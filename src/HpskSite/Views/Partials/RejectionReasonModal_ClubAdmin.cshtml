@@ -1,0 +1,31 @@
+@* Club Admin specific rejection reason modal *@
+<!-- Rejection Reason Modal for Club Admin -->
+<div class="modal fade" id="clubAdminRejectionModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title">Avvisa medlemsansökan</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="clubAdminRejectionMemberId">
+                <div class="alert alert-warning">
+                    <i class="bi bi-exclamation-triangle me-2"></i>
+                    <strong>Varning:</strong> Detta kommer att ta bort medlemskontot permanent och skicka ett avvisningsmail till medlemmen.
+                </div>
+                <div class="mb-3">
+                    <label for="clubAdminRejectionReason" class="form-label">Anledning till avvisning (valfritt):</label>
+                    <textarea class="form-control" id="clubAdminRejectionReason" rows="4"
+                              placeholder="Ange en kort förklaring som kommer att inkluderas i e-postmeddelandet till medlemmen..."></textarea>
+                    <div class="form-text">Detta meddelande kommer att skickas till medlemmen.</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-danger" onclick="confirmRejectMemberClubAdmin()">
+                    <i class="bi bi-x-circle me-1"></i>Avvisa medlem
+                </button>
+            </div>
+        </div>
+    </div>
+</div>

@@ -1,0 +1,511 @@
+@*
+ * Club Admin Invoices List View
+ * Displays table of invoices for club competitions with filtering and payment actions
+ * Swedish translation, simplified from AdminInvoicesList.cshtml
+ * Version: 2025-12-23 v1
+*@
+
+<div class="club-invoices-list">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h5><i class="bi bi-receipt me-2"></i>Fakturor</h5>
+    </div>
+
+    <!-- Filter Section -->
+    <div class="card mb-4">
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-3">
+                    <label for="clubStatusFilterInvoices" class="form-label">Status</label>
+                    <select class="form-select" id="clubStatusFilterInvoices" onchange="applyClubInvoiceFilters()">
+                        <option value="">Alla</option>
+                        <option value="Pending">Väntande</option>
+                        <option value="Paid">Betald</option>
+                        <option value="Cancelled">Makulerad</option>
+                        <option value="Failed">Misslyckad</option>
+                        <option value="Refunded">Återbetald</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label for="clubMemberSearchInvoices" class="form-label">Medlem</label>
+                    <input type="text" class="form-control" id="clubMemberSearchInvoices" placeholder="Sök medlem..." onkeyup="applyClubInvoiceFilters()">
+                </div>
+                <div class="col-md-3">
+                    <label for="clubInvoiceNumberSearch" class="form-label">Fakturanummer</label>
+                    <input type="text" class="form-control" id="clubInvoiceNumberSearch" placeholder="Sök faktura..." onkeyup="applyClubInvoiceFilters()">
+                </div>
+                <div class="col-md-3 d-flex flex-column justify-content-between">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="clubExcludePaidFilter" checked onchange="applyClubInvoiceFilters()">
+                        <label class="form-check-label" for="clubExcludePaidFilter">
+                            Dölj betalda och makulerade
+                        </label>
+                    </div>
+                    <button class="btn btn-outline-secondary btn-sm mt-2" onclick="clearClubInvoiceFilters()">
+                        <i class="bi bi-x-circle me-1"></i>Rensa filter
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Summary Cards -->
+    <div class="row mb-4" id="clubInvoiceSummaryCards">
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-body">
+                    <h6 class="card-subtitle mb-2 text-muted">Totalt</h6>
+                    <h4 class="card-title mb-0" id="clubTotalInvoicesCount">-</h4>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-body">
+                    <h6 class="card-subtitle mb-2 text-muted">Betald</h6>
+                    <h4 class="card-title mb-0 text-success" id="clubPaidAmount">- kr</h4>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-body">
+                    <h6 class="card-subtitle mb-2 text-muted">Väntande</h6>
+                    <h4 class="card-title mb-0 text-warning" id="clubPendingAmount">- kr</h4>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading State -->
+    <div class="spinner-border text-primary d-none" id="clubInvoicesLoadingSpinner" role="status">
+        <span class="visually-hidden">Laddar...</span>
+    </div>
+
+    <!-- Invoices Table -->
+    <div class="table-responsive" id="clubInvoicesTableContainer">
+        <table class="table table-hover table-sm">
+            <thead class="table-light">
+                <tr>
+                    <th>Fakturanummer</th>
+                    <th>Tävling</th>
+                    <th>Medlem</th>
+                    <th class="text-end">Belopp</th>
+                    <th>Status</th>
+                    <th>Skapad</th>
+                    <th>Betaldatum</th>
+                    <th class="text-end">Åtgärder</th>
+                </tr>
+            </thead>
+            <tbody id="clubInvoicesTableBody">
+                <tr class="text-muted">
+                    <td colspan="8" class="text-center py-4">Laddar fakturor...</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Pagination -->
+    <nav aria-label="Club invoice pagination" class="d-none" id="clubInvoicePaginationNav">
+        <div class="d-flex justify-content-between align-items-center">
+            <div class="text-muted">
+                Visar <span id="clubInvoicePageInfo">-</span>
+            </div>
+            <ul class="pagination mb-0" id="clubInvoicePagination">
+                <!-- Pagination items will be inserted here -->
+            </ul>
+        </div>
+    </nav>
+
+    <!-- Empty State -->
+    <div class="alert alert-info d-none text-center" id="clubNoInvoicesAlert">
+        <i class="bi bi-inbox me-2"></i>
+        Inga fakturor hittades för klubbens tävlingar.
+    </div>
+
+    <!-- Error Alert -->
+    <div class="alert alert-danger d-none" id="clubInvoicesErrorAlert" role="alert">
+        <strong>Fel:</strong> <span id="clubInvoicesErrorMessage"></span>
+    </div>
+</div>
+
+<!-- Include Swish Payment Modal Partial -->
+@await Html.PartialAsync("SwishPaymentModal")
+
+<!-- HTML Template for Invoice Row -->
+<script type="text/html" id="club-invoice-row-template">
+    <tr data-invoice-id="{id}">
+        <td><strong>{invoiceNumber}</strong></td>
+        <td>{competitionName}</td>
+        <td>{memberName}</td>
+        <td class="text-end">{totalAmount} kr</td>
+        <td><span class="badge bg-{statusClass}">{paymentStatus}</span></td>
+        <td>{createdDate}</td>
+        <td>{paymentDate}</td>
+        <td class="text-end">
+            <div class="btn-group btn-group-sm" role="group">
+                <button class="btn btn-outline-primary" onclick="showClubSwishQRCode({id})" title="Visa Swish QR-kod">
+                    <i class="bi bi-qr-code"></i>
+                </button>
+                <button class="btn btn-outline-info" onclick="resendClubInvoiceEmail({id})" title="Skicka QR-kod via e-post">
+                    <i class="bi bi-envelope"></i>
+                </button>
+                <button class="btn btn-outline-success {hideIfPaid}" onclick="markClubInvoiceAsPaid({id})" title="Markera som betald">
+                    <i class="bi bi-check-circle"></i>
+                </button>
+                <button class="btn btn-outline-danger {hideIfCancelled}" onclick="cancelClubInvoice({id}, '{invoiceNumber}')" title="Makulera">
+                    <i class="bi bi-x-circle"></i>
+                </button>
+            </div>
+        </td>
+    </tr>
+</script>
+
+<style>
+/* Compact table styling */
+.club-invoices-list .table-sm td,
+.club-invoices-list .table-sm th {
+    padding: 0.4rem;
+    font-size: 0.9rem;
+}
+
+.club-invoices-list .btn-group-sm > .btn {
+    padding: 0.2rem 0.4rem;
+    font-size: 0.85rem;
+}
+</style>
+
+<script>
+// Club Invoices variables (namespaced to avoid conflicts)
+let clubInvoicesListLoaded = false;
+let currentClubInvoicePage = 1;
+const clubInvoicesPerPage = 50;
+
+// Load club invoices function
+function loadClubInvoices() {
+    const spinner = document.getElementById('clubInvoicesLoadingSpinner');
+    const tableContainer = document.getElementById('clubInvoicesTableContainer');
+    const tbody = document.getElementById('clubInvoicesTableBody');
+    const errorAlert = document.getElementById('clubInvoicesErrorAlert');
+    const errorMessage = document.getElementById('clubInvoicesErrorMessage');
+    const noInvoicesAlert = document.getElementById('clubNoInvoicesAlert');
+
+    spinner.classList.remove('d-none');
+    errorAlert.classList.add('d-none');
+    noInvoicesAlert.classList.add('d-none');
+
+    // Build query parameters - using clubId from parent scope
+    const paymentStatus = document.getElementById('clubStatusFilterInvoices')?.value || '';
+    const memberSearch = document.getElementById('clubMemberSearchInvoices')?.value || '';
+    const invoiceNumberSearch = document.getElementById('clubInvoiceNumberSearch')?.value || '';
+    const excludePaid = document.getElementById('clubExcludePaidFilter')?.checked ?? true;
+
+    const params = new URLSearchParams({
+        clubId: clubId,  // Uses the global clubId variable from ClubAdminPanel
+        page: currentClubInvoicePage,
+        pageSize: clubInvoicesPerPage,
+        activeCompetitionsOnly: false,  // Show all competitions for the club
+        excludePaid: excludePaid
+    });
+
+    if (paymentStatus) params.append('paymentStatus', paymentStatus);
+    if (memberSearch) params.append('memberSearch', memberSearch);
+    if (invoiceNumberSearch) params.append('invoiceNumberSearch', invoiceNumberSearch);
+
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+
+    fetch(`/umbraco/surface/InvoiceAdmin/GetInvoices?${params.toString()}`, {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json',
+            'RequestVerificationToken': token
+        },
+        credentials: 'include'
+    })
+        .then(response => response.json())
+        .then(data => {
+            spinner.classList.add('d-none');
+
+            if (!data.success) {
+                errorMessage.textContent = data.message || 'Kunde inte ladda fakturor';
+                errorAlert.classList.remove('d-none');
+                tbody.innerHTML = '<tr class="text-muted"><td colspan="8" class="text-center py-4">Fel vid laddning av fakturor</td></tr>';
+                return;
+            }
+
+            const invoices = data.invoices || [];
+            const metadata = data.metadata || {};
+
+            // Update summary cards
+            updateClubSummaryCards(metadata);
+
+            if (invoices.length === 0) {
+                tableContainer.classList.add('d-none');
+                noInvoicesAlert.classList.remove('d-none');
+                tbody.innerHTML = '';
+                document.getElementById('clubInvoicePaginationNav').classList.add('d-none');
+            } else {
+                tableContainer.classList.remove('d-none');
+                noInvoicesAlert.classList.add('d-none');
+                renderClubInvoices(invoices);
+                renderClubPagination(metadata);
+            }
+        })
+        .catch(error => {
+            spinner.classList.add('d-none');
+            errorMessage.textContent = error.message || 'Nätverksfel';
+            errorAlert.classList.remove('d-none');
+        });
+}
+
+function updateClubSummaryCards(metadata) {
+    document.getElementById('clubTotalInvoicesCount').textContent = metadata.totalInvoices || 0;
+    document.getElementById('clubPaidAmount').textContent = (metadata.paidAmount || 0).toFixed(2) + ' kr';
+    document.getElementById('clubPendingAmount').textContent = (metadata.pendingAmount || 0).toFixed(2) + ' kr';
+}
+
+function renderClubInvoices(invoices) {
+    const tbody = document.getElementById('clubInvoicesTableBody');
+    const template = document.getElementById('club-invoice-row-template').textContent;
+
+    tbody.innerHTML = invoices.map(invoice => {
+        const statusClass = getClubStatusClass(invoice.paymentStatus);
+        const statusText = translateClubStatus(invoice.paymentStatus);
+        const hideIfPaid = invoice.paymentStatus === 'Paid' ? 'd-none' : '';
+        const hideIfCancelled = invoice.paymentStatus === 'Cancelled' ? 'd-none' : '';
+        const createdDate = invoice.createdDate ? new Date(invoice.createdDate).toLocaleDateString('sv-SE') : '-';
+        const paymentDate = invoice.paymentDate ? new Date(invoice.paymentDate).toLocaleDateString('sv-SE') : '-';
+
+        return template
+            .replace(/{id}/g, invoice.id)
+            .replace(/{invoiceNumber}/g, escapeClubHtml(invoice.invoiceNumber))
+            .replace(/{competitionName}/g, escapeClubHtml(invoice.competitionName))
+            .replace(/{memberName}/g, escapeClubHtml(invoice.memberName))
+            .replace(/{totalAmount}/g, invoice.totalAmount.toFixed(2))
+            .replace(/{paymentStatus}/g, escapeClubHtml(statusText))
+            .replace(/{statusClass}/g, statusClass)
+            .replace(/{createdDate}/g, createdDate)
+            .replace(/{paymentDate}/g, paymentDate)
+            .replace(/{hideIfPaid}/g, hideIfPaid)
+            .replace(/{hideIfCancelled}/g, hideIfCancelled);
+    }).join('');
+}
+
+function renderClubPagination(metadata) {
+    const nav = document.getElementById('clubInvoicePaginationNav');
+    const pagination = document.getElementById('clubInvoicePagination');
+    const pageInfo = document.getElementById('clubInvoicePageInfo');
+
+    if (metadata.totalPages <= 1) {
+        nav.classList.add('d-none');
+        return;
+    }
+
+    nav.classList.remove('d-none');
+
+    const start = ((metadata.page - 1) * metadata.pageSize) + 1;
+    const end = Math.min(metadata.page * metadata.pageSize, metadata.filteredInvoices);
+    pageInfo.textContent = `${start}-${end} av ${metadata.filteredInvoices}`;
+
+    let paginationHTML = '';
+
+    // Previous button
+    paginationHTML += `<li class="page-item ${metadata.page === 1 ? 'disabled' : ''}">
+        <a class="page-link" href="#" onclick="goToClubInvoicePage(${metadata.page - 1}); return false;">Föregående</a>
+    </li>`;
+
+    // Page numbers (show max 5 pages)
+    const startPage = Math.max(1, metadata.page - 2);
+    const endPage = Math.min(metadata.totalPages, startPage + 4);
+
+    for (let i = startPage; i <= endPage; i++) {
+        paginationHTML += `<li class="page-item ${i === metadata.page ? 'active' : ''}">
+            <a class="page-link" href="#" onclick="goToClubInvoicePage(${i}); return false;">${i}</a>
+        </li>`;
+    }
+
+    // Next button
+    paginationHTML += `<li class="page-item ${metadata.page === metadata.totalPages ? 'disabled' : ''}">
+        <a class="page-link" href="#" onclick="goToClubInvoicePage(${metadata.page + 1}); return false;">Nästa</a>
+    </li>`;
+
+    pagination.innerHTML = paginationHTML;
+}
+
+function goToClubInvoicePage(page) {
+    currentClubInvoicePage = page;
+    loadClubInvoices();
+}
+
+function applyClubInvoiceFilters() {
+    currentClubInvoicePage = 1;
+    loadClubInvoices();
+}
+
+function clearClubInvoiceFilters() {
+    document.getElementById('clubStatusFilterInvoices').value = '';
+    document.getElementById('clubMemberSearchInvoices').value = '';
+    document.getElementById('clubInvoiceNumberSearch').value = '';
+    document.getElementById('clubExcludePaidFilter').checked = true;
+    applyClubInvoiceFilters();
+}
+
+function getClubStatusClass(status) {
+    switch (status) {
+        case 'Paid': return 'success';
+        case 'Pending': return 'warning';
+        case 'Cancelled': return 'secondary';
+        case 'Failed': return 'danger';
+        case 'Refunded': return 'info';
+        default: return 'secondary';
+    }
+}
+
+function translateClubStatus(status) {
+    switch (status) {
+        case 'Paid': return 'Betald';
+        case 'Pending': return 'Väntande';
+        case 'Cancelled': return 'Makulerad';
+        case 'Failed': return 'Misslyckad';
+        case 'Refunded': return 'Återbetald';
+        default: return status;
+    }
+}
+
+// Invoice Actions (namespaced for club)
+
+function showClubSwishQRCode(invoiceId) {
+    const modal = new bootstrap.Modal(document.getElementById('swishPaymentModal'));
+    const modalBody = document.getElementById('swishPaymentModalBody');
+
+    // Show loading spinner
+    modalBody.innerHTML = '<div class="spinner-border text-primary" role="status"><span class="visually-hidden">Laddar QR-kod...</span></div>';
+    modal.show();
+
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+
+    fetch(`/umbraco/surface/InvoiceAdmin/GenerateInvoiceQRCode?invoiceId=${invoiceId}`, {
+        method: 'GET',
+        headers: {
+            'RequestVerificationToken': token
+        },
+        credentials: 'include'
+    })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                modalBody.innerHTML = `
+                    <div class="text-center">
+                        <h5>${escapeClubHtml(data.competitionName)}</h5>
+                        <p class="mb-3">Belopp: <strong>${data.amount} kr</strong></p>
+                        <img src="data:image/png;base64,${data.qrCodeBase64}" alt="Swish QR Code" class="img-fluid mb-3" style="max-width: 300px;">
+                        <p class="text-muted">Scanna QR-koden med Swish-appen</p>
+                        <p class="small">Fakturanummer: ${escapeClubHtml(data.invoiceNumber)}</p>
+                    </div>
+                `;
+            } else {
+                modalBody.innerHTML = `<div class="alert alert-danger">${escapeClubHtml(data.message)}</div>`;
+            }
+        })
+        .catch(error => {
+            modalBody.innerHTML = `<div class="alert alert-danger">Fel vid generering av QR-kod: ${escapeClubHtml(error.message)}</div>`;
+        });
+}
+
+function resendClubInvoiceEmail(invoiceId) {
+    if (!confirm('Vill du skicka QR-koden via e-post till medlemmen?')) {
+        return;
+    }
+
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+
+    fetch('/umbraco/surface/InvoiceAdmin/ResendInvoiceEmail', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'RequestVerificationToken': token
+        },
+        credentials: 'include',
+        body: JSON.stringify({ invoiceId: invoiceId })
+    })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert('E-post skickat!');
+            } else {
+                alert('Fel: ' + data.message);
+            }
+        })
+        .catch(error => {
+            alert('Nätverksfel: ' + error.message);
+        });
+}
+
+function markClubInvoiceAsPaid(invoiceId) {
+    if (!confirm('Markera fakturan som betald?')) {
+        return;
+    }
+
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+
+    fetch('/umbraco/surface/InvoiceAdmin/MarkAsPaid', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'RequestVerificationToken': token
+        },
+        credentials: 'include',
+        body: JSON.stringify({ invoiceId: invoiceId })
+    })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert('Faktura markerad som betald');
+                loadClubInvoices();
+            } else {
+                alert('Fel: ' + data.message);
+            }
+        })
+        .catch(error => {
+            alert('Nätverksfel: ' + error.message);
+        });
+}
+
+function cancelClubInvoice(invoiceId, invoiceNumber) {
+    if (!confirm(`Vill du makulera faktura ${invoiceNumber}?`)) {
+        return;
+    }
+
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+
+    fetch('/umbraco/surface/InvoiceAdmin/CancelInvoice', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'RequestVerificationToken': token
+        },
+        credentials: 'include',
+        body: JSON.stringify({ invoiceId: invoiceId })
+    })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert('Faktura makulerad');
+                loadClubInvoices();
+            } else {
+                alert('Fel: ' + data.message);
+            }
+        })
+        .catch(error => {
+            alert('Nätverksfel: ' + error.message);
+        });
+}
+
+// Utility function for HTML escaping (namespaced)
+function escapeClubHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+</script>

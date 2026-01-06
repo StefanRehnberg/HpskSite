@@ -1,0 +1,1621 @@
+using System.Collections.ObjectModel;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using HpskSite.Mobile.Models;
+using HpskSite.Mobile.Services;
+using HpskSite.Shared.Models;
+// MatchSpectator is in Services namespace
+
+namespace HpskSite.Mobile.ViewModels;
+
+/// <summary>
+/// ViewModel for active match page (score entry)
+/// </summary>
+[QueryProperty(nameof(MatchCode), "code")]
+[QueryProperty(nameof(IsSpectatorMode), "spectator")]
+public partial class ActiveMatchViewModel : BaseViewModel
+{
+    private readonly IMatchService _matchService;
+    private readonly ISignalRService _signalRService;
+    private readonly IAuthService _authService;
+    private readonly ImageCompressionService _imageCompressionService;
+
+    public ActiveMatchViewModel(
+        IMatchService matchService,
+        ISignalRService signalRService,
+        IAuthService authService,
+        ImageCompressionService imageCompressionService)
+    {
+        _matchService = matchService;
+        _signalRService = signalRService;
+        _authService = authService;
+        _imageCompressionService = imageCompressionService;
+        Title = "Match";
+
+        // Subscribe to SignalR events (using correct event names that match server)
+        _signalRService.ScoreUpdated += OnScoreUpdated;
+        _signalRService.ParticipantJoined += OnParticipantJoined;
+        _signalRService.ParticipantLeft += OnParticipantLeft;
+        _signalRService.MatchCompleted += OnMatchCompleted;
+        _signalRService.SpectatorListUpdated += OnSpectatorListUpdated;
+        _signalRService.JoinRequestReceived += OnJoinRequestReceived;
+        _signalRService.JoinRequestAccepted += OnJoinRequestAccepted;
+        _signalRService.JoinRequestBlocked += OnJoinRequestBlocked;
+        _signalRService.ReactionUpdated += OnReactionUpdated;
+    }
+
+    private string _matchCode = string.Empty;
+    public string MatchCode
+    {
+        get => _matchCode;
+        set
+        {
+            if (SetProperty(ref _matchCode, value))
+            {
+                // Don't auto-load here - wait for TryLoadIfReady
+                // which ensures both MatchCode and IsSpectatorMode are set
+                TryLoadIfReady();
+            }
+        }
+    }
+
+    // Spectator mode properties
+    private string? _isSpectatorMode;
+    private bool _spectatorModeSet; // Track if spectator param was processed
+    public string? IsSpectatorMode
+    {
+        get => _isSpectatorMode;
+        set
+        {
+            _isSpectatorMode = value;
+            IsSpectator = value?.ToLower() == "true";
+            _spectatorModeSet = true;
+            System.Diagnostics.Debug.WriteLine($"IsSpectatorMode set to: {value}, IsSpectator={IsSpectator}");
+            TryLoadIfReady();
+        }
+    }
+
+    private bool _hasStartedLoading;
+
+    /// <summary>
+    /// Attempts to load match data once both MatchCode is set and spectator mode is determined.
+    /// Shell navigation may set query properties in any order, so we wait for both.
+    /// </summary>
+    private void TryLoadIfReady()
+    {
+        // Need MatchCode to be set
+        if (string.IsNullOrEmpty(MatchCode))
+            return;
+
+        // Need to know if we're in spectator mode (wait for the parameter to be processed)
+        // If spectator param is not in URL, _spectatorModeSet will remain false and IsSpectator defaults to false
+        // We use a small delay to allow Shell to set all properties
+        if (!_hasStartedLoading)
+        {
+            _hasStartedLoading = true;
+            // Small delay to ensure all query params are set
+            MainThread.BeginInvokeOnMainThread(async () =>
+            {
+                await Task.Delay(50); // Brief delay for Shell to finish setting properties
+                System.Diagnostics.Debug.WriteLine($"TryLoadIfReady: Loading match {MatchCode}, IsSpectator={IsSpectator}, _spectatorModeSet={_spectatorModeSet}");
+                _ = LoadMatchAsync();
+            });
+        }
+    }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanJoinFromSpectator))]
+    private bool _isSpectator;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanJoinFromSpectator))]
+    private bool _canJoin;
+
+    /// <summary>
+    /// True if user is spectator and can join this match
+    /// </summary>
+    public bool CanJoinFromSpectator => IsSpectator && CanJoin;
+
+    [ObservableProperty]
+    private TrainingMatch? _match;
+
+    [ObservableProperty]
+    private TrainingMatchParticipant? _currentParticipant;
+
+    [ObservableProperty]
+    private ObservableCollection<TrainingMatchParticipant> _participants = new();
+
+    [ObservableProperty]
+    private ObservableCollection<MatchSpectator> _spectators = new();
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CurrentSeriesNumber))]
+    private int _currentSeriesIndex;
+
+    /// <summary>
+    /// 1-based series number for display (CurrentSeriesIndex + 1)
+    /// </summary>
+    public int CurrentSeriesNumber => CurrentSeriesIndex + 1;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsShot1Selected))]
+    [NotifyPropertyChangedFor(nameof(IsShot2Selected))]
+    [NotifyPropertyChangedFor(nameof(IsShot3Selected))]
+    [NotifyPropertyChangedFor(nameof(IsShot4Selected))]
+    [NotifyPropertyChangedFor(nameof(IsShot5Selected))]
+    [NotifyPropertyChangedFor(nameof(CurrentShotNumber))]
+    private int _currentShotIndex;
+
+    /// <summary>
+    /// 1-based shot number for display (CurrentShotIndex + 1)
+    /// </summary>
+    public int CurrentShotNumber => CurrentShotIndex + 1;
+
+    [ObservableProperty]
+    private int _currentScore;
+
+    [ObservableProperty]
+    private bool _isX;
+
+    // Shot tracking for current series (5 shots)
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SeriesTotal))]
+    [NotifyPropertyChangedFor(nameof(SeriesXCount))]
+    private string _shot1 = "-";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SeriesTotal))]
+    [NotifyPropertyChangedFor(nameof(SeriesXCount))]
+    private string _shot2 = "-";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SeriesTotal))]
+    [NotifyPropertyChangedFor(nameof(SeriesXCount))]
+    private string _shot3 = "-";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SeriesTotal))]
+    [NotifyPropertyChangedFor(nameof(SeriesXCount))]
+    private string _shot4 = "-";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SeriesTotal))]
+    [NotifyPropertyChangedFor(nameof(SeriesXCount))]
+    private string _shot5 = "-";
+
+    // Selection states for shot circles
+    public bool IsShot1Selected => CurrentShotIndex == 0;
+    public bool IsShot2Selected => CurrentShotIndex == 1;
+    public bool IsShot3Selected => CurrentShotIndex == 2;
+    public bool IsShot4Selected => CurrentShotIndex == 3;
+    public bool IsShot5Selected => CurrentShotIndex == 4;
+
+    // Calculated series total
+    public int SeriesTotal => GetShotValue(Shot1) + GetShotValue(Shot2) + GetShotValue(Shot3) + GetShotValue(Shot4) + GetShotValue(Shot5);
+
+    // Count of X shots in current series
+    public int SeriesXCount => (Shot1 == "X" ? 1 : 0) + (Shot2 == "X" ? 1 : 0) + (Shot3 == "X" ? 1 : 0) + (Shot4 == "X" ? 1 : 0) + (Shot5 == "X" ? 1 : 0);
+
+    private int GetShotValue(string shot)
+    {
+        if (shot == "-" || string.IsNullOrEmpty(shot)) return 0;
+        if (shot == "X") return 10;
+        return int.TryParse(shot, out int val) ? val : 0;
+    }
+
+    private void SetCurrentShot(string value)
+    {
+        switch (CurrentShotIndex)
+        {
+            case 0: Shot1 = value; break;
+            case 1: Shot2 = value; break;
+            case 2: Shot3 = value; break;
+            case 3: Shot4 = value; break;
+            case 4: Shot5 = value; break;
+        }
+    }
+
+    private string GetCurrentShot()
+    {
+        return CurrentShotIndex switch
+        {
+            0 => Shot1,
+            1 => Shot2,
+            2 => Shot3,
+            3 => Shot4,
+            4 => Shot5,
+            _ => "-"
+        };
+    }
+
+    private void ClearAllShots()
+    {
+        Shot1 = Shot2 = Shot3 = Shot4 = Shot5 = "-";
+        CurrentShotIndex = 0;
+        CurrentScore = 0;
+        IsX = false;
+    }
+
+    [ObservableProperty]
+    private bool _isMatchHost;
+
+    [ObservableProperty]
+    private bool _isMatchActive;
+
+    [ObservableProperty]
+    private string _errorMessage = string.Empty;
+
+    [ObservableProperty]
+    private bool _hasError;
+
+    /// <summary>
+    /// Whether the score entry panel is open
+    /// </summary>
+    [ObservableProperty]
+    private bool _isScoreEntryOpen;
+
+    /// <summary>
+    /// Whether the spectators modal is open
+    /// </summary>
+    [ObservableProperty]
+    private bool _isSpectatorsModalOpen;
+
+    /// <summary>
+    /// Whether the photo prompt is visible after saving a series
+    /// </summary>
+    [ObservableProperty]
+    private bool _isPhotoPromptVisible;
+
+    /// <summary>
+    /// Whether a photo is currently being uploaded
+    /// </summary>
+    [ObservableProperty]
+    private bool _isUploadingPhoto;
+
+    /// <summary>
+    /// The series number that was just saved (for photo upload)
+    /// </summary>
+    private int _savedSeriesNumber;
+
+    /// <summary>
+    /// Whether we're in edit mode (editing an existing series)
+    /// </summary>
+    [ObservableProperty]
+    private bool _isEditMode;
+
+    partial void OnIsEditModeChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanCaptureNewPhoto));
+    }
+
+    protected override void OnPropertyChanged(System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        base.OnPropertyChanged(e);
+        // When IsBusy changes, also update CanCaptureNewPhoto
+        if (e.PropertyName == nameof(IsBusy))
+        {
+            OnPropertyChanged(nameof(CanCaptureNewPhoto));
+        }
+    }
+
+    /// <summary>
+    /// The series number being edited (1-based)
+    /// </summary>
+    [ObservableProperty]
+    private int _editingSeriesNumber;
+
+    /// <summary>
+    /// The target photo URL for the series being edited
+    /// </summary>
+    [ObservableProperty]
+    private string? _editingSeriesPhotoUrl;
+
+    partial void OnEditingSeriesPhotoUrlChanged(string? value)
+    {
+        OnPropertyChanged(nameof(CanCaptureNewPhoto));
+    }
+
+    /// <summary>
+    /// Whether the "Save + Camera" button should be enabled.
+    /// Disabled when editing a series that already has a photo, or when busy.
+    /// </summary>
+    public bool CanCaptureNewPhoto => IsNotBusy && (!IsEditMode || string.IsNullOrEmpty(EditingSeriesPhotoUrl));
+
+    /// <summary>
+    /// Maximum series count across all participants (for building the scoreboard rows)
+    /// </summary>
+    public int MaxSeriesCount => Participants.Count > 0
+        ? Math.Max(6, Participants.Max(p => p.Scores?.Count ?? 0))
+        : 6;
+
+    // Photo Viewer Modal Properties
+    /// <summary>
+    /// Whether the photo viewer modal is open
+    /// </summary>
+    [ObservableProperty]
+    private bool _isPhotoViewerOpen;
+
+    /// <summary>
+    /// The photo URL being viewed
+    /// </summary>
+    [ObservableProperty]
+    private string? _viewingPhotoUrl;
+
+    /// <summary>
+    /// The shooter's name for the photo being viewed
+    /// </summary>
+    [ObservableProperty]
+    private string? _viewingPhotoShooterName;
+
+    /// <summary>
+    /// The series number for the photo being viewed
+    /// </summary>
+    [ObservableProperty]
+    private int _viewingPhotoSeriesNumber;
+
+    /// <summary>
+    /// The member ID of the shooter whose photo is being viewed
+    /// </summary>
+    [ObservableProperty]
+    private int _viewingPhotoMemberId;
+
+    partial void OnViewingPhotoMemberIdChanged(int value)
+    {
+        OnPropertyChanged(nameof(IsCurrentUserPhotoOwner));
+    }
+
+    /// <summary>
+    /// Reactions on the photo being viewed
+    /// </summary>
+    [ObservableProperty]
+    private ObservableCollection<PhotoReaction> _viewingPhotoReactions = new();
+
+    /// <summary>
+    /// The current user's reaction on the photo (if any)
+    /// </summary>
+    [ObservableProperty]
+    private string? _currentUserReaction;
+
+    /// <summary>
+    /// Whether a reaction is currently being sent
+    /// </summary>
+    [ObservableProperty]
+    private bool _isSendingReaction;
+
+    [RelayCommand]
+    private void OpenScoreEntry()
+    {
+        // Reset to new entry mode
+        IsEditMode = false;
+        EditingSeriesNumber = 0;
+        EditingSeriesPhotoUrl = null;
+        IsScoreEntryOpen = true;
+        HasError = false;
+    }
+
+    /// <summary>
+    /// Open score entry in edit mode for a specific series
+    /// </summary>
+    [RelayCommand]
+    private void OpenEditScore(ScoreboardCell cell)
+    {
+        if (cell == null || !cell.CanEdit)
+            return;
+
+        System.Diagnostics.Debug.WriteLine($"OpenEditScore: Editing series {cell.SeriesNumber}, HasPhoto={cell.HasPhoto}, TargetPhotoUrl={cell.TargetPhotoUrl ?? "null"}");
+
+        // Set edit mode
+        IsEditMode = true;
+        EditingSeriesNumber = cell.SeriesNumber;
+        EditingSeriesPhotoUrl = cell.TargetPhotoUrl;
+        System.Diagnostics.Debug.WriteLine($"OpenEditScore: EditingSeriesPhotoUrl set to {EditingSeriesPhotoUrl ?? "null"}");
+
+        // Set the current series index to the one being edited (0-based)
+        CurrentSeriesIndex = cell.SeriesNumber - 1;
+
+        // Populate the shot circles with existing data
+        ClearAllShots();
+        if (cell.Shots != null && cell.Shots.Count > 0)
+        {
+            for (int i = 0; i < cell.Shots.Count && i < 5; i++)
+            {
+                SetShotAtIndex(i, cell.Shots[i]);
+            }
+        }
+
+        IsScoreEntryOpen = true;
+        HasError = false;
+    }
+
+    /// <summary>
+    /// Helper method to set a shot at a specific index
+    /// </summary>
+    private void SetShotAtIndex(int index, string value)
+    {
+        switch (index)
+        {
+            case 0: Shot1 = value; break;
+            case 1: Shot2 = value; break;
+            case 2: Shot3 = value; break;
+            case 3: Shot4 = value; break;
+            case 4: Shot5 = value; break;
+        }
+    }
+
+    [RelayCommand]
+    private void CloseScoreEntry()
+    {
+        IsScoreEntryOpen = false;
+        IsPhotoPromptVisible = false;
+        IsEditMode = false;
+        EditingSeriesNumber = 0;
+        EditingSeriesPhotoUrl = null;
+    }
+
+    [RelayCommand]
+    private void OpenSpectatorsModal()
+    {
+        IsSpectatorsModalOpen = true;
+    }
+
+    [RelayCommand]
+    private void CloseSpectatorsModal()
+    {
+        IsSpectatorsModalOpen = false;
+    }
+
+    /// <summary>
+    /// Open photo viewer for a cell with a photo, or edit mode for own scores
+    /// </summary>
+    [RelayCommand]
+    private void OpenPhotoViewer(ScoreboardCell cell)
+    {
+        if (cell == null)
+            return;
+
+        // If cell has photo, open photo viewer (for any participant)
+        if (cell.HasPhoto)
+        {
+            System.Diagnostics.Debug.WriteLine($"OpenPhotoViewer: Opening photo for member {cell.MemberId}, series {cell.SeriesNumber}");
+
+            // Find the participant to get their name
+            var participant = Participants.FirstOrDefault(p => p.MemberId == cell.MemberId);
+            var shooterName = participant?.DisplayName ?? "Okänd";
+
+            ViewingPhotoUrl = cell.TargetPhotoUrl;
+            ViewingPhotoShooterName = shooterName;
+            ViewingPhotoSeriesNumber = cell.SeriesNumber;
+            ViewingPhotoMemberId = cell.MemberId;
+
+            // Get reactions from the score
+            ViewingPhotoReactions.Clear();
+            if (participant?.Scores != null)
+            {
+                var score = participant.Scores.FirstOrDefault(s => s.SeriesNumber == cell.SeriesNumber);
+                if (score?.Reactions != null)
+                {
+                    foreach (var reaction in score.Reactions)
+                    {
+                        ViewingPhotoReactions.Add(reaction);
+                    }
+                }
+            }
+
+            // Find current user's reaction
+            var currentUserId = _authService.CurrentUser?.MemberId;
+            CurrentUserReaction = ViewingPhotoReactions.FirstOrDefault(r => r.MemberId == currentUserId)?.Emoji;
+
+            IsPhotoViewerOpen = true;
+        }
+        // If no photo but can edit (current user's cell), open edit mode
+        else if (cell.CanEdit)
+        {
+            OpenEditScore(cell);
+        }
+    }
+
+    /// <summary>
+    /// Close the photo viewer modal
+    /// </summary>
+    [RelayCommand]
+    private void ClosePhotoViewer()
+    {
+        IsPhotoViewerOpen = false;
+        ViewingPhotoUrl = null;
+        ViewingPhotoShooterName = null;
+        ViewingPhotoSeriesNumber = 0;
+        ViewingPhotoMemberId = 0;
+        ViewingPhotoReactions.Clear();
+        CurrentUserReaction = null;
+    }
+
+    /// <summary>
+    /// Edit the score from the photo viewer (for own scores)
+    /// </summary>
+    [RelayCommand]
+    private void EditFromPhotoViewer()
+    {
+        var currentUserId = _authService.CurrentUser?.MemberId;
+        if (!currentUserId.HasValue || ViewingPhotoMemberId != currentUserId.Value)
+            return;
+
+        // Find the cell to open edit mode
+        var participant = Participants.FirstOrDefault(p => p.MemberId == ViewingPhotoMemberId);
+        if (participant?.Scores == null)
+            return;
+
+        var score = participant.Scores.FirstOrDefault(s => s.SeriesNumber == ViewingPhotoSeriesNumber);
+        if (score == null)
+            return;
+
+        // Create a cell for the edit command
+        var cell = new ScoreboardCell
+        {
+            SeriesNumber = ViewingPhotoSeriesNumber,
+            MemberId = ViewingPhotoMemberId,
+            IsCurrentUserCell = true,
+            CanEdit = true,
+            TargetPhotoUrl = score.TargetPhotoUrl,
+            Shots = score.Shots,
+            EntryMethod = score.EntryMethod
+        };
+
+        // Close photo viewer and open edit mode
+        IsPhotoViewerOpen = false;
+        OpenEditScore(cell);
+    }
+
+    /// <summary>
+    /// Check if current user owns the photo being viewed
+    /// </summary>
+    public bool IsCurrentUserPhotoOwner =>
+        _authService.CurrentUser?.MemberId > 0 &&
+        ViewingPhotoMemberId == _authService.CurrentUser.MemberId &&
+        IsMatchActive &&
+        !IsSpectator;
+
+    /// <summary>
+    /// Add or toggle a reaction to the currently viewed photo
+    /// </summary>
+    [RelayCommand]
+    private async Task AddReactionAsync(string emoji)
+    {
+        if (IsSendingReaction || ViewingPhotoMemberId == 0 || string.IsNullOrEmpty(emoji))
+            return;
+
+        System.Diagnostics.Debug.WriteLine($"AddReactionAsync: Adding {emoji} to member {ViewingPhotoMemberId}, series {ViewingPhotoSeriesNumber}");
+
+        try
+        {
+            IsSendingReaction = true;
+
+            var result = await _matchService.AddReactionAsync(
+                MatchCode,
+                ViewingPhotoSeriesNumber,
+                ViewingPhotoMemberId,
+                emoji);
+
+            if (result.Success && result.Data != null)
+            {
+                // Update local reactions
+                ViewingPhotoReactions.Clear();
+                foreach (var reaction in result.Data)
+                {
+                    ViewingPhotoReactions.Add(reaction);
+                }
+
+                // Update current user's reaction
+                var currentUserId = _authService.CurrentUser?.MemberId;
+                CurrentUserReaction = ViewingPhotoReactions.FirstOrDefault(r => r.MemberId == currentUserId)?.Emoji;
+
+                System.Diagnostics.Debug.WriteLine($"AddReactionAsync: Success! Reactions count={result.Data.Count}");
+            }
+            else
+            {
+                System.Diagnostics.Debug.WriteLine($"AddReactionAsync: Failed - {result.Message}");
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"AddReactionAsync: Exception - {ex.Message}");
+        }
+        finally
+        {
+            IsSendingReaction = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task LoadMatchAsync()
+    {
+        if (IsBusy || string.IsNullOrEmpty(MatchCode))
+            return;
+
+        try
+        {
+            IsBusy = true;
+            HasError = false;
+            await LoadMatchDataAsync();
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = ex.Message;
+            HasError = true;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    /// <summary>
+    /// Internal method to load match data without IsBusy checks
+    /// </summary>
+    private async Task LoadMatchDataAsync()
+    {
+        if (IsSpectator)
+        {
+            // Load as spectator (read-only view)
+            var spectatorResult = await _matchService.ViewMatchAsSpectatorAsync(MatchCode);
+
+            if (spectatorResult.Success && spectatorResult.Data != null)
+            {
+                Match = spectatorResult.Data.Match;
+                Title = $"Match: {Match.MatchCode} (Visning)";
+                IsMatchActive = Match.IsActive;
+                CanJoin = spectatorResult.Data.CanJoin;
+
+                // Calculate equalized series count BEFORE adding to collection
+                // (TrainingMatchParticipant doesn't implement INotifyPropertyChanged,
+                // so we must set this before bindings evaluate)
+                var participantsWithScores = Match.Participants
+                    .Where(p => p.Scores != null && p.Scores.Count > 0)
+                    .ToList();
+                var minSeriesCount = participantsWithScores.Count > 0
+                    ? participantsWithScores.Min(p => p.Scores.Count)
+                    : 0;
+
+                Participants.Clear();
+                foreach (var participant in Match.Participants)
+                {
+                    // Set equalized count before adding to collection
+                    participant.EqualizedSeriesCount = minSeriesCount > 0 ? minSeriesCount : null;
+                    Participants.Add(participant);
+                }
+
+                // Spectators are not participants - clear participant state
+                CurrentParticipant = null;
+                IsMatchHost = false;
+                CurrentSeriesIndex = 0;
+
+                // Join SignalR group for this match (for live updates)
+                await _signalRService.JoinMatchAsync(MatchCode);
+
+                // Register as spectator so others can see us viewing
+                var currentUser = _authService.CurrentUser;
+                if (currentUser != null)
+                {
+                    await _signalRService.RegisterSpectatorAsync(
+                        MatchCode,
+                        currentUser.MemberId,
+                        currentUser.DisplayName,
+                        currentUser.ProfilePictureUrl ?? "",
+                        "" // ClubName - not available in UserInfo
+                    );
+                    System.Diagnostics.Debug.WriteLine($"LoadMatchDataAsync (spectator): Registered as spectator for match {MatchCode}");
+                }
+
+                // Update scoreboard rows for dynamic display
+                UpdateScoreboardRows();
+
+                System.Diagnostics.Debug.WriteLine($"LoadMatchDataAsync (spectator): Loaded match {MatchCode}, CanJoin={CanJoin}");
+            }
+            else
+            {
+                ErrorMessage = spectatorResult.Message ?? "Kunde inte ladda match";
+                HasError = true;
+            }
+        }
+        else
+        {
+            // Load as participant
+            var result = await _matchService.GetMatchAsync(MatchCode);
+
+            if (result.Success && result.Data != null)
+            {
+                Match = result.Data;
+                Title = $"Match: {Match.MatchCode}";
+                IsMatchActive = Match.IsActive;
+
+                // Calculate equalized series count BEFORE adding to collection
+                // (TrainingMatchParticipant doesn't implement INotifyPropertyChanged,
+                // so we must set this before bindings evaluate)
+                var participantsWithScores = Match.Participants
+                    .Where(p => p.Scores != null && p.Scores.Count > 0)
+                    .ToList();
+                var minSeriesCount = participantsWithScores.Count > 0
+                    ? participantsWithScores.Min(p => p.Scores.Count)
+                    : 0;
+
+                Participants.Clear();
+                foreach (var participant in Match.Participants)
+                {
+                    // Set equalized count before adding to collection
+                    participant.EqualizedSeriesCount = minSeriesCount > 0 ? minSeriesCount : null;
+                    Participants.Add(participant);
+                }
+
+                // Find current user's participant
+                var userId = _authService.CurrentUser?.MemberId;
+                if (userId.HasValue)
+                {
+                    CurrentParticipant = Participants.FirstOrDefault(p => p.MemberId == userId.Value);
+                    IsMatchHost = Match.HostMemberId == userId.Value;
+
+                    // Set CurrentSeriesIndex to continue from where user left off
+                    if (CurrentParticipant?.Scores != null && CurrentParticipant.Scores.Count > 0)
+                    {
+                        CurrentSeriesIndex = CurrentParticipant.Scores.Count;
+                        System.Diagnostics.Debug.WriteLine($"LoadMatchDataAsync: User has {CurrentParticipant.Scores.Count} series, starting at series {CurrentSeriesIndex + 1}");
+                    }
+                    else
+                    {
+                        CurrentSeriesIndex = 0;
+                        System.Diagnostics.Debug.WriteLine("LoadMatchDataAsync: User has no scores, starting at series 1");
+                    }
+                }
+
+                // Join SignalR group for this match
+                await _signalRService.JoinMatchAsync(MatchCode);
+
+                // If user is match host, also join organizer group to receive join requests
+                if (IsMatchHost)
+                {
+                    await _signalRService.JoinOrganizerGroupAsync(MatchCode);
+                    System.Diagnostics.Debug.WriteLine($"LoadMatchDataAsync: Joined organizer group for match {MatchCode}");
+                }
+
+                // Update scoreboard rows for dynamic display
+                UpdateScoreboardRows();
+            }
+            else
+            {
+                ErrorMessage = result.Message ?? "Kunde inte ladda match";
+                HasError = true;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Clear the currently selected shot
+    /// </summary>
+    [RelayCommand]
+    private void ClearCurrentShot()
+    {
+        switch (CurrentShotIndex)
+        {
+            case 0: Shot1 = "-"; break;
+            case 1: Shot2 = "-"; break;
+            case 2: Shot3 = "-"; break;
+            case 3: Shot4 = "-"; break;
+            case 4: Shot5 = "-"; break;
+        }
+        OnPropertyChanged(nameof(SeriesTotal));
+        OnPropertyChanged(nameof(SeriesXCount));
+    }
+
+    /// <summary>
+    /// Save score without taking a photo
+    /// </summary>
+    [RelayCommand]
+    private async Task SaveScoreOnlyAsync()
+    {
+        await SaveScoreInternalAsync(capturePhoto: false);
+    }
+
+    /// <summary>
+    /// Save score and then capture a photo
+    /// </summary>
+    [RelayCommand]
+    private async Task SaveScoreWithPhotoAsync()
+    {
+        await SaveScoreInternalAsync(capturePhoto: true);
+    }
+
+    /// <summary>
+    /// Internal save score method with optional photo capture
+    /// </summary>
+    private async Task SaveScoreInternalAsync(bool capturePhoto)
+    {
+        // Debug: Log that save was clicked
+        System.Diagnostics.Debug.WriteLine($"SaveScoreInternalAsync called. IsBusy={IsBusy}, capturePhoto={capturePhoto}, CurrentParticipant={CurrentParticipant?.DisplayName ?? "null"}");
+
+        if (IsBusy)
+        {
+            System.Diagnostics.Debug.WriteLine("SaveScoreInternalAsync: Returning early because IsBusy=true");
+            return;
+        }
+
+        if (CurrentParticipant == null)
+        {
+            var userId = _authService.CurrentUser?.MemberId;
+            ErrorMessage = $"Du är inte registrerad som deltagare (MemberId: {userId})";
+            HasError = true;
+            System.Diagnostics.Debug.WriteLine($"SaveScoreInternalAsync: CurrentParticipant is null. User MemberId={userId}");
+            return;
+        }
+
+        // Validate at least one shot is entered
+        if (Shot1 == "-" && Shot2 == "-" && Shot3 == "-" && Shot4 == "-" && Shot5 == "-")
+        {
+            ErrorMessage = "Ange minst ett skott";
+            HasError = true;
+            System.Diagnostics.Debug.WriteLine("SaveScoreInternalAsync: No shots entered");
+            return;
+        }
+
+        try
+        {
+            IsBusy = true;
+            HasError = false;
+            System.Diagnostics.Debug.WriteLine($"SaveScoreInternalAsync: Saving series {CurrentSeriesIndex + 1}, Total={SeriesTotal}, XCount={SeriesXCount}");
+
+            // Build the shots list from shot circles (exclude empty "-")
+            var shots = new List<string> { Shot1, Shot2, Shot3, Shot4, Shot5 }
+                .Where(s => s != "-")
+                .ToList();
+
+            var request = new SaveScoreRequest
+            {
+                SeriesNumber = CurrentSeriesIndex + 1,
+                Total = SeriesTotal,
+                XCount = SeriesXCount,
+                Shots = shots,
+                EntryMethod = "ShotByShot"
+            };
+
+            var result = await _matchService.SaveScoreAsync(MatchCode, request);
+            System.Diagnostics.Debug.WriteLine($"SaveScoreInternalAsync: API result Success={result.Success}, Message={result.Message}");
+
+            if (result.Success)
+            {
+                System.Diagnostics.Debug.WriteLine($"SaveScoreInternalAsync: Success! IsEditMode={IsEditMode}, capturePhoto={capturePhoto}");
+                // Update local data
+                UpdateLocalScore(CurrentParticipant.Id, request.SeriesNumber, 0, SeriesTotal);
+
+                // Store the saved series number for photo upload
+                _savedSeriesNumber = request.SeriesNumber;
+
+                if (capturePhoto)
+                {
+                    // User wants to capture a photo - do it now
+                    IsBusy = false; // Allow UI to update before camera
+                    await CaptureAndUploadPhotoAsync();
+                }
+                else
+                {
+                    // Just save without photo - advance to next series or close
+                    if (IsEditMode)
+                    {
+                        // Edit mode: close panel
+                        IsScoreEntryOpen = false;
+                        IsEditMode = false;
+                        EditingSeriesNumber = 0;
+                        EditingSeriesPhotoUrl = null;
+                    }
+                    else
+                    {
+                        // New entry mode: advance to next series
+                        AdvanceToNextSeries();
+                    }
+                }
+
+                // Reload match data to get updated scores (do this in background)
+                _ = LoadMatchDataAsync();
+            }
+            else
+            {
+                ErrorMessage = result.Message ?? "Kunde inte spara poäng";
+                HasError = true;
+                System.Diagnostics.Debug.WriteLine($"SaveScoreInternalAsync: Failed - {ErrorMessage}");
+            }
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Fel: {ex.Message}";
+            HasError = true;
+            System.Diagnostics.Debug.WriteLine($"SaveScoreInternalAsync: Exception - {ex}");
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    /// <summary>
+    /// Capture photo and upload it after saving score
+    /// </summary>
+    private async Task CaptureAndUploadPhotoAsync()
+    {
+        System.Diagnostics.Debug.WriteLine($"CaptureAndUploadPhotoAsync: Starting capture for series {_savedSeriesNumber}");
+
+        try
+        {
+            // Check camera permission
+            var status = await Permissions.CheckStatusAsync<Permissions.Camera>();
+            if (status != PermissionStatus.Granted)
+            {
+                status = await Permissions.RequestAsync<Permissions.Camera>();
+                if (status != PermissionStatus.Granted)
+                {
+                    await Shell.Current.DisplayAlert("Kamerabehörighet",
+                        "Kamerabehörighet krävs för att ta bilder. Gå till Inställningar för att aktivera.", "OK");
+                    AdvanceOrCloseAfterSave();
+                    return;
+                }
+            }
+
+            var photo = await MediaPicker.Default.CapturePhotoAsync();
+
+            if (photo == null)
+            {
+                System.Diagnostics.Debug.WriteLine("CaptureAndUploadPhotoAsync: User cancelled photo capture");
+                AdvanceOrCloseAfterSave();
+                return;
+            }
+
+            System.Diagnostics.Debug.WriteLine($"CaptureAndUploadPhotoAsync: Photo captured at {photo.FullPath}");
+
+            IsUploadingPhoto = true;
+
+            // Compress the image before uploading
+            byte[] imageData;
+            try
+            {
+                using var sourceStream = await photo.OpenReadAsync();
+                imageData = await _imageCompressionService.CompressImageAsync(sourceStream);
+                System.Diagnostics.Debug.WriteLine($"CaptureAndUploadPhotoAsync: Image compressed to {imageData.Length} bytes");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"CaptureAndUploadPhotoAsync: Compression failed, using original - {ex.Message}");
+                using var sourceStream = await photo.OpenReadAsync();
+                using var memStream = new MemoryStream();
+                await sourceStream.CopyToAsync(memStream);
+                imageData = memStream.ToArray();
+            }
+
+            // Upload the photo
+            var result = await _matchService.UploadSeriesPhotoAsync(MatchCode, _savedSeriesNumber, imageData);
+
+            if (result.Success)
+            {
+                System.Diagnostics.Debug.WriteLine($"CaptureAndUploadPhotoAsync: Upload success! URL={result.Data?.PhotoUrl}");
+            }
+            else
+            {
+                ErrorMessage = result.Message ?? "Kunde inte ladda upp bilden";
+                HasError = true;
+                System.Diagnostics.Debug.WriteLine($"CaptureAndUploadPhotoAsync: Upload failed - {ErrorMessage}");
+            }
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Fel vid fotohantering: {ex.Message}";
+            HasError = true;
+            System.Diagnostics.Debug.WriteLine($"CaptureAndUploadPhotoAsync: Exception - {ex}");
+        }
+        finally
+        {
+            IsUploadingPhoto = false;
+            AdvanceOrCloseAfterSave();
+        }
+    }
+
+    /// <summary>
+    /// Advance to next series or close panel after saving (helper method)
+    /// </summary>
+    private void AdvanceOrCloseAfterSave()
+    {
+        if (IsEditMode)
+        {
+            // Edit mode: close panel
+            IsScoreEntryOpen = false;
+            IsEditMode = false;
+            EditingSeriesNumber = 0;
+            EditingSeriesPhotoUrl = null;
+        }
+        else
+        {
+            // New entry mode: advance to next series
+            AdvanceToNextSeries();
+        }
+    }
+
+    /// <summary>
+    /// Advance to the next series after saving (closes the panel)
+    /// </summary>
+    private void AdvanceToNextSeries()
+    {
+        // Clear shots for next series
+        Shot1 = Shot2 = Shot3 = Shot4 = Shot5 = "-";
+        CurrentShotIndex = 0;
+
+        // Advance series index
+        CurrentSeriesIndex++;
+
+        OnPropertyChanged(nameof(SeriesTotal));
+        OnPropertyChanged(nameof(SeriesXCount));
+
+        // Close the score entry panel after saving
+        IsScoreEntryOpen = false;
+    }
+
+    [RelayCommand]
+    private async Task SaveScoreAsync()
+    {
+        // Legacy method - redirect to save only
+        await SaveScoreOnlyAsync();
+    }
+
+    [RelayCommand]
+    private void SetScore(string scoreStr)
+    {
+        if (int.TryParse(scoreStr, out int score))
+        {
+            CurrentScore = score;
+            IsX = false;
+            // Update shot circle
+            SetCurrentShot(scoreStr);
+            // Auto-advance to next empty shot
+            AutoAdvanceToNextShot();
+        }
+    }
+
+    [RelayCommand]
+    private void SetX()
+    {
+        CurrentScore = 10;
+        IsX = true;
+        // Update shot circle with X
+        SetCurrentShot("X");
+        // Auto-advance to next empty shot
+        AutoAdvanceToNextShot();
+    }
+
+    [RelayCommand]
+    private void SelectShot(int index)
+    {
+        if (index >= 0 && index < 5)
+        {
+            CurrentShotIndex = index;
+            // Load the existing value if any
+            var shot = GetCurrentShot();
+            if (shot == "X")
+            {
+                CurrentScore = 10;
+                IsX = true;
+            }
+            else if (int.TryParse(shot, out int val))
+            {
+                CurrentScore = val;
+                IsX = false;
+            }
+            else
+            {
+                CurrentScore = 0;
+                IsX = false;
+            }
+        }
+    }
+
+    [RelayCommand]
+    private void ClearShots()
+    {
+        ClearAllShots();
+    }
+
+    private void AutoAdvanceToNextShot()
+    {
+        // Find the next empty shot slot (or stay at current if all filled)
+        for (int i = 0; i < 5; i++)
+        {
+            int nextIndex = (CurrentShotIndex + 1 + i) % 5;
+            var shot = nextIndex switch
+            {
+                0 => Shot1,
+                1 => Shot2,
+                2 => Shot3,
+                3 => Shot4,
+                4 => Shot5,
+                _ => "-"
+            };
+            if (shot == "-")
+            {
+                CurrentShotIndex = nextIndex;
+                CurrentScore = 0;
+                IsX = false;
+                return;
+            }
+        }
+        // All shots filled - stay at current or move to first
+        if (CurrentShotIndex < 4)
+            CurrentShotIndex++;
+    }
+
+    [RelayCommand]
+    private async Task CompleteMatchAsync()
+    {
+        if (IsBusy || !IsMatchHost)
+            return;
+
+        try
+        {
+            IsBusy = true;
+
+            var result = await _matchService.CompleteMatchAsync(MatchCode);
+
+            if (result.Success)
+            {
+                await Shell.Current.GoToAsync("//main/matches");
+            }
+            else
+            {
+                ErrorMessage = result.Message ?? "Kunde inte avsluta match";
+                HasError = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = ex.Message;
+            HasError = true;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task LeaveMatchAsync()
+    {
+        if (IsBusy)
+            return;
+
+        try
+        {
+            IsBusy = true;
+
+            await _signalRService.LeaveMatchAsync(MatchCode);
+            await _matchService.LeaveMatchAsync(MatchCode);
+            await Shell.Current.GoToAsync("//main/matches");
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = ex.Message;
+            HasError = true;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    /// <summary>
+    /// Join the match from spectator mode (only visible when CanJoinFromSpectator is true)
+    /// </summary>
+    [RelayCommand]
+    private async Task JoinFromSpectatorAsync()
+    {
+        if (IsBusy || !IsSpectator || !CanJoin || Match == null)
+            return;
+
+        try
+        {
+            IsBusy = true;
+            HasError = false;
+
+            if (Match.IsOpen)
+            {
+                // Open match - join directly
+                var result = await _matchService.JoinMatchAsync(MatchCode);
+                if (result.Success)
+                {
+                    // Switch from spectator to participant mode
+                    IsSpectator = false;
+                    CanJoin = false;
+                    await LoadMatchDataAsync();
+                }
+                else
+                {
+                    ErrorMessage = result.Message ?? "Kunde inte gå med i matchen";
+                    HasError = true;
+                }
+            }
+            else
+            {
+                // Private match - send join request
+                var result = await _matchService.RequestJoinMatchAsync(MatchCode);
+                if (result.Success)
+                {
+                    await Shell.Current.DisplayAlert("Förfrågan skickad",
+                        "Din förfrågan har skickats till matchvärden", "OK");
+                }
+                else
+                {
+                    ErrorMessage = result.Message ?? "Kunde inte skicka förfrågan";
+                    HasError = true;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = ex.Message;
+            HasError = true;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private void UpdateLocalScore(int participantId, int seriesNumber, int shotNumber, int score)
+    {
+        var participant = Participants.FirstOrDefault(p => p.Id == participantId);
+        if (participant == null)
+            return;
+
+        var series = participant.Scores.FirstOrDefault(s => s.SeriesNumber == seriesNumber);
+        if (series == null)
+        {
+            series = new TrainingMatchScore { SeriesNumber = seriesNumber };
+            participant.Scores.Add(series);
+        }
+
+        // Add or update shot score - simplified for now
+        // In a real implementation, we would update the Shots list and recalculate Total
+
+        // Refresh scoreboard rows to reflect the updated score
+        UpdateScoreboardRows();
+    }
+
+    private void AdvanceToNextShot()
+    {
+        if (Match == null)
+            return;
+
+        CurrentShotIndex++;
+        if (CurrentShotIndex >= Match.ShotsPerSeries)
+        {
+            CurrentShotIndex = 0;
+            CurrentSeriesIndex++;
+        }
+    }
+
+    private void OnScoreUpdated(object? sender, ScoreUpdate update)
+    {
+        MainThread.BeginInvokeOnMainThread(async () =>
+        {
+            // Reload match data to get updated scores
+            System.Diagnostics.Debug.WriteLine($"SignalR: ScoreUpdated - MemberId={update.MemberId}, Series={update.SeriesNumber}");
+            await LoadMatchDataAsync();
+        });
+    }
+
+    private void OnParticipantJoined(object? sender, int memberId)
+    {
+        MainThread.BeginInvokeOnMainThread(async () =>
+        {
+            System.Diagnostics.Debug.WriteLine($"SignalR: ParticipantJoined - MemberId={memberId}");
+            await LoadMatchDataAsync();
+        });
+    }
+
+    private void OnParticipantLeft(object? sender, int memberId)
+    {
+        MainThread.BeginInvokeOnMainThread(async () =>
+        {
+            System.Diagnostics.Debug.WriteLine($"SignalR: ParticipantLeft - MemberId={memberId}");
+            await LoadMatchDataAsync();
+        });
+    }
+
+    private void OnMatchCompleted(object? sender, EventArgs e)
+    {
+        MainThread.BeginInvokeOnMainThread(() =>
+        {
+            System.Diagnostics.Debug.WriteLine("SignalR: MatchCompleted");
+            IsMatchActive = false;
+        });
+    }
+
+    private void OnSpectatorListUpdated(object? sender, List<MatchSpectator> spectators)
+    {
+        MainThread.BeginInvokeOnMainThread(() =>
+        {
+            // Get current user's member ID to exclude from spectators list
+            var currentUserId = _authService.CurrentUser?.MemberId;
+
+            // Filter out the current user - they shouldn't see themselves as a spectator
+            var otherSpectators = spectators
+                .Where(s => !currentUserId.HasValue || s.MemberId != currentUserId.Value)
+                .ToList();
+
+            System.Diagnostics.Debug.WriteLine($"SignalR: SpectatorListUpdated - Total={spectators.Count}, Showing={otherSpectators.Count} (excluded self)");
+            Spectators.Clear();
+            foreach (var s in otherSpectators)
+            {
+                Spectators.Add(s);
+            }
+        });
+    }
+
+    private void OnJoinRequestReceived(object? sender, JoinRequest request)
+    {
+        MainThread.BeginInvokeOnMainThread(async () =>
+        {
+            System.Diagnostics.Debug.WriteLine($"SignalR: JoinRequestReceived - RequestId={request.RequestId}, MemberId={request.MemberId}, Name={request.MemberName}, MatchCode={request.MatchCode}");
+            System.Diagnostics.Debug.WriteLine($"SignalR: JoinRequest raw object - {System.Text.Json.JsonSerializer.Serialize(request)}");
+
+            // Only show to match host
+            if (!IsMatchHost)
+            {
+                System.Diagnostics.Debug.WriteLine("Not match host, ignoring join request");
+                return;
+            }
+
+            // Show dialog to accept or block
+            var action = await Shell.Current.DisplayActionSheet(
+                $"{request.MemberName} vill gå med i matchen",
+                "Avbryt",
+                null,
+                "Godkänn",
+                "Neka");
+
+            if (action == "Godkänn")
+            {
+                await RespondToJoinRequestAsync(request.RequestId, "Accept");
+            }
+            else if (action == "Neka")
+            {
+                await RespondToJoinRequestAsync(request.RequestId, "Block");
+            }
+        });
+    }
+
+    private void OnJoinRequestAccepted(object? sender, string matchCode)
+    {
+        MainThread.BeginInvokeOnMainThread(async () =>
+        {
+            System.Diagnostics.Debug.WriteLine($"SignalR: JoinRequestAccepted - MatchCode={matchCode}");
+
+            // Check if this is for current match and current user was the requester (spectator)
+            if (matchCode == MatchCode && IsSpectator)
+            {
+                await Shell.Current.DisplayAlert("Förfrågan godkänd",
+                    "Du har blivit godkänd att delta i matchen!", "OK");
+
+                // Switch from spectator to participant mode
+                IsSpectator = false;
+                CanJoin = false;
+                await LoadMatchDataAsync();
+            }
+        });
+    }
+
+    private void OnJoinRequestBlocked(object? sender, string matchCode)
+    {
+        MainThread.BeginInvokeOnMainThread(async () =>
+        {
+            System.Diagnostics.Debug.WriteLine($"SignalR: JoinRequestBlocked - MatchCode={matchCode}");
+
+            // Check if this is for current match and current user was the requester (spectator)
+            if (matchCode == MatchCode && IsSpectator)
+            {
+                await Shell.Current.DisplayAlert("Förfrågan nekad",
+                    "Matchvärden har nekat din förfrågan att gå med.", "OK");
+            }
+        });
+    }
+
+    private void OnReactionUpdated(object? sender, ReactionUpdate update)
+    {
+        MainThread.BeginInvokeOnMainThread(() =>
+        {
+            System.Diagnostics.Debug.WriteLine($"SignalR: ReactionUpdated - TargetMemberId={update.TargetMemberId}, Series={update.SeriesNumber}, Reactions={update.Reactions?.Count ?? 0}");
+
+            // Update the participant's score with new reactions
+            var participant = Participants.FirstOrDefault(p => p.MemberId == update.TargetMemberId);
+            if (participant?.Scores != null)
+            {
+                var score = participant.Scores.FirstOrDefault(s => s.SeriesNumber == update.SeriesNumber);
+                if (score != null)
+                {
+                    score.Reactions = update.Reactions;
+                }
+            }
+
+            // If viewing this photo, update the displayed reactions
+            if (IsPhotoViewerOpen &&
+                ViewingPhotoMemberId == update.TargetMemberId &&
+                ViewingPhotoSeriesNumber == update.SeriesNumber)
+            {
+                ViewingPhotoReactions.Clear();
+                if (update.Reactions != null)
+                {
+                    foreach (var reaction in update.Reactions)
+                    {
+                        ViewingPhotoReactions.Add(reaction);
+                    }
+                }
+
+                // Update current user's reaction
+                var currentUserId = _authService.CurrentUser?.MemberId;
+                CurrentUserReaction = ViewingPhotoReactions.FirstOrDefault(r => r.MemberId == currentUserId)?.Emoji;
+            }
+        });
+    }
+
+    private async Task RespondToJoinRequestAsync(int requestId, string action)
+    {
+        try
+        {
+            var result = await _matchService.RespondToJoinRequestAsync(requestId, action);
+            if (result.Success)
+            {
+                System.Diagnostics.Debug.WriteLine($"Successfully responded to join request: {action}");
+            }
+            else
+            {
+                ErrorMessage = result.Message ?? "Kunde inte svara på förfrågan";
+                HasError = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = ex.Message;
+            HasError = true;
+        }
+    }
+
+    /// <summary>
+    /// Collection of scoreboard rows for dynamic display with subtotals
+    /// </summary>
+    [ObservableProperty]
+    private ObservableCollection<ScoreboardRow> _scoreboardRows = new();
+
+    /// <summary>
+    /// Updates the scoreboard rows based on current participant scores.
+    /// Adds subtotal rows after series 6, 7, 10, and 12.
+    /// </summary>
+    public void UpdateScoreboardRows()
+    {
+        ScoreboardRows.Clear();
+
+        // Determine max series from participants (minimum 6)
+        int maxSeries = MaxSeriesCount;
+
+        // Series indices that should have a subtotal row AFTER them (0-based)
+        // After series 6 (index 5), 7 (index 6), 10 (index 9), 12 (index 11)
+        var subtotalAfterIndices = new HashSet<int> { 5, 6, 9, 11 };
+
+        for (int i = 0; i < maxSeries; i++)
+        {
+            // Add score row for this series
+            var scoreRow = new ScoreboardRow
+            {
+                SeriesIndex = i,
+                RowType = ScoreboardRowType.Score
+            };
+            PopulateRowCells(scoreRow, i);
+            ScoreboardRows.Add(scoreRow);
+
+            // Add subtotal row if applicable and we haven't exceeded the series
+            if (subtotalAfterIndices.Contains(i))
+            {
+                var subtotalRow = new ScoreboardRow
+                {
+                    SeriesIndex = i,
+                    RowType = ScoreboardRowType.Subtotal,
+                    SubtotalUpToSeries = i + 1  // 1-based count of series included
+                };
+                PopulateSubtotalCells(subtotalRow, i + 1);
+                ScoreboardRows.Add(subtotalRow);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Populates cells for a score row (one cell per participant)
+    /// </summary>
+    private void PopulateRowCells(ScoreboardRow row, int seriesIndex)
+    {
+        row.Cells.Clear();
+        var currentUserId = _authService.CurrentUser?.MemberId;
+
+        foreach (var participant in Participants)
+        {
+            var cell = new ScoreboardCell
+            {
+                SeriesNumber = seriesIndex + 1, // 1-based
+                MemberId = participant.MemberId,
+                IsCurrentUserCell = currentUserId.HasValue && participant.MemberId == currentUserId.Value
+            };
+
+            if (participant.Scores != null && seriesIndex < participant.Scores.Count)
+            {
+                var score = participant.Scores[seriesIndex];
+                // Cap at 50 (max possible per series)
+                cell.ScoreText = Math.Min(score.Total, 50).ToString();
+                cell.HasScore = true;
+                cell.BackgroundColorHex = "#1e5631"; // Dark green for scores
+
+                if (score.XCount > 0)
+                {
+                    cell.XCountText = $"{score.XCount}x";
+                    cell.HasXCount = true;
+                }
+
+                // Store additional data for editing and viewing
+                cell.TargetPhotoUrl = score.TargetPhotoUrl;
+                cell.Shots = score.Shots;
+                cell.EntryMethod = score.EntryMethod;
+                cell.Reactions = score.Reactions;
+
+                // Debug logging for photo URL
+                if (!string.IsNullOrEmpty(score.TargetPhotoUrl))
+                {
+                    System.Diagnostics.Debug.WriteLine($"[Scoreboard] Member {participant.MemberId} Series {seriesIndex + 1} has photo: {score.TargetPhotoUrl}");
+                }
+
+                // Can edit if: current user's cell + match is active
+                cell.CanEdit = cell.IsCurrentUserCell && IsMatchActive && !IsSpectator;
+            }
+            else
+            {
+                cell.ScoreText = "-";
+                cell.HasScore = false;
+                cell.BackgroundColorHex = "#374151"; // Gray for empty
+                cell.CanEdit = false;
+            }
+
+            row.Cells.Add(cell);
+        }
+    }
+
+    /// <summary>
+    /// Populates cells for a subtotal row (sum up to seriesCount)
+    /// </summary>
+    private void PopulateSubtotalCells(ScoreboardRow row, int seriesCount)
+    {
+        row.Cells.Clear();
+        foreach (var participant in Participants)
+        {
+            var cell = new ScoreboardCell();
+            int total = 0;
+            int totalX = 0;
+
+            if (participant.Scores != null)
+            {
+                int actualCount = Math.Min(seriesCount, participant.Scores.Count);
+                for (int i = 0; i < actualCount; i++)
+                {
+                    total += Math.Min(participant.Scores[i].Total, 50);
+                    totalX += participant.Scores[i].XCount;
+                }
+            }
+
+            cell.ScoreText = total > 0 ? total.ToString() : "-";
+            cell.HasScore = total > 0;
+            cell.BackgroundColorHex = "#1a365d"; // Dark blue for subtotals
+
+            if (totalX > 0)
+            {
+                cell.XCountText = $"{totalX}x";
+                cell.HasXCount = true;
+            }
+
+            row.Cells.Add(cell);
+        }
+    }
+}

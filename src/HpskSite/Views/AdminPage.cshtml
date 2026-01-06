@@ -1,0 +1,141 @@
+@using Umbraco.Cms.Web.Website.Controllers
+@using Umbraco.Cms.Web.Website.Models
+@using Umbraco.Cms.Core.Security
+@inject IMemberManager MemberManager
+@inject HpskSite.Services.AdminAuthorizationService AuthService
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+    ViewBag.Title = "Administration";
+
+    var currentMember = await MemberManager.GetCurrentMemberAsync();
+    var isLoggedIn = currentMember != null;
+
+    bool isAdmin = false;
+    if (isLoggedIn && currentMember != null)
+    {
+        // Check if user is site administrator
+        isAdmin = await AuthService.IsCurrentUserAdminAsync();
+    }
+}
+
+@* Check if user is logged in *@
+@if (!isLoggedIn)
+{
+    <div class="container mt-4">
+        <div class="alert alert-warning">
+            <h4>Access Denied</h4>
+            <p>You must be logged in to access this page.</p>
+            <a href="/login-register/" class="btn btn-primary">Login</a>
+        </div>
+    </div>
+    return;
+}
+
+@* Check if user is administrator *@
+@if (!isAdmin)
+{
+    <div class="container mt-4">
+        <div class="alert alert-danger">
+            <h4>Access Denied</h4>
+            <p>You must be a site administrator to access this page.</p>
+            <p>Only members in the "Administrators" group have access to the administration panel.</p>
+            <a href="/" class="btn btn-primary">Return to Home</a>
+        </div>
+    </div>
+    return;
+}
+
+<div class="container">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h1>Administration Panel</h1>
+            <p class="mb-0">Welcome, @(currentMember?.UserName ?? "Unknown User")!</p>
+        </div>
+        <div class="admin-tools">
+            <a href="/umbraco" target="_blank" class="btn btn-outline-primary">
+                <i class="bi bi-gear-fill me-2"></i>Umbraco Backoffice
+                <i class="bi bi-box-arrow-up-right ms-1"></i>
+            </a>
+        </div>
+    </div>
+
+    @* Anti-forgery token for AJAX requests *@
+    @Html.AntiForgeryToken()
+
+    <!-- Navigation tabs -->
+    <ul class="nav nav-tabs" id="adminTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="competitions-tab" data-bs-toggle="tab" data-bs-target="#competitions" type="button" role="tab">Tävlingar</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="series-tab" data-bs-toggle="tab" data-bs-target="#series" type="button" role="tab">Serier</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="users-tab" data-bs-toggle="tab" data-bs-target="#users" type="button" role="tab">Användarhantering</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="clubs-tab" data-bs-toggle="tab" data-bs-target="#clubs" type="button" role="tab">Klubbhantering</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="invoices-tab" data-bs-toggle="tab" data-bs-target="#invoices" type="button" role="tab">Fakturor</button>
+        </li>
+    </ul>
+
+    <!-- Load modals BEFORE tab content so JavaScript functions are available -->
+    <!-- Modals for Competition Management -->
+    @await Html.PartialAsync("CompetitionWizardModal")
+    @await Html.PartialAsync("CompetitionAdvertModal")
+    @await Html.PartialAsync("CompetitionEditModal")
+    @await Html.PartialAsync("CompetitionAdvertEditModal")
+    @await Html.PartialAsync("UploadInvitationModal")
+    @await Html.PartialAsync("CompetitionDeleteConfirmModal")
+
+    <!-- Modals for Series Management -->
+    @await Html.PartialAsync("SeriesEditModal")
+    @await Html.PartialAsync("SeriesCopyModal")
+    @await Html.PartialAsync("SeriesDeleteConfirmModal")
+
+    <!-- Tab content -->
+    <div class="tab-content" id="adminTabContent">
+        <div class="tab-pane fade show active" id="competitions" role="tabpanel">
+            <div class="card mt-3">
+                <div class="card-body">
+                    @await Html.PartialAsync("AdminCompetitionsList")
+                </div>
+            </div>
+        </div>
+
+        <div class="tab-pane fade" id="series" role="tabpanel">
+            <div class="card mt-3">
+                <div class="card-body">
+                    @await Html.PartialAsync("AdminSeriesList")
+                </div>
+            </div>
+        </div>
+
+        <div class="tab-pane fade" id="users" role="tabpanel">
+            <div class="card mt-3">
+                <div class="card-body">
+                    @await Html.PartialAsync("UserManagement")
+                </div>
+            </div>
+        </div>
+        
+        <div class="tab-pane fade" id="clubs" role="tabpanel">
+            <div class="card mt-3">
+                <div class="card-body">
+                    @await Html.PartialAsync("ClubManagement")
+                </div>
+            </div>
+        </div>
+
+        <div class="tab-pane fade" id="invoices" role="tabpanel">
+            <div class="card mt-3">
+                <div class="card-body">
+                    @await Html.PartialAsync("AdminInvoicesList")
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

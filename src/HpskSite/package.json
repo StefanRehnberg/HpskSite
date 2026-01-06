@@ -1,0 +1,24 @@
+{
+  "name": "hpsksite",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/StefanRehnberg/HpskSite.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/StefanRehnberg/HpskSite/issues"
+  },
+  "homepage": "https://github.com/StefanRehnberg/HpskSite#readme",
+  "dependencies": {
+    "@ckeditor/ckeditor5-build-classic": "^41.4.2",
+    "chart.js": "^4.5.1"
+  }
+}

@@ -1,0 +1,304 @@
+@*
+ * Series Edit Modal
+ * Used for both creating and editing competition series
+ * Includes Flatpickr for dates and CKEditor 5 for rich text editing
+*@
+
+<!-- Flatpickr CSS & JS -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
+
+<!-- CKEditor 5 Rich Text Editor -->
+<script src="https://cdn.ckeditor.com/ckeditor5/41.0.0/classic/ckeditor.js"></script>
+
+<div class="modal fade" id="seriesEditModal" tabindex="-1" role="dialog">
+    <div class="modal-dialog modal-xl" role="document">
+        <div class="modal-content">
+            <!-- Modal Header -->
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title" id="seriesEditModalLabel">
+                    <i class="bi bi-plus-circle me-2"></i>New Series
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+
+            <!-- Modal Body -->
+            <div class="modal-body">
+                <!-- Error Alert -->
+                <div class="alert alert-danger d-none" id="seriesEditFormErrors" role="alert">
+                    <strong>Validation Errors:</strong>
+                    <ul id="seriesErrorList" class="mb-0"></ul>
+                </div>
+
+                <!-- Series Form -->
+                <form id="seriesEditForm">
+                    <!-- Hidden fields -->
+                    <input type="hidden" id="seriesId" name="seriesId" value="0">
+
+                    <!-- Series Name -->
+                    <div class="mb-3">
+                        <label for="seriesName" class="form-label">Series Name <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="seriesName" name="seriesName" required>
+                    </div>
+
+                    <!-- Short Description -->
+                    <div class="mb-3">
+                        <label for="seriesShortDescription" class="form-label">Short Description</label>
+                        <input type="text" class="form-control" id="seriesShortDescription" name="seriesShortDescription" maxlength="200">
+                        <small class="form-text text-muted">Brief one-line description (max 200 characters)</small>
+                    </div>
+
+                    <!-- Full Description with TinyMCE Editor -->
+                    <div class="mb-3">
+                        <label for="seriesDescription" class="form-label">Description</label>
+                        <textarea id="seriesDescription" name="seriesDescription" style="width: 100%; min-height: 300px;"></textarea>
+                    </div>
+
+                    <!-- Date Fields with Flatpickr -->
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="seriesStartDate" class="form-label">Start Date</label>
+                                <input type="text" class="form-control" id="seriesStartDate" name="seriesStartDate" placeholder="Select start date">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="seriesEndDate" class="form-label">End Date</label>
+                                <input type="text" class="form-control" id="seriesEndDate" name="seriesEndDate" placeholder="Select end date">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Checkboxes -->
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="form-check mb-3">
+                                <input class="form-check-input" type="checkbox" id="showInMenu" name="showInMenu" value="true">
+                                <label class="form-check-label" for="showInMenu">
+                                    Show in Menu
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="isActive" class="form-label">Status</label>
+                                <select class="form-select" id="isActive" name="isActive">
+                                    <option value="true" selected>Active</option>
+                                    <option value="false">Inactive</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Modal Footer -->
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="saveSeriesBtn" onclick="saveSeries()">
+                    <i class="bi bi-check-circle me-1"></i>Save Series
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let editorInstance = null;  // Global reference to CKEditor instance
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize CKEditor 5
+    ClassicEditor
+        .create(document.getElementById('seriesDescription'), {
+            height: '300px',
+            toolbar: [
+                'heading', '|',
+                'bold', 'italic', 'underline', 'strikethrough', '|',
+                'link', 'imageUpload', 'blockQuote', 'codeBlock', '|',
+                'bulletedList', 'numberedList', '|',
+                'undo', 'redo'
+            ],
+            language: 'sv',
+            codeBlock: {
+                indentSequence: '    '
+            }
+        })
+        .then(editor => {
+            editorInstance = editor;
+        })
+        .catch(error => {
+            console.error('CKEditor initialization error:', error);
+        });
+
+    // Initialize Flatpickr for dates
+    flatpickr('#seriesStartDate', {
+        enableTime: false,
+        dateFormat: 'Y-m-d',
+        locale: 'sv'
+    });
+
+    flatpickr('#seriesEndDate', {
+        enableTime: false,
+        dateFormat: 'Y-m-d',
+        locale: 'sv'
+    });
+
+    // Load editor content when modal opens
+    const seriesEditModal = document.getElementById('seriesEditModal');
+    seriesEditModal.addEventListener('show.bs.modal', function() {
+        if (editorInstance) {
+            const textarea = document.getElementById('seriesDescription');
+            let content = textarea.value || '';
+
+            // The content is already parsed by AdminSeriesList.cshtml
+            // Just set it directly into CKEditor
+            if (content) {
+                editorInstance.setData(content);
+            } else {
+                editorInstance.setData('');
+            }
+        }
+    });
+});
+
+// Save series (create or update)
+function saveSeries() {
+    const form = document.getElementById('seriesEditForm');
+
+    // Sync CKEditor content to textarea
+    if (editorInstance) {
+        document.getElementById('seriesDescription').value = editorInstance.getData();
+    }
+
+    if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+    }
+
+    const formData = new FormData(form);
+    const fields = {};
+
+    for (let [key, value] of formData.entries()) {
+        if (key === 'seriesId') {
+            continue;
+        }
+
+        if (key === 'seriesShortDescription' && !value) {
+            continue;
+        }
+
+        if (key === 'seriesDescription') {
+            // Use CKEditor HTML content (already synced to textarea in saveSeries())
+            fields[key] = value;
+        } else if (key === 'showInMenu') {
+            fields[key] = value === 'on' || value === 'true';
+        } else if (key === 'isActive') {
+            fields[key] = value === 'true';
+        } else if (key === 'seriesStartDate' || key === 'seriesEndDate') {
+            if (value) {
+                // Flatpickr already gives us date in Y-m-d format, convert to ISO
+                const dateParts = value.split('-');
+                if (dateParts.length === 3) {
+                    fields[key] = new Date(`${dateParts[0]}-${dateParts[1]}-${dateParts[2]}T00:00:00`).toISOString();
+                }
+            }
+        } else {
+            fields[key] = value;
+        }
+    }
+
+    const seriesId = parseInt(document.getElementById('seriesId').value) || 0;
+    const isNewSeries = seriesId === 0;
+
+    let endpoint = '/umbraco/surface/CompetitionAdmin/UpdateSeries';
+    let requestBody;
+
+    if (isNewSeries) {
+        endpoint = '/umbraco/surface/CompetitionAdmin/CreateSeries';
+        requestBody = fields;
+    } else {
+        requestBody = {
+            seriesId: seriesId,
+            ...fields
+        };
+    }
+
+    const saveBtn = document.getElementById('saveSeriesBtn');
+    const originalText = saveBtn.innerHTML;
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<i class="bi bi-spinner-border spinner-border-sm"></i> Sparar...';
+
+    fetch(endpoint, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value
+        },
+        body: JSON.stringify(requestBody)
+    })
+    .then(response => {
+        if (!response.ok) {
+            return response.text().then(text => {
+                throw new Error(`HTTP ${response.status}: ${text}`);
+            });
+        }
+        return response.json();
+    })
+    .then(data => {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = originalText;
+
+        if (data.success) {
+            document.getElementById('seriesEditFormErrors').classList.add('d-none');
+            showNotification('Serie sparad framgångsrikt!', 'success');
+            bootstrap.Modal.getInstance(document.getElementById('seriesEditModal')).hide();
+
+            if (typeof loadSeriesList === 'function') {
+                setTimeout(() => {
+                    loadSeriesList();
+                }, 500);
+            }
+        } else {
+            const errorList = document.getElementById('seriesErrorList');
+            errorList.innerHTML = '';
+
+            if (data.errors && typeof data.errors === 'object' && Object.keys(data.errors).length > 0) {
+                for (let [field, error] of Object.entries(data.errors)) {
+                    const li = document.createElement('li');
+                    li.textContent = error;
+                    errorList.appendChild(li);
+                }
+            } else {
+                const li = document.createElement('li');
+                li.textContent = data.message || 'Ett okänt fel uppstod';
+                errorList.appendChild(li);
+            }
+
+            document.getElementById('seriesEditFormErrors').classList.remove('d-none');
+        }
+    })
+    .catch(error => {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = originalText;
+
+        const errorList = document.getElementById('seriesErrorList');
+        errorList.innerHTML = '';
+        const li = document.createElement('li');
+        li.textContent = error.message;
+        errorList.appendChild(li);
+        document.getElementById('seriesEditFormErrors').classList.remove('d-none');
+    });
+}
+
+// Show notification helper
+function showNotification(message, type) {
+    // This uses existing notification system if available
+    if (typeof toastr !== 'undefined') {
+        toastr[type](message);
+    } else {
+        alert(message);
+    }
+}
+</script>

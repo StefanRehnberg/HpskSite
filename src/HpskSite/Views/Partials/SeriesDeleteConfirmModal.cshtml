@@ -1,0 +1,104 @@
+@*
+ * Series Delete Confirmation Modal
+ * Confirms deletion with safety checks for competitions
+*@
+
+<div class="modal fade" id="seriesDeleteConfirmModal" tabindex="-1" role="dialog">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <!-- Modal Header -->
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title">
+                    <i class="bi bi-exclamation-triangle-fill me-2"></i>Delete Series
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+
+            <!-- Modal Body -->
+            <div class="modal-body">
+                <p class="mb-3">
+                    Are you sure you want to delete the series <strong id="deleteSeriesName">-</strong>?
+                </p>
+
+                <div class="alert alert-warning">
+                    <i class="bi bi-info-circle me-2"></i>
+                    <strong>This action cannot be undone.</strong>
+                </div>
+
+                <!-- Error Alert for competitions -->
+                <div class="alert alert-danger d-none" id="seriesDeleteErrorAlert" role="alert">
+                    <i class="bi bi-exclamation-circle-fill me-2"></i>
+                    <span id="seriesDeleteErrorMessage"></span>
+                </div>
+            </div>
+
+            <!-- Modal Footer -->
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-danger" id="deleteSeriesBtn" onclick="confirmDeleteSeries()">
+                    <i class="bi bi-trash me-1"></i>Delete Series
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Confirm delete series
+function confirmDeleteSeries() {
+    if (!window.deleteSeriesId) {
+        alert('Error: Series ID not found');
+        return;
+    }
+
+    const deleteBtn = document.getElementById('deleteSeriesBtn');
+    const originalText = deleteBtn.innerHTML;
+    deleteBtn.disabled = true;
+    deleteBtn.innerHTML = '<i class="bi bi-spinner-border spinner-border-sm"></i> Tar bort...';
+
+    const requestBody = {
+        seriesId: window.deleteSeriesId
+    };
+
+    fetch('/umbraco/surface/CompetitionAdmin/DeleteSeries', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value
+        },
+        body: JSON.stringify(requestBody)
+    })
+    .then(response => response.json())
+    .then(data => {
+        deleteBtn.disabled = false;
+        deleteBtn.innerHTML = originalText;
+
+        if (data.success) {
+            showNotification('Serie borttagen framgångsrikt!', 'success');
+            bootstrap.Modal.getInstance(document.getElementById('seriesDeleteConfirmModal')).hide();
+
+            if (typeof removeSeriesFromTable === 'function') {
+                removeSeriesFromTable(window.deleteSeriesId);
+            }
+        } else {
+            const errorAlert = document.getElementById('seriesDeleteErrorAlert');
+            document.getElementById('seriesDeleteErrorMessage').textContent = data.message || 'Ett fel uppstod';
+            errorAlert.classList.remove('d-none');
+        }
+    })
+    .catch(error => {
+        deleteBtn.disabled = false;
+        deleteBtn.innerHTML = originalText;
+        showNotification(error.message || 'Ett fel uppstod', 'error');
+    });
+}
+
+// Show notification helper
+function showNotification(message, type) {
+    if (typeof toastr !== 'undefined') {
+        toastr[type](message);
+    } else {
+        alert(message);
+    }
+}
+</script>

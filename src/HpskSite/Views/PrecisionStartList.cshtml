@@ -1,0 +1,234 @@
+@using Umbraco.Cms.Web.Common.PublishedModels;
+@using Umbraco.Cms.Core.Security
+@using Umbraco.Cms.Core.Services
+@using Newtonsoft.Json
+@using HpskSite.Models
+@inject IMemberManager MemberManager
+@inject IMemberService MemberService
+@inject HpskSite.Services.ClubService ClubService
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+	Layout = null;
+
+	// Get properties
+	var competitionId = Model.Value<int>("competitionId");
+	var configurationData = Model.Value<string>("configurationData") ?? "";
+	var generatedDate = Model.Value<DateTime>("generatedDate");
+	var isPublished = Model.Value<bool>("isOfficialStartList");
+
+	// Get current member info for highlighting
+	var currentMember = await MemberManager.GetCurrentMemberAsync();
+	var currentMemberName = currentMember?.Name ?? "";
+	var currentMemberClub = "";
+
+	if (currentMember != null)
+	{
+		var memberData = MemberService.GetByEmail(currentMember.Email ?? "");
+		if (memberData != null)
+		{
+			var primaryClubIdStr = memberData.GetValue<string>("primaryClubId");
+			if (!string.IsNullOrEmpty(primaryClubIdStr) && int.TryParse(primaryClubIdStr, out int primaryClubId))
+			{
+				currentMemberClub = ClubService.GetClubNameById(primaryClubId) ?? "";
+			}
+		}
+	}
+
+	// Get competition name
+	var competition = Model.Root().DescendantsOrSelf()
+		.FirstOrDefault(x => x.ContentType.Alias == "competition" && x.Id == competitionId);
+	var competitionName = competition?.Name ?? "Okänd tävling";
+}
+
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Startlista - @competitionName</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <style>
+        body { padding: 20px; background-color: #f8f9fa; font-family: Arial, sans-serif; }
+        .print-only { display: none; }
+
+        /* Plain table styling like results */
+        .start-list-table {
+            font-size: 11px;
+            width: 100%;
+            border-collapse: collapse;
+            margin: 10px 0;
+            background: white;
+        }
+
+        .start-list-table th,
+        .start-list-table td {
+            padding: 3px 6px;
+            border: 1px solid #ddd;
+            text-align: left;
+            line-height: 1.2;
+            white-space: nowrap;
+        }
+
+        .start-list-table th {
+            background-color: #f5f5f5;
+            font-weight: bold;
+            font-size: 10px;
+            text-align: center;
+        }
+
+        .start-list-table td {
+            font-size: 11px;
+        }
+
+        .start-list-table .text-center {
+            text-align: center;
+        }
+
+        /* Team header styling */
+        .team-header {
+            background-color: #e9ecef;
+            padding: 8px 12px;
+            margin: 20px 0 5px 0;
+            border-left: 4px solid #007bff;
+            font-weight: bold;
+            font-size: 14px;
+        }
+
+        /* Compact spacing */
+        .team-section {
+            margin-bottom: 25px;
+        }
+
+        /* User highlighting */
+        .current-user { background-color: #cce5ff !important; } /* Light blue for current user */
+        .same-club { background-color: #f0f8ff !important; } /* Very light blue for same club */
+
+        @@media print {
+            .no-print { display: none !important; }
+            .print-only { display: block !important; }
+            body { background-color: white; padding: 0; font-size: 10px; }
+            .start-list-table { font-size: 9px; }
+            .start-list-table th, .start-list-table td { padding: 2px 4px; }
+            .team-header { font-size: 12px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="d-flex justify-content-between align-items-center mb-4 no-print">
+            <div>
+                <h1>
+                    <i class="bi bi-list-ul text-primary me-2"></i>
+                    Startlista
+                </h1>
+                <p class="text-muted mb-0">@competitionName</p>
+            </div>
+            <div>
+                <button class="btn btn-outline-secondary" onclick="window.print()">
+                    <i class="bi bi-printer me-1"></i>Skriv ut
+                    </button>
+            </div>
+        </div>
+
+        <!-- Print Header -->
+        <div class="print-only mb-4">
+            <h1>Startlista - @competitionName</h1>
+            <p><strong>Datum:</strong> @generatedDate.ToString("yyyy-MM-dd HH:mm")</p>
+            <p><strong>Status:</strong> @(isPublished ? "Officiell" : "Preliminär")</p>
+            <hr>
+        </div>
+
+        <!-- Start List Content -->
+        <div id="startListContent">
+            @if (!string.IsNullOrEmpty(configurationData))
+            {
+                try
+                {
+                    var config = JsonConvert.DeserializeObject<dynamic>(configurationData);
+
+                    if (config?.Teams != null)
+                    {
+                        var teams = (IEnumerable<dynamic>)config.Teams;
+
+                        foreach (var team in teams)
+                        {
+                            <div class="team-section">
+                                <div class="team-header">
+                                    Skjutlag: @team.TeamNumber - Tid (ca): @team.StartTime-@team.EndTime (@team.ShooterCount st)
+</div>
+                                <table class="start-list-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Plats</th>
+                                            <th>Namn</th>
+                                            <th>Förening</th>
+                                            <th>Vapengrupp</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @if (team.Shooters != null)
+                                        {
+                                            var shooters = (IEnumerable<dynamic>)team.Shooters;
+                                            foreach (var shooter in shooters.OrderBy(s => (int)s.Position))
+                                            {
+                                                // Determine row class for highlighting
+                                                var rowClass = "";
+                                                var shooterName = (string)shooter.Name;
+                                                var shooterClub = (string)shooter.Club;
+
+                                                if (!string.IsNullOrEmpty(currentMemberName) && shooterName == currentMemberName)
+                                                {
+                                                    rowClass = "current-user";
+                                                }
+                                                else if (!string.IsNullOrEmpty(currentMemberClub) && shooterClub == currentMemberClub)
+                                                {
+                                                    rowClass = "same-club";
+                                                }
+
+                                                var weaponClassId = (string)shooter.WeaponClass;
+                                                var weaponClassName = ShootingClasses.GetById(weaponClassId)?.Name ?? weaponClassId;
+
+                                                <tr class="@rowClass">
+                                                    <td class="text-center">@shooter.Position</td>
+                                                    <td>@shooter.Name</td>
+                                                    <td>@shooter.Club</td>
+                                                    <td class="text-center">@weaponClassName</td>
+                                                </tr>
+                                            }
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                    }
+                    else
+                    {
+                        <div class="alert alert-warning">
+                            <h4 class="alert-heading">Ingen startlistdata tillgänglig</h4>
+                            <p class="mb-0">Startlistdata finns men kunde inte formateras korrekt.</p>
+                        </div>
+                    }
+                }
+                catch (Exception ex)
+                {
+                    <div class="alert alert-danger">
+                        <h4 class="alert-heading">Fel vid visning av startlista</h4>
+                        <p class="mb-0">@ex.Message</p>
+                    </div>
+                }
+            }
+            else
+            {
+                <div class="alert alert-info">
+                    <h4 class="alert-heading">Ingen startlista ännu</h4>
+                    <p class="mb-0">Startlistan har inte genererats ännu.</p>
+                </div>
+            }
+        </div>
+        </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
+    </body>
+    </html>

@@ -1,0 +1,23 @@
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+}
+
+<div class="row">
+    <div class="col-12">
+        <h1>@(Model.Value<string>("pageTitle") ?? Model.Name)</h1>
+        @{
+            var bodyText = Model.Value<string>("bodyText");
+        }
+        @if (!string.IsNullOrEmpty(bodyText))
+        {
+            <div class="content">
+                @Html.Raw(bodyText)
+            </div>
+        }
+        else
+        {
+            <p>Welcome to the @Model.Name page. You can edit this content through the Umbraco back office.</p>
+        }
+    </div>
+</div>

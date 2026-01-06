@@ -1,0 +1,804 @@
+@{
+    var clubId = ViewBag.clubId as int? ?? 0;
+    var isClubMember = ViewBag.isClubMember as bool? ?? false;
+    var isClubAdmin = ViewBag.isClubAdmin as bool? ?? false;
+}
+
+<div class="club-members-directory">
+    <div class="card">
+        <div class="card-header border-bottom">
+            <div class="d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">
+                    <i class="bi bi-people-fill me-2"></i>Klubbmedlemmar
+                </h5>
+                <span class="badge bg-secondary" id="memberCount">0</span>
+            </div>
+        </div>
+        <div class="card-body">
+            <!-- Search bar -->
+            <div class="mb-3">
+                <input type="text" id="memberSearch" class="form-control form-control-sm"
+                       placeholder="Sök medlemmar..." aria-label="Sök medlemmar">
+            </div>
+
+            <!-- Members table -->
+            <div id="membersContainer" style="max-height: 500px; overflow-y: auto;">
+                <div class="text-center py-5">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Laddar medlemmar...</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Empty state -->
+            <div id="emptyState" class="alert alert-info py-4 text-center" style="display: none;">
+                <i class="bi bi-info-circle me-2"></i>
+                Inga medlemmar hittades för denna klubb.
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Member Details Modal -->
+<div class="modal fade" id="memberDetailsModal" tabindex="-1" aria-labelledby="memberDetailsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="memberDetailsModalLabel">
+                    <i class="bi bi-person-badge me-2"></i>Medlemsdetaljer
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <label class="fw-bold text-muted small">Namn</label>
+                        <p id="detailName" class="mb-0"></p>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="fw-bold text-muted small">E-post</label>
+                        <p id="detailEmail" class="mb-0"></p>
+                    </div>
+                </div>
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <label class="fw-bold text-muted small">Telefon</label>
+                        <p id="detailPhone" class="mb-0"></p>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="fw-bold text-muted small">Personnummer</label>
+                        <p id="detailPersonNumber" class="mb-0"></p>
+                    </div>
+                </div>
+                <div class="row mb-3">
+                    <div class="col-md-12">
+                        <label class="fw-bold text-muted small">Adress</label>
+                        <p id="detailAddress" class="mb-0"></p>
+                    </div>
+                </div>
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <label class="fw-bold text-muted small">Postnummer</label>
+                        <p id="detailPostalCode" class="mb-0"></p>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="fw-bold text-muted small">Stad</label>
+                        <p id="detailCity" class="mb-0"></p>
+                    </div>
+                </div>
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <label class="fw-bold text-muted small">Skyttekortnummer</label>
+                        <p id="detailShooterIdNumber" class="mb-0"></p>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="fw-bold text-muted small">Medlem sedan</label>
+                        <p id="detailMemberSince" class="mb-0"></p>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-12">
+                        <label class="fw-bold text-muted small">Klubbstatus</label>
+                        <p id="detailClubStatus" class="mb-0"></p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.members-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.member-item {
+    padding: 12px;
+    border: 1px solid var(--bs-border-color);
+    border-radius: 4px;
+    display: flex;
+    justify-content: space-between;
+    align-items: start;
+    transition: all 0.2s ease;
+}
+
+.member-item:hover {
+    background-color: var(--bs-secondary-bg);
+    border-color: var(--bs-primary);
+}
+
+.member-name {
+    font-weight: 600;
+    display: block;
+    margin-bottom: 4px;
+}
+
+.member-email {
+    font-size: 0.85rem;
+    color: var(--bs-secondary-color);
+    display: block;
+    margin-bottom: 4px;
+}
+
+.member-meta {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.member-badge {
+    font-size: 0.75rem;
+    padding: 3px 8px;
+}
+
+/* Member Avatar Styling */
+.member-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: bold;
+    color: white;
+    background-color: var(--bs-primary);
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.member-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.member-name-cell {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+</style>
+
+<script>
+let allMembers = [];
+let isAdmin = false;
+const isClubMember = @(isClubMember.ToString().ToLower());
+const isClubAdmin = @(isClubAdmin.ToString().ToLower());
+
+document.addEventListener('DOMContentLoaded', function() {
+    if (clubId > 0) {
+        loadMembers();
+
+        // Search functionality
+        document.getElementById('memberSearch').addEventListener('input', function(e) {
+            const searchTerm = e.target.value.trim();
+            filterMembers(searchTerm);
+        });
+    }
+});
+
+function loadMembers() {
+    fetch(`/umbraco/surface/Club/GetClubMembers?clubId=${clubId}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.data && data.data.members) {
+                allMembers = data.data.members;
+                isAdmin = data.data.isAdmin || false;
+                displayMembers(allMembers);
+                document.getElementById('memberCount').textContent = data.data.totalCount || 0;
+            } else {
+                showEmptyState();
+            }
+        })
+        .catch(error => {
+            console.error('Error loading members:', error);
+            document.getElementById('membersContainer').innerHTML =
+                '<p class="text-danger"><i class="bi bi-exclamation-triangle me-2"></i>Fel vid hämtning av medlemmar.</p>';
+        });
+}
+
+function filterMembers(searchTerm) {
+    let filtered = allMembers;
+
+    if (searchTerm) {
+        filtered = allMembers.filter(member =>
+            member.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            (member.email && member.email.toLowerCase().includes(searchTerm.toLowerCase()))
+        );
+    }
+
+    displayMembers(filtered);
+}
+
+function displayMembers(members) {
+    const container = document.getElementById('membersContainer');
+
+    if (members.length === 0) {
+        showEmptyState();
+        return;
+    }
+
+    // Separate prospects from approved members
+    const prospects = members.filter(m => !m.isApproved);
+    const approvedMembers = members.filter(m => m.isApproved);
+
+    // Update prospect badge on Members tab
+    const prospectBadge = document.getElementById('prospectBadge');
+    if (prospectBadge) {
+        if (prospects.length > 0 && isAdmin) {
+            prospectBadge.textContent = prospects.length;
+            prospectBadge.style.display = 'inline-block';
+        } else {
+            prospectBadge.style.display = 'none';
+        }
+    }
+
+    let html = '';
+
+    // Prospects Section (collapsible)
+    if (prospects.length > 0 && isAdmin) {
+        html += `
+            <div class="card mb-3 border-warning">
+                <div class="card-header bg-warning bg-opacity-10" role="button" data-bs-toggle="collapse" data-bs-target="#prospectsSection">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h6 class="mb-0">
+                            <i class="bi bi-person-plus-fill me-2"></i>Prospekterande medlemmar
+                            <span class="badge bg-warning text-dark ms-2">${prospects.length}</span>
+                        </h6>
+                        <i class="bi bi-chevron-down"></i>
+                    </div>
+                </div>
+                <div class="collapse" id="prospectsSection">
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-sm">
+                                <thead>
+                                    <tr>
+                                        <th>Namn</th>
+                                        <th>E-post</th>
+                                        <th>Åtgärder</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+        `;
+
+        prospects.forEach(prospect => {
+            html += `
+                <tr>
+                    <td>
+                        <div class="member-name-cell">
+                            ${renderAvatar(prospect)}
+                            <strong>${escapeHtml(prospect.name)}</strong>
+                        </div>
+                    </td>
+                    <td>${escapeHtml(prospect.email || '-')}</td>
+                    <td>
+                        <button class="btn btn-sm btn-success me-1" onclick="approveMember(${prospect.id}, '${escapeHtml(prospect.name)}')">
+                            <i class="bi bi-check-circle me-1"></i>Godkänn
+                        </button>
+                        <button class="btn btn-sm btn-danger" onclick="declineMember(${prospect.id}, '${escapeHtml(prospect.name)}')">
+                            <i class="bi bi-x-circle me-1"></i>Avslå
+                        </button>
+                    </td>
+                </tr>
+            `;
+        });
+
+        html += `
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    // Approved Members Section - Unified table for all users
+    html += `
+        <div class="table-responsive">
+            <table class="table table-hover table-sm">
+                <thead>
+                    <tr>
+                        <th>Namn</th>
+                        <th>E-post</th>
+                        <th class="text-center" style="width: 50px;"></th>
+                        ${isAdmin ? '<th class="text-end">Åtgärder</th>' : ''}
+                    </tr>
+                </thead>
+                <tbody>
+    `;
+
+    approvedMembers.forEach(member => {
+        // Determine if dashboard button should be shown
+        // Admin always sees all, otherwise based on sharing level and club membership
+        const showDashboardBtn = isAdmin ||
+            member.dashboardSharingLevel === 'all' ||
+            (member.dashboardSharingLevel === 'club' && isClubMember);
+
+        html += `
+            <tr>
+                <td>
+                    <div class="member-name-cell">
+                        ${renderAvatar(member)}
+                        <strong>${escapeHtml(member.name)}</strong>
+                    </div>
+                </td>
+                <td>${escapeHtml(member.email || '-')}</td>
+                <td class="text-center">
+                    ${showDashboardBtn ? `
+                        <button class="btn btn-sm btn-outline-info" onclick="viewMemberDashboard(${member.id}, '${escapeHtml(member.name)}')" title="Visa dashboard">
+                            <i class="bi bi-speedometer2"></i>
+                        </button>
+                    ` : ''}
+                </td>
+                ${isAdmin ? `<td class="text-end">
+                    <button class="btn btn-sm btn-outline-primary" onclick="showMemberDetails(${member.id})">
+                        <i class="bi bi-eye me-1"></i>Visa detaljer
+                    </button>
+                </td>` : ''}
+            </tr>
+        `;
+    });
+
+    html += `
+                </tbody>
+            </table>
+        </div>
+    `;
+
+    container.innerHTML = html;
+    document.getElementById('emptyState').style.display = 'none';
+}
+
+function showEmptyState() {
+    document.getElementById('membersContainer').style.display = 'none';
+    document.getElementById('emptyState').style.display = 'block';
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const map = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;'
+    };
+    return text.toString().replace(/[&<>"']/g, m => map[m]);
+}
+
+function getInitials(name) {
+    if (!name) return '?';
+    const parts = name.trim().split(' ');
+    let initials = '';
+    if (parts.length > 0 && parts[0]) {
+        initials += parts[0].charAt(0).toUpperCase();
+    }
+    if (parts.length > 1 && parts[parts.length - 1]) {
+        initials += parts[parts.length - 1].charAt(0).toUpperCase();
+    }
+    return initials || '?';
+}
+
+function renderAvatar(member) {
+    if (member.profilePictureUrl) {
+        return `<span class="member-avatar"><img src="${escapeHtml(member.profilePictureUrl)}" alt="${escapeHtml(member.name)}"></span>`;
+    } else {
+        return `<span class="member-avatar">${getInitials(member.name)}</span>`;
+    }
+}
+
+function showMemberDetails(memberId) {
+    // Find member in allMembers array
+    const member = allMembers.find(m => m.id === memberId);
+
+    if (!member) {
+        alert('Medlem hittades inte');
+        return;
+    }
+
+    // Populate modal fields
+    document.getElementById('detailName').textContent = member.name || '-';
+    document.getElementById('detailEmail').textContent = member.email || '-';
+    document.getElementById('detailPhone').textContent = member.phoneNumber || '-';
+    document.getElementById('detailPersonNumber').textContent = member.personNumber || '-';
+    document.getElementById('detailAddress').textContent = member.address || '-';
+    document.getElementById('detailPostalCode').textContent = member.postalCode || '-';
+    document.getElementById('detailCity').textContent = member.city || '-';
+    document.getElementById('detailShooterIdNumber').textContent = member.shooterIdNumber || '-';
+
+    // Format member since date
+    if (member.memberSince) {
+        const memberSinceDate = new Date(member.memberSince);
+        document.getElementById('detailMemberSince').textContent = memberSinceDate.toLocaleDateString('sv-SE');
+    } else {
+        document.getElementById('detailMemberSince').textContent = '-';
+    }
+
+    // Club status
+    const clubStatus = member.isPrimaryClub ?
+        '<span class="badge bg-primary">Primär klubb</span>' :
+        '<span class="badge bg-secondary">Sekundär klubb</span>';
+    document.getElementById('detailClubStatus').innerHTML = clubStatus;
+
+    // Show modal
+    const modal = new bootstrap.Modal(document.getElementById('memberDetailsModal'));
+    modal.show();
+}
+
+function approveMember(memberId, memberName) {
+    if (!confirm(`Godkänn ${memberName} som medlem i klubben? Ett godkännandemail kommer att skickas.`)) {
+        return;
+    }
+
+    const formData = new FormData();
+    const token = document.querySelector('input[name="__RequestVerificationToken"]');
+    if (token) {
+        formData.append('__RequestVerificationToken', token.value);
+    }
+    formData.append('memberId', memberId);
+
+    fetch('/umbraco/surface/MemberAdmin/ApproveMember', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => {
+        if (!response.ok) {
+            return response.text().then(text => {
+                throw new Error(`HTTP ${response.status}: ${text}`);
+            });
+        }
+        return response.json();
+    })
+    .then(data => {
+        if (data.success) {
+            alert(`${memberName} har godkänts som medlem! Ett bekräftelsemail har skickats.`);
+            loadMembers(); // Reload the member list
+        } else {
+            alert('Fel vid godkännande: ' + (data.message || 'Okänt fel'));
+        }
+    })
+    .catch(error => {
+        console.error('Error approving member:', error);
+        alert('Fel vid godkännande av medlem: ' + error.message);
+    });
+}
+
+function declineMember(memberId, memberName) {
+    if (!confirm(`Avslå ${memberName}s ansökan om medlemskap?`)) {
+        return;
+    }
+
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+
+    fetch(`/umbraco/surface/Club/DeclineMember`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'RequestVerificationToken': token
+        },
+        body: JSON.stringify({
+            memberId: memberId,
+            clubId: clubId
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(`${memberName}s ansökan har avslagits.`);
+            loadMembers(); // Reload the member list
+        } else {
+            alert('Fel vid avslag: ' + (data.message || 'Okänt fel'));
+        }
+    })
+    .catch(error => {
+        console.error('Error declining member:', error);
+        alert('Fel vid avslag av ansökan.');
+    });
+}
+
+// ========== MEMBER DASHBOARD FUNCTIONS ==========
+
+// Store current member info for year filter reload
+let currentDashboardMemberId = null;
+let currentDashboardMemberName = null;
+
+async function viewMemberDashboard(memberId, memberName, year = null) {
+    currentDashboardMemberId = memberId;
+    currentDashboardMemberName = memberName;
+
+    const modalEl = document.getElementById('memberDashboardModal');
+    const modal = bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl);
+    const titleEl = document.getElementById('memberDashboardTitle');
+    const contentEl = document.getElementById('memberDashboardContent');
+    const yearFilter = document.getElementById('memberDashboardYearFilter');
+
+    // Set title and show loading
+    titleEl.innerHTML = `<i class="bi bi-speedometer2 me-2"></i>Dashboard - ${memberName}`;
+    contentEl.innerHTML = `
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Laddar dashboard...</span>
+            </div>
+        </div>
+    `;
+
+    modal.show();
+
+    try {
+        let url = `/umbraco/surface/Member/GetMemberDashboard?memberId=${memberId}`;
+        if (year) {
+            url += `&year=${year}`;
+        }
+
+        const response = await fetch(url);
+        const result = await response.json();
+
+        if (result.success) {
+            // Populate year filter
+            yearFilter.innerHTML = result.data.availableYears
+                .map(y => `<option value="${y}" ${y === result.data.selectedYear ? 'selected' : ''}>${y}</option>`)
+                .join('');
+
+            renderMemberDashboard(result.data, contentEl);
+        } else {
+            contentEl.innerHTML = `
+                <div class="alert alert-warning">
+                    <i class="bi bi-exclamation-triangle me-2"></i>${result.message || 'Kunde inte ladda dashboard'}
+                </div>
+            `;
+        }
+    } catch (error) {
+        console.error('Error loading member dashboard:', error);
+        contentEl.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="bi bi-x-circle me-2"></i>Ett fel uppstod vid laddning av dashboard
+            </div>
+        `;
+    }
+}
+
+// Handle year filter change (called from onchange attribute)
+function onMemberDashboardYearChange(selectElement) {
+    if (currentDashboardMemberId && currentDashboardMemberName) {
+        viewMemberDashboard(currentDashboardMemberId, currentDashboardMemberName, selectElement.value);
+    }
+}
+
+function renderMemberDashboard(data, container) {
+    // Calculate trend
+    const trendPercentage = data.previousAverage > 0
+        ? ((data.recentAverage - data.previousAverage) / data.previousAverage * 100).toFixed(1)
+        : 0;
+
+    let trendIcon, trendColor, trendText;
+    if (Math.abs(trendPercentage) < 2) {
+        trendIcon = 'arrow-right';
+        trendColor = 'secondary';
+        trendText = 'Stabilt';
+    } else if (trendPercentage > 0) {
+        trendIcon = 'arrow-up';
+        trendColor = 'success';
+        trendText = `+${trendPercentage}%`;
+    } else {
+        trendIcon = 'arrow-down';
+        trendColor = 'danger';
+        trendText = `${trendPercentage}%`;
+    }
+
+    // Render weapon class badges for activity card
+    const weaponBadgesHtml = (data.weaponClassData || [])
+        .reduce((acc, wc) => {
+            const existing = acc.find(w => w.weaponClass === wc.weaponClass);
+            if (existing) {
+                existing.sessionCount += wc.sessionCount;
+            } else {
+                acc.push({ weaponClass: wc.weaponClass, sessionCount: wc.sessionCount });
+            }
+            return acc;
+        }, [])
+        .map(wc => `<span class="badge bg-secondary me-1">${wc.weaponClass}: ${wc.sessionCount}</span>`)
+        .join('');
+
+    // Render recent average by class
+    const recentByClassHtml = (data.recentAverageByClass || [])
+        .map(wc => `<span class="badge bg-primary me-1">${wc.weaponClass}: ${wc.average}p</span>`)
+        .join('') || '<span class="text-muted small">Ingen data</span>';
+
+    container.innerHTML = `
+        <div class="row mb-3">
+            <!-- Activity Summary Card -->
+            <div class="col-md-3 mb-3">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="text-muted mb-2"><i class="bi bi-clipboard-data me-1"></i>Aktivitet</h6>
+                        <h3 class="mb-2">${data.totalSessions} <small class="text-muted fs-6">pass</small></h3>
+                        <div class="mb-2">${weaponBadgesHtml || '<span class="text-muted small">Ingen data</span>'}</div>
+                        <hr class="my-2">
+                        <div class="d-flex justify-content-around text-center small">
+                            <div>
+                                <i class="bi bi-bullseye text-primary"></i>
+                                <strong class="ms-1">${data.totalTrainingSessions}</strong>
+                                <span class="text-muted">trän</span>
+                            </div>
+                            <div>
+                                <i class="bi bi-trophy text-success"></i>
+                                <strong class="ms-1">${data.totalCompetitions}</strong>
+                                <span class="text-muted">tävl</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Current Form Card -->
+            <div class="col-md-3 mb-3">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="text-muted mb-2"><i class="bi bi-graph-up-arrow me-1"></i>Aktuell Form</h6>
+                        ${data.recentAverageByClass && data.recentAverageByClass.length > 0 ? `
+                            <h3 class="mb-2">${data.recentAverage.toFixed(1)}p <small class="text-muted fs-6">snitt</small></h3>
+                            <div class="mb-2">${recentByClassHtml}</div>
+                            <hr class="my-2">
+                            <small class="text-${trendColor}">
+                                <i class="bi bi-${trendIcon}"></i> ${trendText}
+                            </small>
+                        ` : `
+                            <div class="text-center text-muted py-3">
+                                <i class="bi bi-info-circle fs-3"></i>
+                                <p class="mb-0 mt-1 small">Inga resultat (30 dagar)</p>
+                            </div>
+                        `}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Standard Medals Card -->
+            <div class="col-md-2 mb-3">
+                <div class="card h-100">
+                    <div class="card-body text-center">
+                        <h6 class="text-muted mb-2" style="font-size: 0.8rem;"><i class="bi bi-award me-1"></i>Standardmedaljer</h6>
+                        ${data.medalStats && (data.medalStats.silverCount > 0 || data.medalStats.bronzeCount > 0) ? `
+                            <div class="d-flex justify-content-around mb-2">
+                                <div>
+                                    <i class="bi bi-circle-fill" style="font-size: 1.3rem; color: #C0C0C0;"></i>
+                                    <div class="fw-bold">${data.medalStats.silverCount}</div>
+                                </div>
+                                <div>
+                                    <i class="bi bi-circle-fill" style="font-size: 1.3rem; color: #CD7F32;"></i>
+                                    <div class="fw-bold">${data.medalStats.bronzeCount}</div>
+                                </div>
+                            </div>
+                            <hr class="my-2">
+                            <div>
+                                <strong>${data.medalStats.totalPoints}</strong>
+                                <span class="text-muted small">poäng</span>
+                            </div>
+                        ` : `
+                            <div class="text-muted py-3">
+                                <i class="bi bi-dash-circle fs-3"></i>
+                                <p class="mb-0 mt-1 small">Inga medaljer</p>
+                            </div>
+                        `}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Personal Bests Card -->
+            <div class="col-md-4 mb-3">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="text-muted mb-2"><i class="bi bi-trophy-fill me-1"></i>Personliga Rekord</h6>
+                        ${renderPersonalBestsTable(data.personalBestsBySeriesCount || [])}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Stats Summary -->
+        <div class="text-center text-muted small">
+            <span>Totalt genomsnitt: <strong>${data.overallAverage}p</strong></span>
+            ${data.availableYears && data.availableYears.length > 0 ? `
+                <span class="ms-3">Data från: <strong>${data.availableYears[data.availableYears.length - 1]} - ${data.availableYears[0]}</strong></span>
+            ` : ''}
+        </div>
+    `;
+}
+
+function renderPersonalBestsTable(personalBests) {
+    if (!personalBests || personalBests.length === 0) {
+        return '<div class="text-center text-muted py-3"><i class="bi bi-info-circle"></i><p class="mb-0 small">Inga rekord ännu</p></div>';
+    }
+
+    // Group by weapon class
+    const byWeapon = {};
+    personalBests.forEach(pb => {
+        if (!byWeapon[pb.weaponClass]) {
+            byWeapon[pb.weaponClass] = { training: {}, competition: {} };
+        }
+        const type = pb.isCompetition ? 'competition' : 'training';
+        byWeapon[pb.weaponClass][type][pb.seriesCount] = pb.bestTotalScore;
+    });
+
+    let html = '<div class="small">';
+
+    // Training bests
+    html += '<strong class="d-block mb-1"><i class="bi bi-bullseye text-primary me-1"></i>Träning</strong>';
+    html += '<div class="mb-2">';
+    Object.keys(byWeapon).sort().forEach(wc => {
+        const scores = byWeapon[wc].training;
+        if (Object.keys(scores).length > 0) {
+            const scoreText = Object.keys(scores).sort((a,b) => a-b).map(s => `${s}s:${scores[s]}`).join(' ');
+            html += `<span class="badge bg-light text-dark me-1">${wc}: ${scoreText}</span>`;
+        }
+    });
+    html += '</div>';
+
+    // Competition bests
+    html += '<strong class="d-block mb-1"><i class="bi bi-trophy text-success me-1"></i>Tävling</strong>';
+    html += '<div>';
+    Object.keys(byWeapon).sort().forEach(wc => {
+        const scores = byWeapon[wc].competition;
+        if (Object.keys(scores).length > 0) {
+            const scoreText = Object.keys(scores).sort((a,b) => a-b).map(s => `${s}s:${scores[s]}`).join(' ');
+            html += `<span class="badge bg-light text-dark me-1">${wc}: ${scoreText}</span>`;
+        }
+    });
+    html += '</div>';
+
+    html += '</div>';
+    return html;
+}
+</script>
+
+<!-- Member Dashboard Modal -->
+<div class="modal fade" id="memberDashboardModal" tabindex="-1" aria-labelledby="memberDashboardModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="memberDashboardTitle">
+                    <i class="bi bi-speedometer2 me-2"></i>Dashboard
+                </h5>
+                <div class="ms-auto me-3">
+                    <select class="form-select form-select-sm" id="memberDashboardYearFilter" style="width: auto;" onchange="onMemberDashboardYearChange(this)">
+                        <!-- Years populated dynamically -->
+                    </select>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="memberDashboardContent">
+                <!-- Dashboard content loaded here -->
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+            </div>
+        </div>
+    </div>
+</div>

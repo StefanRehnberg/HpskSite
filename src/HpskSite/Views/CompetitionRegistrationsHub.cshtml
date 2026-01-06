@@ -1,0 +1,202 @@
+@using HpskSite.Extensions
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+    var competition = Model.Parent;
+}
+
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex align-items-center mb-4">
+            <div>
+                <h1><i class="bi bi-people text-primary me-2"></i>Anmälningar</h1>
+                <nav aria-label="breadcrumb">
+                    <ol class="breadcrumb">
+                        <li class="breadcrumb-item"><a href="@competition.CompetitionUrl()">@competition.Name</a></li>
+                        <li class="breadcrumb-item active" aria-current="page">Anmälningar</li>
+                    </ol>
+                </nav>
+            </div>
+        </div>
+
+        <!-- Registration Summary Card -->
+        @{
+            var description = Model.Value<string>("description");
+            var deadline = Model.Value<DateTime>("registrationDeadline");
+            var maxParticipants = Model.Value<int>("maxParticipants");
+            var activeRegistrations = Model.Children.Where(r => r.Value<bool>("isActive")).ToList();
+            var totalRegistrations = Model.Children.Count();
+            var isDeadlinePassed = deadline != default && deadline < DateTime.Now;
+        }
+
+        <div class="row mb-4">
+            <div class="col-md-8">
+                @if (!string.IsNullOrEmpty(description))
+                {
+                    <div class="alert alert-info">
+                        <p class="mb-0">@description</p>
+                    </div>
+                }
+            </div>
+            <div class="col-md-4">
+                <div class="card border-primary">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="mb-0">Anmälningsöversikt</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between mb-2">
+                            <span>Aktiva anmälningar:</span>
+                            <strong>@activeRegistrations.Count</strong>
+                        </div>
+                        <div class="d-flex justify-content-between mb-2">
+                            <span>Totalt anmälningar:</span>
+                            <strong>@totalRegistrations</strong>
+                        </div>
+                        @if (maxParticipants > 0)
+                        {
+                            <div class="d-flex justify-content-between mb-2">
+                                <span>Max deltagare:</span>
+                                <strong>@maxParticipants</strong>
+                            </div>
+                            <div class="progress">
+                                <div class="progress-bar" role="progressbar" style="width: @((double)activeRegistrations.Count / maxParticipants * 100)%">
+                                    @Math.Round((double)activeRegistrations.Count / maxParticipants * 100, 1)%
+                                </div>
+                            </div>
+                        }
+                        @if (deadline != default)
+                        {
+                            <hr>
+                            <div class="text-center">
+                                @if (isDeadlinePassed)
+                                {
+                                    <span class="badge bg-danger">Anmälan stängd</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-success">Anmälan öppen</span>
+                                }
+                                <br>
+                                <small class="text-muted">Till: @deadline.ToString("yyyy-MM-dd HH:mm")</small>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Registration List -->
+        <div class="row">
+            @if (Model.Children.Any())
+            {
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="mb-0">Alla Anmälningar</h5>
+                        </div>
+                        <div class="card-body p-0">
+                            <div class="table-responsive">
+                                <table class="table table-striped table-hover mb-0">
+                                    <thead class="table-dark">
+                                        <tr>
+                                            <th>Namn</th>
+                                            <th>Klubb</th>
+                                            <th>Skytteklass</th>
+                                            <th>Anmälningsdatum</th>
+                                            <th>Startpreferens</th>
+                                            <th>Status</th>
+                                            <th>Åtgärder</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var registration in Model.Children.OrderByDescending(x => x.Value<DateTime>("registrationDate")))
+                                        {
+                                            var memberName = registration.Value<string>("memberName") ?? "Okänt namn";
+                                            var memberClub = registration.Value<string>("memberClub") ?? "Okänd klubb";
+                                            var shootingClass = registration.Value<string>("shootingClass") ?? "Okänd klass";
+                                            var registrationDate = registration.Value<DateTime>("registrationDate");
+                                            var startPreference = registration.Value<string>("startPreference") ?? "Ingen preferens";
+                                            var isActive = registration.Value<bool>("isActive");
+                                            var registeredBy = registration.Value<string>("registeredBy") ?? "Okänd";
+
+                                            <tr class="@(!isActive ? "table-secondary" : "")">
+                                                <td>
+                                                    <strong>@memberName</strong>
+                                                    @if (registeredBy != memberName)
+                                                    {
+                                                        <br><small class="text-muted">Anmäld av: @registeredBy</small>
+                                                    }
+                                                </td>
+                                                <td>@memberClub</td>
+                                                <td><span class="badge bg-info">@shootingClass</span></td>
+                                                <td>@registrationDate.ToString("yyyy-MM-dd HH:mm")</td>
+                                                <td>@startPreference</td>
+                                                <td>
+                                                    @if (isActive)
+                                                    {
+                                                        <span class="badge bg-success">Aktiv</span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="badge bg-secondary">Inaktiv</span>
+                                                    }
+                                                </td>
+                                                <td>
+                                                    <a href="@registration.Url()" class="btn btn-sm btn-outline-primary">
+                                                        <i class="bi bi-eye"></i>
+                                                    </a>
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="col-12">
+                    <div class="alert alert-warning">
+                        <h4 class="alert-heading">Inga anmälningar ännu</h4>
+                        <p class="mb-0">Det finns inga anmälningar för denna tävling ännu. Anmälningar skapas när medlemmar registrerar sig för tävlingen.</p>
+                    </div>
+                </div>
+            }
+        </div>
+
+        <!-- Registration Statistics -->
+        @if (Model.Children.Any())
+        {
+            @{
+                var registrationsByClass = Model.Children
+                    .Where(r => r.Value<bool>("isActive"))
+                    .GroupBy(r => r.Value<string>("shootingClass"))
+                    .ToDictionary(g => g.Key ?? "Okänd", g => g.Count());
+            }
+            <div class="row mt-4">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="mb-0">Anmälningsstatistik per Skytteklass</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                @foreach (var classGroup in registrationsByClass.OrderBy(x => x.Key))
+                                {
+                                    <div class="col-md-3 mb-3">
+                                        <div class="text-center">
+                                            <h4 class="text-primary">@classGroup.Value</h4>
+                                            <p class="mb-0">@classGroup.Key</p>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+</div>

@@ -1,0 +1,184 @@
+@using HpskSite.Models.ViewModels.Training
+@model MemberProgress
+
+@{
+    var allLevels = TrainingDefinitions.GetAllLevels();
+    var currentLevel = allLevels.FirstOrDefault(l => l.LevelId == Model.CurrentLevel);
+    var overallPercent = Model.GetOverallCompletionPercentage();
+
+    // Get current step details
+    var currentStep = currentLevel?.Steps?.FirstOrDefault(s => s.StepNumber == Model.CurrentStep);
+}
+
+<div class="training-progress-container">
+    <!-- Current Level Header -->
+    <div class="current-level-header">
+        <div class="row align-items-center">
+            <div class="col-md-8">
+                <h4>
+                    <span class="level-badge">@(currentLevel?.Badge ?? "🎯")</span>
+                    @(currentLevel?.Name ?? "Level " + Model.CurrentLevel)
+                </h4>
+                <div class="current-step-info mb-2">
+                    <p class="step-title mb-1">
+                        <span class="step-number-badge">@Model.CurrentStep</span>
+                        <strong>Steg @Model.CurrentStep:</strong> @(currentStep?.Description ?? "Steg information ej tillgänglig")
+                    </p>
+                    @if (currentStep?.IsCompetitionRequired == true)
+                    {
+                        <div class="competition-indicator">
+                            <i class="bi bi-trophy-fill me-1"></i>
+                            <small>Tävling krävs</small>
+                        </div>
+                    }
+                </div>
+                <div class="progress mb-2" style="height: 10px;">
+                    <div class="progress-bar bg-success" style="width: @overallPercent%"></div>
+                </div>
+                <small class="text-muted">@Math.Round(overallPercent)% slutfört (@Model.CompletedSteps.Count steg)</small>
+            </div>
+            <div class="col-md-4 text-end">
+                <div class="current-step-badge">
+                    <div class="step-number">@Model.CurrentStep</div>
+                    <small>Nuvarande steg</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (Model.CompletedSteps.Any())
+    {
+        <hr class="my-4">
+
+        <!-- Recent Completions -->
+        <h6><i class="bi bi-clock-history text-primary"></i> Senaste Slutförda Steg</h6>
+        <div class="recent-completions">
+            @foreach (var step in Model.CompletedSteps.OrderByDescending(s => s.CompletedDate).Take(3))
+            {
+                var stepLevel = allLevels.FirstOrDefault(l => l.LevelId == step.LevelId);
+
+                <div class="completion-item">
+                    <div class="completion-badge">@(stepLevel?.Badge ?? "🎯")</div>
+                    <div class="completion-details">
+                        <div class="fw-bold">@(stepLevel?.Name ?? "Level " + step.LevelId) - Steg @step.StepNumber</div>
+                        <small class="text-muted">
+                            @step.CompletedDate.ToString("yyyy-MM-dd")
+                            @if (!string.IsNullOrEmpty(step.InstructorName))
+                            {
+                                <span> • av @step.InstructorName</span>
+                            }
+                        </small>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+<style>
+    .training-progress-container {
+        background: white;
+        border: 1px solid #e9ecef;
+        border-radius: 12px;
+        padding: 24px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        border-left: 4px solid #28a745;
+    }
+
+    .level-badge {
+        font-size: 1.8em;
+        margin-right: 10px;
+    }
+
+    .current-step-badge {
+        background: linear-gradient(135deg, #007bff, #0056b3);
+        color: white;
+        padding: 16px;
+        border-radius: 12px;
+        text-align: center;
+        box-shadow: 0 4px 8px rgba(0,123,255,0.3);
+    }
+
+    .step-number {
+        font-size: 1.8em;
+        font-weight: bold;
+        line-height: 1;
+    }
+
+    /* Enhanced current step styling */
+    .current-step-info {
+        background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+        border: 1px solid #dee2e6;
+        border-radius: 8px;
+        padding: 12px;
+        border-left: 4px solid #007bff;
+    }
+
+    .step-title {
+        color: #2c3e50;
+        margin-bottom: 4px;
+    }
+
+    .step-number-badge {
+        background: linear-gradient(135deg, #007bff, #0056b3);
+        color: white;
+        border-radius: 50%;
+        width: 24px;
+        height: 24px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        font-size: 0.8em;
+        margin-right: 6px;
+        box-shadow: 0 2px 4px rgba(0,123,255,0.3);
+    }
+
+    .competition-indicator {
+        background: linear-gradient(135deg, #ffc107, #e0a800);
+        color: #212529;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 0.75em;
+        font-weight: 500;
+        display: inline-flex;
+        align-items: center;
+        box-shadow: 0 1px 3px rgba(255,193,7,0.3);
+        margin-top: 4px;
+    }
+
+    .competition-indicator i {
+        color: #856404;
+    }
+
+    .recent-completions {
+        margin-top: 16px;
+    }
+
+    .completion-item {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 12px;
+        background: #f8f9fa;
+        border-radius: 8px;
+        margin-bottom: 8px;
+        border-left: 3px solid #28a745;
+    }
+
+    .completion-badge {
+        font-size: 24px;
+        min-width: 40px;
+        text-align: center;
+    }
+
+    .completion-details {
+        flex: 1;
+    }
+
+    @media (max-width: 768px) {
+        .current-step-badge {
+            margin-top: 16px;
+        }
+    }
+</style>

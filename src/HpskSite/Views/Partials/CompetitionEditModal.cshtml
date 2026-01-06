@@ -1,0 +1,1056 @@
+@using Umbraco.Cms.Web.Common.PublishedModels;
+@{
+    var competition = ViewData["Competition"] as IPublishedContent;
+    var competitionId = (int?)ViewData["CompetitionId"] ?? 0;
+    
+    var compName = competition?.Value<string>("competitionName") ?? "";
+    var compDesc = competition?.Value<string>("description") ?? "";
+    var compVenue = competition?.Value<string>("venue") ?? "";
+    var compDate = competition?.Value<DateTime>("competitionDate");
+    var compEndDate = competition?.Value<DateTime?>("competitionEndDate");
+    var regOpenDate = competition?.Value<DateTime>("registrationOpenDate");
+    var regCloseDate = competition?.Value<DateTime>("registrationCloseDate");
+    var maxParticipants = competition?.Value<int>("maxParticipants") ?? 0;
+    var regFee = competition?.Value<decimal>("registrationFee") ?? 0;
+    var compDirector = competition?.Value<string>("competitionDirector") ?? "";
+    var contactEmail = competition?.Value<string>("contactEmail") ?? "";
+    var contactPhone = competition?.Value<string>("contactPhone") ?? "";
+    var numSeries = competition?.Value<int>("numberOfSeriesOrStations") ?? 0;
+    var isActive = competition?.Value<bool>("isActive");
+    var showLiveResults = competition?.Value<bool>("showLiveResults");
+    var competitionScope = competition?.Value<string>("competitionScope") ?? "";
+    var isAwardingStandardMedals = competition?.Value<bool>("isAwardingStandardMedals");
+    
+    // Handle shootingClassIds - convert to comma-separated string
+    var shootingClassIds = "";
+    var classIdsObj = competition?.Value("shootingClassIds");
+
+    if (classIdsObj is string[] classArray && classArray.Length > 0)
+    {
+        // string array from Flexible Dropdown
+        shootingClassIds = string.Join(",", classArray);
+    }
+    else if (classIdsObj is IEnumerable<string> enumerable)
+    {
+        // IEnumerable from Flexible Dropdown property value converter
+        var classIds = enumerable.Where(s => !string.IsNullOrEmpty(s)).ToList();
+        if (classIds.Any())
+        {
+            shootingClassIds = string.Join(",", classIds);
+        }
+    }
+    else if (classIdsObj is string classStr && !string.IsNullOrEmpty(classStr))
+    {
+        // Raw string - could be JSON array ["A1","A2","A3"] or comma-separated
+        if (classStr.StartsWith("[") && classStr.EndsWith("]"))
+        {
+            // Parse JSON array to comma-separated
+            try
+            {
+                var jsonContent = classStr.Substring(1, classStr.Length - 2); // Remove [ and ]
+                var ids = jsonContent.Split(',')
+                    .Select(s => s.Trim().Trim('"').Trim())
+                    .Where(s => !string.IsNullOrEmpty(s))
+                    .ToList();
+                shootingClassIds = string.Join(",", ids);
+            }
+            catch
+            {
+                // Fallback to original string if parsing fails
+                shootingClassIds = classStr;
+            }
+        }
+        else
+        {
+            // Already comma-separated
+        shootingClassIds = classStr;
+        }
+    }
+    
+    var allowDualCClass = competition?.Value<bool>("allowDualCClass");
+
+    // Get competitionManagers as JSON array of IDs
+    var competitionManagerIds = new List<int>();
+    var competitionManagersJson = competition?.Value<string>("competitionManagers") ?? "[]";
+    try
+    {
+        competitionManagerIds = Newtonsoft.Json.JsonConvert.DeserializeObject<List<int>>(competitionManagersJson) ?? new List<int>();
+    }
+    catch
+    {
+        // Fallback for old format or invalid data
+        competitionManagerIds = new List<int>();
+    }
+
+    var swishNumber = competition?.Value<string>("swishNumber") ?? "";
+    var addToMenu = competition?.Value<bool>("addToMenu");
+    var numberOfFinalSeries = competition?.Value<int>("numberOfFinalSeries") ?? 0;
+
+    var isClubOnly = competition?.Value<bool>("isClubOnly") ?? false;
+    var clubId = competition?.Value<int>("clubId") ?? 0;
+
+    var compDateStr = compDate.HasValue ? compDate.Value.ToString("yyyy-MM-dd HH:mm") : "";
+    var compEndDateStr = compEndDate.HasValue ? compEndDate.Value.ToString("yyyy-MM-dd") : "";
+    var regOpenDateStr = regOpenDate.HasValue ? regOpenDate.Value.ToString("yyyy-MM-dd HH:mm") : "";
+    var regCloseDateStr = regCloseDate.HasValue ? regCloseDate.Value.ToString("yyyy-MM-dd HH:mm") : "";
+}
+
+<style>
+    input[type="text"].date-input {
+        font-family: monospace;
+    }
+</style>
+
+<!-- Flatpickr CSS and JS from CDN -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
+
+<script>
+console.log('CompetitionEditModal.cshtml is being loaded and executed');
+</script>
+
+<div class="modal fade" id="competitionEditModal" tabindex="-1" aria-labelledby="competitionEditModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="competitionEditModalLabel">
+                    <i class="bi bi-pencil me-2"></i>Redigera Tävling
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div id="editFormErrors" class="alert alert-danger d-none mt-3" role="alert">
+                    <strong>Fel vid sparning:</strong>
+                    <ul id="errorList" class="mb-0 mt-2"></ul>
+                </div>
+
+                <form id="competitionEditForm">
+                    <input type="hidden" id="competitionId" name="competitionId" value="@(competition?.Id ?? 0)">
+                    <div class="row">
+                        <div class="col-12">
+                            <h6 class="mb-3 text-primary">
+                                <i class="bi bi-info-circle me-1"></i>Grundinformation
+                            </h6>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="competitionScope" class="form-label">Omfattning</label>
+                        <select class="form-select" id="competitionScope" name="competitionScope">
+                            @if (string.IsNullOrEmpty(competitionScope))
+                            {
+                                <option value="" selected>-- Välj omfattning --</option>
+                                <option value="Svenskt Mästerskap">Svenskt Mästerskap</option>
+                                <option value="Landsdelsmästerskap">Landsdelsmästerskap</option>
+                                <option value="Kretsmästerskap">Kretsmästerskap</option>
+                                <option value="Klubbmästerskap">Klubbmästerskap</option>
+                            }
+                            else if (competitionScope == "Svenskt Mästerskap")
+                            {
+                                <option value="">-- Välj omfattning --</option>
+                                <option value="Svenskt Mästerskap" selected>Svenskt Mästerskap</option>
+                                <option value="Landsdelsmästerskap">Landsdelsmästerskap</option>
+                                <option value="Kretsmästerskap">Kretsmästerskap</option>
+                                <option value="Klubbmästerskap">Klubbmästerskap</option>
+                            }
+                            else if (competitionScope == "Landsdelsmästerskap")
+                            {
+                                <option value="">-- Välj omfattning --</option>
+                                <option value="Svenskt Mästerskap">Svenskt Mästerskap</option>
+                                <option value="Landsdelsmästerskap" selected>Landsdelsmästerskap</option>
+                                <option value="Kretsmästerskap">Kretsmästerskap</option>
+                                <option value="Klubbmästerskap">Klubbmästerskap</option>
+                            }
+                            else if (competitionScope == "Kretsmästerskap")
+                            {
+                                <option value="">-- Välj omfattning --</option>
+                                <option value="Svenskt Mästerskap">Svenskt Mästerskap</option>
+                                <option value="Landsdelsmästerskap">Landsdelsmästerskap</option>
+                                <option value="Kretsmästerskap" selected>Kretsmästerskap</option>
+                                <option value="Klubbmästerskap">Klubbmästerskap</option>
+                            }
+                            else if (competitionScope == "Klubbmästerskap")
+                            {
+                                <option value="">-- Välj omfattning --</option>
+                                <option value="Svenskt Mästerskap">Svenskt Mästerskap</option>
+                                <option value="Landsdelsmästerskap">Landsdelsmästerskap</option>
+                                <option value="Kretsmästerskap">Kretsmästerskap</option>
+                                <option value="Klubbmästerskap" selected>Klubbmästerskap</option>
+                            }
+                            else
+                            {
+                                <option value="" selected>-- Välj omfattning --</option>
+                                <option value="Svenskt Mästerskap">Svenskt Mästerskap</option>
+                                <option value="Landsdelsmästerskap">Landsdelsmästerskap</option>
+                                <option value="Kretsmästerskap">Kretsmästerskap</option>
+                                <option value="Klubbmästerskap">Klubbmästerskap</option>
+                            }
+                        </select>
+                        <small class="form-text text-muted">Avgör hur standardmedaljer beräknas</small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="competitionSeriesId" class="form-label">Tävlingsserie (valfritt)</label>
+                        <select class="form-select" id="competitionSeriesId" name="seriesId">
+                            <option value="">Ingen serie</option>
+                        </select>
+                        <small class="form-text text-muted">Välj serie som tävlingen ingår i</small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="competitionName" class="form-label">Tävlingsnamn <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="competitionName" name="competitionName" value="@compName" required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="description" class="form-label">Beskrivning</label>
+                        <textarea class="form-control" id="description" name="description" rows="2">@compDesc</textarea>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="venue" class="form-label">Plats <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="venue" name="venue" value="@compVenue" required>
+                    </div>
+
+                    <hr>
+
+                    <div class="row">
+                        <div class="col-12">
+                            <h6 class="mb-3 text-primary"><i class="bi bi-calendar me-1"></i>Datum</h6>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="competitionDate" class="form-label">Tävlingsdatum <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control date-input" id="competitionDate" name="competitionDate" value="@compDateStr" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="competitionEndDate" class="form-label">Slutdatum</label>
+                                <input type="text" class="form-control date-input" id="competitionEndDate" name="competitionEndDate" value="@compEndDateStr">
+                            </div>
+                        </div>
+                    </div>
+
+                    <hr>
+
+                    <div class="row">
+                        <div class="col-12">
+                            <h6 class="mb-3 text-primary"><i class="bi bi-clipboard me-1"></i>Anmälansinformation</h6>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="registrationOpenDate" class="form-label">Anmälan öppnar <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control date-input" id="registrationOpenDate" name="registrationOpenDate" value="@regOpenDateStr" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="registrationCloseDate" class="form-label">Anmälan stänger <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control date-input" id="registrationCloseDate" name="registrationCloseDate" value="@regCloseDateStr" required>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="maxParticipants" class="form-label">Max antal deltagare <span class="text-danger">*</span></label>
+                                <input type="number" class="form-control" id="maxParticipants" name="maxParticipants" value="@maxParticipants" min="1" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="registrationFee" class="form-label">Anmälningsavgift (kr)</label>
+                                <input type="number" class="form-control" id="registrationFee" name="registrationFee" value="@regFee" min="0" step="0.01">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-12">
+                            <h6 class="mb-3 text-primary"><i class="bi bi-gear me-1"></i>Konfiguration</h6>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Skytteklasser <span class="text-danger">*</span></label>
+                        <div id="shootingClassesContainer" class="border rounded p-3" style="max-height: 300px; overflow-y: auto;">
+                            <div class="text-center text-muted">
+                                <small>Laddar klasser...</small>
+                            </div>
+                        </div>
+                        <input type="hidden" id="shootingClassIds" name="shootingClassIds" value="@shootingClassIds">
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="numberOfSeriesOrStations" class="form-label">Antal serier/stationer <span class="text-danger">*</span></label>
+                                <input type="number" class="form-control" id="numberOfSeriesOrStations" name="numberOfSeriesOrStations" value="@numSeries" min="1" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="allowDualCClass" name="allowDualCClass" @(allowDualCClass == true ? "checked" : "")>
+                                    <label class="form-check-label" for="allowDualCClass">
+                                        Tillåt dubbel C-klassregistrering
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="showLiveResults" name="showLiveResults" @(showLiveResults == true ? "checked" : "")>
+                                    <label class="form-check-label" for="showLiveResults">
+                                        Visa live-resultat
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="isAwardingStandardMedals" name="isAwardingStandardMedals" @(isAwardingStandardMedals == true ? "checked" : "")>
+                                    <label class="form-check-label" for="isAwardingStandardMedals">
+                                        Standardmedaljsgrundande
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="numberOfFinalSeries" class="form-label">Varav finalserier</label>
+                                <input type="number" class="form-control" id="numberOfFinalSeries" name="numberOfFinalSeries" value="@numberOfFinalSeries" min="0">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="comp_isActive" class="form-label">Status</label>
+                                <select class="form-select" id="comp_isActive" name="isActive">
+                                    @if (isActive == true)
+                                    {
+                                        <option value="true" selected>Aktiv</option>
+                                        <option value="false">Inaktiv</option>
+                                    }
+                                    else
+                                    {
+                                        <option value="true">Aktiv</option>
+                                        <option value="false" selected>Inaktiv</option>
+                                    }
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="isClubOnly" name="isClubOnly" @(isClubOnly == true ? "checked" : "")>
+                                    <label class="form-check-label" for="isClubOnly">
+                                        <i class="bi bi-shield-check me-1"></i>Endast för specifik klubb
+                                    </label>
+                                </div>
+                                <small class="form-text text-muted d-block mt-1">Begränsa denna tävling till medlemmar från en specifik klubb</small>
+                            </div>
+                        </div>
+                        <div class="col-md-6" id="clubSelectorContainer">
+                            <div class="mb-3">
+                                <label for="clubId" class="form-label">Klubb</label>
+                                <select class="form-select" id="clubId" name="clubId">
+                                    <option value="">-- Välj klubb --</option>
+                                </select>
+                                <small class="form-text text-muted">Laddar klubbar...</small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <hr>
+
+                    <div class="row">
+                        <div class="col-12">
+                            <h6 class="mb-3 text-primary"><i class="bi bi-people me-1"></i>Tävlingsledning & Betalning</h6>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="competitionDirector" class="form-label">Tävlingsledare <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="competitionDirector" name="competitionDirector" value="@compDirector" required>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="comp_contactEmail" class="form-label">Kontakt e-post <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control" id="comp_contactEmail" name="contactEmail" value="@contactEmail" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="comp_contactPhone" class="form-label">Kontakt telefon</label>
+                                <input type="text" class="form-control" id="comp_contactPhone" name="contactPhone" value="@contactPhone">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Tävlingsledare</label>
+                        <div>
+                            <button type="button" class="btn btn-outline-primary btn-sm" onclick="openManagerSelectionModal()">
+                                <i class="bi bi-person-plus"></i> Hantera tävlingsledare
+                            </button>
+                        </div>
+                        <div id="selectedManagersBadges" class="mt-2">
+                            <!-- Selected managers shown as removable badges -->
+                        </div>
+                        <input type="hidden" id="comp_competitionManagers_ids" name="competitionManagerIds" value="@string.Join(",", competitionManagerIds)" />
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="swishNumber" class="form-label">Swish-nummer</label>
+                        <input type="text" class="form-control" id="swishNumber" name="swishNumber" value="@swishNumber" placeholder="1123456789">
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="addToMenu" name="addToMenu" @(addToMenu == true ? "checked" : "")>
+                            <label class="form-check-label" for="addToMenu">
+                                Lägg till genväg till tävlingen i menyn
+                            </label>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    <i class="bi bi-x-circle me-1"></i>Avbryt
+                </button>
+                <button type="button" class="btn btn-primary" id="saveCompetitionBtn" onclick="saveCompetition()">
+                    <i class="bi bi-check-circle me-1"></i>Spara ändringar
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Parse shooting class IDs - handle comma-separated format (may contain spaces)
+let editModalCurrentSelectedClasses = "@shootingClassIds".split(',').map(c => c.trim()).filter(c => c);
+
+const editModal = document.getElementById('competitionEditModal');
+
+editModal.addEventListener('show.bs.modal', function() {
+    setTimeout(function() {
+        try {
+            // Initialize Flatpickr date pickers with Swedish locale
+            flatpickr('#competitionDate', {
+                enableTime: true,
+                dateFormat: 'Y-m-d H:i',
+                time_24hr: true,
+                locale: 'sv'
+            });
+
+            flatpickr('#competitionEndDate', {
+                dateFormat: 'Y-m-d',
+                locale: 'sv'
+            });
+
+            flatpickr('#registrationOpenDate', {
+                enableTime: true,
+                dateFormat: 'Y-m-d H:i',
+                time_24hr: true,
+                locale: 'sv'
+            });
+
+            flatpickr('#registrationCloseDate', {
+                enableTime: true,
+                dateFormat: 'Y-m-d H:i',
+                time_24hr: true,
+                locale: 'sv'
+            });
+        } catch (e) {
+            console.error('Error initializing date pickers:', e);
+        }
+
+        // Load shooting classes
+        loadShootingClasses();
+
+        // Always load clubs when modal opens
+        ensureClubsLoaded();
+
+        // Load series for series selector
+        loadSeries();
+    }, 100);
+});
+
+// Reset form when modal is hidden
+editModal.addEventListener('hidden.bs.modal', function() {
+    document.getElementById('competitionEditForm').reset();
+    editModalCurrentSelectedClasses = [];
+    document.getElementById('shootingClassesContainer').innerHTML = '<div class="text-center text-muted"><small>Laddar klasser...</small></div>';
+});
+
+function loadShootingClasses() {
+    const competitionId = @competitionId;
+
+    fetch(`/umbraco/surface/CompetitionEdit/GetShootingClasses?competitionId=${competitionId}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.data) {
+                renderShootingClassCheckboxes(data.data);
+            }
+        })
+        .catch(error => console.error('Error loading shooting classes:', error));
+}
+
+function loadSeries() {
+    const cacheBuster = new Date().getTime();
+    fetch(`/umbraco/surface/CompetitionAdmin/GetSeriesList?_=${cacheBuster}`)
+        .then(response => response.json())
+        .then(data => {
+            const select = document.getElementById('competitionSeriesId');
+            if (data.success && data.data && data.data.length > 0) {
+                select.innerHTML = '<option value="">Ingen serie</option>';
+                data.data.forEach(series => {
+                    const option = document.createElement('option');
+                    option.value = series.id;
+                    option.textContent = series.name;
+                    select.appendChild(option);
+                });
+            } else {
+                select.innerHTML = '<option value="">Ingen serie</option>';
+            }
+
+            // After populating options, check if there's a pending value to set
+            const pendingValue = select.dataset.pendingValue;
+            if (pendingValue) {
+                select.value = pendingValue;
+                delete select.dataset.pendingValue; // Clear it after using
+            }
+        })
+        .catch(error => {
+            console.error('Error loading series:', error);
+            const select = document.getElementById('competitionSeriesId');
+            select.innerHTML = '<option value="">Ingen serie</option>';
+        });
+}
+
+function renderShootingClassCheckboxes(classes) {
+    const container = document.getElementById('shootingClassesContainer');
+    container.innerHTML = '';
+    
+    if (!classes || classes.length === 0) {
+        container.innerHTML = '<p class="text-muted">Inga klasser tillgängliga</p>';
+        return;
+    }
+    
+    classes.forEach(cls => {
+        const isChecked = editModalCurrentSelectedClasses.includes(cls.id);
+        const checkbox = document.createElement('div');
+        checkbox.className = 'form-check';
+        checkbox.innerHTML = `
+            <input class="form-check-input shooting-class-checkbox" type="checkbox" value="${cls.id}" id="class_${cls.id}" ${isChecked ? 'checked' : ''}>
+            <label class="form-check-label" for="class_${cls.id}">
+                <strong>${cls.name}</strong>
+                <small class="text-muted d-block">${cls.description}</small>
+            </label>
+        `;
+        container.appendChild(checkbox);
+    });
+    
+    // Add change event listeners
+    document.querySelectorAll('.shooting-class-checkbox').forEach(checkbox => {
+        checkbox.addEventListener('change', updateShootingClassIds);
+    });
+}
+
+// Helper functions for populating the modal
+window.setFieldValue = function(fieldId, value) {
+    const element = document.getElementById(fieldId);
+    if (element) {
+        element.value = value;
+        // For textareas, also set textContent
+        if (element.tagName === 'TEXTAREA') {
+            element.textContent = value;
+        }
+        // DO NOT set attribute - it makes that the "default" value for reset()
+        // Trigger change event to force UI update
+        element.dispatchEvent(new Event('change', { bubbles: true }));
+        element.dispatchEvent(new Event('input', { bubbles: true }));
+    } else {
+        console.error(`Field ${fieldId} not found!`);
+    }
+}
+
+window.setCheckboxValue = function(fieldId, checked) {
+    const element = document.getElementById(fieldId);
+    if (element) {
+        element.checked = checked;
+    } else {
+        console.error(`Checkbox ${fieldId} not found!`);
+    }
+}
+
+window.formatDateForInput = function(dateStr, includeTime = true) {
+    if (!dateStr) return '';
+    const date = new Date(dateStr);
+    if (includeTime) {
+        return date.getFullYear() + '-' +
+               String(date.getMonth() + 1).padStart(2, '0') + '-' +
+               String(date.getDate()).padStart(2, '0') + ' ' +
+               String(date.getHours()).padStart(2, '0') + ':' +
+               String(date.getMinutes()).padStart(2, '0');
+    } else {
+        return date.getFullYear() + '-' +
+               String(date.getMonth() + 1).padStart(2, '0') + '-' +
+               String(date.getDate()).padStart(2, '0');
+    }
+}
+
+// Populate edit modal with competition data
+window.populateEditModal = function(competition) {
+    if (!competition) {
+        console.error('No competition data provided to populateEditModal');
+        return;
+    }
+
+    // Check if form exists
+    const form = document.getElementById('competitionEditForm');
+    if (!form) {
+        console.error('competitionEditForm not found!');
+        return;
+    }
+
+    // Basic fields
+    setFieldValue('competitionName', competition.competitionName || '');
+    setFieldValue('description', competition.description || '');
+    setFieldValue('venue', competition.venue || '');
+
+    // Handle date fields - use Flatpickr's setDate method when available
+    if (competition.competitionDate) {
+        const compDateInput = document.getElementById('competitionDate');
+        if (compDateInput && compDateInput._flatpickr) {
+            compDateInput._flatpickr.setDate(competition.competitionDate);
+        } else {
+            setFieldValue('competitionDate', formatDateForInput(competition.competitionDate));
+        }
+    } else {
+        // Clear the date field if it's null (for copy operations)
+        const compDateInput = document.getElementById('competitionDate');
+        if (compDateInput && compDateInput._flatpickr) {
+            compDateInput._flatpickr.clear();
+        } else {
+            setFieldValue('competitionDate', '');
+        }
+    }
+
+    if (competition.competitionEndDate) {
+        const endDateInput = document.getElementById('competitionEndDate');
+        if (endDateInput && endDateInput._flatpickr) {
+            endDateInput._flatpickr.setDate(competition.competitionEndDate);
+        } else {
+            setFieldValue('competitionEndDate', formatDateForInput(competition.competitionEndDate, false));
+        }
+    } else {
+        // Clear the date field if it's null (for copy operations)
+        const endDateInput = document.getElementById('competitionEndDate');
+        if (endDateInput && endDateInput._flatpickr) {
+            endDateInput._flatpickr.clear();
+        } else {
+            setFieldValue('competitionEndDate', '');
+        }
+    }
+
+    if (competition.registrationOpenDate) {
+        const openDateInput = document.getElementById('registrationOpenDate');
+        if (openDateInput && openDateInput._flatpickr) {
+            openDateInput._flatpickr.setDate(competition.registrationOpenDate);
+        } else {
+            setFieldValue('registrationOpenDate', formatDateForInput(competition.registrationOpenDate));
+        }
+    } else {
+        // Clear the date field if it's null (for copy operations)
+        const openDateInput = document.getElementById('registrationOpenDate');
+        if (openDateInput && openDateInput._flatpickr) {
+            openDateInput._flatpickr.clear();
+        } else {
+            setFieldValue('registrationOpenDate', '');
+        }
+    }
+
+    if (competition.registrationCloseDate) {
+        const closeDateInput = document.getElementById('registrationCloseDate');
+        if (closeDateInput && closeDateInput._flatpickr) {
+            closeDateInput._flatpickr.setDate(competition.registrationCloseDate);
+        } else {
+            setFieldValue('registrationCloseDate', formatDateForInput(competition.registrationCloseDate));
+        }
+    } else {
+        // Clear the date field if it's null (for copy operations)
+        const closeDateInput = document.getElementById('registrationCloseDate');
+        if (closeDateInput && closeDateInput._flatpickr) {
+            closeDateInput._flatpickr.clear();
+        } else {
+            setFieldValue('registrationCloseDate', '');
+        }
+    }
+
+    // Set all form fields
+    setFieldValue('maxParticipants', competition.maxParticipants || 50);
+    setFieldValue('registrationFee', competition.registrationFee || 0);
+    setFieldValue('competitionDirector', competition.competitionDirector || '');
+
+    setFieldValue('comp_contactEmail', competition.contactEmail || '');
+    setFieldValue('comp_contactPhone', competition.contactPhone || '');
+
+    setFieldValue('numberOfSeriesOrStations', competition.numberOfSeriesOrStations || 1);
+    setFieldValue('numberOfFinalSeries', competition.numberOfFinalSeries || 0);
+    setFieldValue('swishNumber', competition.swishNumber || '');
+
+    // Handle competitionManagers - array of member IDs
+    var managerIds = Array.isArray(competition.competitionManagers) ? competition.competitionManagers : [];
+    console.log('Competition managers (IDs):', managerIds);
+
+    // Store IDs in hidden field
+    setFieldValue('comp_competitionManagers_ids', managerIds.join(','));
+
+    // Initialize badges display (will be populated when manager modal loads)
+    const badgesContainer = document.getElementById('selectedManagersBadges');
+    if (badgesContainer) {
+        if (managerIds.length === 0) {
+            badgesContainer.innerHTML = '<small class="text-muted">Inga tävlingsledare valda</small>';
+        } else {
+            badgesContainer.innerHTML = '<small class="text-muted">Laddar...</small>';
+        }
+    }
+
+    setFieldValue('shootingClassIds', competition.shootingClassIds || '');
+    setFieldValue('competitionId', competition.id || '');
+
+    // Checkboxes
+    setCheckboxValue('allowDualCClass', competition.allowDualCClass || false);
+    setCheckboxValue('showLiveResults', competition.showLiveResults || false);
+    setCheckboxValue('addToMenu', competition.addToMenu || false);
+    setCheckboxValue('isAwardingStandardMedals', competition.isAwardingStandardMedals || false);
+
+    // Competition scope dropdown
+    setFieldValue('competitionScope', competition.competitionScope || '');
+
+    // Series dropdown - store value in dataset for loadSeries() to apply
+    const seriesId = competition.seriesId || '';
+    const seriesDropdown = document.getElementById('competitionSeriesId');
+    if (seriesDropdown) {
+        seriesDropdown.dataset.pendingValue = seriesId;
+    }
+
+    // Status dropdown
+    setFieldValue('comp_isActive', competition.isActive ? 'true' : 'false');
+}
+
+// Load shooting classes for edit modal
+window.loadEditModalShootingClasses = function() {
+    fetch('/umbraco/surface/CompetitionEdit/GetShootingClasses', {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success && data.data) {
+            renderEditModalShootingClasses(data.data);
+        }
+    })
+    .catch(error => console.error('Error loading shooting classes:', error));
+}
+
+// Render shooting classes checkboxes in edit modal
+window.renderEditModalShootingClasses = function(classes) {
+    const container = document.getElementById('shootingClassesContainer');
+    if (!container) return;
+
+    container.innerHTML = '';
+
+    if (!classes || classes.length === 0) {
+        container.innerHTML = '<p class="text-muted">Inga klasser tillgängliga</p>';
+        return;
+    }
+
+    // Get current selected classes from the hidden input
+    const currentSelected = document.getElementById('shootingClassIds').value.split(',').map(c => c.trim()).filter(c => c);
+
+    classes.forEach(cls => {
+        const isChecked = currentSelected.includes(cls.id);
+        const checkbox = document.createElement('div');
+        checkbox.className = 'form-check';
+        checkbox.innerHTML = `
+            <input class="form-check-input shooting-class-checkbox" type="checkbox" value="${cls.id}" id="class_${cls.id}" ${isChecked ? 'checked' : ''}>
+            <label class="form-check-label" for="class_${cls.id}">
+                <strong>${cls.name}</strong>
+                <small class="text-muted d-block">${cls.description}</small>
+            </label>
+        `;
+        container.appendChild(checkbox);
+    });
+    
+    // Add change event listeners
+    document.querySelectorAll('.shooting-class-checkbox').forEach(checkbox => {
+        checkbox.addEventListener('change', updateShootingClassIds);
+    });
+}
+
+function updateShootingClassIds() {
+    const selected = Array.from(document.querySelectorAll('.shooting-class-checkbox:checked'))
+        .map(cb => cb.value)
+        .join(',');
+    document.getElementById('shootingClassIds').value = selected;
+}
+
+function saveCompetition() {
+    const form = document.getElementById('competitionEditForm');
+    if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+    }
+
+    const formData = new FormData(form);
+    const fields = {};
+
+    for (let [key, value] of formData.entries()) {
+        // Skip competitionId - it's passed separately
+        if (key === 'competitionId') {
+            continue;
+        }
+
+        // Skip competitionManagers and competitionManagerIds - handled separately below
+        if (key === 'competitionManagers' || key === 'competitionManagerIds') {
+            continue;
+        }
+
+        if ((key === 'competitionEndDate' || key === 'description' || key === 'contactPhone') && !value) {
+            continue;
+        }
+
+        if (key === 'showLiveResults' || key === 'addToMenu' || key === 'allowDualCClass' || key === 'isClubOnly' || key === 'isAwardingStandardMedals') {
+            fields[key] = value === 'on';
+        } else if (key === 'isActive') {
+            fields[key] = value === 'true';
+        } else {
+            fields[key] = value;
+        }
+    }
+
+    // Handle competitionManagers - convert from hidden field to array of integers
+    const managerIdsStr = document.getElementById('comp_competitionManagers_ids').value || '';
+    const managerIds = managerIdsStr.split(',')
+        .map(id => id.trim())
+        .filter(id => id)
+        .map(id => parseInt(id));
+    fields.competitionManagers = managerIds;
+
+    // Ensure unchecked checkboxes are explicitly set to false
+    const checkboxFields = ['showLiveResults', 'addToMenu', 'allowDualCClass', 'isClubOnly', 'isActive', 'isAwardingStandardMedals', 'isExternal'];
+    checkboxFields.forEach(field => {
+        if (!(field in fields)) {
+            fields[field] = false;
+        }
+    });
+
+    const requiredDateFields = ['competitionDate', 'registrationOpenDate', 'registrationCloseDate'];
+    for (let field of requiredDateFields) {
+        if (!fields[field]) {
+            showNotification(`${field} är obligatorisk`, 'error');
+            return;
+        }
+    }
+
+    const saveBtn = document.getElementById('saveCompetitionBtn');
+    const originalText = saveBtn.innerHTML;
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<i class="bi bi-spinner-border spinner-border-sm"></i> Sparar...';
+
+    const competitionId = parseInt(document.getElementById('competitionId').value) || 0;
+    const isNewCompetition = competitionId === 0;
+
+    let endpoint = '/umbraco/surface/CompetitionEdit/SaveCompetition';
+    let requestBody;
+
+    if (isNewCompetition) {
+        // For new competitions (copy), use CreateCompetition endpoint
+        endpoint = '/umbraco/surface/CompetitionAdmin/CreateCompetition';
+        // CreateCompetition expects competitionType in fields
+        fields.competitionType = 'Precision';
+        requestBody = { fields: fields };
+    } else {
+        // For existing competitions (edit), use SaveCompetition endpoint
+        requestBody = {
+            competitionId: competitionId,
+            competitionType: 'Precision',
+            fields: fields
+        };
+    }
+
+    fetch(endpoint, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value
+        },
+        body: JSON.stringify(requestBody)
+    })
+    .then(response => {
+        if (!response.ok) {
+            return response.text().then(text => {
+                throw new Error(`HTTP ${response.status}: ${text}`);
+            });
+        }
+        return response.json();
+    })
+    .then(data => {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = originalText;
+
+        if (data.success) {
+            document.getElementById('editFormErrors').classList.add('d-none');
+            const message = isNewCompetition ? 'Tävlingen skapades framgångsrikt!' : 'Tävlingen uppdaterades framgångsrikt!';
+            showNotification(message, 'success');
+            bootstrap.Modal.getInstance(editModal).hide();
+
+            // Reload just the competitions list to update the modified row
+            if (typeof loadCompetitionsList === 'function') {
+                setTimeout(() => {
+                    loadCompetitionsList();
+                }, 500);
+            }
+        } else {
+            const errorList = document.getElementById('errorList');
+            errorList.innerHTML = '';
+            
+            if (data.errors && typeof data.errors === 'object' && Object.keys(data.errors).length > 0) {
+                for (let [field, error] of Object.entries(data.errors)) {
+                    const li = document.createElement('li');
+                    li.textContent = error;
+                    errorList.appendChild(li);
+                }
+            } else {
+                const li = document.createElement('li');
+                li.textContent = data.message || 'Ett okänt fel uppstod';
+                errorList.appendChild(li);
+            }
+            
+            document.getElementById('editFormErrors').classList.remove('d-none');
+        }
+    })
+    .catch(error => {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = originalText;
+        console.error('Error saving competition:', error);
+        showNotification('Fel vid sparning: ' + error.message, 'error');
+    });
+}
+
+function showNotification(message, type) {
+    const alertClass = type === 'success' ? 'alert-success' : 'alert-danger';
+    const notification = document.createElement('div');
+    notification.className = `alert ${alertClass} alert-dismissible fade show position-fixed`;
+    notification.style.cssText = 'top: 20px; right: 20px; z-index: 9999; max-width: 400px;';
+    notification.innerHTML = `
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+
+    document.body.appendChild(notification);
+
+    setTimeout(() => {
+        if (notification.parentNode) {
+            notification.remove();
+        }
+    }, 5000);
+}
+
+// Ensure clubs are loaded in the dropdown
+function ensureClubsLoaded() {
+    const clubSelect = document.getElementById('clubId');
+    // Load clubs if not already loaded
+    if (clubSelect.options.length <= 1) {
+        loadClubsForSelector();
+    } else {
+        // Clubs already loaded, just set the value from dataset
+        const currentClubId = clubSelect.dataset.currentValue;
+        if (currentClubId && currentClubId !== '0') {
+            clubSelect.value = currentClubId;
+        }
+    }
+}
+
+function loadClubsForSelector() {
+    const clubSelect = document.getElementById('clubId');
+
+    fetch('/umbraco/surface/CompetitionAdmin/GetClubsList')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.data && Array.isArray(data.data)) {
+                // Clear loading message
+                clubSelect.parentElement.querySelector('small').style.display = 'none';
+
+                // Populate clubs
+                data.data.forEach(club => {
+                    const option = document.createElement('option');
+                    option.value = club.id;
+                    option.textContent = club.name + (club.city ? ` (${club.city})` : '');
+                    clubSelect.appendChild(option);
+                });
+
+                // Set the current club if editing
+                const currentClubId = document.getElementById('clubId').dataset.currentValue;
+                if (currentClubId && currentClubId !== '0') {
+                    clubSelect.value = currentClubId;
+                }
+            } else {
+                clubSelect.parentElement.querySelector('small').textContent = 'Kunde inte ladda klubbar';
+                clubSelect.parentElement.querySelector('small').classList.add('text-danger');
+            }
+        })
+        .catch(error => {
+            console.error('Error loading clubs:', error);
+            clubSelect.parentElement.querySelector('small').textContent = 'Fel vid hämtning av klubbar';
+            clubSelect.parentElement.querySelector('small').classList.add('text-danger');
+        });
+}
+
+// Update populateEditModal to handle club fields
+const originalPopulateEditModal = window.populateEditModal;
+window.populateEditModal = function(competition) {
+    // Call original function
+    originalPopulateEditModal(competition);
+
+    // Handle club fields
+    if (competition) {
+        setCheckboxValue('isClubOnly', competition.isClubOnly || false);
+
+        // Set clubId as data attribute for later use
+        document.getElementById('clubId').dataset.currentValue = competition.clubId || '0';
+
+        // Always ensure clubs are loaded
+        ensureClubsLoaded();
+
+        // Handle external competition fields
+        setCheckboxValue('isExternal', competition.isExternal || false);
+        setFieldValue('externalUrl', competition.externalUrl || '');
+        setFieldValue('externalRegistrationEmail', competition.externalRegistrationEmail || '');
+        // Note: invitationFile cannot be pre-populated for security reasons (file inputs cannot be set programmatically)
+    }
+}
+</script>
+
+@* Include Manager Selection Modal *@
+@await Html.PartialAsync("ManagerSelectionModal")

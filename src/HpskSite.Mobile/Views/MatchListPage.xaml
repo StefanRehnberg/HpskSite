@@ -1,0 +1,752 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage x:Class="HpskSite.Mobile.Views.MatchListPage"
+             xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:models="clr-namespace:HpskSite.Shared.Models;assembly=HpskSite.Shared"
+             xmlns:services="clr-namespace:HpskSite.Mobile.Services"
+             xmlns:viewmodels="clr-namespace:HpskSite.Mobile.ViewModels"
+             Title="{Binding Title}"
+             x:DataType="viewmodels:MatchListViewModel"
+             BackgroundColor="{StaticResource OffBlack}">
+
+    <RefreshView Command="{Binding LoadMatchesCommand}" IsRefreshing="{Binding IsRefreshing}">
+        <ScrollView>
+            <VerticalStackLayout Padding="16" Spacing="16">
+
+                <!--  Tab Bar  -->
+                <Border Padding="4"
+                        BackgroundColor="{StaticResource Gray600}"
+                        Stroke="Transparent" StrokeShape="RoundRectangle 8">
+                    <Grid ColumnDefinitions="*,*,*" ColumnSpacing="4">
+                        <!--  Tab 0: Aktuell  -->
+                        <Border Grid.Column="0" Padding="12,10"
+                                BackgroundColor="{Binding IsCurrentTabSelected, Converter={StaticResource BoolToColorConverter}}"
+                                Stroke="Transparent" StrokeShape="RoundRectangle 6">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding SelectTabCommand}">
+                                    <TapGestureRecognizer.CommandParameter>
+                                        <x:Int32>0</x:Int32>
+                                    </TapGestureRecognizer.CommandParameter>
+                                </TapGestureRecognizer>
+                            </Border.GestureRecognizers>
+                            <Label FontAttributes="{Binding IsCurrentTabSelected, Converter={StaticResource BoolToFontAttributeConverter}}"
+                                   FontSize="14" HorizontalOptions="Center" Text="Aktuell"
+                                   TextColor="{Binding IsCurrentTabSelected, Converter={StaticResource BoolToTabTextColorConverter}}" />
+                        </Border>
+
+                        <!--  Tab 1: Aktiva  -->
+                        <Border Grid.Column="1" Padding="12,10"
+                                BackgroundColor="{Binding IsActiveTabSelected, Converter={StaticResource BoolToColorConverter}}"
+                                Stroke="Transparent" StrokeShape="RoundRectangle 6">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding SelectTabCommand}">
+                                    <TapGestureRecognizer.CommandParameter>
+                                        <x:Int32>1</x:Int32>
+                                    </TapGestureRecognizer.CommandParameter>
+                                </TapGestureRecognizer>
+                            </Border.GestureRecognizers>
+                            <Label FontAttributes="{Binding IsActiveTabSelected, Converter={StaticResource BoolToFontAttributeConverter}}"
+                                   FontSize="14" HorizontalOptions="Center" Text="Aktiva"
+                                   TextColor="{Binding IsActiveTabSelected, Converter={StaticResource BoolToTabTextColorConverter}}" />
+                        </Border>
+
+                        <!--  Tab 2: Historik  -->
+                        <Border Grid.Column="2" Padding="12,10"
+                                BackgroundColor="{Binding IsHistoryTabSelected, Converter={StaticResource BoolToColorConverter}}"
+                                Stroke="Transparent" StrokeShape="RoundRectangle 6">
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding SelectTabCommand}">
+                                    <TapGestureRecognizer.CommandParameter>
+                                        <x:Int32>2</x:Int32>
+                                    </TapGestureRecognizer.CommandParameter>
+                                </TapGestureRecognizer>
+                            </Border.GestureRecognizers>
+                            <Label FontAttributes="{Binding IsHistoryTabSelected, Converter={StaticResource BoolToFontAttributeConverter}}"
+                                   FontSize="14" HorizontalOptions="Center" Text="Historik"
+                                   TextColor="{Binding IsHistoryTabSelected, Converter={StaticResource BoolToTabTextColorConverter}}" />
+                        </Border>
+                    </Grid>
+                </Border>
+
+                <!--  Error Message  -->
+                <Border Padding="12" BackgroundColor="#FEE2E2"
+                        IsVisible="{Binding HasError}"
+                        Stroke="{StaticResource Danger}"
+                        StrokeShape="RoundRectangle 8">
+                    <Label HorizontalTextAlignment="Center"
+                           Text="{Binding ErrorMessage}"
+                           TextColor="{StaticResource Danger}" />
+                </Border>
+
+                <!--  TAB 0: Current Match Content  -->
+                <VerticalStackLayout IsVisible="{Binding IsCurrentTabSelected}" Spacing="16">
+
+                    <!--  Loading State  -->
+                    <VerticalStackLayout Padding="24"
+                                         IsVisible="{Binding IsBusy}"
+                                         Spacing="12">
+                        <ActivityIndicator IsRunning="True" Color="{StaticResource Primary}" />
+                        <Label FontSize="14" HorizontalOptions="Center" Text="Söker efter aktiva matcher..."
+                               TextColor="{StaticResource Gray400}" />
+                    </VerticalStackLayout>
+
+                    <!--  Current Match Card (if user has an active match)  -->
+                    <Border Padding="0"
+                            BackgroundColor="{StaticResource CardBackgroundDark}"
+                            IsVisible="{Binding HasCurrentMatch}"
+                            Stroke="{StaticResource Primary}"
+                            StrokeShape="RoundRectangle 12" StrokeThickness="2">
+                        <Border.Shadow>
+                            <Shadow Brush="Black" Opacity="0.1" Radius="8"
+                                    Offset="0,2" />
+                        </Border.Shadow>
+
+                        <VerticalStackLayout Spacing="0">
+                            <!--  Card Header  -->
+                            <Border Padding="16"
+                                    BackgroundColor="{StaticResource Primary}"
+                                    StrokeThickness="0">
+                                <Grid ColumnDefinitions="Auto,*,Auto">
+                                    <Label Grid.Column="0" FontSize="20" Text="🎯"
+                                           VerticalOptions="Center" />
+                                    <VerticalStackLayout Grid.Column="1" Margin="12,0">
+                                        <Label FontSize="12" Opacity="0.8" Text="Din aktiva match"
+                                               TextColor="White" />
+                                        <Label FontAttributes="Bold" FontSize="20"
+                                               Text="{Binding CurrentMatch.DisplayName}"
+                                               TextColor="White" />
+                                        <Label FontSize="12" Opacity="0.8"
+                                               Text="{Binding CurrentMatch.MatchCode}"
+                                               TextColor="White" />
+                                    </VerticalStackLayout>
+                                    <Border Grid.Column="2" Padding="10,4" BackgroundColor="White"
+                                            Stroke="Transparent" StrokeShape="RoundRectangle 4" VerticalOptions="Center">
+                                        <Label FontAttributes="Bold" FontSize="12"
+                                               Text="{Binding CurrentMatch.WeaponClass}"
+                                               TextColor="{StaticResource Primary}" />
+                                    </Border>
+                                </Grid>
+                            </Border>
+
+                            <!--  Match Info  -->
+                            <VerticalStackLayout Padding="16" Spacing="12">
+                                <!--  Participant Avatars  -->
+                                <HorizontalStackLayout Spacing="-8">
+                                    <BindableLayout.ItemsSource>
+                                        <Binding Path="CurrentMatch.Participants" />
+                                    </BindableLayout.ItemsSource>
+                                    <BindableLayout.ItemTemplate>
+                                        <DataTemplate x:DataType="models:TrainingMatchParticipant">
+                                            <Grid HeightRequest="36" WidthRequest="36">
+                                                <!--  Profile Picture  -->
+                                                <Border HeightRequest="36"
+                                                        IsVisible="{Binding ProfilePictureUrl, Converter={StaticResource StringToBoolConverter}}"
+                                                        Stroke="#4b5563" StrokeShape="RoundRectangle 18" StrokeThickness="2"
+                                                        WidthRequest="36">
+                                                    <Border.Clip>
+                                                        <EllipseGeometry Center="18,18" RadiusX="18" RadiusY="18" />
+                                                    </Border.Clip>
+                                                    <Image Aspect="AspectFill" HeightRequest="36"
+                                                           Source="{Binding ProfilePictureUrl, Converter={StaticResource ProfilePictureUrlConverter}}"
+                                                           WidthRequest="36" />
+                                                </Border>
+                                                <!--  Initials Fallback  -->
+                                                <Border BackgroundColor="{StaticResource Primary}"
+                                                        HeightRequest="36"
+                                                        IsVisible="{Binding ProfilePictureUrl, Converter={StaticResource InvertedStringToBoolConverter}}"
+                                                        Stroke="#4b5563" StrokeShape="RoundRectangle 18" StrokeThickness="2"
+                                                        WidthRequest="36">
+                                                    <Label FontAttributes="Bold" FontSize="12" HorizontalOptions="Center"
+                                                           Text="{Binding Initials}"
+                                                           TextColor="White" VerticalOptions="Center" />
+                                                </Border>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </BindableLayout.ItemTemplate>
+                                </HorizontalStackLayout>
+
+                                <!--  Continue Button  -->
+                                <Button BackgroundColor="{StaticResource Primary}"
+                                        Command="{Binding ContinueMatchCommand}"
+                                        CornerRadius="8" FontAttributes="Bold" HeightRequest="50"
+                                        Text="Fortsätt match" TextColor="White" />
+                            </VerticalStackLayout>
+                        </VerticalStackLayout>
+                    </Border>
+
+                    <!--  Create/Join Options (only after loading, if no current match)  -->
+                    <VerticalStackLayout IsVisible="{Binding ShowNoMatchOptions}" Spacing="16">
+
+                        <!--  Create Match Card  -->
+                        <Border Padding="0"
+                                BackgroundColor="{StaticResource CardBackgroundDark}"
+                                Stroke="Transparent" StrokeShape="RoundRectangle 12">
+                            <Border.Shadow>
+                                <Shadow Brush="Black" Opacity="0.1" Radius="8"
+                                        Offset="0,2" />
+                            </Border.Shadow>
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding NavigateToCreateMatchCommand}" />
+                            </Border.GestureRecognizers>
+
+                            <Grid Padding="16" ColumnDefinitions="Auto,*,Auto">
+                                <Border Grid.Column="0"
+                                        BackgroundColor="{StaticResource Primary}"
+                                        HeightRequest="48" Stroke="Transparent" StrokeShape="RoundRectangle 24"
+                                        VerticalOptions="Center" WidthRequest="48">
+                                    <Label FontSize="20" HorizontalOptions="Center" Text="➕"
+                                           VerticalOptions="Center" />
+                                </Border>
+
+                                <VerticalStackLayout Grid.Column="1" Margin="12,0" VerticalOptions="Center">
+                                    <Label FontAttributes="Bold" FontSize="18" Text="Skapa match"
+                                           TextColor="{StaticResource White}" />
+                                    <Label FontSize="12" Text="Starta en ny träningsmatch"
+                                           TextColor="{StaticResource Gray400}" />
+                                </VerticalStackLayout>
+
+                                <Label Grid.Column="2" FontSize="20" Text="&gt;"
+                                       TextColor="{StaticResource Gray500}"
+                                       VerticalOptions="Center" />
+                            </Grid>
+                        </Border>
+
+                        <!--  Join Match Card  -->
+                        <Border Padding="0"
+                                BackgroundColor="{StaticResource CardBackgroundDark}"
+                                Stroke="Transparent" StrokeShape="RoundRectangle 12">
+                            <Border.Shadow>
+                                <Shadow Brush="Black" Opacity="0.1" Radius="8"
+                                        Offset="0,2" />
+                            </Border.Shadow>
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding NavigateToJoinMatchCommand}" />
+                            </Border.GestureRecognizers>
+
+                            <Grid Padding="16" ColumnDefinitions="Auto,*,Auto">
+                                <Border Grid.Column="0"
+                                        BackgroundColor="{StaticResource Success}"
+                                        HeightRequest="48" Stroke="Transparent" StrokeShape="RoundRectangle 24"
+                                        VerticalOptions="Center" WidthRequest="48">
+                                    <Label FontSize="20" HorizontalOptions="Center" Text="🔗"
+                                           VerticalOptions="Center" />
+                                </Border>
+
+                                <VerticalStackLayout Grid.Column="1" Margin="12,0" VerticalOptions="Center">
+                                    <Label FontAttributes="Bold" FontSize="18" Text="Gå med i match"
+                                           TextColor="{StaticResource White}" />
+                                    <Label FontSize="12" Text="Ange matchkod eller skanna QR"
+                                           TextColor="{StaticResource Gray400}" />
+                                </VerticalStackLayout>
+
+                                <Label Grid.Column="2" FontSize="20" Text="&gt;"
+                                       TextColor="{StaticResource Gray500}"
+                                       VerticalOptions="Center" />
+                            </Grid>
+                        </Border>
+
+                        <!--  Info text  -->
+                        <Label FontSize="12" HorizontalOptions="Center" HorizontalTextAlignment="Center"
+                               Text="Ingen aktiv match. Skapa en ny eller gå med i en befintlig."
+                               TextColor="{StaticResource Gray400}" />
+                    </VerticalStackLayout>
+                </VerticalStackLayout>
+
+                <!--  TAB 1: Active Matches Content  -->
+                <VerticalStackLayout IsVisible="{Binding IsActiveTabSelected}" Spacing="16">
+
+                    <!--  Ongoing Matches Section  -->
+                    <Border Padding="0"
+                            BackgroundColor="{StaticResource CardBackgroundDark}"
+                            Stroke="Transparent" StrokeShape="RoundRectangle 12">
+                        <Border.Shadow>
+                            <Shadow Brush="Black" Opacity="0.1" Radius="8"
+                                    Offset="0,2" />
+                        </Border.Shadow>
+
+                        <VerticalStackLayout Spacing="0">
+                            <!--  Section Header  -->
+                            <Border Padding="16"
+                                    BackgroundColor="{StaticResource Gray600}"
+                                    StrokeThickness="0">
+                                <HorizontalStackLayout Spacing="8">
+                                    <Label FontSize="16" Text="🎯" VerticalOptions="Center" />
+                                    <Label FontAttributes="Bold" FontSize="16" Text="Pågående matcher"
+                                           TextColor="{StaticResource White}"
+                                           VerticalOptions="Center" />
+                                </HorizontalStackLayout>
+                            </Border>
+
+                            <!--  Divider  -->
+                            <BoxView HeightRequest="1" Color="{StaticResource Gray600}" />
+
+                            <!--  Ongoing Matches List  -->
+                            <CollectionView ItemsSource="{Binding OngoingMatches}">
+                                <CollectionView.ItemTemplate>
+                                    <DataTemplate x:DataType="models:TrainingMatch">
+                                        <Border Margin="12,8" Padding="12"
+                                                BackgroundColor="{StaticResource Gray600}"
+                                                Stroke="Transparent" StrokeShape="RoundRectangle 8">
+                                            <VerticalStackLayout Spacing="10">
+                                                <!--  Header: Match name + Weapon class badge  -->
+                                                <Grid ColumnDefinitions="*,Auto">
+                                                    <Label Grid.Column="0" FontAttributes="Bold" FontSize="16"
+                                                           Text="{Binding DisplayName}"
+                                                           TextColor="{StaticResource White}"
+                                                           VerticalOptions="Center" />
+                                                    <Border Grid.Column="1" Padding="8,4" BackgroundColor="#e3f2fd"
+                                                            Stroke="Transparent" StrokeShape="RoundRectangle 4" VerticalOptions="Center">
+                                                        <Label FontAttributes="Bold" FontSize="11" TextColor="#1565c0">
+                                                            <Label.Text>
+                                                                <MultiBinding StringFormat="Klass {0}">
+                                                                    <Binding Path="WeaponClass" />
+                                                                </MultiBinding>
+                                                            </Label.Text>
+                                                        </Label>
+                                                    </Border>
+                                                </Grid>
+
+                                                <!--  Participant Avatars  -->
+                                                <HorizontalStackLayout Spacing="-8">
+                                                    <BindableLayout.ItemsSource>
+                                                        <Binding Path="Participants" />
+                                                    </BindableLayout.ItemsSource>
+                                                    <BindableLayout.ItemTemplate>
+                                                        <DataTemplate x:DataType="models:TrainingMatchParticipant">
+                                                            <Grid HeightRequest="32" WidthRequest="32">
+                                                                <Border HeightRequest="32"
+                                                                        IsVisible="{Binding ProfilePictureUrl, Converter={StaticResource StringToBoolConverter}}"
+                                                                        Stroke="White" StrokeShape="RoundRectangle 16" StrokeThickness="2"
+                                                                        WidthRequest="32">
+                                                                    <Border.Clip>
+                                                                        <EllipseGeometry Center="16,16" RadiusX="16" RadiusY="16" />
+                                                                    </Border.Clip>
+                                                                    <Image Aspect="AspectFill" HeightRequest="32"
+                                                                           Source="{Binding ProfilePictureUrl, Converter={StaticResource ProfilePictureUrlConverter}}"
+                                                                           WidthRequest="32" />
+                                                                </Border>
+                                                                <Border BackgroundColor="{StaticResource Primary}"
+                                                                        HeightRequest="32"
+                                                                        IsVisible="{Binding ProfilePictureUrl, Converter={StaticResource InvertedStringToBoolConverter}}"
+                                                                        Stroke="White" StrokeShape="RoundRectangle 16" StrokeThickness="2"
+                                                                        WidthRequest="32">
+                                                                    <Label FontAttributes="Bold" FontSize="11" HorizontalOptions="Center"
+                                                                           Text="{Binding Initials}"
+                                                                           TextColor="White" VerticalOptions="Center" />
+                                                                </Border>
+                                                            </Grid>
+                                                        </DataTemplate>
+                                                    </BindableLayout.ItemTemplate>
+                                                </HorizontalStackLayout>
+
+                                                <!--  Action Buttons  -->
+                                                <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                                                    <Button Grid.Column="0" BackgroundColor="Transparent"
+                                                            BorderColor="{StaticResource Primary}"
+                                                            BorderWidth="1"
+                                                            Command="{Binding Source={RelativeSource AncestorType={x:Type viewmodels:MatchListViewModel}}, Path=ViewMatchCommand}"
+                                                            CommandParameter="{Binding .}"
+                                                            CornerRadius="6" FontSize="13" HeightRequest="38"
+                                                            Text="Visa"
+                                                            TextColor="{StaticResource Primary}" />
+                                                    <Button Grid.Column="1"
+                                                            BackgroundColor="{StaticResource Primary}"
+                                                            Command="{Binding Source={RelativeSource AncestorType={x:Type viewmodels:MatchListViewModel}}, Path=JoinMatchCommand}"
+                                                            CommandParameter="{Binding .}"
+                                                            CornerRadius="6" FontSize="13" HeightRequest="38"
+                                                            Text="Gå med" TextColor="White" />
+                                                </Grid>
+                                            </VerticalStackLayout>
+                                        </Border>
+                                    </DataTemplate>
+                                </CollectionView.ItemTemplate>
+                                <CollectionView.EmptyView>
+                                    <VerticalStackLayout Padding="24">
+                                        <Label FontSize="13" HorizontalOptions="Center" Text="Inga pågående matcher just nu"
+                                               TextColor="{StaticResource Gray400}" />
+                                    </VerticalStackLayout>
+                                </CollectionView.EmptyView>
+                            </CollectionView>
+                        </VerticalStackLayout>
+                    </Border>
+
+                    <!--  Upcoming Matches Section  -->
+                    <Border Padding="0"
+                            BackgroundColor="{StaticResource CardBackgroundDark}"
+                            Stroke="Transparent" StrokeShape="RoundRectangle 12">
+                        <Border.Shadow>
+                            <Shadow Brush="Black" Opacity="0.1" Radius="8"
+                                    Offset="0,2" />
+                        </Border.Shadow>
+
+                        <VerticalStackLayout Spacing="0">
+                            <!--  Section Header  -->
+                            <Border Padding="16"
+                                    BackgroundColor="{StaticResource Gray600}"
+                                    StrokeThickness="0">
+                                <HorizontalStackLayout Spacing="8">
+                                    <Label FontSize="16" Text="📅" VerticalOptions="Center" />
+                                    <Label FontAttributes="Bold" FontSize="16" Text="Kommande matcher"
+                                           TextColor="{StaticResource White}"
+                                           VerticalOptions="Center" />
+                                </HorizontalStackLayout>
+                            </Border>
+
+                            <!--  Divider  -->
+                            <BoxView HeightRequest="1" Color="{StaticResource Gray600}" />
+
+                            <!--  Upcoming Matches List  -->
+                            <CollectionView ItemsSource="{Binding UpcomingMatches}">
+                                <CollectionView.ItemTemplate>
+                                    <DataTemplate x:DataType="models:TrainingMatch">
+                                        <Border Margin="12,8" Padding="12"
+                                                BackgroundColor="{StaticResource Gray600}"
+                                                Stroke="Transparent" StrokeShape="RoundRectangle 8">
+                                            <VerticalStackLayout Spacing="10">
+                                                <!--  Header: Match name + Weapon class badge  -->
+                                                <Grid ColumnDefinitions="*,Auto">
+                                                    <Label Grid.Column="0" FontAttributes="Bold" FontSize="16"
+                                                           Text="{Binding DisplayName}"
+                                                           TextColor="{StaticResource White}"
+                                                           VerticalOptions="Center" />
+                                                    <Border Grid.Column="1" Padding="8,4" BackgroundColor="#e3f2fd"
+                                                            Stroke="Transparent" StrokeShape="RoundRectangle 4" VerticalOptions="Center">
+                                                        <Label FontAttributes="Bold" FontSize="11" TextColor="#1565c0">
+                                                            <Label.Text>
+                                                                <MultiBinding StringFormat="Klass {0}">
+                                                                    <Binding Path="WeaponClass" />
+                                                                </MultiBinding>
+                                                            </Label.Text>
+                                                        </Label>
+                                                    </Border>
+                                                </Grid>
+
+                                                <!--  Scheduled Time Badge  -->
+                                                <Border Padding="8,4" BackgroundColor="#fff3cd" HorizontalOptions="Start"
+                                                        Stroke="Transparent" StrokeShape="RoundRectangle 4">
+                                                    <HorizontalStackLayout Spacing="4">
+                                                        <Label FontSize="11" Text="🕐" VerticalOptions="Center" />
+                                                        <Label FontAttributes="Bold" FontSize="11"
+                                                               Text="{Binding StartDate, StringFormat='{0:ddd d MMM HH:mm}'}"
+                                                               TextColor="#856404" VerticalOptions="Center" />
+                                                    </HorizontalStackLayout>
+                                                </Border>
+
+                                                <!--  Participant Avatars  -->
+                                                <HorizontalStackLayout Spacing="-8">
+                                                    <BindableLayout.ItemsSource>
+                                                        <Binding Path="Participants" />
+                                                    </BindableLayout.ItemsSource>
+                                                    <BindableLayout.ItemTemplate>
+                                                        <DataTemplate x:DataType="models:TrainingMatchParticipant">
+                                                            <Grid HeightRequest="32" WidthRequest="32">
+                                                                <Border HeightRequest="32"
+                                                                        IsVisible="{Binding ProfilePictureUrl, Converter={StaticResource StringToBoolConverter}}"
+                                                                        Stroke="White" StrokeShape="RoundRectangle 16" StrokeThickness="2"
+                                                                        WidthRequest="32">
+                                                                    <Border.Clip>
+                                                                        <EllipseGeometry Center="16,16" RadiusX="16" RadiusY="16" />
+                                                                    </Border.Clip>
+                                                                    <Image Aspect="AspectFill" HeightRequest="32"
+                                                                           Source="{Binding ProfilePictureUrl, Converter={StaticResource ProfilePictureUrlConverter}}"
+                                                                           WidthRequest="32" />
+                                                                </Border>
+                                                                <Border BackgroundColor="#17a2b8" HeightRequest="32"
+                                                                        IsVisible="{Binding ProfilePictureUrl, Converter={StaticResource InvertedStringToBoolConverter}}"
+                                                                        Stroke="White" StrokeShape="RoundRectangle 16" StrokeThickness="2"
+                                                                        WidthRequest="32">
+                                                                    <Label FontAttributes="Bold" FontSize="11" HorizontalOptions="Center"
+                                                                           Text="{Binding Initials}"
+                                                                           TextColor="White" VerticalOptions="Center" />
+                                                                </Border>
+                                                            </Grid>
+                                                        </DataTemplate>
+                                                    </BindableLayout.ItemTemplate>
+                                                </HorizontalStackLayout>
+
+                                                <!--  Action Buttons  -->
+                                                <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                                                    <Button Grid.Column="0" BackgroundColor="Transparent"
+                                                            BorderColor="{StaticResource Primary}"
+                                                            BorderWidth="1"
+                                                            Command="{Binding Source={RelativeSource AncestorType={x:Type viewmodels:MatchListViewModel}}, Path=ViewMatchCommand}"
+                                                            CommandParameter="{Binding .}"
+                                                            CornerRadius="6" FontSize="13" HeightRequest="38"
+                                                            Text="Visa"
+                                                            TextColor="{StaticResource Primary}" />
+                                                    <Button Grid.Column="1"
+                                                            BackgroundColor="{StaticResource Primary}"
+                                                            Command="{Binding Source={RelativeSource AncestorType={x:Type viewmodels:MatchListViewModel}}, Path=JoinMatchCommand}"
+                                                            CommandParameter="{Binding .}"
+                                                            CornerRadius="6" FontSize="13" HeightRequest="38"
+                                                            Text="Gå med" TextColor="White" />
+                                                </Grid>
+                                            </VerticalStackLayout>
+                                        </Border>
+                                    </DataTemplate>
+                                </CollectionView.ItemTemplate>
+                                <CollectionView.EmptyView>
+                                    <VerticalStackLayout Padding="24">
+                                        <Label FontSize="13" HorizontalOptions="Center" Text="Inga kommande matcher schemalagda"
+                                               TextColor="{StaticResource Gray400}" />
+                                    </VerticalStackLayout>
+                                </CollectionView.EmptyView>
+                            </CollectionView>
+                        </VerticalStackLayout>
+                    </Border>
+                </VerticalStackLayout>
+
+                <!--  TAB 2: History Content  -->
+                <VerticalStackLayout IsVisible="{Binding IsHistoryTabSelected}" Spacing="12">
+
+                    <!--  Filter Button  -->
+                    <Button BackgroundColor="{StaticResource Gray600}"
+                            Command="{Binding ToggleFilterPanelCommand}"
+                            CornerRadius="8" FontSize="14" HeightRequest="40"
+                            HorizontalOptions="Start" Text="🔍 Filter"
+                            TextColor="{StaticResource White}" />
+
+                    <!--  Collapsible Filter Panel  -->
+                    <Border Padding="12"
+                            BackgroundColor="{StaticResource Gray700}"
+                            IsVisible="{Binding IsFilterPanelOpen}"
+                            Stroke="Transparent" StrokeShape="RoundRectangle 8">
+                        <VerticalStackLayout Spacing="12">
+
+                            <!--  Search  -->
+                            <Entry BackgroundColor="{StaticResource Gray600}"
+                                   Placeholder="Sok matchnamn..."
+                                   PlaceholderColor="{StaticResource Gray400}"
+                                   Text="{Binding FilterSearchName}"
+                                   TextColor="{StaticResource White}" />
+
+                            <!--  My Matches Toggle  -->
+                            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+                                <Switch IsToggled="{Binding FilterMyMatchesOnly}"
+                                        OnColor="{StaticResource Primary}"
+                                        VerticalOptions="Center" />
+                                <Label Grid.Column="1" Text="Visa bara mina matcher"
+                                       TextColor="{StaticResource White}"
+                                       VerticalOptions="Center" />
+                            </Grid>
+
+                            <!--  Weapon Class Picker  -->
+                            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+                                <Label Text="Vapenklass:"
+                                       TextColor="{StaticResource Gray300}"
+                                       VerticalOptions="Center" />
+                                <Picker Title="Alla" Grid.Column="1"
+                                        BackgroundColor="{StaticResource Gray600}"
+                                        ItemsSource="{Binding WeaponClassOptions}"
+                                        SelectedItem="{Binding FilterWeaponClass}"
+                                        TextColor="{StaticResource White}"
+                                        TitleColor="{StaticResource Gray400}" />
+                            </Grid>
+
+                            <!--  Date Range  -->
+                            <Label FontSize="12" Text="Datumintervall:"
+                                   TextColor="{StaticResource Gray300}" />
+                            <Grid ColumnDefinitions="*,Auto,*" ColumnSpacing="8">
+                                <DatePicker BackgroundColor="{StaticResource Gray600}"
+                                            Date="{Binding FilterDateFrom}"
+                                            Format="yyyy-MM-dd"
+                                            TextColor="{StaticResource White}" />
+                                <Label Grid.Column="1" Text="–"
+                                       TextColor="{StaticResource White}"
+                                       VerticalOptions="Center" />
+                                <DatePicker Grid.Column="2"
+                                            BackgroundColor="{StaticResource Gray600}"
+                                            Date="{Binding FilterDateTo}"
+                                            Format="yyyy-MM-dd"
+                                            TextColor="{StaticResource White}" />
+                            </Grid>
+
+                            <!--  Action Buttons  -->
+                            <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                                <Button BackgroundColor="Transparent"
+                                        BorderColor="{StaticResource Gray400}"
+                                        BorderWidth="1"
+                                        Command="{Binding ClearFiltersCommand}"
+                                        CornerRadius="6" HeightRequest="40" Text="Rensa"
+                                        TextColor="{StaticResource Gray300}" />
+                                <Button Grid.Column="1"
+                                        BackgroundColor="{StaticResource Primary}"
+                                        Command="{Binding ApplyFiltersCommand}"
+                                        CornerRadius="6" HeightRequest="40" Text="Sök"
+                                        TextColor="White" />
+                            </Grid>
+
+                        </VerticalStackLayout>
+                    </Border>
+
+                    <!--  History Card  -->
+                    <Border Padding="0"
+                            BackgroundColor="{StaticResource CardBackgroundDark}"
+                            Stroke="Transparent" StrokeShape="RoundRectangle 12">
+                        <Border.Shadow>
+                            <Shadow Brush="Black" Opacity="0.1" Radius="8"
+                                    Offset="0,2" />
+                        </Border.Shadow>
+
+                        <VerticalStackLayout Spacing="0">
+                            <!--  Card Header  -->
+                            <Border Padding="16"
+                                    BackgroundColor="{StaticResource Gray600}"
+                                    StrokeThickness="0">
+                                <HorizontalStackLayout Spacing="8">
+                                    <Label FontSize="16" Text="📜" VerticalOptions="Center" />
+                                    <Label FontAttributes="Bold" FontSize="16" Text="Matchhistorik"
+                                           TextColor="{StaticResource White}"
+                                           VerticalOptions="Center" />
+                                </HorizontalStackLayout>
+                            </Border>
+
+                            <!--  Divider  -->
+                            <BoxView HeightRequest="1" Color="{StaticResource Gray600}" />
+
+                            <!--  History List  -->
+                            <CollectionView ItemsSource="{Binding MatchHistory}">
+                                <CollectionView.ItemTemplate>
+                                    <DataTemplate x:DataType="services:MatchHistoryItem">
+                                        <VerticalStackLayout>
+                                            <Grid Padding="8,10" ColumnDefinitions="36,*,Auto" ColumnSpacing="8">
+                                                <!--  Date  -->
+                                                <Label FontSize="12"
+                                                       Text="{Binding CompletedDate, StringFormat='{0:d/M}'}"
+                                                       TextColor="{StaticResource Gray400}"
+                                                       VerticalOptions="Center" />
+
+                                                <!--  Match Info (all on one row)  -->
+                                                <HorizontalStackLayout Grid.Column="1" Spacing="6" VerticalOptions="Center">
+                                                    <Label FontAttributes="Bold" FontSize="14" LineBreakMode="TailTruncation"
+                                                           Text="{Binding DisplayName}"
+                                                           TextColor="White" VerticalOptions="Center" />
+                                                    <Border Padding="5,2"
+                                                            BackgroundColor="{StaticResource Primary}"
+                                                            Stroke="Transparent" StrokeShape="RoundRectangle 3" VerticalOptions="Center">
+                                                        <Label FontAttributes="Bold" FontSize="10"
+                                                               Text="{Binding WeaponClass}"
+                                                               TextColor="White" />
+                                                    </Border>
+                                                    <!--  Score (if participated)  -->
+                                                    <Label FontAttributes="Bold" FontSize="13"
+                                                           IsVisible="{Binding IsParticipant}"
+                                                           Text="{Binding UserScore, StringFormat='{0}p'}"
+                                                           TextColor="{StaticResource Success}"
+                                                           VerticalOptions="Center" />
+                                                    <!--  Landscape extras: series, placement, avatars  -->
+                                                    <Label FontSize="11"
+                                                           IsVisible="{Binding Source={RelativeSource AncestorType={x:Type viewmodels:MatchListViewModel}}, Path=IsLandscape}"
+                                                           Text="{Binding UserSeriesCount, StringFormat='({0} serier)'}"
+                                                           TextColor="{StaticResource Gray400}"
+                                                           VerticalOptions="Center" />
+                                                    <Label FontSize="13"
+                                                           IsVisible="{Binding Source={RelativeSource AncestorType={x:Type viewmodels:MatchListViewModel}}, Path=IsLandscape}"
+                                                           Text="{Binding PlacementBadge}"
+                                                           VerticalOptions="Center" />
+                                                    <!--  Avatars (landscape only)  -->
+                                                    <HorizontalStackLayout IsVisible="{Binding Source={RelativeSource AncestorType={x:Type viewmodels:MatchListViewModel}}, Path=IsLandscape}"
+                                                                           Spacing="-6" VerticalOptions="Center">
+                                                        <BindableLayout.ItemsSource>
+                                                            <Binding Path="DisplayedParticipants" />
+                                                        </BindableLayout.ItemsSource>
+                                                        <BindableLayout.ItemTemplate>
+                                                            <DataTemplate x:DataType="services:MatchHistoryParticipant">
+                                                                <Grid HeightRequest="24" WidthRequest="24">
+                                                                    <Border HeightRequest="24"
+                                                                            IsVisible="{Binding ProfilePictureUrl, Converter={StaticResource StringToBoolConverter}}"
+                                                                            Stroke="{StaticResource Gray600}"
+                                                                            StrokeShape="RoundRectangle 12" StrokeThickness="2" WidthRequest="24">
+                                                                        <Border.Clip>
+                                                                            <EllipseGeometry Center="12,12" RadiusX="12" RadiusY="12" />
+                                                                        </Border.Clip>
+                                                                        <Image Aspect="AspectFill" HeightRequest="24"
+                                                                               Source="{Binding ProfilePictureUrl, Converter={StaticResource ProfilePictureUrlConverter}}"
+                                                                               WidthRequest="24" />
+                                                                    </Border>
+                                                                    <Border BackgroundColor="{StaticResource Primary}"
+                                                                            HeightRequest="24"
+                                                                            IsVisible="{Binding ProfilePictureUrl, Converter={StaticResource InvertedStringToBoolConverter}}"
+                                                                            Stroke="{StaticResource Gray600}"
+                                                                            StrokeShape="RoundRectangle 12" StrokeThickness="2" WidthRequest="24">
+                                                                        <Label FontAttributes="Bold" FontSize="8" HorizontalOptions="Center"
+                                                                               Text="{Binding Initials}"
+                                                                               TextColor="White" VerticalOptions="Center" />
+                                                                    </Border>
+                                                                </Grid>
+                                                            </DataTemplate>
+                                                        </BindableLayout.ItemTemplate>
+                                                        <Border BackgroundColor="{StaticResource Gray500}"
+                                                                HeightRequest="24"
+                                                                IsVisible="{Binding HasExtraParticipants}"
+                                                                Stroke="{StaticResource Gray600}"
+                                                                StrokeShape="RoundRectangle 12" StrokeThickness="2" WidthRequest="24">
+                                                            <Label FontAttributes="Bold" FontSize="8" HorizontalOptions="Center"
+                                                                   Text="{Binding ExtraParticipantsBadge}"
+                                                                   TextColor="White" VerticalOptions="Center" />
+                                                        </Border>
+                                                    </HorizontalStackLayout>
+                                                </HorizontalStackLayout>
+
+                                                <!--  Buttons  -->
+                                                <HorizontalStackLayout Grid.Column="2" Spacing="4" VerticalOptions="Center">
+                                                    <Button Padding="0"
+                                                            BackgroundColor="{StaticResource Gray600}"
+                                                            Command="{Binding Source={RelativeSource AncestorType={x:Type viewmodels:MatchListViewModel}}, Path=ViewHistoryMatchCommand}"
+                                                            CommandParameter="{Binding .}"
+                                                            CornerRadius="6" FontSize="14" HeightRequest="36"
+                                                            Text="👁" WidthRequest="36" />
+                                                    <Button Padding="0"
+                                                            BackgroundColor="{StaticResource Danger}"
+                                                            Command="{Binding Source={RelativeSource AncestorType={x:Type viewmodels:MatchListViewModel}}, Path=DeleteHistoryMatchCommand}"
+                                                            CommandParameter="{Binding .}"
+                                                            CornerRadius="6" FontSize="14" HeightRequest="36"
+                                                            IsVisible="{Binding CanDelete}"
+                                                            Text="🗑" WidthRequest="36" />
+                                                </HorizontalStackLayout>
+                                            </Grid>
+
+                                            <!--  Row Divider  -->
+                                            <BoxView HeightRequest="1" Color="{StaticResource Gray600}" />
+                                        </VerticalStackLayout>
+                                    </DataTemplate>
+                                </CollectionView.ItemTemplate>
+                                <CollectionView.EmptyView>
+                                    <VerticalStackLayout Padding="24">
+                                        <Label FontSize="32" HorizontalOptions="Center" Text="📜" />
+                                        <Label Margin="0,8,0,0" HorizontalOptions="Center" Text="Ingen matchhistorik"
+                                               TextColor="{StaticResource Gray400}" />
+                                    </VerticalStackLayout>
+                                </CollectionView.EmptyView>
+                            </CollectionView>
+
+                            <!--  Load More Button  -->
+                            <VerticalStackLayout Padding="16" IsVisible="{Binding HasMoreHistory}">
+                                <Button BackgroundColor="{StaticResource Gray600}"
+                                        Command="{Binding LoadHistoryCommand}"
+                                        CornerRadius="8" HeightRequest="44"
+                                        IsEnabled="{Binding IsLoadingHistory, Converter={StaticResource InverseBoolConverter}}"
+                                        Text="Ladda fler..."
+                                        TextColor="{StaticResource White}" />
+                            </VerticalStackLayout>
+
+                            <!--  Loading History Indicator  -->
+                            <ActivityIndicator Margin="0,8" HorizontalOptions="Center"
+                                               IsRunning="{Binding IsLoadingHistory}"
+                                               IsVisible="{Binding IsLoadingHistory}"
+                                               Color="{StaticResource Primary}" />
+                        </VerticalStackLayout>
+                    </Border>
+                </VerticalStackLayout>
+
+                <!--  Loading Indicator  -->
+                <ActivityIndicator HorizontalOptions="Center"
+                                   IsRunning="{Binding IsBusy}"
+                                   IsVisible="{Binding IsBusy}"
+                                   Color="{StaticResource Primary}" />
+
+            </VerticalStackLayout>
+        </ScrollView>
+    </RefreshView>
+
+</ContentPage>

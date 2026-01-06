@@ -1,0 +1,385 @@
+@using HpskSite.Models.ViewModels.Training
+@model MemberProgress
+
+@{
+    var allLevels = TrainingDefinitions.GetAllLevels();
+    var currentLevel = allLevels.FirstOrDefault(l => l.LevelId == Model.CurrentLevel);
+    var progressPercent = Math.Round(Model.GetOverallCompletionPercentage());
+}
+
+<div class="member-progress-card">
+    <!-- Current Level Header -->
+    <div class="row align-items-center mb-3">
+        <div class="col-md-8">
+            <h4>
+                <span class="badge-level">@(currentLevel?.Badge ?? "🎯")</span>
+                @(currentLevel?.Name ?? "Okänd nivå")
+            </h4>
+            <p class="mb-1">Nuvarande steg: <strong>@Model.CurrentStep</strong></p>
+            <div class="progress mb-2" style="height: 8px;">
+                <div class="progress-bar bg-success" style="width: @progressPercent%"></div>
+            </div>
+            <small class="text-muted">@progressPercent% slutfört (@Model.CompletedSteps.Count steg)</small>
+        </div>
+        <div class="col-md-4 text-end">
+            <div class="current-step-badge">
+                <div class="step-number">@Model.CurrentStep</div>
+                <small>Nuvarande steg</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Completed Steps Visualization -->
+    @if (Model.CompletedSteps.Any())
+    {
+        <hr class="my-3">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h6 class="mb-0"><i class="bi bi-trophy text-warning"></i> Slutförda Steg</h6>
+            <button class="btn btn-sm btn-outline-primary" type="button" data-bs-toggle="collapse"
+                    data-bs-target="#completedStepsDetails" aria-expanded="false">
+                <i class="bi bi-eye"></i> Visa Alla
+            </button>
+        </div>
+
+        <!-- Achievement Summary Cards -->
+        <div class="row mb-3">
+            @foreach (var levelGroup in Model.CompletedSteps.GroupBy(c => c.LevelId))
+            {
+                var level = allLevels.FirstOrDefault(l => l.LevelId == levelGroup.Key);
+                if (level != null)
+                {
+                    var levelCompletions = levelGroup.Count();
+                    var levelProgress = Math.Round((double)levelCompletions / level.Steps.Count * 100);
+                    var isCompleted = levelCompletions >= level.Steps.Count;
+
+                    <div class="col-md-6 mb-2">
+                        <div class="achievement-card @(isCompleted ? "completed" : "")">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <div class="fw-bold">
+                                        @level.Badge @level.Name
+                                        @if (isCompleted)
+                                        {
+                                            <i class="bi bi-check-circle-fill text-success ms-1"></i>
+                                        }
+                                    </div>
+                                    <small class="text-muted">@levelCompletions av @level.Steps.Count steg</small>
+                                </div>
+                                <div class="achievement-progress">
+                                    <div class="circular-progress" data-progress="@levelProgress">
+                                        <span>@levelProgress%</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                }
+            }
+        </div>
+
+        <!-- Recent Achievements -->
+        <h6 class="mb-2"><i class="bi bi-clock-history text-primary"></i> Senaste Framsteg</h6>
+        <div class="row">
+            @foreach (var completion in Model.CompletedSteps.OrderByDescending(c => c.CompletedDate).Take(3))
+            {
+                var completionLevel = allLevels.FirstOrDefault(l => l.LevelId == completion.LevelId);
+
+                <div class="col-md-4 mb-2">
+                    <div class="recent-achievement-card">
+                        <div class="achievement-badge">@(completionLevel?.Badge ?? "🎯")</div>
+                        <div class="achievement-info">
+                            <div class="fw-bold">@(completionLevel?.Name ?? "Okänd nivå")</div>
+                            <div class="small text-muted">Steg @completion.StepNumber</div>
+                            <div class="achievement-meta">
+                                <small class="text-muted">
+                                    <i class="bi bi-calendar3"></i> @completion.CompletedDate.ToString("yyyy-MM-dd")
+                                    @if (!string.IsNullOrEmpty(completion.InstructorName))
+                                    {
+                                        <br><i class="bi bi-person"></i> @completion.InstructorName
+                                    }
+                                </small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+
+        <!-- Detailed Timeline (Collapsible) -->
+        <div class="collapse mt-3" id="completedStepsDetails">
+            <div class="card">
+                <div class="card-header">
+                    <h6 class="mb-0"><i class="bi bi-list-check"></i> Alla Slutförda Steg</h6>
+                </div>
+                <div class="card-body">
+                    @foreach (var levelGroup in Model.CompletedSteps.GroupBy(c => c.LevelId).OrderBy(g => g.Key))
+                    {
+                        var level = allLevels.FirstOrDefault(l => l.LevelId == levelGroup.Key);
+                        if (level != null)
+                        {
+                            <div class="completed-level-section mb-3">
+                                <h6 class="level-header">
+                                    @level.Badge @level.Name
+                                    <span class="badge bg-success ms-2">@levelGroup.Count() av @level.Steps.Count</span>
+                                </h6>
+
+                                <div class="list-group">
+                                    @foreach (var completion in levelGroup.OrderBy(c => c.StepNumber))
+                                    {
+                                        <div class="list-group-item d-flex justify-content-between align-items-start">
+                                            <div>
+                                                <div class="fw-bold">Steg @completion.StepNumber</div>
+                                                @if (!string.IsNullOrEmpty(completion.Notes))
+                                                {
+                                                    <div class="small text-primary">
+                                                        <i class="bi bi-chat-left-text"></i> @completion.Notes
+                                                    </div>
+                                                }
+                                            </div>
+                                            <div class="text-end">
+                                                <small class="text-muted">@completion.CompletedDate.ToString("yyyy-MM-dd")</small>
+                                                @if (!string.IsNullOrEmpty(completion.InstructorName))
+                                                {
+                                                    <br><small class="text-muted">@completion.InstructorName</small>
+                                                }
+                                            </div>
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    }
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+<style>
+    .member-progress-card {
+        background: white;
+        border: 1px solid #e9ecef;
+        border-radius: 12px;
+        padding: 24px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        border-left: 4px solid #28a745;
+    }
+
+    .badge-level {
+        font-size: 1.8em;
+        margin-right: 10px;
+    }
+
+    /* Current Step Badge */
+    .current-step-badge {
+        background: linear-gradient(135deg, #007bff, #0056b3);
+        color: white;
+        padding: 16px;
+        border-radius: 12px;
+        text-align: center;
+        box-shadow: 0 4px 8px rgba(0,123,255,0.3);
+    }
+
+    .step-number {
+        font-size: 1.8em;
+        font-weight: bold;
+        line-height: 1;
+    }
+
+    /* Achievement Cards */
+    .achievement-card {
+        background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
+        border: 1px solid #e9ecef;
+        border-radius: 8px;
+        padding: 16px;
+        transition: all 0.3s ease;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .achievement-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        border-color: #007bff;
+    }
+
+    .achievement-card.completed {
+        background: linear-gradient(135deg, #d4edda 0%, #f8fff9 100%);
+        border-color: #28a745;
+    }
+
+    .achievement-card.completed::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        right: 0;
+        width: 0;
+        height: 0;
+        border-style: solid;
+        border-width: 0 20px 20px 0;
+        border-color: transparent #28a745 transparent transparent;
+    }
+
+    .achievement-card.completed::after {
+        content: '✓';
+        position: absolute;
+        top: 2px;
+        right: 3px;
+        color: white;
+        font-size: 10px;
+        font-weight: bold;
+    }
+
+    /* Circular Progress */
+    .circular-progress {
+        width: 50px;
+        height: 50px;
+        border-radius: 50%;
+        background: conic-gradient(from 0deg, #28a745 var(--progress, 0%), #e9ecef var(--progress, 0%));
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+    }
+
+    .circular-progress::before {
+        content: '';
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        background: white;
+        position: absolute;
+    }
+
+    .circular-progress span {
+        position: relative;
+        font-size: 11px;
+        font-weight: bold;
+        color: #495057;
+        z-index: 1;
+    }
+
+    /* Recent Achievement Cards */
+    .recent-achievement-card {
+        background: white;
+        border: 1px solid #e9ecef;
+        border-radius: 8px;
+        padding: 16px;
+        display: flex;
+        gap: 12px;
+        transition: all 0.2s ease;
+        position: relative;
+        overflow: hidden;
+        height: 100%;
+    }
+
+    .recent-achievement-card:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        border-color: #007bff;
+    }
+
+    .recent-achievement-card::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 3px;
+        background: linear-gradient(to bottom, #28a745, #20c997);
+    }
+
+    .achievement-badge {
+        font-size: 24px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 40px;
+        height: 40px;
+        background: #f8f9fa;
+        border-radius: 50%;
+        border: 2px solid #e9ecef;
+        flex-shrink: 0;
+    }
+
+    .achievement-info {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .achievement-meta {
+        margin-top: 8px;
+        padding-top: 8px;
+        border-top: 1px solid #f8f9fa;
+    }
+
+    /* Level Section Headers */
+    .level-header {
+        color: #495057;
+        border-bottom: 2px solid #e9ecef;
+        padding-bottom: 8px;
+        margin-bottom: 16px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .completed-level-section {
+        background: #f8f9fa;
+        border-radius: 8px;
+        padding: 16px;
+        border-left: 4px solid #28a745;
+    }
+
+    /* Responsive adjustments */
+    @media (max-width: 768px) {
+        .member-progress-card {
+            padding: 16px;
+        }
+
+        .current-step-badge {
+            margin-top: 16px;
+        }
+
+        .achievement-card {
+            margin-bottom: 8px;
+        }
+
+        .recent-achievement-card {
+            flex-direction: column;
+            text-align: center;
+        }
+
+        .achievement-badge {
+            align-self: center;
+        }
+    }
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize circular progress indicators
+    initializeCircularProgress();
+});
+
+function initializeCircularProgress() {
+    const progressElements = document.querySelectorAll('.circular-progress[data-progress]');
+
+    progressElements.forEach((element, index) => {
+        const progress = parseInt(element.getAttribute('data-progress'));
+
+        // Set CSS custom property for the animation
+        element.style.setProperty('--progress', progress + '%');
+
+        // Add slight delay for staggered effect
+        setTimeout(() => {
+            element.style.opacity = '1';
+        }, index * 100);
+    });
+}
+
+// Export for parent page
+window.TrainingProgressUtils = {
+    initializeCircularProgress
+};
+</script>

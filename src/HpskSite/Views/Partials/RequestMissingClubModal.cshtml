@@ -1,0 +1,124 @@
+@* Modal for requesting a missing club to be added *@
+<div class="modal fade" id="requestMissingClubModal" tabindex="-1" aria-labelledby="requestMissingClubModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="requestMissingClubModalLabel">Begär att lägga till klubb</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div id="missingClubResult"></div>
+
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle"></i>
+                    <strong>OBS:</strong> Vi kommer att kontakta klubbens kontaktperson, enligt Svenska Pistolskytteförbundets (SPSF), för godkännande.
+                </div>
+
+                <form id="requestMissingClubForm">
+                    <div class="mb-3">
+                        <label for="clubName" class="form-label">Klubbnamn <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="clubName" name="clubName" required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="clubLocation" class="form-label">Ort/Plats</label>
+                        <input type="text" class="form-control" id="clubLocation" name="clubLocation" placeholder="T.ex. Stockholm, Göteborg">
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="contactPerson" class="form-label">Klubbens kontaktperson (om känd)</label>
+                        <input type="text" class="form-control" id="contactPerson" name="contactPerson" placeholder="Namn på klubbens kontaktperson">
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="requestorEmail" class="form-label">Din e-postadress <span class="text-danger">*</span></label>
+                        <input type="email" class="form-control" id="requestorEmail" name="requestorEmail" required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="additionalNotes" class="form-label">Ytterligare information</label>
+                        <textarea class="form-control" id="additionalNotes" name="additionalNotes" rows="3" placeholder="Övrig information som kan vara till hjälp"></textarea>
+                    </div>
+
+                    <div class="text-muted small">
+                        <i class="bi bi-shield-check"></i> Din information kommer endast att användas för att kontakta klubben och administrera begäran.
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" onclick="submitMissingClubRequest()">Skicka begäran</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function submitMissingClubRequest() {
+    const form = document.getElementById('requestMissingClubForm');
+    const resultDiv = document.getElementById('missingClubResult');
+
+    // Clear previous messages
+    resultDiv.innerHTML = '';
+
+    // Get form data
+    const clubName = document.getElementById('clubName').value.trim();
+    const clubLocation = document.getElementById('clubLocation').value.trim();
+    const contactPerson = document.getElementById('contactPerson').value.trim();
+    const requestorEmail = document.getElementById('requestorEmail').value.trim();
+    const additionalNotes = document.getElementById('additionalNotes').value.trim();
+
+    // Validate required fields
+    if (!clubName || !requestorEmail) {
+        resultDiv.innerHTML = '<div class="alert alert-warning">Fyll i alla obligatoriska fält (markerade med *).</div>';
+        return;
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@@]+@@[^\s@@]+\.[^\s@@]+$/;
+    if (!emailRegex.test(requestorEmail)) {
+        resultDiv.innerHTML = '<div class="alert alert-warning">Ange en giltig e-postadress.</div>';
+        return;
+    }
+
+    // Get anti-forgery token
+    const token = document.querySelector('input[name="__RequestVerificationToken"]').value;
+
+    // Show loading indicator
+    resultDiv.innerHTML = '<div class="alert alert-info"><div class="spinner-border spinner-border-sm me-2"></div>Skickar begäran...</div>';
+
+    // Submit request
+    fetch('/umbraco/surface/Member/RequestMissingClub', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'RequestVerificationToken': token
+        },
+        body: JSON.stringify({
+            clubName: clubName,
+            clubLocation: clubLocation,
+            contactPerson: contactPerson,
+            requestorEmail: requestorEmail,
+            additionalNotes: additionalNotes
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            resultDiv.innerHTML = '<div class="alert alert-success">' + data.message + '</div>';
+            form.reset();
+            // Close modal after 2 seconds
+            setTimeout(function() {
+                bootstrap.Modal.getInstance(document.getElementById('requestMissingClubModal')).hide();
+                resultDiv.innerHTML = '';
+            }, 2000);
+        } else {
+            resultDiv.innerHTML = '<div class="alert alert-danger">Fel: ' + data.message + '</div>';
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        resultDiv.innerHTML = '<div class="alert alert-danger">Ett fel uppstod vid skickandet. Försök igen senare.</div>';
+    });
+}
+</script>

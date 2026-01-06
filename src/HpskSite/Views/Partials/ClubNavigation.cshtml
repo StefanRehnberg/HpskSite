@@ -1,0 +1,31 @@
+@{
+    var clubId = ViewBag.clubId as int? ?? 0;
+    var isClubAdmin = ViewBag.isClubAdmin as bool? ?? false;
+}
+
+<ul class="nav nav-tabs" id="clubPageTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="clubHome-tab" data-bs-toggle="tab" data-bs-target="#clubHome" type="button" role="tab" aria-controls="clubHome" aria-selected="true">
+            <i class="bi bi-house-fill me-2"></i>Hem
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="clubCalendar-tab" data-bs-toggle="tab" data-bs-target="#clubCalendar" type="button" role="tab" aria-controls="clubCalendar" aria-selected="false">
+            <i class="bi bi-calendar-event me-2"></i>Kalender
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="clubMembers-tab" data-bs-toggle="tab" data-bs-target="#clubMembers" type="button" role="tab" aria-controls="clubMembers" aria-selected="false">
+            <i class="bi bi-people-fill me-2"></i>Medlemar
+            <span id="prospectBadge" class="badge bg-warning text-dark ms-2" style="display: none;"></span>
+        </button>
+    </li>
+    @if (isClubAdmin)
+    {
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="clubAdmin-tab" data-bs-toggle="tab" data-bs-target="#clubAdmin" type="button" role="tab" aria-controls="clubAdmin" aria-selected="false">
+                <i class="bi bi-gear-fill me-2"></i>Admin
+            </button>
+        </li>
+    }
+</ul>

@@ -1,0 +1,110 @@
+name: Mobile Build
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'src/HpskSite.Mobile/**'
+      - 'src/HpskSite.Shared/**'
+      - '.github/workflows/mobile-build.yml'
+      - 'global.json'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'src/HpskSite.Mobile/**'
+      - 'src/HpskSite.Shared/**'
+  workflow_dispatch:
+    inputs:
+      deploy_to_play_store:
+        description: 'Deploy to Google Play Internal Testing'
+        required: false
+        default: 'false'
+        type: boolean
+
+jobs:
+  build-android:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Install MAUI workload
+        run: dotnet workload install maui --skip-manifest-update
+
+      - name: Decode Keystore
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" > keystore_base64.txt
+          certutil -decode keystore_base64.txt src/HpskSite.Mobile/Platforms/Android/hpsk-upload-key.keystore
+
+      - name: Publish Android Release (Signed AAB)
+        run: |
+          dotnet publish src/HpskSite.Mobile/HpskSite.Mobile.csproj `
+            -f net9.0-android `
+            -c Release `
+            -p:ApplicationVersion=${{ github.run_number }} `
+            -p:AndroidPackageFormat=aab `
+            -p:AndroidKeyStore=true `
+            -p:AndroidSigningKeyStore=Platforms/Android/hpsk-upload-key.keystore `
+            -p:AndroidSigningKeyAlias=${{ secrets.ANDROID_KEY_ALIAS }} `
+            -p:AndroidSigningKeyPass=${{ secrets.ANDROID_KEY_PASSWORD }} `
+            -p:AndroidSigningStorePass=${{ secrets.ANDROID_STORE_PASSWORD }}
+
+      - name: Upload AAB Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release-aab
+          path: src/HpskSite.Mobile/bin/Release/net9.0-android/publish/*.aab
+          retention-days: 30
+
+      - name: Deploy to Google Play Internal Testing
+        if: github.event.inputs.deploy_to_play_store == 'true'
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: se.hpsk.traningsmatch
+          releaseFiles: src/HpskSite.Mobile/bin/Release/net9.0-android/publish/*.aab
+          track: internal
+          status: completed
+
+  build-ios:
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Select Xcode 16.3
+        run: sudo xcode-select -s /Applications/Xcode_16.3.app
+
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Install MAUI workload
+        run: dotnet workload install maui --skip-manifest-update
+
+      - name: Build iOS
+        run: dotnet build src/HpskSite.Mobile/HpskSite.Mobile.csproj -f net9.0-ios -c Debug

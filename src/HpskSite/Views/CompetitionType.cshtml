@@ -1,0 +1,89 @@
+@using Umbraco.Cms.Web.Common.PublishedModels;
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+	Layout = "Master.cshtml";
+	ViewBag.Title = Model.Value<string>("competitionTypeName") ?? "Competition Type";
+
+	var competitionTypeName = Model.Value<string>("competitionTypeName") ?? "";
+	var description = Model.Value<string>("description") ?? "";
+	var maxSeries = Model.Value<int>("maxSeries");
+	var shotsPerSeries = Model.Value<int>("shotsPerSeries");
+	var maxScorePerShot = Model.Value<string>("maxScorePerShot") ?? "10";
+	var allowPrecisionScoring = Model.Value<bool>("allowPrecisionScoring");
+	var isActive = Model.Value<bool>("isActive");
+}
+
+<div class="container mt-4">
+	<div class="row">
+		<div class="col-lg-8">
+			<h1 class="mb-4">@competitionTypeName</h1>
+
+			<div class="card">
+				<div class="card-header">
+					<h2 class="card-title h4 mb-0">Competition Type Details</h2>
+				</div>
+				<div class="card-body">
+					<div class="row">
+						<div class="col-md-6">
+							<p><strong>Description:</strong></p>
+							<p>@description</p>
+						</div>
+						<div class="col-md-6">
+							<p><strong>Configuration:</strong></p>
+							<ul class="list-unstyled">
+								<li><i class="bi bi-arrow-right"></i> Max Series: <strong>@maxSeries</strong></li>
+								<li><i class="bi bi-arrow-right"></i> Shots per Series: <strong>@shotsPerSeries</strong></li>
+								<li><i class="bi bi-arrow-right"></i> Max Score per Shot: <strong>@maxScorePerShot</strong></li>
+								<li><i class="bi bi-arrow-right"></i> Precision Scoring: <strong>@(allowPrecisionScoring ? "Yes" : "No")</strong></li>
+								<li><i class="bi bi-arrow-right"></i> Status: <strong>@(isActive ? "Active" : "Inactive")</strong></li>
+							</ul>
+						</div>
+					</div>
+				</div>
+			</div>
+
+			@if(allowPrecisionScoring)
+			{
+				<div class="card mt-4">
+					<div class="card-header">
+						<h3 class="card-title h5 mb-0">Precision Scoring Information</h3>
+					</div>
+					<div class="card-body">
+						<p>This competition type uses precision scoring where perfect 10's are distinguished as X's.</p>
+						<ul>
+							<li>Shots scored: 1-10 points (whole numbers)</li>
+							<li>Perfect 10's marked as "X" (still count as 10 points)</li>
+							<li>X-count tracked separately for tie-breaking</li>
+							<li>Maximum per shot: @maxScorePerShot points</li>
+						</ul>
+					</div>
+				</div>
+			}
+		</div>
+
+		<div class="col-lg-4">
+			<div class="card">
+				<div class="card-header">
+					<h3 class="card-title h5 mb-0">Competition Rules</h3>
+				</div>
+				<div class="card-body">
+					<p><strong>Series Structure:</strong></p>
+					<ul>
+						<li>@maxSeries series total</li>
+						<li>@shotsPerSeries shots per series</li>
+						<li>Total shots: @(maxSeries * shotsPerSeries)</li>
+					</ul>
+
+					<hr>
+
+					<p><strong>Scoring:</strong></p>
+					<ul>
+						<li>Max per shot: @maxScorePerShot</li>
+						<li>Max per series: @(shotsPerSeries * int.Parse(maxScorePerShot))</li>
+						<li>Max total: @(maxSeries * shotsPerSeries * int.Parse(maxScorePerShot))</li>
+					</ul>
+				</div>
+			</div>
+		</div>
+	</div>
+</div>

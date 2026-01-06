@@ -1,0 +1,323 @@
+@using Umbraco.Cms.Web.Common.PublishedModels;
+@using Umbraco.Extensions;
+@using Umbraco.Cms.Core.Security;
+@inject IMemberManager MemberManager
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+
+    // Get parent club node (clubHome is child of club)
+    var clubNode = Model?.Parent;
+    var clubId = clubNode?.Id ?? 0;
+    var clubName = clubNode?.Name ?? "Club";
+
+    ViewBag.Title = clubName;
+
+    // Get club properties from parent node
+    var description = clubNode?.Value<string>("description") ?? "";
+    var logo = clubNode?.Value<IPublishedContent>("logo");
+    var bannerImage = clubNode?.Value<IPublishedContent>("bannerImage");
+    var contactPerson = clubNode?.Value<string>("contactPerson") ?? "";
+    var contactEmail = clubNode?.Value<string>("contactEmail") ?? "";
+
+    // Welcome message can come from clubHome page itself
+    var welcomeMessage = Model?.Value<string>("welcomeMessage") ?? description;
+
+    // Get current member to check permissions
+    var currentMember = await MemberManager.GetCurrentMemberAsync();
+    var isClubAdmin = false;
+
+    // TODO: Club admin check - verify against ClubAdmin_{clubId} group
+    // Actual admin permissions will be enforced when admin actions are performed
+}
+
+@{
+    ViewBag.clubId = clubId;
+    ViewBag.clubName = clubName;
+    ViewBag.description = description;
+    ViewBag.logo = logo;
+    ViewBag.bannerImage = bannerImage;
+    ViewBag.isClubAdmin = isClubAdmin;
+}
+
+<div class="club-page container-fluid">
+    <!-- Club Header with Logo and Banner -->
+    @await Html.PartialAsync("ClubHeader")
+
+    <!-- Club Navigation Tabs -->
+    <div class="container mt-4">
+        @await Html.PartialAsync("ClubNavigation")
+
+        <!-- Tab Content -->
+        <div class="tab-content mt-3" id="clubTabContent">
+
+            <!-- Home Tab -->
+            <div class="tab-pane fade show active" id="clubHome" role="tabpanel">
+                <div class="row">
+                    <div class="col-lg-8">
+                        @if (!string.IsNullOrEmpty(welcomeMessage))
+                        {
+                            <div class="card mb-4">
+                                <div class="card-body">
+                                    <h5 class="card-title">Välkommen</h5>
+                                    <p class="card-text">@Html.Raw(welcomeMessage)</p>
+                                </div>
+                            </div>
+                        }
+
+                        <!-- Upcoming Events Preview -->
+                        <div class="card mb-4">
+                            <div class="card-header">
+                                <h5 class="mb-0">
+                                    <i class="bi bi-calendar-event me-2"></i>Kommande Tävlingar
+                                </h5>
+                            </div>
+                            <div class="card-body" id="upcomingEventsContainer">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Laddar tävlingar...</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Recent Results -->
+                        <div class="card">
+                            <div class="card-header">
+                                <h5 class="mb-0">
+                                    <i class="bi bi-trophy me-2"></i>Senaste Resultat
+                                </h5>
+                            </div>
+                            <div class="card-body" id="recentResultsContainer">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Laddar resultat...</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Sidebar Stats -->
+                    <div class="col-lg-4">
+                        <div class="card mb-4 bg-light">
+                            <div class="card-header">
+                                <h6 class="mb-0">Klubbstatistik</h6>
+                            </div>
+                            <div class="card-body">
+                                <div class="stat-item mb-3">
+                                    <small class="text-muted">Medlemmar</small>
+                                    <div class="h4 mb-0" id="memberCount">
+                                        <span class="spinner-border spinner-border-sm" role="status"></span>
+                                    </div>
+                                </div>
+                                <div class="stat-item mb-3">
+                                    <small class="text-muted">Kommande Tävlingar</small>
+                                    <div class="h4 mb-0" id="eventCount">
+                                        <span class="spinner-border spinner-border-sm" role="status"></span>
+                                    </div>
+                                </div>
+                                <div class="stat-item">
+                                    <small class="text-muted">Aktiva Medlemmar</small>
+                                    <div class="h4 mb-0" id="activeCount">
+                                        <span class="spinner-border spinner-border-sm" role="status"></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        @if (isClubAdmin)
+                        {
+                            <div class="card bg-info bg-opacity-10 border-info">
+                                <div class="card-header bg-info bg-opacity-25">
+                                    <h6 class="mb-0">
+                                        <i class="bi bi-shield-check me-2"></i>Klubbadmin
+                                    </h6>
+                                </div>
+                                <div class="card-body">
+                                    <p class="small mb-2">Du har administratörsåtkomst till denna klubb.</p>
+                                    <a href="#" onclick="navigateToTab('clubAdmin')" class="btn btn-sm btn-info">
+                                        <i class="bi bi-gear me-1"></i>Hantera Klubb
+                                    </a>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            <!-- Calendar Tab -->
+            <div class="tab-pane fade" id="clubCalendar" role="tabpanel">
+                @await Html.PartialAsync("ClubCalendar")
+            </div>
+
+            <!-- Members Tab -->
+            <div class="tab-pane fade" id="clubMembers" role="tabpanel">
+                <div class="row">
+                    <div class="col-lg-8">
+                        @await Html.PartialAsync("ClubMembersDirectory")
+                    </div>
+                    <div class="col-lg-4">
+                        @await Html.PartialAsync("ClubNews")
+                    </div>
+                </div>
+            </div>
+
+            @if (isClubAdmin)
+            {
+                <!-- Admin Tab (only for club admins) -->
+                <div class="tab-pane fade" id="clubAdmin" role="tabpanel">
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle me-2"></i>
+                        Klubbadministrationsfunktioner kommer snart.
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+<!-- Bootstrap Icons -->
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+
+<!-- JavaScript for club page functionality -->
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const clubId = @clubId;
+
+    if (clubId > 0) {
+        loadClubStats();
+        loadUpcomingEvents();
+        loadRecentResults();
+    } else {
+        // Show placeholder when clubId is not available
+        document.getElementById('upcomingEventsContainer').innerHTML = '<p class="text-warning">Klubb-ID krävs för att ladda data.</p>';
+        document.getElementById('recentResultsContainer').innerHTML = '<p class="text-warning">Klubb-ID krävs för att ladda data.</p>';
+    }
+});
+
+function navigateToTab(tabName) {
+    const tab = new bootstrap.Tab(document.querySelector(`#${tabName}-tab`));
+    tab.show();
+}
+
+function loadClubStats() {
+    // Load club statistics via API
+    fetch(`/umbraco/surface/Club/GetClubStats?clubId=@clubId`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                document.getElementById('memberCount').textContent = data.data.memberCount || 0;
+                document.getElementById('eventCount').textContent = data.data.upcomingEventCount || 0;
+                document.getElementById('activeCount').textContent = data.data.activeMembers || 0;
+            }
+        })
+        .catch(error => console.error('Error loading club stats:', error));
+}
+
+function loadUpcomingEvents() {
+    // Load upcoming events
+    fetch(`/umbraco/surface/Club/GetUpcomingEvents?clubId=@clubId&days=30`)
+        .then(response => response.json())
+        .then(data => {
+            const container = document.getElementById('upcomingEventsContainer');
+            if (data.success && data.data.length > 0) {
+                let html = '<ul class="list-group list-group-flush">';
+                data.data.slice(0, 5).forEach(event => {
+                    html += `
+                        <li class="list-group-item">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div>
+                                    <h6 class="mb-1">${event.name}</h6>
+                                    <small class="text-muted">${new Date(event.date).toLocaleDateString('sv-SE')}</small>
+                                </div>
+                                <span class="badge bg-secondary">${event.type}</span>
+                            </div>
+                        </li>
+                    `;
+                });
+                html += '</ul>';
+                container.innerHTML = html;
+            } else {
+                container.innerHTML = '<p class="text-muted">Inga kommande tävlingar inplanerade.</p>';
+            }
+        })
+        .catch(error => {
+            console.error('Error loading events:', error);
+            document.getElementById('upcomingEventsContainer').innerHTML = '<p class="text-danger">Fel vid hämtning av tävlingar.</p>';
+        });
+}
+
+function loadRecentResults() {
+    // Load recent competition results for club members
+    fetch(`/umbraco/surface/Club/GetRecentResults?clubId=@clubId&limit=5`)
+        .then(response => response.json())
+        .then(data => {
+            const container = document.getElementById('recentResultsContainer');
+            if (data.success && data.data.length > 0) {
+                let html = '<ul class="list-group list-group-flush">';
+                data.data.forEach(result => {
+                    html += `
+                        <li class="list-group-item">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div>
+                                    <h6 class="mb-1">${result.memberName}</h6>
+                                    <small class="text-muted">${result.competitionName}</small>
+                                </div>
+                                <div class="text-end">
+                                    <div class="h6 mb-0">${result.score || 'N/A'}</div>
+                                    <small class="text-muted">${result.placement ? result.placement + ' place' : ''}</small>
+                                </div>
+                            </div>
+                        </li>
+                    `;
+                });
+                html += '</ul>';
+                container.innerHTML = html;
+            } else {
+                container.innerHTML = '<p class="text-muted">Inga senaste resultat hittade.</p>';
+            }
+        })
+        .catch(error => {
+            console.error('Error loading results:', error);
+            document.getElementById('recentResultsContainer').innerHTML = '<p class="text-danger">Fel vid hämtning av resultat.</p>';
+        });
+}
+</script>
+
+<style>
+.club-page {
+    padding-bottom: 2rem;
+}
+
+.stat-item {
+    padding: 0;
+}
+
+.stat-item small {
+    display: block;
+    font-weight: 500;
+}
+
+#clubPage .nav-tabs .nav-link {
+    border-bottom: 3px solid transparent;
+    color: #6c757d;
+}
+
+#clubPage .nav-tabs .nav-link:hover {
+    border-bottom-color: #0d6efd;
+    color: #0d6efd;
+}
+
+#clubPage .nav-tabs .nav-link.active {
+    border-bottom-color: #0d6efd;
+    color: #0d6efd;
+    background-color: transparent;
+}
+
+.list-group-item {
+    border-left: 4px solid transparent;
+    transition: all 0.2s ease;
+}
+
+.list-group-item:hover {
+    border-left-color: #0d6efd;
+    background-color: #f8f9fa;
+}
+</style>

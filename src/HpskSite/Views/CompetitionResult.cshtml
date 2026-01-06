@@ -1,0 +1,399 @@
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@using Newtonsoft.Json
+@using Umbraco.Cms.Core.Models.PublishedContent
+@using Umbraco.Extensions
+@using Umbraco.Cms.Core.Security
+@using Umbraco.Cms.Core.Services
+@inject IMemberManager MemberManager
+@inject IMemberService MemberService
+@inject HpskSite.Services.ClubService ClubService
+@{
+    Layout = null;
+    var competition = Model.Parent; // Competition -> Result (direct child)
+    
+    // Get properties using Value<T>
+    var resultData = Model.Value<string>("resultData") ?? "";
+    var lastUpdated = Model.Value<DateTime>("lastUpdated", fallback: Fallback.ToDefaultValue, defaultValue: DateTime.Now);
+    var isOfficial = Model.Value<bool>("isOfficial", fallback: Fallback.ToDefaultValue, defaultValue: false);
+    
+    // Get competition configuration for finals
+    var numberOfSeriesOrStations = 0;
+    var numberOfFinalSeries = 0;
+    try { numberOfSeriesOrStations = competition.Value<int>("numberOfSeriesOrStations"); } catch { }
+    try { numberOfFinalSeries = competition.Value<int>("numberOfFinalSeries"); } catch { }
+    
+    var hasFinalsRound = numberOfFinalSeries > 0;
+    var qualificationSeriesCount = hasFinalsRound ? (numberOfSeriesOrStations - numberOfFinalSeries) : numberOfSeriesOrStations;
+    
+    // Get current member info for highlighting
+    var currentMember = await MemberManager.GetCurrentMemberAsync();
+    var currentMemberName = currentMember?.Name ?? "";
+    var currentMemberClub = "";
+    
+    if (currentMember != null)
+    {
+        var memberData = MemberService.GetByEmail(currentMember.Email ?? "");
+        if (memberData != null)
+        {
+            var primaryClubIdStr = memberData.GetValue<string>("primaryClubId");
+            if (!string.IsNullOrEmpty(primaryClubIdStr) && int.TryParse(primaryClubIdStr, out int primaryClubId))
+            {
+                currentMemberClub = ClubService.GetClubNameById(primaryClubId) ?? "";
+            }
+        }
+    }
+}
+
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@Model.Name - @competition.Name</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <style>
+        body { padding: 20px; background-color: #f8f9fa; font-family: Arial, sans-serif; }
+        .print-only { display: none; }
+        
+        /* Plain table styling like start lists */
+        .results-table {
+            font-size: 11px;
+            width: 100%;
+            border-collapse: collapse;
+            margin: 10px 0;
+            background: white;
+        }
+        
+        .results-table th,
+        .results-table td {
+            padding: 3px 6px;
+            border: 1px solid #ddd;
+            text-align: left;
+            line-height: 1.2;
+            white-space: nowrap;
+        }
+        
+        .results-table th {
+            background-color: #f5f5f5;
+            font-weight: bold;
+            font-size: 10px;
+            text-align: center;
+        }
+        
+        .results-table td {
+            font-size: 11px;
+        }
+        
+        .results-table .text-center {
+            text-align: center;
+        }
+        
+        .results-table .text-right {
+            text-align: right;
+        }
+        
+        /* Class header styling */
+        .class-header {
+            background-color: #e9ecef;
+            padding: 8px 12px;
+            margin: 20px 0 5px 0;
+            border-left: 4px solid #007bff;
+            font-weight: bold;
+            font-size: 14px;
+        }
+        
+        /* Compact spacing */
+        .class-results-section {
+            margin-bottom: 25px;
+        }
+        
+        /* User highlighting */
+        .current-user { background-color: #cce5ff !important; } /* Light blue for current user */
+        .same-club { background-color: #f0f8ff !important; } /* Very light blue for same club */
+        
+        .x-count { color: #dc3545; font-size: 9px; }
+        
+        @@media print {
+            .no-print { display: none !important; }
+            .print-only { display: block !important; }
+            body { background-color: white; padding: 0; font-size: 10px; }
+            .results-table { font-size: 9px; }
+            .results-table th, .results-table td { padding: 2px 4px; }
+            .class-header { font-size: 12px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="d-flex justify-content-between align-items-center mb-4 no-print">
+            <div>
+                <h1>
+                        <i class="bi bi-trophy text-warning me-2"></i>
+                                @Model.Name
+                </h1>
+                <p class="text-muted mb-0">@competition.Name</p>
+                            </div>
+                        <div>
+                <button class="btn btn-outline-secondary" onclick="window.print()">
+                                <i class="bi bi-printer me-1"></i>Skriv ut
+                            </button>
+                            </div>
+                        </div>
+
+        <!-- Print Header -->
+        <div class="print-only mb-4">
+            <h1>@Model.Name</h1>
+            <h2>@competition.Name</h2>
+            <p><strong>Datum:</strong> @lastUpdated.ToString("yyyy-MM-dd HH:mm")</p>
+            <p><strong>Status:</strong> @(isOfficial ? "Officiellt" : "Preliminärt")</p>
+            <hr>
+                    </div>
+
+        <!-- Results Content -->
+        <div id="resultsContent">
+            <div class="text-center py-4">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Laddar resultat...</span>
+                    </div>
+                <p class="mt-2">Laddar resultat...</p>
+                </div>
+            </div>
+        </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
+<script>
+    // Get competition ID from the URL or parent
+    const competitionId = @(competition?.Id ?? 0);
+    const refreshInterval = 15000; // 15 seconds
+    let autoRefreshTimer = null;
+    let isOfficialResults = false;
+    
+    // Finals configuration
+    const hasFinalsRound = @(hasFinalsRound.ToString().ToLower());
+    const qualificationSeriesCount = @qualificationSeriesCount;
+    const numberOfFinalSeries = @numberOfFinalSeries;
+    const totalSeriesCount = @numberOfSeriesOrStations;
+    
+    // Current user info for highlighting
+    const currentUserName = '@Html.Raw(currentMemberName.Replace("'", "\\'"))';
+    const currentUserClub = '@Html.Raw(currentMemberClub.Replace("'", "\\'"))';
+        
+        // Fetch and display results
+        async function loadResults() {
+            const container = document.getElementById('resultsContent');
+            
+            try {
+                const response = await fetch(`/umbraco/surface/CompetitionResults/GetResultsList?competitionId=${competitionId}`);
+                const data = await response.json();
+                
+                if (!data.success || !data.exists) {
+                    container.innerHTML = `
+                            <div class="alert alert-info">
+                                <h4 class="alert-heading">Inga resultat ännu</h4>
+                            <p class="mb-0">Det finns inga registrerade resultat för denna tävling ännu. Resultat visas automatiskt här när domare börjar registrera skjutresultat.</p>
+                            </div>
+                    `;
+                    return;
+                }
+                
+                isOfficialResults = data.isOfficial;
+                const results = data.results;
+                const isAwardingStandardMedals = data.isAwardingStandardMedals || false;
+                
+                // Build HTML for results
+                let html = '';
+                
+                if (results.classGroups && results.classGroups.length > 0) {
+                    results.classGroups.forEach(classGroup => {
+                        // Class header
+                        html += `
+                            <div class="class-results-section">
+                                <div class="class-header">
+                                    ${classGroup.className} (${classGroup.shooters.length} deltagare)
+                                </div>
+                                <table class="results-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Plats</th>
+                                            <th>Namn</th>
+                                            <th>Förening</th>
+                                            <th>Vapengrupp</th>
+                        `;
+
+                        html += ``;
+
+                        // Add series columns (numbered)
+                        if (classGroup.shooters.length > 0 && classGroup.shooters[0].results) {
+                            const seriesCount = classGroup.shooters[0].results.length;
+                            
+                            if (hasFinalsRound && seriesCount >= totalSeriesCount) {
+                                // Competition with finals: show qualification series, qual total, final series, final total
+                                for (let i = 1; i <= qualificationSeriesCount; i++) {
+                                    html += `<th>${i}</th>`;
+                                }
+                                html += `<th>Tot</th>`; // Qualification total
+                                for (let i = 1; i <= numberOfFinalSeries; i++) {
+                                    html += `<th>F${i}</th>`;
+                                }
+                            } else {
+                                // Regular competition: just number the series
+                                for (let i = 1; i <= seriesCount; i++) {
+                                    html += `<th>${i}</th>`;
+                                }
+                            }
+                        }
+                        
+                        html += `
+                                            <th>Tot</th>
+                                            <th>X</th>
+                        `;
+
+                        // Add Standard Medal column header if enabled (at the end)
+                        if (isAwardingStandardMedals) {
+                            html += `<th>S</th>`;
+                        }
+
+                        html += `
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                        `;
+                        
+                        // Add shooters
+                        classGroup.shooters.forEach((shooter, index) => {
+                            const position = index + 1;
+                            let totalScore = 0;
+                            let totalXCount = 0;
+                            let qualificationScore = 0;
+                            let finalsScore = 0;
+                            
+                            // Calculate series scores
+                            const seriesScores = [];
+                            shooter.results.forEach(result => {
+                                const shots = JSON.parse(result.shots);
+                                let score = 0;
+                                let xCount = 0;
+                                shots.forEach(shot => {
+                                    score += (shot === 'X' ? 10 : parseInt(shot));
+                                    if (shot === 'X') xCount++;
+                                });
+                                seriesScores.push({score, xCount});
+                                totalScore += score;
+                                totalXCount += xCount;
+                            });
+                            
+                            // Calculate qualification and finals scores if applicable
+                            if (hasFinalsRound && seriesScores.length >= totalSeriesCount) {
+                                qualificationScore = seriesScores.slice(0, qualificationSeriesCount).reduce((sum, s) => sum + s.score, 0);
+                                finalsScore = seriesScores.slice(qualificationSeriesCount, totalSeriesCount).reduce((sum, s) => sum + s.score, 0);
+                            }
+                            
+                            // Row styling - prioritize user highlighting over position
+                            let rowClass = '';
+                            if (currentUserName && shooter.name === currentUserName) {
+                                rowClass = 'current-user';
+                            } else if (currentUserClub && shooter.club === currentUserClub) {
+                                rowClass = 'same-club';
+                            }
+                            
+                            html += `
+                                <tr class="${rowClass}">
+                                    <td class="text-center">${position}</td>
+                                    <td>${shooter.name}</td>
+                                    <td>${shooter.club}</td>
+                                    <td class="text-center">${shooter.shootingClass || classGroup.className}</td>
+                            `;
+
+                            // Add series scores
+                            if (hasFinalsRound && seriesScores.length >= totalSeriesCount) {
+                                // Show qualification series
+                                for (let i = 0; i < qualificationSeriesCount; i++) {
+                                    if (i < seriesScores.length) {
+                                        html += `<td class="text-center">${seriesScores[i].score}</td>`;
+                                    } else {
+                                        html += `<td class="text-center">-</td>`;
+                                    }
+                                }
+                                // Show qualification total
+                                html += `<td class="text-center"><strong>${qualificationScore}</strong></td>`;
+                                // Show finals series
+                                for (let i = qualificationSeriesCount; i < totalSeriesCount; i++) {
+                                    if (i < seriesScores.length) {
+                                        html += `<td class="text-center">${seriesScores[i].score}</td>`;
+                                    } else {
+                                        html += `<td class="text-center">-</td>`;
+                                    }
+                                }
+                            } else {
+                                // Regular competition: show all series
+                                seriesScores.forEach(s => {
+                                    html += `<td class="text-center">${s.score}</td>`;
+                                });
+                            }
+                            
+                            html += `
+                                    <td class="text-center"><strong>${totalScore}</strong></td>
+                                    <td class="text-center">${totalXCount}</td>
+                            `;
+
+                            // Add Standard Medal cell if enabled (at the end)
+                            if (isAwardingStandardMedals) {
+                                const medal = shooter.standardMedal || '';
+                                html += `<td class="text-center"><strong>${medal}</strong></td>`;
+                            }
+
+                            html += `
+                                </tr>
+                            `;
+                        });
+                        
+                        html += `
+                                    </tbody>
+                                </table>
+                            </div>
+                        `;
+                    });
+                    
+                    container.innerHTML = html;
+                    
+                    // Setup auto-refresh for preliminary results
+                    if (!isOfficialResults && !autoRefreshTimer) {
+                        console.log('Preliminary results - enabling auto-refresh');
+                        autoRefreshTimer = setInterval(loadResults, refreshInterval);
+                    }
+                } else {
+                    container.innerHTML = `
+                        <div class="alert alert-warning">
+                            <h4 class="alert-heading">Ingen resultatdata tillgänglig</h4>
+                            <p class="mb-0">Resultatdata finns men kunde inte formateras korrekt.</p>
+                    </div>
+                    `;
+                }
+            } catch (error) {
+                console.error('Error loading results:', error);
+                container.innerHTML = `
+                    <div class="alert alert-danger">
+                        <h4 class="alert-heading">Fel vid laddning av resultat</h4>
+                        <p class="mb-0">${error.message}</p>
+                </div>
+                `;
+            }
+        }
+        
+        // Load results when page loads
+        document.addEventListener('DOMContentLoaded', loadResults);
+        
+        // Stop auto-refresh when page is hidden
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden && autoRefreshTimer) {
+                clearInterval(autoRefreshTimer);
+                autoRefreshTimer = null;
+            } else if (!document.hidden && !isOfficialResults && !autoRefreshTimer) {
+                autoRefreshTimer = setInterval(loadResults, refreshInterval);
+            }
+        });
+</script>
+            </body>
+            </html>

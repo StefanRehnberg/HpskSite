@@ -1,0 +1,57 @@
+Access and permissions
+
+First and lowest level is a Visitor. This is someone that is not loged in, they have access to:
+Training page (/training-page/) but can only see the tabs "Trappan" and "Deltagare". Members listed in the list on the tab "Deltagare" will only show with first name and last name first initial. 
+Competitions list page (/competitions/) but not view details of individual competitions.
+Clubs page (/clubs/) and any clubs pages like /clubs/haaplinge/ but only basic information on the club "Home" tab.
+Contacts page (/contact/).
+
+Second level is a User. This is a loged in user that is a member of a club, the users Umbraco Member type User, have a property called primaryClubId that is the Id of the users club. A User is invalid without a primaryClubId. A Visitor applies to becom a member of a Club and if approved by a club admin or full administrator, will become a member of type User
+The User can access all that a Visitor can access and also:
+Can see all the tabs on the Training page and the full names od members listed in the list on the tab "Deltagare".
+View details of competitions and register for competitions.
+Have a /user-profile-page/.
+View its own clubs page calendar and members, but no access to the clubs Admin tab.
+
+A special permission for a User is a User that has been tagged in a competition as a Competition Manager. This type of User can also manage that competition. The Id of the users that are Competition Manager, are saved in the Umbraco document Competition in property competitionManagers as json array.
+Competition Managers have access to:
+- Manage competition button and competition management page for their assigned competitions
+- View and manage registrations for their assigned competitions
+- Edit competition details and results
+
+The next level is Club Admin. This is a user that can access its own clubs Admin tab and all it's sub tabs. And as such can create Club level competitions and assign other club members as Competition admins and approve Visitor prospects as members of the club, make them a User. A Club Admin is saved in Umbraco as Member Group called "ClubAdmin_xxxx" where xxxx is the Id of the club, the user is then assigned to this group. This is managed on the general admin page /admin-page/ on the tab "Klubbhantering" so only a full Administrator with access to that page can assign Club Admins. So each club must have a corresponding Member Group.
+Club Admins have access to:
+- Club Admin tab on their club's page with Events, Competitions, and Settings tabs
+- Create, edit, and delete club events and news
+- View and manage competitions created by their club (only if competition.clubId matches their club)
+- View and manage registrations for their club's competitions
+- Update club information and settings
+- Approve pending member applications for their club
+
+The final level is Administrator, can access all of the site and all functions. This is the Umbraco Member Group Administrator.
+Administrators have access to:
+- Full admin panel at /admin-page/ with all management tabs
+- Manage all clubs, competitions, members, and content
+- Assign Club Admins and Competition Managers
+- View and manage all registrations and results
+- Override all permission restrictions
+
+AUTHORIZATION IMPLEMENTATION (Updated 2025-11-02):
+The site uses centralized authorization through AdminAuthorizationService (Services/AdminAuthorizationService.cs) with the following key methods:
+- IsCurrentUserAdminAsync() - Checks if user is in "Administrators" group
+- IsClubAdminForClub(clubId) - Checks if user is in "ClubAdmin_{clubId}" group or is site admin
+- GetManagedClubIds() - Returns list of club IDs the user can administer
+- IsCompetitionManager(competitionId) - Checks if user's ID is in competition's competitionManagers JSON array or is site admin
+
+Most endpoints follow a three-tier authorization pattern:
+1. Check if Site Admin (has access to everything)
+2. Check if Competition Manager (for competition-specific resources)
+3. Check if Club Admin for the relevant club (for club-scoped resources)
+Access is granted if ANY of these conditions are met.
+
+SECURITY NOTES:
+- Never check just for page existence (e.g., adminPage) - always validate actual user permissions
+- Always use centralized AdminAuthorizationService methods instead of duplicating authorization logic
+- Server-side filtering is used to ensure club admins only see data for their managed clubs
+- Competition managers are identified by ID (stored in JSON array), not by name
+- All modification endpoints validate authorization before allowing changes

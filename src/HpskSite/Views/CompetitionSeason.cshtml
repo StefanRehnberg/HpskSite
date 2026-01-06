@@ -1,0 +1,653 @@
+@using Umbraco.Cms.Web.Common.PublishedModels;
+@using HpskSite.Extensions
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+    ViewBag.Title = Model.Value<string>("pageTitle") ?? Model.Name;
+
+    // Get competitions in this season
+    var allCompetitions = Model.Children.Where(x => x.ContentType.Alias == "competition").ToList();
+
+    // Get unique venues for filtering
+    var allVenues = allCompetitions.Select(c => c.Value<string>("venue")).Where(v => !string.IsNullOrEmpty(v)).Distinct().OrderBy(v => v).ToList();
+
+    // Group competitions by status
+    var now = DateTime.Now;
+    var openCompetitions = allCompetitions.Where(c =>
+    {
+        var isActive = c.Value<bool>("isActive");
+        var regOpenDate = c.Value<DateTime>("registrationOpenDate");
+        var regCloseDate = c.Value<DateTime>("registrationCloseDate");
+        return isActive && regOpenDate <= now && regCloseDate >= now;
+    }).ToList();
+
+    var upcomingCompetitions = allCompetitions.Where(c =>
+    {
+        var isActive = c.Value<bool>("isActive");
+        var regOpenDate = c.Value<DateTime>("registrationOpenDate");
+        return isActive && regOpenDate > now;
+    }).ToList();
+
+    var activeCompetitions = allCompetitions.Where(c =>
+    {
+        var isActive = c.Value<bool>("isActive");
+        var regCloseDate = c.Value<DateTime>("registrationCloseDate");
+        var compDate = c.Value<DateTime>("competitionDate");
+        return isActive && regCloseDate < now && compDate >= now;
+    }).ToList();
+
+    var completedCompetitions = allCompetitions.Where(c =>
+    {
+        var compDate = c.Value<DateTime>("competitionDate");
+        return compDate < now;
+    }).OrderByDescending(c =>
+    {
+        return c.Value<DateTime>("competitionDate");
+    }).ToList();
+
+    // Get unique competition types from competitions in this season
+    var competitionTypes = Model.Root().DescendantsOrSelf().Where(x => x.ContentType.Alias == "competitionType").ToList();
+}
+
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-12">
+            <!-- Breadcrumb -->
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a href="@Model.Root().Url()">Hem</a></li>
+                    @if (Model.Parent.ContentType.Alias == "competitionsHub")
+                    {
+                        <li class="breadcrumb-item"><a href="@Model.Parent.Url()">Tävlingar</a></li>
+                    }
+                    <li class="breadcrumb-item active">@Model.Name</li>
+                </ol>
+            </nav>
+
+            <h1 class="mb-4">@(Model.Value<string>("pageTitle") ?? Model.Name)</h1>
+
+            @if (!string.IsNullOrEmpty(Model.Value<string>("seasonDescription")))
+            {
+                <p class="lead">@(Model.Value<string>("seasonDescription"))</p>
+            }
+        </div>
+    </div>
+
+
+    <!-- Filter Section -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <!-- Primary Filter Pills (Always Visible) -->
+            <div class="d-flex flex-wrap gap-2 mb-3 align-items-center">
+                <button class="btn btn-outline-success filter-pill active" data-status="open" title="Klicka för att visa/dölja öppna tävlingar">
+                    ?? Öppna (<span id="open-count">@openCompetitions.Count</span>)
+                </button>
+                <button class="btn btn-outline-warning filter-pill active" data-status="upcoming" title="Klicka för att visa/dölja kommande tävlingar">
+                    ?? Kommande (<span id="upcoming-count">@upcomingCompetitions.Count</span>)
+                </button>
+                <button class="btn btn-outline-primary filter-pill active" data-status="active" title="Klicka för att visa/dölja pågående tävlingar">
+                    ?? Pågående (<span id="active-count">@activeCompetitions.Count</span>)
+                </button>
+                <button class="btn btn-outline-secondary filter-pill" data-status="completed" title="Klicka för att visa/dölja avslutade tävlingar">
+                    ? Avslutade (<span id="completed-count">@completedCompetitions.Count</span>)
+                </button>
+
+                <!-- Expander Button -->
+                <button class="btn btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#advancedFilters" aria-expanded="false" aria-controls="advancedFilters">
+                    <i class="bi bi-funnel"></i> Mer filter
+                    <i class="bi bi-chevron-down ms-1" id="expanderIcon"></i>
+                </button>
+
+                <!-- Clear Filters (always visible) -->
+                <button class="btn btn-outline-dark ms-auto" id="clearFilters">
+                    <i class="bi bi-x-circle"></i> Rensa
+                </button>
+
+                <!-- Season Overview Toggle -->
+                <button class="btn btn-outline-info" id="toggleOverview" title="Visa/dölj säsongsöversikt">
+                    <i class="bi bi-graph-up"></i> Översikt
+                </button>
+            </div>
+
+            <!-- Advanced Filters (Collapsible) -->
+            <div class="collapse" id="advancedFilters">
+                <div class="card bg-light">
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <!-- Search Box -->
+                            <div class="col-md-3">
+                                <label for="searchCompetitions" class="form-label">
+                                    <i class="bi bi-search"></i> Sök tävlingar
+                                </label>
+                                <input type="text" class="form-control" id="searchCompetitions" placeholder="Sök på namn, plats eller beskrivning...">
+                            </div>
+
+                            <!-- Competition Type Filter -->
+                            <div class="col-md-3">
+                                <label for="filterCompetitionType" class="form-label">
+                                    <i class="bi bi-trophy"></i> Tävlingstyp
+                                </label>
+                                <select class="form-select" id="filterCompetitionType">
+                                    <option value="">Alla typer</option>
+                                    @foreach (var type in competitionTypes.Where(t => t.Value<bool>("isActive", fallback: Fallback.ToDefaultValue, defaultValue: true)))
+                                    {
+                                        <option value="@type.Id">@type.Name</option>
+                                    }
+                                </select>
+                            </div>
+
+                            <!-- Venue Filter -->
+                            <div class="col-md-4">
+                                <label for="filterVenue" class="form-label">
+                                    <i class="bi bi-geo-alt"></i> Plats
+                                </label>
+                                <select class="form-select" id="filterVenue">
+                                    <option value="">Alla platser</option>
+                                    @foreach (var venue in allVenues)
+                                    {
+                                        <option value="@venue">@venue</option>
+                                    }
+                                </select>
+                            </div>
+
+                            <!-- Sort Options -->
+                            <div class="col-md-2">
+                                <label for="sortCompetitions" class="form-label">
+                                    <i class="bi bi-sort-down"></i> Sortera
+                                </label>
+                                <select class="form-select" id="sortCompetitions">
+                                    <option value="date-desc">Datum ?</option>
+                                    <option value="date-asc">Datum ?</option>
+                                    <option value="name-asc">Namn A-Z</option>
+                                    <option value="name-desc">Namn Z-A</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Season Overview (Collapsible) -->
+    <div class="collapse" id="seasonOverview">
+        <div class="row mb-4">
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">Säsongssammanfattning</h5>
+                    </div>
+                    <div class="card-body">
+                        @if (!string.IsNullOrEmpty(Model.Value<string>("seasonDescription")))
+                        {
+                            <p class="lead">@(Model.Value<string>("seasonDescription"))</p>
+                        }
+
+                        <div class="row text-center">
+                            <div class="col-md-3">
+                                <div class="overview-stats border rounded p-3 mb-3">
+                                    <h4 class="text-primary">@allCompetitions.Count</h4>
+                                    <small class="text-muted">Totalt tävlingar</small>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="overview-stats border rounded p-3 mb-3">
+                                    <h4 class="text-success">@openCompetitions.Count</h4>
+                                    <small class="text-muted">Öppna</small>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="overview-stats border rounded p-3 mb-3">
+                                    <h4 class="text-warning">@upcomingCompetitions.Count</h4>
+                                    <small class="text-muted">Kommande</small>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="overview-stats border rounded p-3 mb-3">
+                                    <h4 class="text-secondary">@completedCompetitions.Count</h4>
+                                    <small class="text-muted">Avslutade</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h6 class="mb-0">Snabbaccess</h6>
+                    </div>
+                    <div class="card-body quick-actions">
+                        <div class="d-grid gap-2">
+                            <a href="@Model.Parent.Url()" class="btn btn-outline-primary btn-sm">
+                                <i class="bi bi-arrow-left"></i> Alla tävlingar
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- All Competitions Grid -->
+    <div class="mt-4" id="competitionsGrid">
+        <div class="row">
+            @foreach (var competition in allCompetitions)
+            {
+                // Get competition details
+                var compDate = competition.Value<DateTime>("competitionDate");
+                var regCloseDate = competition.Value<DateTime>("registrationCloseDate");
+                var regOpenDate = competition.Value<DateTime>("registrationOpenDate");
+                var description = competition.Value<string>("description");
+                var venue = competition.Value<string>("venue");
+                var maxParticipants = competition.Value<int>("maxParticipants");
+                var registrationFee = competition.Value<string>("registrationFee");
+                var competitionType = competition.Value<IPublishedContent>("competitionType");
+                var competitionTypeId = competitionType?.Id.ToString() ?? "";
+                var competitionTypeName = competitionType?.Name ?? "Okänd typ";
+
+                // Multiple shooting classes support - handle string array from multiselect
+                var shootingClassIdsRaw = competition.Value("shootingClassIds");
+                var shootingClassIds = "";
+                if (shootingClassIdsRaw is string[] stringArray)
+                {
+                    shootingClassIds = string.Join(",", stringArray);
+                }
+                else if (shootingClassIdsRaw is string stringValue)
+                {
+                    shootingClassIds = stringValue ?? "";
+                }
+                // Define shooting classes (hardcoded Swedish weapon classes)
+                var shootingClasses = new List<dynamic>
+                {
+                    new { Id = "A1", Name = "A1", Description = "Vapenklass A för nybörjare" },
+                    new { Id = "A2", Name = "A2", Description = "Vapenklass A för Guldmärkesskyttar" },
+                    new { Id = "A3", Name = "A3", Description = "Vapenklass A för Riksmästare" },
+                    new { Id = "B1", Name = "B1", Description = "Vapenklass B för nybörjare" },
+                    new { Id = "B2", Name = "B2", Description = "Vapenklass B för Guldmärkesskyttar" },
+                    new { Id = "B3", Name = "B3", Description = "Vapenklass B för Riksmästare" },
+                    new { Id = "C1", Name = "C1", Description = "Vapenklass C öppen för nybörjare" },
+                    new { Id = "C2", Name = "C2", Description = "Vapenklass C öppen för Guldmärkesskyttar" },
+                    new { Id = "C3", Name = "C3", Description = "Vapenklass C öppen för Riksmästare" },
+                    new { Id = "C_Vet_Y", Name = "C Vet Y", Description = "Vapenklass C Veteran Yngre" },
+                    new { Id = "C_Vet_A", Name = "C Vet Ä", Description = "Vapenklass C Veteran Äldre" },
+                    new { Id = "C_Jun", Name = "C Jun", Description = "Vapenklass C Juniorer" },
+                    new { Id = "C1_Dam", Name = "C1 Dam", Description = "Vapenklass C Dam för nybörjare" },
+                    new { Id = "C2_Dam", Name = "C2 Dam", Description = "Vapenklass C Dam för Guldmärkesskyttar" },
+                    new { Id = "C3_Dam", Name = "C3 Dam", Description = "Vapenklass C Dam för Riksmästare" }
+                };
+
+                // Get all shooting classes for this competition
+                var competitionShootingClasses = new List<dynamic>();
+                if (!string.IsNullOrEmpty(shootingClassIds))
+                {
+                    var ids = shootingClassIds.Split(',').Select(id => id.Trim()).Where(id => !string.IsNullOrEmpty(id)).ToList();
+                    competitionShootingClasses = shootingClasses.Where(sc => ids.Contains(sc.Id)).ToList<dynamic>();
+                }
+
+                var shootingClassName = competitionShootingClasses.Any()
+                    ? string.Join(", ", competitionShootingClasses.Select(sc => sc.Name))
+                    : "Inga klasser";
+                var allShootingClassIds = string.Join(",", competitionShootingClasses.Select(sc => sc.Id));
+                var isActive = competition.Value<bool>("isActive");
+
+                // Calculate status
+                var status = "completed";
+                var statusText = "? Avslutad";
+                var statusClass = "secondary";
+                var buttonText = "Visa Tävling";
+                var buttonClass = "btn-secondary";
+
+                if (isActive && compDate.Date >= now.Date)
+                {
+                    if (regOpenDate <= now && regCloseDate >= now)
+                    {
+                        status = "open";
+                        statusText = "?? Anmälan öppen";
+                        statusClass = "success";
+                        buttonClass = "btn-success";
+                    }
+                    else if (regOpenDate > now)
+                    {
+                        status = "upcoming";
+                        statusText = "?? Anmälan öppnar snart";
+                        statusClass = "warning";
+                        buttonClass = "btn-warning";
+                    }
+                    else if (compDate.Date == now.Date)
+                    {
+                        status = "active";
+                        statusText = "?? Pågående tävling";
+                        statusClass = "primary";
+                        buttonClass = "btn-primary";
+                    }
+                    else if (regCloseDate < now && compDate.Date > now.Date)
+                    {
+                        status = "active";
+                        statusText = "?? Pågående tävling";
+                        statusClass = "primary";
+                        buttonClass = "btn-primary";
+                    }
+                }
+
+                <div class="col-md-6 col-lg-4 mb-4 competition-card"
+                     data-status="@status"
+                     data-name="@competition.Name.ToLower()"
+                     data-venue="@venue"
+                     data-description="@description?.ToLower()"
+                     data-competition-type="@competitionTypeId"
+                     data-shooting-class="@allShootingClassIds"
+                     data-date="@compDate.ToString("yyyy-MM-dd")"
+                     data-search-text="@((competition.Name + " " + venue + " " + description + " " + competitionTypeName + " " + shootingClassName).ToLower())">
+                    <div class="card h-100 border-@statusClass">
+                        <div class="card-header bg-@statusClass text-white">
+                            <h5 class="card-title mb-0">@competition.Name</h5>
+                            <small>@statusText</small>
+                        </div>
+                        <div class="card-body">
+                            <p class="card-text">@description</p>
+                            <ul class="list-unstyled small">
+                                <li><i class="bi bi-calendar"></i> @compDate.ToString("yyyy-MM-dd")</li>
+                                <li><i class="bi bi-geo-alt"></i> @venue</li>
+                                <li><i class="bi bi-people"></i> Max: @maxParticipants deltagare</li>
+                                <li><i class="bi bi-currency-dollar"></i> @registrationFee</li>
+                                @if (competitionType != null)
+                                {
+                                    <li><i class="bi bi-trophy"></i> @competitionTypeName</li>
+                                }
+                            </ul>
+                        </div>
+                        <div class="card-footer">
+                            <a href="@competition.CompetitionUrl()" class="btn @buttonClass btn-sm">@buttonText</a>
+                            @if (status == "open")
+                            {
+                                <small class="text-muted">Stänger: @regCloseDate.ToString("yyyy-MM-dd")</small>
+                            }
+                            else if (status == "upcoming")
+                            {
+                                <small class="text-muted">Öppnar: @regOpenDate.ToString("yyyy-MM-dd")</small>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+
+    @if (!allCompetitions.Any())
+    {
+        <div class="alert alert-info mt-4">
+            <i class="bi bi-info-circle"></i> Inga tävlingar planerade för denna säsong än.
+        </div>
+    }
+</div>
+
+<style>
+.card {
+    transition: all 0.3s ease;
+    border: 1px solid #dee2e6;
+}
+
+.card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+    border-color: #007bff;
+}
+
+.badge {
+    font-size: 0.75rem;
+    padding: 0.35em 0.65em;
+}
+
+.card-header {
+    border-bottom: 1px solid rgba(255,255,255,0.2);
+}
+
+.alert {
+    border: none;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+}
+
+.btn {
+    border-radius: 6px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+}
+
+.btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.overview-stats {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border-radius: 8px;
+    transition: all 0.3s ease;
+}
+
+.overview-stats:hover {
+    background: linear-gradient(135deg, #e9ecef 0%, #dee2e6 100%);
+    transform: translateY(-2px);
+}
+
+.quick-actions .btn {
+    margin-bottom: 0.5rem;
+}
+
+.filter-pill.active {
+    background-color: var(--bs-primary);
+    color: white;
+    border-color: var(--bs-primary);
+}
+
+.competition-card {
+    transition: all 0.3s ease;
+}
+
+.competition-card.filtered-out {
+    display: none !important;
+}
+
+.filter-pill {
+    transition: all 0.2s ease;
+    font-weight: 500;
+}
+
+.filter-pill:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+
+#expanderIcon {
+    transition: transform 0.2s ease;
+}
+
+.collapse.show #expanderIcon {
+    transform: rotate(180deg);
+}
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Get filter elements
+    const searchInput = document.getElementById('searchCompetitions');
+    const typeFilter = document.getElementById('filterCompetitionType');
+    const venueFilter = document.getElementById('filterVenue');
+    const sortSelect = document.getElementById('sortCompetitions');
+    const clearFiltersBtn = document.getElementById('clearFilters');
+    const filterPills = document.querySelectorAll('.filter-pill');
+    const toggleOverviewBtn = document.getElementById('toggleOverview');
+
+    let activeStatuses = new Set(['open', 'upcoming', 'active']); // Default: show open, upcoming, active - hide completed
+
+    // Filter function
+    function filterCompetitions() {
+        const searchTerm = searchInput.value.toLowerCase();
+        const selectedType = typeFilter.value;
+        const selectedShootingClass = shootingClassFilter ? shootingClassFilter.value : '';
+        const selectedVenue = venueFilter.value;
+        const sortBy = sortSelect.value;
+
+        // Get all competition cards
+        const cards = document.querySelectorAll('.competition-card');
+        const visibleCards = [];
+
+        cards.forEach(card => {
+            const cardStatus = card.dataset.status;
+            const searchText = card.dataset.searchText || '';
+            const cardType = card.dataset.competitionType || '';
+            const cardShootingClass = card.dataset.shootingClass || '';
+            const cardVenue = card.dataset.venue || '';
+
+            // Status filter (from pills) - show if status is in activeStatuses set
+            let matchesStatus = activeStatuses.has(cardStatus);
+
+            // Search filter
+            let matchesSearch = !searchTerm || searchText.includes(searchTerm);
+
+            // Type filter
+            let matchesType = !selectedType || cardType === selectedType;
+
+            // Shooting class filter - handle multiple classes (comma-separated)
+            let matchesShootingClass = !selectedShootingClass ||
+                cardShootingClass.split(',').some(classId => classId.trim() === selectedShootingClass);
+
+            // Venue filter
+            let matchesVenue = !selectedVenue || cardVenue === selectedVenue;
+
+            // Show/hide card
+            if (matchesStatus && matchesSearch && matchesType && matchesShootingClass && matchesVenue) {
+                card.classList.remove('filtered-out');
+                visibleCards.push(card);
+            } else {
+                card.classList.add('filtered-out');
+            }
+        });
+
+        // Sort visible cards
+        if (visibleCards.length > 0) {
+            sortCards(visibleCards, sortBy);
+        }
+
+        // Update counts
+        updateStatusCounts();
+    }
+
+    // Sort function
+    function sortCards(cards, sortBy) {
+        cards.sort((a, b) => {
+            switch (sortBy) {
+                case 'date-asc':
+                    return new Date(a.dataset.date) - new Date(b.dataset.date);
+                case 'date-desc':
+                    return new Date(b.dataset.date) - new Date(a.dataset.date);
+                case 'name-asc':
+                    return a.dataset.name.localeCompare(b.dataset.name);
+                case 'name-desc':
+                    return b.dataset.name.localeCompare(a.dataset.name);
+                default:
+                    return 0;
+            }
+        });
+
+        // Re-append sorted cards to their parent
+        cards.forEach(card => {
+            card.parentNode.appendChild(card);
+        });
+    }
+
+    // Update status pill counts
+    function updateStatusCounts() {
+        const statuses = ['open', 'upcoming', 'active', 'completed'];
+
+        statuses.forEach(status => {
+            // Count all cards with this status (regardless of other filters)
+            const allCardsWithStatus = document.querySelectorAll(`.competition-card[data-status="${status}"]`);
+            const visibleCardsWithStatus = document.querySelectorAll(`.competition-card[data-status="${status}"]:not(.filtered-out)`);
+
+            const countElement = document.getElementById(`${status}-count`);
+            if (countElement) {
+                // Show visible/total if filtered, or just total if status is inactive
+                if (activeStatuses.has(status)) {
+                    countElement.textContent = visibleCardsWithStatus.length;
+                } else {
+                    countElement.textContent = allCardsWithStatus.length;
+                }
+            }
+        });
+    }
+
+    // Status pill click handlers (toggle behavior)
+    filterPills.forEach(pill => {
+        pill.addEventListener('click', function() {
+            const status = this.dataset.status;
+
+            // Toggle the status in the activeStatuses set
+            if (activeStatuses.has(status)) {
+                activeStatuses.delete(status);
+                this.classList.remove('active');
+            } else {
+                activeStatuses.add(status);
+                this.classList.add('active');
+            }
+
+            // Filter competitions
+            filterCompetitions();
+        });
+    });
+
+    // Search input handler
+    searchInput.addEventListener('input', filterCompetitions);
+
+    // Filter change handlers
+    typeFilter.addEventListener('change', filterCompetitions);
+    venueFilter.addEventListener('change', filterCompetitions);
+    sortSelect.addEventListener('change', filterCompetitions);
+
+    // Clear filters
+    clearFiltersBtn.addEventListener('click', function() {
+        searchInput.value = '';
+        typeFilter.value = '';
+        venueFilter.value = '';
+        sortSelect.value = 'date-desc';
+
+        // Reset to all statuses active
+        activeStatuses = new Set(['open', 'upcoming', 'active', 'completed']);
+        filterPills.forEach(p => p.classList.add('active'));
+
+        filterCompetitions();
+    });
+
+    // Toggle overview
+    toggleOverviewBtn.addEventListener('click', function() {
+        const overview = document.getElementById('seasonOverview');
+        const isVisible = overview.classList.contains('show');
+
+        if (isVisible) {
+            overview.classList.remove('show');
+            this.classList.remove('active');
+        } else {
+            overview.classList.add('show');
+            this.classList.add('active');
+        }
+    });
+
+    // Handle expander icon rotation
+    const advancedFilters = document.getElementById('advancedFilters');
+    const expanderIcon = document.getElementById('expanderIcon');
+
+    advancedFilters.addEventListener('show.bs.collapse', function () {
+        expanderIcon.classList.remove('bi-chevron-down');
+        expanderIcon.classList.add('bi-chevron-up');
+    });
+
+    advancedFilters.addEventListener('hide.bs.collapse', function () {
+        expanderIcon.classList.remove('bi-chevron-up');
+        expanderIcon.classList.add('bi-chevron-down');
+    });
+
+    // Initial filter
+    filterCompetitions();
+});
+</script>

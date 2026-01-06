@@ -1,0 +1,226 @@
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+    ViewBag.Title = "Klubbar";
+}
+
+<div class="container-fluid">
+    <!-- Clubs Directory -->
+    <div class="card">
+        <div class="card-header">
+            <h5 class="mb-0">Klubbkatalog</h5>
+            <p class="mb-0 small text-muted">Hitta och kontakta skytteföreningar</p>
+        </div>
+        <div class="card-body">
+            <!-- Filter Section -->
+            <div class="row mb-3">
+                <div class="col-md-4">
+                    <label for="kretsFilter" class="form-label">Välj krets</label>
+                    <select class="form-select" id="kretsFilter" onchange="filterClubsByKrets()">
+                        <option value="">Alla kretsar</option>
+                    </select>
+                </div>
+            </div>
+
+            <div id="clubsTableContainer">
+                <div class="text-center">
+                    <div class="spinner-border" role="status">
+                        <span class="visually-hidden">Laddar...</span>
+                    </div>
+                    <p>Laddar klubbar...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* Bootstrap Icons (Bootstrap JS is already loaded in Master.cshtml) *@
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+
+<script>
+// Regional Federations data (from Models/Federations.cs)
+const regionalFederations = [
+    { value: 'Blekinge', description: 'Blekinge Pistolskyttekrets' },
+    { value: 'Dalarna', description: 'Dalarnas Pistolskyttekrets' },
+    { value: 'Gotland', description: 'Gotlands Pistolskyttekrets' },
+    { value: 'Gavleborg', description: 'Gävleborgs Pistolskyttekrets' },
+    { value: 'GoteborgOchBohuslan', description: 'Göteborg och Bohusläns Pistol.Krets' },
+    { value: 'Halland', description: 'Hallands Pistolskyttekrets' },
+    { value: 'Jamtland', description: 'Jämtlands Läns Pistolskyttekrets' },
+    { value: 'Jonkoping', description: 'Jönköpings Läns Pistolskyttekrets' },
+    { value: 'KalmarNorra', description: 'Kalmar Läns Norra Pistolskyttekrets' },
+    { value: 'KalmarSodra', description: 'Kalmar Läns Södra Pistolskyttekrets' },
+    { value: 'Kristianstad', description: 'Kristianstads Pistolskyttekrets' },
+    { value: 'Kronoberg', description: 'Kronobergs Läns Pistolskyttekrets' },
+    { value: 'Malmohus', description: 'Malmöhus Pistolskyttekrets' },
+    { value: 'Norrbotten', description: 'Norrbottens Pistolskyttekrets' },
+    { value: 'Skaraborg', description: 'Skaraborgs Pistolskyttekrets' },
+    { value: 'Stockholm', description: 'Stockholms Pistolskyttekrets' },
+    { value: 'Sodermanland', description: 'Södermanlands Pistolskyttekrets' },
+    { value: 'Uppsala', description: 'Uppsala Läns Pistolskyttekrets' },
+    { value: 'Varmland', description: 'Värmlands Pistolskyttekrets' },
+    { value: 'Vasterbotten', description: 'Västerbottens Läns Pistolskyttekrets' },
+    { value: 'Vasternorrland', description: 'Västernorrlands Läns Pistolskyttekrets' },
+    { value: 'VastgotaDal', description: 'Västgöta-Dals Pistolskyttekrets' },
+    { value: 'Vastmanland', description: 'Västmanlands Pistolskyttekrets' },
+    { value: 'Alvsborg', description: 'Älvsborgs Pistolskyttekrets' },
+    { value: 'Orebro', description: 'Örebro Läns Pistolskyttekrets' },
+    { value: 'Ostergotland', description: 'Östergötlands Pistolskyttekrets' }
+];
+
+function populateKretsFilter() {
+    const select = document.getElementById('kretsFilter');
+    select.innerHTML = '<option value="">Alla kretsar</option>';
+    regionalFederations.forEach(f => {
+        const selected = f.value === 'Halland' ? 'selected' : '';
+        select.innerHTML += `<option value="${f.value}" ${selected}>${f.description}</option>`;
+    });
+}
+
+function filterClubsByKrets() {
+    // Use server-side filtering for performance
+    loadClubsTable();
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    populateKretsFilter();
+    loadClubsTable();
+});
+
+async function loadClubsTable() {
+    const container = document.getElementById('clubsTableContainer');
+    const selectedKrets = document.getElementById('kretsFilter').value;
+
+    // Show loading state
+    container.innerHTML = `
+        <div class="text-center">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">Laddar...</span>
+            </div>
+            <p>Laddar klubbar...</p>
+        </div>
+    `;
+
+    try {
+        // Use server-side filtering endpoint
+        const url = `/umbraco/surface/ClubAdmin/GetClubsByKrets?krets=${encodeURIComponent(selectedKrets)}`;
+        const response = await fetch(url);
+        const data = await response.json();
+
+        if (data.success) {
+            displayClubsTable(data.clubs);
+        } else {
+            container.innerHTML = '<div class="alert alert-danger">Fel vid laddning av klubbar: ' + data.message + '</div>';
+        }
+    } catch (error) {
+        console.error('Error loading clubs:', error);
+        container.innerHTML = '<div class="alert alert-danger">Fel vid laddning av klubbar. Försök igen.</div>';
+    }
+}
+
+function displayClubsTable(clubs) {
+    const container = document.getElementById('clubsTableContainer');
+
+    if (!clubs || clubs.length === 0) {
+        container.innerHTML = '<div class="alert alert-info">Inga klubbar hittades.</div>';
+        return;
+    }
+
+    let tableHtml = `
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead>
+                    <tr>
+                        <th>Klubbnamn</th>
+                        <th>Stad</th>
+                        <th>E-post</th>
+                        <th>Tel</th>
+                        <th style="width: 60px;"></th>
+                    </tr>
+                </thead>
+                <tbody>
+    `;
+
+    clubs.forEach(club => {
+        // Determine navigation URL: external website or internal club page
+        let navigationUrl = '';
+        let linkTarget = '';
+
+        if (club.webSite && club.webSite.trim() !== '') {
+            // Club has external website - use that
+            navigationUrl = club.webSite;
+            linkTarget = ' target="_blank" rel="noopener noreferrer"';
+        } else {
+            // No external website - navigate to internal club page
+            navigationUrl = `/clubs/${club.urlSegment || club.name.toLowerCase().replace(/\\s+/g, '-')}`;
+        }
+
+        tableHtml += `
+            <tr>
+                <td>
+                    <div class="club-name-cell">
+                        <strong class="d-block">${club.name}</strong>
+                        ${club.description ? `<small class="text-muted d-block mt-1">${club.description}</small>` : ''}
+                    </div>
+                </td>
+                <td>${club.city || '-'}</td>
+                <td>${club.contactEmail ? `<a href="mailto:${club.contactEmail}">${club.contactEmail}</a>` : '-'}</td>
+                <td>${club.contactPhone || '-'}</td>
+                <td class="text-center">
+                    <a href="${navigationUrl}"${linkTarget} class="btn btn-sm btn-outline-primary" title="Öppna hemsida" data-bs-toggle="tooltip">
+                        <i class="bi bi-globe"></i>
+                    </a>
+                </td>
+            </tr>
+        `;
+    });
+
+    tableHtml += `
+                </tbody>
+            </table>
+        </div>
+    `;
+
+    container.innerHTML = tableHtml;
+
+    // Initialize Bootstrap tooltips
+    const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+    tooltipTriggerList.map(function (tooltipTriggerEl) {
+        return new bootstrap.Tooltip(tooltipTriggerEl);
+    });
+}
+</script>
+
+<style>
+.club-name-cell {
+    min-height: 25px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.table > thead {
+    background-color: var(--bs-tertiary-bg);
+    border-bottom: 2px solid var(--bs-border-color);
+}
+
+.table > thead > tr > th {
+    font-weight: 600;
+    color: var(--bs-body-color);
+    border-bottom: 2px solid var(--bs-border-color);
+    padding: 0.5rem 0.75rem;
+}
+
+.table tbody tr {
+    transition: background-color 0.2s ease;
+}
+
+.table tbody tr:hover {
+    background-color: var(--bs-tertiary-bg);
+}
+
+.table td {
+    vertical-align: middle;
+    padding: 0.5rem 0.75rem;
+}
+</style>

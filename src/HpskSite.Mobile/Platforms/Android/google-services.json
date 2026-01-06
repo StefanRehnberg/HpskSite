@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1081851357248",
+    "project_id": "hpsk-f2e8c",
+    "storage_bucket": "hpsk-f2e8c.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1081851357248:android:8f903f22f2fb0ae645d7a5",
+        "android_client_info": {
+          "package_name": "se.hpsk.traningsmatch"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCXmaS1pjvt3o570DLxYOrNCvsZ9yv6jnM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

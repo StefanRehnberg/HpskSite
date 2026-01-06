@@ -1,0 +1,646 @@
+@using Umbraco.Cms.Web.Common.PublishedModels;
+@using System.Linq;
+@using System;
+@using HpskSite.Extensions
+@using Newtonsoft.Json
+@inject Umbraco.Cms.Core.Services.IMemberService MemberService
+@inject Umbraco.Cms.Core.Security.IMemberManager MemberManager
+@inject Umbraco.Cms.Core.Services.IContentService ContentService
+@inject HpskSite.Services.AdminAuthorizationService AuthService
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+
+    // Get competition ID from query string
+    var competitionIdStr = Context.Request.Query["competitionId"].FirstOrDefault();
+    int competitionId = 0;
+    int.TryParse(competitionIdStr, out competitionId);
+
+    // Find the competition content
+    IPublishedContent? competition = null;
+    if (competitionId > 0)
+    {
+        var root = Model.Root();
+        competition = root.DescendantsOrSelf()
+                         .FirstOrDefault(x => x.ContentType.Alias == "competition" && x.Id == competitionId);
+    }
+
+    // Set page title based on competition
+    if (competitionId == 0)
+    {
+        ViewBag.Title = "Tävlingshantering - Välj tävling";
+    }
+    else if (competition == null)
+    {
+        ViewBag.Title = "Tävlingshantering - Tävlingen hittades inte";
+    }
+    else
+    {
+        ViewBag.Title = $"Tävlingshantering - {competition.Value<string>("competitionName")}";
+        
+        // Pass competition properties to ViewData for partial views
+        ViewData["NumberOfSeriesOrStations"] = competition.Value<int>("numberOfSeriesOrStations");
+        ViewData["NumberOfFinalSeries"] = competition.Value<int>("numberOfFinalSeries");
+    }
+
+    // Check authorization
+    var currentMember = await MemberManager.GetCurrentMemberAsync();
+    bool canManageCompetition = false;
+    bool isSiteAdmin = false;
+
+    if (currentMember != null)
+    {
+        // Check if user is site admin (using centralized service)
+        isSiteAdmin = await AuthService.IsCurrentUserAdminAsync();
+
+        if (competition != null)
+        {
+            // Check if user is competition manager (using ID-based check)
+            bool isCompetitionManager = await AuthService.IsCompetitionManager(competitionId);
+
+            // Check if user is club admin for this competition's club
+            bool isClubAdminForCompetition = false;
+            var competitionClubId = competition.Value<int>("clubId");
+            if (competitionClubId > 0)
+            {
+                isClubAdminForCompetition = await AuthService.IsClubAdminForClub(competitionClubId);
+            }
+
+            canManageCompetition = isSiteAdmin || isCompetitionManager || isClubAdminForCompetition;
+        }
+        else if (competitionId == 0)
+        {
+            // Allow access to competition selection if user is admin (they can manage any competition)
+            canManageCompetition = isSiteAdmin;
+        }
+    }
+
+    // Prepare shooting classes for registration modal (if competition exists)
+    var allowDualCClassRegistration = false;
+    var competitionShootingClasses = new List<HpskSite.Models.ShootingClass>();
+    var aClasses = new List<HpskSite.Models.ShootingClass>();
+    var bClasses = new List<HpskSite.Models.ShootingClass>();
+    var cClasses = new List<HpskSite.Models.ShootingClass>();
+    var cRegularClasses = new List<HpskSite.Models.ShootingClass>();
+    var cVetClasses = new List<HpskSite.Models.ShootingClass>();
+    var cJuniorClasses = new List<HpskSite.Models.ShootingClass>();
+    var cDamClasses = new List<HpskSite.Models.ShootingClass>();
+    var rClasses = new List<HpskSite.Models.ShootingClass>();
+    var lClasses = new List<HpskSite.Models.ShootingClass>();
+    var lRegularClasses = new List<HpskSite.Models.ShootingClass>();
+    var lVetClasses = new List<HpskSite.Models.ShootingClass>();
+    var lJuniorClasses = new List<HpskSite.Models.ShootingClass>();
+    var lDamClasses = new List<HpskSite.Models.ShootingClass>();
+    var mClasses = new List<HpskSite.Models.ShootingClass>();
+
+    if (competition != null)
+    {
+        allowDualCClassRegistration = competition.Value<bool>("allowDualCClassRegistration");
+
+        // Get shooting class IDs
+        var shootingClassIdsRaw = competition.Value("shootingClassIds");
+        var shootingClassIds = "";
+
+        // Handle different data types from Umbraco multiselect
+        if (shootingClassIdsRaw is string[] stringArray)
+        {
+            shootingClassIds = string.Join(",", stringArray);
+        }
+        else if (shootingClassIdsRaw is IEnumerable<string> enumerable)
+        {
+            shootingClassIds = string.Join(",", enumerable);
+        }
+        else if (shootingClassIdsRaw is string stringValue)
+        {
+            shootingClassIds = stringValue ?? "";
+        }
+        else if (shootingClassIdsRaw != null)
+        {
+            // Try generic Value<T> approach for Flexible Dropdown
+            try
+            {
+                var typed = competition.Value<IEnumerable<string>>("shootingClassIds");
+                if (typed != null)
+                {
+                    shootingClassIds = string.Join(",", typed);
+                }
+            }
+            catch
+            {
+                // Fallback to empty if all parsing fails
+                shootingClassIds = "";
+            }
+        }
+
+        // Parse shooting class IDs - handle JSON array format
+        if (!string.IsNullOrEmpty(shootingClassIds))
+        {
+            var ids = new List<string>();
+
+            // Check if it's a JSON array format: ["A1","B2"]
+            if (shootingClassIds.StartsWith("[") && shootingClassIds.EndsWith("]"))
+            {
+                try
+                {
+                    // Parse JSON array manually (simple approach)
+                    var jsonContent = shootingClassIds.Substring(1, shootingClassIds.Length - 2); // Remove [ and ]
+                    ids.AddRange(jsonContent.Split(',')
+                        .Select(s => s.Trim().Trim('"'))
+                        .Where(s => !string.IsNullOrEmpty(s)));
+                }
+                catch
+                {
+                    // If JSON parsing fails, try as comma-separated
+                    ids.AddRange(shootingClassIds.Split(',')
+                        .Select(id => id.Trim())
+                        .Where(id => !string.IsNullOrEmpty(id)));
+                }
+            }
+            else
+            {
+                // Already comma-separated or single value
+                ids.AddRange(shootingClassIds.Split(',')
+                    .Select(id => id.Trim())
+                    .Where(id => !string.IsNullOrEmpty(id)));
+            }
+
+            foreach (var id in ids)
+            {
+                var shootingClass = HpskSite.Models.ShootingClasses.GetById(id);
+                if (shootingClass != null)
+                {
+                    competitionShootingClasses.Add(shootingClass);
+                }
+            }
+        }
+
+        // Group available shooting classes by category for smart registration
+        aClasses = competitionShootingClasses.Where(sc => sc.Id.StartsWith("A")).ToList();
+        bClasses = competitionShootingClasses.Where(sc => sc.Id.StartsWith("B")).ToList();
+        cClasses = competitionShootingClasses.Where(sc => sc.Id.StartsWith("C")).ToList();
+        rClasses = competitionShootingClasses.Where(sc => sc.Id.StartsWith("R")).ToList();
+        lClasses = competitionShootingClasses.Where(sc => sc.Id.StartsWith("L")).ToList();
+        mClasses = competitionShootingClasses.Where(sc => sc.Id.StartsWith("M")).ToList();
+
+        // Subdivide C classes into subcategories for proper validation
+        cRegularClasses = cClasses.Where(sc => sc.Id == "C1" || sc.Id == "C2" || sc.Id == "C3").ToList();
+        cVetClasses = cClasses.Where(sc => sc.Id == "C_Vet_Y" || sc.Id == "C_Vet_A").ToList();
+        cJuniorClasses = cClasses.Where(sc => sc.Id == "C_Jun").ToList();
+        cDamClasses = cClasses.Where(sc => sc.Id.EndsWith("_Dam") && sc.Id.StartsWith("C")).ToList();
+
+        // Subdivide L classes into subcategories (same structure as C)
+        lRegularClasses = lClasses.Where(sc => sc.Id == "L1" || sc.Id == "L2" || sc.Id == "L3").ToList();
+        lVetClasses = lClasses.Where(sc => sc.Id == "L_Vet_Y" || sc.Id == "L_Vet_A").ToList();
+        lJuniorClasses = lClasses.Where(sc => sc.Id == "L_Jun").ToList();
+        lDamClasses = lClasses.Where(sc => sc.Id.EndsWith("_Dam") && sc.Id.StartsWith("L")).ToList();
+    }
+}
+
+@* Check if user is logged in *@
+@if (currentMember == null)
+{
+    <div class="container mt-4">
+        <div class="alert alert-warning">
+            <h4>Åtkomst nekad</h4>
+            <p>Du måste vara inloggad för att komma åt tävlingshanteringen.</p>
+            <a href="/login-register/" class="btn btn-primary">Logga in</a>
+        </div>
+    </div>
+    return;
+}
+
+@* Handle no competition selected or competition not found *@
+@if (competition == null)
+{
+    @if (competitionId == 0)
+    {
+        @* Competition selection interface *@
+        <div class="container mt-4">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <div>
+                    <h1><i class="bi bi-gear me-2"></i>Tävlingshantering</h1>
+                    <p class="text-muted mb-0">Välj en tävling att hantera</p>
+                </div>
+            </div>
+
+            @if (isSiteAdmin)
+            {
+                <div class="card">
+                    <div class="card-header">
+                        <h5><i class="bi bi-list me-2"></i>Välj tävling att hantera</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="competitionListLoading" class="text-center py-4">
+                            <div class="spinner-border" role="status">
+                                <span class="visually-hidden">Laddar...</span>
+                            </div>
+                            <p class="mt-2">Laddar tävlingar...</p>
+                        </div>
+
+                        <div id="competitionListContainer" class="d-none">
+                            <div class="table-responsive">
+                                <table class="table table-hover">
+                                    <thead>
+                                        <tr>
+                                            <th>Tävling</th>
+                                            <th>Datum</th>
+                                            <th>Status</th>
+                                            <th>Plats</th>
+                                            <th>Åtgärd</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="competitionListBody">
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="alert alert-warning">
+                    <h4>Åtkomst nekad</h4>
+                    <p>Du har inte behörighet att komma åt tävlingshanteringen. Endast webbplatsadministratörer och tävlingsansvariga har åtkomst.</p>
+                    <a href="/" class="btn btn-primary">Gå till startsidan</a>
+                </div>
+            }
+        </div>
+
+        <script>
+        // Load competitions for selection
+        $(document).ready(function() {
+            if (@(isSiteAdmin ? "true" : "false")) {
+                loadCompetitionList();
+            }
+        });
+
+        function loadCompetitionList() {
+            fetch('/umbraco/surface/RegistrationAdmin/GetActiveCompetitions', {
+                method: 'GET'
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    populateCompetitionList(data.competitions || []);
+                } else {
+                    showCompetitionListError(data.message || 'Failed to load competitions');
+                }
+            })
+            .catch(error => {
+                console.error('Error loading competitions:', error);
+                showCompetitionListError('Failed to load competitions. Please try again.');
+            });
+        }
+
+        function populateCompetitionList(competitions) {
+            const tbody = document.getElementById('competitionListBody');
+            tbody.innerHTML = '';
+
+            if (competitions.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">No competitions found</td></tr>';
+            } else {
+                competitions.forEach(comp => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td><strong>${comp.name}</strong></td>
+                        <td>-</td>
+                        <td><span class="badge bg-secondary">Loading...</span></td>
+                        <td>-</td>
+                        <td>
+                            <a href="/competitionmanagement?competitionId=${comp.id}" class="btn btn-primary btn-sm">
+                                <i class="bi bi-gear me-1"></i>Manage
+                            </a>
+                        </td>
+                    `;
+                    tbody.appendChild(row);
+                });
+            }
+
+            document.getElementById('competitionListLoading').classList.add('d-none');
+            document.getElementById('competitionListContainer').classList.remove('d-none');
+        }
+
+        function showCompetitionListError(message) {
+            const tbody = document.getElementById('competitionListBody');
+            tbody.innerHTML = `<tr><td colspan="5" class="text-center text-danger py-4">Error: ${message}</td></tr>`;
+
+            document.getElementById('competitionListLoading').classList.add('d-none');
+            document.getElementById('competitionListContainer').classList.remove('d-none');
+        }
+        </script>
+
+        return;
+    }
+    else
+    {
+        @* Competition not found with specific ID *@
+        <div class="container mt-4">
+            <div class="alert alert-danger">
+                <h4>Tävlingen hittades inte</h4>
+                <p>Den begärda tävlingen kunde inte hittas eller så är tävlings-ID ogiltigt.</p>
+                <a href="/competitionmanagement/" class="btn btn-primary">Välj tävling</a>
+                <a href="/competitions/" class="btn btn-outline-primary ms-2">Visa alla tävlingar</a>
+            </div>
+        </div>
+        return;
+    }
+}
+
+@* Check authorization *@
+@if (!canManageCompetition)
+{
+    <div class="container mt-4">
+        <div class="alert alert-warning">
+            <h4>Access Denied</h4>
+            <p>You do not have permission to manage this competition. Only competition managers and administrators can access this page.</p>
+            <a href="@(competition?.CompetitionUrl() ?? "/")" class="btn btn-primary">Back to Competition</a>
+        </div>
+    </div>
+    return;
+}
+
+<div class="container mt-4">
+    <!-- Header Section -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h1>
+                <i class="bi bi-gear me-2"></i>Tävlingshantering
+            </h1>
+            <p class="text-muted mb-0">
+                Hanterar: <strong>@(competition?.Value<string>("competitionName") ?? "Okänd tävling")</strong>
+            </p>
+        </div>
+        <div>
+            <a href="@(competition?.CompetitionUrl() ?? "/")" class="btn btn-outline-secondary">
+                <i class="bi bi-arrow-left"></i> Tillbaka till tävlingen
+            </a>
+        </div>
+    </div>
+
+    @* Anti-forgery token for AJAX requests *@
+    @Html.AntiForgeryToken()
+
+    <!-- Navigation tabs -->
+    <ul class="nav nav-tabs" id="managementTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="registrations-tab" data-bs-toggle="tab" data-bs-target="#registrations" type="button" role="tab">
+                <i class="bi bi-people me-1"></i>Anmälningar
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="startlists-tab" data-bs-toggle="tab" data-bs-target="#startlists" type="button" role="tab">
+                <i class="bi bi-list-ol me-1"></i>Startlistor
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="results-tab" data-bs-toggle="tab" data-bs-target="#results" type="button" role="tab">
+                <i class="bi bi-trophy me-1"></i>Resultat
+            </button>
+        </li>
+    </ul>
+
+    <!-- Tab content -->
+    <div class="tab-content" id="managementTabContent">
+        <!-- Registrations Tab -->
+        <div class="tab-pane fade show active" id="registrations" role="tabpanel">
+            <div class="mt-3">
+                @await Html.PartialAsync("CompetitionRegistrationManagement", new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId } })
+            </div>
+        </div>
+
+        <!-- Start Lists Tab -->
+        <div class="tab-pane fade" id="startlists" role="tabpanel">
+            <div class="mt-3">
+                @await Html.PartialAsync("CompetitionStartListManagement", new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId } })
+            </div>
+        </div>
+
+        <!-- Results Tab -->
+        <div class="tab-pane fade" id="results" role="tabpanel">
+            <div class="mt-3">
+                @{
+                    var resultsViewData = new ViewDataDictionary(ViewData);
+                    resultsViewData["CompetitionId"] = competitionId;
+                    // NumberOfSeriesOrStations is already in ViewData from line 39
+                }
+                @await Html.PartialAsync("CompetitionResultsManagement", resultsViewData)
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<script>
+// Competition Management JavaScript
+const competitionId = @competitionId;
+
+// Load data on page ready
+$(document).ready(function() {
+    // Overview tab removed - no stats to load
+});
+
+// Removed loadOverviewStats() function - overview tab no longer exists
+function loadOverviewStats_REMOVED() {
+    // Load registration statistics
+    fetch(`/umbraco/surface/Competition/GetCompetitionRegistrations?competitionId=${competitionId}`, {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            const registrations = data.registrations || [];
+            const activeRegistrations = registrations.filter(r => r.isActive);
+            const maxParticipants = @(competition?.Value<int>("maxParticipants", fallback: Fallback.ToDefaultValue, defaultValue: 0) ?? 0);
+
+            document.getElementById('totalRegistrationsCount').textContent = registrations.length;
+            document.getElementById('activeRegistrationsCount').textContent = activeRegistrations.length;
+            
+            // Update progress bar
+            if (maxParticipants > 0) {
+                const percentage = Math.min(100, Math.round((activeRegistrations.length / maxParticipants) * 100));
+                const progressBar = document.getElementById('registrationsProgress');
+                progressBar.style.width = `${percentage}%`;
+                
+                // Change color based on capacity
+                if (percentage >= 90) {
+                    progressBar.classList.remove('bg-primary', 'bg-warning');
+                    progressBar.classList.add('bg-danger');
+                } else if (percentage >= 70) {
+                    progressBar.classList.remove('bg-primary', 'bg-danger');
+                    progressBar.classList.add('bg-warning');
+                } else {
+                    progressBar.classList.remove('bg-warning', 'bg-danger');
+                    progressBar.classList.add('bg-primary');
+                }
+            }
+        } else {
+            document.getElementById('totalRegistrationsCount').textContent = 'Error';
+            document.getElementById('activeRegistrationsCount').textContent = 'Error';
+        }
+    })
+    .catch(error => {
+        console.error('Error loading registration stats:', error);
+        document.getElementById('totalRegistrationsCount').textContent = 'Error';
+        document.getElementById('activeRegistrationsCount').textContent = 'Error';
+    });
+
+    // Load start list statistics
+    fetch(`/umbraco/surface/PrecisionStartList/GetStartLists?competitionId=${competitionId}`, {
+        method: 'GET'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            const startLists = data.startLists || [];
+            document.getElementById('startListsCount').textContent = startLists.length;
+        } else {
+    document.getElementById('startListsCount').textContent = '0';
+        }
+    })
+    .catch(error => {
+        console.error('Error loading start list stats:', error);
+        document.getElementById('startListsCount').textContent = 'Error';
+    });
+
+    // Load results statistics
+    fetch(`/umbraco/surface/CompetitionResults/GetResultsStats?competitionId=${competitionId}`, {
+        method: 'GET'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            document.getElementById('resultsCount').textContent = data.count || '0';
+        } else {
+    document.getElementById('resultsCount').textContent = '0';
+        }
+    })
+    .catch(error => {
+        console.error('Error loading results stats:', error);
+        document.getElementById('resultsCount').textContent = 'Error';
+    });
+
+    // Calculate days to competition
+    const competitionDate = new Date('@(competition?.Value<DateTime>("competitionDate", fallback: Fallback.ToDefaultValue, defaultValue: DateTime.Now).ToString("yyyy-MM-dd") ?? DateTime.Now.ToString("yyyy-MM-dd"))');
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const timeDiff = competitionDate.getTime() - today.getTime();
+    const daysDiff = Math.ceil(timeDiff / (1000 * 3600 * 24));
+    
+    const daysElement = document.getElementById('daysToCompetition');
+    if (daysDiff > 0) {
+        daysElement.textContent = daysDiff;
+        daysElement.classList.remove('bg-success', 'bg-warning');
+        daysElement.classList.add('bg-danger');
+    } else if (daysDiff === 0) {
+        daysElement.textContent = 'Idag!';
+        daysElement.classList.remove('bg-danger', 'bg-warning');
+        daysElement.classList.add('bg-success');
+    } else {
+        daysElement.textContent = `${Math.abs(daysDiff)} dagar sedan`;
+        daysElement.classList.remove('bg-danger', 'bg-success');
+        daysElement.classList.add('bg-warning');
+    }
+    
+    // Update last updated timestamp
+    document.getElementById('lastUpdated').textContent = new Date().toLocaleTimeString();
+}
+
+function refreshAllData() {
+    // Overview tab removed - no stats to load
+    // Refresh active tabs if needed
+    const activeTab = document.querySelector('.tab-pane.active');
+    if (activeTab) {
+        // Trigger refresh for active tab
+        if (activeTab.id === 'registrations' && window.loadCompetitionRegistrations) {
+            window.loadCompetitionRegistrations();
+        }
+    }
+}
+
+function generateStartList() {
+    // Navigate to start lists tab and trigger the create start list button
+    document.getElementById('startlists-tab').click();
+    setTimeout(() => {
+        const createButton = document.querySelector('.create-start-list-btn');
+        if (createButton) {
+            createButton.click();
+        }
+    }, 500);
+}
+
+function openResultsTab() {
+    // Navigate to results tab
+    document.getElementById('results-tab').click();
+}
+</script>
+
+@* Competition configuration for registration modal *@
+@if (competition != null)
+{
+    var swishNumberMgmt = competition.Value<string>("swishNumber");
+    var hasSwishNumberMgmt = !string.IsNullOrWhiteSpace(swishNumberMgmt);
+
+<script>
+// Configuration for competition-registration.js
+window.CompetitionConfig = {
+    competitionId: @competitionId,
+    allowDualCClassRegistration: @(allowDualCClassRegistration.ToString().ToLower()),
+    registrationFee: @(competition.Value<decimal>("registrationFee", fallback: Fallback.ToDefaultValue, defaultValue: 0)),
+    hasSwishNumber: @(hasSwishNumberMgmt.ToString().ToLower())
+};
+</script>
+<script src="/js/competition-registration.js?v=@DateTime.Now.Ticks"></script>
+}
+
+@if (competition != null)
+{
+    @await Html.PartialAsync("CompetitionRegistrationModal", new ViewDataDictionary(ViewData)
+    {
+        { "CompetitionId", competitionId },
+        { "CompetitionName", competition.Value<string>("competitionName") },
+        { "AClasses", aClasses },
+        { "BClasses", bClasses },
+        { "CClasses", cClasses },
+        { "CRegularClasses", cRegularClasses },
+        { "CVetClasses", cVetClasses },
+        { "CJuniorClasses", cJuniorClasses },
+        { "CDamClasses", cDamClasses },
+        { "RClasses", rClasses },
+        { "LClasses", lClasses },
+        { "LRegularClasses", lRegularClasses },
+        { "LVetClasses", lVetClasses },
+        { "LJuniorClasses", lJuniorClasses },
+        { "LDamClasses", lDamClasses },
+        { "MClasses", mClasses },
+        { "AllowDualCClassRegistration", allowDualCClassRegistration }
+    })
+}
+
+@* Swish Payment Modal *@
+<div class="modal fade" id="swishPaymentModal" tabindex="-1" aria-labelledby="swishPaymentModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title" id="swishPaymentModalLabel">
+                    <i class="bi bi-qr-code"></i> Betala med Swish
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body text-center" id="swishPaymentModalBody">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Laddar QR-kod...</span>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    <i class="bi bi-x-circle"></i> Stäng
+                </button>
+            </div>
+        </div>
+    </div>
+</div>

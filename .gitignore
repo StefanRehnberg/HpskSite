@@ -1,0 +1,33 @@
+# Visual Studio
+.vs/
+
+# Build outputs
+[Bb]in/
+[Oo]bj/
+
+# User-specific files
+*.user
+*.suo
+
+# NuGet
+*.nupkg
+nul
+
+# Android keystore (NEVER commit!)
+*.keystore
+*.jks
+
+# Firebase Admin SDK credentials (server-side - NEVER commit!)
+*firebase-adminsdk*.json
+firebase-service-account.json
+
+# Note: google-services.json and GoogleService-Info.plist are CLIENT-SIDE
+# Firebase configs that ARE safe to commit (security is via Firebase rules)
+
+# Umbraco App_Data (runtime data)
+App_Data/
+
+# Sensitive configuration files (use .template.json versions instead)
+appsettings.Production.json
+appsettings.Development.json
+**/Properties/launchSettings.json

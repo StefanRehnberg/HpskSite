@@ -1,0 +1,2965 @@
+@using Umbraco.Cms.Web.Website.Controllers
+@using Umbraco.Cms.Web.Website.Models
+@using Umbraco.Cms.Core.Security
+@using Umbraco.Cms.Web.Common.PublishedModels
+@using Umbraco.Cms.Core.Services
+@inject IMemberManager MemberManager
+@inject IMemberService MemberService
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+    ViewBag.Title = "Min Sida";
+
+    var currentMember = await MemberManager.GetCurrentMemberAsync();
+    var isLoggedIn = currentMember != null;
+
+    // Get member data with properties
+    var memberData = isLoggedIn ? MemberService.GetByEmail(currentMember?.Email ?? "") : null;
+}
+
+@* Check if user is logged in *@
+@if (!isLoggedIn)
+{
+    <div class="alert alert-warning">
+        <h4>Access Denied</h4>
+        <p>You must be logged in to access this page.</p>
+        <a href="/login-register/" class="btn btn-primary">Login</a>
+    </div>
+    return;
+}
+
+<div class="container">
+    <div class="row justify-content-center">
+        <div class="col-lg-10">
+            <div class="card">
+                <div class="card-header">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h3 class="mb-0"><i class="bi bi-person"></i> Min Sida</h3>
+                        <div id="primaryClubButton" class="d-none">
+                            <a href="#" id="clubLink" class="btn btn-primary">
+                                <i class="bi bi-building"></i> Min klubb: <span id="clubName"></span>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-body">
+                    @* Anti-forgery token for AJAX requests *@
+                    @Html.AntiForgeryToken()
+
+                    @* Tab Navigation *@
+                    <ul class="nav nav-tabs mb-4" id="profileTabs" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" id="dashboard-tab" data-bs-toggle="tab" data-bs-target="#dashboard-pane" type="button" role="tab">
+                                <i class="bi bi-speedometer2"></i> Dashboard
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="results-tab" data-bs-toggle="tab" data-bs-target="#results-pane" type="button" role="tab">
+                                <i class="bi bi-clipboard-data"></i> Resultat
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="competitions-tab" data-bs-toggle="tab" data-bs-target="#competitions-pane" type="button" role="tab">
+                                <i class="bi bi-trophy"></i> Tävlingar
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="profile-tab" data-bs-toggle="tab" data-bs-target="#profile-pane" type="button" role="tab">
+                                <i class="bi bi-person-circle"></i> Profil
+                            </button>
+                        </li>
+                    </ul>
+
+                    @* Tab Content *@
+                    <div class="tab-content" id="profileTabContent">
+
+                        @* Dashboard Tab *@
+                        <div class="tab-pane fade show active" id="dashboard-pane" role="tabpanel">
+                            <div id="dashboardContent">
+                                <div class="text-center py-5">
+                                    <div class="spinner-border text-primary" role="status">
+                                        <span class="visually-hidden">Laddar dashboard...</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        @* End Dashboard Tab *@
+
+                        @* Training Results Tab *@
+                        <div class="tab-pane fade" id="results-pane" role="tabpanel">
+                            @* Action Bar *@
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <button class="btn btn-primary" onclick="openTrainingScoreModal()">
+                                    <i class="bi bi-plus-circle"></i> Lägg in Resultat
+                                </button>
+                                <button class="btn btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#filterSection" aria-expanded="false" aria-controls="filterSection">
+                                    <i class="bi bi-funnel"></i> Filter
+                                </button>
+                            </div>
+
+                            @* Collapsible Filter Section *@
+                            <div class="collapse mb-4" id="filterSection">
+                                <div class="card card-body">
+                                    <div class="row">
+                                        <div class="col-md-4">
+                                            <label for="competitionTypeFilter" class="form-label">Tävlingstyp</label>
+                                            <select id="competitionTypeFilter" class="form-select" onchange="loadResults()">
+                                                <option value="Precision" selected>Precision</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label for="yearFilter" class="form-label">År</label>
+                                            <select id="yearFilter" class="form-select" onchange="loadResults()">
+                                                @* Options populated by JavaScript *@
+                                            </select>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label for="weaponClassFilter" class="form-label">Vapenklass</label>
+                                            <select id="weaponClassFilter" class="form-select" onchange="loadResults()">
+                                                <option value="Alla" selected>Alla</option>
+                                                <option value="A">A - Tjänstevapen</option>
+                                                <option value="B">B - Kal. 32-45</option>
+                                                <option value="C">C - Kal. 22</option>
+                                                <option value="R">R - Revolver</option>
+                                                <option value="L">L - Luftpistol</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            @* Results Content *@
+                            <div id="resultsContent">
+                                <div class="text-center py-3">
+                                    <div class="spinner-border text-primary" role="status">
+                                        <span class="visually-hidden">Laddar...</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        @* Competitions Tab *@
+                        <div class="tab-pane fade" id="competitions-pane" role="tabpanel">
+                            @* Filter Bar *@
+                            <div class="card mb-3">
+                                <div class="card-body">
+                                    <div class="row g-3">
+                                        <div class="col-md-3 col-sm-6">
+                                            <label for="compYearFilter" class="form-label">År</label>
+                                            <select id="compYearFilter" class="form-select" onchange="applyCompetitionFilters()">
+                                                <option value="">Alla år</option>
+                                                @* Options populated by JavaScript *@
+                                            </select>
+                                        </div>
+                                        <div class="col-md-3 col-sm-6">
+                                            <label for="compStatusFilter" class="form-label">Status</label>
+                                            <select id="compStatusFilter" class="form-select" onchange="applyCompetitionFilters()">
+                                                <option value="all" selected>Alla</option>
+                                                <option value="upcoming">Kommande</option>
+                                                <option value="past">Genomförda</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-3 col-sm-6">
+                                            <label for="compPaymentFilter" class="form-label">Betalning</label>
+                                            <select id="compPaymentFilter" class="form-select" onchange="applyCompetitionFilters()">
+                                                <option value="all">Alla</option>
+                                                <option value="paid">Betald</option>
+                                                <option value="pending">Väntande</option>
+                                                <option value="no_invoice">Ingen faktura</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-3 col-sm-6">
+                                            <label for="compSearchFilter" class="form-label">Sök</label>
+                                            <input type="text" id="compSearchFilter" class="form-control" placeholder="Sök tävlingar..." oninput="applyCompetitionFiltersDebounced()">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            @* Competitions Content *@
+                            <div id="competitionsContent">
+                                <div class="text-center py-3">
+                                    <div class="spinner-border text-primary" role="status">
+                                        <span class="visually-hidden">Laddar...</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        @* End Competitions Tab *@
+
+                        @* Profile Tab *@
+                        <div class="tab-pane fade" id="profile-pane" role="tabpanel">
+
+                            @* Profile Picture Section *@
+                            <div class="text-center mb-4">
+                                <div class="position-relative d-inline-block">
+                                    <div id="profilePictureContainer" class="rounded-circle overflow-hidden bg-light d-flex align-items-center justify-content-center" style="width: 150px; height: 150px; border: 3px solid #dee2e6;">
+                                        @{
+                                            var profilePictureUrl = memberData?.GetValue("profilePictureUrl")?.ToString();
+                                            var firstName = memberData?.GetValue("firstName")?.ToString() ?? "";
+                                            var lastName = memberData?.GetValue("lastName")?.ToString() ?? "";
+                                            var initials = "";
+                                            if (!string.IsNullOrEmpty(firstName)) initials += firstName[0];
+                                            if (!string.IsNullOrEmpty(lastName)) initials += lastName[0];
+                                            if (string.IsNullOrEmpty(initials)) initials = "?";
+                                        }
+                                        @if (!string.IsNullOrEmpty(profilePictureUrl))
+                                        {
+                                            <img id="profileImage" src="@profilePictureUrl" alt="Profilbild" class="w-100 h-100" style="object-fit: cover;">
+                                        }
+                                        else
+                                        {
+                                            <div id="profileInitials" class="d-flex align-items-center justify-content-center w-100 h-100 bg-primary text-white" style="font-size: 3rem; font-weight: bold;">
+                                                @initials.ToUpper()
+                                            </div>
+                                        }
+                                    </div>
+                                    <label for="profilePictureInput" class="btn btn-primary btn-sm position-absolute" style="bottom: 5px; right: 5px; border-radius: 50%; width: 36px; height: 36px; padding: 0;" title="Byt profilbild">
+                                        <i class="bi bi-camera"></i>
+                                    </label>
+                                    <input type="file" id="profilePictureInput" accept="image/*" class="d-none" onchange="uploadProfilePicture(this)">
+                                </div>
+                                <div class="mt-2">
+                                    <small class="text-muted">Klicka på kameran för att byta bild</small>
+                                    @if (!string.IsNullOrEmpty(profilePictureUrl))
+                                    {
+                                        <br><button type="button" class="btn btn-link btn-sm text-danger p-0" onclick="removeProfilePicture()">
+                                            <i class="bi bi-trash"></i> Ta bort bild
+                                        </button>
+                                    }
+                                </div>
+                            </div>
+
+                            <form id="profileForm">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="firstName" class="form-label">Förnamn</label>
+                                            <input type="text" class="form-control" id="firstName" name="firstName" value="@(memberData?.GetValue("firstName")?.ToString() ?? "")" required>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="lastName" class="form-label">Efternamn</label>
+                                            <input type="text" class="form-control" id="lastName" name="lastName" value="@(memberData?.GetValue("lastName")?.ToString() ?? "")" required>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label for="email" class="form-label">E-post</label>
+                                    <input type="email" class="form-control" id="email" name="email" value="@(currentMember?.Email ?? "")" required>
+                                </div>
+
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="phoneNumber" class="form-label">Telefonnummer</label>
+                                            <input type="tel" class="form-control" id="phoneNumber" name="phoneNumber" value="@(memberData?.GetValue("phoneNumber")?.ToString() ?? "")" placeholder="070-123 45 67">
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="shooterIdNumber" class="form-label">Skytte-ID</label>
+                                            <input type="text" class="form-control" id="shooterIdNumber" name="shooterIdNumber" value="@(memberData?.GetValue("shooterIdNumber")?.ToString() ?? "")" placeholder="Ditt skytte-ID nummer">
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label for="address" class="form-label">Adress</label>
+                                    <input type="text" class="form-control" id="address" name="address" value="@(memberData?.GetValue("address")?.ToString() ?? "")" placeholder="Gatuadress">
+                                </div>
+
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="postalCode" class="form-label">Postnummer</label>
+                                            <input type="text" class="form-control" id="postalCode" name="postalCode" value="@(memberData?.GetValue("postalCode")?.ToString() ?? "")" placeholder="123 45">
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="city" class="form-label">Ort</label>
+                                            <input type="text" class="form-control" id="city" name="city" value="@(memberData?.GetValue("city")?.ToString() ?? "")" placeholder="Stad">
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="personNumber" class="form-label">Personnummer</label>
+                                            <input type="text" class="form-control" id="personNumber" name="personNumber" value="@(memberData?.GetValue("personNumber")?.ToString() ?? "")" placeholder="ÅÅÅÅMMDD-XXXX">
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="memberSince" class="form-label">Medlem sedan</label>
+                                            <input type="text" class="form-control" id="memberSince" name="memberSince" value="@(memberData?.CreateDate.ToString("yyyy-MM-dd") ?? "")" readonly>
+                                            <div class="form-text">Skrivskyddad</div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Club Information Section -->
+                                <div class="mb-4">
+                                    <h6 class="text-muted mb-3">
+                                        <i class="bi bi-buildings me-1"></i>Klubbmedlemskap
+                                    </h6>
+                                    <div class="card border-light">
+                                        <div class="card-body">
+                                            <div class="row">
+                                                <div class="col-md-6">
+                                                    <label class="form-label fw-semibold">Primär Klubb</label>
+                                                    <div id="primaryClubInfo" class="form-control-plaintext p-2 rounded" style="background-color: var(--bs-tertiary-bg);">
+                                                        <span id="primaryClubName">Laddar...</span>
+                                                    </div>
+                                                </div>
+                                                <div class="col-md-6">
+                                                    <label class="form-label fw-semibold">Ytterligare Klubbar</label>
+                                                    <div id="additionalClubs" class="form-control-plaintext p-2 rounded" style="min-height: 40px; background-color: var(--bs-tertiary-bg);">
+                                                        <span id="additionalClubsList">Laddar...</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="form-text mt-2 text-center">
+                                                <i class="bi bi-info-circle me-1"></i>
+                                                Kontakta administratör för att ändra ditt klubbmedlemskap
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label class="form-label">Medlemsgrupper</label>
+                                    <div id="memberGroups" class="form-control-plaintext p-2 rounded" style="background-color: var(--bs-tertiary-bg);">
+                                        <span id="memberGroupsList">Laddar...</span>
+                                    </div>
+                                    <div class="form-text">Dina nuvarande medlemsgrupper i systemet</div>
+                                </div>
+
+                                <hr class="my-4">
+
+                                <!-- Precision Shooting Settings Section -->
+                                <div class="mb-4">
+                                    <h5 class="mb-3">
+                                        <i class="bi bi-bullseye me-2"></i>Precisionsskytte
+                                    </h5>
+                                    <div class="card border-light">
+                                        <div class="card-body">
+                                            <!-- Shooter Class Selection -->
+                                            <label class="form-label fw-semibold">Skytteklass</label>
+                                            <div class="mb-3">
+                                                @{
+                                                    var currentShooterClass = memberData?.GetValue("precisionShooterClass")?.ToString() ?? "";
+                                                }
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="radio" name="shooterClass" id="class1" value="Klass 1 - Nybörjare" @(currentShooterClass == "Klass 1 - Nybörjare" ? "checked" : "")>
+                                                    <label class="form-check-label" for="class1">Klass 1 - Nybörjare</label>
+                                                </div>
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="radio" name="shooterClass" id="class2" value="Klass 2 - Guldmärkesskytt" @(currentShooterClass == "Klass 2 - Guldmärkesskytt" ? "checked" : "")>
+                                                    <label class="form-check-label" for="class2">Klass 2 - Guldmärkesskytt</label>
+                                                </div>
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="radio" name="shooterClass" id="class3" value="Klass 3 - Riksmästare" @(currentShooterClass == "Klass 3 - Riksmästare" ? "checked" : "")>
+                                                    <label class="form-check-label" for="class3">Klass 3 - Riksmästare</label>
+                                                </div>
+                                            </div>
+
+                                            <hr class="my-3">
+
+                                            <!-- Handicap Info Section -->
+                                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                                <label class="form-label fw-semibold mb-0">Ditt Handicapindex</label>
+                                                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="recalculateMyHandicap()" id="recalculateHandicapBtn" title="Omberäkna handicap från alla resultat">
+                                                    <i class="bi bi-arrow-clockwise"></i> Omberäkna
+                                                </button>
+                                            </div>
+                                            <div id="handicapInfoContainer">
+                                                <div class="text-center py-3">
+                                                    <div class="spinner-border spinner-border-sm text-primary" role="status">
+                                                        <span class="visually-hidden">Laddar...</span>
+                                                    </div>
+                                                    <span class="ms-2 text-muted">Laddar handicapinformation...</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <hr class="my-4">
+
+                                <h5>Ändra Lösenord</h5>
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="currentPassword" class="form-label">Nuvarande Lösenord</label>
+                                            <input type="password" class="form-control" id="currentPassword" name="currentPassword">
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="newPassword" class="form-label">Nytt Lösenord</label>
+                                            <input type="password" class="form-control" id="newPassword" name="newPassword">
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="confirmPassword" class="form-label">Bekräfta Nytt Lösenord</label>
+                                            <input type="password" class="form-control" id="confirmPassword" name="confirmPassword">
+                                        </div>
+                                    </div>
+                                </div>
+                            </form>
+
+                            <div class="mt-3">
+                                <button type="button" class="btn btn-primary" onclick="saveProfile()">
+                                    <i class="bi bi-check-circle"></i> Spara Ändringar
+                                </button>
+                                <button type="button" class="btn btn-secondary" onclick="savePasswordOnly()">
+                                    <i class="bi bi-key"></i> Ändra Endast Lösenord
+                                </button>
+                            </div>
+
+                            <hr class="my-4">
+
+                            <!-- Tutorial Settings Section -->
+                            <div class="mb-4">
+                                <h5 class="mb-3">
+                                    <i class="bi bi-camera-video me-2"></i>Handledningar
+                                </h5>
+                                <p class="text-muted">
+                                    Om du har stängt bort hjälpbannerna på olika sidor kan du återställa dem här för att se handledningarna igen.
+                                </p>
+                                <button type="button" class="btn btn-outline-primary" id="resetTutorialsBtn" onclick="resetTutorialBanners()">
+                                    <i class="bi bi-arrow-clockwise me-1"></i> Återställ alla handledningsbannrar
+                                </button>
+                                <div id="resetTutorialsMessage" class="alert mt-3" style="display: none;"></div>
+                            </div>
+                        </div>
+                        @* End Profile Tab *@
+
+                    </div>
+                    @* End Tab Content *@
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* Include Training Score Modals *@
+@await Html.PartialAsync("~/Views/Partials/TrainingScoreEntry.cshtml")
+@await Html.PartialAsync("~/Views/Partials/TrainingScoreDetail.cshtml")
+
+@* Share Dashboard Modal *@
+<div class="modal fade" id="shareDashboardModal" tabindex="-1" aria-labelledby="shareDashboardModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-sm modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="shareDashboardModalLabel"><i class="bi bi-share me-2"></i>Dela min Dashboard</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <label class="form-label" for="dashboardSharingSelect">Vem kan se min dashboard?</label>
+                <select class="form-select" id="dashboardSharingSelect">
+                    <option value="club">Klubbkamrater</option>
+                    <option value="all">Alla medlemmar</option>
+                    <option value="none">Ingen (privat)</option>
+                </select>
+                <small class="text-muted d-block mt-2">
+                    <i class="bi bi-info-circle"></i> Visas på klubbens medlemslista.
+                </small>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" onclick="saveDashboardSharing()">
+                    <i class="bi bi-check-lg me-1"></i>Spara
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* Competition Result Detail Modal *@
+<div class="modal fade" id="viewCompetitionResultModal" tabindex="-1" aria-labelledby="viewCompetitionResultModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="viewCompetitionResultModalLabel">
+                    <i class="bi bi-trophy"></i> Tävlingsresultat
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body" id="competitionResultDetailContent">
+                <div class="text-center py-3">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Laddar...</span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* Chart.js Library *@
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+
+<script>
+// Global chart instances
+let progressChart = null;
+let weaponClassChart = null;
+let dashboardData = null;
+
+document.addEventListener('DOMContentLoaded', function() {
+    loadUserProfile();
+    loadDashboard(); // Load dashboard on page load
+    loadPrimaryClubButton(); // Load club navigation button
+    loadHandicapProfile(); // Load handicap info for profile tab
+
+    // Handle tab switching
+    const resultsTab = document.getElementById('results-tab');
+    if (resultsTab) {
+        resultsTab.addEventListener('shown.bs.tab', function() {
+            initializeResultsTab();
+        });
+    }
+
+    const competitionsTab = document.getElementById('competitions-tab');
+    if (competitionsTab) {
+        competitionsTab.addEventListener('shown.bs.tab', function() {
+            initializeCompetitionsTab();
+        });
+    }
+});
+
+function loadUserProfile() {
+    // Load primary club info
+    fetch('/umbraco/surface/Member/GetCurrentMemberClubInfo')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                document.getElementById('primaryClubName').textContent = data.data.primaryClubName || 'Ingen klubb tilldelad';
+
+                const additionalClubs = data.data.additionalClubs || [];
+                const additionalClubsList = document.getElementById('additionalClubsList');
+                if (additionalClubs.length > 0) {
+                    additionalClubsList.innerHTML = additionalClubs.map(club =>
+                        `<span class="badge bg-secondary me-1">${club.name}</span>`
+                    ).join('');
+                } else {
+                    additionalClubsList.textContent = 'Inga ytterligare klubbar';
+                }
+
+                const memberGroups = data.data.memberGroups || [];
+                const memberGroupsList = document.getElementById('memberGroupsList');
+                if (memberGroups.length > 0) {
+                    memberGroupsList.innerHTML = memberGroups.map(group =>
+                        `<span class="badge bg-primary me-1">${group}</span>`
+                    ).join('');
+                } else {
+                    memberGroupsList.textContent = 'Inga grupper tilldelade';
+                }
+            } else {
+                document.getElementById('primaryClubName').textContent = 'Kunde inte ladda klubbinformation';
+                document.getElementById('additionalClubsList').textContent = 'Kunde inte ladda information';
+                document.getElementById('memberGroupsList').textContent = 'Kunde inte ladda information';
+            }
+        })
+        .catch(error => {
+            console.error('Error loading profile:', error);
+            document.getElementById('primaryClubName').textContent = 'Fel vid inläsning';
+            document.getElementById('additionalClubsList').textContent = 'Fel vid inläsning';
+            document.getElementById('memberGroupsList').textContent = 'Fel vid inläsning';
+        });
+}
+
+function loadPrimaryClubButton() {
+    // Load member's club info (already includes club URL)
+    fetch('/umbraco/surface/Member/GetCurrentMemberClubInfo')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.data && data.data.primaryClubId && data.data.primaryClubUrl) {
+                const clubName = data.data.primaryClubName || 'Min klubb';
+                const clubUrl = data.data.primaryClubUrl;
+
+                // Update button
+                document.getElementById('clubName').textContent = clubName;
+                document.getElementById('clubLink').href = clubUrl;
+                document.getElementById('primaryClubButton').classList.remove('d-none');
+            }
+        })
+        .catch(error => {
+            console.error('Error loading primary club button:', error);
+        });
+}
+
+function loadHandicapProfile() {
+    fetch('/umbraco/surface/Member/GetHandicapProfile')
+        .then(response => response.json())
+        .then(response => {
+            if (response.success && response.data) {
+                const data = response.data;
+                // Pre-select shooter class radio (if not already set by server-side rendering)
+                if (data.shooterClass) {
+                    const radio = document.querySelector(`input[name="shooterClass"][value="${data.shooterClass}"]`);
+                    if (radio) radio.checked = true;
+                }
+                // Render handicap info
+                renderHandicapInfo(data.weaponClasses, data.shooterClass, data.settings);
+            } else {
+                document.getElementById('handicapInfoContainer').innerHTML =
+                    '<p class="text-muted">Kunde inte ladda handicapinformation.</p>';
+            }
+        })
+        .catch(error => {
+            console.error('Error loading handicap profile:', error);
+            document.getElementById('handicapInfoContainer').innerHTML =
+                '<p class="text-muted">Fel vid laddning av handicapinformation.</p>';
+        });
+}
+
+// Recalculate handicap for current user
+function recalculateMyHandicap() {
+    const btn = document.getElementById('recalculateHandicapBtn');
+    const originalContent = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span> Beräknar...';
+
+    fetch('/umbraco/surface/Member/RecalculateMyHandicap', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        btn.disabled = false;
+        btn.innerHTML = originalContent;
+
+        if (data.success) {
+            // Reload handicap profile to show updated values
+            loadHandicapProfile();
+        } else {
+            alert('Kunde inte omberäkna handicap: ' + (data.message || 'Okänt fel'));
+        }
+    })
+    .catch(error => {
+        console.error('Error recalculating handicap:', error);
+        btn.disabled = false;
+        btn.innerHTML = originalContent;
+        alert('Fel vid omberäkning av handicap');
+    });
+}
+
+// Helper functions for quarter-point handicap display
+function roundToQuarterProfile(value) {
+    return Math.round(value * 4) / 4;
+}
+
+function formatHandicapProfile(value) {
+    const rounded = roundToQuarterProfile(value);
+    const sign = rounded >= 0 ? '+' : '';
+    // Show decimals only if not a whole number
+    const formatted = Number.isInteger(rounded) ? rounded.toString() : rounded.toFixed(2);
+    return sign + formatted;
+}
+
+function renderHandicapInfo(weaponClasses, shooterClass, settings) {
+    const container = document.getElementById('handicapInfoContainer');
+
+    // Check if shooter class is not selected - this is required for handicap calculation
+    if (!shooterClass) {
+        container.innerHTML = `
+            <div class="alert alert-danger mb-0">
+                <i class="bi bi-exclamation-circle me-2"></i>
+                <strong>Skytteklass krävs!</strong> Du måste välja din skytteklass ovan för att kunna beräkna handicap
+                och delta i handicapmatcher. Skytteklassen avgör ditt provisoriska handicap tills du har genomfört tillräckligt många matcher.
+            </div>`;
+        return;
+    }
+
+    if (!weaponClasses || weaponClasses.length === 0) {
+        container.innerHTML = `
+            <div class="alert alert-info mb-0">
+                <i class="bi bi-info-circle me-2"></i>
+                Ingen statistik tillgänglig än. Delta i träningsmatcher eller tävlingar för att få ett handicapindex.
+            </div>`;
+        return;
+    }
+
+    // Build provisional averages text from settings
+    const provisionalText = settings.provisionalAverages
+        .map(pa => {
+            // Extract class number from name (e.g., "Klass 1 - Nybörjare" -> "Klass 1")
+            const classMatch = pa.className.match(/Klass \d/);
+            const shortName = classMatch ? classMatch[0] : pa.className;
+            return `${shortName} = ${pa.average}`;
+        })
+        .join(', ');
+
+    // Explanatory text about handicap calculation using actual settings
+    let html = `
+        <div class="small text-body-secondary mb-3 p-2 rounded" style="background-color: var(--bs-tertiary-bg);">
+            <p class="mb-2">
+                <strong class="text-body">Så beräknas ditt handicap:</strong> Referenspoängen (${settings.referenceScore}) minus ditt genomsnittliga serieresultat
+                från dina <strong>senaste ${settings.rollingWindowMatchCount} matcher</strong>.
+                Handicap kan vara max +${settings.maxHandicap} och avrundas till närmaste kvarts poäng (0.25).
+            </p>
+            <p class="mb-0">
+                <strong class="text-body">Provisoriskt handicap (P):</strong> Innan du har ${settings.requiredMatches} resultat, viktas ditt snitt
+                med din skytteklass: ${provisionalText}. Efter ${settings.requiredMatches} matcher baseras handicap helt på ditt faktiska snitt.
+            </p>
+        </div>
+    `;
+
+    for (const wc of weaponClasses) {
+        const provBadge = wc.isProvisional
+            ? '<span class="badge bg-warning text-dark ms-2" title="Provisoriskt handicap">(P)</span>'
+            : '';
+        const handicapDisplay = formatHandicapProfile(wc.handicapPerSeries);
+        const progress = Math.min((wc.completedMatches / wc.requiredMatches) * 100, 100);
+
+        // Calculate the raw handicap before rounding for display
+        const rawHandicap = wc.referenceScore - wc.effectiveAverage;
+
+        html += `
+        <div class="card mb-2 border">
+            <div class="card-body py-2 px-3">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                    <strong>Vapenklass ${wc.weaponClass} <span class="text-muted fw-normal">(${wc.weaponClassName})</span></strong>
+                    <span class="fs-5">Handicap: <strong>${handicapDisplay}</strong>${provBadge}</span>
+                </div>
+                <div class="small text-muted mt-2">
+                    <div class="mb-1">
+                        <strong>Beräkning:</strong> Referens (${wc.referenceScore}) − Effektivt snitt (${wc.effectiveAverage.toFixed(1)}) = ${rawHandicap.toFixed(2)} → <strong>${handicapDisplay}</strong>
+                    </div>
+                    <div>
+                        Ditt faktiska snitt: ${wc.actualAverage.toFixed(1)} poäng/serie
+                        ${wc.isProvisional ? `<br>Effektivt snitt är viktat med din skytteklass tills du har ${wc.requiredMatches} matcher.` : ''}
+                    </div>
+                </div>
+                ${wc.isProvisional ? `
+                <div class="mt-2">
+                    <div class="progress" style="height: 6px;">
+                        <div class="progress-bar bg-primary" role="progressbar" style="width: ${progress}%"></div>
+                    </div>
+                    <small class="text-muted">${wc.completedMatches} av ${wc.requiredMatches} matcher genomförda</small>
+                </div>
+                ` : `
+                <small class="text-success d-block mt-2"><i class="bi bi-check-circle me-1"></i>Fullständigt handicap baserat på ditt faktiska snitt</small>
+                `}
+            </div>
+        </div>`;
+    }
+    container.innerHTML = html;
+}
+
+function saveProfile() {
+    const formData = new FormData();
+
+    // Add anti-forgery token
+    const token = document.querySelector('input[name="__RequestVerificationToken"]');
+    if (token) {
+        formData.append('__RequestVerificationToken', token.value);
+    }
+
+    formData.append('firstName', document.getElementById('firstName').value);
+    formData.append('lastName', document.getElementById('lastName').value);
+    formData.append('email', document.getElementById('email').value);
+    formData.append('phoneNumber', document.getElementById('phoneNumber').value);
+    formData.append('shooterIdNumber', document.getElementById('shooterIdNumber').value);
+    formData.append('address', document.getElementById('address').value);
+    formData.append('postalCode', document.getElementById('postalCode').value);
+    formData.append('city', document.getElementById('city').value);
+    formData.append('personNumber', document.getElementById('personNumber').value);
+
+    // Include shooter class
+    const shooterClassRadio = document.querySelector('input[name="shooterClass"]:checked');
+    formData.append('precisionShooterClass', shooterClassRadio ? shooterClassRadio.value : '');
+
+    // Include password fields if they are filled
+    const currentPassword = document.getElementById('currentPassword').value;
+    const newPassword = document.getElementById('newPassword').value;
+    const confirmPassword = document.getElementById('confirmPassword').value;
+
+    if (currentPassword || newPassword || confirmPassword) {
+        if (newPassword !== confirmPassword) {
+            alert('Nya lösenord matchar inte!');
+            return;
+        }
+        if (newPassword.length < 6) {
+            alert('Nytt lösenord måste vara minst 6 tecken långt!');
+            return;
+        }
+
+        formData.append('currentPassword', currentPassword);
+        formData.append('newPassword', newPassword);
+    }
+
+    fetch('/umbraco/surface/Member/UpdateProfile', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => {
+        if (!response.ok) {
+            return response.text().then(text => {
+                throw new Error(`HTTP ${response.status}: ${text}`);
+            });
+        }
+        return response.json();
+    })
+    .then(data => {
+        if (data.success) {
+            alert('Profil uppdaterad framgångsrikt!');
+            // Clear password fields
+            document.getElementById('currentPassword').value = '';
+            document.getElementById('newPassword').value = '';
+            document.getElementById('confirmPassword').value = '';
+            // Reload page to reflect changes in navigation
+            window.location.reload();
+        } else {
+            alert('Fel: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Save error:', error);
+        alert('Kunde inte spara profil: ' + error.message);
+    });
+}
+
+function savePasswordOnly() {
+    const currentPassword = document.getElementById('currentPassword').value;
+    const newPassword = document.getElementById('newPassword').value;
+    const confirmPassword = document.getElementById('confirmPassword').value;
+
+    if (!currentPassword || !newPassword || !confirmPassword) {
+        alert('Alla lösenordsfält måste fyllas i för att ändra lösenord!');
+        return;
+    }
+
+    if (newPassword !== confirmPassword) {
+        alert('Nya lösenord matchar inte!');
+        return;
+    }
+
+    if (newPassword.length < 6) {
+        alert('Nytt lösenord måste vara minst 6 tecken långt!');
+        return;
+    }
+
+    const formData = new FormData();
+
+    // Add anti-forgery token
+    const token = document.querySelector('input[name="__RequestVerificationToken"]');
+    if (token) {
+        formData.append('__RequestVerificationToken', token.value);
+    }
+
+    formData.append('currentPassword', currentPassword);
+    formData.append('newPassword', newPassword);
+
+    fetch('/umbraco/surface/Member/ChangePassword', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => {
+        if (!response.ok) {
+            return response.text().then(text => {
+                throw new Error(`HTTP ${response.status}: ${text}`);
+            });
+        }
+        return response.json();
+    })
+    .then(data => {
+        if (data.success) {
+            alert('Lösenord ändrat framgångsrikt!');
+            // Clear password fields
+            document.getElementById('currentPassword').value = '';
+            document.getElementById('newPassword').value = '';
+            document.getElementById('confirmPassword').value = '';
+        } else {
+            alert('Fel: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Password change error:', error);
+        alert('Kunde inte ändra lösenord: ' + error.message);
+    });
+}
+
+// Reset tutorial banners - clears dismissed tutorial banners from localStorage
+function resetTutorialBanners() {
+    const button = document.getElementById('resetTutorialsBtn');
+    const messageDiv = document.getElementById('resetTutorialsMessage');
+
+    // Disable button during operation
+    button.disabled = true;
+    button.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Återställer...';
+
+    try {
+        // Get current dismissed banners
+        const dismissed = JSON.parse(localStorage.getItem('dismissedBanners') || '[]');
+        const count = dismissed.length;
+
+        // Clear dismissed banners
+        localStorage.removeItem('dismissedBanners');
+
+        // Also clear seen icon flags
+        const allKeys = Object.keys(localStorage);
+        allKeys.forEach(key => {
+            if (key.startsWith('seenIcon_')) {
+                localStorage.removeItem(key);
+            }
+        });
+
+        // Show success message
+        messageDiv.className = 'alert alert-success mt-3';
+        messageDiv.style.display = 'block';
+        messageDiv.innerHTML = `
+            <i class="bi bi-check-circle me-2"></i>
+            <strong>Klart!</strong> ${count > 0 ? count + ' handledningsbannrar' : 'Alla handledningsbannrar'} har återställts.
+            Du kommer nu att se hjälpbannrarna igen när du besöker olika sidor.
+        `;
+
+        // Reset button
+        button.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i> Återställ alla handledningsbannrar';
+        button.disabled = false;
+
+        // Auto-hide success message after 5 seconds
+        setTimeout(() => {
+            messageDiv.style.display = 'none';
+        }, 5000);
+
+    } catch (error) {
+        console.error('Error resetting tutorial banners:', error);
+
+        // Show error message
+        messageDiv.className = 'alert alert-danger mt-3';
+        messageDiv.style.display = 'block';
+        messageDiv.innerHTML = `
+            <i class="bi bi-exclamation-triangle me-2"></i>
+            <strong>Fel!</strong> Kunde inte återställa handledningsbannrar. Försök igen.
+        `;
+
+        // Reset button
+        button.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i> Återställ alla handledningsbannrar';
+        button.disabled = false;
+    }
+}
+
+function loadTrainingScoresDashboard() {
+    const content = document.getElementById('trainingScoresContent');
+    if (!content) return;
+
+    // Show loading state
+    content.innerHTML = `
+        <div class="text-center py-3">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Laddar...</span>
+            </div>
+        </div>
+    `;
+
+    // Load unified results from all sources
+    fetch('/umbraco/surface/TrainingScoring/GetMyResults?limit=20')
+        .then(r => r.json())
+        .then(data => {
+            if (data.success && data.results) {
+                content.innerHTML = renderResultsDashboard(data.results);
+            } else {
+                content.innerHTML = `
+                    <div class="alert alert-info">
+                        <h5><i class="bi bi-info-circle"></i> Inga resultat ännu</h5>
+                        <p>Du har inte loggat några resultat ännu. Börja logga dina resultat för att se din progress!</p>
+                        <button class="btn btn-primary" onclick="showAddScoreModal()">
+                            <i class="bi bi-plus-circle"></i> Lägg till första resultatet
+                        </button>
+                    </div>
+                `;
+            }
+        })
+        .catch(error => {
+            console.error('Error loading results:', error);
+            content.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="bi bi-exclamation-triangle"></i> Fel vid inläsning av resultat: ${error.message}
+                </div>
+            `;
+        });
+}
+
+function renderResultsDashboard(results) {
+    const totalResults = results.length;
+    const trainingResults = results.filter(r => r.sourceType === 'Training');
+    const competitionResults = results.filter(r => r.sourceType === 'Competition' || r.sourceType === 'Official');
+
+    const avgScore = totalResults > 0
+        ? (results.reduce((sum, r) => sum + r.totalScore, 0) / totalResults).toFixed(1)
+        : 0;
+
+    // Helper function to get badge class based on source type
+    function getSourceBadge(sourceType) {
+        switch(sourceType) {
+            case 'Training': return '<span class="badge bg-primary">TRÄNING</span>';
+            case 'Competition': return '<span class="badge bg-success">TÄVLING</span>';
+            case 'Official': return '<span class="badge bg-warning">OFFICIELL</span>';
+            default: return '<span class="badge bg-secondary">OKÄND</span>';
+        }
+    }
+
+    return `
+        <div class="row mb-4">
+            <div class="col-md-4">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h3 class="text-primary">${totalResults}</h3>
+                        <p class="text-muted mb-0">Totalt resultat</p>
+                        <small class="text-muted">${trainingResults.length} träning / ${competitionResults.length} tävling</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h3 class="text-success">${avgScore}</h3>
+                        <p class="text-muted mb-0">Genomsnitt totalt</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <button class="btn btn-primary" onclick="showAddScoreModal()">
+                            <i class="bi bi-plus-circle"></i> Nytt resultat
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h5>Senaste resultat</h5>
+        </div>
+
+        ${totalResults > 0 ? `
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>Datum</th>
+                        <th>Typ</th>
+                        <th>Klass</th>
+                        <th>Poäng</th>
+                        <th>X-antal</th>
+                        <th>Tävling</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${results.map(result => `
+                        <tr>
+                            <td>${new Date(result.date).toLocaleDateString('sv-SE')}</td>
+                            <td>${getSourceBadge(result.sourceType)}</td>
+                            <td><span class="badge bg-secondary">${result.weaponClass}</span></td>
+                            <td><strong>${result.totalScore}p</strong> <small class="text-muted">(${result.averageScore.toFixed(1)}p/serie)</small></td>
+                            <td>${result.xCount} X</td>
+                            <td>${result.competitionName || '-'}</td>
+                            <td>
+                                ${result.canEdit ? `
+                                    <button class="btn btn-sm btn-outline-primary" onclick="viewScore(${result.id})">
+                                        <i class="bi bi-eye"></i>
+                                    </button>
+                                ` : `
+                                    <span class="text-muted"><i class="bi bi-lock"></i></span>
+                                `}
+                            </td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>
+        ` : '<p class="text-muted text-center py-4">Inga resultat loggade ännu</p>'}
+    `;
+}
+
+function showAddScoreModal() {
+    const modal = new bootstrap.Modal(document.getElementById('addTrainingScoreModal'));
+    modal.show();
+}
+
+function viewScore(id) {
+    viewScoreDetails(id);
+}
+
+// ========== DASHBOARD TAB FUNCTIONS ==========
+
+async function loadDashboard() {
+    try {
+        const response = await fetch('/umbraco/surface/TrainingScoring/GetDashboardStatistics');
+        const result = await response.json();
+
+        if (result.success) {
+            dashboardData = result.data;
+            // Default to current year only if it exists in available years
+            const currentYear = new Date().getFullYear();
+            const defaultYears = dashboardData.availableYears && dashboardData.availableYears.includes(currentYear)
+                ? [currentYear]
+                : dashboardData.availableYears || null;
+            renderDashboard(dashboardData, defaultYears);
+        } else {
+            document.getElementById('dashboardContent').innerHTML = `
+                <div class="alert alert-warning">
+                    <i class="bi bi-exclamation-triangle"></i> ${result.message || 'Kunde inte ladda dashboard-data'}
+                </div>
+            `;
+        }
+    } catch (error) {
+        console.error('Error loading dashboard:', error);
+        document.getElementById('dashboardContent').innerHTML = `
+            <div class="alert alert-danger">
+                <i class="bi bi-x-circle"></i> Ett fel uppstod vid laddning av dashboard
+            </div>
+        `;
+    }
+}
+
+// ========== DASHBOARD SHARING FUNCTIONS ==========
+
+// Open the share dashboard modal and load current settings
+async function openShareDashboardModal() {
+    try {
+        const response = await fetch('/umbraco/surface/Member/GetDashboardSharingLevel');
+        const result = await response.json();
+
+        if (result.success) {
+            const dropdown = document.getElementById('dashboardSharingSelect');
+            dropdown.value = result.sharingLevel || 'club';
+        }
+
+        const modal = new bootstrap.Modal(document.getElementById('shareDashboardModal'));
+        modal.show();
+    } catch (error) {
+        console.error('Error loading sharing settings:', error);
+        // Still show modal with default value (club)
+        document.getElementById('dashboardSharingSelect').value = 'club';
+        const modal = new bootstrap.Modal(document.getElementById('shareDashboardModal'));
+        modal.show();
+    }
+}
+
+// Save dashboard sharing preferences
+async function saveDashboardSharing() {
+    const sharingLevel = document.getElementById('dashboardSharingSelect').value;
+
+    try {
+        const response = await fetch('/umbraco/surface/Member/UpdateDashboardSharing', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]')?.value || ''
+            },
+            body: JSON.stringify({ sharingLevel: sharingLevel })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            // Close modal
+            const modalEl = document.getElementById('shareDashboardModal');
+            const modal = bootstrap.Modal.getInstance(modalEl);
+            modal.hide();
+
+            // Show success message
+            showToast('Delningsinställningar sparade', 'success');
+        } else {
+            showToast(result.message || 'Kunde inte spara inställningar', 'danger');
+        }
+    } catch (error) {
+        console.error('Error saving sharing settings:', error);
+        showToast('Ett fel uppstod', 'danger');
+    }
+}
+
+// Simple toast notification helper
+function showToast(message, type = 'info') {
+    // Create toast container if it doesn't exist
+    let toastContainer = document.querySelector('.toast-container');
+    if (!toastContainer) {
+        toastContainer = document.createElement('div');
+        toastContainer.className = 'toast-container position-fixed bottom-0 end-0 p-3';
+        toastContainer.style.zIndex = '1100';
+        document.body.appendChild(toastContainer);
+    }
+
+    const toastId = 'toast-' + Date.now();
+    const toastHtml = `
+        <div id="${toastId}" class="toast align-items-center text-bg-${type} border-0" role="alert" aria-live="assertive" aria-atomic="true">
+            <div class="d-flex">
+                <div class="toast-body">${message}</div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+            </div>
+        </div>
+    `;
+
+    toastContainer.insertAdjacentHTML('beforeend', toastHtml);
+    const toastEl = document.getElementById(toastId);
+    const toast = new bootstrap.Toast(toastEl, { delay: 3000 });
+    toast.show();
+
+    // Remove toast element after it hides
+    toastEl.addEventListener('hidden.bs.toast', () => toastEl.remove());
+}
+
+// Get theme-aware chart colors from CSS variables
+function getChartColors() {
+    const style = getComputedStyle(document.documentElement);
+    return {
+        primary: style.getPropertyValue('--chart-primary').trim() || '#0d6efd',
+        success: style.getPropertyValue('--chart-success').trim() || '#198754',
+        danger: style.getPropertyValue('--chart-danger').trim() || '#dc3545',
+        text: style.getPropertyValue('--chart-text').trim() || '#212529',
+        grid: style.getPropertyValue('--chart-grid').trim() || 'rgba(0, 0, 0, 0.1)'
+    };
+}
+
+// Update charts when theme changes
+function updateChartsTheme(theme) {
+    // Re-render dashboard if data exists
+    if (window.dashboardData) {
+        renderDashboard(window.dashboardData);
+    }
+}
+
+// Toggle Personal Bests card expand/collapse
+function togglePersonalBests() {
+    const preview = document.getElementById('personalBestsPreview');
+    const full = document.getElementById('personalBestsFull');
+    const toggle = document.getElementById('personalBestsToggle');
+
+    if (!preview || !full || !toggle) return;
+
+    const isExpanded = full.style.display !== 'none';
+
+    if (isExpanded) {
+        // Collapse
+        full.style.display = 'none';
+        preview.style.display = 'block';
+        toggle.innerHTML = '<i class="bi bi-chevron-down"></i>';
+        toggle.title = 'Visa mer';
+    } else {
+        // Expand
+        preview.style.display = 'none';
+        full.style.display = 'block';
+        toggle.innerHTML = '<i class="bi bi-chevron-up"></i>';
+        toggle.title = 'Visa mindre';
+    }
+}
+
+// Calculate statistics from filtered data entries
+function calculateStatsFromData(entries) {
+    if (!entries || entries.length === 0) {
+        return {
+            totalSessions: 0,
+            totalTrainingSessions: 0,
+            totalCompetitions: 0,
+            overallAverage: 0,
+            personalBests: [],
+            weaponClassData: [],
+            personalBestsBySeriesCount: []
+        };
+    }
+
+    const trainingEntries = entries.filter(e => !e.isCompetition);
+    const competitionEntries = entries.filter(e => e.isCompetition);
+
+    // Calculate totals
+    const totalSessions = entries.length;
+    const totalTrainingSessions = trainingEntries.length;
+    const totalCompetitions = competitionEntries.length;
+
+    // Calculate overall average
+    const overallAverage = entries.reduce((sum, e) => sum + e.averageScore, 0) / entries.length;
+
+    // Calculate personal bests by weapon class (for backward compatibility)
+    const personalBests = [];
+    const weaponClasses = [...new Set(entries.map(e => e.weaponClass))];
+    weaponClasses.forEach(wc => {
+        const classEntries = entries.filter(e => e.weaponClass === wc);
+        if (classEntries.length > 0) {
+            const best = Math.max(...classEntries.map(e => e.averageScore));
+            personalBests.push({ weaponClass: wc, bestAverage: Math.round(best * 10) / 10 });
+        }
+    });
+
+    // Calculate personal bests by series count (total score, not average)
+    const personalBestsBySeriesCount = [];
+    const standardSeriesCounts = [6, 7, 10];
+    const lWeaponSeriesCounts = [6, 8, 12];
+    const allWeaponClasses = ['A', 'B', 'C', 'R', 'M', 'L'];
+
+    allWeaponClasses.forEach(wc => {
+        const seriesCounts = wc === 'L' ? lWeaponSeriesCounts : standardSeriesCounts;
+
+        seriesCounts.forEach(sc => {
+            // Training best for this weapon class and series count
+            const trainingForWcSc = trainingEntries.filter(e =>
+                e.weaponClass === wc && e.seriesCount === sc
+            );
+            if (trainingForWcSc.length > 0) {
+                personalBestsBySeriesCount.push({
+                    weaponClass: wc,
+                    seriesCount: sc,
+                    isCompetition: false,
+                    bestTotalScore: Math.max(...trainingForWcSc.map(e => e.totalScore))
+                });
+            }
+
+            // Competition best for this weapon class and series count
+            const compForWcSc = competitionEntries.filter(e =>
+                e.weaponClass === wc && e.seriesCount === sc
+            );
+            if (compForWcSc.length > 0) {
+                personalBestsBySeriesCount.push({
+                    weaponClass: wc,
+                    seriesCount: sc,
+                    isCompetition: true,
+                    bestTotalScore: Math.max(...compForWcSc.map(e => e.totalScore))
+                });
+            }
+        });
+    });
+
+    // Calculate weapon class data (grouped by weapon class and training/competition)
+    const weaponClassData = [];
+    weaponClasses.forEach(wc => {
+        // Training data for this weapon class
+        const wcTraining = trainingEntries.filter(e => e.weaponClass === wc);
+        if (wcTraining.length > 0) {
+            weaponClassData.push({
+                weaponClass: wc,
+                isCompetition: false,
+                averageScore: wcTraining.reduce((sum, e) => sum + e.averageScore, 0) / wcTraining.length,
+                sessionCount: wcTraining.length
+            });
+        }
+        // Competition data for this weapon class
+        const wcComp = competitionEntries.filter(e => e.weaponClass === wc);
+        if (wcComp.length > 0) {
+            weaponClassData.push({
+                weaponClass: wc,
+                isCompetition: true,
+                averageScore: wcComp.reduce((sum, e) => sum + e.averageScore, 0) / wcComp.length,
+                sessionCount: wcComp.length
+            });
+        }
+    });
+
+    return {
+        totalSessions,
+        totalTrainingSessions,
+        totalCompetitions,
+        overallAverage: Math.round(overallAverage * 10) / 10,
+        personalBests,
+        weaponClassData,
+        personalBestsBySeriesCount
+    };
+}
+
+// Render personal best rows for a table (training or competition)
+function renderPersonalBestRows(bests, isCompetition) {
+    const weaponClasses = ['A', 'B', 'C', 'R', 'M', 'L'];
+
+    // Helper to get score for a specific weapon class and series count
+    const getScore = (wc, sc) => {
+        const entry = bests.find(b =>
+            b.weaponClass === wc &&
+            b.isCompetition === isCompetition &&
+            b.seriesCount === sc
+        );
+        return entry ? entry.bestTotalScore : '-';
+    };
+
+    // Only show weapon classes that have at least one result
+    const activeWeaponClasses = weaponClasses.filter(wc => {
+        const seriesCounts = wc === 'L' ? [6, 8, 12] : [6, 7, 10];
+        return seriesCounts.some(sc =>
+            bests.some(b => b.weaponClass === wc && b.isCompetition === isCompetition && b.seriesCount === sc)
+        );
+    });
+
+    if (activeWeaponClasses.length === 0) {
+        return '<tr><td colspan="4" class="text-center text-muted">-</td></tr>';
+    }
+
+    return activeWeaponClasses.map(wc => {
+        const seriesCounts = wc === 'L' ? [6, 8, 12] : [6, 7, 10];
+        const isLWeapon = wc === 'L';
+
+        // For L weapon, show series count labels in the row (6/8/12 instead of 6/7/10)
+        if (isLWeapon) {
+            return `
+                <tr>
+                    <td><strong>${wc}</strong></td>
+                    <td class="text-center" title="6 serier">${getScore(wc, 6)}</td>
+                    <td class="text-center" title="8 serier">${getScore(wc, 8)}</td>
+                    <td class="text-center" title="12 serier">${getScore(wc, 12)}</td>
+                </tr>
+            `;
+        }
+
+        return `
+            <tr>
+                <td><strong>${wc}</strong></td>
+                <td class="text-center">${getScore(wc, 6)}</td>
+                <td class="text-center">${getScore(wc, 7)}</td>
+                <td class="text-center">${getScore(wc, 10)}</td>
+            </tr>
+        `;
+    }).join('');
+}
+
+// Render sessions per weapon class (training + competition combined)
+function renderSessionsPerWeapon(weaponClassData) {
+    if (!weaponClassData || weaponClassData.length === 0) {
+        return '<div class="text-center text-muted small">Inga pass registrerade</div>';
+    }
+
+    // Group by weapon class and sum training + competition sessions
+    const sessionsPerWeapon = {};
+    weaponClassData.forEach(wcd => {
+        if (!sessionsPerWeapon[wcd.weaponClass]) {
+            sessionsPerWeapon[wcd.weaponClass] = 0;
+        }
+        sessionsPerWeapon[wcd.weaponClass] += wcd.sessionCount;
+    });
+
+    // Sort by weapon class
+    const sortedWeapons = Object.keys(sessionsPerWeapon).sort();
+
+    if (sortedWeapons.length === 0) {
+        return '<div class="text-center text-muted small">Inga pass registrerade</div>';
+    }
+
+    // Render as a compact row of weapon badges
+    return `
+        <div class="d-flex flex-wrap justify-content-center gap-2 mb-2">
+            ${sortedWeapons.map(wc => `
+                <div class="text-center">
+                    <span class="badge bg-secondary">${wc}</span>
+                    <strong class="d-block small">${sessionsPerWeapon[wc]}</strong>
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+// Render recent average per weapon class
+function renderRecentAverageByWeapon(recentAverageByClass) {
+    if (!recentAverageByClass || recentAverageByClass.length === 0) {
+        return '<div class="text-center text-muted small">Ingen data</div>';
+    }
+
+    // Sort by weapon class
+    const sortedData = [...recentAverageByClass].sort((a, b) => a.weaponClass.localeCompare(b.weaponClass));
+
+    // Render as a compact row of weapon badges with averages
+    return `
+        <div class="d-flex flex-wrap justify-content-center gap-2 mb-2">
+            ${sortedData.map(wcd => `
+                <div class="text-center">
+                    <span class="badge bg-secondary">${wcd.weaponClass}</span>
+                    <strong class="d-block small">${wcd.average.toFixed(1)}p</strong>
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+function renderDashboard(data, selectedYears = null) {
+    const content = document.getElementById('dashboardContent');
+
+    // Store data globally for theme updates
+    window.dashboardData = data;
+
+    // Determine year filter state
+    // selectedYears = null means "Alla" (all years)
+    // selectedYears = [year] means a specific year is selected
+    const allYearsSelected = selectedYears === null;
+
+    // Filter data by selected years if specified
+    let filteredData = data;
+    let filteredMonthlyData = data.monthlyData;
+
+    if (selectedYears && selectedYears.length > 0) {
+        // Filter monthly data by year
+        filteredMonthlyData = data.monthlyData.filter(d => selectedYears.includes(d.year));
+
+        // Recalculate statistics from filtered data
+        const recalculatedStats = calculateStatsFromData(filteredMonthlyData);
+
+        // Calculate training-specific personal bests from filtered data
+        const trainingBests = [];
+        const competitionBests = [];
+        const weaponClasses = [...new Set(filteredMonthlyData.map(e => e.weaponClass))];
+
+        weaponClasses.forEach(wc => {
+            const trainingEntries = filteredMonthlyData.filter(e => e.weaponClass === wc && !e.isCompetition);
+            if (trainingEntries.length > 0) {
+                trainingBests.push({
+                    weaponClass: wc,
+                    bestAverage: Math.round(Math.max(...trainingEntries.map(e => e.averageScore)) * 10) / 10
+                });
+            }
+            const competitionEntries = filteredMonthlyData.filter(e => e.weaponClass === wc && e.isCompetition);
+            if (competitionEntries.length > 0) {
+                competitionBests.push({
+                    weaponClass: wc,
+                    bestAverage: Math.round(Math.max(...competitionEntries.map(e => e.averageScore)) * 10) / 10
+                });
+            }
+        });
+
+        // Aggregate medal stats for selected years
+        let aggregatedMedalStats = { silverCount: 0, bronzeCount: 0, totalPoints: 0 };
+        if (data.medalStatsByYear) {
+            selectedYears.forEach(year => {
+                const yearStats = data.medalStatsByYear[year];
+                if (yearStats) {
+                    aggregatedMedalStats.silverCount += yearStats.silverCount || 0;
+                    aggregatedMedalStats.bronzeCount += yearStats.bronzeCount || 0;
+                }
+            });
+            aggregatedMedalStats.totalPoints = (aggregatedMedalStats.silverCount * 2) + aggregatedMedalStats.bronzeCount;
+        }
+
+        filteredData = {
+            ...data,
+            monthlyData: filteredMonthlyData,
+            // Use recalculated stats for year-filtered data
+            totalSessions: recalculatedStats.totalSessions,
+            totalTrainingSessions: recalculatedStats.totalTrainingSessions,
+            totalCompetitions: recalculatedStats.totalCompetitions,
+            overallAverage: recalculatedStats.overallAverage,
+            weaponClassData: recalculatedStats.weaponClassData,
+            personalBestsBySeriesCount: recalculatedStats.personalBestsBySeriesCount,
+            // Keep 30-day stats from original data (always show real last 30 days)
+            // recentAverage, previousAverage, recentAverageByClass stay unchanged
+
+            // Recalculate personal bests for training and competition stats
+            trainingStats: {
+                ...data.trainingStats,
+                totalSessions: recalculatedStats.totalTrainingSessions,
+                personalBests: trainingBests
+            },
+            competitionStats: {
+                ...data.competitionStats,
+                totalSessions: recalculatedStats.totalCompetitions,
+                personalBests: competitionBests
+            },
+
+            // Use aggregated medal stats for selected years
+            medalStats: aggregatedMedalStats
+        };
+    }
+
+    // Calculate trend percentage
+    const trendPercentage = filteredData.previousAverage > 0
+        ? ((filteredData.recentAverage - filteredData.previousAverage) / filteredData.previousAverage * 100).toFixed(1)
+        : 0;
+
+    let trendIcon, trendColor, trendText;
+    if (Math.abs(trendPercentage) < 2) {
+        trendIcon = 'arrow-right';
+        trendColor = 'secondary';
+        trendText = 'Stabilt';
+    } else if (trendPercentage > 0) {
+        trendIcon = 'arrow-up';
+        trendColor = 'success';
+        trendText = `+${trendPercentage}%`;
+    } else {
+        trendIcon = 'arrow-down';
+        trendColor = 'danger';
+        trendText = `${trendPercentage}%`;
+    }
+
+    content.innerHTML = `
+        @* Year Selector Row *@
+        <div class="row mb-3">
+            <div class="col-12">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Översikt</h5>
+                    <div class="d-flex gap-2 align-items-center">
+                        <button class="btn btn-outline-secondary btn-sm" type="button" onclick="openShareDashboardModal()" title="Dela dashboard">
+                            <i class="bi bi-share"></i>
+                        </button>
+                        <select id="dashboardYearFilter" class="form-select form-select-sm" style="width: auto;" onchange="onDashboardYearChange(this)">
+                            <option value="all" ${selectedYears === null ? 'selected' : ''}>Alla</option>
+                            ${data.availableYears && data.availableYears.length > 0
+                                ? data.availableYears.map(year => `
+                                    <option value="${year}" ${selectedYears !== null && selectedYears.length === 1 && selectedYears[0] === year ? 'selected' : ''}>${year}</option>
+                                `).join('')
+                                : ''
+                            }
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        @* Redesigned Stats Cards Row - 4 Cards *@
+        <div class="row mb-4" id="statsCardsRow">
+            @* Card 1: Activity Summary *@
+            <div class="col-md-3 mb-3">
+                <div class="card stats-card h-100">
+                    <div class="card-body">
+                        <h6 class="text-muted mb-2"><i class="bi bi-clipboard-data"></i> Aktivitet</h6>
+                        <h3 class="mb-2 text-center">${filteredData.totalSessions} <small class="text-muted fs-6">pass</small></h3>
+                        ${renderSessionsPerWeapon(filteredData.weaponClassData || [])}
+                        <hr class="my-2">
+                        <div class="d-flex justify-content-around text-center small">
+                            <div>
+                                <i class="bi bi-bullseye text-primary"></i>
+                                <strong class="ms-1">${filteredData.totalTrainingSessions}</strong>
+                                <span class="text-muted ms-1">trän</span>
+                            </div>
+                            <div>
+                                <i class="bi bi-trophy text-success"></i>
+                                <strong class="ms-1">${filteredData.totalCompetitions}</strong>
+                                <span class="text-muted ms-1">tävl</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            @* Card 2: Current Form (Recent Performance) *@
+            <div class="col-md-3 mb-3">
+                <div class="card stats-card h-100">
+                    <div class="card-body">
+                        <h6 class="text-muted mb-2"><i class="bi bi-graph-up-arrow"></i> Aktuell Form</h6>
+                        ${filteredData.recentAverageByClass && filteredData.recentAverageByClass.length > 0 ? `
+                            <h3 class="mb-2 text-center">${filteredData.recentAverage.toFixed(1)}p <small class="text-muted fs-6">snitt</small></h3>
+                            ${renderRecentAverageByWeapon(filteredData.recentAverageByClass || [])}
+                            <hr class="my-2">
+                            <small class="text-${trendColor} text-center d-block">
+                                <i class="bi bi-${trendIcon}"></i> ${trendText}
+                            </small>
+                        ` : `
+                            <div class="text-center text-muted py-3">
+                                <i class="bi bi-info-circle fs-3"></i>
+                                <p class="mb-0 mt-1 small">Inga resultat (30 dagar)</p>
+                            </div>
+                        `}
+                    </div>
+                </div>
+            </div>
+
+            @* Card 3: Standard Medals *@
+            <div class="col-md-2 mb-3">
+                <div class="card stats-card h-100">
+                    <div class="card-body text-center">
+                        <h6 class="text-muted mb-2" style="font-size: 0.8rem;"><i class="bi bi-award"></i> Standardmedaljer</h6>
+                        ${filteredData.medalStats && (filteredData.medalStats.silverCount > 0 || filteredData.medalStats.bronzeCount > 0) ? `
+                            <div class="d-flex justify-content-around mb-2">
+                                <div>
+                                    <i class="bi bi-circle-fill" style="font-size: 1.3rem; color: #C0C0C0;"></i>
+                                    <div class="fw-bold">${filteredData.medalStats.silverCount}</div>
+                                </div>
+                                <div>
+                                    <i class="bi bi-circle-fill" style="font-size: 1.3rem; color: #CD7F32;"></i>
+                                    <div class="fw-bold">${filteredData.medalStats.bronzeCount}</div>
+                                </div>
+                            </div>
+                            <hr class="my-2">
+                            <div>
+                                <strong>${filteredData.medalStats.totalPoints}</strong>
+                                <span class="text-muted small">poäng</span>
+                            </div>
+                        ` : `
+                            <div class="text-muted py-3">
+                                <i class="bi bi-dash-circle fs-3"></i>
+                                <p class="mb-0 mt-1 small">Inga medaljer</p>
+                            </div>
+                        `}
+                    </div>
+                </div>
+            </div>
+
+            @* Card 4: Personal Bests (Total Scores by Series Count) - Collapsible *@
+            <div class="col-md-4 mb-3">
+                <div class="card stats-card" id="personalBestsCard">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h6 class="text-muted mb-0"><i class="bi bi-trophy-fill"></i> Personliga Rekord</h6>
+                            <button class="btn btn-sm btn-link text-muted p-0" onclick="togglePersonalBests()" id="personalBestsToggle" title="Visa mer">
+                                <i class="bi bi-chevron-down"></i>
+                            </button>
+                        </div>
+
+                        @* Collapsed Preview - Training Bests Only (first few rows) *@
+                        <div id="personalBestsPreview">
+                            <strong class="d-block mb-2 small"><i class="bi bi-bullseye text-primary"></i> Träning</strong>
+                            <div class="table-responsive">
+                                <table class="table table-sm table-borderless mb-0" style="font-size: 0.85rem;">
+                                    <thead>
+                                        <tr class="text-muted">
+                                            <th style="width: 50px;"></th>
+                                            <th class="text-center">6 ser</th>
+                                            <th class="text-center">7 ser</th>
+                                            <th class="text-center">10 ser</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${renderPersonalBestRows(filteredData.personalBestsBySeriesCount || [], false)}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        @* Full Content - Both Tables (hidden by default) *@
+                        <div id="personalBestsFull" style="display: none;">
+                            @* Training Bests Table *@
+                            <div class="mb-3">
+                                <strong class="d-block mb-2 small"><i class="bi bi-bullseye text-primary"></i> Träning</strong>
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-borderless mb-0" style="font-size: 0.85rem;">
+                                        <thead>
+                                            <tr class="text-muted">
+                                                <th style="width: 50px;"></th>
+                                                <th class="text-center">6 ser</th>
+                                                <th class="text-center">7 ser</th>
+                                                <th class="text-center">10 ser</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            ${renderPersonalBestRows(filteredData.personalBestsBySeriesCount || [], false)}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            @* Competition Bests Table *@
+                            <div>
+                                <strong class="d-block mb-2 small"><i class="bi bi-trophy text-success"></i> Tävling</strong>
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-borderless mb-0" style="font-size: 0.85rem;">
+                                        <thead>
+                                            <tr class="text-muted">
+                                                <th style="width: 50px;"></th>
+                                                <th class="text-center">6 ser</th>
+                                                <th class="text-center">7 ser</th>
+                                                <th class="text-center">10 ser</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            ${renderPersonalBestRows(filteredData.personalBestsBySeriesCount || [], true)}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        @* Charts Row *@
+        <div class="row mb-4">
+            <div class="col-lg-8 mb-3">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0"><i class="bi bi-graph-up-arrow"></i> Utveckling över tid</h5>
+                        <div class="btn-group btn-group-sm" role="group">
+                            <button type="button" class="btn btn-outline-secondary active" data-filter="all" onclick="filterProgressChart('all', this)">
+                                Alla
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary" data-filter="training" onclick="filterProgressChart('training', this)">
+                                Träning
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary" data-filter="competition" onclick="filterProgressChart('competition', this)">
+                                Tävling
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="progressChart" style="height: 250px;"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-4 mb-3">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-bar-chart"></i> Genomsnitt per vapen</h5>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="weaponClassChart" style="height: 250px;"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Render charts after DOM update
+    setTimeout(() => {
+        renderProgressChart(filteredData.monthlyData, 'all');
+        renderWeaponClassChart(filteredData.weaponClassData);
+    }, 100);
+}
+
+function renderProgressChart(monthlyData, filter) {
+    const ctx = document.getElementById('progressChart');
+    if (!ctx) return;
+
+    // Get theme-aware colors
+    const colors = getChartColors();
+
+    // Filter data based on training/competition/all
+    let filteredData = monthlyData;
+    if (filter === 'training') {
+        filteredData = monthlyData.filter(d => !d.isCompetition);
+    } else if (filter === 'competition') {
+        filteredData = monthlyData.filter(d => d.isCompetition);
+    }
+
+    // Sort by date
+    filteredData = filteredData.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    // Group by weapon class - each entry is a separate data point
+    const weaponClasses = [...new Set(filteredData.map(d => d.weaponClass))].sort();
+
+    const datasets = weaponClasses.map((wc) => {
+        const color = getColorForWeaponClass(wc);
+        const classData = filteredData.filter(d => d.weaponClass === wc);
+
+        return {
+                label: `${wc}-Vapen`,
+            data: classData.map(d => ({
+                x: new Date(d.date),
+                y: d.averageScore,
+                competitionName: d.competitionName
+            })),
+            borderColor: color,
+            backgroundColor: color + '33',
+            borderWidth: 2,
+            tension: 0,
+            spanGaps: false,
+            fill: false
+        };
+    });
+
+    // Calculate dynamic Y-axis range (max capped at 50.0 - theoretical maximum per series)
+    const allValues = filteredData.map(d => d.averageScore);
+    let minValue = 0;
+    let maxValue = 50;
+
+    if (allValues.length > 0) {
+        minValue = Math.min(...allValues);
+        minValue = Math.max(0, Math.floor(minValue - 2)); // 2 points below lowest value
+        maxValue = 50; // Always cap at 50 (10 points × 5 shots)
+    }
+
+    if (progressChart) {
+        progressChart.destroy();
+    }
+
+    progressChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            datasets: datasets
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'top',
+                },
+                tooltip: {
+                    callbacks: {
+                        title: function(context) {
+                            const dataPoint = context[0].raw;
+                            const date = new Date(dataPoint.x);
+                            return date.toLocaleDateString('sv-SE', { year: 'numeric', month: 'short', day: 'numeric' });
+                        },
+                        label: function(context) {
+                            const dataPoint = context.raw;
+                            let label = `${context.dataset.label}: ${dataPoint.y.toFixed(1)} poäng`;
+                            if (dataPoint.competitionName) {
+                                label += ` (${dataPoint.competitionName})`;
+                            }
+                            return label;
+                        }
+                    }
+                },
+                datalabels: {
+                    display: false  // Disable for line chart to avoid clutter
+                }
+            },
+            scales: {
+                x: {
+                    type: 'time',
+                    time: {
+                        unit: 'month',
+                        displayFormats: {
+                            month: 'MMM yyyy'
+                        },
+                        tooltipFormat: 'd MMM yyyy'
+                    },
+                    min: filteredData.length > 0 ? new Date(Math.min(...filteredData.map(d => new Date(d.date)))) : undefined,
+                    max: filteredData.length > 0 ? new Date(Math.max(...filteredData.map(d => new Date(d.date)))) : undefined,
+                    title: {
+                        display: true,
+                        text: 'Datum'
+                    },
+                    ticks: {
+                        color: colors.text
+                    },
+                    grid: {
+                        color: colors.grid
+                    }
+                },
+                y: {
+                    min: minValue,
+                    max: maxValue,
+                    title: {
+                        display: true,
+                        text: 'Snitt poäng per serie'
+                    },
+                    ticks: {
+                        color: colors.text,
+                        callback: function(value) {
+                            return value.toFixed(1);
+                        }
+                    },
+                    grid: {
+                        color: colors.grid
+                    }
+                }
+            }
+        }
+    });
+}
+
+function renderWeaponClassChart(weaponClassData) {
+    const ctx = document.getElementById('weaponClassChart');
+    if (!ctx) return;
+
+    // Get theme-aware colors
+    const colors = getChartColors();
+
+    // Group by weapon class
+    const weaponClasses = [...new Set(weaponClassData.map(d => d.weaponClass))].sort();
+
+    const trainingData = weaponClasses.map(wc => {
+        const entry = weaponClassData.find(d => d.weaponClass === wc && !d.isCompetition);
+        return entry ? entry.averageScore : 0;
+    });
+
+    const competitionData = weaponClasses.map(wc => {
+        const entry = weaponClassData.find(d => d.weaponClass === wc && d.isCompetition);
+        return entry ? entry.averageScore : 0;
+    });
+
+    // Calculate dynamic Y-axis range (max capped at 50.0 - theoretical maximum per series)
+    const allValues = [...trainingData, ...competitionData].filter(v => v > 0);
+    let minValue = 0;
+    let maxValue = 50;
+
+    if (allValues.length > 0) {
+        minValue = Math.min(...allValues);
+        const range = 50 - minValue;
+        const padding = Math.max(range * 0.15, 2); // 15% padding or minimum 2 points
+        minValue = Math.floor(minValue - padding);
+        maxValue = 50; // Always cap at 50 (10 points × 5 shots)
+    }
+
+    if (weaponClassChart) {
+        weaponClassChart.destroy();
+    }
+
+    weaponClassChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+                labels: weaponClasses.map(wc => `${wc}-Vapen`),
+            datasets: [
+                {
+                    label: 'Träning',
+                    data: trainingData,
+                    backgroundColor: colors.primary,
+                    borderColor: colors.primary,
+                    borderWidth: 1
+                },
+                {
+                    label: 'Tävling',
+                    data: competitionData,
+                    backgroundColor: colors.success,
+                    borderColor: colors.success,
+                    borderWidth: 1
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'top',
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return `${context.dataset.label}: ${context.parsed.y.toFixed(1)}p`;
+                        }
+                    }
+                },
+                datalabels: {
+                    anchor: 'end',
+                    align: 'top',
+                    formatter: function(value) {
+                        return value > 0 ? value.toFixed(1) : '';
+                    },
+                    font: {
+                        weight: 'bold',
+                        size: 11
+                    },
+                    color: colors.text
+                }
+            },
+            scales: {
+                y: {
+                    min: minValue,
+                    max: maxValue,
+                    title: {
+                        display: true,
+                        text: 'Snitt poäng per serie'
+                    },
+                    ticks: {
+                        color: colors.text,
+                        callback: function(value) {
+                            return value.toFixed(1);
+                        }
+                    },
+                    grid: {
+                        color: colors.grid
+                    }
+                },
+                x: {
+                    ticks: {
+                        color: colors.text
+                    }
+                }
+            }
+        }
+    });
+}
+
+function getColorForWeaponClass(weaponClass) {
+    const colors = {
+        'A': '#dc3545',  // Red
+        'B': '#fd7e14',  // Orange
+        'C': '#ffc107',  // Yellow
+        'R': '#20c997',  // Teal
+        'L': '#0dcaf0',  // Cyan (air/sky)
+        'P': '#6f42c1'   // Purple
+    };
+    return colors[weaponClass] || '#6c757d';
+}
+
+function filterProgressChart(filter, button) {
+    // Update active button
+    document.querySelectorAll('[data-filter]').forEach(btn => btn.classList.remove('active'));
+    button.classList.add('active');
+
+    // Re-render chart with filter
+    if (dashboardData && dashboardData.monthlyData) {
+        renderProgressChart(dashboardData.monthlyData, filter);
+    }
+}
+
+function onDashboardYearChange(select) {
+    if (!dashboardData) return;
+
+    const value = select.value;
+    if (value === 'all') {
+        // Show all years
+        renderDashboard(dashboardData, null);
+    } else {
+        // Show specific year
+        const year = parseInt(value);
+        renderDashboard(dashboardData, [year]);
+    }
+}
+
+function switchToTab(tabId) {
+    const tab = document.getElementById(tabId);
+    if (tab) {
+        const bsTab = new bootstrap.Tab(tab);
+        bsTab.show();
+    }
+}
+
+// ========== RESULTS TAB FUNCTIONS ==========
+
+function initializeResultsTab() {
+    // Populate year dropdown
+    const yearFilter = document.getElementById('yearFilter');
+    const currentYear = new Date().getFullYear();
+
+    yearFilter.innerHTML = '';
+    for (let y = currentYear + 1; y >= currentYear - 5; y--) {
+        const option = document.createElement('option');
+        option.value = y;
+        option.textContent = y;
+        if (y === currentYear) option.selected = true;
+        yearFilter.appendChild(option);
+    }
+
+    // Load results
+    loadResults();
+}
+
+function loadResults() {
+    const content = document.getElementById('resultsContent');
+    if (!content) return;
+
+    // Show loading state
+    content.innerHTML = `
+        <div class="text-center py-3">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Laddar...</span>
+            </div>
+        </div>
+    `;
+
+    const competitionType = document.getElementById('competitionTypeFilter')?.value || 'Precision';
+    const year = document.getElementById('yearFilter')?.value || new Date().getFullYear();
+    const weaponClass = document.getElementById('weaponClassFilter')?.value || 'Alla';
+
+    fetch(`/umbraco/surface/Member/GetMemberResults?competitionType=${competitionType}&year=${year}&weaponClass=${weaponClass}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                renderResultsTable(data.results);
+            } else {
+                content.innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="bi bi-exclamation-triangle"></i> ${data.message || 'Kunde inte ladda resultat'}
+                    </div>
+                `;
+            }
+        })
+        .catch(error => {
+            console.error('Error loading results:', error);
+            content.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="bi bi-exclamation-triangle"></i> Fel vid inläsning av resultat
+                </div>
+            `;
+        });
+}
+
+function renderResultsTable(results) {
+    const content = document.getElementById('resultsContent');
+
+    if (!results || results.length === 0) {
+        content.innerHTML = `
+            <div class="alert alert-info">
+                <h5><i class="bi bi-info-circle"></i> Inga resultat hittades</h5>
+                <p>Det finns inga resultat för de valda filtren. Prova att ändra år eller vapenklass.</p>
+                <button class="btn btn-primary" onclick="openTrainingScoreModal()">
+                    <i class="bi bi-plus-circle"></i> Lägg till träningsresultat
+                </button>
+            </div>
+        `;
+        return;
+    }
+
+    const html = `
+        <div class="table-responsive">
+            <table class="table table-striped table-hover">
+                <thead>
+                    <tr>
+                        <th>Datum</th>
+                        <th class="d-none d-md-table-cell">Namn</th>
+                        <th class="d-none d-md-table-cell">Medel</th>
+                        <th>Klass</th>
+                        <th>Totalt</th>
+                        <th>Åtgärder</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${results.map(r => `
+                        <tr>
+                            <td>
+                                ${r.type === 'Competition'
+                                    ? '<i class="bi bi-trophy text-primary me-2" title="Tävling"></i>'
+                                    : (r.trainingMatchId
+                                        ? '<i class="bi bi-people text-warning me-2" title="Träningsmatch"></i>'
+                                        : '<i class="bi bi-pencil-square text-success me-2" title="Träning"></i>')}
+                                ${formatDateShort(r.date)}
+                            </td>
+                            <td class="d-none d-md-table-cell">${escapeHtml(r.name)}</td>
+                            <td class="d-none d-md-table-cell"><strong>${r.averageScore}</strong></td>
+                            <td><span class="badge bg-secondary">${r.weaponClass}</span></td>
+                            <td>${r.totalScore} <small class="text-muted">(${r.seriesCount} serier)</small></td>
+                            <td>
+                                <button type="button" class="btn btn-sm btn-outline-primary me-1" onclick="viewResultDetails('${r.type}', ${r.trainingScoreId || 'null'}, ${r.competitionId || 'null'}, '${r.shootingClass || ''}')" title="Visa">
+                                    <i class="bi bi-eye"></i>
+                                </button>
+                                ${r.trainingScoreId && !r.trainingMatchId && !r.competitionId ? `
+                                    <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteTrainingScoreFromList(${r.trainingScoreId});" title="Ta bort">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                ` : ''}
+                            </td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="text-muted mt-3">
+            <small><i class="bi bi-info-circle"></i> Visar ${results.length} resultat</small>
+        </div>
+    `;
+
+    content.innerHTML = html;
+}
+
+function viewResultDetails(type, trainingScoreId, competitionId, shootingClass) {
+    // Training scores (including those marked as competition) use the training detail modal
+    if (trainingScoreId && trainingScoreId !== 'null') {
+        viewScoreDetails(trainingScoreId);
+    }
+    // Real competition results from PrecisionResultEntry use the competition detail modal
+    else if (competitionId && competitionId !== 'null' && shootingClass) {
+        viewCompetitionResultDetails(competitionId, shootingClass);
+    }
+}
+
+function viewCompetitionResultDetails(competitionId, shootingClass) {
+    const modal = new bootstrap.Modal(document.getElementById('viewCompetitionResultModal'));
+    const content = document.getElementById('competitionResultDetailContent');
+
+    // Show loading
+    content.innerHTML = `
+        <div class="text-center py-3">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Laddar...</span>
+            </div>
+        </div>
+    `;
+    modal.show();
+
+    // Fetch user's result for this competition
+    fetch(`/umbraco/surface/CompetitionResults/GetMyCompetitionResult?competitionId=${competitionId}&shootingClass=${encodeURIComponent(shootingClass)}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                content.innerHTML = renderCompetitionResultDetails(data);
+            } else {
+                content.innerHTML = `
+                    <div class="alert alert-warning">
+                        <i class="bi bi-exclamation-triangle"></i> ${data.message || 'Kunde inte ladda resultat'}
+                    </div>
+                `;
+            }
+        })
+        .catch(error => {
+            console.error('Error loading competition result:', error);
+            content.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="bi bi-exclamation-triangle"></i> Fel vid inläsning av resultat
+                </div>
+            `;
+        });
+}
+
+function renderCompetitionResultDetails(data) {
+    const series = data.series || [];
+
+    return `
+        <div class="mb-4">
+            <div class="row">
+                <div class="col-md-6">
+                    <h6 class="text-muted mb-1">Tävling</h6>
+                    <p class="h5">${escapeHtml(data.competitionName)}</p>
+                </div>
+                <div class="col-md-3">
+                    <h6 class="text-muted mb-1">Datum</h6>
+                    <p class="h5">${data.competitionDate ? new Date(data.competitionDate).toLocaleDateString('sv-SE', { year: 'numeric', month: 'long', day: 'numeric' }) : '-'}</p>
+                </div>
+                <div class="col-md-3">
+                    <h6 class="text-muted mb-1">Klass</h6>
+                    <p class="h5"><span class="badge bg-secondary">${data.weaponClass || data.shootingClass || '-'}</span></p>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mb-4">
+            <div class="col-md-4 text-center">
+                <div class="card" style="background-color: var(--bs-tertiary-bg);">
+                    <div class="card-body">
+                        <h3 class="text-primary mb-0">${data.totalScore}</h3>
+                        <small class="text-muted">Totalt poäng</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4 text-center">
+                <div class="card" style="background-color: var(--bs-tertiary-bg);">
+                    <div class="card-body">
+                        <h3 class="text-success mb-0">${data.xCount}</h3>
+                        <small class="text-muted">X-antal</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4 text-center">
+                <div class="card" style="background-color: var(--bs-tertiary-bg);">
+                    <div class="card-body">
+                        <h3 class="text-info mb-0">${data.seriesCount}</h3>
+                        <small class="text-muted">Serier</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <h6 class="mb-3">Detaljer per serie:</h6>
+        <div class="accordion" id="competitionSeriesAccordion">
+            ${series.map((s, index) => {
+                const hasShots = s.shots && s.shots.length > 0;
+
+                return `
+                <div class="accordion-item">
+                    <h2 class="accordion-header" id="compHeading${index}">
+                        <button class="accordion-button ${index === 0 ? '' : 'collapsed'}" type="button" data-bs-toggle="collapse" data-bs-target="#compCollapse${index}">
+                            <strong>Serie ${s.seriesNumber}</strong>
+                            <span class="ms-auto me-3">
+                                ${s.total}p
+                                ${s.xCount > 0 ? `<span class="badge bg-warning text-dark ms-2">${s.xCount} X</span>` : ''}
+                            </span>
+                        </button>
+                    </h2>
+                    <div id="compCollapse${index}" class="accordion-collapse collapse ${index === 0 ? 'show' : ''}" data-bs-parent="#competitionSeriesAccordion">
+                        <div class="accordion-body">
+                            ${hasShots ? `
+                                <div class="row g-2">
+                                    ${s.shots.map((shot, shotIndex) => `
+                                        <div class="col text-center">
+                                            <div class="card ${shot.toUpperCase() === 'X' ? 'bg-warning text-dark' : shot == '10' ? 'bg-success text-white' : ''}" style="${shot.toUpperCase() !== 'X' && shot != '10' ? 'background-color: var(--bs-tertiary-bg);' : ''}">
+                                                <div class="card-body py-2">
+                                                    <h4 class="mb-0">${shot}</h4>
+                                                    <small class="${shot.toUpperCase() === 'X' || shot == '10' ? '' : 'text-muted'}">Skott ${shotIndex + 1}</small>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            ` : `
+                                <div class="alert alert-info mb-0">
+                                    <i class="bi bi-info-circle"></i> Serie-total: <strong>${s.total}p</strong>${s.xCount > 0 ? ` med <strong>${s.xCount} X</strong>` : ''}
+                                </div>
+                            `}
+                        </div>
+                    </div>
+                </div>
+                `;
+            }).join('')}
+        </div>
+    `;
+}
+
+function deleteTrainingScoreFromList(scoreId) {
+    if (!confirm('Är du säker på att du vill ta bort detta träningsresultat? Detta går inte att ångra.')) {
+        return;
+    }
+
+    // Get anti-forgery token
+    const token = document.querySelector('input[name="__RequestVerificationToken"]').value;
+
+    fetch(`/umbraco/surface/TrainingScoring/DeleteTrainingScore?id=${scoreId}`, {
+        method: 'DELETE',
+        headers: {
+            'RequestVerificationToken': token
+        }
+    })
+    .then(response => response.json())
+    .then(result => {
+        if (result.success) {
+            // Refresh the results list
+            loadResults();
+        } else {
+            alert('Fel: ' + result.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error deleting training score:', error);
+        alert('Kunde inte ta bort träningsresultat. Försök igen.');
+    });
+}
+
+function formatDateShort(dateStr) {
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('sv-SE', { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function openTrainingScoreModal() {
+    const modal = new bootstrap.Modal(document.getElementById('addTrainingScoreModal'));
+    modal.show();
+}
+
+// ========== COMPETITIONS TAB FUNCTIONS ==========
+
+let allCompetitionRegistrations = [];
+let filterDebounceTimer = null;
+
+function initializeCompetitionsTab() {
+    // Populate year dropdown
+    const yearFilter = document.getElementById('compYearFilter');
+    const currentYear = new Date().getFullYear();
+
+    // Keep "Alla år" option, add years
+    for (let y = currentYear + 1; y >= currentYear - 3; y--) {
+        const option = document.createElement('option');
+        option.value = y;
+        option.textContent = y;
+        yearFilter.appendChild(option);
+    }
+
+    // Load data
+    loadCompetitionRegistrations();
+}
+
+function loadCompetitionRegistrations() {
+    const content = document.getElementById('competitionsContent');
+    if (!content) return;
+
+    // Show loading state
+    content.innerHTML = `
+        <div class="text-center py-3">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Laddar tävlingar...</span>
+            </div>
+        </div>
+    `;
+
+    // Get filter values
+    const year = document.getElementById('compYearFilter')?.value || null;
+    const competitionStatus = document.getElementById('compStatusFilter')?.value || 'all';
+    const paymentStatus = document.getElementById('compPaymentFilter')?.value || 'all';
+    const searchText = document.getElementById('compSearchFilter')?.value || '';
+
+    // Build query string
+    const params = new URLSearchParams();
+    if (year) params.append('year', year);
+    if (competitionStatus && competitionStatus !== 'all') params.append('competitionStatus', competitionStatus);
+    if (paymentStatus && paymentStatus !== 'all') params.append('paymentStatus', paymentStatus);
+    if (searchText) params.append('searchText', searchText);
+
+    fetch(`/umbraco/surface/Member/GetMyCompetitionRegistrations?${params.toString()}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                allCompetitionRegistrations = data.registrations || [];
+                renderCompetitionsView();
+            } else {
+                content.innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="bi bi-exclamation-triangle"></i> ${data.message || 'Kunde inte ladda tävlingar'}
+                    </div>
+                `;
+            }
+        })
+        .catch(error => {
+            console.error('Error loading competitions:', error);
+            content.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="bi bi-exclamation-triangle"></i> Fel vid inläsning av tävlingar: ${error.message}
+                </div>
+            `;
+        });
+}
+
+function renderCompetitionsView() {
+    const content = document.getElementById('competitionsContent');
+
+    if (allCompetitionRegistrations.length === 0) {
+        content.innerHTML = `
+            <div class="alert alert-info">
+                <h5><i class="bi bi-info-circle"></i> Inga tävlingsanmälningar hittades</h5>
+                <p>Du har inte anmält dig till några tävlingar än, eller så filtrerar du bort alla resultat.</p>
+                <a href="/competitions/" class="btn btn-primary">
+                    <i class="bi bi-search"></i> Hitta tävlingar
+                </a>
+            </div>
+        `;
+        return;
+    }
+
+    // Render desktop table view (hidden on mobile)
+    const tableHtml = renderCompetitionsTable();
+
+    // Render mobile card view (hidden on desktop)
+    const cardsHtml = renderCompetitionsCards();
+
+    content.innerHTML = `
+        <!-- Desktop Table View -->
+        <div class="d-none d-md-block">
+            ${tableHtml}
+        </div>
+
+        <!-- Mobile Card View -->
+        <div class="d-md-none">
+            ${cardsHtml}
+        </div>
+
+        <div class="text-muted mt-3">
+            <small><i class="bi bi-info-circle"></i> Visar ${allCompetitionRegistrations.length} anmälning${allCompetitionRegistrations.length !== 1 ? 'ar' : ''}</small>
+        </div>
+    `;
+}
+
+function renderCompetitionsTable() {
+    return `
+        <div class="table-responsive">
+            <table class="table table-striped table-hover">
+                <thead>
+                    <tr>
+                        <th>Tävling</th>
+                        <th>Datum</th>
+                        <th>Klasser</th>
+                        <th>Betalning</th>
+                        <th>Status</th>
+                        <th>Åtgärder</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${allCompetitionRegistrations.map(comp => `
+                        <tr>
+                            <td>
+                                <strong>${escapeHtml(comp.competitionName)}</strong>
+                            </td>
+                            <td>${formatCompetitionDate(comp.competitionDate)}</td>
+                            <td>${renderShootingClasses(comp.shootingClasses)}</td>
+                            <td>${renderPaymentBadge(comp.paymentStatus, comp.paymentAmount)}</td>
+                            <td>${renderStatusBadge(comp.competitionStatus)}</td>
+                            <td>
+                                <div class="btn-group btn-group-sm" role="group">
+                                    <a href="/competitions/${comp.competitionId}/" class="btn btn-outline-primary" title="Visa tävling">
+                                        <i class="bi bi-eye"></i>
+                                    </a>
+                                    ${comp.paymentStatus === 'pending' && comp.hasInvoice ? `
+                                        <button class="btn btn-outline-success" onclick="payInvoice(${comp.competitionId}, ${comp.invoiceId})" title="Betala">
+                                            <i class="bi bi-credit-card"></i>
+                                        </button>
+                                    ` : ''}
+                                    ${comp.canUnregister ? `
+                                        <button class="btn btn-outline-danger" onclick="unregisterFromCompetition(${comp.registrationId}, '${escapeHtml(comp.competitionName)}')" title="Avanmäl">
+                                            <i class="bi bi-x-circle"></i>
+                                        </button>
+                                    ` : ''}
+                                </div>
+                            </td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
+function renderCompetitionsCards() {
+    return `
+        <div class="competition-cards">
+            ${allCompetitionRegistrations.map(comp => `
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <h5 class="card-title mb-0">${escapeHtml(comp.competitionName)}</h5>
+                            ${renderStatusBadge(comp.competitionStatus)}
+                        </div>
+
+                        <p class="text-muted mb-2">
+                            <i class="bi bi-calendar3"></i> ${formatCompetitionDate(comp.competitionDate)}
+                        </p>
+
+                        <div class="mb-2">
+                            <strong>Klasser:</strong><br>
+                            ${renderShootingClasses(comp.shootingClasses)}
+                        </div>
+
+                        <div class="mb-3">
+                            <strong>Betalning:</strong><br>
+                            ${renderPaymentBadge(comp.paymentStatus, comp.paymentAmount)}
+                        </div>
+
+                        <div class="d-grid gap-2">
+                            <a href="/competitions/${comp.competitionId}/" class="btn btn-primary">
+                                <i class="bi bi-eye"></i> Visa tävling
+                            </a>
+                            ${comp.paymentStatus === 'pending' && comp.hasInvoice ? `
+                                <button class="btn btn-success" onclick="payInvoice(${comp.competitionId}, ${comp.invoiceId})">
+                                    <i class="bi bi-credit-card"></i> Betala med Swish
+                                </button>
+                            ` : ''}
+                            ${comp.canUnregister ? `
+                                <button class="btn btn-outline-danger" onclick="unregisterFromCompetition(${comp.registrationId}, '${escapeHtml(comp.competitionName)}')">
+                                    <i class="bi bi-x-circle"></i> Avanmäl
+                                </button>
+                            ` : ''}
+                        </div>
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+function renderShootingClasses(classes) {
+    if (!classes || classes.length === 0) return '<span class="text-muted">Ingen</span>';
+    return classes.map(cls => `<span class="badge bg-secondary me-1">${cls}</span>`).join('');
+}
+
+function renderPaymentBadge(status, amount) {
+    const badges = {
+        'paid': '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Betald</span>',
+        'pending': `<span class="badge bg-warning text-dark"><i class="bi bi-clock"></i> Väntande (${amount ? amount + ' kr' : ''})</span>`,
+        'no_invoice': '<span class="badge bg-secondary"><i class="bi bi-dash-circle"></i> Ingen faktura</span>'
+    };
+    return badges[status] || '<span class="badge bg-secondary">Okänd</span>';
+}
+
+function renderStatusBadge(status) {
+    const badges = {
+        'upcoming': '<span class="badge bg-primary"><i class="bi bi-calendar-event"></i> Kommande</span>',
+        'past': '<span class="badge bg-secondary"><i class="bi bi-calendar-check"></i> Genomförd</span>'
+    };
+    return badges[status] || '<span class="badge bg-secondary">Okänd</span>';
+}
+
+function formatCompetitionDate(dateStr) {
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('sv-SE', { year: 'numeric', month: 'long', day: 'numeric' });
+}
+
+function applyCompetitionFilters() {
+    loadCompetitionRegistrations();
+}
+
+function applyCompetitionFiltersDebounced() {
+    clearTimeout(filterDebounceTimer);
+    filterDebounceTimer = setTimeout(() => {
+        loadCompetitionRegistrations();
+    }, 500);
+}
+
+function payInvoice(competitionId, invoiceId) {
+    // Show Swish QR code modal
+    showSwishPaymentModal(competitionId, invoiceId);
+}
+
+function showSwishPaymentModal(competitionId, invoiceId) {
+    // Create modal HTML
+    const modalHtml = `
+        <div class="modal fade" id="swishPaymentModal" tabindex="-1">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header bg-success text-white">
+                        <h5 class="modal-title">
+                            <i class="bi bi-phone me-2"></i>Betala med Swish
+                        </h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body text-center">
+                        <div id="swishQrCodeContainer" class="mb-3">
+                            <div class="spinner-border text-success" role="status">
+                                <span class="visually-hidden">Laddar QR-kod...</span>
+                            </div>
+                        </div>
+                        <div id="swishInstructions" class="d-none">
+                            <p class="text-muted mb-3">
+                                <strong>Så här betalar du:</strong>
+                            </p>
+                            <ol class="text-start text-muted mb-3">
+                                <li>Öppna Swish-appen på din telefon</li>
+                                <li>Scanna QR-koden ovan</li>
+                                <li>Bekräfta betalningen</li>
+                            </ol>
+                            <div class="alert alert-info">
+                                <i class="bi bi-info-circle"></i> Belopp och meddelande är förifyllda
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Remove existing modal if any
+    const existingModal = document.getElementById('swishPaymentModal');
+    if (existingModal) {
+        existingModal.remove();
+    }
+
+    // Add modal to page
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+    // Show modal
+    const modal = new bootstrap.Modal(document.getElementById('swishPaymentModal'));
+    modal.show();
+
+    // Load QR code
+    loadSwishQrCode(competitionId, invoiceId);
+}
+
+function loadSwishQrCode(competitionId, invoiceId) {
+    // Fetch QR code from server - endpoint is GeneratePaymentQR
+    fetch(`/umbraco/surface/Swish/GeneratePaymentQR?competitionId=${competitionId}`)
+        .then(response => response.json())
+        .then(data => {
+            const container = document.getElementById('swishQrCodeContainer');
+            const instructions = document.getElementById('swishInstructions');
+
+            if (data.success && data.qrCode) {
+                container.innerHTML = `
+                    <img src="${data.qrCode}" alt="Swish QR Code" class="img-fluid" style="max-width: 300px;">
+                    <p class="text-muted mt-2">
+                        <strong>Belopp:</strong> ${data.amount} kr<br>
+                        <strong>Fakturanr:</strong> ${data.invoiceNumber || invoiceId}
+                    </p>
+                `;
+                instructions.classList.remove('d-none');
+            } else {
+                container.innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="bi bi-exclamation-triangle"></i>
+                        Kunde inte ladda QR-kod: ${data.message || 'Okänt fel'}
+                    </div>
+                `;
+            }
+        })
+        .catch(error => {
+            console.error('Error loading Swish QR code:', error);
+            document.getElementById('swishQrCodeContainer').innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    Ett fel uppstod vid laddning av QR-kod
+                </div>
+            `;
+        });
+}
+
+function unregisterFromCompetition(registrationId, competitionName) {
+    if (!confirm(`Är du säker på att du vill avanmäla dig från "${competitionName}"?\n\nOBS: Detta går inte att ångra.`)) {
+        return;
+    }
+
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+
+    fetch(`/umbraco/surface/Competition/UnregisterFromCompetition`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'RequestVerificationToken': token
+        },
+        body: JSON.stringify({ registrationId: registrationId })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('Du har framgångsrikt avanmält dig från tävlingen.');
+            loadCompetitionRegistrations(); // Reload list
+        } else {
+            alert('Fel vid avanmälan: ' + (data.message || 'Okänt fel'));
+        }
+    })
+    .catch(error => {
+        console.error('Error unregistering:', error);
+        alert('Kunde inte avanmäla: ' + error.message);
+    });
+}
+
+// ========== PROFILE PICTURE FUNCTIONS ==========
+
+function uploadProfilePicture(input) {
+    if (!input.files || !input.files[0]) {
+        return;
+    }
+
+    const file = input.files[0];
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+        alert('Vänligen välj en bildfil (JPG, PNG, etc.)');
+        return;
+    }
+
+    // Validate file size (max 5MB)
+    const maxSize = 5 * 1024 * 1024; // 5MB
+    if (file.size > maxSize) {
+        alert('Bilden är för stor. Max storlek är 5MB.');
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('profilePicture', file);
+
+    // Get anti-forgery token
+    const token = document.querySelector('input[name="__RequestVerificationToken"]');
+    if (token) {
+        formData.append('__RequestVerificationToken', token.value);
+    }
+
+    // Show loading state
+    const container = document.getElementById('profilePictureContainer');
+    const originalContent = container.innerHTML;
+    container.innerHTML = `
+        <div class="d-flex align-items-center justify-content-center w-100 h-100">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Laddar upp...</span>
+            </div>
+        </div>
+    `;
+
+    fetch('/umbraco/surface/Member/UploadProfilePicture', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Update the profile picture
+            container.innerHTML = `
+                <img id="profileImage" src="${data.imageUrl}" alt="Profilbild" class="w-100 h-100" style="object-fit: cover;">
+            `;
+            // Reload page to update navigation avatar and remove button
+            window.location.reload();
+        } else {
+            container.innerHTML = originalContent;
+            alert('Fel vid uppladdning: ' + (data.message || 'Okänt fel'));
+        }
+    })
+    .catch(error => {
+        console.error('Error uploading profile picture:', error);
+        container.innerHTML = originalContent;
+        alert('Kunde inte ladda upp bild. Försök igen.');
+    });
+
+    // Clear the input
+    input.value = '';
+}
+
+function removeProfilePicture() {
+    if (!confirm('Är du säker på att du vill ta bort din profilbild?')) {
+        return;
+    }
+
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+
+    // Show loading state
+    const container = document.getElementById('profilePictureContainer');
+    const originalContent = container.innerHTML;
+    container.innerHTML = `
+        <div class="d-flex align-items-center justify-content-center w-100 h-100">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Tar bort...</span>
+            </div>
+        </div>
+    `;
+
+    fetch('/umbraco/surface/Member/RemoveProfilePicture', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'RequestVerificationToken': token
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Reload page to update to initials avatar
+            window.location.reload();
+        } else {
+            container.innerHTML = originalContent;
+            alert('Fel vid borttagning: ' + (data.message || 'Okänt fel'));
+        }
+    })
+    .catch(error => {
+        console.error('Error removing profile picture:', error);
+        container.innerHTML = originalContent;
+        alert('Kunde inte ta bort bild. Försök igen.');
+    });
+}
+</script>
+
+<style>
+/* Mobile optimizations for touch targets */
+@@media (max-width: 768px) {
+    /* Increase button sizes for better touch targets */
+    .btn-sm {
+        padding: 0.5rem 0.75rem;
+        font-size: 1rem;
+        min-height: 44px;
+        min-width: 44px;
+    }
+
+    /* Action buttons in table */
+    .table .btn-sm {
+        padding: 0.5rem 0.75rem;
+    }
+
+    /* Primary action buttons */
+    .btn-primary,
+    .btn-outline-primary,
+    .btn-secondary,
+    .btn-outline-secondary {
+        min-height: 44px;
+        padding: 0.5rem 1rem;
+    }
+
+    /* Filter button */
+    .btn-outline-secondary[data-bs-toggle="collapse"] {
+        min-height: 44px;
+    }
+
+    /* Tab buttons */
+    .nav-tabs .nav-link {
+        padding: 0.75rem 1rem;
+        font-size: 1rem;
+    }
+
+    /* Compact table on mobile */
+    .table-responsive {
+        font-size: 0.9rem;
+    }
+
+    .table td,
+    .table th {
+        padding: 0.75rem 0.5rem;
+    }
+
+    /* Ensure badges are readable */
+    .badge {
+        padding: 0.5em 0.75em;
+        font-size: 0.875rem;
+    }
+}
+</style>

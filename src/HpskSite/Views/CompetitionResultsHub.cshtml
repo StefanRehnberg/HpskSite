@@ -1,0 +1,236 @@
+@using HpskSite.Extensions
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = null;
+    var competition = Model.Parent;
+}
+
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex align-items-center mb-4">
+            <div>
+                <h1><i class="bi bi-trophy text-primary me-2"></i>Resultat</h1>
+                <nav aria-label="breadcrumb">
+                    <ol class="breadcrumb">
+                        <li class="breadcrumb-item"><a href="@competition.CompetitionUrl()">@competition.Name</a></li>
+                        <li class="breadcrumb-item active" aria-current="page">Resultat</li>
+                    </ol>
+                </nav>
+            </div>
+        </div>
+
+        @{
+            var description = Model.Value<string>("description");
+        }
+        @if (!string.IsNullOrEmpty(description))
+        {
+            <div class="alert alert-info">
+                <p class="mb-0">@description</p>
+            </div>
+        }
+
+        <!-- Live Results Status -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card border-success">
+                    <div class="card-body">
+                        <div class="d-flex align-items-center">
+                            <div class="me-3">
+                                <i class="bi bi-broadcast text-success" style="font-size: 2rem;"></i>
+                            </div>
+                            <div class="flex-grow-1">
+                                <h5 class="card-title mb-1">Live Resultat</h5>
+                                <p class="card-text mb-0">Resultat uppdateras i realtid när de registreras av domare.</p>
+                            </div>
+                            <div class="text-end">
+                                <span class="badge bg-success fs-6">Live</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            @if (Model.Children.Any())
+            {
+                @foreach (var result in Model.Children.OrderBy(x => x.Value<bool>("isOfficial")))
+                {
+                    var resultType = result.Value<string>("resultType") ?? "Leaderboard";
+                    var lastUpdated = result.Value<DateTime>("lastUpdated");
+                    var isOfficial = result.Value<bool>("isOfficial");
+                    var resultData = result.Value<string>("resultData");
+
+                    <div class="col-md-6 col-lg-4 mb-4">
+                        <div class="card h-100 @(isOfficial ? "border-success" : "border-primary")">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <small class="text-muted">
+                                    <i class="bi bi-clock me-1"></i>
+                                    @lastUpdated.ToString("HH:mm:ss")
+                                </small>
+                                @if (isOfficial)
+                                {
+                                    <span class="badge bg-success">Officiellt</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-primary">Live</span>
+                                }
+                            </div>
+                            <div class="card-body">
+                                <h5 class="card-title">
+                                    @if (resultType == "Leaderboard")
+                                    {
+                                        @if (isOfficial)
+                                        {
+                                            <i class="bi bi-trophy text-success me-2"></i>
+                                            @("Slutresultat")
+                                        }
+                                        else
+                                        {
+                                            <i class="bi bi-broadcast text-primary me-2"></i>
+                                            @("Live Resultat")
+                                        }
+                                    }
+                                    else if (resultType == "Overall")
+                                    {
+                                        <i class="bi bi-graph-up text-success me-2"></i>
+                                        @("Slutresultat")
+                                    }
+                                    else
+                                    {
+                                        @result.Name
+                                    }
+                                </h5>
+                                <p class="card-text">
+                                    <strong>Typ:</strong> @(isOfficial ? "Officiella resultat" : "Live uppdateringar")<br>
+                                    <strong>Senast uppdaterad:</strong> @lastUpdated.ToString("yyyy-MM-dd HH:mm")
+                                </p>
+                            </div>
+                            <div class="card-footer">
+                                <a href="@result.Url()" class="btn btn-primary btn-sm">
+                                    <i class="bi bi-eye me-1"></i>Visa Resultat
+                                </a>
+                                @if (!string.IsNullOrEmpty(resultData))
+                                {
+                                    <button class="btn btn-outline-secondary btn-sm ms-2" onclick="showResultData(@result.Id)">
+                                        <i class="bi bi-download me-1"></i>Exportera
+                                    </button>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                }
+            }
+            else
+            {
+                <div class="col-12">
+                    <div class="alert alert-warning">
+                        <h4 class="alert-heading">Inga resultat ännu</h4>
+                        <p class="mb-0">Det finns inga registrerade resultat för denna tävling ännu. Resultat visas automatiskt här när domare börjar registrera skjutresultat.</p>
+                    </div>
+                </div>
+            }
+        </div>
+
+        <!-- Quick Actions -->
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-lightning me-2"></i>Snabbåtgärder</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-4 mb-3">
+                                <a href="@competition.CompetitionUrl()?tab=results" class="btn btn-outline-primary w-100">
+                                    <i class="bi bi-pencil-square me-2"></i>
+                                    Registrera Resultat
+                                </a>
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <button class="btn btn-outline-success w-100" onclick="refreshResults()">
+                                    <i class="bi bi-arrow-clockwise me-2"></i>
+                                    Uppdatera Resultat
+                                </button>
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <button class="btn btn-outline-info w-100" onclick="exportAllResults()">
+                                    <i class="bi bi-file-earmark-spreadsheet me-2"></i>
+                                    Exportera Alla
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@if (Model.Children.Any())
+{
+    <!-- Result Data Modal -->
+    <div class="modal fade" id="resultDataModal" tabindex="-1" aria-labelledby="resultDataModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="resultDataModalLabel">Resultatdata</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <pre id="resultDataContent" class="bg-light p-3 rounded"></pre>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+                    <button type="button" class="btn btn-primary" onclick="downloadResultData()">Ladda Ner</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentResultId = null;
+        
+        function showResultData(resultId) {
+            currentResultId = resultId;
+            // This would fetch actual result data from the server
+            document.getElementById('resultDataContent').textContent = 'Resultatdata för resultat ' + resultId;
+            new bootstrap.Modal(document.getElementById('resultDataModal')).show();
+        }
+        
+        function downloadResultData() {
+            if (currentResultId) {
+                // Implement download functionality
+                console.log('Downloading result data for:', currentResultId);
+            }
+        }
+        
+        function refreshResults() {
+            // Reload the page to get latest results
+            location.reload();
+        }
+        
+        function exportAllResults() {
+            // Implement export all results functionality
+            console.log('Exporting all results');
+        }
+        
+        // Auto-refresh every 30 seconds for live updates
+        setInterval(function() {
+            // Only refresh if no modals are open
+            if (!document.querySelector('.modal.show')) {
+                // Could implement AJAX refresh instead of full page reload
+                // refreshResults();
+            }
+        }, 30000);
+    </script>
+}
+
+
+
+
+
+
+
+

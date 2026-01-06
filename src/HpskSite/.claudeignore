@@ -1,0 +1,27 @@
+# Build outputs
+bin/
+obj/
+
+# Dependencies
+node_modules/
+
+# Git
+.git/
+
+# IDE
+.vs/
+.vscode/
+.idea/
+.cursor/
+
+# Umbraco temp data
+umbraco/Data/TEMP/
+umbraco/Data/*.sqlite*
+umbraco/Logs/
+
+# Media (user uploads)
+wwwroot/media/
+
+# Package files
+*.nupkg
+*.snupkg

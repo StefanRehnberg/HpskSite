@@ -1,0 +1,746 @@
+@using Umbraco.Cms.Web.Common.PublishedModels;
+@{
+    var competition = ViewData["Competition"] as IPublishedContent;
+    var competitionId = (int?)ViewData["CompetitionId"] ?? 0;
+    
+    var compName = competition?.Value<string>("competitionName") ?? "";
+    var compDesc = competition?.Value<string>("description") ?? "";
+    var compVenue = competition?.Value<string>("venue") ?? "";
+    var compDate = competition?.Value<DateTime>("competitionDate");
+    var compEndDate = competition?.Value<DateTime?>("competitionEndDate");
+    var regOpenDate = competition?.Value<DateTime>("registrationOpenDate");
+    var regCloseDate = competition?.Value<DateTime>("registrationCloseDate");
+    var maxParticipants = competition?.Value<int>("maxParticipants") ?? 0;
+    var regFee = competition?.Value<decimal>("registrationFee") ?? 0;
+    var compDirector = competition?.Value<string>("competitionDirector") ?? "";
+    var contactEmail = competition?.Value<string>("contactEmail") ?? "";
+    var contactPhone = competition?.Value<string>("contactPhone") ?? "";
+    var numSeries = competition?.Value<int>("numberOfSeriesOrStations") ?? 0;
+    var isActive = competition?.Value<bool>("isActive");
+    var showLiveResults = competition?.Value<bool>("showLiveResults");
+    
+    var shootingClassIds = "";
+    var classIdsObj = competition?.Value("shootingClassIds");
+    if (classIdsObj is string[] classArray && classArray.Length > 0)
+    {
+        shootingClassIds = string.Join(", ", classArray);
+    }
+    else if (classIdsObj is string classStr && !string.IsNullOrEmpty(classStr))
+    {
+        shootingClassIds = classStr;
+    }
+    
+    var allowDualCClass = competition?.Value<bool>("allowDualCClass");
+    var competitionManagers = competition?.Value<string[]>("competitionManagers") ?? new string[] { };
+    var swishNumber = competition?.Value<string>("swishNumber") ?? "";
+    var addToMenu = competition?.Value<bool>("addToMenu");
+    var numberOfFinalSeries = competition?.Value<int>("numberOfFinalSeries") ?? 0;
+    
+    var compDateStr = compDate.HasValue ? compDate.Value.ToString("yyyy-MM-dd HH:mm") : "";
+    var compEndDateStr = compEndDate.HasValue ? compEndDate.Value.ToString("yyyy-MM-dd") : "";
+    var regOpenDateStr = regOpenDate.HasValue ? regOpenDate.Value.ToString("yyyy-MM-dd HH:mm") : "";
+    var regCloseDateStr = regCloseDate.HasValue ? regCloseDate.Value.ToString("yyyy-MM-dd HH:mm") : "";
+}
+
+<style>
+    input[type="text"].date-input {
+        font-family: monospace;
+    }
+</style>
+
+<!-- Flatpickr CSS and JS from CDN -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
+
+<div class="modal fade" id="competitionModal" tabindex="-1" aria-labelledby="competitionModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="competitionModalLabel">
+                    <i class="bi bi-pencil me-2"></i><span id="modalTitleText">Redigera Tävling</span>
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div id="formErrors" class="alert alert-danger d-none mt-3" role="alert">
+                    <strong>Fel:</strong>
+                    <ul id="errorList" class="mb-0 mt-2"></ul>
+                </div>
+
+                <form id="competitionForm">
+                    <!-- COMPETITION TYPE - Only visible and required for CREATE mode -->
+                    <div id="typeSection" class="mb-4 d-none">
+                        <div class="row">
+                            <div class="col-12">
+                                <h6 class="mb-3 text-primary">
+                                    <i class="bi bi-tag me-1"></i>Typ
+                                </h6>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="competitionType" class="form-label">Tävlingstyp <span class="text-danger">*</span></label>
+                            <select class="form-select" id="competitionType" name="competitionType">
+                                <option value="">Laddar tävlingstyper...</option>
+                            </select>
+                            <small class="form-text text-muted">Kan inte ändras efter skapande</small>
+                        </div>
+                        <hr>
+                    </div>
+
+                    <!-- BASIC INFO -->
+                    <div class="row">
+                        <div class="col-12">
+                            <h6 class="mb-3 text-primary">
+                                <i class="bi bi-info-circle me-1"></i>Grundinformation
+                            </h6>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="competitionName" class="form-label">Tävlingsnamn <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="competitionName" name="competitionName" value="@compName" required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="description" class="form-label">Beskrivning</label>
+                        <textarea class="form-control" id="description" name="description" rows="2">@compDesc</textarea>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="venue" class="form-label">Plats <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="venue" name="venue" value="@compVenue" required>
+                    </div>
+
+                    <hr>
+
+                    <!-- DATES -->
+                    <div class="row">
+                        <div class="col-12">
+                            <h6 class="mb-3 text-primary"><i class="bi bi-calendar me-1"></i>Datum</h6>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="competitionDate" class="form-label">Tävlingsdatum <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control date-input" id="competitionDate" name="competitionDate" value="@compDateStr" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="competitionEndDate" class="form-label">Slutdatum</label>
+                                <input type="text" class="form-control date-input" id="competitionEndDate" name="competitionEndDate" value="@compEndDateStr">
+                            </div>
+                        </div>
+                    </div>
+
+                    <hr>
+
+                    <!-- REGISTRATION INFO -->
+                    <div class="row">
+                        <div class="col-12">
+                            <h6 class="mb-3 text-primary"><i class="bi bi-clipboard me-1"></i>Anmälansinformation</h6>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="registrationOpenDate" class="form-label">Anmälan öppnar <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control date-input" id="registrationOpenDate" name="registrationOpenDate" value="@regOpenDateStr" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="registrationCloseDate" class="form-label">Anmälan stänger <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control date-input" id="registrationCloseDate" name="registrationCloseDate" value="@regCloseDateStr" required>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="maxParticipants" class="form-label">Max antal deltagare <span class="text-danger">*</span></label>
+                                <input type="number" class="form-control" id="maxParticipants" name="maxParticipants" value="@maxParticipants" min="1" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="registrationFee" class="form-label">Anmälningsavgift (kr)</label>
+                                <input type="number" class="form-control" id="registrationFee" name="registrationFee" value="@regFee" min="0" step="0.01">
+                            </div>
+                        </div>
+                    </div>
+
+                    <hr>
+
+                    <!-- CONFIGURATION -->
+                    <div class="row">
+                        <div class="col-12">
+                            <h6 class="mb-3 text-primary"><i class="bi bi-gear me-1"></i>Konfiguration</h6>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Skytteklasser <span class="text-danger">*</span></label>
+                        <div id="shootingClassesContainer" class="border rounded p-3" style="max-height: 300px; overflow-y: auto;">
+                            <div class="text-center text-muted">
+                                <small>Laddar klasser...</small>
+                            </div>
+                        </div>
+                        <input type="hidden" id="shootingClassIds" name="shootingClassIds" value="@shootingClassIds">
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="allowDualCClass" name="allowDualCClass" @(allowDualCClass == true ? "checked" : "")>
+                                    <label class="form-check-label" for="allowDualCClass">
+                                        Tillåt dubbel C-klassregistrering
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="showLiveResults" name="showLiveResults" @(showLiveResults == true ? "checked" : "")>
+                                    <label class="form-check-label" for="showLiveResults">
+                                        Visa live-resultat
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="numberOfFinalSeries" class="form-label">Antal finalserie</label>
+                                <input type="number" class="form-control" id="numberOfFinalSeries" name="numberOfFinalSeries" value="@numberOfFinalSeries" min="0">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="numberOfSeriesOrStations" class="form-label">Antal serier/stationer <span class="text-danger">*</span></label>
+                                <input type="number" class="form-control" id="numberOfSeriesOrStations" name="numberOfSeriesOrStations" value="@numSeries" min="1" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="isActive" class="form-label">Status</label>
+                                <select class="form-select" id="isActive" name="isActive">
+                                    @if (isActive == true)
+                                    {
+                                        <option value="true" selected>Aktiv</option>
+                                        <option value="false">Inaktiv</option>
+                                    }
+                                    else
+                                    {
+                                        <option value="true">Aktiv</option>
+                                        <option value="false" selected>Inaktiv</option>
+                                    }
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <hr>
+
+                    <!-- COMPETITION MANAGEMENT & PAYMENT -->
+                    <div class="row">
+                        <div class="col-12">
+                            <h6 class="mb-3 text-primary"><i class="bi bi-people me-1"></i>Tävlingsledning & Betalning</h6>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="competitionDirector" class="form-label">Tävlingsledare <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="competitionDirector" name="competitionDirector" value="@compDirector" required>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="modal_contactEmail" class="form-label">Kontakt e-post <span class="text-danger">*</span></label>
+                                <input type="email" class="form-control" id="modal_contactEmail" name="contactEmail" value="@contactEmail" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="modal_contactPhone" class="form-label">Kontakt telefon</label>
+                                <input type="tel" class="form-control" id="modal_contactPhone" name="contactPhone" value="@contactPhone">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="modal_competitionManagers" class="form-label">Tävlingsledare (lag)</label>
+                        <textarea class="form-control" id="modal_competitionManagers" name="competitionManagers" rows="3" placeholder="Ledare (en per rad)">@string.Join(Environment.NewLine, competitionManagers)</textarea>
+                        <small class="form-text text-muted">En ledare per rad</small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="swishNumber" class="form-label">Swish-nummer</label>
+                        <input type="text" class="form-control" id="swishNumber" name="swishNumber" value="@swishNumber" placeholder="1123456789">
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="addToMenu" name="addToMenu" @(addToMenu == true ? "checked" : "")>
+                            <label class="form-check-label" for="addToMenu">
+                                Lägg till genväg till tävlingen i menyn
+                            </label>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    <i class="bi bi-x-circle me-1"></i>Avbryt
+                </button>
+                <button type="button" class="btn btn-primary" id="saveBtn" onclick="submitCompetitionForm()">
+                    <i class="bi bi-check-circle me-1"></i><span id="saveBtnText">Spara</span>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let modalMode = null; // 'create', 'edit', or 'copy'
+let modalCompetitionId = null;
+let currentSelectedClasses = "@shootingClassIds".split(',').map(c => c.trim()).filter(c => c);
+
+const competitionModal = document.getElementById('competitionModal');
+
+// Initialize modal when shown
+competitionModal.addEventListener('show.bs.modal', function() {
+    if (!modalMode) modalMode = 'edit'; // Default to edit
+
+    setTimeout(() => {
+        initializeDatePickers();
+        loadShootingClasses();
+        if (modalMode === 'create') {
+            loadCompetitionTypesForModal();
+        }
+    }, 100);
+});
+
+// Reset when modal is hidden
+competitionModal.addEventListener('hide.bs.modal', function() {
+    resetModalState();
+});
+
+function resetModalState() {
+    modalMode = null;
+    modalCompetitionId = null;
+    document.getElementById('formErrors').classList.add('d-none');
+}
+
+// Open modal in CREATE mode
+window.openCreateModal = function() {
+    modalMode = 'create';
+    modalCompetitionId = null;
+    
+    // Clear form
+    document.getElementById('competitionForm').reset();
+    
+    // Show type section and required defaults
+    document.getElementById('typeSection').classList.remove('d-none');
+    document.getElementById('competitionType').required = true;
+    
+    // Set defaults for create mode
+    document.getElementById('maxParticipants').value = '50';
+    document.getElementById('numberOfSeriesOrStations').value = '4';
+    document.getElementById('registrationFee').value = '0';
+    document.getElementById('numberOfFinalSeries').value = '0';
+    
+    // Update modal title
+    document.getElementById('competitionModalLabel').innerHTML = '<i class="bi bi-plus-circle me-2"></i><span id="modalTitleText">Skapa ny tävling</span>';
+    document.getElementById('saveBtnText').textContent = 'Skapa';
+    
+    bootstrap.Modal.getOrCreateInstance(competitionModal).show();
+};
+
+// Open modal in EDIT mode (for existing competitions)
+window.openEditModal = function(competitionId) {
+    modalMode = 'edit';
+    modalCompetitionId = competitionId;
+    
+    // Hide type section
+    document.getElementById('typeSection').classList.add('d-none');
+    
+    // Update modal title
+    document.getElementById('competitionModalLabel').innerHTML = '<i class="bi bi-pencil me-2"></i><span id="modalTitleText">Redigera Tävling</span>';
+    document.getElementById('saveBtnText').textContent = 'Spara ändringar';
+    
+    bootstrap.Modal.getOrCreateInstance(competitionModal).show();
+};
+
+// Open modal in COPY mode
+window.openCopyModal = function(competitionId) {
+    modalMode = 'copy';
+    modalCompetitionId = competitionId;
+    
+    // Hide type section (can't change type when copying)
+    document.getElementById('typeSection').classList.add('d-none');
+    
+    // Clear form but keep structure
+    document.getElementById('competitionForm').reset();
+    
+    // Update modal title
+    document.getElementById('competitionModalLabel').innerHTML = '<i class="bi bi-files me-2"></i><span id="modalTitleText">Kopiera Tävling</span>';
+    document.getElementById('saveBtnText').textContent = 'Kopiera';
+    
+    bootstrap.Modal.getOrCreateInstance(competitionModal).show();
+};
+
+function initializeDatePickers() {
+    try {
+        // Destroy existing instances if any
+        flatpickr('#competitionDate', {
+            enableTime: true,
+            dateFormat: 'Y-m-d H:i',
+            time_24hr: true,
+            locale: 'sv'
+        });
+        
+        flatpickr('#competitionEndDate', {
+            dateFormat: 'Y-m-d',
+            locale: 'sv'
+        });
+        
+        flatpickr('#registrationOpenDate', {
+            enableTime: true,
+            dateFormat: 'Y-m-d H:i',
+            time_24hr: true,
+            locale: 'sv'
+        });
+        
+        flatpickr('#registrationCloseDate', {
+            enableTime: true,
+            dateFormat: 'Y-m-d H:i',
+            time_24hr: true,
+            locale: 'sv'
+        });
+    } catch (e) {
+        console.error('Error initializing date pickers:', e);
+    }
+}
+
+function loadShootingClasses() {
+    fetch(`/umbraco/surface/CompetitionEdit/GetShootingClasses?competitionId=${modalCompetitionId || ''}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.data) {
+                renderShootingClassCheckboxes(data.data);
+            }
+        })
+        .catch(error => console.error('Error loading shooting classes:', error));
+}
+
+function loadCompetitionTypesForModal() {
+    const cacheBuster = new Date().getTime();
+    fetch(`/umbraco/surface/CompetitionAdmin/GetCompetitionTypes?_=${cacheBuster}`)
+        .then(response => response.json())
+        .then(data => {
+            console.log('=== MODAL COMPETITION TYPES DEBUG ===');
+            console.log('API Response:', data);
+
+            const select = document.getElementById('competitionType');
+
+            if (data.success && data.data && data.data.length > 0) {
+                select.innerHTML = '<option value="">-- Välj tävlingstyp --</option>';
+                data.data.forEach(type => {
+                    console.log('Adding type:', type.id, type.name);
+                    const option = document.createElement('option');
+                    option.value = type.id;
+                    option.textContent = type.name;
+                    if (type.description) {
+                        option.title = type.description;
+                    }
+                    select.appendChild(option);
+                });
+                console.log('Final dropdown HTML:', select.innerHTML);
+            } else {
+                console.warn('No competition types found:', data);
+                select.innerHTML = '<option value="">Inga tävlingstyper tillgängliga</option>';
+            }
+            console.log('=== END DEBUG ===');
+        })
+        .catch(error => {
+            console.error('Error loading competition types:', error);
+            const select = document.getElementById('competitionType');
+            select.innerHTML = '<option value="">Fel vid laddning av tävlingstyper</option>';
+        });
+}
+
+function renderShootingClassCheckboxes(classes) {
+    const container = document.getElementById('shootingClassesContainer');
+    container.innerHTML = '';
+    
+    if (!classes || classes.length === 0) {
+        container.innerHTML = '<p class="text-muted">Inga klasser tillgängliga</p>';
+        return;
+    }
+    
+    classes.forEach(cls => {
+        const isChecked = currentSelectedClasses.includes(cls.id);
+        const checkbox = document.createElement('div');
+        checkbox.className = 'form-check';
+        checkbox.innerHTML = `
+            <input class="form-check-input shooting-class-checkbox" type="checkbox" value="${cls.id}" id="class_${cls.id}" ${isChecked ? 'checked' : ''}>
+            <label class="form-check-label" for="class_${cls.id}">
+                <strong>${cls.name}</strong>
+                <small class="text-muted d-block">${cls.description}</small>
+            </label>
+        `;
+        container.appendChild(checkbox);
+    });
+    
+    document.querySelectorAll('.shooting-class-checkbox').forEach(checkbox => {
+        checkbox.addEventListener('change', updateShootingClassIds);
+    });
+}
+
+function updateShootingClassIds() {
+    const selected = Array.from(document.querySelectorAll('.shooting-class-checkbox:checked'))
+        .map(cb => cb.value)
+        .join(',');
+    document.getElementById('shootingClassIds').value = selected;
+}
+
+function submitCompetitionForm() {
+    if (modalMode === 'create') {
+        submitCreateCompetition();
+    } else if (modalMode === 'copy') {
+        submitCopyCompetition();
+    } else {
+        submitEditCompetition();
+    }
+}
+
+function submitCreateCompetition() {
+    const form = document.getElementById('competitionForm');
+    if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+    }
+
+    const competitionType = document.getElementById('competitionType').value;
+    if (!competitionType) {
+        showNotification('Du måste välja tävlingstyp', 'error');
+        return;
+    }
+
+    const formData = new FormData(form);
+    const fields = {};
+    
+    for (let [key, value] of formData.entries()) {
+        if ((key === 'description' || key === 'contactPhone' || key === 'competitionEndDate') && !value) {
+            continue;
+        }
+        
+        if (key === 'showLiveResults' || key === 'addToMenu' || key === 'allowDualCClass') {
+            fields[key] = value === 'on';
+        } else {
+            fields[key] = value;
+        }
+    }
+
+    if (!fields['shootingClassIds']) {
+        showNotification('Du måste välja minst en skytteklass', 'error');
+        return;
+    }
+
+    const saveBtn = document.getElementById('saveBtn');
+    const originalText = saveBtn.innerHTML;
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<i class="bi bi-spinner-border spinner-border-sm"></i> Skapar...';
+
+    fetch('/umbraco/surface/CompetitionAdmin/CreateCompetition', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]')?.value || ''
+        },
+        body: JSON.stringify({
+            competitionType: competitionType,
+            fields: fields
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = originalText;
+
+        if (data.success) {
+            document.getElementById('formErrors').classList.add('d-none');
+            showNotification('Tävlingen skapades framgångsrikt!', 'success');
+            bootstrap.Modal.getInstance(competitionModal).hide();
+
+            // OPTIMIZED: Add new competition to table instead of full reload
+            if (data.data && typeof window.addCompetitionToTable === 'function') {
+                window.addCompetitionToTable(data.data);
+            } else {
+                // Fallback to reload if table function not available
+                setTimeout(() => location.reload(), 1500);
+            }
+        } else {
+            showErrors(data.errors || data.message);
+        }
+    })
+    .catch(error => {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = originalText;
+        showNotification('Fel vid skapande: ' + error.message, 'error');
+    });
+}
+
+function submitEditCompetition() {
+    const form = document.getElementById('competitionForm');
+    if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+    }
+
+    const formData = new FormData(form);
+    const fields = {};
+    
+    for (let [key, value] of formData.entries()) {
+        if ((key === 'competitionEndDate' || key === 'description' || key === 'contactPhone') && !value) {
+            continue;
+        }
+        
+        if (key === 'showLiveResults' || key === 'addToMenu' || key === 'allowDualCClass') {
+            fields[key] = value === 'on';
+        } else if (key === 'isActive') {
+            fields[key] = value === 'true';
+        } else {
+            fields[key] = value;
+        }
+    }
+
+    const saveBtn = document.getElementById('saveBtn');
+    const originalText = saveBtn.innerHTML;
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<i class="bi bi-spinner-border spinner-border-sm"></i> Sparar...';
+
+    fetch('/umbraco/surface/CompetitionEdit/SaveCompetition', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]')?.value || ''
+        },
+        body: JSON.stringify({
+            competitionId: modalCompetitionId,
+            competitionType: 'Precision',
+            fields: fields
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = originalText;
+
+        if (data.success) {
+            document.getElementById('formErrors').classList.add('d-none');
+            showNotification('Tävlingen uppdaterad framgångsrikt!', 'success');
+            bootstrap.Modal.getInstance(competitionModal).hide();
+            setTimeout(() => location.reload(), 1500);
+        } else {
+            showErrors(data.errors || data.message);
+        }
+    })
+    .catch(error => {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = originalText;
+        showNotification('Fel vid sparning: ' + error.message, 'error');
+    });
+}
+
+function submitCopyCompetition() {
+    const saveBtn = document.getElementById('saveBtn');
+    const originalText = saveBtn.innerHTML;
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<i class="bi bi-spinner-border spinner-border-sm"></i> Kopierar...';
+
+    fetch('/umbraco/surface/CompetitionAdmin/CopyCompetition', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]')?.value || ''
+        },
+        body: JSON.stringify({
+            sourceCompetitionId: modalCompetitionId
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = originalText;
+
+        if (data.success) {
+            document.getElementById('formErrors').classList.add('d-none');
+            showNotification('Tävlingen kopierades framgångsrikt! Datum har förflyttats ett år framåt.', 'success');
+            bootstrap.Modal.getInstance(competitionModal).hide();
+
+            // OPTIMIZED: Add copied competition to table instead of full reload
+            if (data.data && typeof window.addCompetitionToTable === 'function') {
+                window.addCompetitionToTable(data.data);
+            } else {
+                // Fallback to reload if table function not available
+                setTimeout(() => location.reload(), 1500);
+            }
+        } else {
+            showNotification(data.message || 'Fel vid kopiering', 'error');
+        }
+    })
+    .catch(error => {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = originalText;
+        showNotification('Fel vid kopiering: ' + error.message, 'error');
+    });
+}
+
+function showErrors(errors) {
+    const errorList = document.getElementById('errorList');
+    errorList.innerHTML = '';
+    
+    if (errors && typeof errors === 'object' && Object.keys(errors).length > 0) {
+        for (let [field, error] of Object.entries(errors)) {
+            const li = document.createElement('li');
+            li.textContent = error;
+            errorList.appendChild(li);
+        }
+    } else {
+        const li = document.createElement('li');
+        li.textContent = errors || 'Ett okänt fel uppstod';
+        errorList.appendChild(li);
+    }
+    
+    document.getElementById('formErrors').classList.remove('d-none');
+}
+
+function showNotification(message, type) {
+    const alertClass = type === 'success' ? 'alert-success' : 'alert-danger';
+    const notification = document.createElement('div');
+    notification.className = `alert ${alertClass} alert-dismissible fade show position-fixed`;
+    notification.style.cssText = 'top: 20px; right: 20px; z-index: 9999; max-width: 400px;';
+    notification.innerHTML = `
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+    
+    document.body.appendChild(notification);
+    
+    setTimeout(() => {
+        if (notification.parentNode) {
+            notification.remove();
+        }
+    }, 5000);
+}
+</script>

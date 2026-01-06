@@ -1,0 +1,411 @@
+@using Umbraco.Cms.Web.Common.PublishedModels;
+@using Umbraco.Extensions;
+@using HpskSite.Extensions
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+    ViewBag.Title = Model.Value<string>("seriesName") ?? Model.Name;
+
+    // Get all competitions in this series - order by seriesSortOrder first, then by date
+    var seriesCompetitions = Model.Children().Where(x => x.ContentType.Alias == "competition")
+                                          .OrderBy(x => x.Value<int?>("seriesSortOrder") ?? int.MaxValue)
+                                          .ThenBy(x => x.Value<DateTime>("competitionDate"))
+                                          .ToList();
+
+    var now = DateTime.Now;
+    var completedCompetitions = seriesCompetitions.Where(c => c.Value<DateTime>("competitionDate").Date < now.Date).Count();
+    var totalCompetitions = seriesCompetitions.Count();
+    var progressPercentage = totalCompetitions > 0 ? (completedCompetitions * 100 / totalCompetitions) : 0;
+
+    var seriesStartDate = Model.Value<DateTime>("seriesStartDate");
+    var seriesEndDate = Model.Value<DateTime>("seriesEndDate");
+    var seriesName = Model.Value<string>("seriesName") ?? Model.Name;
+    var seriesDescription = Model.Value<string>("seriesDescription");
+    var seriesLogo = Model.Value<IPublishedContent>("seriesLogo");
+    var isActive = Model.Value<bool>("isActive", fallback: Fallback.ToDefaultValue, defaultValue: true);
+}
+
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-12">
+            <!-- Breadcrumb -->
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a href="@Model.Root().Url()">Hem</a></li>
+                    @if (Model.Parent()?.ContentType.Alias == "competitionsHub")
+                    {
+                        <li class="breadcrumb-item"><a href="@Model.Parent().Url()">Tävlingar</a></li>
+                    }
+                    else if (Model.Parent()?.ContentType.Alias == "competitionSeason")
+                    {
+                        <li class="breadcrumb-item"><a href="@Model.Parent().Parent().Url()">Tävlingar</a></li>
+                        <li class="breadcrumb-item"><a href="@Model.Parent().Url()">@Model.Parent().Name</a></li>
+                    }
+                    <li class="breadcrumb-item active">@seriesName</li>
+                </ol>
+            </nav>
+
+            <!-- Series Header -->
+            <div class="card border-primary mb-4">
+                <div class="card-header bg-primary text-white">
+                    <div class="row align-items-center">
+                        <div class="col-md-8">
+                            <div class="d-flex align-items-center">
+                                @if (seriesLogo != null)
+                                {
+                                    <img src="@seriesLogo.Url()" alt="@seriesName Logo" class="me-3" style="max-height: 60px; max-width: 80px;">
+                                }
+                                <div>
+                                    <h1 class="mb-1">🏆 @seriesName</h1>
+                                    <p class="mb-0 opacity-75">
+                                        @if (seriesStartDate != DateTime.MinValue && seriesEndDate != DateTime.MinValue)
+                                        {
+                                            @seriesStartDate.ToString("yyyy-MM-dd") <text> - </text> @seriesEndDate.ToString("yyyy-MM-dd")
+                                        }
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4 text-end">
+                            <div class="text-white">
+                                <div class="h4 mb-1">@completedCompetitions/@totalCompetitions</div>
+                                <small>Genomförda</small>
+                                @if (!isActive)
+                                {
+                                    <div class="badge bg-warning text-dark mt-2">Inaktiv</div>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                @if (!string.IsNullOrEmpty(seriesDescription))
+                {
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-8">
+                                <!-- Expandable Description -->
+                                <div class="series-description-container">
+                                    <div class="series-description-preview" id="seriesDescriptionPreview">
+                                        @Html.Raw(seriesDescription)
+                                    </div>
+                                    <div class="series-description-full" id="seriesDescriptionFull" style="display: none;">
+                                        @Html.Raw(seriesDescription)
+                                    </div>
+                                    <button type="button" class="btn btn-link btn-sm p-0 mt-2 text-decoration-none"
+                                            id="toggleDescription"
+                                            onclick="toggleSeriesDescription()"
+                                            style="display: none;">
+                                        <i class="bi bi-chevron-down" id="toggleIcon"></i>
+                                        <span id="toggleText">Visa mer</span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <h6>Serieframsteg</h6>
+                                <div class="progress mb-2" style="height: 8px;">
+                                    <div class="progress-bar bg-success" role="progressbar" style="width: @progressPercentage%"></div>
+                                </div>
+                                <small class="text-muted">@progressPercentage% genomfört</small>
+                            </div>
+                        </div>
+                    </div>
+                }
+            </div>
+
+            <!-- Competitions in Series -->
+            @if (seriesCompetitions.Any())
+            {
+                <div class="row">
+                    <div class="col-12">
+                        <div class="row">
+                            @{ int roundNumber = 1; }
+                            @foreach (var competition in seriesCompetitions)
+                            {
+                                // Get competition details (same as competitions hub)
+                                var compDate = competition.Value<DateTime>("competitionDate");
+                                var compEndDate = competition.Value<DateTime?>("competitionEndDate");
+                                var regCloseDate = competition.Value<DateTime>("registrationCloseDate");
+                                var regOpenDate = competition.Value<DateTime>("registrationOpenDate");
+                                var description = competition.Value<string>("description");
+                                var venue = competition.Value<string>("venue");
+
+                                // Check if multi-day competition
+                                var hasValidEndDate = compEndDate.HasValue &&
+                                                      compEndDate.Value > DateTime.MinValue &&
+                                                      compEndDate.Value.Year > 1900 &&
+                                                      compEndDate.Value.Date >= compDate.Date;
+                                var isMultiDay = hasValidEndDate && compEndDate!.Value.Date != compDate.Date;
+                                var dateIcon = isMultiDay ? "📅" : "🕐";
+                                var dateDisplay = isMultiDay ?
+                                    $"{compDate:yyyy-MM-dd} - {compEndDate.Value:yyyy-MM-dd}" :
+                                    compDate.ToString("yyyy-MM-dd");
+                                var durationInfo = isMultiDay ?
+                                    $"({(compEndDate.Value.Date - compDate.Date).Days + 1} dagar)" :
+                                    "(1 dag)";
+
+                                var maxParticipants = competition.Value<int>("maxParticipants");
+                                var registrationFee = competition.Value<string>("registrationFee");
+                                var competitionTypeId = competition.Value<string>("competitionType") ?? "";
+                                var competitionTypeObj = HpskSite.Models.CompetitionTypes.GetById(competitionTypeId);
+                                var competitionTypeName = competitionTypeObj?.Name ?? "Okänd typ";
+                                var numberOfSeriesOrStations = competition.Value<int>("numberOfSeriesOrStations");
+                                var numberOfFinalSeries = competition.Value<int>("numberOfFinalSeries");
+
+                                // Build competition type display name with series info
+                                var competitionTypeDisplayName = competitionTypeName;
+                                if (numberOfSeriesOrStations > 0)
+                                {
+                                    if (numberOfFinalSeries > 0)
+                                    {
+                                        var qualSeries = numberOfSeriesOrStations - numberOfFinalSeries;
+                                        competitionTypeDisplayName += $" {qualSeries}+{numberOfFinalSeries} serier";
+                                    }
+                                    else
+                                    {
+                                        competitionTypeDisplayName += $" {numberOfSeriesOrStations} serier";
+                                    }
+                                }
+
+                                // Multiple shooting classes support - handle string array, JSON array, or CSV
+                                var shootingClassIdsRaw = competition.Value("shootingClassIds");
+                                string[] classIdArray = Array.Empty<string>();
+                                try
+                                {
+                                    if (shootingClassIdsRaw is string[] stringArray)
+                                    {
+                                        classIdArray = stringArray;
+                                    }
+                                    else if (shootingClassIdsRaw is string stringValue && !string.IsNullOrEmpty(stringValue))
+                                    {
+                                        // Check if JSON array format
+                                        if (stringValue.TrimStart().StartsWith("["))
+                                        {
+                                            classIdArray = System.Text.Json.JsonSerializer.Deserialize<string[]>(stringValue) ?? Array.Empty<string>();
+                                        }
+                                        else
+                                        {
+                                            // CSV format (legacy)
+                                            classIdArray = stringValue.Split(',').Select(s => s.Trim()).Where(s => !string.IsNullOrEmpty(s)).ToArray();
+                                        }
+                                    }
+                                }
+                                catch (System.Text.Json.JsonException)
+                                {
+                                    // Handle corrupted shooting class data - fallback to empty
+                                    classIdArray = Array.Empty<string>();
+                                }
+
+                                // Use centralized shooting classes model (includes R, L, M classes)
+                                var shootingClasses = HpskSite.Models.ShootingClasses.All;
+
+                                var competitionShootingClasses = new List<dynamic>();
+                                if (classIdArray.Length > 0)
+                                {
+                                    competitionShootingClasses = shootingClasses.Where(sc => classIdArray.Contains((string)sc.Id)).ToList<dynamic>();
+                                }
+
+                                var shootingClassName = competitionShootingClasses.Any()
+                                    ? string.Join(", ", competitionShootingClasses.Select(sc => sc.Name))
+                                    : "Inga klasser";
+                                var isCompetitionActive = competition.Value<bool>("isActive");
+
+                                // Calculate status (same logic as competitions hub)
+                                var status = "completed";
+                                var statusIcon = "bi-check-circle";
+                                var statusText = "Avslutad";
+                                var statusClass = "secondary";
+                                var buttonText = "Visa Tävling";
+                                var buttonClass = "btn-secondary";
+
+                                if (isCompetitionActive && compDate.Date >= now.Date)
+                                {
+                                    if (regOpenDate <= now && regCloseDate >= now)
+                                    {
+                                        status = "open";
+                                        statusIcon = "bi-person-plus";
+                                        statusText = "Anmälan öppen";
+                                        statusClass = "success";
+                                        buttonClass = "btn-success";
+                                    }
+                                    else if (regOpenDate > now)
+                                    {
+                                        status = "upcoming";
+                                        statusIcon = "bi-calendar-plus";
+                                        statusText = "Kommande";
+                                        statusClass = "warning";
+                                        buttonClass = "btn-warning";
+                                    }
+                                    else if (compDate.Date == now.Date || (regCloseDate < now && compDate.Date >= now.Date))
+                                    {
+                                        status = "active";
+                                        statusIcon = "bi-play-circle";
+                                        statusText = "Pågående";
+                                        statusClass = "primary";
+                                        buttonClass = "btn-primary";
+                                    }
+                                }
+
+                                <div class="col-md-6 col-lg-4 mb-4">
+                                    <div class="card h-100 border-@statusClass">
+                                        <div class="card-header bg-@statusClass text-white d-flex justify-content-between align-items-center">
+                                            <div class="flex-grow-1">
+                                                <h5 class="card-title mb-0">@competition.Name</h5>
+                                                <small><i class="bi @statusIcon me-1"></i>@statusText</small>
+                                            </div>
+                                            <span class="badge bg-light text-dark">Round @roundNumber</span>
+                                        </div>
+                                        <div class="card-body">
+                                            <p class="card-text">@description</p>
+                                            <ul class="list-unstyled small">
+                                                <li>
+                                                    @dateIcon @dateDisplay
+                                                    <small class="text-muted ms-1">@durationInfo</small>
+                                                </li>
+                                                <li><i class="bi bi-geo-alt"></i> @venue</li>
+                                                @if (competitionTypeObj != null)
+                                                {
+                                                    <li><i class="bi bi-trophy"></i> @competitionTypeDisplayName</li>
+                                                }
+                                                <li><i class="bi bi-bullseye"></i> @shootingClassName</li>
+                                            </ul>
+                                            <div class="mt-2">
+                                                <span class="badge bg-@statusClass">@statusText</span>
+                                            </div>
+                                        </div>
+                                        <div class="card-footer">
+                                            <a href="@competition.CompetitionUrl()" class="btn @buttonClass btn-sm">@buttonText</a>
+                                            @if (status == "open")
+                                            {
+                                                <small class="text-muted d-block mt-1">Stänger: @regCloseDate.ToString("yyyy-MM-dd")</small>
+                                            }
+                                            else if (status == "upcoming")
+                                            {
+                                                <small class="text-muted d-block mt-1">Öppnar: @regOpenDate.ToString("yyyy-MM-dd")</small>
+                                            }
+                                        </div>
+                                    </div>
+                                </div>
+                                roundNumber++;
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle"></i> Inga tävlingar har lagts till i denna serie ännu.
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+<style>
+.series-description-container {
+    position: relative;
+}
+
+.series-description-preview {
+    max-height: 3.6em; /* Approximately 2-3 lines */
+    overflow: hidden;
+    position: relative;
+    line-height: 1.4em;
+}
+
+.series-description-preview::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    width: 100%;
+    height: 1.4em;
+    background: linear-gradient(to bottom, transparent, white);
+    pointer-events: none;
+}
+
+.series-description-preview.no-fade::after {
+    display: none;
+}
+
+.series-description-full {
+    line-height: 1.4em;
+}
+
+#toggleDescription {
+    color: #0d6efd !important;
+    font-size: 0.875rem;
+    transition: all 0.2s ease;
+}
+
+#toggleDescription:hover {
+    color: #0a58ca !important;
+}
+
+#toggleIcon {
+    transition: transform 0.2s ease;
+    margin-right: 0.25rem;
+}
+
+#toggleIcon.rotated {
+    transform: rotate(180deg);
+}
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    initializeSeriesDescription();
+});
+
+function initializeSeriesDescription() {
+    const preview = document.getElementById('seriesDescriptionPreview');
+    const toggle = document.getElementById('toggleDescription');
+
+    if (!preview || !toggle) return;
+
+    // Check if content actually overflows
+    const lineHeight = parseFloat(getComputedStyle(preview).lineHeight);
+    const maxHeight = 3.6 * (lineHeight || 16); // Fallback to 16px if lineHeight is NaN
+
+    if (preview.scrollHeight > maxHeight) {
+        // Content overflows, show the toggle button
+        toggle.style.display = 'inline-flex';
+    } else {
+        // Content fits, remove fade effect and hide toggle
+        preview.classList.add('no-fade');
+        toggle.style.display = 'none';
+    }
+}
+
+function toggleSeriesDescription() {
+    const preview = document.getElementById('seriesDescriptionPreview');
+    const full = document.getElementById('seriesDescriptionFull');
+    const toggleIcon = document.getElementById('toggleIcon');
+    const toggleText = document.getElementById('toggleText');
+
+    if (!preview || !full || !toggleIcon || !toggleText) return;
+
+    const isExpanded = full.style.display !== 'none';
+
+    if (isExpanded) {
+        // Collapse
+        preview.style.display = 'block';
+        full.style.display = 'none';
+        toggleIcon.classList.remove('rotated');
+        toggleText.textContent = 'Visa mer';
+
+        // Smooth scroll to series header
+        document.querySelector('.card.border-primary').scrollIntoView({
+            behavior: 'smooth',
+            block: 'start'
+        });
+    } else {
+        // Expand
+        preview.style.display = 'none';
+        full.style.display = 'block';
+        toggleIcon.classList.add('rotated');
+        toggleText.textContent = 'Visa mindre';
+    }
+}
+</script>

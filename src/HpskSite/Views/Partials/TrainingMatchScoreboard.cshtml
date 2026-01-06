@@ -1,0 +1,984 @@
+@*
+    Training Match Scoreboard Partial
+    Displays the paper-like scoreboard with participant columns
+*@
+
+<!-- Spectator Banner - Note: avoid d-flex class as it has !important that overrides JS -->
+<div class="alert alert-info align-items-center mb-3" id="spectatorBanner" style="display: none;">
+    <i class="bi bi-eye-fill me-2 fs-5"></i>
+    <div>
+        <strong>Du tittar som åskådare</strong>
+        <span class="ms-2 d-none d-sm-inline">- Du kan se resultaten i realtid men inte delta</span>
+    </div>
+    <button type="button" class="btn btn-sm btn-outline-primary ms-auto" onclick="requestJoinCurrentMatch()">
+        <i class="bi bi-person-plus me-1"></i>Gå med
+    </button>
+</div>
+
+<!-- Scheduled Match Banner (for creator) -->
+<div class="alert alert-warning align-items-center mb-3" id="scheduledMatchBannerCreator" style="display: none;">
+    <i class="bi bi-clock-fill me-2 fs-5"></i>
+    <div>
+        <strong>Schemalagd match</strong>
+        <span class="ms-2">Startar: <span id="scheduledStartTimeCreator">-</span></span>
+        <small class="d-block text-muted mt-1">Du kan lägga till resultat efter starttiden.</small>
+    </div>
+</div>
+
+<!-- Scheduled Match Banner (for participants - cannot add scores yet) -->
+<div class="alert alert-info align-items-center mb-3" id="scheduledMatchBannerParticipant" style="display: none;">
+    <i class="bi bi-hourglass-split me-2 fs-5"></i>
+    <div>
+        <strong>Matchen har inte startat</strong>
+        <span class="ms-2">Startar: <span id="scheduledStartTimeParticipant">-</span></span>
+        <small class="d-block mt-1">Du kan registrera resultat när matchen startar.</small>
+    </div>
+</div>
+
+<!-- Match Header -->
+<div class="card mb-3">
+    <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div>
+            <h5 class="mb-0" id="matchTitle">
+                <i class="bi bi-people-fill me-2"></i><span id="matchNameDisplay">Match</span>
+                <span id="handicapBadge" class="badge bg-warning text-dark ms-2" style="display: none;" title="Handicapsystem aktiverat">
+                    <i class="bi bi-balance-scale me-1"></i>HCP
+                </span>
+            </h5>
+            <small>
+                <span id="matchWeaponClass">Klass C</span> |
+                Kod: <strong id="matchCodeDisplay">------</strong>
+            </small>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+            <!-- Spectators Display -->
+            <div id="spectatorsDisplay" class="d-flex align-items-center" style="display: none !important;" onclick="showSpectatorsModal()" role="button" title="Visa åskådare">
+                <i class="bi bi-eye text-light me-1"></i>
+                <div id="spectatorAvatars" class="d-flex" style="margin-right: 4px;">
+                    <!-- Spectator avatars will be added dynamically -->
+                </div>
+                <span id="spectatorCount" class="badge bg-light text-primary">0</span>
+            </div>
+            <div class="btn-group" id="matchActionButtons">
+                <button type="button" class="btn btn-light btn-sm" onclick="showShareModal()" title="Dela" id="shareMatchBtn">
+                    <i class="bi bi-share"></i> Dela
+                </button>
+                <button type="button" class="btn btn-warning btn-sm" id="leaveMatchBtn" onclick="leaveMatch()" title="Lämna">
+                    <i class="bi bi-box-arrow-left"></i>
+                </button>
+                <button type="button" class="btn btn-secondary btn-sm" id="exitSpectatorBtn" onclick="exitSpectatorMode()" title="Stäng" style="display:none;">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+                <button type="button" class="btn btn-danger btn-sm" id="endMatchBtn" onclick="completeMatch()" title="Avsluta" style="display:none;">
+                    <i class="bi bi-stop-circle"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Spectators Modal -->
+<div class="modal fade" id="spectatorsModal" tabindex="-1" aria-labelledby="spectatorsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="spectatorsModalLabel">
+                    <i class="bi bi-eye me-2"></i>Åskådare
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <div id="spectatorsList" class="list-group">
+                    <!-- Spectators will be listed here -->
+                </div>
+                <div id="noSpectatorsMessage" class="text-center text-muted py-3" style="display: none;">
+                    <i class="bi bi-eye-slash fs-3 d-block mb-2"></i>
+                    Inga åskådare just nu
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Scoreboard Container -->
+<div class="scoreboard-container">
+    <div class="scoreboard-scroll">
+        <table class="scoreboard-table" id="scoreboardTable">
+            <thead>
+                <tr id="participantHeaderRow">
+                    <!-- Participant columns will be added dynamically -->
+                </tr>
+            </thead>
+            <tbody id="scoreboardBody">
+                <!-- Score rows will be added dynamically -->
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Add Score Button (floating) -->
+<div class="fixed-bottom pb-4 pe-4 text-end" style="pointer-events: none;">
+    <button type="button" class="btn btn-success btn-lg shadow" id="addScoreBtn"
+            onclick="handleAddScoreClick()" style="pointer-events: auto;">
+        <i class="bi bi-plus-circle me-1"></i> Lägg till serie
+    </button>
+</div>
+
+<script>
+// Helper functions for quarter-point handicap display
+function roundToQuarter(value) {
+    return Math.round(value * 4) / 4;
+}
+
+function formatHandicap(value) {
+    const rounded = roundToQuarter(value);
+    const sign = rounded >= 0 ? '+' : '';
+    // Show decimals only if not a whole number
+    const formatted = Number.isInteger(rounded) ? rounded.toString() : rounded.toFixed(2);
+    return sign + formatted;
+}
+
+// Render the scoreboard
+function renderScoreboard(match) {
+    // Update header info
+    document.getElementById('matchNameDisplay').textContent = match.matchName || 'Träningsmatch';
+    document.getElementById('matchCodeDisplay').textContent = match.matchCode;
+    document.getElementById('matchWeaponClass').textContent = 'Klass ' + match.weaponClass;
+
+    // Store match status for spectators display (hide for completed matches)
+    window.currentMatchStatus = match.status || 'Active';
+
+    // Show/hide handicap badge
+    const handicapBadge = document.getElementById('handicapBadge');
+    if (handicapBadge) {
+        handicapBadge.style.display = match.hasHandicap ? 'inline-block' : 'none';
+    }
+
+    // Handle spectator mode
+    const spectatorBanner = document.getElementById('spectatorBanner');
+    const addScoreBtn = document.getElementById('addScoreBtn');
+    const leaveBtn = document.getElementById('leaveMatchBtn');
+    const endBtn = document.getElementById('endMatchBtn');
+    const shareBtn = document.getElementById('shareMatchBtn');
+    const exitSpectatorBtn = document.getElementById('exitSpectatorBtn');
+
+    // Check if current user is actually in the participants list
+    const myMemberIdCheck = parseInt(document.body.dataset.memberId) || 0;
+    const isActuallyParticipant = match.participants.some(p => p.memberId === myMemberIdCheck);
+
+    // Show/hide spectator banner - show if:
+    // 1. Match is ACTIVE (not completed/history), AND
+    // 2. User is explicitly spectator OR not in participants list
+    const isMatchActive = match.status === 'Active';
+    const isSpectatorMode = (typeof isSpectator !== 'undefined' && isSpectator === true) || !isActuallyParticipant;
+    const shouldShowSpectatorBanner = isMatchActive && isSpectatorMode;
+
+    if (shouldShowSpectatorBanner) {
+        if (spectatorBanner) spectatorBanner.style.display = 'flex';
+        if (addScoreBtn) addScoreBtn.style.display = 'none';
+        if (leaveBtn) leaveBtn.style.display = 'none';
+        if (endBtn) endBtn.style.display = 'none';
+        if (exitSpectatorBtn) exitSpectatorBtn.style.display = 'inline-block';
+    } else {
+        if (spectatorBanner) spectatorBanner.style.display = 'none';
+        // Only show add score button if match is active and user is participant
+        if (addScoreBtn) addScoreBtn.style.display = isMatchActive && isActuallyParticipant ? 'block' : 'none';
+        if (exitSpectatorBtn) exitSpectatorBtn.style.display = 'none';
+    }
+
+    // Handle scheduled match banners
+    const scheduledBannerCreator = document.getElementById('scheduledMatchBannerCreator');
+    const scheduledBannerParticipant = document.getElementById('scheduledMatchBannerParticipant');
+    const myMemberIdForSchedule = parseInt(document.body.dataset.memberId) || 0;
+    const isCreatorForSchedule = match.createdByMemberId === myMemberIdForSchedule;
+
+    // Store match state globally for score button click handler
+    window.currentMatchState = {
+        hasStarted: match.hasStarted,
+        isCreator: isCreatorForSchedule,
+        startDate: match.startDate
+    };
+
+    // Debug logging
+    console.log('Match state:', {
+        hasStarted: match.hasStarted,
+        startDate: match.startDate,
+        isCreator: isCreatorForSchedule,
+        myMemberId: myMemberIdForSchedule,
+        createdByMemberId: match.createdByMemberId
+    });
+
+    // Clear any existing start timer
+    if (window.matchStartTimer) {
+        clearTimeout(window.matchStartTimer);
+        window.matchStartTimer = null;
+    }
+
+    if (match.hasStarted === false) {
+        const startTimeDate = new Date(match.startDate);
+        const startTime = startTimeDate.toLocaleString('sv-SE', {
+            weekday: 'short', month: 'short', day: 'numeric',
+            hour: '2-digit', minute: '2-digit'
+        });
+
+        if (isCreatorForSchedule) {
+            // Creator sees warning banner but can still add scores
+            document.getElementById('scheduledStartTimeCreator').textContent = startTime;
+            if (scheduledBannerCreator) scheduledBannerCreator.style.display = 'flex';
+            if (scheduledBannerParticipant) scheduledBannerParticipant.style.display = 'none';
+            // Creator can add scores, but non-creators cannot
+            if (addScoreBtn) addScoreBtn.style.display = 'block';
+        } else {
+            // Non-creator participant sees info banner and cannot add scores
+            document.getElementById('scheduledStartTimeParticipant').textContent = startTime;
+            if (scheduledBannerCreator) scheduledBannerCreator.style.display = 'none';
+            if (scheduledBannerParticipant) scheduledBannerParticipant.style.display = 'flex';
+            // Keep button visible but it will show message on click
+            if (addScoreBtn) addScoreBtn.style.display = 'block';
+        }
+
+        // Set timer to fire when match starts
+        const msUntilStart = startTimeDate.getTime() - Date.now();
+        if (msUntilStart > 0 && msUntilStart < 24 * 60 * 60 * 1000) {
+            // Only set timer if start is within 24 hours (avoid very long timers)
+            window.matchStartTimer = setTimeout(() => {
+                // Update state
+                if (window.currentMatchState) {
+                    window.currentMatchState.hasStarted = true;
+                }
+                // Hide banners
+                if (scheduledBannerCreator) scheduledBannerCreator.style.display = 'none';
+                if (scheduledBannerParticipant) scheduledBannerParticipant.style.display = 'none';
+                // Show notification
+                if (typeof showToast === 'function') {
+                    showToast('Matchen har startat! Du kan nu registrera resultat.', 'success');
+                }
+            }, msUntilStart);
+            console.log('Match start timer set for', msUntilStart / 1000, 'seconds');
+        }
+    } else {
+        if (scheduledBannerCreator) scheduledBannerCreator.style.display = 'none';
+        if (scheduledBannerParticipant) scheduledBannerParticipant.style.display = 'none';
+    }
+
+    // Get current member ID from participants (the one with our email)
+    const currentParticipant = match.participants.find(p =>
+        document.body.dataset.memberEmail &&
+        p.email === document.body.dataset.memberEmail
+    );
+
+    // Show/hide buttons based on participant status (only if not spectator)
+    if (typeof isSpectator === 'undefined' || !isSpectator) {
+        const myMemberId = parseInt(document.body.dataset.memberId) || 0;
+        const isCreator = match.createdByMemberId === myMemberId;
+        const isParticipant = match.participants.some(p => p.memberId === myMemberId);
+
+        if (isCreator && match.status === 'Active') {
+            if (endBtn) endBtn.style.display = 'inline-block';
+            if (leaveBtn) leaveBtn.style.display = 'none';
+        } else if (isParticipant && match.status === 'Active') {
+            if (endBtn) endBtn.style.display = 'none';
+            if (leaveBtn) leaveBtn.style.display = 'inline-block';
+        } else {
+            // Match completed or user is not participant
+            if (endBtn) endBtn.style.display = 'none';
+            if (leaveBtn) leaveBtn.style.display = 'none';
+        }
+    }
+
+    // Build participant header row
+    const headerRow = document.getElementById('participantHeaderRow');
+    headerRow.innerHTML = '';
+
+    match.participants.forEach((participant, index) => {
+        const th = document.createElement('th');
+        th.className = 'participant-column';
+
+        // Build handicap info if match has handicap enabled
+        let handicapInfo = '';
+        if (match.hasHandicap && participant.handicapPerSeries !== null && participant.handicapPerSeries !== undefined) {
+            const hcpDisplay = formatHandicap(participant.handicapPerSeries);
+            const provisionalBadge = participant.isProvisional
+                ? '<span class="provisional-badge" title="Provisoriskt handicap (färre än 8 matcher)">(P)</span>'
+                : '';
+            handicapInfo = `
+                <div class="participant-handicap">
+                    <span class="handicap-value">${hcpDisplay}</span>
+                    ${provisionalBadge}
+                </div>
+            `;
+        }
+
+        th.innerHTML = `
+            <div class="participant-header">
+                ${renderAvatar(participant)}
+                <div class="participant-name">${participant.firstName || 'Skytt'}</div>
+                ${handicapInfo}
+            </div>
+        `;
+        headerRow.appendChild(th);
+    });
+
+    // Find max series count
+    let maxSeries = 0;
+    match.participants.forEach(p => {
+        if (p.scores && p.scores.length > maxSeries) {
+            maxSeries = p.scores.length;
+        }
+    });
+
+    // Always show at least 6 rows, or more if there are more series
+    const displayRows = Math.max(6, maxSeries);
+
+    // Build score rows
+    const tbody = document.getElementById('scoreboardBody');
+    tbody.innerHTML = '';
+
+    // Track running totals for each participant
+    const runningTotals = match.participants.map(() => 0);
+
+    // Get current member's participant for identifying editable cells
+    const myMemberId = document.body.dataset.memberId;
+
+    for (let seriesNum = 1; seriesNum <= displayRows; seriesNum++) {
+        const tr = document.createElement('tr');
+
+        match.participants.forEach((participant, pIndex) => {
+            const td = document.createElement('td');
+            td.className = 'score-cell';
+
+            const score = participant.scores?.find(s => s.seriesNumber === seriesNum);
+            if (score) {
+                runningTotals[pIndex] += score.total;
+
+                // Check if this is the current user's score (editable)
+                // Never allow editing if spectator or match not started
+                const isMyScore = myMemberId && participant.memberId == myMemberId;
+                const isFirstParticipantFallback = !myMemberId && pIndex === 0;
+                const isSpectatorMode = typeof isSpectator !== 'undefined' && isSpectator;
+                const matchHasStarted = match.hasStarted !== false;
+                const canEdit = (isMyScore || isFirstParticipantFallback) && match.status === 'Active' && !isSpectatorMode && matchHasStarted;
+
+                if (canEdit) {
+                    td.innerHTML = `
+                        <div class="score-editable" onclick="editSeriesScore(${seriesNum}, ${JSON.stringify(score).replace(/"/g, '&quot;')})">
+                            <span class="score-value">${score.total}</span>
+                            ${score.xCount > 0 ? `<span class="x-count">${score.xCount}x</span>` : ''}
+                            <i class="bi bi-pencil edit-icon"></i>
+                        </div>
+                    `;
+                    td.classList.add('has-score', 'editable');
+                } else {
+                    td.innerHTML = `
+                        <span class="score-value">${score.total}</span>
+                        ${score.xCount > 0 ? `<span class="x-count">${score.xCount}x</span>` : ''}
+                    `;
+                    td.classList.add('has-score');
+                }
+            } else {
+                td.innerHTML = '<span class="score-empty">-</span>';
+            }
+
+            tr.appendChild(td);
+        });
+
+        tbody.appendChild(tr);
+
+        // Add summary row after series 6, 7, and 10
+        if (seriesNum === 6 || seriesNum === 7 || seriesNum === 10) {
+            const summaryRow = document.createElement('tr');
+            summaryRow.className = 'summary-row';
+
+            match.participants.forEach((participant, pIndex) => {
+                const td = document.createElement('td');
+                td.className = 'summary-cell';
+
+                // Calculate total up to this point
+                let totalToHere = 0;
+                for (let s = 1; s <= seriesNum; s++) {
+                    const score = participant.scores?.find(sc => sc.seriesNumber === s);
+                    if (score) totalToHere += score.total;
+                }
+
+                td.innerHTML = `<strong>${totalToHere}</strong> <small class="text-muted">(${seriesNum})</small>`;
+                summaryRow.appendChild(td);
+            });
+
+            tbody.appendChild(summaryRow);
+        }
+    }
+
+    // Add final total row
+    const totalRow = document.createElement('tr');
+    totalRow.className = 'total-row';
+
+    // Calculate minimum series count for equalized totals (fair comparison)
+    const participantsWithScores = match.participants.filter(p => p.scores && p.scores.length > 0);
+    const minSeriesCount = participantsWithScores.length > 0
+        ? Math.min(...participantsWithScores.map(p => p.scores.length))
+        : 0;
+
+    match.participants.forEach(participant => {
+        const td = document.createElement('td');
+        td.className = 'total-cell';
+
+        // Use only the first minSeriesCount series for equalized totals
+        const allScores = participant.scores || [];
+        const effectiveScores = allScores
+            .sort((a, b) => a.seriesNumber - b.seriesNumber)
+            .slice(0, minSeriesCount);
+
+        const totalScore = effectiveScores.reduce((sum, s) => sum + s.total, 0);
+        const totalX = effectiveScores.reduce((sum, s) => sum + (s.xCount || 0), 0);
+        const effectiveSeriesCount = effectiveScores.length;
+        const actualSeriesCount = allScores.length;
+
+        // Show "6/10 serier" format if participant has more series than minimum
+        const seriesDisplay = actualSeriesCount > effectiveSeriesCount
+            ? `${effectiveSeriesCount}/${actualSeriesCount} serier`
+            : `${effectiveSeriesCount} serier`;
+
+        // Check if handicap is enabled and participant has handicap data
+        if (match.hasHandicap && participant.handicapPerSeries !== null && participant.handicapPerSeries !== undefined) {
+            // Use quarter-point handicap, then round final score to integer
+            const hcpPerSeries = roundToQuarter(participant.handicapPerSeries);
+            const handicapTotal = hcpPerSeries * effectiveSeriesCount;
+            const maxPossible = 50 * effectiveSeriesCount;  // Max 50 points per series
+            let finalScore = totalScore + handicapTotal;
+            // Cap at maximum possible - you can never score more than 50 per series
+            finalScore = Math.min(Math.round(finalScore), maxPossible);
+            const hcpTotalDisplay = formatHandicap(handicapTotal);
+
+            td.innerHTML = `
+                <div class="total-score handicap-final">${finalScore}</div>
+                <div class="total-handicap-breakdown">
+                    <span class="raw-score">${totalScore}</span>
+                    <span class="hcp-addition">${hcpTotalDisplay}</span>
+                </div>
+                <div class="total-details">${seriesDisplay}${totalX > 0 ? ` | ${totalX}x` : ''}</div>
+            `;
+        } else {
+            td.innerHTML = `
+                <div class="total-score">${totalScore}</div>
+                <div class="total-details">${seriesDisplay}${totalX > 0 ? ` | ${totalX}x` : ''}</div>
+            `;
+        }
+        totalRow.appendChild(td);
+    });
+
+    tbody.appendChild(totalRow);
+}
+
+// Render avatar helper
+function renderAvatar(participant) {
+    if (participant.profilePictureUrl) {
+        return `<img src="${participant.profilePictureUrl}" alt="${participant.firstName}"
+                     class="participant-avatar">`;
+    }
+
+    const initials = ((participant.firstName?.[0] || '') + (participant.lastName?.[0] || '')).toUpperCase();
+    return `<div class="participant-avatar participant-avatar-initials">${initials}</div>`;
+}
+
+// Handle add score button click - check if match has started for non-creators
+function handleAddScoreClick() {
+    const state = window.currentMatchState || {};
+
+    // If match hasn't started and user is not the creator, show message
+    if (state.hasStarted === false && !state.isCreator) {
+        const startTime = new Date(state.startDate).toLocaleString('sv-SE', {
+            weekday: 'short', month: 'short', day: 'numeric',
+            hour: '2-digit', minute: '2-digit'
+        });
+        showToast(`Matchen har inte startat ännu. Du kan registrera resultat efter ${startTime}.`, 'warning', 5000);
+        return;
+    }
+
+    // Otherwise, open the score entry modal
+    if (typeof openScoreEntryModal === 'function') {
+        openScoreEntryModal();
+    } else {
+        console.error('openScoreEntryModal function not found');
+    }
+}
+
+// Edit a series score - opens the edit modal
+function editSeriesScore(seriesNumber, scoreData) {
+    // The scoreData is passed as an object from the onclick handler
+    if (typeof openScoreEditModal === 'function') {
+        openScoreEditModal(seriesNumber, scoreData);
+    } else {
+        console.error('openScoreEditModal function not found');
+    }
+}
+
+// Store current spectators list globally (filtered, excluding current user)
+window.currentSpectators = [];
+// Store current match status for spectators display
+window.currentMatchStatus = 'Active';
+
+// Update spectators display
+function updateSpectatorsDisplay(spectators, matchStatus) {
+    const display = document.getElementById('spectatorsDisplay');
+    const avatarsContainer = document.getElementById('spectatorAvatars');
+    const countBadge = document.getElementById('spectatorCount');
+
+    if (!display || !avatarsContainer || !countBadge) return;
+
+    // Update match status if provided
+    if (matchStatus) {
+        window.currentMatchStatus = matchStatus;
+    }
+
+    // Only show spectators for active matches, not completed/history
+    if (window.currentMatchStatus !== 'Active') {
+        display.style.display = 'none';
+        display.style.setProperty('display', 'none', 'important');
+        window.currentSpectators = [];
+        return;
+    }
+
+    // Filter out the current user from spectators list
+    const myMemberId = parseInt(document.body.dataset.memberId) || 0;
+    const otherSpectators = (spectators || []).filter(s => s.memberId !== myMemberId);
+    window.currentSpectators = otherSpectators;
+
+    if (otherSpectators.length === 0) {
+        display.style.display = 'none';
+        display.style.setProperty('display', 'none', 'important');
+        return;
+    }
+
+    // Show display
+    display.style.display = 'flex';
+    display.style.removeProperty('display');
+
+    // Show up to 3 avatars
+    const maxAvatars = 3;
+    const visibleSpectators = otherSpectators.slice(0, maxAvatars);
+
+    avatarsContainer.innerHTML = visibleSpectators.map(s => {
+        if (s.profilePictureUrl) {
+            return `<img src="${s.profilePictureUrl}" alt="${s.name}" class="spectator-mini-avatar" title="${s.name}">`;
+        }
+        const initials = s.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+        return `<div class="spectator-mini-avatar spectator-mini-avatar-initials" title="${s.name}">${initials}</div>`;
+    }).join('');
+
+    // Update count
+    countBadge.textContent = otherSpectators.length;
+}
+
+// Show spectators modal
+function showSpectatorsModal() {
+    const spectators = window.currentSpectators || [];
+    const listContainer = document.getElementById('spectatorsList');
+    const noMessage = document.getElementById('noSpectatorsMessage');
+
+    if (spectators.length === 0) {
+        listContainer.style.display = 'none';
+        noMessage.style.display = 'block';
+    } else {
+        listContainer.style.display = 'block';
+        noMessage.style.display = 'none';
+
+        listContainer.innerHTML = spectators.map(s => {
+            const avatar = s.profilePictureUrl
+                ? `<img src="${s.profilePictureUrl}" alt="${s.name}" class="rounded-circle" style="width: 40px; height: 40px; object-fit: cover;">`
+                : `<div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center" style="width: 40px; height: 40px; font-size: 14px;">${s.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}</div>`;
+
+            return `
+                <div class="list-group-item d-flex align-items-center gap-3">
+                    ${avatar}
+                    <div>
+                        <div class="fw-medium">${s.name}</div>
+                        ${s.clubName ? `<small class="text-muted">${s.clubName}</small>` : ''}
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    const modal = new bootstrap.Modal(document.getElementById('spectatorsModal'));
+    modal.show();
+}
+</script>
+
+<style>
+/* Scoreboard Container */
+.scoreboard-container {
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    overflow: hidden;
+    margin-bottom: 80px; /* Space for floating button */
+}
+
+.scoreboard-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+/* Scoreboard Table */
+.scoreboard-table {
+    width: 100%;
+    min-width: max-content;
+    border-collapse: collapse;
+    table-layout: fixed;
+}
+
+.scoreboard-table th,
+.scoreboard-table td {
+    min-width: 80px;
+    text-align: center;
+    padding: 8px 4px;
+    border: 1px solid #dee2e6;
+}
+
+/* Participant Header */
+.participant-column {
+    background: #f8f9fa;
+    padding: 12px 8px !important;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.participant-header {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+}
+
+.participant-avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 2px solid #dee2e6;
+}
+
+.participant-avatar-initials {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #6c757d;
+    color: white;
+    font-weight: bold;
+    font-size: 1rem;
+}
+
+.participant-name {
+    font-weight: 600;
+    font-size: 0.9rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 80px;
+}
+
+/* Handicap Display in Participant Header */
+.participant-handicap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    margin-top: 2px;
+}
+
+.handicap-value {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #198754;
+    background: rgba(25, 135, 84, 0.1);
+    padding: 1px 6px;
+    border-radius: 10px;
+}
+
+.provisional-badge {
+    font-size: 0.65rem;
+    font-weight: bold;
+    color: #fd7e14;
+    cursor: help;
+}
+
+/* Score Cells */
+.score-cell {
+    font-size: 1.2rem;
+    font-weight: 500;
+    position: relative;
+    height: 44px;
+    vertical-align: middle;
+}
+
+.score-cell.has-score {
+    background: #f0f9f0;
+}
+
+.score-cell.editable {
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+.score-cell.editable:hover {
+    background: #d4edda;
+}
+
+.score-cell.editable:active {
+    background: #c3e6cb;
+}
+
+.score-editable {
+    position: relative;
+    display: inline-block;
+    width: 100%;
+    height: 100%;
+}
+
+.score-editable .edit-icon {
+    position: absolute;
+    bottom: 2px;
+    right: 4px;
+    font-size: 0.65rem;
+    color: #6c757d;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
+.score-cell.editable:hover .edit-icon,
+.score-cell.editable:focus .edit-icon {
+    opacity: 1;
+}
+
+/* Always show edit icon on touch devices */
+@@media (hover: none) {
+    .score-editable .edit-icon {
+        opacity: 0.5;
+    }
+}
+
+.score-value {
+    font-weight: 600;
+}
+
+.score-empty {
+    color: #ccc;
+}
+
+.x-count {
+    font-size: 0.7rem;
+    color: #ffc107;
+    font-weight: bold;
+    position: absolute;
+    top: 2px;
+    right: 4px;
+}
+
+/* Summary Rows */
+.summary-row {
+    background: #e9ecef !important;
+}
+
+.summary-cell {
+    font-size: 1rem;
+    padding: 6px 4px !important;
+}
+
+/* Total Row */
+.total-row {
+    background: #343a40 !important;
+    color: white;
+}
+
+.total-cell {
+    padding: 12px 4px !important;
+}
+
+.total-score {
+    font-size: 1.5rem;
+    font-weight: bold;
+}
+
+.total-details {
+    font-size: 0.75rem;
+    opacity: 0.8;
+}
+
+/* Handicap Total Display */
+.total-score.handicap-final {
+    color: #ffc107;
+}
+
+.total-handicap-breakdown {
+    display: flex;
+    justify-content: center;
+    gap: 4px;
+    font-size: 0.8rem;
+    margin-top: 2px;
+}
+
+.total-handicap-breakdown .raw-score {
+    opacity: 0.7;
+}
+
+.total-handicap-breakdown .hcp-addition {
+    color: #90EE90;
+    font-weight: 500;
+}
+
+/* Mobile Responsive */
+@@media (max-width: 576px) {
+    .scoreboard-table th,
+    .scoreboard-table td {
+        min-width: 70px;
+        padding: 6px 2px;
+    }
+
+    .participant-avatar {
+        width: 40px;
+        height: 40px;
+    }
+
+    .participant-name {
+        font-size: 0.8rem;
+        max-width: 70px;
+    }
+
+    .score-cell {
+        font-size: 1rem;
+        height: 40px;
+    }
+
+    .total-score {
+        font-size: 1.2rem;
+    }
+
+    /* Floating button smaller on mobile */
+    #addScoreBtn {
+        padding: 0.5rem 1rem;
+        font-size: 0.9rem;
+    }
+}
+
+/* Landscape optimization for more columns */
+@@media (min-width: 768px) and (orientation: landscape) {
+    .scoreboard-table th,
+    .scoreboard-table td {
+        min-width: 90px;
+    }
+}
+
+/* Dark Mode Support */
+[data-bs-theme="dark"] .scoreboard-container {
+    background: #212529;
+}
+
+[data-bs-theme="dark"] .scoreboard-table th,
+[data-bs-theme="dark"] .scoreboard-table td {
+    border-color: #495057;
+    color: #e9ecef;
+}
+
+[data-bs-theme="dark"] .participant-column {
+    background: #343a40;
+}
+
+[data-bs-theme="dark"] .participant-avatar {
+    border-color: #6c757d;
+}
+
+[data-bs-theme="dark"] .score-cell {
+    background: #2b3035;
+}
+
+[data-bs-theme="dark"] .score-cell.has-score {
+    background: #1a3a1a;
+}
+
+[data-bs-theme="dark"] .score-cell.editable:hover {
+    background: #2a4a2a;
+}
+
+[data-bs-theme="dark"] .score-cell.editable:active {
+    background: #3a5a3a;
+}
+
+[data-bs-theme="dark"] .score-editable .edit-icon {
+    color: #adb5bd;
+}
+
+[data-bs-theme="dark"] .score-empty {
+    color: #6c757d;
+}
+
+[data-bs-theme="dark"] .summary-row {
+    background: #495057 !important;
+}
+
+[data-bs-theme="dark"] .summary-cell {
+    color: #e9ecef;
+}
+
+[data-bs-theme="dark"] .summary-cell .text-muted {
+    color: #adb5bd !important;
+}
+
+[data-bs-theme="dark"] .total-row {
+    background: #0d6efd !important;
+}
+
+/* Dark Mode Handicap Styles */
+[data-bs-theme="dark"] .handicap-value {
+    color: #75b798;
+    background: rgba(117, 183, 152, 0.15);
+}
+
+[data-bs-theme="dark"] .provisional-badge {
+    color: #ffb74d;
+}
+
+[data-bs-theme="dark"] .total-score.handicap-final {
+    color: #ffd54f;
+}
+
+[data-bs-theme="dark"] .total-handicap-breakdown .hcp-addition {
+    color: #a5d6a7;
+}
+
+/* Spectator Mini Avatars */
+.spectator-mini-avatar {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 2px solid rgba(255,255,255,0.8);
+    margin-left: -8px;
+}
+
+.spectator-mini-avatar:first-child {
+    margin-left: 0;
+}
+
+.spectator-mini-avatar-initials {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #6c757d;
+    color: white;
+    font-weight: bold;
+    font-size: 0.6rem;
+}
+
+#spectatorsDisplay {
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 20px;
+    background: rgba(255,255,255,0.15);
+    transition: background 0.2s;
+}
+
+#spectatorsDisplay:hover {
+    background: rgba(255,255,255,0.25);
+}
+</style>

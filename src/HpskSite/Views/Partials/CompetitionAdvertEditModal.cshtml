@@ -1,0 +1,528 @@
+@*
+ * Competition Advertisement Edit Modal
+ * Simplified edit form for external competition advertisements
+ * Only shown when editing competitions with isExternal=true
+ *@
+
+<!-- Flatpickr CSS and JS from CDN -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
+
+<div class="modal fade" id="competitionAdvertEditModal" tabindex="-1" aria-labelledby="competitionAdvertEditModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-info text-white">
+                <h5 class="modal-title" id="competitionAdvertEditModalLabel">
+                    <i class="bi bi-megaphone me-2"></i>Redigera Extern Tävlingsannons
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <!-- Info Alert -->
+                <div class="alert alert-info" role="alert">
+                    <i class="bi bi-info-circle me-2"></i>
+                    <strong>Externa tävlingar</strong> visas som annonser i tävlingslistan men har ingen intern hantering (inga anmälningar, startlistor, eller resultat).
+                </div>
+
+                <!-- Error Container -->
+                <div id="advertEditFormErrors" class="alert alert-danger d-none" role="alert">
+                    <strong>Fel vid sparning:</strong>
+                    <ul id="advertEditErrorList" class="mb-0 mt-2"></ul>
+                </div>
+
+                <form id="competitionAdvertEditForm">
+                    <!-- Hidden field for competition ID -->
+                    <input type="hidden" id="advertEdit_competitionId" name="competitionId" value="">
+
+                    <!-- Basic Information -->
+                    <div class="row">
+                        <div class="col-12">
+                            <h6 class="mb-3 text-primary">
+                                <i class="bi bi-info-circle me-1"></i>Grundinformation
+                            </h6>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="advertEdit_competitionSeriesId" class="form-label">Tävlingsserie (valfritt)</label>
+                        <select class="form-select" id="advertEdit_competitionSeriesId" name="seriesId">
+                            <option value="">Ingen serie</option>
+                        </select>
+                        <small class="form-text text-muted">Välj serie som tävlingen ingår i</small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="advertEdit_clubId" class="form-label">Ansvarig klubb</label>
+                        <select class="form-select" id="advertEdit_clubId" name="clubId">
+                            <option value="">-- Välj klubb --</option>
+                        </select>
+                        <small class="form-text text-muted">Klubben som arrangerar tävlingen</small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="advertEdit_competitionName" class="form-label">Tävlingsnamn <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="advertEdit_competitionName" name="competitionName" required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="advertEdit_competitionType" class="form-label">Tävlingstyp</label>
+                        <input type="text" class="form-control" id="advertEdit_competitionType" name="competitionType" value="Precision">
+                        <small class="form-text text-muted">T.ex. Precision, Fält, Multikal</small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="advertEdit_description" class="form-label">Beskrivning</label>
+                        <textarea class="form-control" id="advertEdit_description" name="description" rows="3"></textarea>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="advertEdit_venue" class="form-label">Plats <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="advertEdit_venue" name="venue" required>
+                    </div>
+
+                    <hr>
+
+                    <!-- Dates -->
+                    <div class="row">
+                        <div class="col-12">
+                            <h6 class="mb-3 text-primary"><i class="bi bi-calendar me-1"></i>Datum</h6>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="advertEdit_competitionDate" class="form-label">Tävlingsdatum <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control" id="advertEdit_competitionDate" name="competitionDate" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="advertEdit_competitionEndDate" class="form-label">Slutdatum (om fler dagar)</label>
+                                <input type="text" class="form-control" id="advertEdit_competitionEndDate" name="competitionEndDate">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="advertEdit_registrationOpenDate" class="form-label">Anmälan öppnar <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control" id="advertEdit_registrationOpenDate" name="registrationOpenDate" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="advertEdit_registrationCloseDate" class="form-label">Anmälan stänger <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control" id="advertEdit_registrationCloseDate" name="registrationCloseDate" required>
+                            </div>
+                        </div>
+                    </div>
+
+                    <hr>
+
+                    <!-- External Registration -->
+                    <div class="row">
+                        <div class="col-12">
+                            <h6 class="mb-3 text-primary"><i class="bi bi-box-arrow-up-right me-1"></i>Extern Anmälan</h6>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="advertEdit_externalUrl" class="form-label">Extern URL</label>
+                        <input type="url" class="form-control" id="advertEdit_externalUrl" name="externalUrl" placeholder="https://...">
+                        <small class="form-text text-muted">Länk till extern hemsida för mer information</small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="advertEdit_externalRegistrationEmail" class="form-label">Anmälningsmail</label>
+                        <input type="email" class="form-control" id="advertEdit_externalRegistrationEmail" name="externalRegistrationEmail" placeholder="anmalan@exempel.se">
+                        <small class="form-text text-muted">E-post för anmälan (visas som mailto: länk)</small>
+                    </div>
+
+                    <div class="alert alert-info" role="alert">
+                        <i class="bi bi-info-circle me-2"></i>
+                        <strong>Inbjudningsfil:</strong> Ladda upp inbjudan (PDF/Word) via Umbraco backoffice.
+                    </div>
+
+                    <hr>
+
+                    <!-- Optional Configuration -->
+                    <div class="row">
+                        <div class="col-12">
+                            <h6 class="mb-3 text-primary"><i class="bi bi-gear me-1"></i>Övrig Information (valfritt)</h6>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Skytteklasser (valfritt)</label>
+                        <div id="advertEdit_shootingClassesContainer" class="border rounded p-3" style="max-height: 250px; overflow-y: auto;">
+                            <div class="text-center text-muted">
+                                <small>Laddar klasser...</small>
+                            </div>
+                        </div>
+                        <input type="hidden" id="advertEdit_shootingClassIds" name="shootingClassIds" value="">
+                        <small class="form-text text-muted">Välj vilka klasser som tävlingen är öppen för (kan lämnas tomt)</small>
+                    </div>
+
+                    <hr>
+
+                    <!-- Competition Format -->
+                    <div class="row">
+                        <div class="col-12">
+                            <h6 class="mb-3 text-primary"><i class="bi bi-list-ol me-1"></i>Tävlingsformat</h6>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="advertEdit_numberOfSeriesOrStations" class="form-label">
+                                    Antal serier/stationer <span class="text-danger">*</span>
+                                </label>
+                                <input type="number" class="form-control" id="advertEdit_numberOfSeriesOrStations"
+                                       name="numberOfSeriesOrStations" min="1" max="20" value="6" required>
+                                <small class="form-text text-muted">Antal ordinarie serier (vanligtvis 6 för precision)</small>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="advertEdit_numberOfFinalSeries" class="form-label">
+                                    Antal finalserier
+                                </label>
+                                <input type="number" class="form-control" id="advertEdit_numberOfFinalSeries"
+                                       name="numberOfFinalSeries" min="0" max="10" value="0">
+                                <small class="form-text text-muted">0 om ingen final, annars antal finalserier</small>
+                            </div>
+                        </div>
+                    </div>
+
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    <i class="bi bi-x-circle me-1"></i>Avbryt
+                </button>
+                <button type="button" class="btn btn-info" id="saveAdvertEditBtn" onclick="saveAdvertEdit()">
+                    <i class="bi bi-save me-1"></i>Spara Ändringar
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Store selected shooting class IDs to be used when modal is shown
+window.advertEditSelectedClassIds = [];
+
+// Initialize Flatpickr date pickers when modal is shown
+document.getElementById('competitionAdvertEditModal')?.addEventListener('shown.bs.modal', function() {
+    console.log('CompetitionAdvertEditModal opened, initializing Flatpickr');
+
+    // Competition dates (date + time)
+    flatpickr('#advertEdit_competitionDate', {
+        locale: 'sv',
+        enableTime: true,
+        time_24hr: true,
+        dateFormat: 'Y-m-d H:i'
+    });
+
+    flatpickr('#advertEdit_competitionEndDate', {
+        locale: 'sv',
+        enableTime: false,
+        dateFormat: 'Y-m-d'
+    });
+
+    // Registration dates (date + time)
+    flatpickr('#advertEdit_registrationOpenDate', {
+        locale: 'sv',
+        enableTime: true,
+        time_24hr: true,
+        dateFormat: 'Y-m-d H:i'
+    });
+
+    flatpickr('#advertEdit_registrationCloseDate', {
+        locale: 'sv',
+        enableTime: true,
+        time_24hr: true,
+        dateFormat: 'Y-m-d H:i'
+    });
+
+    // Load series list
+    loadAdvertEditSeriesList();
+
+    // Load clubs list
+    loadAdvertEditClubsList();
+
+    // Load shooting classes with stored selected IDs
+    loadAdvertEditShootingClasses(window.advertEditSelectedClassIds || []);
+});
+
+// Load series list for dropdown
+function loadAdvertEditSeriesList() {
+    fetch('/umbraco/surface/CompetitionAdmin/GetSeriesList')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.data && Array.isArray(data.data)) {
+                const select = document.getElementById('advertEdit_competitionSeriesId');
+                select.innerHTML = '<option value="">Ingen serie</option>';
+
+                data.data.forEach(series => {
+                    const option = document.createElement('option');
+                    option.value = series.id;
+                    option.textContent = series.name;
+                    select.appendChild(option);
+                });
+            }
+        })
+        .catch(error => console.error('Error loading series:', error));
+}
+
+// Load clubs list for dropdown
+function loadAdvertEditClubsList() {
+    fetch('/umbraco/surface/ClubAdmin/GetClubsForRegistration')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.clubs) {
+                const select = document.getElementById('advertEdit_clubId');
+                select.innerHTML = '<option value="">-- Välj klubb --</option>';
+
+                data.clubs.forEach(club => {
+                    const option = document.createElement('option');
+                    option.value = club.id;
+                    option.textContent = club.name;
+                    select.appendChild(option);
+                });
+
+                // Set the stored club ID if available
+                if (window.advertEditClubId) {
+                    setTimeout(() => {
+                        select.value = window.advertEditClubId;
+                    }, 50);
+                }
+            }
+        })
+        .catch(error => console.error('Error loading clubs:', error));
+}
+
+// Load shooting classes for checkbox selection
+function loadAdvertEditShootingClasses(selectedClassIds = []) {
+    const container = document.getElementById('advertEdit_shootingClassesContainer');
+
+    fetch('/umbraco/surface/CompetitionEdit/GetShootingClasses')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.data && Array.isArray(data.data)) {
+                container.innerHTML = '';
+
+                data.data.forEach(classItem => {
+                    const div = document.createElement('div');
+                    div.className = 'form-check';
+
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.className = 'form-check-input advertEdit-shooting-class-checkbox';
+                    checkbox.id = `advertEdit_class_${classItem.id}`;
+                    checkbox.value = classItem.id;
+
+                    // Pre-check if in selected list
+                    if (selectedClassIds.includes(classItem.id)) {
+                        checkbox.checked = true;
+                    }
+
+                    const label = document.createElement('label');
+                    label.className = 'form-check-label';
+                    label.htmlFor = `advertEdit_class_${classItem.id}`;
+                    label.textContent = `${classItem.name}`;
+                    if (classItem.description) {
+                        label.textContent += ` - ${classItem.description}`;
+                    }
+
+                    div.appendChild(checkbox);
+                    div.appendChild(label);
+                    container.appendChild(div);
+                });
+            } else {
+                container.innerHTML = '<div class="text-muted"><small>Kunde inte ladda skytteklasser</small></div>';
+            }
+        })
+        .catch(error => {
+            console.error('Error loading shooting classes:', error);
+            container.innerHTML = '<div class="text-danger"><small>Fel vid laddning av klasser</small></div>';
+        });
+}
+
+// Populate modal with competition data
+window.populateAdvertEditModal = function(competition) {
+    console.log('Populating advert edit modal with:', competition);
+
+    // Set competition ID
+    document.getElementById('advertEdit_competitionId').value = competition.id || '';
+
+    // Basic info
+    document.getElementById('advertEdit_competitionName').value = competition.competitionName || '';
+    document.getElementById('advertEdit_competitionType').value = competition.competitionType || 'Precision';
+    document.getElementById('advertEdit_description').value = competition.description || '';
+    document.getElementById('advertEdit_venue').value = competition.venue || '';
+
+    // Dates (backend should return in format suitable for Flatpickr: 'Y-m-d H:i' or 'Y-m-d')
+    document.getElementById('advertEdit_competitionDate').value = competition.competitionDate || '';
+    document.getElementById('advertEdit_competitionEndDate').value = competition.competitionEndDate || '';
+    document.getElementById('advertEdit_registrationOpenDate').value = competition.registrationOpenDate || '';
+    document.getElementById('advertEdit_registrationCloseDate').value = competition.registrationCloseDate || '';
+
+    // External fields
+    document.getElementById('advertEdit_externalUrl').value = competition.externalUrl || '';
+    document.getElementById('advertEdit_externalRegistrationEmail').value = competition.externalRegistrationEmail || '';
+
+    // Series
+    document.getElementById('advertEdit_numberOfSeriesOrStations').value = competition.numberOfSeriesOrStations || 6;
+    document.getElementById('advertEdit_numberOfFinalSeries').value = competition.numberOfFinalSeries || 0;
+
+    // Series selection
+    if (competition.seriesId) {
+        setTimeout(() => {
+            document.getElementById('advertEdit_competitionSeriesId').value = competition.seriesId;
+        }, 100);
+    }
+
+    // Store shooting class IDs globally so the modal's shown.bs.modal event can use them
+    window.advertEditSelectedClassIds = competition.shootingClassIds || [];
+    console.log('Stored shooting class IDs for pre-selection:', window.advertEditSelectedClassIds);
+
+    // Store club ID globally so the modal's shown.bs.modal event can use it
+    window.advertEditClubId = competition.clubId || '';
+    console.log('Stored club ID for pre-selection:', window.advertEditClubId);
+};
+
+// Reset form when modal is closed
+window.resetAdvertEditForm = function() {
+    document.getElementById('competitionAdvertEditForm').reset();
+    document.getElementById('advertEditFormErrors').classList.add('d-none');
+
+    // Clear all checkboxes
+    document.querySelectorAll('.advertEdit-shooting-class-checkbox').forEach(cb => {
+        cb.checked = false;
+    });
+};
+
+// Save advertisement edits
+function saveAdvertEdit() {
+    const form = document.getElementById('competitionAdvertEditForm');
+    const formData = new FormData(form);
+
+    // Build fields object
+    const fields = {};
+    formData.forEach((value, key) => {
+        fields[key] = value;
+    });
+
+    // Collect selected shooting classes
+    const selectedClasses = [];
+    document.querySelectorAll('.advertEdit-shooting-class-checkbox:checked').forEach(cb => {
+        selectedClasses.push(cb.value);
+    });
+    fields.shootingClassIds = selectedClasses;
+
+    // Validate required fields
+    if (!fields.competitionName || !fields.venue || !fields.competitionDate || !fields.registrationOpenDate || !fields.registrationCloseDate) {
+        showAdvertEditNotification('Fyll i alla obligatoriska fält', 'error');
+        return;
+    }
+
+    // Validate series count
+    if (!fields.numberOfSeriesOrStations || fields.numberOfSeriesOrStations < 1) {
+        showAdvertEditNotification('Antal serier/stationer måste vara minst 1', 'error');
+        return;
+    }
+
+    const saveBtn = document.getElementById('saveAdvertEditBtn');
+    const originalText = saveBtn.innerHTML;
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<i class="spinner-border spinner-border-sm me-1"></i>Sparar...';
+
+    // Use FormData for consistency with create endpoint
+    const requestData = new FormData();
+    requestData.append('fields', JSON.stringify(fields));
+
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+
+    fetch('/umbraco/surface/CompetitionAdmin/SaveAdvertisement', {
+        method: 'POST',
+        headers: {
+            'RequestVerificationToken': token
+        },
+        body: requestData
+    })
+    .then(response => {
+        if (!response.ok) {
+            return response.text().then(text => {
+                throw new Error(`HTTP ${response.status}: ${text}`);
+            });
+        }
+        return response.json();
+    })
+    .then(data => {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = originalText;
+
+        if (data.success) {
+            document.getElementById('advertEditFormErrors').classList.add('d-none');
+            showAdvertEditNotification('Tävlingsannons uppdaterades framgångsrikt!', 'success');
+
+            // Close modal
+            bootstrap.Modal.getInstance(document.getElementById('competitionAdvertEditModal')).hide();
+
+            // Reload competitions list
+            if (typeof loadCompetitionsList === 'function') {
+                setTimeout(() => {
+                    loadCompetitionsList();
+                }, 500);
+            }
+        } else {
+            const errorList = document.getElementById('advertEditErrorList');
+            errorList.innerHTML = '';
+
+            if (data.errors && typeof data.errors === 'object' && Object.keys(data.errors).length > 0) {
+                for (let [field, error] of Object.entries(data.errors)) {
+                    const li = document.createElement('li');
+                    li.textContent = error;
+                    errorList.appendChild(li);
+                }
+            } else {
+                const li = document.createElement('li');
+                li.textContent = data.message || 'Ett okänt fel uppstod';
+                errorList.appendChild(li);
+            }
+
+            document.getElementById('advertEditFormErrors').classList.remove('d-none');
+        }
+    })
+    .catch(error => {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = originalText;
+        console.error('Error saving advertisement:', error);
+        showAdvertEditNotification('Fel vid sparning: ' + error.message, 'error');
+    });
+}
+
+function showAdvertEditNotification(message, type) {
+    const alertClass = type === 'success' ? 'alert-success' : 'alert-danger';
+    const notification = document.createElement('div');
+    notification.className = `alert ${alertClass} alert-dismissible fade show position-fixed`;
+    notification.style.cssText = 'top: 20px; right: 20px; z-index: 9999; max-width: 400px;';
+    notification.innerHTML = `
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+
+    document.body.appendChild(notification);
+
+    setTimeout(() => {
+        if (notification.parentNode) {
+            notification.remove();
+        }
+    }, 5000);
+}
+</script>

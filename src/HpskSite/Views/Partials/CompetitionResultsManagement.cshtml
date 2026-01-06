@@ -1,0 +1,2287 @@
+@*
+ * Competition Results Management Partial View
+ * Handles results entry and management for a specific competition
+*@
+
+@{
+    var competitionId = ViewData["CompetitionId"]?.ToString() ?? "";
+    
+    // Get values from ViewData with appropriate defaults
+    var numberOfSeriesOrStations = ViewData["NumberOfSeriesOrStations"] as int?;
+    var numberOfFinalSeries = ViewData["NumberOfFinalSeries"] as int?;
+    
+    // If ViewData is null/0, use sensible defaults (but log it)
+    if (!numberOfSeriesOrStations.HasValue || numberOfSeriesOrStations.Value == 0)
+    {
+        System.Diagnostics.Debug.WriteLine($"WARNING: numberOfSeriesOrStations not set for competition {competitionId}, defaulting to 10");
+        numberOfSeriesOrStations = 10;
+    }
+    
+    if (!numberOfFinalSeries.HasValue)
+    {
+        System.Diagnostics.Debug.WriteLine($"WARNING: numberOfFinalSeries not set for competition {competitionId}, defaulting to 3");
+        numberOfFinalSeries = 3;
+    }
+    
+    var hasFinalsRound = numberOfFinalSeries > 0;
+    var qualificationSeriesCount = hasFinalsRound ? (numberOfSeriesOrStations.Value - numberOfFinalSeries.Value) : numberOfSeriesOrStations.Value;
+    
+    // Debug output
+    System.Diagnostics.Debug.WriteLine($"CompetitionResultsManagement - Competition: {competitionId}");
+    System.Diagnostics.Debug.WriteLine($"  numberOfSeriesOrStations: {numberOfSeriesOrStations}");
+    System.Diagnostics.Debug.WriteLine($"  numberOfFinalSeries: {numberOfFinalSeries}");
+    System.Diagnostics.Debug.WriteLine($"  hasFinalsRound: {hasFinalsRound}");
+    System.Diagnostics.Debug.WriteLine($"  qualificationSeriesCount: {qualificationSeriesCount}");
+}
+
+<div class="competition-results-management" data-competition-id="@competitionId">
+    <!-- Precision Results Entry Section (Collapsible) -->
+    <div class="card">
+        <div class="card-header" style="cursor: pointer;" onclick="toggleResultsEntry(event)">
+            <div class="d-flex justify-content-between align-items-center">
+                <div class="d-flex align-items-center">
+                    <i class="bi bi-chevron-down me-2" id="resultsEntryChevron"></i>
+                    <h5 class="mb-0"><i class="bi bi-bullseye me-2"></i>Registrera Resultat</h5>
+                </div>
+                <div>
+                    <span class="text-muted">
+                        <small><i class="bi bi-keyboard me-1"></i>Använd tangentbordet eller klicka på knapparna</small>
+                    </span>
+                </div>
+            </div>
+        </div>
+        <div class="card-body" id="resultsEntryBody">
+            <!-- Controls Row: Entry Order, Phase Selector, and Traversal Mode -->
+            <div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-3">
+                <!-- Entry Order Selector -->
+                <div>
+                    <label for="entryOrderSelect" class="form-label mb-1 small">Ordning</label>
+                    <select class="form-select form-select-sm" id="entryOrderSelect" onchange="changeEntryOrder()">
+                        <option value="registration">Anmälningsordning (klass/namn)</option>
+                        <option value="startlist">Startlisteordning (lag/tid)</option>
+                    </select>
+                </div>
+
+                <!-- Phase Selector (Qualification vs Finals) -->
+                @if (hasFinalsRound)
+                {
+                    <div>
+                        <label class="form-label mb-1 small">Fas</label>
+                        <div class="btn-group phase-selector" role="group" aria-label="Competition Phase">
+                            <input type="radio" class="btn-check" name="competitionPhase" id="phaseQualification" value="qualification" checked autocomplete="off">
+                            <label class="btn btn-sm btn-outline-primary" for="phaseQualification" id="phaseQualificationLabel">
+                                <i class="bi bi-list-ol me-1"></i>
+                                <span>Qualification (1-@qualificationSeriesCount)</span>
+                            </label>
+
+                            <input type="radio" class="btn-check" name="competitionPhase" id="phaseFinals" value="finals" autocomplete="off">
+                            <label class="btn btn-sm btn-outline-success" for="phaseFinals" id="phaseFinalsLabel">
+                                <i class="bi bi-trophy me-1"></i>
+                                <span>Finals (F1-F@numberOfFinalSeries)</span>
+                            </label>
+                        </div>
+                    </div>
+                }
+
+                <!-- Traversal Mode Dropdown -->
+                <div>
+                    <label for="traversalModeSelect" class="form-label mb-1 small">Efter Enter flytta till</label>
+                    <select class="form-select form-select-sm" id="traversalModeSelect">
+                        <option value="nextShooter">Nästa Skytt</option>
+                        <option value="nextSeries">Nästa Serie</option>
+                        <option value="stay">Stanna kvar</option>
+                    </select>
+                </div>
+            </div>
+
+            <div id="resultsEntryContainer">
+                <div class="text-center py-4">
+                    <i class="bi bi-arrow-up-circle display-1 text-muted"></i>
+                    <p class="text-muted mt-2">Select a shooter above to start entering results</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Results List Section (Collapsible) -->
+    <div class="card mt-4" id="resultsListSection">
+        <div class="card-header" style="cursor: pointer;" onclick="toggleResultsList(event)">
+            <div class="d-flex justify-content-between align-items-center">
+                <div class="d-flex align-items-center">
+                    <i class="bi bi-chevron-right me-2" id="resultsListChevron"></i>
+                    <h5 class="mb-0"><i class="bi bi-file-earmark-text me-2"></i>Resultatlista</h5>
+                </div>
+                <div class="d-flex align-items-center gap-2" onclick="event.stopPropagation()" id="resultsListActions">
+                    <!-- Create/Update Results List Button -->
+                    <button class="btn btn-outline-primary btn-sm" onclick="createResultsList(event)" id="btnCreateResultsList">
+                        <i class="bi bi-arrow-clockwise me-1"></i>Uppdatera
+                    </button>
+                    <!-- Status Badge -->
+                    <span class="badge bg-warning fs-6 px-3 py-2" id="resultsListStatusBadge" style="display: none;">
+                        <i class="bi bi-exclamation-triangle me-1"></i>Preliminär
+                    </span>
+                    <!-- Publish Action Buttons -->
+                    <button class="btn btn-success btn-sm" id="btnMarkOfficial" onclick="markResultsOfficial(event)" style="display: none;">
+                        <i class="bi bi-check-circle me-1"></i>Publicera
+                    </button>
+                    <button class="btn btn-outline-warning btn-sm" id="btnMarkPreliminary" onclick="markResultsPreliminary(event)" style="display: none;">
+                        <i class="bi bi-arrow-counterclockwise me-1"></i>Avpublicera
+                    </button>
+                    <!-- Summary -->
+                    <span class="text-muted" id="resultsListSummary" style="display: none;">
+                        <small><i class="bi bi-people me-1"></i><span id="resultsListCount">0</span> deltagare</small>
+                    </span>
+                </div>
+            </div>
+        </div>
+        <div class="card-body" id="resultsListBody" style="display: none;">
+            <!-- No Results Message (shown when no results list exists) -->
+            <div id="noResultsMessage" class="text-center py-5" style="display: none;">
+                <i class="bi bi-file-earmark-text display-1 text-muted"></i>
+                <h5 class="mt-3 mb-2">Ingen resultatlista skapad ännu</h5>
+                <p class="text-muted">Klicka på knappen "Uppdatera" ovan för att skapa en resultatlista baserad på de registrerade resultaten.</p>
+            </div>
+
+            <!-- Results Display (shown when results list exists) -->
+            <div id="resultsDisplay" style="display: none;">
+                <!-- Action Button -->
+                <div class="d-flex justify-content-end mb-3">
+                    <button type="button" class="btn btn-outline-primary btn-sm" onclick="openResultsInNewTab(event)">
+                        <i class="bi bi-box-arrow-up-right"></i> Öppna i ny flik
+                    </button>
+                </div>
+
+                <!-- Results Display (iframe) -->
+                <div id="resultsIframeContainer">
+                    <iframe id="resultsManagementIframe" src="" style="width: 100%; height: 800px; border: 1px solid #dee2e6; border-radius: 0.375rem;"></iframe>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Results Management JavaScript
+
+// Toggle results entry section
+function toggleResultsEntry(event) {
+    // Prevent clicks on child elements from bubbling
+    if (event && event.target !== event.currentTarget && !event.target.closest('.card-header')) {
+        return;
+    }
+    
+    const body = document.getElementById('resultsEntryBody');
+    const chevron = document.getElementById('resultsEntryChevron');
+    
+    if (body.style.display === 'none') {
+        body.style.display = 'block';
+        chevron.classList.remove('bi-chevron-right');
+        chevron.classList.add('bi-chevron-down');
+    } else {
+        body.style.display = 'none';
+        chevron.classList.remove('bi-chevron-down');
+        chevron.classList.add('bi-chevron-right');
+    }
+}
+
+function createResultsList(event) {
+    // Stop event propagation to prevent triggering parent click handlers
+    if (event) {
+        event.stopPropagation();
+    }
+    
+    const competitionId = $('.competition-results-management').data('competition-id');
+    if (!competitionId) {
+        alert('Ingen tävling vald.');
+        return;
+    }
+    
+    if (confirm('Vill du skapa/uppdatera resultatlistan för denna tävling?')) {
+        // Show loading state
+        const button = event?.target?.closest('button');
+        if (!button) return;
+        
+        const originalText = button.innerHTML;
+        button.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Skapar...';
+        button.disabled = true;
+        
+        // Call API to create results list
+        fetch('/umbraco/surface/CompetitionResults/CreateResultsList', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': $('input[name="__RequestVerificationToken"]').val()
+            },
+            body: JSON.stringify({ competitionId: parseInt(competitionId) })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showSaveMessage('Resultatlistan har skapats/uppdaterats framgångsrikt! (' + data.resultsCount + ' deltagare)', 'success');
+                // Load and show the results list
+                loadResultsList();
+            } else {
+                alert('Fel vid skapande av resultatlista: ' + (data.message || 'Okänt fel'));
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Ett fel uppstod vid skapande av resultatlista.');
+        })
+        .finally(() => {
+            // Restore button state
+            button.innerHTML = originalText;
+            button.disabled = false;
+        });
+    }
+}
+
+// Global variables
+let currentResultsListData = null;
+let currentResultPageUrl = null;
+
+async function loadResultsList() {
+    const competitionId = $('.competition-results-management').data('competition-id');
+    if (!competitionId) {
+        console.error('No competition ID');
+        return;
+    }
+
+    console.log('Loading results list for competition:', competitionId);
+
+    try {
+        const response = await fetch(`/umbraco/surface/CompetitionResults/GetResultsList?competitionId=${competitionId}`);
+        const data = await response.json();
+
+        console.log('Results list response:', data);
+
+        const section = document.getElementById('resultsListSection');
+        const body = document.getElementById('resultsListBody');
+        const chevron = document.getElementById('resultsListChevron');
+        const noResultsMessage = document.getElementById('noResultsMessage');
+        const resultsDisplay = document.getElementById('resultsDisplay');
+        const statusBadge = document.getElementById('resultsListStatusBadge');
+        const summary = document.getElementById('resultsListSummary');
+        const btnMarkOfficial = document.getElementById('btnMarkOfficial');
+        const btnMarkPreliminary = document.getElementById('btnMarkPreliminary');
+
+        if (data.success && data.exists) {
+            currentResultsListData = data.results;
+
+            // Show results list section (always visible now)
+            if (section) {
+                section.style.display = 'block';
+                console.log('Results list section shown');
+
+                // Auto-expand the section
+                if (body && chevron) {
+                    body.style.display = 'block';
+                    chevron.classList.remove('bi-chevron-right');
+                    chevron.classList.add('bi-chevron-down');
+                    console.log('Results list section expanded');
+                }
+            }
+
+            // Show results display, hide no-results message
+            if (noResultsMessage) noResultsMessage.style.display = 'none';
+            if (resultsDisplay) resultsDisplay.style.display = 'block';
+
+            // Show status badge, summary, and action buttons
+            if (statusBadge) statusBadge.style.display = 'inline-block';
+            if (summary) summary.style.display = 'inline-block';
+            if (btnMarkOfficial || btnMarkPreliminary) {
+                updateResultsListStatus(data.isOfficial);
+            }
+
+            // Update summary
+            const totalShooters = data.results.classGroups.reduce((sum, group) => sum + group.shooters.length, 0);
+            const resultsCountEl = document.getElementById('resultsListCount');
+            if (resultsCountEl) resultsCountEl.textContent = totalShooters;
+
+            // Load the result page in iframe using the URL from API
+            if (data.resultPageUrl) {
+                currentResultPageUrl = data.resultPageUrl;
+                const iframe = document.getElementById('resultsManagementIframe');
+                if (iframe) {
+                    iframe.src = currentResultPageUrl;
+                }
+            }
+        } else {
+            console.log('No results list exists yet - success:', data.success, 'exists:', data.exists);
+
+            // Section stays visible, but show "no results" message
+            if (section) section.style.display = 'block';
+
+            // Auto-expand to show the no-results message
+            if (body && chevron) {
+                body.style.display = 'block';
+                chevron.classList.remove('bi-chevron-right');
+                chevron.classList.add('bi-chevron-down');
+            }
+
+            // Show no-results message, hide results display
+            if (noResultsMessage) noResultsMessage.style.display = 'block';
+            if (resultsDisplay) resultsDisplay.style.display = 'none';
+
+            // Hide status badge, summary, and action buttons
+            if (statusBadge) statusBadge.style.display = 'none';
+            if (summary) summary.style.display = 'none';
+            if (btnMarkOfficial) btnMarkOfficial.style.display = 'none';
+            if (btnMarkPreliminary) btnMarkPreliminary.style.display = 'none';
+        }
+    } catch (error) {
+        console.error('Error loading results list:', error);
+    }
+}
+
+function toggleResultsList(event) {
+    // Prevent clicks on child elements from bubbling
+    if (event && event.target !== event.currentTarget && !event.target.closest('.card-header')) {
+        return;
+    }
+    
+    const body = document.getElementById('resultsListBody');
+    const chevron = document.getElementById('resultsListChevron');
+    
+    if (body.style.display === 'none') {
+        body.style.display = 'block';
+        chevron.classList.remove('bi-chevron-right');
+        chevron.classList.add('bi-chevron-down');
+        
+        // Load results if not already loaded
+        if (!currentResultsListData) {
+            loadResultsList();
+        }
+    } else {
+        body.style.display = 'none';
+        chevron.classList.remove('bi-chevron-down');
+        chevron.classList.add('bi-chevron-right');
+    }
+}
+
+function updateResultsListStatus(isOfficial) {
+    const statusBadge = document.getElementById('resultsListStatusBadge');
+    const btnMarkOfficial = document.getElementById('btnMarkOfficial');
+    const btnMarkPreliminary = document.getElementById('btnMarkPreliminary');
+
+    if (isOfficial) {
+        // Official status
+        statusBadge.className = 'badge bg-success fs-6 px-3 py-2';
+        statusBadge.innerHTML = '<i class="bi bi-check-circle me-1"></i>Publicerad';
+        btnMarkOfficial.style.display = 'none';
+        btnMarkPreliminary.style.display = 'inline-block';
+    } else {
+        // Preliminary status
+        statusBadge.className = 'badge bg-warning fs-6 px-3 py-2';
+        statusBadge.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>Preliminär';
+        btnMarkOfficial.style.display = 'inline-block';
+        btnMarkPreliminary.style.display = 'none';
+    }
+}
+
+async function markResultsOfficial(event) {
+    if (event) event.stopPropagation();
+    
+    if (!confirm('Vill du markera resultatlistan som officiell?\n\nDetta kommer att göra resultaten synliga för alla.')) {
+        return;
+    }
+
+    const competitionId = $('.competition-results-management').data('competition-id');
+    const button = event?.target?.closest('button');
+    const originalText = button.innerHTML;
+    button.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Sparar...';
+    button.disabled = true;
+
+    try {
+        const response = await fetch('/umbraco/surface/CompetitionResults/ToggleResultsOfficial', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': $('input[name="__RequestVerificationToken"]').val()
+            },
+            body: JSON.stringify({ competitionId: parseInt(competitionId), isOfficial: true })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            showSaveMessage(data.message, 'success');
+            updateResultsListStatus(data.isOfficial);
+        } else {
+            alert('Fel: ' + (data.message || 'Okänt fel'));
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Ett fel uppstod vid uppdatering av status.');
+    } finally {
+        button.innerHTML = originalText;
+        button.disabled = false;
+    }
+}
+
+async function markResultsPreliminary(event) {
+    if (event) event.stopPropagation();
+    
+    if (!confirm('Vill du återställa resultatlistan till preliminär status?')) {
+        return;
+    }
+
+    const competitionId = $('.competition-results-management').data('competition-id');
+    const button = event?.target?.closest('button');
+    const originalText = button.innerHTML;
+    button.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Sparar...';
+    button.disabled = true;
+
+    try {
+        const response = await fetch('/umbraco/surface/CompetitionResults/ToggleResultsOfficial', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': $('input[name="__RequestVerificationToken"]').val()
+            },
+            body: JSON.stringify({ competitionId: parseInt(competitionId), isOfficial: false })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            showSaveMessage(data.message, 'success');
+            updateResultsListStatus(data.isOfficial);
+        } else {
+            alert('Fel: ' + (data.message || 'Okänt fel'));
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Ett fel uppstod vid uppdatering av status.');
+    } finally {
+        button.innerHTML = originalText;
+        button.disabled = false;
+    }
+}
+
+function openResultsInNewTab(event) {
+    if (event) event.stopPropagation();
+    
+    if (currentResultPageUrl) {
+        window.open(currentResultPageUrl, '_blank');
+    }
+}
+
+// Load results list when page loads or when tab is shown
+$(document).ready(function() {
+    // Try multiple selectors for different page contexts
+    $('button[data-bs-target="#results"], #results-tab').on('shown.bs.tab', function () {
+        // Try to load results list when tab is shown
+        setTimeout(() => loadResultsList(), 500);
+    });
+
+    // Also try on page load if results tab is active
+    if ($('#results').hasClass('active') || $('#results').hasClass('show')) {
+        setTimeout(() => loadResultsList(), 500);
+    }
+    
+    // Force load after a short delay to ensure everything is initialized
+    setTimeout(() => {
+        const competitionId = $('.competition-results-management').data('competition-id');
+        if (competitionId) {
+            loadResultsList();
+        }
+    }, 1000);
+});
+
+function refreshResults() {
+    loadCompetitionData();
+}
+
+let competitionData = {
+    competitionId: null,
+    numberOfSeries: @numberOfSeriesOrStations,
+    numberOfFinalSeries: @numberOfFinalSeries,
+    hasFinalsRound: @(hasFinalsRound.ToString().ToLower()),
+    qualificationSeriesCount: @qualificationSeriesCount,
+    currentPhase: 'qualification' // 'qualification' or 'finals'
+};
+
+// Debug: Log competition data on load
+console.log('Competition data initialized:', {
+    numberOfSeries: competitionData.numberOfSeries,
+    numberOfFinalSeries: competitionData.numberOfFinalSeries,
+    hasFinalsRound: competitionData.hasFinalsRound,
+    qualificationSeriesCount: competitionData.qualificationSeriesCount
+});
+
+// Validation: Check for configuration errors
+if (competitionData.hasFinalsRound) {
+    if (competitionData.qualificationSeriesCount < 1) {
+        console.error('❌ CONFIGURATION ERROR: qualificationSeriesCount < 1');
+        console.error('   numberOfSeries (total):', competitionData.numberOfSeries);
+        console.error('   numberOfFinalSeries:', competitionData.numberOfFinalSeries);
+        console.error('   Expected: numberOfSeries should be (qualification + finals)');
+        console.error('   Example: For 7 qual + 3 finals, set numberOfSeriesOrStations = 10');
+        alert('⚠️ Competition Configuration Error!\n\n' +
+              'Number of series is incorrectly configured.\n\n' +
+              'Current: ' + competitionData.numberOfSeries + ' total series, ' + competitionData.numberOfFinalSeries + ' finals\n' +
+              'This gives only ' + competitionData.qualificationSeriesCount + ' qualification series!\n\n' +
+              'Please update the competition:\n' +
+              '• numberOfSeriesOrStations should be TOTAL (qual + finals)\n' +
+              '• Example: 7 qualification + 3 finals = 10 total');
+    }
+}
+// NEW SHOOTER-BASED NAVIGATION SYSTEM
+// Results entry now works from registrations, with optional start list ordering
+
+let shootersData = [];       // All shooters (from registrations)
+let currentShooterIndex = 0; // Current position in shootersData
+let hasStartList = false;    // Whether start list exists
+let currentEntryOrder = 'registration'; // 'registration' or 'startlist'
+let currentSeries = 1;
+let currentUserId = null;    // Will be set when page loads
+
+// Legacy support - keep startListData for some existing functions
+let startListData = null;
+let currentTeam = 1;
+let currentPosition = 1;
+
+function loadCompetitionData() {
+    const competitionId = $('.competition-results-management').data('competition-id');
+
+    // Get current user ID first
+    fetch('/umbraco/surface/CompetitionResults/GetCurrentUserId')
+    .then(response => response.json())
+    .then(userResponse => {
+        if (userResponse.success) {
+            currentUserId = userResponse.userId;
+            console.log('Current user ID:', currentUserId);
+        } else {
+            console.error('Failed to get current user ID:', userResponse.message);
+            currentUserId = 1; // Fallback
+        }
+    })
+    .catch(error => {
+        console.error('Error getting current user ID:', error);
+        currentUserId = 1; // Fallback
+    });
+
+    // Update competition data
+    competitionData.competitionId = competitionId;
+    competitionData.competitionType = 'Precision';
+
+    // Load shooters from registrations (new approach - no start list required)
+    loadShooters(currentEntryOrder);
+}
+
+// Load shooters from registrations (called on page load and when order changes)
+function loadShooters(orderBy = 'registration') {
+    const competitionId = $('.competition-results-management').data('competition-id');
+
+    console.log('Loading shooters for competition', competitionId, 'orderBy:', orderBy);
+
+    fetch(`/umbraco/surface/CompetitionResults/GetShootersForResultsEntry?competitionId=${competitionId}&orderBy=${orderBy}`)
+        .then(response => response.json())
+        .then(data => {
+            console.log('GetShootersForResultsEntry response:', data);
+
+            if (data.success) {
+                shootersData = data.shooters;
+                hasStartList = data.hasStartList;
+                currentEntryOrder = orderBy;
+
+                // If start list order requested but no start list exists
+                if (orderBy === 'startlist' && !hasStartList) {
+                    alert('Ingen startlista finns. Skyttar visas i anmälningsordning.');
+                    document.getElementById('entryOrderSelect').value = 'registration';
+                    currentEntryOrder = 'registration';
+                }
+
+                // Restore last session or start from first shooter
+                restoreLastSession();
+
+                // Update display
+                updateShooterDisplay();
+                loadCurrentShooterByIndex();
+
+                console.log('Loaded', shootersData.length, 'shooters');
+            } else {
+                showNoShootersError(data.message || 'Kunde inte ladda skyttar för resultatinmatning.');
+            }
+        })
+        .catch(error => {
+            console.error('Error loading shooters:', error);
+            showNoShootersError('Ett fel uppstod vid laddning av skyttar: ' + error.message);
+        });
+}
+
+// Change entry order
+function changeEntryOrder() {
+    const orderBy = document.getElementById('entryOrderSelect').value;
+    // Reset to first shooter when changing order
+    currentShooterIndex = 0;
+    // Load shooters - warning will be shown by loadShooters() if no start list exists
+    loadShooters(orderBy);
+}
+
+// Navigate to previous shooter
+function prevShooter() {
+    if (currentShooterIndex > 0) {
+        currentShooterIndex--;
+        updateShooterDisplay();
+        loadCurrentShooterByIndex();
+        saveCurrentSession();
+    }
+}
+
+// Navigate to next shooter
+function nextShooter() {
+    if (currentShooterIndex < shootersData.length - 1) {
+        currentShooterIndex++;
+        updateShooterDisplay();
+        loadCurrentShooterByIndex();
+        saveCurrentSession();
+    }
+}
+
+// Update shooter display in navigation
+function updateShooterDisplay() {
+    const shooterInfoEl = document.getElementById('currentShooterInfo');
+    if (!shooterInfoEl) return;
+
+    const shooter = shootersData[currentShooterIndex];
+    if (!shooter) {
+        shooterInfoEl.textContent = '-';
+        return;
+    }
+
+    let displayText = `${currentShooterIndex + 1}/${shootersData.length}: ${shooter.name}`;
+    if (currentEntryOrder === 'startlist' && shooter.teamNumber) {
+        displayText += ` (Lag ${shooter.teamNumber})`;
+    }
+
+    shooterInfoEl.textContent = displayText;
+}
+
+// Load results for current shooter by index
+function loadCurrentShooterByIndex() {
+    const shooter = shootersData[currentShooterIndex];
+    if (!shooter) {
+        document.getElementById('resultsEntryContainer').innerHTML = `
+            <div class="alert alert-info">
+                <h6><i class="bi bi-info-circle me-2"></i>Inga skyttar</h6>
+                <p>Det finns inga registrerade skyttar för denna tävling.</p>
+            </div>
+        `;
+        return;
+    }
+
+    const competitionId = $('.competition-results-management').data('competition-id');
+
+    // Convert shooter data to format expected by existing functions
+    const shooterData = {
+        id: shooter.memberId,
+        memberId: shooter.memberId,
+        name: shooter.name,
+        club: shooter.club,
+        class: shooter.shootingClass,
+        teamNumber: shooter.teamNumber || 0,
+        position: shooter.position || (currentShooterIndex + 1)
+    };
+
+    // Update legacy variables for compatibility with existing save/load functions
+    currentTeam = shooterData.teamNumber;
+    currentPosition = shooterData.position;
+
+    // Load existing results for this shooter/series combination
+    loadExistingResults(competitionId, currentSeries, shooterData.teamNumber, shooterData.position, shooterData);
+}
+
+// Show error when no shooters can be loaded
+function showNoShootersError(message) {
+    document.getElementById('resultsEntryContainer').innerHTML = `
+        <div class="alert alert-warning">
+            <h6><i class="bi bi-exclamation-triangle me-2"></i>Inga skyttar hittades</h6>
+            <p>${message}</p>
+            <p>Kontrollera att det finns registrerade deltagare för denna tävling.</p>
+        </div>
+    `;
+}
+
+function showStartListError(message) {
+    document.getElementById('resultsEntryContainer').innerHTML = `
+        <div class="alert alert-warning">
+            <h6><i class="bi bi-exclamation-triangle me-2"></i>Start List Required</h6>
+            <p>${message}</p>
+            <p>Please generate an official start list first before entering results.</p>
+        </div>
+    `;
+}
+
+function populateSeriesDropdown() {
+    const seriesSelect = document.getElementById('seriesSelect');
+    seriesSelect.innerHTML = '<option value="">Choose a series...</option>';
+    
+    if (competitionData.hasFinalsRound) {
+        // Populate based on current phase
+        if (competitionData.currentPhase === 'qualification') {
+            // Qualification series (1 to qualificationSeriesCount)
+            for (let i = 1; i <= competitionData.qualificationSeriesCount; i++) {
+                const option = document.createElement('option');
+                option.value = i;
+                option.textContent = `Series ${i}`;
+                seriesSelect.appendChild(option);
+            }
+        } else {
+            // Finals series (qualificationSeriesCount+1 to numberOfSeries)
+            const startSeries = competitionData.qualificationSeriesCount + 1;
+            for (let i = startSeries; i <= competitionData.numberOfSeries; i++) {
+                const option = document.createElement('option');
+                option.value = i;
+                const finalsNumber = i - competitionData.qualificationSeriesCount;
+                option.textContent = `Finals ${finalsNumber} (F${finalsNumber})`;
+                seriesSelect.appendChild(option);
+            }
+        }
+    } else {
+        // Regular competition: all series
+        for (let i = 1; i <= competitionData.numberOfSeries; i++) {
+            const option = document.createElement('option');
+            option.value = i;
+            option.textContent = `Series ${i}`;
+            seriesSelect.appendChild(option);
+        }
+    }
+}
+
+function populateTeamsDropdown() {
+    const teamSelect = document.getElementById('teamSelect');
+    teamSelect.innerHTML = '<option value="">Choose a team...</option>';
+    
+    if (!startListData || !startListData.teams) {
+        console.error('No start list data available');
+        return;
+    }
+    
+    // Add teams from the start list
+    startListData.teams.forEach(team => {
+        const option = document.createElement('option');
+        option.value = team.teamNumber;
+        option.textContent = `Team ${team.teamNumber} (${team.startTime} - ${team.endTime})`;
+        option.dataset.teamNumber = team.teamNumber;
+        option.dataset.startTime = team.startTime;
+        option.dataset.endTime = team.endTime;
+        option.dataset.shooterCount = team.shooterCount;
+        teamSelect.appendChild(option);
+    });
+}
+
+function setDefaultValues() {
+    const competitionId = $('.competition-results-management').data('competition-id');
+    const storageKey = `competition_${competitionId}_last_selection`;
+    
+    // Try to restore last session values
+    const lastSelection = localStorage.getItem(storageKey);
+    let teamNumber = 1; // Default to Team 1
+    let position = 1;   // Default to Position 1
+    let seriesNumber = 1; // Default to Series 1
+    
+    if (lastSelection) {
+        try {
+            const parsed = JSON.parse(lastSelection);
+            teamNumber = parsed.teamNumber || 1;
+            position = parsed.position || 1;
+            seriesNumber = parsed.seriesNumber || 1;
+            console.log('Restored last selection:', parsed);
+        } catch (e) {
+            console.warn('Failed to parse last selection from localStorage:', e);
+        }
+    }
+    
+    // Set team selection
+    const teamSelect = document.getElementById('teamSelect');
+    if (teamSelect) {
+        teamSelect.value = teamNumber;
+        // Trigger change event to populate positions
+        teamSelect.dispatchEvent(new Event('change'));
+        
+        // Set position after a short delay to ensure positions are loaded
+        setTimeout(() => {
+            const positionSelect = document.getElementById('positionSelect');
+            if (positionSelect) {
+                positionSelect.value = position;
+                // Trigger change event to enable series selection
+                positionSelect.dispatchEvent(new Event('change'));
+                
+                // Set series after another short delay
+                setTimeout(() => {
+                    const seriesSelect = document.getElementById('seriesSelect');
+                    if (seriesSelect) {
+                        seriesSelect.value = seriesNumber;
+                        // Trigger change event to load shooter results
+                        seriesSelect.dispatchEvent(new Event('change'));
+                    }
+                }, 100);
+            }
+        }, 100);
+    }
+    
+    console.log('Set default values:', { teamNumber, position, seriesNumber });
+}
+
+// OLD: saveCurrentSelection() - now replaced by saveCurrentSession() in new navigation system
+
+function loadTeamShooters() {
+    const teamNumber = document.getElementById('teamSelect').value;
+    const positionSelect = document.getElementById('positionSelect');
+    const seriesSelect = document.getElementById('seriesSelect');
+    
+    // Reset dependent dropdowns
+    positionSelect.innerHTML = '<option value="">Choose position...</option>';
+    positionSelect.disabled = true;
+    seriesSelect.disabled = true;
+    
+    if (!teamNumber || !startListData || !startListData.teams) {
+        document.getElementById('resultsEntryContainer').innerHTML = `
+            <div class="text-center py-4">
+                <i class="bi bi-arrow-up-circle display-1 text-muted"></i>
+                <p class="text-muted mt-2">Select a team above to start entering results</p>
+            </div>
+        `;
+        return;
+    }
+    
+    // Find the selected team
+    const selectedTeam = startListData.teams.find(team => team.teamNumber == teamNumber);
+    if (!selectedTeam || !selectedTeam.shooters) {
+        console.error('Team not found or has no shooters');
+        return;
+    }
+    
+    // Enable position selection
+    positionSelect.disabled = false;
+    
+    // Add positions for this team
+    selectedTeam.shooters.forEach(shooter => {
+        const option = document.createElement('option');
+        option.value = shooter.position;
+        option.textContent = `Position ${shooter.position} - ${shooter.name}`;
+        option.dataset.position = shooter.position;
+        option.dataset.name = shooter.name;
+        option.dataset.club = shooter.club;
+        option.dataset.weaponClass = shooter.weaponClass;
+        option.dataset.memberId = shooter.memberId;
+        positionSelect.appendChild(option);
+    });
+}
+
+function loadShooterResults() {
+    const teamNumber = document.getElementById('teamSelect').value;
+    const position = document.getElementById('positionSelect').value;
+    const seriesId = document.getElementById('seriesSelect').value;
+    const competitionId = $('.competition-results-management').data('competition-id');
+    
+    if (!teamNumber || !position || !competitionId) {
+        document.getElementById('resultsEntryContainer').innerHTML = `
+            <div class="text-center py-4">
+                <i class="bi bi-arrow-up-circle display-1 text-muted"></i>
+                <p class="text-muted mt-2">Select a team and position above to start entering results</p>
+                </div>
+        `;
+        document.getElementById('seriesSelect').disabled = true;
+        return;
+    }
+    
+    // Enable series selection
+    document.getElementById('seriesSelect').disabled = false;
+    
+    if (!seriesId) {
+        document.getElementById('resultsEntryContainer').innerHTML = `
+            <div class="text-center py-4">
+                <i class="bi bi-list-ol display-1 text-muted"></i>
+                <p class="text-muted mt-2">Select a series to enter results for this shooter</p>
+            </div>
+        `;
+        return;
+    }
+    
+    // Show loading state
+    document.getElementById('resultsEntryContainer').innerHTML = `
+        <div class="text-center py-4">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-2">Loading results entry form...</p>
+        </div>
+    `;
+    
+    // Get selected shooter data from start list
+    const selectedTeam = startListData.teams.find(team => team.teamNumber == teamNumber);
+    const selectedShooter = selectedTeam.shooters.find(shooter => shooter.position == position);
+    
+    if (!selectedShooter) {
+        console.error('Shooter not found at team', teamNumber, 'position', position);
+        return;
+    }
+    
+    const shooterData = {
+        id: selectedShooter.memberId,
+        name: selectedShooter.name,
+        club: selectedShooter.club,
+        class: selectedShooter.weaponClass,
+        memberId: selectedShooter.memberId,
+        teamNumber: teamNumber,
+        position: position
+    };
+    
+    // Load existing results for this shooter/series combination
+    loadExistingResults(competitionId, seriesId, teamNumber, position, shooterData);
+}
+
+async function loadExistingResults(competitionId, seriesId, teamNumber, position, shooterData) {
+    try {
+        // Check if results already exist for this shooter/series
+        const response = await fetch(`/umbraco/surface/CompetitionResults/GetCompetitionResults?competitionId=${competitionId}`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        const data = await response.json();
+        
+        let existingResult = null;
+        
+        if ((data.Success || data.success) && (data.Results || data.results)) {
+            const results = data.Results || data.results;
+            
+            // Find existing result for this specific shooter/series combination
+            // IDENTITY-BASED: Search by MemberId instead of position to handle late registrations
+            const targetSeries = parseInt(seriesId);
+
+            existingResult = results.find(result => {
+                return result.memberId === shooterData.memberId &&
+                       result.seriesNumber === targetSeries;
+            });
+        }
+        
+        // Save scroll position before updating DOM
+        const scrollY = window.scrollY || window.pageYOffset;
+        
+        // Create the results entry form HTML
+        const resultsEntryHtml = generateShooterResultsEntryHtml(shooterData, seriesId, competitionId);
+        document.getElementById('resultsEntryContainer').innerHTML = resultsEntryHtml;
+        
+        // Restore scroll position immediately
+        window.scrollTo(0, scrollY);
+        
+        // Initialize the results entry functionality with existing data
+        initializeShooterResultsEntry(shooterData, existingResult);
+        
+    } catch (error) {
+        console.error('Error loading existing results:', error);
+        // Save scroll position before updating DOM
+        const scrollY = window.scrollY || window.pageYOffset;
+        
+        // Fallback to normal initialization
+        const resultsEntryHtml = generateShooterResultsEntryHtml(shooterData, seriesId, competitionId);
+        document.getElementById('resultsEntryContainer').innerHTML = resultsEntryHtml;
+        
+        // Restore scroll position immediately
+        window.scrollTo(0, scrollY);
+        initializeShooterResultsEntry(shooterData, null);
+    }
+}
+
+function generateShooterResultsEntryHtml(shooterData, seriesId, competitionId) {
+    let html = `
+        <div class="precision-results-entry" data-series-id="${seriesId}" data-shooter-id="${shooterData.id}" data-competition-id="${competitionId}">
+            <div class="card">
+                <div class="card-header">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div class="d-flex align-items-center">
+                            <div class="shooter-navigation me-3">
+                                <button type="button" class="btn btn-outline-secondary btn-sm prev-shooter-btn" title="Previous Shooter">
+                                    <i class="bi bi-chevron-left"></i>
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm next-shooter-btn" title="Next Shooter">
+                                    <i class="bi bi-chevron-right"></i>
+                                </button>
+                            </div>
+                            <div>
+                                <div class="fs-5">
+                                    <strong>Skytt ${shooterData.position} - ${shooterData.name} - ${shooterData.class}</strong>
+                                    <span class="text-muted ms-2">${shooterData.club}</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="shooter-overall-totals text-end">
+                            <div class="d-inline-block me-3">
+                                <span class="fw-bold">Total: </span><span class="shooter-overall-total fs-5 fw-bold">0</span>
+                            </div>
+                            <div class="d-inline-block me-3">
+                                <span class="fw-bold">X: </span><span class="shooter-overall-xcount fs-5 fw-bold">0</span>
+                            </div>
+                            <button type="button" class="btn btn-outline-info btn-sm info-toggle-btn" title="Show/Hide Instructions">
+                                <i class="bi bi-info-circle"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-8">
+                            <div class="shots-display mb-3">
+                                <div class="d-flex align-items-center gap-3">
+                                    <div class="series-navigation">
+                                        <button type="button" class="btn btn-outline-secondary btn-sm prev-series-btn" title="Previous Series">
+                                            <i class="bi bi-chevron-up"></i>
+                                        </button>
+                                        <button type="button" class="btn btn-outline-secondary btn-sm next-series-btn" title="Next Series">
+                                            <i class="bi bi-chevron-down"></i>
+                                        </button>
+                                    </div>
+                                    <h6 id="seriesTitle" class="mb-0">Serie ${seriesId}</h6>
+                                    <div class="shots-grid">
+                                        <span class="shot-placeholder" data-shot="0">_</span>
+                                        <span class="shot-placeholder" data-shot="1">_</span>
+                                        <span class="shot-placeholder" data-shot="2">_</span>
+                                        <span class="shot-placeholder" data-shot="3">_</span>
+                                        <span class="shot-placeholder" data-shot="4">_</span>
+                                    </div>
+                                    <div class="series-totals d-flex align-items-center ms-3">
+                                        <span class="fw-bold me-2 d-flex align-items-center">=</span><span class="series-total fs-5 fw-bold">0</span>
+                                        <span class="ms-4 fw-bold d-flex align-items-center">X: </span><span class="series-xcount fs-5 fw-bold">0</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="entry-buttons">
+                                <div class="row g-2">
+                                    <div class="col-4">
+                                        <button type="button" class="btn btn-primary w-100 shot-btn" data-value="X">X</button>
+                                    </div>
+                                    <div class="col-4">
+                                        <button type="button" class="btn btn-primary w-100 shot-btn" data-value="10">10</button>
+                                    </div>
+                                    <div class="col-4">
+                                        <button type="button" class="btn btn-primary w-100 shot-btn" data-value="9">9</button>
+                                    </div>
+                                    <div class="col-4">
+                                        <button type="button" class="btn btn-primary w-100 shot-btn" data-value="8">8</button>
+                                    </div>
+                                    <div class="col-4">
+                                        <button type="button" class="btn btn-primary w-100 shot-btn" data-value="7">7</button>
+                                    </div>
+                                    <div class="col-4">
+                                        <button type="button" class="btn btn-primary w-100 shot-btn" data-value="6">6</button>
+                                    </div>
+                                    <div class="col-4">
+                                        <button type="button" class="btn btn-primary w-100 shot-btn" data-value="5">5</button>
+                                    </div>
+                                    <div class="col-4">
+                                        <button type="button" class="btn btn-primary w-100 shot-btn" data-value="4">4</button>
+                                    </div>
+                                    <div class="col-4">
+                                        <button type="button" class="btn btn-primary w-100 shot-btn" data-value="3">3</button>
+                                    </div>
+                                    <div class="col-4">
+                                        <button type="button" class="btn btn-primary w-100 shot-btn" data-value="2">2</button>
+                                    </div>
+                                    <div class="col-4">
+                                        <button type="button" class="btn btn-primary w-100 shot-btn" data-value="1">1</button>
+                                    </div>
+                                    <div class="col-4">
+                                        <button type="button" class="btn btn-primary w-100 shot-btn" data-value="0">0</button>
+                                    </div>
+                                    <div class="col-6">
+                                        <button type="button" class="btn btn-success w-100 enter-btn">ENTER</button>
+                                    </div>
+                                    <div class="col-6">
+                                        <button type="button" class="btn btn-danger w-100 clear-btn">CLEAR</button>
+                                    </div>
+            </div>
+        </div>
+    </div>
+
+                        <div class="col-md-4">
+                            <div class="alert alert-info info-section" style="display: none;">
+                                <h6><i class="bi bi-info-circle"></i> Quick Entry Mode</h6>
+                                <p class="mb-1">• Click buttons or use keyboard (0-9, X)</p>
+                                <p class="mb-1">• Press ENTER when done</p>
+                                <p class="mb-1">• Press ESC or CLEAR to reset</p>
+                                <p class="mb-0">• 5 shots per series</p>
+                            </div>
+                        </div>
+        </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    html += `
+                </div>
+            </div>
+        </div>
+        
+        <style>
+        .shots-grid {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-bottom: 0;
+            align-items: center;
+            height: 40px; /* Fixed height to ensure consistent alignment */
+        }
+        
+        .shot-placeholder {
+            width: 40px;
+            height: 40px;
+            border: 2px solid #dee2e6;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 18px;
+        }
+        
+        .shot-placeholder.filled {
+            background-color: #007bff;
+            color: white;
+            border-color: #007bff;
+        }
+        
+        .entry-buttons .btn {
+            margin-bottom: 5px;
+        }
+        
+        .shot-btn:disabled {
+            opacity: 0.5;
+        }
+        
+        .shooter-overall-totals {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .series-totals {
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            margin-top: 0;
+        }
+        
+        .shooter-navigation {
+            display: flex;
+            gap: 5px;
+        }
+        
+        .team-navigation {
+            display: flex;
+            align-items: center;
+            gap: 0;
+        }
+        
+        .series-navigation {
+            display: flex;
+            gap: 5px;
+        }
+        
+        .info-section {
+            transition: all 0.3s ease;
+        }
+        
+        .info-toggle-btn {
+            min-width: 32px;
+        }
+
+        /* Mobile responsive styles */
+        @@media (max-width: 575.98px) {
+            /* Control row - stack dropdowns vertically */
+            #resultsEntryBody > .d-flex.flex-wrap {
+                flex-direction: column;
+                align-items: stretch !important;
+            }
+            #resultsEntryBody > .d-flex.flex-wrap > div {
+                width: 100%;
+            }
+            #resultsEntryBody .form-select {
+                width: 100% !important;
+            }
+
+            /* Shot circles - smaller for mobile */
+            .shots-grid {
+                gap: 6px;
+                height: 32px;
+            }
+            .shot-placeholder {
+                width: 32px;
+                height: 32px;
+                font-size: 14px;
+            }
+
+            /* Series row - wrap and center */
+            .shots-display .d-flex.align-items-center.gap-3 {
+                flex-wrap: wrap;
+                justify-content: center;
+            }
+            .series-totals {
+                width: 100%;
+                justify-content: center;
+                margin-top: 8px;
+                margin-left: 0 !important;
+            }
+
+            /* Card header - stack shooter info */
+            .precision-results-entry .card-header > .d-flex {
+                flex-direction: column;
+                gap: 8px;
+            }
+            .shooter-overall-totals {
+                width: 100%;
+                text-align: left !important;
+                justify-content: flex-start;
+            }
+
+            /* Number pad - larger buttons for touch */
+            .entry-buttons .btn {
+                min-height: 48px;
+                font-size: 18px;
+            }
+        }
+
+        /* Small tablets */
+        @@media (min-width: 576px) and (max-width: 767.98px) {
+            .shots-grid {
+                height: 36px;
+            }
+            .shot-placeholder {
+                width: 36px;
+                height: 36px;
+            }
+        }
+        </style>
+    `;
+    
+    return html;
+}
+
+function initializeShooterResultsEntry(shooterData, existingResult = null) {
+    // Initialize shooter data
+    let shots = [];
+    let total = 0;
+    let xCount = 0;
+    let isComplete = false;
+    
+    if (existingResult) {
+        // Parse existing shots from JSON
+        try {
+            shots = JSON.parse(existingResult.shots);
+            // Calculate totals from shots instead of using stored values
+            const calculatedTotals = calculateTotalsFromShots(shots);
+            total = calculatedTotals.total;
+            xCount = calculatedTotals.xCount;
+            isComplete = shots.length === 5;
+            
+            // Show confirmation dialog if trying to edit existing results
+            // showExistingResultsWarning(existingResult);
+        } catch (error) {
+            console.error('Error parsing existing shots:', error);
+        }
+    }
+    
+    currentShooterData = {
+        id: shooterData.id,
+        memberId: shooterData.memberId, // Add memberId for server requests
+        name: shooterData.name,
+        club: shooterData.club,
+        class: shooterData.class,
+        teamNumber: shooterData.teamNumber,
+        position: shooterData.position,
+        shots: shots, // Now stores strings directly: ["X", "10", "9", "8", "7"]
+        total: total,
+        xCount: xCount,
+        isComplete: isComplete,
+        hasExistingResults: !!existingResult
+    };
+    
+    // Set up event listeners
+    initializeShooterEventListeners();
+    
+    // We've removed the existingResultsBadge display
+    
+    // Update display
+    updateShooterDisplay();
+    updateButtonStates();
+}
+
+// Global variables for results entry
+let currentShooterData = null;
+
+// Helper function to calculate totals from shots array
+function calculateTotalsFromShots(shots) {
+    let total = 0;
+    let xCount = 0;
+    
+    shots.forEach(shot => {
+        if (shot.toUpperCase() === 'X') {
+            total += 10;
+            xCount++;
+        } else {
+            const value = parseInt(shot);
+            if (!isNaN(value) && value >= 0 && value <= 10) {
+                total += value;
+            }
+        }
+    });
+    
+    return { total, xCount };
+}
+
+
+function initializeShooterEventListeners() {
+    // Remove existing listeners
+    document.removeEventListener('click', handleShooterClick);
+    document.removeEventListener('keydown', handleShooterKeydown);
+    
+    // Add new listeners
+    document.addEventListener('click', handleShooterClick);
+    document.addEventListener('keydown', handleShooterKeydown);
+    
+    // OLD: Dropdown event listeners removed - no longer needed with button navigation
+}
+
+function handleShooterClick(e) {
+    // Handle button clicks - check both the button and its children (like icons)
+    const button = e.target.closest('button');
+    
+    if (!button) return;
+    
+    // Check if this is one of our buttons
+    const isOurButton = button.classList.contains('shot-btn') ||
+                        button.classList.contains('enter-btn') ||
+                        button.classList.contains('clear-btn') ||
+                        button.classList.contains('info-toggle-btn') ||
+                        button.classList.contains('prev-shooter-btn') ||
+                        button.classList.contains('next-shooter-btn') ||
+                        button.classList.contains('prev-series-btn') ||
+                        button.classList.contains('next-series-btn') ||
+                        button.classList.contains('prev-team-btn') ||
+                        button.classList.contains('next-team-btn');
+    
+    if (!isOurButton) return;
+    
+    // Prevent default behavior for all our buttons
+    e.preventDefault();
+    e.stopPropagation();
+    
+    if (button.classList.contains('shot-btn')) {
+        const value = button.getAttribute('data-value');
+        addShot(value);
+    } else if (button.classList.contains('enter-btn')) {
+        handleEnter();
+    } else if (button.classList.contains('clear-btn')) {
+        clearShots();
+    } else if (button.classList.contains('info-toggle-btn')) {
+        toggleInfoSection();
+    } else if (button.classList.contains('prev-team-btn')) {
+        navigateToPreviousTeam();
+    } else if (button.classList.contains('next-team-btn')) {
+        navigateToNextTeam();
+    } else if (button.classList.contains('prev-shooter-btn')) {
+        // Navigate to previous position (shooter)
+        navigateToPreviousPosition();
+    } else if (button.classList.contains('next-shooter-btn')) {
+        // Navigate to next position (shooter)
+        navigateToNextPosition();
+    } else if (button.classList.contains('prev-series-btn')) {
+        navigateToPreviousSeries();
+    } else if (button.classList.contains('next-series-btn')) {
+        navigateToNextSeries();
+    }
+}
+
+function handleShooterKeydown(e) {
+    // Handle number keys and X
+    if (e.key >= '0' && e.key <= '9') {
+        e.preventDefault();
+        addShot(e.key);
+    } else if (e.key.toLowerCase() === 'x') {
+        e.preventDefault();
+        addShot('X');
+    } else if (e.key === 'Enter') {
+        e.preventDefault();
+        handleEnter();
+    } else if (e.key === 'Escape') {
+        e.preventDefault();
+        clearShots();
+    }
+}
+
+async function addShot(value) {
+    if (!currentShooterData) return;
+    
+    // If there are existing results and we're trying to add a new shot, require confirmation
+    if (currentShooterData.hasExistingResults && currentShooterData.shots.length === 0) {
+        const confirmed = await confirmClearExistingResults();
+        if (!confirmed) return;
+        
+        // Clear existing results
+        currentShooterData.hasExistingResults = false;
+    }
+    
+    if (currentShooterData.shots.length >= 5) return;
+    
+    // Store the shot value as a string
+    currentShooterData.shots.push(value);
+    
+    // Calculate numeric value for totals
+    currentShooterData.isComplete = currentShooterData.shots.length === 5;
+    
+    // Calculate totals from shots
+    const { total, xCount } = calculateTotalsFromShots(currentShooterData.shots);
+    currentShooterData.total = total;
+    currentShooterData.xCount = xCount;
+    
+    updateShooterDisplay();
+    updateButtonStates();
+}
+
+function handleEnter() {
+    if (!currentShooterData || currentShooterData.shots.length === 0) return;
+    
+    if (currentShooterData.shots.length < 5) return;
+    
+    // Automatically save results when Enter is clicked
+    saveResults();
+}
+
+async function clearShots() {
+    if (!currentShooterData) return;
+    
+    // If there are existing results, require confirmation
+    if (currentShooterData.hasExistingResults) {
+        const confirmed = await confirmClearExistingResults();
+        if (!confirmed) return;
+        
+        // Delete existing results from database
+        await deleteExistingResults();
+    }
+    
+    // Reset shooter data
+    currentShooterData.shots = [];
+    currentShooterData.isComplete = false;
+    currentShooterData.hasExistingResults = false;
+    
+    // Calculate totals from shots (will be 0 for empty array)
+    const { total, xCount } = calculateTotalsFromShots(currentShooterData.shots);
+    currentShooterData.total = total;
+    currentShooterData.xCount = xCount;
+    
+    updateShooterDisplay();
+    updateButtonStates();
+}
+
+function updateShooterDisplay() {
+    if (!currentShooterData) return;
+    
+    // Update shot placeholders
+    const placeholders = document.querySelectorAll('.shot-placeholder');
+    placeholders.forEach((placeholder, index) => {
+        if (index < currentShooterData.shots.length) {
+            // Shots are now stored as strings, so display them directly
+            placeholder.textContent = currentShooterData.shots[index];
+            placeholder.classList.add('filled');
+        } else {
+            placeholder.textContent = '_';
+            placeholder.classList.remove('filled');
+        }
+    });
+    
+    // Update series totals (current series)
+    const seriesTotalElement = document.querySelector('.series-total');
+    const seriesXCountElement = document.querySelector('.series-xcount');
+    
+    if (seriesTotalElement) seriesTotalElement.textContent = currentShooterData.total;
+    if (seriesXCountElement) seriesXCountElement.textContent = currentShooterData.xCount;
+    
+    // Update overall totals (all series for this shooter)
+    updateOverallTotals();
+}
+
+async function updateOverallTotals() {
+    if (!currentShooterData) return;
+
+    const competitionId = $('.competition-results-management').data('competition-id');
+
+    try {
+        // Get all results for this shooter across all series
+        const response = await fetch(`/umbraco/surface/CompetitionResults/GetCompetitionResults?competitionId=${competitionId}`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+
+        const data = await response.json();
+
+        let overallTotal = 0;
+        let overallXCount = 0;
+
+        if ((data.Success || data.success) && data.results) {
+            const results = data.results;
+
+            // Filter results for this specific shooter
+            // IDENTITY-BASED: Use MemberId instead of position to handle late registrations
+            const shooterResults = results.filter(result => {
+                return result.memberId === currentShooterData.memberId;
+            });
+            
+            // Sum up all series totals by calculating from shots
+            shooterResults.forEach(result => {
+                if (result.shots) {
+                    try {
+                        const shots = JSON.parse(result.shots);
+                        const calculatedTotals = calculateTotalsFromShots(shots);
+                        overallTotal += calculatedTotals.total;
+                        overallXCount += calculatedTotals.xCount;
+                    } catch (error) {
+                        console.error('Error parsing shots for overall total:', error);
+                    }
+                }
+            });
+        }
+        
+        // Update overall total elements
+        const overallTotalElement = document.querySelector('.shooter-overall-total');
+        const overallXCountElement = document.querySelector('.shooter-overall-xcount');
+        
+        if (overallTotalElement) overallTotalElement.textContent = overallTotal;
+        if (overallXCountElement) overallXCountElement.textContent = overallXCount;
+        
+    } catch (error) {
+        console.error('Error updating overall totals:', error);
+    }
+}
+
+function updateButtonStates() {
+    if (!currentShooterData) return;
+    
+    const shotButtons = document.querySelectorAll('.shot-btn');
+    const enterButton = document.querySelector('.enter-btn');
+    
+    // Disable shot buttons if 5 shots entered
+    shotButtons.forEach(btn => {
+        btn.disabled = currentShooterData.shots.length >= 5;
+    });
+    
+    // Enable/disable enter button
+    if (enterButton) {
+        enterButton.disabled = currentShooterData.shots.length === 0;
+    }
+}
+
+
+
+// Load results when tab is shown
+$(document).ready(function() {
+    console.log('CompetitionResultsManagement script loaded');
+    
+    // Test if elements exist
+    console.log('Competition data element exists:', $('.competition-results-management').length > 0);
+    
+    // Load competition data when results tab is shown
+    $('button[data-bs-target="#results"]').on('shown.bs.tab', function () {
+        console.log('Results tab activated');
+        loadCompetitionData();
+    });
+
+    // Also trigger load on document ready if this tab is active
+    if ($('#results').hasClass('active') || $('#results').hasClass('show')) {
+        console.log('Results tab is active on page load');
+        loadCompetitionData();
+    }
+});
+
+async function deleteExistingResults() {
+    if (!currentShooterData) return;
+
+    // Prepare delete request data
+    // IDENTITY-BASED: Include MemberId for future optimization (controller still uses position for now)
+    const deleteData = {
+        competitionId: competitionData.competitionId,
+        seriesNumber: currentSeries,
+        memberId: currentShooterData.memberId,  // Identity field for future use
+        teamNumber: parseInt(currentShooterData.teamNumber),  // Still needed by current controller
+        position: parseInt(currentShooterData.position)  // Still needed by current controller
+    };
+
+    console.log('Sending delete request:', deleteData);
+
+    // Validate data before sending
+    if (!deleteData.competitionId || !deleteData.seriesNumber || !deleteData.memberId) {
+        console.error('Missing required data for delete:', deleteData);
+        showSaveMessage('Saknar nödvändig data för att ta bort resultat.', 'error');
+        return;
+    }
+    
+    // Get anti-forgery token
+    const token = $('input[name="__RequestVerificationToken"]').val();
+    console.log('Anti-forgery token:', token);
+    
+    if (!token) {
+        console.error('No anti-forgery token found');
+        showSaveMessage('Säkerhetstoken saknas. Ladda om sidan och försök igen.', 'error');
+        return;
+    }
+    
+    try {
+        // Send delete request to the CompetitionResults controller
+        const response = await fetch('/umbraco/surface/CompetitionResults/DeleteResult', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': token
+            },
+            body: JSON.stringify(deleteData)
+        });
+        
+        console.log('Delete response status:', response.status);
+        const data = await response.json();
+        console.log('Delete response data:', data);
+        
+        if (data.success) {
+            // Show success message
+            showSaveMessage('Resultat borttaget!', 'success');
+            
+            // Update overall totals after deletion
+            updateOverallTotals();
+            
+            // Reload the current shooter's results to reflect the deletion
+            setTimeout(() => {
+                const competitionId = $('.competition-results-management').data('competition-id');
+                
+                if (currentTeam && currentPosition && currentSeries && competitionId) {
+                    // Reload results for this shooter/series combination
+                    loadExistingResults(competitionId, currentSeries, currentTeam, currentPosition, currentShooterData);
+                }
+            }, 500); // Small delay to ensure the success message is visible
+        } else {
+            console.error('Server returned error:', data);
+            showSaveMessage('Fel vid borttagning: ' + data.message, 'error');
+        }
+    } catch (error) {
+        console.error('Error deleting results:', error);
+        showSaveMessage('Ett fel uppstod vid borttagning av resultat.', 'error');
+    }
+}
+
+function saveResults() {
+    if (!currentShooterData || currentShooterData.shots.length === 0) {
+        alert('Inga skott att spara.');
+        return;
+    }
+    
+    // Prepare results data for the new seamless system
+    const resultsData = {
+        competitionId: competitionData.competitionId,
+        seriesNumber: currentSeries,
+        teamNumber: parseInt(currentShooterData.teamNumber),
+        position: parseInt(currentShooterData.position),
+        shots: currentShooterData.shots,
+        rangeOfficerId: currentUserId || 1, // Use current user ID or fallback to 1
+        shooterMemberId: currentShooterData.memberId, // Include the actual shooter's MemberId
+        shooterClass: currentShooterData.class // Include the shooter's class
+    };
+    
+    console.log('Sending results data:', resultsData);
+    console.log('competitionData:', competitionData);
+    console.log('currentShooterData:', currentShooterData);
+    console.log('shooterMemberId being sent:', resultsData.shooterMemberId);
+    console.log('currentShooterData.memberId:', currentShooterData.memberId);
+    
+    // Validate data before sending (allow 0 for teamNumber and position)
+    if (!resultsData.competitionId || !resultsData.seriesNumber || resultsData.teamNumber == null || resultsData.position == null) {
+        console.error('Missing required data:', {
+            competitionId: resultsData.competitionId,
+            seriesNumber: resultsData.seriesNumber,
+            teamNumber: resultsData.teamNumber,
+            position: resultsData.position
+        });
+        showSaveMessage('Saknar nödvändig data för att spara resultat.', 'error');
+        return;
+    }
+    
+    // Get anti-forgery token
+    const token = $('input[name="__RequestVerificationToken"]').val();
+    console.log('Anti-forgery token:', token);
+    
+    if (!token) {
+        console.error('No anti-forgery token found');
+        showSaveMessage('Säkerhetstoken saknas. Ladda om sidan och försök igen.', 'error');
+        return;
+    }
+    
+    // Send to the new CompetitionResults controller
+    fetch('/umbraco/surface/CompetitionResults/SaveResult', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'RequestVerificationToken': token
+        },
+        body: JSON.stringify(resultsData)
+    })
+    .then(response => {
+        console.log('Server response status:', response.status);
+        console.log('Server response headers:', response.headers);
+        return response.json();
+    })
+    .then(data => {
+        console.log('Server response data:', data);
+        
+        if (data.success) {
+            // Show success message
+            showSaveMessage('Resultat sparade!', 'success');
+            
+            // Update overall totals after saving
+            updateOverallTotals();
+            
+            // Handle traversal after saving
+            setTimeout(() => {
+                handleTraversalAfterSave();
+            }, 1000);
+        } else {
+            console.error('Server returned error:', data);
+            showSaveMessage('Fel vid sparande: ' + data.message, 'error');
+        }
+    })
+    .catch(error => {
+        console.error('Error saving results:', error);
+        showSaveMessage('Ett fel uppstod vid sparande av resultat.', 'error');
+    });
+}
+
+function handleTraversalAfterSave() {
+    const traversalMode = document.getElementById('traversalModeSelect').value;
+
+    if (traversalMode === 'nextShooter') {
+        // Move to next shooter in list (same series)
+        moveToNextShooterNew();
+    } else if (traversalMode === 'nextSeries') {
+        // Move to next series for current shooter
+        moveToNextSeriesNew();
+    }
+}
+
+// NEW: Move to next shooter using shooter-based navigation
+function moveToNextShooterNew() {
+    if (currentShooterIndex < shootersData.length - 1) {
+        currentShooterIndex++;
+        updateShooterDisplay();
+        loadCurrentShooterByIndex();
+        saveCurrentSession();
+    } else {
+        // No more shooters - we've completed all shooters for this series
+        console.log('Completed all shooters for series', currentSeries);
+        // Reset to first shooter or show completion message
+        resetForm();
+    }
+}
+
+// NEW: Move to next series for current shooter
+function moveToNextSeriesNew() {
+    const nextSeries = currentSeries + 1;
+
+    // Determine maximum series based on phase
+    let maxSeries = competitionData.numberOfSeries;
+    if (competitionData.hasFinalsRound && competitionData.currentPhase === 'qualification') {
+        maxSeries = competitionData.qualificationSeriesCount;
+    }
+
+    if (nextSeries <= maxSeries) {
+        // Move to next series for same shooter
+        currentSeries = nextSeries;
+        updateSeriesDisplay();
+        loadCurrentShooterByIndex();
+        saveCurrentSession();
+    } else {
+        // Completed all series for this shooter - move to next shooter, reset to series 1
+        console.log('Completed all series for shooter', currentShooterIndex);
+        if (currentShooterIndex < shootersData.length - 1) {
+            currentShooterIndex++;
+            currentSeries = 1;
+            updateShooterDisplay();
+            updateSeriesDisplay();
+            loadCurrentShooterByIndex();
+            saveCurrentSession();
+        } else {
+            resetForm();
+        }
+    }
+}
+
+// Update series number display
+function updateSeriesDisplay() {
+    const seriesNumberDisplay = document.getElementById('currentSeriesNumber');
+    if (seriesNumberDisplay) {
+        seriesNumberDisplay.textContent = currentSeries;
+    }
+}
+
+// Legacy function - kept for backward compatibility
+function moveToNextShooter(legacyTeam, legacyPosition, legacySeries) {
+    // Use new shooter-based navigation
+    moveToNextShooterNew();
+}
+
+// Legacy function - kept for backward compatibility
+function moveToNextSeries(legacyTeam, legacyPosition, legacySeries) {
+    // Use new shooter-based navigation
+    moveToNextSeriesNew();
+}
+
+// Legacy function - kept for backward compatibility
+function selectShooterAndSeries(teamNumber, position, seriesNumber) {
+    // Find shooter by team/position if using start list order
+    if (currentEntryOrder === 'startlist' && shootersData.length > 0) {
+        const idx = shootersData.findIndex(s => s.teamNumber === teamNumber && s.position === position);
+        if (idx >= 0) {
+            currentShooterIndex = idx;
+        }
+    }
+
+    currentTeam = teamNumber;
+    currentPosition = position;
+    currentSeries = seriesNumber;
+
+    updateShooterDisplay();
+    loadCurrentShooterByIndex();
+    saveCurrentSession();
+}
+
+function showSaveMessage(message, type = 'success') {
+    // Create or update message element
+    let messageElement = document.getElementById('saveMessage');
+    if (!messageElement) {
+        messageElement = document.createElement('div');
+        messageElement.id = 'saveMessage';
+        messageElement.className = 'alert alert-dismissible fade show';
+        messageElement.style.position = 'fixed';
+        messageElement.style.top = '20px';
+        messageElement.style.right = '20px';
+        messageElement.style.zIndex = '9999';
+        messageElement.style.minWidth = '300px';
+        document.body.appendChild(messageElement);
+    }
+    
+    // Set message content and styling
+    messageElement.className = `alert alert-${type === 'success' ? 'success' : 'danger'} alert-dismissible fade show`;
+    messageElement.innerHTML = `
+        <i class="bi bi-${type === 'success' ? 'check-circle' : 'exclamation-triangle'} me-2"></i>
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    `;
+    
+    // Auto-hide after 3 seconds
+    setTimeout(() => {
+        if (messageElement && messageElement.parentNode) {
+            messageElement.remove();
+        }
+    }, 3000);
+}
+
+function resetForm() {
+    // Reset all dropdowns
+    document.getElementById('teamSelect').value = '';
+    document.getElementById('positionSelect').value = '';
+    document.getElementById('seriesSelect').value = '';
+    
+    // Disable dependent dropdowns
+    document.getElementById('positionSelect').disabled = true;
+    document.getElementById('seriesSelect').disabled = true;
+    
+    // Clear results entry container
+    document.getElementById('resultsEntryContainer').innerHTML = `
+        <div class="text-center py-4">
+            <i class="bi bi-arrow-up-circle display-1 text-muted"></i>
+            <p class="text-muted mt-2">Select a shooter above to start entering results</p>
+        </div>
+    `;
+    
+    // Reset current shooter data
+    currentShooterData = null;
+}
+
+// Update traversal mode info when dropdown changes
+document.getElementById('traversalModeSelect').addEventListener('change', function() {
+    // Just store the mode, no info text to update
+    const mode = this.value;
+    console.log('Traversal mode changed to:', mode);
+});
+
+// Info section toggle function
+function toggleInfoSection() {
+    const infoSection = document.querySelector('.info-section');
+    if (infoSection) {
+        infoSection.style.display = infoSection.style.display === 'none' ? 'block' : 'none';
+    }
+}
+
+// Show warning when existing results are loaded
+function showExistingResultsWarning(existingResult) {
+    const shots = JSON.parse(existingResult.shots);
+    const shotDisplay = shots.map(shot => shot === 'X' ? 'X' : shot).join(', ');
+    
+    // Create a subtle notification instead of blocking dialog
+    const notification = document.createElement('div');
+    notification.className = 'alert alert-warning alert-dismissible fade show position-fixed';
+    notification.style.cssText = 'top: 20px; right: 20px; z-index: 1050; max-width: 400px;';
+    notification.innerHTML = `
+        <strong>Existing Results Found</strong><br>
+        Current scores: ${shotDisplay} (Total: ${existingResult.total}, X: ${existingResult.xCount})<br>
+        <small class="text-muted">Click CLEAR to start over, or continue editing.</small>
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+    
+    document.body.appendChild(notification);
+    
+    // Auto-remove after 5 seconds
+    setTimeout(() => {
+        if (notification.parentNode) {
+            notification.parentNode.removeChild(notification);
+        }
+    }, 5000);
+}
+
+// Confirmation dialog for clearing existing results
+async function confirmClearExistingResults() {
+    return new Promise((resolve) => {
+        const modal = document.createElement('div');
+        modal.className = 'modal fade';
+        modal.innerHTML = `
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Clear Existing Results</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p>This shooter already has results entered. Are you sure you want to clear them and start over?</p>
+                        <div class="alert alert-warning">
+                            <strong>Warning:</strong> This action cannot be undone.
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-danger" id="confirmClearBtn">Yes, Clear Results</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+        
+        const bsModal = new bootstrap.Modal(modal);
+        bsModal.show();
+        
+        document.getElementById('confirmClearBtn').addEventListener('click', () => {
+            bsModal.hide();
+            document.body.removeChild(modal);
+            resolve(true);
+        });
+        
+        modal.addEventListener('hidden.bs.modal', () => {
+            document.body.removeChild(modal);
+            resolve(false);
+        });
+    });
+}
+
+// Helper functions for new navigation system
+
+function restoreLastSession() {
+    const competitionId = $('.competition-results-management').data('competition-id');
+    const storageKey = `competition_${competitionId}_last_selection`;
+
+    const lastSelection = localStorage.getItem(storageKey);
+
+    if (lastSelection) {
+        try {
+            const selection = JSON.parse(lastSelection);
+
+            // New shooter-based navigation - restore shooter index and series
+            if (selection.shooterIndex !== undefined && selection.shooterIndex < shootersData.length) {
+                currentShooterIndex = selection.shooterIndex;
+            } else if (selection.memberId) {
+                // Try to find shooter by memberId (fallback for old sessions)
+                const idx = shootersData.findIndex(s => s.memberId === selection.memberId);
+                currentShooterIndex = idx >= 0 ? idx : 0;
+            } else {
+                currentShooterIndex = 0;
+            }
+
+            currentSeries = selection.seriesNumber || 1;
+
+            // Legacy support
+            currentTeam = selection.teamNumber || 1;
+            currentPosition = selection.position || 1;
+        } catch (e) {
+            // Use defaults
+            currentShooterIndex = 0;
+            currentSeries = 1;
+            currentTeam = 1;
+            currentPosition = 1;
+        }
+    }
+}
+
+function saveCurrentSession() {
+    const competitionId = $('.competition-results-management').data('competition-id');
+    const storageKey = `competition_${competitionId}_last_selection`;
+
+    const shooter = shootersData[currentShooterIndex];
+
+    const selection = {
+        // New shooter-based navigation
+        shooterIndex: currentShooterIndex,
+        memberId: shooter ? shooter.memberId : null,
+        seriesNumber: currentSeries,
+        entryOrder: currentEntryOrder,
+        // Legacy support
+        teamNumber: currentTeam,
+        position: currentPosition,
+        timestamp: new Date().toISOString()
+    };
+
+    localStorage.setItem(storageKey, JSON.stringify(selection));
+}
+
+function updateNavigationDisplays() {
+    // NEW: Update shooter display instead of team display
+    updateShooterDisplay();
+    updateSeriesDisplay();
+}
+
+// Legacy function - redirect to new shooter-based loading
+function loadCurrentShooter() {
+    // Use new shooter-based navigation
+    loadCurrentShooterByIndex();
+}
+
+// Legacy navigation functions - redirect to new shooter-based navigation
+
+function navigateToPreviousTeam() {
+    // Use new shooter-based navigation
+    prevShooter();
+}
+
+function navigateToNextTeam() {
+    // Use new shooter-based navigation
+    nextShooter();
+}
+
+// Legacy position navigation - redirect to shooter-based navigation
+function navigateToPreviousPosition() {
+    prevShooter();
+}
+
+function navigateToNextPosition() {
+    nextShooter();
+}
+
+function navigateToPreviousSeries() {
+    // Determine minimum series based on phase
+    let minSeries = 1;
+    if (competitionData.hasFinalsRound && competitionData.currentPhase === 'finals') {
+        minSeries = competitionData.qualificationSeriesCount + 1;
+    }
+    
+    if (currentSeries > minSeries) {
+        currentSeries--;
+        updateNavigationDisplays();
+        loadCurrentShooter();
+    }
+}
+
+function navigateToNextSeries() {
+    if (!competitionData) return;
+    
+    // Determine maximum series based on phase
+    let maxSeries = competitionData.numberOfSeries;
+    if (competitionData.hasFinalsRound && competitionData.currentPhase === 'qualification') {
+        maxSeries = competitionData.qualificationSeriesCount;
+    }
+    
+    if (currentSeries < maxSeries) {
+        currentSeries++;
+        updateNavigationDisplays();
+        loadCurrentShooter();
+    }
+}
+
+// ========================================
+// Finals Phase Management
+// ========================================
+
+let finalsStartListData = null;
+
+function initializePhaseSelector() {
+    if (!competitionData.hasFinalsRound) {
+        return; // No phase selector needed
+    }
+
+    // Update phase selector labels with correct values
+    const qualLabel = document.getElementById('phaseQualificationLabel');
+    const finalsLabel = document.getElementById('phaseFinalsLabel');
+    
+    if (qualLabel && qualLabel.querySelector('span')) {
+        qualLabel.querySelector('span').textContent = `Qualification (Series 1-${competitionData.qualificationSeriesCount})`;
+    }
+    
+    if (finalsLabel && finalsLabel.querySelector('span')) {
+        finalsLabel.querySelector('span').textContent = `Finals (Series F1-F${competitionData.numberOfFinalSeries})`;
+    }
+
+    // Add event listeners to phase selector radio buttons
+    const phaseRadios = document.querySelectorAll('input[name="competitionPhase"]');
+    phaseRadios.forEach(radio => {
+        radio.addEventListener('change', function() {
+            competitionData.currentPhase = this.value;
+            onPhaseChanged();
+        });
+    });
+
+    console.log('Phase selector initialized. Current phase:', competitionData.currentPhase);
+    console.log('Qualification series count:', competitionData.qualificationSeriesCount);
+    console.log('Number of final series:', competitionData.numberOfFinalSeries);
+}
+
+function onPhaseChanged() {
+    console.log('Phase changed to:', competitionData.currentPhase);
+
+    // Update series dropdown
+    populateSeriesDropdown();
+
+    // Load appropriate start list
+    if (competitionData.currentPhase === 'finals') {
+        loadFinalsStartList();
+    } else {
+        // Qualification start list is already loaded in startListData
+        currentSeries = 1; // Reset to first qual series
+        updateNavigationDisplays();
+        populateTeamsDropdown();
+        populatePositionsDropdown();
+    }
+}
+
+function loadFinalsStartList() {
+    const competitionId = $('.competition-results-management').data('competition-id');
+
+    console.log('Loading finals start list for competition', competitionId);
+
+    fetch(`/umbraco/surface/PrecisionStartList/GetFinalsStartList?competitionId=${competitionId}`)
+        .then(response => response.json())
+        .then(data => {
+            console.log('Finals start list response:', data);
+
+            if (data.success && data.exists && data.startList) {
+                finalsStartListData = data.startList;
+
+                // Use finals start list as the current start list
+                startListData = data.startList;
+
+                // Reset to first finals series
+                currentSeries = competitionData.qualificationSeriesCount + 1;
+                currentTeam = 1;
+                currentPosition = 1;
+
+                // Update UI
+                updateNavigationDisplays();
+                populateTeamsDropdown();
+                populatePositionsDropdown();
+                loadCurrentShooter();
+
+                console.log('Finals start list loaded successfully');
+            } else {
+                alert('Ingen finalstartlista finns. Generera den först från Startlistor-sektionen.');
+
+                // Switch back to qualification
+                document.getElementById('phaseQualification').checked = true;
+                competitionData.currentPhase = 'qualification';
+                onPhaseChanged();
+            }
+        })
+        .catch(error => {
+            console.error('Error loading finals start list:', error);
+            alert('Ett fel uppstod vid laddning av finalstartlistan: ' + error.message);
+
+            // Switch back to qualification
+            document.getElementById('phaseQualification').checked = true;
+            competitionData.currentPhase = 'qualification';
+            onPhaseChanged();
+        });
+}
+
+function getCurrentStartList() {
+    if (competitionData.hasFinalsRound && competitionData.currentPhase === 'finals') {
+        return finalsStartListData || startListData;
+    }
+    return startListData;
+}
+
+function populateTeamsDropdown() {
+    const teamSelect = document.getElementById('teamSelect');
+    if (!teamSelect) return;
+
+    teamSelect.innerHTML = '<option value="">Choose a team...</option>';
+
+    const currentList = getCurrentStartList();
+    if (!currentList || !currentList.teams) {
+        return;
+    }
+
+    currentList.teams.forEach(team => {
+        const option = document.createElement('option');
+        option.value = team.teamNumber;
+
+        if (competitionData.hasFinalsRound && competitionData.currentPhase === 'finals') {
+            option.textContent = `Team F${team.teamNumber} (${team.shooterCount} shooters)`;
+        } else {
+            option.textContent = `Team ${team.teamNumber} (${team.shooterCount} shooters)`;
+        }
+
+        teamSelect.appendChild(option);
+    });
+}
+
+function populatePositionsDropdown() {
+    const positionSelect = document.getElementById('positionSelect');
+    if (!positionSelect) return;
+
+    positionSelect.innerHTML = '<option value="">Choose a position...</option>';
+
+    const currentList = getCurrentStartList();
+    if (!currentList || !currentList.teams) {
+        return;
+    }
+
+    const team = currentList.teams.find(t => t.teamNumber === currentTeam);
+    if (!team || !team.shooters) {
+        return;
+    }
+
+    team.shooters.forEach(shooter => {
+        const option = document.createElement('option');
+        option.value = shooter.position;
+        option.textContent = `Pos ${shooter.position}: ${shooter.name || 'Unknown'} (${shooter.weaponClass || 'N/A'})`;
+        positionSelect.appendChild(option);
+    });
+}
+
+// Initialize phase selector when page loads
+if (competitionData.hasFinalsRound) {
+    // Wait a moment for DOM to be ready
+    setTimeout(() => {
+        initializePhaseSelector();
+    }, 100);
+}
+
+</script>

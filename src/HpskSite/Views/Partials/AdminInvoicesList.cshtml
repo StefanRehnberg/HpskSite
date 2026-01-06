@@ -1,0 +1,585 @@
+@*
+ * Admin Invoices List View
+ * Displays table of all invoices with filtering and payment actions
+ * Swedish translation, follows Admin Competitions List design pattern
+ * Version: 2025-11-28 v2 - Swedish status translations
+*@
+@inject Umbraco.Cms.Core.Security.IMemberManager MemberManager
+@{
+    var currentMember = await MemberManager.GetCurrentMemberAsync();
+}
+
+<div class="admin-invoices-list">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h3><i class="bi bi-receipt me-2"></i>Fakturor</h3>
+    </div>
+
+    <!-- Filter Section -->
+    <div class="card mb-4">
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-3">
+                    <label for="competitionFilterInvoices" class="form-label">Tävling</label>
+                    <select class="form-select" id="competitionFilterInvoices" onchange="applyInvoiceFilters()">
+                        <option value="">Alla tävlingar</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label for="statusFilterInvoices" class="form-label">Status</label>
+                    <select class="form-select" id="statusFilterInvoices" onchange="applyInvoiceFilters()">
+                        <option value="">Alla</option>
+                        <option value="Pending">Väntande</option>
+                        <option value="Paid">Betald</option>
+                        <option value="Cancelled">Makulerad</option>
+                        <option value="Failed">Misslyckad</option>
+                        <option value="Refunded">Återbetald</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label for="memberSearchInvoices" class="form-label">Medlem</label>
+                    <input type="text" class="form-control" id="memberSearchInvoices" placeholder="Sök medlem..." onkeyup="applyInvoiceFilters()">
+                </div>
+                <div class="col-md-2">
+                    <label for="invoiceNumberSearch" class="form-label">Fakturanummer</label>
+                    <input type="text" class="form-control" id="invoiceNumberSearch" placeholder="Sök faktura..." onkeyup="applyInvoiceFilters()">
+                </div>
+                <div class="col-md-3 d-flex flex-column justify-content-between">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="activeOnlyFilterInvoices" checked onchange="applyInvoiceFilters()">
+                        <label class="form-check-label" for="activeOnlyFilterInvoices">
+                            Endast aktiva tävlingar
+                        </label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="excludePaidFilter" checked onchange="applyInvoiceFilters()">
+                        <label class="form-check-label" for="excludePaidFilter">
+                            Dölj betalda och makulerade
+                        </label>
+                    </div>
+                    <button class="btn btn-outline-secondary btn-sm mt-2" onclick="clearInvoiceFilters()">
+                        <i class="bi bi-x-circle me-1"></i>Rensa filter
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Summary Cards -->
+    <div class="row mb-4" id="invoiceSummaryCards">
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-body">
+                    <h6 class="card-subtitle mb-2 text-muted">Totalt</h6>
+                    <h4 class="card-title mb-0" id="totalInvoicesCount">-</h4>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-body">
+                    <h6 class="card-subtitle mb-2 text-muted">Betald</h6>
+                    <h4 class="card-title mb-0 text-success" id="paidAmount">- kr</h4>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-body">
+                    <h6 class="card-subtitle mb-2 text-muted">Väntande</h6>
+                    <h4 class="card-title mb-0 text-warning" id="pendingAmount">- kr</h4>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-body">
+                    <h6 class="card-subtitle mb-2 text-muted">Aktiva tävlingar</h6>
+                    <h4 class="card-title mb-0" id="activeCompetitionsCount">-</h4>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading State -->
+    <div class="spinner-border text-primary d-none" id="invoicesLoadingSpinner" role="status">
+        <span class="visually-hidden">Laddar...</span>
+    </div>
+
+    <!-- Invoices Table -->
+    <div class="table-responsive" id="invoicesTableContainer">
+        <table class="table table-hover table-sm">
+            <thead class="table-light">
+                <tr>
+                    <th>Fakturanummer</th>
+                    <th>Tävling</th>
+                    <th>Medlem</th>
+                    <th class="text-end">Belopp</th>
+                    <th>Status</th>
+                    <th>Skapad</th>
+                    <th>Betaldatum</th>
+                    <th class="text-end">Åtgärder</th>
+                </tr>
+            </thead>
+            <tbody id="invoicesTableBody">
+                <tr class="text-muted">
+                    <td colspan="8" class="text-center py-4">Laddar fakturor...</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Pagination -->
+    <nav aria-label="Invoice pagination" class="d-none" id="invoicePaginationNav">
+        <div class="d-flex justify-content-between align-items-center">
+            <div class="text-muted">
+                Visar <span id="invoicePageInfo">-</span>
+            </div>
+            <ul class="pagination mb-0" id="invoicePagination">
+                <!-- Pagination items will be inserted here -->
+            </ul>
+        </div>
+    </nav>
+
+    <!-- Empty State -->
+    <div class="alert alert-info d-none text-center" id="noInvoicesAlert">
+        <i class="bi bi-inbox me-2"></i>
+        Inga fakturor hittades.
+    </div>
+
+    <!-- Error Alert -->
+    <div class="alert alert-danger d-none" id="invoicesErrorAlert" role="alert">
+        <strong>Fel:</strong> <span id="invoicesErrorMessage"></span>
+    </div>
+</div>
+
+<!-- HTML Template for Invoice Row -->
+<script type="text/html" id="invoice-row-template">
+    <tr data-invoice-id="{id}">
+        <td><strong>{invoiceNumber}</strong></td>
+        <td>{competitionName}</td>
+        <td>{memberName}</td>
+        <td class="text-end">{totalAmount} kr</td>
+        <td><span class="badge bg-{statusClass}">{paymentStatus}</span></td>
+        <td>{createdDate}</td>
+        <td>{paymentDate}</td>
+        <td class="text-end">
+            <div class="btn-group btn-group-sm" role="group">
+                <button class="btn btn-outline-primary" onclick="showSwishQRCode({id})" title="Visa Swish QR-kod">
+                    <i class="bi bi-qr-code"></i>
+                </button>
+                <button class="btn btn-outline-info" onclick="resendInvoiceEmail({id})" title="Skicka QR-kod via e-post">
+                    <i class="bi bi-envelope"></i>
+                </button>
+                <button class="btn btn-outline-success {hideIfPaid}" onclick="markInvoiceAsPaid({id})" title="Markera som betald">
+                    <i class="bi bi-check-circle"></i>
+                </button>
+                <button class="btn btn-outline-danger {hideIfCancelled}" onclick="cancelInvoice({id}, '{invoiceNumber}')" title="Makulera">
+                    <i class="bi bi-x-circle"></i>
+                </button>
+            </div>
+        </td>
+    </tr>
+</script>
+
+<!-- Include Swish Payment Modal Partial -->
+@await Html.PartialAsync("SwishPaymentModal")
+
+<!-- Anti-forgery token for AJAX -->
+@Html.AntiForgeryToken()
+
+<style>
+/* Compact table styling */
+.admin-invoices-list .table-sm td,
+.admin-invoices-list .table-sm th {
+    padding: 0.4rem;
+    font-size: 0.9rem;
+}
+
+.admin-invoices-list .btn-group-sm > .btn {
+    padding: 0.2rem 0.4rem;
+    font-size: 0.85rem;
+}
+</style>
+
+<script>
+// Global variables
+let invoicesListLoaded = false;
+let currentInvoicePage = 1;
+const invoicesPerPage = 50;
+
+// Load invoices list when tab is shown
+document.addEventListener('DOMContentLoaded', function() {
+    const invoicesTab = document.getElementById('invoices-tab');
+
+    // Load when tab is clicked
+    if (invoicesTab) {
+        invoicesTab.addEventListener('shown.bs.tab', function() {
+            if (!invoicesListLoaded) {
+                loadInvoicesList();
+                loadActiveCompetitionsFilter();
+                invoicesListLoaded = true;
+            }
+        });
+    }
+});
+
+function loadActiveCompetitionsFilter() {
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+
+    fetch('/umbraco/surface/InvoiceAdmin/GetActiveCompetitionsForFilter', {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json',
+            'RequestVerificationToken': token
+        },
+        credentials: 'include'
+    })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.competitions) {
+                const competitionFilter = document.getElementById('competitionFilterInvoices');
+                const options = data.competitions
+                    .map(comp => `<option value="${comp.id}">${escapeHtml(comp.name)} (${comp.date})</option>`)
+                    .join('');
+                competitionFilter.innerHTML = '<option value="">Alla tävlingar</option>' + options;
+            }
+        })
+        .catch(error => {
+            console.error('Error loading competitions filter:', error);
+        });
+}
+
+function loadInvoicesList() {
+    const spinner = document.getElementById('invoicesLoadingSpinner');
+    const tableContainer = document.getElementById('invoicesTableContainer');
+    const tbody = document.getElementById('invoicesTableBody');
+    const errorAlert = document.getElementById('invoicesErrorAlert');
+    const errorMessage = document.getElementById('invoicesErrorMessage');
+    const noInvoicesAlert = document.getElementById('noInvoicesAlert');
+
+    spinner.classList.remove('d-none');
+    errorAlert.classList.add('d-none');
+    noInvoicesAlert.classList.add('d-none');
+
+    // Build query parameters
+    const competitionId = document.getElementById('competitionFilterInvoices')?.value || '';
+    const paymentStatus = document.getElementById('statusFilterInvoices')?.value || '';
+    const memberSearch = document.getElementById('memberSearchInvoices')?.value || '';
+    const invoiceNumberSearch = document.getElementById('invoiceNumberSearch')?.value || '';
+    const activeOnly = document.getElementById('activeOnlyFilterInvoices')?.checked ?? true;
+    const excludePaid = document.getElementById('excludePaidFilter')?.checked ?? true;
+
+    const params = new URLSearchParams({
+        page: currentInvoicePage,
+        pageSize: invoicesPerPage,
+        activeCompetitionsOnly: activeOnly,
+        excludePaid: excludePaid
+    });
+
+    if (competitionId) params.append('competitionId', competitionId);
+    if (paymentStatus) params.append('paymentStatus', paymentStatus);
+    if (memberSearch) params.append('memberSearch', memberSearch);
+    if (invoiceNumberSearch) params.append('invoiceNumberSearch', invoiceNumberSearch);
+
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+
+    fetch(`/umbraco/surface/InvoiceAdmin/GetInvoices?${params.toString()}`, {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json',
+            'RequestVerificationToken': token
+        },
+        credentials: 'include'
+    })
+        .then(response => response.json())
+        .then(data => {
+            spinner.classList.add('d-none');
+
+            if (!data.success) {
+                errorMessage.textContent = data.message || 'Kunde inte ladda fakturor';
+                errorAlert.classList.remove('d-none');
+                tbody.innerHTML = '<tr class="text-muted"><td colspan="8" class="text-center py-4">Fel vid laddning av fakturor</td></tr>';
+                return;
+            }
+
+            const invoices = data.invoices || [];
+            const metadata = data.metadata || {};
+
+            // Update summary cards
+            updateSummaryCards(metadata);
+
+            if (invoices.length === 0) {
+                tableContainer.classList.add('d-none');
+                noInvoicesAlert.classList.remove('d-none');
+                tbody.innerHTML = '';
+                document.getElementById('invoicePaginationNav').classList.add('d-none');
+            } else {
+                tableContainer.classList.remove('d-none');
+                noInvoicesAlert.classList.add('d-none');
+                renderInvoices(invoices);
+                renderPagination(metadata);
+            }
+        })
+        .catch(error => {
+            spinner.classList.add('d-none');
+            errorMessage.textContent = error.message || 'Nätverksfel';
+            errorAlert.classList.remove('d-none');
+        });
+}
+
+function updateSummaryCards(metadata) {
+    document.getElementById('totalInvoicesCount').textContent = metadata.totalInvoices || 0;
+    document.getElementById('paidAmount').textContent = (metadata.paidAmount || 0).toFixed(2) + ' kr';
+    document.getElementById('pendingAmount').textContent = (metadata.pendingAmount || 0).toFixed(2) + ' kr';
+    document.getElementById('activeCompetitionsCount').textContent = metadata.activeCompetitions || 0;
+}
+
+function renderInvoices(invoices) {
+    const tbody = document.getElementById('invoicesTableBody');
+    const template = document.getElementById('invoice-row-template').textContent;
+
+    tbody.innerHTML = invoices.map(invoice => {
+        const statusClass = getStatusClass(invoice.paymentStatus);
+        const statusText = translateStatus(invoice.paymentStatus);
+        const hideIfPaid = invoice.paymentStatus === 'Paid' ? 'd-none' : '';
+        const hideIfCancelled = invoice.paymentStatus === 'Cancelled' ? 'd-none' : '';
+        const createdDate = invoice.createdDate ? new Date(invoice.createdDate).toLocaleDateString('sv-SE') : '-';
+        const paymentDate = invoice.paymentDate ? new Date(invoice.paymentDate).toLocaleDateString('sv-SE') : '-';
+
+        return template
+            .replace(/{id}/g, invoice.id)
+            .replace(/{invoiceNumber}/g, escapeHtml(invoice.invoiceNumber))
+            .replace(/{competitionName}/g, escapeHtml(invoice.competitionName))
+            .replace(/{memberName}/g, escapeHtml(invoice.memberName))
+            .replace(/{totalAmount}/g, invoice.totalAmount.toFixed(2))
+            .replace(/{paymentStatus}/g, escapeHtml(statusText))
+            .replace(/{statusClass}/g, statusClass)
+            .replace(/{createdDate}/g, createdDate)
+            .replace(/{paymentDate}/g, paymentDate)
+            .replace(/{hideIfPaid}/g, hideIfPaid)
+            .replace(/{hideIfCancelled}/g, hideIfCancelled);
+    }).join('');
+}
+
+function renderPagination(metadata) {
+    const nav = document.getElementById('invoicePaginationNav');
+    const pagination = document.getElementById('invoicePagination');
+    const pageInfo = document.getElementById('invoicePageInfo');
+
+    if (metadata.totalPages <= 1) {
+        nav.classList.add('d-none');
+        return;
+    }
+
+    nav.classList.remove('d-none');
+
+    const start = ((metadata.page - 1) * metadata.pageSize) + 1;
+    const end = Math.min(metadata.page * metadata.pageSize, metadata.filteredInvoices);
+    pageInfo.textContent = `${start}-${end} av ${metadata.filteredInvoices}`;
+
+    let paginationHTML = '';
+
+    // Previous button
+    paginationHTML += `<li class="page-item ${metadata.page === 1 ? 'disabled' : ''}">
+        <a class="page-link" href="#" onclick="goToInvoicePage(${metadata.page - 1}); return false;">Föregående</a>
+    </li>`;
+
+    // Page numbers (show max 5 pages)
+    const startPage = Math.max(1, metadata.page - 2);
+    const endPage = Math.min(metadata.totalPages, startPage + 4);
+
+    for (let i = startPage; i <= endPage; i++) {
+        paginationHTML += `<li class="page-item ${i === metadata.page ? 'active' : ''}">
+            <a class="page-link" href="#" onclick="goToInvoicePage(${i}); return false;">${i}</a>
+        </li>`;
+    }
+
+    // Next button
+    paginationHTML += `<li class="page-item ${metadata.page === metadata.totalPages ? 'disabled' : ''}">
+        <a class="page-link" href="#" onclick="goToInvoicePage(${metadata.page + 1}); return false;">Nästa</a>
+    </li>`;
+
+    pagination.innerHTML = paginationHTML;
+}
+
+function goToInvoicePage(page) {
+    currentInvoicePage = page;
+    loadInvoicesList();
+}
+
+function applyInvoiceFilters() {
+    currentInvoicePage = 1;
+    loadInvoicesList();
+}
+
+function clearInvoiceFilters() {
+    document.getElementById('competitionFilterInvoices').value = '';
+    document.getElementById('statusFilterInvoices').value = '';
+    document.getElementById('memberSearchInvoices').value = '';
+    document.getElementById('invoiceNumberSearch').value = '';
+    document.getElementById('activeOnlyFilterInvoices').checked = true;
+    document.getElementById('excludePaidFilter').checked = true;
+    applyInvoiceFilters();
+}
+
+function getStatusClass(status) {
+    switch (status) {
+        case 'Paid': return 'success';
+        case 'Pending': return 'warning';
+        case 'Cancelled': return 'secondary';
+        case 'Failed': return 'danger';
+        case 'Refunded': return 'info';
+        default: return 'secondary';
+    }
+}
+
+function translateStatus(status) {
+    switch (status) {
+        case 'Paid': return 'Betald';
+        case 'Pending': return 'Väntande';
+        case 'Cancelled': return 'Makulerad';
+        case 'Failed': return 'Misslyckad';
+        case 'Refunded': return 'Återbetald';
+        default: return status;
+    }
+}
+
+// Invoice Actions
+
+function showSwishQRCode(invoiceId) {
+    const modal = new bootstrap.Modal(document.getElementById('swishPaymentModal'));
+    const modalBody = document.getElementById('swishPaymentModalBody');
+
+    // Show loading spinner
+    modalBody.innerHTML = '<div class="spinner-border text-primary" role="status"><span class="visually-hidden">Laddar QR-kod...</span></div>';
+    modal.show();
+
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+
+    // Generate QR code - call the correct endpoint
+    fetch(`/umbraco/surface/InvoiceAdmin/GenerateInvoiceQRCode?invoiceId=${invoiceId}`, {
+        method: 'GET',
+        headers: {
+            'RequestVerificationToken': token
+        },
+        credentials: 'include'
+    })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                modalBody.innerHTML = `
+                    <div class="text-center">
+                        <h5>${escapeHtml(data.competitionName)}</h5>
+                        <p class="mb-3">Belopp: <strong>${data.amount} kr</strong></p>
+                        <img src="data:image/png;base64,${data.qrCodeBase64}" alt="Swish QR Code" class="img-fluid mb-3" style="max-width: 300px;">
+                        <p class="text-muted">Scanna QR-koden med Swish-appen</p>
+                        <p class="small">Fakturanummer: ${escapeHtml(data.invoiceNumber)}</p>
+                    </div>
+                `;
+            } else {
+                modalBody.innerHTML = `<div class="alert alert-danger">${escapeHtml(data.message)}</div>`;
+            }
+        })
+        .catch(error => {
+            modalBody.innerHTML = `<div class="alert alert-danger">Fel vid generering av QR-kod: ${escapeHtml(error.message)}</div>`;
+        });
+}
+
+function resendInvoiceEmail(invoiceId) {
+    if (!confirm('Vill du skicka QR-koden via e-post till medlemmen?')) {
+        return;
+    }
+
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+
+    fetch('/umbraco/surface/InvoiceAdmin/ResendInvoiceEmail', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'RequestVerificationToken': token
+        },
+        credentials: 'include',
+        body: JSON.stringify({ invoiceId: invoiceId })
+    })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert('E-post skickat!');
+            } else {
+                alert('Fel: ' + data.message);
+            }
+        })
+        .catch(error => {
+            alert('Nätverksfel: ' + error.message);
+        });
+}
+
+function markInvoiceAsPaid(invoiceId) {
+    if (!confirm('Markera fakturan som betald?')) {
+        return;
+    }
+
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+
+    fetch('/umbraco/surface/InvoiceAdmin/MarkAsPaid', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'RequestVerificationToken': token
+        },
+        credentials: 'include',
+        body: JSON.stringify({ invoiceId: invoiceId })
+    })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert('Faktura markerad som betald');
+                loadInvoicesList();
+            } else {
+                alert('Fel: ' + data.message);
+            }
+        })
+        .catch(error => {
+            alert('Nätverksfel: ' + error.message);
+        });
+}
+
+function cancelInvoice(invoiceId, invoiceNumber) {
+    if (!confirm(`Vill du makulera faktura ${invoiceNumber}?`)) {
+        return;
+    }
+
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+
+    fetch('/umbraco/surface/InvoiceAdmin/CancelInvoice', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'RequestVerificationToken': token
+        },
+        credentials: 'include',
+        body: JSON.stringify({ invoiceId: invoiceId })
+    })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert('Faktura makulerad');
+                loadInvoicesList();
+            } else {
+                alert('Fel: ' + data.message);
+            }
+        })
+        .catch(error => {
+            alert('Nätverksfel: ' + error.message);
+        });
+}
+
+// Utility function for HTML escaping
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+</script>

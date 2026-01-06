@@ -1,0 +1,215 @@
+<!-- CLUBNEWS PARTIAL START -->
+<div class="club-news">
+    <div class="card">
+        <div class="card-header bg-light border-bottom">
+            <div class="d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">
+                    <i class="bi bi-newspaper me-2"></i>Klubbnyheter
+                </h5>
+                <span class="badge bg-info" id="newsCount">0</span>
+            </div>
+        </div>
+        <div class="card-body">
+            <div id="newsContainer" style="max-height: 600px; overflow-y: auto;">
+                <div class="text-center py-5">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Laddar nyheter...</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Empty state -->
+            <div id="emptyState" class="alert alert-info py-4 text-center" style="display: none;">
+                <i class="bi bi-info-circle me-2"></i>
+                Inga nyheter eller meddelanden ännu.
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.news-list {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.news-item {
+    padding: 15px;
+    border-left: 4px solid #0d6efd;
+    border-radius: 4px;
+    background: #f8f9fa;
+    transition: all 0.2s ease;
+}
+
+.news-item.pinned {
+    border-left-color: #ffc107;
+    background: #fffbf0;
+}
+
+.news-item:hover {
+    background-color: #e7f1ff;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.news-title {
+    font-weight: 700;
+    font-size: 1.05rem;
+    display: block;
+    margin-bottom: 8px;
+    color: #212529;
+}
+
+.news-meta {
+    font-size: 0.85rem;
+    color: #666;
+    display: flex;
+    gap: 12px;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+}
+
+.news-meta-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.news-content {
+    font-size: 0.95rem;
+    color: #495057;
+    line-height: 1.5;
+}
+
+.news-badge {
+    display: inline-block;
+    font-size: 0.75rem;
+    padding: 4px 8px;
+    margin-right: 6px;
+}
+
+.pin-icon {
+    color: #ffc107;
+    font-weight: bold;
+}
+</style>
+
+<script>
+// clubId is already declared globally in Club.cshtml, so we can use it directly
+
+console.log('ClubNews script loaded. clubId:', clubId, 'readyState:', document.readyState);
+
+// Check if DOM is already loaded, or wait for it
+if (document.readyState === 'loading') {
+    console.log('Waiting for DOMContentLoaded...');
+    document.addEventListener('DOMContentLoaded', function() {
+        console.log('DOMContentLoaded fired, clubId:', clubId);
+        if (clubId > 0) {
+            console.log('Calling loadNews()...');
+            loadNews();
+        } else {
+            console.log('clubId is 0 or undefined, not loading news');
+        }
+    });
+} else {
+    // DOM already loaded, call immediately
+    console.log('DOM already loaded, clubId:', clubId);
+    if (clubId > 0) {
+        console.log('Calling loadNews() immediately...');
+        loadNews();
+    } else {
+        console.log('clubId is 0 or undefined, not loading news');
+    }
+}
+
+function loadNews() {
+    fetch(`/umbraco/surface/Club/GetClubNews?clubId=${clubId}&limit=10`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.data) {
+                displayNews(data.data);
+                document.getElementById('newsCount').textContent = data.data.length;
+            } else {
+                showEmptyState();
+            }
+        })
+        .catch(error => {
+            console.error('Error loading news:', error);
+            document.getElementById('newsContainer').innerHTML =
+                '<p class="text-danger"><i class="bi bi-exclamation-triangle me-2"></i>Fel vid hämtning av nyheter.</p>';
+        });
+}
+
+function displayNews(newsItems) {
+    const container = document.getElementById('newsContainer');
+
+    if (newsItems.length === 0) {
+        showEmptyState();
+        return;
+    }
+
+    // Sort by pinned first, then by date
+    const sorted = newsItems.sort((a, b) => {
+        if (a.isPinned !== b.isPinned) {
+            return b.isPinned ? 1 : -1;
+        }
+        return new Date(b.date) - new Date(a.date);
+    });
+
+    let html = '<div class="news-list">';
+
+    sorted.forEach(news => {
+        const date = new Date(news.date);
+        const dateStr = date.toLocaleDateString('sv-SE', {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric'
+        });
+
+        const itemClass = news.isPinned ? 'news-item pinned' : 'news-item';
+
+        html += `
+            <div class="${itemClass}">
+                <div style="display: flex; align-items: start; gap: 8px;">
+                    ${news.isPinned ? '<i class="bi bi-pin-fill pin-icon mt-1" title="Fastnålat"></i>' : ''}
+                    <div class="flex-grow-1">
+                        <span class="news-title">${escapeHtml(news.title)}</span>
+                        <div class="news-meta">
+                            <span class="news-meta-item">
+                                <i class="bi bi-calendar-event"></i>
+                                ${dateStr}
+                            </span>
+                            <span class="news-meta-item">
+                                <i class="bi bi-person"></i>
+                                ${escapeHtml(news.author || 'Klubben')}
+                            </span>
+                        </div>
+                        <div class="news-content">${escapeHtml(news.content)}</div>
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+
+    html += '</div>';
+    container.innerHTML = html;
+    document.getElementById('emptyState').style.display = 'none';
+}
+
+function showEmptyState() {
+    document.getElementById('newsContainer').style.display = 'none';
+    document.getElementById('emptyState').style.display = 'block';
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const map = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;'
+    };
+    return text.replace(/[&<>"']/g, m => map[m]);
+}
+</script>

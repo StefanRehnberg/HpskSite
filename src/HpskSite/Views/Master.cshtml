@@ -1,0 +1,813 @@
+@using Umbraco.Cms.Core.Security
+@using Umbraco.Cms.Web.Website.Controllers
+@using Umbraco.Cms.Core.Services
+@inject IMemberManager MemberManager
+@inject IMemberService MemberService
+@inject HpskSite.Services.AdminAuthorizationService AuthService
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = null;
+
+    // Get current member and admin status
+    var currentMember = await MemberManager.GetCurrentMemberAsync();
+    var isLoggedIn = currentMember != null;
+    var userInitials = "";
+    var profilePictureUrl = "";
+    var isAdmin = false;
+
+    if (isLoggedIn && currentMember != null)
+    {
+        // Get member's name for initials
+        var firstName = currentMember.Name?.Split(' ').FirstOrDefault() ?? "";
+        var lastName = currentMember.Name?.Split(' ').LastOrDefault() ?? "";
+
+        if (!string.IsNullOrEmpty(firstName))
+        {
+            userInitials = firstName.Substring(0, 1).ToUpper();
+        }
+        if (!string.IsNullOrEmpty(lastName) && lastName != firstName)
+        {
+            userInitials += lastName.Substring(0, 1).ToUpper();
+        }
+
+        // Get profile picture URL
+        var memberData = MemberService.GetByEmail(currentMember.Email ?? "");
+        if (memberData != null)
+        {
+            profilePictureUrl = memberData.GetValue<string>("profilePictureUrl") ?? "";
+        }
+
+        // Check if user is site administrator using centralized authorization service
+        isAdmin = await AuthService.IsCurrentUserAdminAsync();
+    }
+}
+<!DOCTYPE html>
+<html data-bs-theme="light">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>@(Model.Value<string>("pageTitle") ?? Model.Name) - HPSK</title>
+    <meta name="description" content="@(Model.Value<string>("metaDescription") ?? "")" />
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="~/images/HPSK_Logo.png">
+    <link rel="shortcut icon" type="image/png" href="~/images/HPSK_Logo.png">
+    <link rel="apple-touch-icon" href="~/images/HPSK_Logo.png">
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <link href="~/css/theme.css" rel="stylesheet" asp-append-version="true">
+    <link href="~/css/tutorial.css" rel="stylesheet" asp-append-version="true">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.4/jquery.min.js"></script>
+    <style>
+        .navbar-brand { font-weight: bold; font-size: 1.5rem; }
+        .jumbotron { background: var(--jumbotron-gradient); }
+        .nav-link.active { font-weight: bold; }
+
+        /* Sticky footer - pushes footer to bottom when content is short */
+        html, body {
+            height: 100%;
+        }
+        body {
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+        main {
+            flex: 1 0 auto;
+        }
+        footer {
+            flex-shrink: 0;
+        }
+
+        /* Combined compact header */
+        .navbar-custom {
+            background-color: var(--navbar-bg);
+            padding: 0.5rem 0;
+        }
+
+        .navbar-custom .navbar-brand {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.5rem 0;
+        }
+
+        .navbar-custom .logo {
+            max-height: 45px;
+            width: auto;
+        }
+
+        .navbar-custom .site-title {
+            color: var(--navbar-text-hover);
+            font-size: 1.3rem;
+            font-weight: bold;
+            margin: 0;
+            white-space: nowrap;
+        }
+
+        .navbar-custom .site-subtitle {
+            color: var(--navbar-subtitle);
+            font-size: 0.75rem;
+            margin: 0;
+            display: none;
+        }
+
+        /* Show subtitle on larger screens */
+        @@media (min-width: 992px) {
+            .navbar-custom .site-subtitle {
+                display: block;
+            }
+
+            .navbar-custom .logo {
+                max-height: 50px;
+            }
+
+            .navbar-custom .site-title {
+                font-size: 1.4rem;
+            }
+        }
+
+        /* User menu styling */
+        .user-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 32px;
+            height: 32px;
+            background-color: var(--navbar-icon-bg);
+            color: var(--navbar-text-hover);
+            border-radius: 50%;
+            font-size: 14px;
+            font-weight: bold;
+            text-decoration: none;
+            margin-right: 8px;
+            border: 1px solid var(--navbar-icon-border);
+            overflow: hidden;
+        }
+
+        .user-icon img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .user-icon:hover {
+            background-color: var(--navbar-icon-hover-bg);
+            color: var(--navbar-text-hover);
+            text-decoration: none;
+        }
+
+        .user-dropdown .dropdown-toggle::after {
+            display: none;
+        }
+
+        .navbar-custom .nav-link {
+            color: var(--navbar-text) !important;
+            font-size: 0.95rem;
+            padding: 0.5rem 0.75rem !important;
+        }
+
+        .navbar-custom .nav-link:hover {
+            color: var(--navbar-text-hover) !important;
+        }
+
+        .navbar-custom .nav-link.active {
+            color: var(--navbar-text-hover) !important;
+            font-weight: 600;
+            border-bottom: 2px solid var(--navbar-active-border);
+        }
+
+        .navbar-custom .dropdown-menu {
+            border-radius: 0.25rem;
+            border: none;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+        }
+
+        .navbar-custom .dropdown-item.active,
+        .navbar-custom .dropdown-item:active {
+            background-color: var(--navbar-bg);
+            color: var(--navbar-text-hover);
+        }
+
+        .navbar-custom .dropdown-item:hover {
+            background-color: var(--navbar-bg-hover);
+            color: var(--navbar-text-hover);
+        }
+
+        /* Auth buttons styling */
+        .btn-auth {
+            font-size: 0.9rem;
+            font-weight: 500;
+            padding: 0.5rem 1rem;
+            border-radius: 0.375rem;
+            white-space: nowrap;
+            min-height: 44px; /* Mobile touch target */
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+        }
+
+        .btn-auth.btn-outline-light:hover {
+            background-color: rgba(255, 255, 255, 0.2);
+            border-color: white;
+            color: white;
+        }
+
+        .btn-auth.btn-light {
+            background-color: white;
+            color: #007bff;
+            border: 2px solid white;
+            font-weight: 600;
+        }
+
+        .btn-auth.btn-light:hover {
+            background-color: #f8f9fa;
+            color: #0056b3;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Mobile responsive adjustments */
+        @@media (max-width: 991px) {
+            .navbar-custom .navbar-brand {
+                gap: 0.5rem;
+            }
+
+            .navbar-custom .site-title {
+                font-size: 1.1rem;
+            }
+
+            .navbar-custom .logo {
+                max-height: 40px;
+            }
+
+            .navbar-custom .nav-link {
+                padding: 0.5rem 0 !important;
+                font-size: 0.9rem;
+            }
+
+            /* Auth buttons in collapsed mobile menu */
+            .navbar-collapse .btn-auth {
+                width: 100%;
+                margin-top: 0.5rem;
+                justify-content: center;
+                padding: 0.75rem 1rem;
+            }
+        }
+
+        @@media (max-width: 768px) {
+            .navbar-custom {
+                padding: 0.35rem 0;
+            }
+
+            .navbar-custom .navbar-brand {
+                gap: 0.5rem;
+            }
+
+            .navbar-custom .site-title {
+                font-size: 1rem;
+            }
+
+            .navbar-custom .logo {
+                max-height: 35px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <!-- Combined Compact Navigation Header -->
+        <nav class="navbar navbar-expand-lg navbar-dark navbar-custom">
+            <div class="container">
+                <a class="navbar-brand" href="@Model.Root().Url()">
+                    <img src="~/images/HPSK_Logo.png" alt="HPSK Logo" class="logo">
+                    <div>
+                        <div class="site-title">@(Model.Root().Value<string>("siteTitle") ?? "Hallands Pistolskytteförbund")</div>
+                        <div class="site-subtitle">@(Model.Root().Value<string>("siteSubtitle") ?? "Välkommen till HPSK - Kom till skjutbanan och träffa kompisar")</div>
+                    </div>
+                </a>
+                
+                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+                
+                <div class="collapse navbar-collapse" id="navbarNav">
+                    <ul class="navbar-nav ms-auto">
+                        <li class="nav-item">
+                            <a class="nav-link @(Model.Root().IsAncestorOrSelf(Model) ? "active" : "")" 
+                               href="@Model.Root().Url()">Hem</a>
+                        </li>
+                        
+                        @{
+                            var trainingStairsPage = Model.Root().Children.FirstOrDefault(x => x.Url().Contains("training-page"));
+                            bool isTrainingActive = (trainingStairsPage != null && trainingStairsPage.IsAncestorOrSelf(Model)) || Model.Url().Contains("training-page");
+                        }
+                        <li class="nav-item dropdown">
+                            <a class="nav-link dropdown-toggle @(isTrainingActive ? "active" : "")" href="#" role="button" data-bs-toggle="dropdown">
+                                Träning
+                            </a>
+                            <ul class="dropdown-menu">
+                                <li><a class="dropdown-item" href="/training-page">Skyttetrappan</a></li>
+                                <li><a class="dropdown-item" href="/traningsmatch/">Träningsmatch</a></li>
+                            </ul>
+                        </li>
+                        
+                        @{
+                            var competitionsPage = Model.Root().Children.FirstOrDefault(x => x.ContentType.Alias == "competitionsHub");
+                            var calendarPage = Model.Root().Children.FirstOrDefault(x => x.Name == "Calendar");
+                            var resultsPage = Model.Root().Children.FirstOrDefault(x => x.Name == "Results");
+                            var seriesPage = Model.Root().Children.FirstOrDefault(x => x.Name == "Series");
+
+                            bool isCompetitionActive = (competitionsPage != null && competitionsPage.IsAncestorOrSelf(Model)) ||
+                                                      (calendarPage != null && calendarPage.IsAncestorOrSelf(Model)) ||
+                                                      (resultsPage != null && resultsPage.IsAncestorOrSelf(Model)) ||
+                                                      (seriesPage != null && seriesPage.IsAncestorOrSelf(Model)) ||
+                                                      Model.ContentType.Alias == "competition" ||
+                                                      Model.ContentType.Alias == "competitionType" ||
+                                                      Model.ContentType.Alias == "competitionSeason";
+                        }
+                        <li class="nav-item dropdown">
+                            <a class="nav-link dropdown-toggle @(isCompetitionActive ? "active" : "")" href="#" role="button" data-bs-toggle="dropdown">
+                                Tävling
+                            </a>
+                            <ul class="dropdown-menu">
+                                @if (competitionsPage != null)
+                                {
+                                    <li><a class="dropdown-item" href="@competitionsPage.Url()">Alla Tävlingar</a></li>
+                                }
+                                else
+                                {
+                                    <li><a class="dropdown-item" href="/competitions">Alla Tävlingar</a></li>
+                                }
+
+                                @* Add competitions and series with addToMenu/showInMenu = true *@
+                                @{
+                                    var menuCompetitions = Model.Root().DescendantsOrSelf()
+                                        .Where(x => x.ContentType.Alias == "competition" &&
+                                                   x.Value<bool>("addToMenu") &&
+                                                   x.Value<bool>("isActive", fallback: Fallback.ToDefaultValue, defaultValue: true) &&
+                                                   x.Parent()?.ContentType.Alias != "competitionSeries")
+                                        .OrderBy(x => x.Value<DateTime>("competitionDate"))
+                                        .Take(5); // Limit to 5 standalone competitions to avoid menu overflow
+
+                                    var menuSeries = Model.Root().DescendantsOrSelf()
+                                        .Where(x => x.ContentType.Alias == "competitionSeries" &&
+                                                   x.Value<bool>("showInMenu") &&
+                                                   x.Value<bool>("isActive", fallback: Fallback.ToDefaultValue, defaultValue: true))
+                                        .OrderBy(x => x.Value<DateTime>("seriesStartDate"))
+                                        .Take(3); // Limit to 3 series to avoid menu overflow
+
+                                    var allMenuItems = menuSeries.Concat(menuCompetitions)
+                                        .OrderBy(x => x.ContentType.Alias == "competitionSeries" ?
+                                                     x.Value<DateTime>("seriesStartDate") :
+                                                     x.Value<DateTime>("competitionDate"))
+                                        .Take(6); // Total limit of 6 items
+                                }
+                                @if (allMenuItems.Any())
+                                {
+                                    <li><hr class="dropdown-divider"></li>
+                                    @foreach (var item in allMenuItems)
+                                    {
+                                        @if (item.ContentType.Alias == "competitionSeries")
+                                        {
+                                            var seriesName = item.Value<string>("seriesName") ?? item.Name;
+                                            <li><a class="dropdown-item" href="@item.Url()"><i class="bi bi-trophy me-2"></i> @seriesName</a></li>
+                                        }
+                                        else
+                                        {
+                                            <li><a class="dropdown-item" href="@item.Url()">@item.Name</a></li>
+                                        }
+                                    }
+                                }
+
+                                @if (calendarPage != null)
+                                {
+                                    <li><a class="dropdown-item" href="@calendarPage.Url()">Kommande</a></li>
+                                }
+                                @if (resultsPage != null)
+                                {
+                                    <li><a class="dropdown-item" href="@resultsPage.Url()">Resultat</a></li>
+                                }
+                                @if (seriesPage != null)
+                                {
+                                    <li><a class="dropdown-item" href="@seriesPage.Url()">Hallandsserien</a></li>
+                                }
+                            </ul>
+                        </li>
+                        
+                        @{
+                            var contactPage = Model.Root().Children.FirstOrDefault(x => x.Name == "Contact");
+                            var clubsPage = Model.Root().Children.FirstOrDefault(x => x.Name == "Clubs");
+                            bool isContactOrClubsActive = (contactPage != null && contactPage.IsAncestorOrSelf(Model)) || 
+                                                         (clubsPage != null && clubsPage.IsAncestorOrSelf(Model));
+                        }
+                        <li class="nav-item dropdown">
+                            <a class="nav-link dropdown-toggle @(isContactOrClubsActive ? "active" : "")" href="#" role="button" data-bs-toggle="dropdown">
+                                Kontakt
+                            </a>
+                            <ul class="dropdown-menu">
+                                @if (clubsPage != null)
+                                {
+                                    <li><a class="dropdown-item" href="@clubsPage.Url()">Klubbar</a></li>
+                                }
+                                @if (contactPage != null)
+                                {
+                                    <li><a class="dropdown-item" href="@contactPage.Url()">HPSK</a></li>
+                                }
+                            </ul>
+                        </li>
+                    </ul>
+
+                    <!-- Bug Report Button -->
+                    <button type="button" class="btn btn-outline-danger btn-sm me-2" data-bs-toggle="modal" data-bs-target="#bugReportModal">
+                        <i class="bi bi-bug"></i> <span class="d-none d-md-inline">Rapportera Fel</span>
+                    </button>
+
+                    <!-- Theme Toggle Button -->
+                    <button type="button" class="btn btn-outline-secondary btn-sm me-2" id="themeToggle"
+                            title="Växla ljus/mörk läge" aria-label="Byt färgtema">
+                        <i class="bi bi-moon-stars-fill" id="themeIcon"></i>
+                    </button>
+
+                    <!-- User Menu -->
+                    @if (isLoggedIn)
+                    {
+                        <div class="navbar-nav">
+                            <div class="nav-item dropdown user-dropdown">
+                                <a class="nav-link dropdown-toggle d-flex align-items-center" href="#" role="button" data-bs-toggle="dropdown">
+                                    <span class="user-icon">
+                                        @if (!string.IsNullOrEmpty(profilePictureUrl))
+                                        {
+                                            <img src="@profilePictureUrl" alt="@currentMember?.Name">
+                                        }
+                                        else
+                                        {
+                                            @userInitials
+                                        }
+                                    </span>
+                                    <span class="d-none d-md-inline">@currentMember?.Name</span>
+                                </a>
+                                <ul class="dropdown-menu dropdown-menu-end">
+                                    @{
+                                        var userProfileUrl = Model.Root().Children.FirstOrDefault(x => x.ContentType.Alias == "userProfile")?.Url() ?? "/user-profile";
+                                    }
+                                    <li><a class="dropdown-item" href="@userProfileUrl"><i class="bi bi-person"></i> Min Sida</a></li>
+                                    @if (isAdmin)
+                                    {
+                                        var adminPageUrl = Model.Root().Children.FirstOrDefault(x => x.ContentType.Alias == "adminPage")?.Url() ?? "/admin";
+                                        <li><a class="dropdown-item" href="@adminPageUrl"><i class="bi bi-gear"></i> Administration</a></li>
+                                    }
+                                    <li><hr class="dropdown-divider"></li>
+                                    <li><a class="dropdown-item" href="#" onclick="logout()"><i class="bi bi-box-arrow-right"></i> Logga ut</a></li>
+                                </ul>
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        var loginPage = Model.Root().Children.FirstOrDefault(x => x.Name == "Login & Register")
+                                        ?? Model.Root().Children.FirstOrDefault(x => x.Name.ToLower().Contains("login"));
+                        var loginUrl = loginPage?.Url() ?? "/login-register";
+
+                        <div class="navbar-nav d-flex flex-row gap-2 align-items-center ms-lg-2">
+                            <a class="btn btn-outline-light btn-auth" href="@(loginUrl)?tab=login">
+                                <i class="bi bi-box-arrow-in-right me-1"></i>
+                                <span class="btn-text">Logga in</span>
+                            </a>
+                            <a class="btn btn-light btn-auth btn-register" href="@(loginUrl)?tab=register">
+                                <i class="bi bi-person-plus me-1"></i>
+                                <span class="btn-text">Skapa konto</span>
+                            </a>
+                        </div>
+                    }
+                </div>
+            </div>
+        </nav>
+    </header>
+
+    <main class="container mt-4">
+        <!-- Tutorial Icon & Banner (Auto-detected per page) -->
+        @await Html.PartialAsync("TutorialHelpers")
+
+        @RenderBody()
+    </main>
+
+    <footer class="mt-5 py-4 border-top" style="background-color: var(--footer-bg); color: var(--footer-text); border-top-color: var(--footer-border) !important;">
+        <div class="container">
+            <div class="row">
+                <div class="col-md-6">
+                    <p class="mb-0">&copy; @DateTime.Now.Year HPSK. All rights reserved.</p>
+                    <p class="mb-0 small">
+                        <a href="/integritetspolicy" class="text-muted text-decoration-none">
+                            <i class="bi bi-shield-check me-1"></i>Integritetspolicy
+                        </a>
+                    </p>
+                </div>
+                <div class="col-md-6 text-end">
+                    <p class="mb-0">Built by SR</p>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.4/jquery.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
+
+    @* Hidden logout form for proper Umbraco form handling *@
+    @if (isLoggedIn)
+    {
+        @using (Html.BeginUmbracoForm<UmbLoginStatusController>("HandleLogout", new { RedirectUrl = "/" }, new { id = "logoutForm", style = "display: none;" }))
+        {
+            <input type="submit" id="logoutSubmit" />
+        }
+
+        <script>
+        function logout() {
+            if (confirm('Är du säker på att du vill logga ut?')) {
+                document.getElementById('logoutSubmit').click();
+            }
+        }
+        </script>
+    }
+
+    <!-- Bug Report Modal -->
+    <div class="modal fade" id="bugReportModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title">
+                        <i class="bi bi-bug me-2"></i>Rapportera Fel
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="bugReportForm" enctype="multipart/form-data">
+                        @Html.AntiForgeryToken()
+
+                        @if (isLoggedIn && currentMember != null)
+                        {
+                            <div class="mb-3">
+                                <label for="bugReportName" class="form-label">Namn</label>
+                                <input type="text" class="form-control" id="bugReportName" name="name" value="@currentMember.Name" readonly>
+                            </div>
+                            <div class="mb-3">
+                                <label for="bugReportEmail" class="form-label">E-post</label>
+                                <input type="email" class="form-control" id="bugReportEmail" name="email" value="@currentMember.Email" readonly>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="mb-3">
+                                <label for="bugReportName" class="form-label">Namn <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control" id="bugReportName" name="name" required minlength="2">
+                            </div>
+                            <div class="mb-3">
+                                <label for="bugReportEmail" class="form-label">E-post <span class="text-danger">*</span></label>
+                                <input type="email" class="form-control" id="bugReportEmail" name="email" required>
+                            </div>
+                        }
+
+                        <div class="mb-3">
+                            <label for="bugReportDescription" class="form-label">Beskrivning av problemet <span class="text-danger">*</span></label>
+                            <textarea class="form-control" id="bugReportDescription" name="description" rows="5" required minlength="10" maxlength="2000"></textarea>
+                            <div class="form-text">
+                                <span id="charCount">0</span> / 2000 tecken
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="bugReportImages" class="form-label">Bifoga bilder (valfritt)</label>
+                            <input class="form-control" type="file" id="bugReportImages" name="images" accept="image/*" multiple>
+                            <div class="form-text">Max 3 bilder, 5MB vardera. Tillåtna format: JPG, PNG, GIF, WebP</div>
+                        </div>
+
+                        <div id="imagePreview" class="mb-3" style="display: none;">
+                            <label class="form-label">Förhandsvisning:</label>
+                            <div id="imagePreviewContainer" class="d-flex flex-wrap gap-2"></div>
+                        </div>
+
+                        <div id="bugReportMessage" class="alert" style="display: none;"></div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                    <button type="button" class="btn btn-danger" id="submitBugReport">
+                        <span id="submitBtnText">
+                            <i class="bi bi-send me-1"></i>Skicka Rapport
+                        </span>
+                        <span id="submitBtnSpinner" style="display: none;">
+                            <span class="spinner-border spinner-border-sm me-1"></span>Skickar...
+                        </span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    // Bug Report Form Handling
+    document.addEventListener('DOMContentLoaded', function() {
+        const bugReportModal = document.getElementById('bugReportModal');
+        const bugReportForm = document.getElementById('bugReportForm');
+        const submitBtn = document.getElementById('submitBugReport');
+        const descriptionInput = document.getElementById('bugReportDescription');
+        const charCount = document.getElementById('charCount');
+        const imagesInput = document.getElementById('bugReportImages');
+        const imagePreview = document.getElementById('imagePreview');
+        const imagePreviewContainer = document.getElementById('imagePreviewContainer');
+
+        // Character count
+        if (descriptionInput && charCount) {
+            descriptionInput.addEventListener('input', function() {
+                charCount.textContent = this.value.length;
+            });
+        }
+
+        // Image preview
+        if (imagesInput) {
+            imagesInput.addEventListener('change', function() {
+                imagePreviewContainer.innerHTML = '';
+                const files = Array.from(this.files);
+
+                if (files.length > 3) {
+                    showMessage('Max 3 bilder kan bifogas', 'danger');
+                    this.value = '';
+                    imagePreview.style.display = 'none';
+                    return;
+                }
+
+                if (files.length > 0) {
+                    imagePreview.style.display = 'block';
+                    files.forEach(file => {
+                        if (file.size > 5 * 1024 * 1024) {
+                            showMessage('Bildfiler får inte överstiga 5MB vardera', 'danger');
+                            this.value = '';
+                            imagePreview.style.display = 'none';
+                            return;
+                        }
+
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            const img = document.createElement('img');
+                            img.src = e.target.result;
+                            img.style.maxWidth = '100px';
+                            img.style.maxHeight = '100px';
+                            img.className = 'border rounded';
+                            imagePreviewContainer.appendChild(img);
+                        };
+                        reader.readAsDataURL(file);
+                    });
+                } else {
+                    imagePreview.style.display = 'none';
+                }
+            });
+        }
+
+        // Form submission
+        if (submitBtn && bugReportForm) {
+            submitBtn.addEventListener('click', async function() {
+                const form = bugReportForm;
+
+                // Validate form
+                if (!form.checkValidity()) {
+                    form.reportValidity();
+                    return;
+                }
+
+                // Show loading state
+                document.getElementById('submitBtnText').style.display = 'none';
+                document.getElementById('submitBtnSpinner').style.display = 'inline-block';
+                submitBtn.disabled = true;
+
+                try {
+                    const formData = new FormData(form);
+                    formData.append('pageUrl', window.location.href);
+
+                    const response = await fetch('/umbraco/surface/BugReport/SubmitReport', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    const data = await response.json();
+
+                    if (data.success) {
+                        showMessage(data.message, 'success');
+                        setTimeout(() => {
+                            bootstrap.Modal.getInstance(bugReportModal).hide();
+                            resetForm();
+                        }, 2000);
+                    } else {
+                        showMessage(data.message, 'danger');
+                    }
+                } catch (error) {
+                    console.error('Error submitting bug report:', error);
+                    showMessage('Ett fel uppstod vid skicka rapporten. Försök igen senare.', 'danger');
+                } finally {
+                    // Reset loading state
+                    document.getElementById('submitBtnText').style.display = 'inline-block';
+                    document.getElementById('submitBtnSpinner').style.display = 'none';
+                    submitBtn.disabled = false;
+                }
+            });
+        }
+
+        // Reset form when modal is hidden
+        if (bugReportModal) {
+            bugReportModal.addEventListener('hidden.bs.modal', function() {
+                resetForm();
+            });
+        }
+
+        function showMessage(message, type) {
+            const messageDiv = document.getElementById('bugReportMessage');
+            messageDiv.className = `alert alert-${type}`;
+            messageDiv.textContent = message;
+            messageDiv.style.display = 'block';
+        }
+
+        function resetForm() {
+            bugReportForm.reset();
+            document.getElementById('bugReportMessage').style.display = 'none';
+            document.getElementById('charCount').textContent = '0';
+            imagePreview.style.display = 'none';
+            imagePreviewContainer.innerHTML = '';
+        }
+    });
+    </script>
+
+    <script>
+    // Theme Toggle System
+    (function() {
+        const html = document.documentElement;
+        const toggle = document.getElementById('themeToggle');
+        const icon = document.getElementById('themeIcon');
+
+        // Get saved theme from localStorage or default to light
+        const savedTheme = localStorage.getItem('hpsk-theme') || 'light';
+        html.setAttribute('data-bs-theme', savedTheme);
+        updateIcon(savedTheme);
+
+        // Toggle button click handler
+        if (toggle) {
+            toggle.addEventListener('click', function() {
+                const current = html.getAttribute('data-bs-theme') || 'light';
+                const newTheme = current === 'light' ? 'dark' : 'light';
+
+                html.setAttribute('data-bs-theme', newTheme);
+                localStorage.setItem('hpsk-theme', newTheme);
+                updateIcon(newTheme);
+
+                // Update charts if on user profile page
+                if (typeof updateChartsTheme === 'function') {
+                    updateChartsTheme(newTheme);
+                }
+            });
+        }
+
+        function updateIcon(theme) {
+            if (icon) {
+                icon.className = theme === 'dark'
+                    ? 'bi bi-sun-fill'
+                    : 'bi bi-moon-stars-fill';
+            }
+        }
+    })();
+    </script>
+
+    <!-- Tutorial System JavaScript -->
+    <script src="~/js/tutorialHelper.js" asp-append-version="true"></script>
+
+    <!-- Tutorial Modal Partial -->
+    @await Html.PartialAsync("TutorialModal")
+
+    <!-- Cookie Consent Banner -->
+    <div id="cookieConsentBanner" class="position-fixed bottom-0 start-0 end-0 p-3 bg-dark text-white"
+         style="z-index: 9999; display: none;">
+        <div class="container d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <span>
+                <i class="bi bi-shield-check me-2"></i>
+                Vi använder cookies för inloggning och funktionalitet.
+                <a href="/integritetspolicy" class="text-white text-decoration-underline">Läs mer</a>
+            </span>
+            <button class="btn btn-primary btn-sm" onclick="acceptCookies()">
+                Jag förstår
+            </button>
+        </div>
+    </div>
+
+    <script>
+    (function() {
+        if (!localStorage.getItem('cookieConsent')) {
+            document.getElementById('cookieConsentBanner').style.display = 'block';
+        }
+    })();
+
+    function acceptCookies() {
+        localStorage.setItem('cookieConsent', 'accepted');
+        document.getElementById('cookieConsentBanner').style.display = 'none';
+    }
+    </script>
+</body>
+</html>

@@ -1,0 +1,603 @@
+@using Umbraco.Cms.Core.Security
+@using HpskSite.Models
+@inject IMemberManager MemberManager
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+    ViewBag.Title = "Klubbadministration";
+
+    var currentMember = await MemberManager.GetCurrentMemberAsync();
+    var isLoggedIn = currentMember != null;
+
+    // Get clubId from query string
+    var clubIdParam = Context.Request.Query["clubId"].ToString();
+    int? clubId = null;
+    if (int.TryParse(clubIdParam, out int parsedClubId))
+    {
+        clubId = parsedClubId;
+    }
+}
+
+@* Check if user is logged in *@
+@if (!isLoggedIn)
+{
+    <div class="alert alert-warning">
+        <h4>Åtkomst Nekad</h4>
+        <p>Du måste vara inloggad för att komma åt klubbadministration.</p>
+        <a href="/login-register/" class="btn btn-primary">Logga in</a>
+    </div>
+}
+else
+{
+    <div class="container-fluid">
+        @if (!clubId.HasValue)
+        {
+            <div class="alert alert-warning">
+                <h4>Ogiltig Klubb</h4>
+                <p>Inget klubb-ID angivet. Välj en klubb från klubbsidan.</p>
+                <a href="/clubs/" class="btn btn-primary">Gå till Klubbar</a>
+            </div>
+        }
+        else
+        {
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Klubbadministration - Klubb-ID: @clubId</h5>
+                    <a href="/clubs/" class="btn btn-secondary btn-sm">Tillbaka till Klubbar</a>
+                </div>
+                <div class="card-body">
+                    <div id="clubAdminContent">
+                        <div class="text-center">
+                            <div class="spinner-border" role="status">
+                                <span class="visually-hidden">Laddar...</span>
+                            </div>
+                            <p>Laddar klubbinformation...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+
+    @* Club Edit Modal for Club Admins *@
+    <div class="modal fade" id="clubEditModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Redigera Klubbinformation</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="clubEditForm">
+                        <input type="hidden" id="editClubId" name="id">
+
+                        <div class="mb-3">
+                            <label for="editClubName" class="form-label">Klubbnamn *</label>
+                            <input type="text" class="form-control" id="editClubName" name="name" required>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="editClubDescription" class="form-label">Beskrivning</label>
+                            <textarea class="form-control" id="editClubDescription" name="description" rows="3"></textarea>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="editContactPerson" class="form-label">Kontaktperson</label>
+                                    <input type="text" class="form-control" id="editContactPerson" name="contactPerson">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="editContactEmail" class="form-label">Kontakt E-post</label>
+                                    <input type="email" class="form-control" id="editContactEmail" name="contactEmail">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="editContactPhone" class="form-label">Kontakttelefon</label>
+                                    <input type="text" class="form-control" id="editContactPhone" name="contactPhone">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="editWebSite" class="form-label">Webbsida</label>
+                                    <input type="url" class="form-control" id="editWebSite" name="webSite">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="editAddress" class="form-label">Adress</label>
+                            <input type="text" class="form-control" id="editAddress" name="address">
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="editCity" class="form-label">Stad</label>
+                                    <input type="text" class="form-control" id="editCity" name="city">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="editPostalCode" class="form-label">Postnummer</label>
+                                    <input type="text" class="form-control" id="editPostalCode" name="postalCode">
+                                </div>
+                            </div>
+                        </div>
+                        @Html.AntiForgeryToken()
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                    <button type="button" class="btn btn-primary" onclick="saveClubChanges()">Spara Ändringar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @* Members Management Modal *@
+    <div class="modal fade" id="membersModal" tabindex="-1">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Klubbmedlemmar</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="membersContent">
+                        <div class="text-center">
+                            <div class="spinner-border" role="status">
+                                <span class="visually-hidden">Laddar...</span>
+                            </div>
+                            <p>Laddar medlemmar...</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @* Include club admin specific rejection reason modal *@
+    @await Html.PartialAsync("~/Views/Partials/RejectionReasonModal_ClubAdmin.cshtml")
+
+    @* Add page-level anti-forgery token for JavaScript functions *@
+    @Html.AntiForgeryToken()
+
+    @if (clubId.HasValue)
+    {
+        <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            loadClubInfo(@clubId.Value);
+        });
+
+        async function loadClubInfo(clubId) {
+            const container = document.getElementById('clubAdminContent');
+
+            try {
+                const response = await fetch(`/umbraco/surface/ClubAdmin/GetClubsPublic`);
+                const data = await response.json();
+
+                if (data.success) {
+                    const club = data.clubs.find(c => c.id === clubId);
+                    if (club) {
+                        displayClubInfo(club);
+                    } else {
+                        container.innerHTML = '<div class="alert alert-danger">Klubb hittades inte.</div>';
+                    }
+                } else {
+                    container.innerHTML = '<div class="alert alert-danger">Fel vid laddning av klubb: ' + data.message + '</div>';
+                }
+            } catch (error) {
+                console.error('Error loading club:', error);
+                container.innerHTML = '<div class="alert alert-danger">Fel vid laddning av klubbinformation.</div>';
+            }
+        }
+
+        function displayClubInfo(club) {
+            const container = document.getElementById('clubAdminContent');
+
+            const html = `
+                <div class="row">
+                    <div class="col-md-8">
+                        <h4>${club.name}</h4>
+                        <p class="text-muted">${club.description || 'Ingen beskrivning tillgänglig'}</p>
+
+                        <div class="row mt-3">
+                            <div class="col-md-6">
+                                <strong>Kontaktperson:</strong> ${club.contactPerson || 'Ej specificerad'}<br>
+                                <strong>Kontakt E-post:</strong> ${club.contactEmail || 'Ej specificerad'}<br>
+                                <strong>Kontakttelefon:</strong> ${club.contactPhone || 'Ej specificerad'}
+                            </div>
+                            <div class="col-md-6">
+                                <strong>Webbsida:</strong> ${club.webSite ? `<a href="${club.webSite}" target="_blank">${club.webSite}</a>` : 'Ej specificerad'}<br>
+                                <strong>Adress:</strong> ${club.address || 'Ej specificerad'}<br>
+                                <strong>Stad:</strong> ${club.city || 'Ej specificerad'}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card">
+                            <div class="card-header">
+                                <h6 class="mb-0">Snabbåtgärder</h6>
+                            </div>
+                            <div class="card-body">
+                                <button id="manageMembersBtn" class="btn btn-primary btn-sm w-100 mb-2" onclick="manageMembers(${club.id})">
+                                    <span class="spinner-border spinner-border-sm me-1" role="status" style="display: none;"></span>
+                                    Hantera Medlemmar
+                                </button>
+                                <button class="btn btn-info btn-sm w-100" onclick="editClub(${club.id})">Redigera Klubbinfo</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            container.innerHTML = html;
+
+            // Load pending count and update button text
+            updateManageMembersButton(club.id);
+        }
+
+        function updateManageMembersButton(clubId) {
+            const btn = document.getElementById('manageMembersBtn');
+            if (!btn) return;
+
+            // Show loading spinner
+            const spinner = btn.querySelector('.spinner-border');
+            if (spinner) spinner.style.display = 'inline-block';
+
+            fetch(`/umbraco/surface/ClubAdmin/GetPendingApprovalsCount?clubId=${clubId}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        const count = data.count || 0;
+                        if (count > 0) {
+                            btn.innerHTML = `Godkänn ${count} Medlem${count > 1 ? 'mar' : ''}`;
+                            btn.className = 'btn btn-warning btn-sm w-100 mb-2'; // Change to warning color
+                        } else {
+                            btn.innerHTML = 'Hantera Medlemmar';
+                            btn.className = 'btn btn-primary btn-sm w-100 mb-2'; // Keep primary color
+                        }
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading pending count:', error);
+                    btn.innerHTML = 'Manage Members';
+                })
+                .finally(() => {
+                    // Hide loading spinner
+                    if (spinner) spinner.style.display = 'none';
+                });
+        }
+
+        function editClub(clubId) {
+            // Load club data and show edit modal
+            fetch(`/umbraco/surface/Admin/GetClubsPublic`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        const club = data.clubs.find(c => c.id === clubId);
+                        if (club) {
+                            populateEditModal(club);
+                            new bootstrap.Modal(document.getElementById('clubEditModal')).show();
+                        } else {
+                            alert('Klubb hittades inte.');
+                        }
+                    } else {
+                        alert('Fel vid laddning av klubb: ' + data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading club:', error);
+                    alert('Fel vid laddning av klubbinformation.');
+                });
+        }
+
+        function populateEditModal(club) {
+            document.getElementById('editClubId').value = club.id;
+            document.getElementById('editClubName').value = club.name || '';
+            document.getElementById('editClubDescription').value = club.description || '';
+            document.getElementById('editContactPerson').value = club.contactPerson || '';
+            document.getElementById('editContactEmail').value = club.contactEmail || '';
+            document.getElementById('editContactPhone').value = club.contactPhone || '';
+            document.getElementById('editWebSite').value = club.webSite || '';
+            document.getElementById('editAddress').value = club.address || '';
+            document.getElementById('editCity').value = club.city || '';
+            document.getElementById('editPostalCode').value = club.postalCode || '';
+        }
+
+        function saveClubChanges() {
+            const form = document.getElementById('clubEditForm');
+            const formData = new FormData();
+
+            // Add form data
+            formData.append('id', document.getElementById('editClubId').value);
+            formData.append('name', document.getElementById('editClubName').value);
+            formData.append('description', document.getElementById('editClubDescription').value);
+            formData.append('contactPerson', document.getElementById('editContactPerson').value);
+            formData.append('contactEmail', document.getElementById('editContactEmail').value);
+            formData.append('contactPhone', document.getElementById('editContactPhone').value);
+            formData.append('webSite', document.getElementById('editWebSite').value);
+            formData.append('address', document.getElementById('editAddress').value);
+            formData.append('city', document.getElementById('editCity').value);
+            formData.append('postalCode', document.getElementById('editPostalCode').value);
+            formData.append('isActive', true); // Keep active status
+
+            // Add anti-forgery token
+            const token = document.querySelector('input[name="__RequestVerificationToken"]');
+            if (token) {
+                formData.append('__RequestVerificationToken', token.value);
+            }
+
+            fetch('/umbraco/surface/ClubAdmin/SaveClub', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    bootstrap.Modal.getInstance(document.getElementById('clubEditModal')).hide();
+                    // Reload club info to show updated data
+                    loadClubInfo(@clubId.Value);
+                } else {
+                    alert('Fel vid sparande av klubb: ' + data.message);
+                }
+            })
+            .catch(error => {
+                console.error('Error saving club:', error);
+                alert('Fel vid sparande av klubbändringar.');
+            });
+        }
+
+        function manageMembers(clubId) {
+            // Show members modal
+            new bootstrap.Modal(document.getElementById('membersModal')).show();
+            loadClubMembers(clubId);
+        }
+
+        function loadClubMembers(clubId) {
+            const container = document.getElementById('membersContent');
+            container.innerHTML = '<div class="text-center"><div class="spinner-border" role="status"></div><p>Laddar medlemmar...</p></div>';
+
+            fetch(`/umbraco/surface/ClubAdmin/GetClubMembersForClubAdmin?clubId=${clubId}`)
+                .then(response => response.json())
+                .then(data => {
+                    console.log('GetClubMembers response:', data); // Debug log
+                    if (data.success) {
+                        console.log('Club members found:', data.data.length); // Debug log
+                        // API already filters by club, so use data directly
+                        displayClubMembers(data.data, clubId);
+                    } else {
+                        console.log('API error:', data.message); // Debug log
+                        container.innerHTML = '<div class="alert alert-danger">Fel vid laddning av medlemmar: ' + data.message + '</div>';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading members:', error);
+                    container.innerHTML = '<div class="alert alert-danger">Fel vid laddning av medlemmar. Försök igen.</div>';
+                });
+        }
+
+        function displayClubMembers(members, clubId) {
+            const container = document.getElementById('membersContent');
+
+            if (!members || members.length === 0) {
+                container.innerHTML = '<div class="alert alert-info">Inga medlemmar hittades för denna klubb.</div>';
+                return;
+            }
+
+            // Separate pending and approved members
+            const pendingMembers = members.filter(m => !m.isApproved);
+            const approvedMembers = members.filter(m => m.isApproved);
+
+            let html = '';
+
+            // Pending approvals section (if any)
+            if (pendingMembers.length > 0) {
+                html += `
+                    <div class="card border-warning mb-3">
+                        <div class="card-header bg-warning text-dark">
+                            <h6 class="mb-0">Väntande Godkännanden (${pendingMembers.length})</h6>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-sm mb-0">
+                                    <thead>
+                                        <tr>
+                                            <th>Namn</th>
+                                            <th>E-post</th>
+                                            <th>Typ</th>
+                                            <th>Åtgärder</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                `;
+
+                pendingMembers.forEach(member => {
+                    const membershipType = member.primaryClubId === clubId ? 'Primär' : 'Tillhörande';
+                    html += `
+                        <tr>
+                            <td>${member.firstName} ${member.lastName}</td>
+                            <td>${member.email}</td>
+                            <td>${membershipType}</td>
+                            <td>
+                                <button class="btn btn-success btn-sm me-1" onclick="approveMember(${member.id}, ${clubId})">
+                                    <i class="bi bi-check"></i> Godkänn
+                                </button>
+                                <button class="btn btn-danger btn-sm" onclick="rejectMember(${member.id}, ${clubId})">
+                                    <i class="bi bi-x"></i> Avslå
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                });
+
+                html += `
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // Current members section
+            html += `
+                <div class="card">
+                    <div class="card-header">
+                        <h6 class="mb-0">Nuvarande Medlemmar (${approvedMembers.length})</h6>
+                    </div>
+                    <div class="card-body">
+            `;
+
+            if (approvedMembers.length === 0) {
+                html += '<div class="alert alert-info mb-0">Inga godkända medlemmar ännu.</div>';
+            } else {
+                html += `
+                    <div class="table-responsive">
+                        <table class="table table-sm mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Namn</th>
+                                    <th>E-post</th>
+                                    <th>Medlemstyp</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                `;
+
+                approvedMembers.forEach(member => {
+                    const membershipType = member.primaryClubId === clubId ? 'Primär' : 'Tillhörande';
+                    html += `
+                        <tr>
+                            <td>${member.firstName} ${member.lastName}</td>
+                            <td>${member.email}</td>
+                            <td>${membershipType}</td>
+                        </tr>
+                    `;
+                });
+
+                html += `
+                            </tbody>
+                        </table>
+                    </div>
+                `;
+            }
+
+            html += `
+                    </div>
+                </div>
+            `;
+
+            container.innerHTML = html;
+        }
+
+        function approveMember(memberId, clubId) {
+            if (!confirm('Godkänn denna medlem? Ett godkännandemail kommer att skickas till medlemmen.')) {
+                return;
+            }
+
+            const formData = new FormData();
+
+            // Add anti-forgery token
+            const token = document.querySelector('input[name="__RequestVerificationToken"]');
+            if (token) {
+                formData.append('__RequestVerificationToken', token.value);
+            }
+
+            formData.append('memberId', memberId);
+
+            fetch('/umbraco/surface/MemberAdmin/ApproveMember', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.text().then(text => {
+                        throw new Error(`HTTP ${response.status}: ${text}`);
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.success) {
+                    alert('✅ Medlem godkänd! Ett bekräftelsemail har skickats.');
+                    loadClubMembers(clubId); // Reload member list
+                    updateManageMembersButton(clubId); // Update button text
+                } else {
+                    alert('❌ Fel: ' + data.message);
+                }
+            })
+            .catch(error => {
+                console.error('Approval error:', error);
+                alert('❌ Kunde inte godkänna medlem: ' + error.message);
+            });
+        }
+
+        function rejectMember(memberId, clubId) {
+            // Store clubId for use after rejection
+            window.currentClubId = clubId;
+            // Store member ID and show rejection reason modal
+            document.getElementById('clubAdminRejectionMemberId').value = memberId;
+            document.getElementById('clubAdminRejectionReason').value = '';
+            new bootstrap.Modal(document.getElementById('clubAdminRejectionModal')).show();
+        }
+
+        function confirmRejectMemberClubAdmin() {
+            const memberId = document.getElementById('clubAdminRejectionMemberId').value;
+            const reason = document.getElementById('clubAdminRejectionReason').value.trim();
+            const clubId = window.currentClubId;
+
+            const formData = new FormData();
+
+            // Add anti-forgery token
+            const token = document.querySelector('input[name="__RequestVerificationToken"]');
+            if (token) {
+                formData.append('__RequestVerificationToken', token.value);
+            }
+
+            formData.append('memberId', memberId);
+            formData.append('reason', reason);
+
+            fetch('/umbraco/surface/MemberAdmin/RejectMember', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.text().then(text => {
+                        throw new Error(`HTTP ${response.status}: ${text}`);
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.success) {
+                    // Close the rejection modal
+                    bootstrap.Modal.getInstance(document.getElementById('clubAdminRejectionModal')).hide();
+
+                    alert('✅ Medlem avvisad. Ett avvisningsmail har skickats.');
+                    loadClubMembers(clubId); // Reload member list
+                    updateManageMembersButton(clubId); // Update button text
+                } else {
+                    alert('❌ Fel: ' + data.message);
+                }
+            })
+            .catch(error => {
+                console.error('Rejection error:', error);
+                alert('❌ Kunde inte avvisa medlem: ' + error.message);
+            });
+        }
+
+        </script>
+    }
+}

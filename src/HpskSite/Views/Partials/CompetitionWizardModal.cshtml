@@ -1,0 +1,1137 @@
+@*
+ * Competition Creation Wizard Modal
+ * 5-step wizard for creating competitions
+ * Mobile-optimized with context-aware behavior
+*@
+
+<!-- Competition Wizard Modal -->
+<div class="modal fade" id="competitionWizardModal" tabindex="-1" aria-labelledby="wizardModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <!-- Modal Header -->
+            <div class="modal-header">
+                <h5 class="modal-title" id="wizardModalLabel">
+                    <i class="bi bi-plus-circle me-2"></i>Skapa Ny Tävling
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+
+            <!-- Progress Indicator -->
+            <div class="wizard-progress p-3" style="background-color: var(--bs-tertiary-bg);">
+                <div class="d-flex justify-content-center align-items-center">
+                    <span class="wizard-dot" data-step="0"></span>
+                    <span class="wizard-line"></span>
+                    <span class="wizard-dot" data-step="1"></span>
+                    <span class="wizard-line"></span>
+                    <span class="wizard-dot" data-step="2"></span>
+                    <span class="wizard-line"></span>
+                    <span class="wizard-dot" data-step="3"></span>
+                    <span class="wizard-line"></span>
+                    <span class="wizard-dot" data-step="4"></span>
+                </div>
+                <div class="text-center mt-2">
+                    <small id="wizardStepLabel" class="text-muted"></small>
+                </div>
+            </div>
+
+            <!-- Modal Body -->
+            <div class="modal-body">
+                <form id="competitionWizardForm">
+
+                    <!-- Step 0: Tävlingstyp & Grunduppgifter -->
+                    <div class="wizard-step" data-step="0">
+                        <h6 class="mb-3 text-primary"><i class="bi bi-trophy me-1"></i>Tävlingstyp & Grunduppgifter</h6>
+
+                        <div class="mb-3">
+                            <label for="wizard_competitionType" class="form-label">Tävlingstyp <span class="text-danger">*</span></label>
+                            <select class="form-select" id="wizard_competitionType" name="competitionType" required>
+                                <option value="Precision" selected>Precision</option>
+                            </select>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="wizard_competitionName" class="form-label">Tävlingsnamn <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="wizard_competitionName" name="competitionName" required>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="wizard_competitionDate" class="form-label">Tävlingsdatum <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="wizard_competitionDate" name="competitionDate" required>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="wizard_clubId" class="form-label">Ansvarig klubb <span class="text-danger">*</span></label>
+                            <select class="form-select" id="wizard_clubId" name="clubId" required>
+                                <option value="">-- Välj klubb --</option>
+                            </select>
+                            <small class="form-text text-muted" id="wizard_clubHelpText"></small>
+                        </div>
+                    </div>
+
+                    <!-- Step 1: Anmälan & Beskrivning -->
+                    <div class="wizard-step d-none" data-step="1">
+                        <h6 class="mb-3 text-primary"><i class="bi bi-calendar-check me-1"></i>Anmälan & Beskrivning</h6>
+
+                        <div class="mb-3">
+                            <label for="wizard_venue" class="form-label">Plats <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="wizard_venue" name="venue" required>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="wizard_registrationOpenDate" class="form-label">Anmälan öppnar <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="wizard_registrationOpenDate" name="registrationOpenDate" required>
+                            <small class="form-text text-muted">Förslag baserat på dagens datum och tid</small>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="wizard_registrationCloseDate" class="form-label">Anmälan stänger <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="wizard_registrationCloseDate" name="registrationCloseDate" required>
+                            <small class="form-text text-muted">Förslag baserat på tävlingsdatum</small>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="wizard_description" class="form-label">Beskrivning (valfritt)</label>
+                            <textarea class="form-control" id="wizard_description" name="description" rows="3"></textarea>
+                        </div>
+                    </div>
+
+                    <!-- Step 2: Skytteklasser -->
+                    <div class="wizard-step d-none" data-step="2">
+                        <h6 class="mb-3 text-primary"><i class="bi bi-bullseye me-1"></i>Skytteklasser</h6>
+
+                        <div class="mb-3">
+                            <label class="form-label">Vilka klasser ska tävlingen ha? <span class="text-danger">*</span></label>
+
+                            <!-- Class Selection Display -->
+                            <div class="card" id="wizard_classSelectionCard">
+                                <div class="card-body text-center">
+                                    <p class="text-muted mb-3" id="wizard_noClassesText">Inga klasser valda ännu</p>
+                                    <div class="d-none" id="wizard_selectedClassesDisplay">
+                                        <p class="mb-2"><strong>Valda klasser: <span id="wizard_classCount">0</span></strong></p>
+                                        <p class="mb-3" id="wizard_classList"></p>
+                                    </div>
+                                    <button type="button" class="btn btn-primary" onclick="openClassSelectionOverlay()">
+                                        <i class="bi bi-ui-checks me-1"></i><span id="wizard_selectClassesButtonText">Välj skytteklasser</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Hidden input to store selected classes -->
+                            <input type="hidden" id="wizard_shootingClassIds" name="shootingClassIds">
+                        </div>
+                    </div>
+
+                    <!-- Step 3: Serier & Kontakt -->
+                    <div class="wizard-step d-none" data-step="3">
+                        <h6 class="mb-3 text-primary"><i class="bi bi-list-ol me-1"></i>Serier & Kontakt</h6>
+
+                        <div class="mb-3">
+                            <label for="wizard_numberOfSeries" class="form-label">Antal serier/stationer <span class="text-danger">*</span></label>
+                            <div class="btn-group mb-2" role="group">
+                                <button type="button" class="btn btn-outline-primary" onclick="setSeriesCount(6)">6</button>
+                                <button type="button" class="btn btn-outline-primary" onclick="setSeriesCount(7)">7</button>
+                                <button type="button" class="btn btn-outline-primary" onclick="setSeriesCount(10)">10</button>
+                            </div>
+                            <input type="number" class="form-control" id="wizard_numberOfSeries" name="numberOfSeriesOrStations" min="1" max="50" value="6" required>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="wizard_finalSeries" class="form-label">Varav finalserier</label>
+                            <div class="btn-group mb-2" role="group">
+                                <button type="button" class="btn btn-outline-secondary" onclick="setFinalSeries(0)">0</button>
+                                <button type="button" class="btn btn-outline-secondary" onclick="setFinalSeries(3)">3</button>
+                            </div>
+                            <input type="number" class="form-control" id="wizard_finalSeries" name="numberOfFinalSeries" min="0" max="10" value="0">
+                        </div>
+
+                        <hr class="my-4">
+
+                        <div class="mb-3">
+                            <label for="wizard_competitionDirector" class="form-label">Tävlingsledare <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="wizard_competitionDirector" name="competitionDirector" required>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="wizard_contactEmail" class="form-label">Kontakt e-post <span class="text-danger">*</span></label>
+                            <input type="email" class="form-control" id="wizard_contactEmail" name="contactEmail" required>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="wizard_contactPhone" class="form-label">Kontakt telefon</label>
+                            <input type="tel" class="form-control" id="wizard_contactPhone" name="contactPhone">
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="wizard_registrationFee" class="form-label">Anmälningsavgift</label>
+                            <div class="input-group">
+                                <input type="number" class="form-control" id="wizard_registrationFee" name="registrationFee" min="0" value="0">
+                                <span class="input-group-text">kr</span>
+                            </div>
+                            <small class="form-text text-muted">0 för ingen avgift</small>
+                        </div>
+                    </div>
+
+                    <!-- Step 4: Avancerat -->
+                    <div class="wizard-step d-none" data-step="4">
+                        <h6 class="mb-3 text-primary"><i class="bi bi-gear me-1"></i>Avancerade inställningar (valfritt)</h6>
+
+                        <!-- Tävlingsinställningar Section -->
+                        <div class="accordion mb-3" id="wizardAccordionSettings">
+                            <div class="accordion-item">
+                                <h2 class="accordion-header" id="headingSettings">
+                                    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseSettings">
+                                        Tävlingsinställningar
+                                    </button>
+                                </h2>
+                                <div id="collapseSettings" class="accordion-collapse collapse" data-bs-parent="#wizardAccordionSettings">
+                                    <div class="accordion-body">
+                                        <div class="mb-3">
+                                            <label for="wizard_competitionScope" class="form-label">Omfattning</label>
+                                            <select class="form-select" id="wizard_competitionScope" name="competitionScope">
+                                                <option value="">Ingen</option>
+                                                <option value="Svenskt Mästerskap">Svenskt Mästerskap</option>
+                                                <option value="Landsdelsmästerskap">Landsdelsmästerskap</option>
+                                                <option value="Kretsmästerskap">Kretsmästerskap</option>
+                                                <option value="Klubbmästerskap">Klubbmästerskap</option>
+                                            </select>
+                                            <small class="form-text text-muted">Avgör hur standardmedaljer beräknas</small>
+                                        </div>
+
+                                        <div class="mb-3">
+                                            <label for="wizard_seriesId" class="form-label">Tävlingsserie</label>
+                                            <select class="form-select" id="wizard_seriesId" name="seriesId">
+                                                <option value="">Ingen serie</option>
+                                            </select>
+                                        </div>
+
+                                        <div class="mb-3 form-check">
+                                            <input type="checkbox" class="form-check-input" id="wizard_isAwardingStandardMedals" name="isAwardingStandardMedals">
+                                            <label class="form-check-label" for="wizard_isAwardingStandardMedals">
+                                                Standardmedaljsgrundande
+                                            </label>
+                                        </div>
+
+                                        <div class="mb-3">
+                                            <label for="wizard_competitionEndDate" class="form-label">Slutdatum</label>
+                                            <input type="text" class="form-control" id="wizard_competitionEndDate" name="competitionEndDate">
+                                            <small class="form-text text-muted">För flerdagars tävlingar</small>
+                                        </div>
+
+                                        <div class="mb-3">
+                                            <label for="wizard_maxParticipants" class="form-label">Max antal deltagare</label>
+                                            <input type="number" class="form-control" id="wizard_maxParticipants" name="maxParticipants" value="300" min="1">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Specialfunktioner Section -->
+                        <div class="accordion mb-3" id="wizardAccordionFeatures">
+                            <div class="accordion-item">
+                                <h2 class="accordion-header" id="headingFeatures">
+                                    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseFeatures">
+                                        Specialfunktioner
+                                    </button>
+                                </h2>
+                                <div id="collapseFeatures" class="accordion-collapse collapse" data-bs-parent="#wizardAccordionFeatures">
+                                    <div class="accordion-body">
+                                        <div class="mb-3 form-check">
+                                            <input type="checkbox" class="form-check-input" id="wizard_allowDualCClass" name="allowDualCClass">
+                                            <label class="form-check-label" for="wizard_allowDualCClass">
+                                                Tillåt dubbel C-klassregistrering
+                                            </label>
+                                        </div>
+
+                                        <div class="mb-3 form-check">
+                                            <input type="checkbox" class="form-check-input" id="wizard_showLiveResults" name="showLiveResults">
+                                            <label class="form-check-label" for="wizard_showLiveResults">
+                                                Visa live-resultat
+                                            </label>
+                                        </div>
+
+                                        <div class="mb-3 form-check">
+                                            <input type="checkbox" class="form-check-input" id="wizard_isClubOnly" name="isClubOnly">
+                                            <label class="form-check-label" for="wizard_isClubOnly">
+                                                Endast för specifik klubb
+                                            </label>
+                                        </div>
+
+                                        <div class="mb-3 form-check">
+                                            <input type="checkbox" class="form-check-input" id="wizard_addToMenu" name="addToMenu">
+                                            <label class="form-check-label" for="wizard_addToMenu">
+                                                Lägg till genväg till tävlingen i menyn
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Betalning & Ledning Section -->
+                        <div class="accordion" id="wizardAccordionPayment">
+                            <div class="accordion-item">
+                                <h2 class="accordion-header" id="headingPayment">
+                                    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapsePayment">
+                                        Betalning & Ledning
+                                    </button>
+                                </h2>
+                                <div id="collapsePayment" class="accordion-collapse collapse" data-bs-parent="#wizardAccordionPayment">
+                                    <div class="accordion-body">
+                                        <div class="mb-3">
+                                            <label for="wizard_swishNumber" class="form-label">Swish-nummer</label>
+                                            <input type="text" class="form-control" id="wizard_swishNumber" name="swishNumber" pattern="[0-9]{10}" maxlength="10">
+                                            <small class="form-text text-muted">10 siffror för betalning via Swish</small>
+                                        </div>
+
+                                        <div class="mb-3">
+                                            <label class="form-label">Tävlingsledare (managers)</label>
+                                            <p><small class="text-muted">Denna funktion kan konfigureras efter att tävlingen skapats</small></p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </form>
+            </div>
+
+            <!-- Modal Footer with Navigation -->
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" id="wizard_btnBack" onclick="wizardPrevStep()" style="display: none;">
+                    <i class="bi bi-arrow-left me-1"></i>Tillbaka
+                </button>
+                <button type="button" class="btn btn-primary" id="wizard_btnNext" onclick="wizardNextStep()">
+                    Nästa <i class="bi bi-arrow-right ms-1"></i>
+                </button>
+                <button type="button" class="btn btn-success" id="wizard_btnCreate" onclick="submitWizard()" style="display: none;">
+                    <i class="bi bi-check-circle me-1"></i>Skapa tävling
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Class Selection Overlay (Step 2B) -->
+<div class="wizard-overlay" id="classSelectionOverlay">
+    <div class="wizard-overlay-header">
+        <button type="button" class="btn btn-link text-white" onclick="closeClassSelectionOverlay()">
+            <i class="bi bi-arrow-left me-1"></i>Steg 3: Välj Skytteklasser
+        </button>
+    </div>
+    <div class="wizard-overlay-body">
+        <!-- A-klasser -->
+        <div class="class-section mb-3">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0">A-klasser</h6>
+                <button type="button" class="btn btn-sm btn-outline-primary" onclick="toggleClassSection('A')">
+                    <span class="select-all-a-text">Välj alla</span>
+                </button>
+            </div>
+            <div class="row">
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-A" type="checkbox" value="A1" id="class_A1"><label class="form-check-label" for="class_A1">A1</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-A" type="checkbox" value="A2" id="class_A2"><label class="form-check-label" for="class_A2">A2</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-A" type="checkbox" value="A3" id="class_A3"><label class="form-check-label" for="class_A3">A3</label></div></div>
+            </div>
+        </div>
+
+        <!-- B-klasser -->
+        <div class="class-section mb-3">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0">B-klasser</h6>
+                <button type="button" class="btn btn-sm btn-outline-primary" onclick="toggleClassSection('B')">
+                    <span class="select-all-b-text">Välj alla</span>
+                </button>
+            </div>
+            <div class="row">
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-B" type="checkbox" value="B1" id="class_B1"><label class="form-check-label" for="class_B1">B1</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-B" type="checkbox" value="B2" id="class_B2"><label class="form-check-label" for="class_B2">B2</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-B" type="checkbox" value="B3" id="class_B3"><label class="form-check-label" for="class_B3">B3</label></div></div>
+            </div>
+        </div>
+
+        <!-- C-klasser -->
+        <div class="class-section mb-3">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0">C-klasser</h6>
+                <button type="button" class="btn btn-sm btn-outline-primary" onclick="toggleClassSection('C')">
+                    <span class="select-all-c-text">Välj alla</span>
+                </button>
+            </div>
+            <div class="row">
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-C" type="checkbox" value="C1" id="class_C1"><label class="form-check-label" for="class_C1">C1</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-C" type="checkbox" value="C2" id="class_C2"><label class="form-check-label" for="class_C2">C2</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-C" type="checkbox" value="C3" id="class_C3"><label class="form-check-label" for="class_C3">C3</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-C" type="checkbox" value="C_Vet_Y" id="class_C_Vet_Y"><label class="form-check-label" for="class_C_Vet_Y">C Vet Y</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-C" type="checkbox" value="C_Vet_A" id="class_C_Vet_A"><label class="form-check-label" for="class_C_Vet_A">C Vet Ä</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-C" type="checkbox" value="C_Jun" id="class_C_Jun"><label class="form-check-label" for="class_C_Jun">C Jun</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-C" type="checkbox" value="C1_Dam" id="class_C1_Dam"><label class="form-check-label" for="class_C1_Dam">C1 Dam</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-C" type="checkbox" value="C2_Dam" id="class_C2_Dam"><label class="form-check-label" for="class_C2_Dam">C2 Dam</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-C" type="checkbox" value="C3_Dam" id="class_C3_Dam"><label class="form-check-label" for="class_C3_Dam">C3 Dam</label></div></div>
+            </div>
+        </div>
+
+        <!-- R-klasser -->
+        <div class="class-section mb-3">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0">R-klasser</h6>
+                <button type="button" class="btn btn-sm btn-outline-primary" onclick="toggleClassSection('R')">
+                    <span class="select-all-r-text">Välj alla</span>
+                </button>
+            </div>
+            <div class="row">
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-R" type="checkbox" value="R1" id="class_R1"><label class="form-check-label" for="class_R1">R1</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-R" type="checkbox" value="R2" id="class_R2"><label class="form-check-label" for="class_R2">R2</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-R" type="checkbox" value="R3" id="class_R3"><label class="form-check-label" for="class_R3">R3</label></div></div>
+            </div>
+        </div>
+
+        <!-- L-klasser -->
+        <div class="class-section mb-3">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0">L-klasser</h6>
+                <button type="button" class="btn btn-sm btn-outline-primary" onclick="toggleClassSection('L')">
+                    <span class="select-all-l-text">Välj alla</span>
+                </button>
+            </div>
+            <div class="row">
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-L" type="checkbox" value="L1" id="class_L1"><label class="form-check-label" for="class_L1">L1</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-L" type="checkbox" value="L2" id="class_L2"><label class="form-check-label" for="class_L2">L2</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-L" type="checkbox" value="L3" id="class_L3"><label class="form-check-label" for="class_L3">L3</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-L" type="checkbox" value="L_Vet_Y" id="class_L_Vet_Y"><label class="form-check-label" for="class_L_Vet_Y">L Vet Y</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-L" type="checkbox" value="L_Vet_A" id="class_L_Vet_A"><label class="form-check-label" for="class_L_Vet_A">L Vet Ä</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-L" type="checkbox" value="L_Jun" id="class_L_Jun"><label class="form-check-label" for="class_L_Jun">L Jun</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-L" type="checkbox" value="L1_Dam" id="class_L1_Dam"><label class="form-check-label" for="class_L1_Dam">L1 Dam</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-L" type="checkbox" value="L2_Dam" id="class_L2_Dam"><label class="form-check-label" for="class_L2_Dam">L2 Dam</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-L" type="checkbox" value="L3_Dam" id="class_L3_Dam"><label class="form-check-label" for="class_L3_Dam">L3 Dam</label></div></div>
+            </div>
+        </div>
+
+        <!-- M-klasser -->
+        <div class="class-section mb-3">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0">M-klasser</h6>
+                <button type="button" class="btn btn-sm btn-outline-primary" onclick="toggleClassSection('M')">
+                    <span class="select-all-m-text">Välj alla</span>
+                </button>
+            </div>
+            <div class="row">
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-M" type="checkbox" value="M1" id="class_M1"><label class="form-check-label" for="class_M1">M1</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-M" type="checkbox" value="M2" id="class_M2"><label class="form-check-label" for="class_M2">M2</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-M" type="checkbox" value="M3" id="class_M3"><label class="form-check-label" for="class_M3">M3</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-M" type="checkbox" value="M4" id="class_M4"><label class="form-check-label" for="class_M4">M4</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-M" type="checkbox" value="M5" id="class_M5"><label class="form-check-label" for="class_M5">M5</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-M" type="checkbox" value="M6" id="class_M6"><label class="form-check-label" for="class_M6">M6</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-M" type="checkbox" value="M7" id="class_M7"><label class="form-check-label" for="class_M7">M7</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-M" type="checkbox" value="M8" id="class_M8"><label class="form-check-label" for="class_M8">M8</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-M" type="checkbox" value="M9" id="class_M9"><label class="form-check-label" for="class_M9">M9</label></div></div>
+            </div>
+        </div>
+    </div>
+    <div class="wizard-overlay-footer">
+        <div class="text-center mb-2">
+            <strong>Valda: <span id="overlay_classCount">0</span> klasser</strong><br>
+            <small id="overlay_classList" class="text-muted"></small>
+        </div>
+        <button type="button" class="btn btn-primary btn-lg w-100" onclick="confirmClassSelection()" id="overlay_btnConfirm" disabled>
+            Klar, fortsätt <i class="bi bi-arrow-right ms-1"></i>
+        </button>
+    </div>
+</div>
+
+<style>
+/* Wizard Progress Indicator */
+.wizard-progress {
+    border-bottom: 1px solid var(--bs-border-color);
+}
+
+.wizard-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background-color: var(--bs-secondary-bg);
+    display: inline-block;
+}
+
+.wizard-dot.active {
+    background-color: var(--bs-primary);
+}
+
+.wizard-line {
+    width: 40px;
+    height: 2px;
+    background-color: var(--bs-secondary-bg);
+    display: inline-block;
+}
+
+/* Wizard Steps */
+.wizard-step {
+    min-height: 300px;
+}
+
+/* Class Selection Overlay - Base Styles */
+.wizard-overlay {
+    background-color: var(--bs-body-bg);
+    z-index: 1060;
+    display: none;
+    flex-direction: column;
+}
+
+.wizard-overlay.active {
+    display: flex;
+}
+
+.wizard-overlay-header {
+    background-color: var(--bs-primary);
+    color: white;
+    flex-shrink: 0;
+}
+
+.wizard-overlay-body {
+    flex: 1;
+    overflow-y: auto;
+}
+
+.wizard-overlay-footer {
+    padding: 1rem;
+    border-top: 1px solid var(--bs-border-color);
+    background-color: var(--bs-tertiary-bg);
+    flex-shrink: 0;
+}
+
+/* Touch targets for mobile */
+.form-check-input {
+    width: 20px;
+    height: 20px;
+    margin-top: 0.15rem;
+}
+
+.form-check-label {
+    padding-left: 0.5rem;
+    cursor: pointer;
+}
+
+.btn-lg {
+    min-height: 48px;
+}
+
+/* Mobile: Full-screen overlay (≤767px) */
+@@media (max-width: 767px) {
+    .wizard-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+    }
+
+    .wizard-overlay-header {
+        padding: 1rem;
+    }
+
+    .wizard-overlay-body {
+        padding: 1rem;
+    }
+
+    .modal-dialog {
+        margin: 0.5rem;
+    }
+}
+
+/* Desktop/Tablet: Centered modal (≥768px) */
+@@media (min-width: 768px) {
+    .wizard-overlay {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 90%;
+        max-width: 700px;
+        height: auto;
+        max-height: 85vh;
+        border-radius: 0.5rem;
+        box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.25);
+    }
+
+    .wizard-overlay-header {
+        padding: 1rem 1.5rem;
+        border-radius: 0.5rem 0.5rem 0 0;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .wizard-overlay-header button {
+        padding: 0.25rem 0.5rem;
+        font-size: 1rem;
+        background: transparent;
+        border: 1px solid rgba(255, 255, 255, 0.5);
+        border-radius: 0.25rem;
+        transition: all 0.2s;
+    }
+
+    .wizard-overlay-header button:hover {
+        background: rgba(255, 255, 255, 0.1);
+        border-color: rgba(255, 255, 255, 0.8);
+    }
+
+    .wizard-overlay-body {
+        padding: 1.5rem;
+        max-height: calc(85vh - 140px);
+    }
+
+    .wizard-overlay-footer {
+        border-radius: 0 0 0.5rem 0.5rem;
+    }
+}
+
+/* Backdrop for desktop - Light and subtle */
+@@media (min-width: 768px) {
+    .wizard-overlay.active::before {
+        content: '';
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: rgba(0, 0, 0, 0.15);
+        z-index: -1;
+    }
+}
+</style>
+
+<script>
+// Wizard State
+let wizardCurrentStep = 0;
+let wizardContext = {
+    isClubPage: false,
+    clubId: null
+};
+
+// Initialize wizard when modal opens
+document.getElementById('competitionWizardModal').addEventListener('show.bs.modal', function() {
+    wizardCurrentStep = 0;
+    resetWizard();
+    detectContext();
+    loadClubsForWizard();
+    loadSeriesForWizard();
+    updateWizardUI();
+
+    // Initialize Flatpickr on first show
+    setTimeout(() => {
+        initializeWizardDatePickers();
+    }, 100);
+});
+
+// Detect if we're on a club page or admin page
+function detectContext() {
+    const isClubPage = window.location.pathname.includes('/clubs/');
+    wizardContext.isClubPage = isClubPage;
+
+    if (isClubPage) {
+        // Try to get club ID from URL or page context
+        // This would need to be passed when opening the wizard
+        wizardContext.clubId = window.currentClubId || null;
+    }
+}
+
+// Reset wizard to initial state
+function resetWizard() {
+    document.getElementById('competitionWizardForm').reset();
+    document.getElementById('wizard_shootingClassIds').value = '';
+    updateClassSelectionDisplay();
+
+    // Reset step visibility
+    document.querySelectorAll('.wizard-step').forEach((step, index) => {
+        if (index === 0) {
+            step.classList.remove('d-none');
+        } else {
+            step.classList.add('d-none');
+        }
+    });
+}
+
+// Initialize Flatpickr date pickers
+function initializeWizardDatePickers() {
+    flatpickr('#wizard_competitionDate', {
+        enableTime: true,
+        dateFormat: 'Y-m-d H:i',
+        time_24hr: true,
+        locale: 'sv',
+        onChange: function(selectedDates) {
+            if (selectedDates.length > 0) {
+                suggestRegistrationDates(selectedDates[0]);
+            }
+        }
+    });
+
+    flatpickr('#wizard_registrationOpenDate', {
+        enableTime: true,
+        dateFormat: 'Y-m-d H:i',
+        time_24hr: true,
+        locale: 'sv'
+    });
+
+    flatpickr('#wizard_registrationCloseDate', {
+        enableTime: true,
+        dateFormat: 'Y-m-d H:i',
+        time_24hr: true,
+        locale: 'sv'
+    });
+
+    flatpickr('#wizard_competitionEndDate', {
+        dateFormat: 'Y-m-d',
+        locale: 'sv'
+    });
+
+    // Set default registration open date to now
+    const now = new Date();
+    document.getElementById('wizard_registrationOpenDate').value =
+        now.getFullYear() + '-' +
+        String(now.getMonth() + 1).padStart(2, '0') + '-' +
+        String(now.getDate()).padStart(2, '0') + ' ' +
+        String(now.getHours()).padStart(2, '0') + ':' +
+        String(now.getMinutes()).padStart(2, '0');
+}
+
+// Suggest registration dates based on competition date
+function suggestRegistrationDates(competitionDate) {
+    // Registration close: Competition date - 1 day at 23:59
+    const closeDate = new Date(competitionDate);
+    closeDate.setDate(closeDate.getDate() - 1);
+    closeDate.setHours(23, 59, 0, 0);
+
+    document.getElementById('wizard_registrationCloseDate').value =
+        closeDate.getFullYear() + '-' +
+        String(closeDate.getMonth() + 1).padStart(2, '0') + '-' +
+        String(closeDate.getDate()).padStart(2, '0') + ' ' +
+        String(closeDate.getHours()).padStart(2, '0') + ':' +
+        String(closeDate.getMinutes()).padStart(2, '0');
+}
+
+// Load clubs for dropdown
+function loadClubsForWizard() {
+    fetch('/umbraco/surface/ClubAdmin/GetClubsForRegistration')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.clubs) {
+                const select = document.getElementById('wizard_clubId');
+                select.innerHTML = '<option value="">-- Välj klubb --</option>';
+
+                data.clubs.forEach(club => {
+                    const option = document.createElement('option');
+                    option.value = club.id;
+                    option.textContent = club.name;
+                    select.appendChild(option);
+                });
+
+                // Context-aware: Pre-fill if on club page
+                if (wizardContext.isClubPage && wizardContext.clubId) {
+                    select.value = wizardContext.clubId;
+                    // Don't disable - keep it enabled so form submits the value
+                    document.getElementById('wizard_clubHelpText').textContent = 'Tävlingen skapas för denna klubb';
+
+                    // Auto-check "isClubOnly" checkbox if on club page
+                    document.getElementById('wizard_isClubOnly').checked = true;
+                }
+            }
+        })
+        .catch(error => console.error('Error loading clubs:', error));
+}
+
+// Load series for dropdown
+function loadSeriesForWizard() {
+    const cacheBuster = new Date().getTime();
+    fetch(`/umbraco/surface/CompetitionAdmin/GetSeriesList?_=${cacheBuster}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.data && data.data.length > 0) {
+                const select = document.getElementById('wizard_seriesId');
+                select.innerHTML = '<option value="">Ingen serie</option>';
+                data.data.forEach(series => {
+                    const option = document.createElement('option');
+                    option.value = series.id;
+                    option.textContent = series.name;
+                    select.appendChild(option);
+                });
+            }
+        })
+        .catch(error => console.error('Error loading series:', error));
+}
+
+// Navigation: Next Step
+function wizardNextStep() {
+    if (!validateCurrentStep()) {
+        return;
+    }
+
+    if (wizardCurrentStep < 4) {
+        wizardCurrentStep++;
+        updateWizardUI();
+    }
+}
+
+// Navigation: Previous Step
+function wizardPrevStep() {
+    if (wizardCurrentStep > 0) {
+        wizardCurrentStep--;
+        updateWizardUI();
+    }
+}
+
+// Update wizard UI based on current step
+function updateWizardUI() {
+    // Update step visibility
+    document.querySelectorAll('.wizard-step').forEach((step, index) => {
+        if (index === wizardCurrentStep) {
+            step.classList.remove('d-none');
+            // Auto-focus first input
+            const firstInput = step.querySelector('input:not([type="hidden"]), select, textarea');
+            if (firstInput) {
+                setTimeout(() => firstInput.focus(), 100);
+            }
+        } else {
+            step.classList.add('d-none');
+        }
+    });
+
+    // Update progress dots
+    document.querySelectorAll('.wizard-dot').forEach((dot, index) => {
+        if (index <= wizardCurrentStep) {
+            dot.classList.add('active');
+        } else {
+            dot.classList.remove('active');
+        }
+    });
+
+    // Update step label
+    const stepLabels = [
+        'Steg 1 av 5: Tävlingstyp',
+        'Steg 2 av 5: Anmälan',
+        'Steg 3 av 5: Skytteklasser',
+        'Steg 4 av 5: Serier & Kontakt',
+        'Steg 5 av 5: Avancerat'
+    ];
+    document.getElementById('wizardStepLabel').textContent = stepLabels[wizardCurrentStep];
+
+    // Update buttons
+    const btnBack = document.getElementById('wizard_btnBack');
+    const btnNext = document.getElementById('wizard_btnNext');
+    const btnCreate = document.getElementById('wizard_btnCreate');
+
+    // Back button: Show on all steps except first
+    btnBack.style.display = wizardCurrentStep > 0 ? 'inline-block' : 'none';
+
+    // Next/Create buttons based on step
+    if (wizardCurrentStep < 4) {
+        btnNext.style.display = 'inline-block';
+        btnCreate.style.display = 'none';
+    } else { // Step 4
+        btnNext.style.display = 'none';
+        btnCreate.style.display = 'inline-block';
+    }
+}
+
+// Validate current step
+function validateCurrentStep() {
+    const currentStepEl = document.querySelector(`.wizard-step[data-step="${wizardCurrentStep}"]`);
+    const requiredFields = currentStepEl.querySelectorAll('[required]');
+
+    let isValid = true;
+    requiredFields.forEach(field => {
+        if (!field.value || field.value.trim() === '') {
+            isValid = false;
+            field.classList.add('is-invalid');
+        } else {
+            field.classList.remove('is-invalid');
+        }
+    });
+
+    // Special validation for Step 2 (shooting classes)
+    if (wizardCurrentStep === 2) {
+        const classIds = document.getElementById('wizard_shootingClassIds').value;
+        if (!classIds || classIds.trim() === '') {
+            alert('Vänligen välj minst en skytteklass');
+            return false;
+        }
+    }
+
+    if (!isValid) {
+        alert('Vänligen fyll i alla obligatoriska fält (markerade med *)');
+    }
+
+    return isValid;
+}
+
+// Class Selection Overlay
+function openClassSelectionOverlay() {
+    const overlay = document.getElementById('classSelectionOverlay');
+    overlay.classList.add('active');
+
+    // Restore current selections
+    restoreClassSelections();
+    updateOverlayClassCount();
+
+    // Add ESC key handler for closing overlay
+    document.addEventListener('keydown', handleOverlayEscKey);
+
+    // Add backdrop click handler for desktop (click outside modal)
+    overlay.addEventListener('click', handleOverlayBackdropClick);
+}
+
+function closeClassSelectionOverlay() {
+    const overlay = document.getElementById('classSelectionOverlay');
+    overlay.classList.remove('active');
+
+    // Remove event listeners
+    document.removeEventListener('keydown', handleOverlayEscKey);
+    overlay.removeEventListener('click', handleOverlayBackdropClick);
+}
+
+// Handle ESC key to close overlay
+function handleOverlayEscKey(e) {
+    if (e.key === 'Escape') {
+        closeClassSelectionOverlay();
+    }
+}
+
+// Handle backdrop click (only on desktop - click outside the content area)
+function handleOverlayBackdropClick(e) {
+    // Only close if clicking the overlay itself (backdrop), not its children
+    if (e.target.id === 'classSelectionOverlay') {
+        closeClassSelectionOverlay();
+    }
+}
+
+function restoreClassSelections() {
+    const currentIds = document.getElementById('wizard_shootingClassIds').value;
+    const selectedArray = currentIds ? currentIds.split(',') : [];
+
+    document.querySelectorAll('.class-checkbox').forEach(checkbox => {
+        checkbox.checked = selectedArray.includes(checkbox.value);
+    });
+}
+
+function confirmClassSelection() {
+    const selected = Array.from(document.querySelectorAll('.class-checkbox:checked'))
+        .map(cb => cb.value);
+
+    if (selected.length === 0) {
+        alert('Välj minst en klass');
+        return;
+    }
+
+    document.getElementById('wizard_shootingClassIds').value = selected.join(',');
+    updateClassSelectionDisplay();
+    closeClassSelectionOverlay();
+}
+
+function updateClassSelectionDisplay() {
+    const classIds = document.getElementById('wizard_shootingClassIds').value;
+    const selectedArray = classIds ? classIds.split(',') : [];
+
+    if (selectedArray.length > 0) {
+        document.getElementById('wizard_noClassesText').style.display = 'none';
+        document.getElementById('wizard_selectedClassesDisplay').classList.remove('d-none');
+        document.getElementById('wizard_classCount').textContent = selectedArray.length;
+        document.getElementById('wizard_classList').textContent = selectedArray.join(', ');
+        document.getElementById('wizard_selectClassesButtonText').textContent = 'Ändra val';
+    } else {
+        document.getElementById('wizard_noClassesText').style.display = 'block';
+        document.getElementById('wizard_selectedClassesDisplay').classList.add('d-none');
+        document.getElementById('wizard_selectClassesButtonText').textContent = 'Välj skytteklasser';
+    }
+}
+
+function updateOverlayClassCount() {
+    const selected = document.querySelectorAll('.class-checkbox:checked');
+    const count = selected.length;
+    const classList = Array.from(selected).map(cb => cb.value).join(', ');
+
+    document.getElementById('overlay_classCount').textContent = count;
+    document.getElementById('overlay_classList').textContent = classList || 'Inga klasser valda';
+
+    const btnConfirm = document.getElementById('overlay_btnConfirm');
+    if (count > 0) {
+        btnConfirm.disabled = false;
+        btnConfirm.classList.remove('btn-secondary');
+        btnConfirm.classList.add('btn-primary');
+    } else {
+        btnConfirm.disabled = true;
+        btnConfirm.classList.remove('btn-primary');
+        btnConfirm.classList.add('btn-secondary');
+    }
+}
+
+// Add event listeners to all class checkboxes
+document.querySelectorAll('.class-checkbox').forEach(checkbox => {
+    checkbox.addEventListener('change', updateOverlayClassCount);
+});
+
+function toggleClassSection(section) {
+    const checkboxes = document.querySelectorAll(`.class-${section}`);
+    const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+
+    checkboxes.forEach(cb => {
+        cb.checked = !allChecked;
+    });
+
+    updateOverlayClassCount();
+}
+
+// Preset buttons for series
+function setSeriesCount(count) {
+    document.getElementById('wizard_numberOfSeries').value = count;
+}
+
+function setFinalSeries(count) {
+    document.getElementById('wizard_finalSeries').value = count;
+}
+
+// Submit wizard
+function submitWizard() {
+    // Validate all required steps (0-3)
+    for (let i = 0; i <= 3; i++) {
+        wizardCurrentStep = i;
+        if (!validateCurrentStep()) {
+            updateWizardUI();
+            return;
+        }
+    }
+
+    // Collect form data
+    const formData = new FormData(document.getElementById('competitionWizardForm'));
+    const fields = {};
+
+    for (let [key, value] of formData.entries()) {
+        // Convert checkbox values
+        if (key === 'allowDualCClass' || key === 'showLiveResults' ||
+            key === 'isClubOnly' || key === 'addToMenu' || key === 'isAwardingStandardMedals') {
+            fields[key] = value === 'on';
+        } else {
+            fields[key] = value;
+        }
+    }
+
+    // Ensure unchecked checkboxes are false
+    ['allowDualCClass', 'showLiveResults', 'isClubOnly', 'addToMenu', 'isAwardingStandardMedals'].forEach(field => {
+        if (!(field in fields)) {
+            fields[field] = false;
+        }
+    });
+
+    // Add defaults
+    fields.competitionType = 'Precision';
+    fields.isActive = true;
+
+    // Context-aware: Set clubId and isClubOnly if created from club page
+    if (wizardContext.isClubPage && wizardContext.clubId) {
+        fields.clubId = wizardContext.clubId;
+        fields.isClubOnly = true;
+    }
+
+    const requestBody = { fields: fields };
+
+    // Show loading state
+    const btnCreate = document.getElementById('wizard_btnCreate');
+    const originalText = btnCreate.innerHTML;
+    btnCreate.disabled = true;
+    btnCreate.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Skapar...';
+
+    // Submit to backend
+    fetch('/umbraco/surface/CompetitionAdmin/CreateCompetition', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value
+        },
+        body: JSON.stringify(requestBody)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Reset button state BEFORE closing modal
+            btnCreate.disabled = false;
+            btnCreate.innerHTML = originalText;
+
+            // Close wizard
+            const modal = bootstrap.Modal.getInstance(document.getElementById('competitionWizardModal'));
+            modal.hide();
+
+            // Reload competitions list
+            if (typeof reloadCompetitionsList === 'function') {
+                reloadCompetitionsList();
+            }
+
+            // Call onCompetitionSaved callback if set (for club pages)
+            if (typeof window.onCompetitionSaved === 'function') {
+                window.onCompetitionSaved();
+            }
+
+            // Show success message
+            alert('Tävling skapad!');
+        } else {
+            alert('Fel vid skapande av tävling: ' + (data.message || 'Okänt fel'));
+            btnCreate.disabled = false;
+            btnCreate.innerHTML = originalText;
+        }
+    })
+    .catch(error => {
+        console.error('Error creating competition:', error);
+        alert('Fel vid skapande av tävling: ' + error.message);
+        btnCreate.disabled = false;
+        btnCreate.innerHTML = originalText;
+    });
+}
+
+// Reset wizard to initial state
+window.resetWizard = function() {
+    // Reset button state
+    const btnCreate = document.getElementById('wizard_btnCreate');
+    if (btnCreate) {
+        btnCreate.disabled = false;
+        btnCreate.innerHTML = '<i class="bi bi-check-circle me-1"></i>Skapa tävling';
+    }
+
+    // Reset to step 0
+    wizardCurrentStep = 0;
+
+    // Clear the form
+    const form = document.getElementById('competitionWizardForm');
+    if (form) {
+        form.reset();
+    }
+
+    // Clear shooting class selection
+    document.getElementById('wizard_shootingClassIds').value = '';
+    updateClassSelectionDisplay();
+
+    // Uncheck all class checkboxes
+    document.querySelectorAll('.class-checkbox').forEach(checkbox => {
+        checkbox.checked = false;
+    });
+    updateOverlayClassCount();
+
+    // Remove validation errors
+    document.querySelectorAll('.is-invalid').forEach(field => {
+        field.classList.remove('is-invalid');
+    });
+
+    // Re-detect context (club page vs admin page)
+    detectContext();
+
+    // Auto-check "isClubOnly" checkbox if on club page
+    if (wizardContext.isClubPage) {
+        document.getElementById('wizard_isClubOnly').checked = true;
+    }
+
+    // Re-initialize date pickers with defaults
+    initializeWizardDatePickers();
+
+    // Update UI to show step 0
+    updateWizardUI();
+
+    console.log('Wizard reset to initial state');
+};
+</script>

@@ -1,0 +1,38 @@
+<!-- Start Preference and Notes Modal -->
+<div class="modal fade" id="preferenceModal" tabindex="-1" aria-labelledby="preferenceModalLabel" aria-hidden="true">
+	<div class="modal-dialog">
+		<div class="modal-content">
+			<div class="modal-header">
+				<h5 class="modal-title" id="preferenceModalLabel">
+					<i class="bi bi-gear"></i> Inställningar för <span id="preferenceClassName"></span>
+				</h5>
+				<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+			</div>
+			<div class="modal-body">
+				<input type="hidden" id="preferenceClassId" />
+				<input type="hidden" id="preferenceClassGroup" />
+
+				<div class="mb-3">
+					<label for="startPreference" class="form-label">Starttidspreference:</label>
+					<select class="form-select" id="startPreference">
+						<option value="Inget" selected>Inget (ingen preferens)</option>
+						<option value="Tidig Start">Tidig Start</option>
+						<option value="Sen Start">Sen Start</option>
+					</select>
+					<small class="form-text text-muted">
+						Ange om du föredrar att starta tidigt eller sent. Detta är endast en önskan och garanteras inte.
+					</small>
+				</div>
+
+			</div>
+			<div class="modal-footer">
+				<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+					<i class="bi bi-x-circle"></i> Avbryt
+				</button>
+				<button type="button" class="btn btn-primary" onclick="savePreferences()">
+					<i class="bi bi-check-circle"></i> Spara
+				</button>
+			</div>
+		</div>
+	</div>
+</div>

@@ -1,0 +1,81 @@
+/* HPSK Site Styles */
+
+.navbar-brand {
+    font-weight: bold;
+    font-size: 1.5rem;
+}
+
+.jumbotron {
+    background: var(--jumbotron-gradient);
+}
+
+.content img {
+    max-width: 100%;
+    height: auto;
+}
+
+.nav-link.active {
+    font-weight: bold;
+}
+
+footer {
+    margin-top: auto;
+}
+
+body {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+main {
+    flex: 1;
+}
+
+.card {
+    transition: transform 0.2s;
+}
+
+.card:hover {
+    transform: translateY(-2px);
+}
+
+/* Member Groups Dropdown with Checkboxes */
+.dropdown-menu {
+    max-width: 100%;
+}
+
+.dropdown-menu .form-check {
+    padding-left: 0;
+    margin-bottom: 0.5rem;
+}
+
+.dropdown-menu .form-check:last-child {
+    margin-bottom: 0;
+}
+
+/* Prevent dropdown from closing when clicking inside */
+.dropdown-menu.show {
+    display: block;
+}
+
+#memberGroupsDropdownMenu .form-check-input,
+#additionalClubsDropdownMenu .form-check-input {
+    cursor: pointer;
+}
+
+#memberGroupsDropdownMenu .form-check-label,
+#additionalClubsDropdownMenu .form-check-label {
+    cursor: pointer;
+    user-select: none;
+}
+
+/* Sortable table headers */
+.sortable {
+    cursor: pointer;
+    user-select: none;
+}
+
+.sortable:hover {
+    background-color: var(--bs-secondary-bg);
+}

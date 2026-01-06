@@ -1,0 +1,45 @@
+name: Website Build
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'src/HpskSite/**'
+      - 'src/HpskSite.Shared/**'
+      - 'src/HpskSite.Tests/**'
+      - '.github/workflows/website-build.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'src/HpskSite/**'
+      - 'src/HpskSite.Shared/**'
+      - 'src/HpskSite.Tests/**'
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Configure workload mode
+        run: dotnet workload config --update-mode workload-set
+
+      - name: Install MAUI workload
+        run: dotnet workload install maui
+
+      - name: Restore dependencies
+        run: dotnet restore HpskSite.sln
+
+      - name: Build solution
+        run: dotnet build HpskSite.sln -c Release --no-restore
+
+      - name: Run tests
+        run: dotnet test src/HpskSite.Tests/HpskSite.Tests.csproj -c Release --no-build --verbosity normal

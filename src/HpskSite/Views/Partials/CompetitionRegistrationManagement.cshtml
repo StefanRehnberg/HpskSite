@@ -1,0 +1,987 @@
+@*
+ * Competition-Specific Registration Management Partial View
+ * Focused on managing registrations for a single competition
+*@
+
+@{
+    var competitionId = ViewData["CompetitionId"]?.ToString() ?? "";
+}
+
+<div class="competition-registration-management" data-competition-id="@competitionId">
+    <!-- Header Section -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h4><i class="bi bi-people me-2"></i>Anmälningar</h4>
+        <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#registrationModal">
+            <i class="bi bi-person-plus"></i> Registrera
+        </button>
+    </div>
+
+    <!-- Filter Section -->
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label for="competitionClassFilter" class="form-label">Filtrera på klass:</label>
+                    <select class="form-select" id="competitionClassFilter" onchange="filterCompetitionRegistrations()">
+                        <option value="">Alla klasser</option>
+                        <!-- Options populated dynamically by populateShootingClassFilter() -->
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label for="competitionClubFilter" class="form-label">Filtrera på klubb:</label>
+                    <select class="form-select" id="competitionClubFilter" onchange="filterCompetitionRegistrations()">
+                        <option value="">All Clubs</option>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label for="competitionPreferenceFilter" class="form-label">Filtrera på startpreferens:</label>
+                    <select class="form-select" id="competitionPreferenceFilter" onchange="filterCompetitionRegistrations()">
+                        <option value="">Alla preferenser</option>
+                        <option value="Inget">Inget (ingen preferens)</option>
+                        <option value="Tidig Start">Tidig start</option>
+                        <option value="Sen Start">Sen start</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Registrations Table -->
+    <div class="card">
+        <div class="card-header">
+            <h5 class="mb-0">Anmälningar för denna tävling</h5>
+        </div>
+        <div class="card-body">
+            <!-- Loading State -->
+            <div id="competitionRegistrationsLoading" class="text-center py-4">
+                <div class="spinner-border" role="status">
+                    <span class="visually-hidden">Laddar...</span>
+                </div>
+                <p class="mt-2">Laddar anmälningar...</p>
+            </div>
+
+            <!-- Error State -->
+            <div id="competitionRegistrationsError" class="alert alert-danger d-none">
+                <h6>Fel vid inläsning av anmälningar</h6>
+                <p id="competitionRegistrationsErrorMessage"></p>
+                <button class="btn btn-outline-danger" onclick="loadCompetitionRegistrations()">Försök igen</button>
+            </div>
+
+            <!-- Registrations Table -->
+            <div id="competitionRegistrationsTableContainer" class="d-none">
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover" id="competitionRegistrationsTable">
+                        <thead>
+                            <tr>
+                                <th>Medlem</th>
+                                <th>Klubb</th>
+                                <th>Klass</th>
+                                <th>Anmälningsdatum</th>
+                                <th>Status</th>
+                                <th>Åtgärder</th>
+                            </tr>
+                        </thead>
+                        <tbody id="competitionRegistrationsTableBody">
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Pagination -->
+                <nav aria-label="Competition registrations pagination">
+                    <ul class="pagination justify-content-center" id="competitionRegistrationsPagination">
+                    </ul>
+                </nav>
+            </div>
+
+            <!-- No Results State -->
+            <div id="competitionNoRegistrations" class="text-center py-4 d-none">
+                <i class="bi bi-inbox display-1 text-muted"></i>
+                <p class="text-muted mt-2">No registrations found for this competition.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Payment Options Modal -->
+<div class="modal fade" id="paymentOptionsModal" tabindex="-1" aria-labelledby="paymentOptionsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title" id="paymentOptionsModalLabel">
+                    <i class="bi bi-wallet2"></i> Betalningsalternativ
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body text-center py-4">
+                <h6 class="mb-4">Välj hur du vill betala tävlingsavgiften:</h6>
+                <div class="d-flex flex-column gap-3 align-items-center">
+                    <button type="button" class="btn btn-primary w-75" onclick="showSwishPaymentModalForRegistration()">
+                        <i class="bi bi-qr-code"></i> Betala nu med Swish
+                    </button>
+                    <button type="button" class="btn btn-outline-primary w-75" onclick="sendSwishQRCodeEmailForRegistration()">
+                        <i class="bi bi-envelope"></i> Skicka QR-kod via e-post
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary w-75" data-bs-dismiss="modal">
+                        <i class="bi bi-clock"></i> Stäng
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Swish Payment Modal (for QR code display) -->
+<div class="modal fade" id="swishPaymentModalAdmin" tabindex="-1" aria-labelledby="swishPaymentModalAdminLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title" id="swishPaymentModalAdminLabel">
+                    <i class="bi bi-qr-code"></i> Betala med Swish
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body text-center" id="swishPaymentModalAdminBody">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Laddar QR-kod...</span>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    <i class="bi bi-x-circle"></i> Stäng
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Registration Modal (reuse from main registration management) -->
+<div class="modal fade" id="competitionEditRegistrationModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Edit Registration</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="competitionEditRegistrationForm">
+                    <input type="hidden" id="competitionEditRegistrationId" />
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="competitionEditMemberName" class="form-label">Member Name:</label>
+                                <input type="text" class="form-control" id="competitionEditMemberName" readonly />
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="competitionEditShootingClass" class="form-label">Shooting Class:</label>
+                                <input type="text" class="form-control" id="competitionEditShootingClass" readonly />
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="competitionEditStartPreference" class="form-label">Start Preference:</label>
+                                <select class="form-select" id="competitionEditStartPreference">
+                                    <option value="Inget">Inget (ingen preferens)</option>
+                                    <option value="Tidig Start">Tidig Start</option>
+                                    <option value="Sen Start">Sen Start</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="competitionEditMemberClub" class="form-label">Club:</label>
+                                <input type="text" class="form-control" id="competitionEditMemberClub" readonly />
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="competitionEditIsActive" />
+                            <label class="form-check-label" for="competitionEditIsActive">
+                                Registration Active
+                            </label>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-danger" onclick="deleteCompetitionRegistration()">Delete Registration</button>
+                <button type="button" class="btn btn-primary" onclick="saveCompetitionRegistrationChanges()">Save Changes</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Competition Registration Management JavaScript
+let competitionRegistrations = [];
+let filteredCompetitionRegistrations = [];
+let currentCompetitionPage = 1;
+const competitionPageSize = 20;
+
+// Helper function to get payment status badge class
+function getPaymentStatusBadgeClass(status) {
+    switch(status) {
+        case 'Paid':
+            return 'bg-success';
+        case 'Pending':
+            return 'bg-warning';
+        case 'Failed':
+        case 'Cancelled':
+        case 'Refunded':
+            return 'bg-danger';
+        case 'No Invoice':
+            return 'bg-secondary';
+        default:
+            return 'bg-secondary';
+    }
+}
+
+// Helper function to get payment status display text in Swedish
+function getPaymentStatusText(status) {
+    switch(status) {
+        case 'Paid':
+            return 'Betald';
+        case 'Pending':
+            return 'Väntande';
+        case 'Failed':
+            return 'Misslyckad';
+        case 'Cancelled':
+            return 'Makulerad';
+        case 'Refunded':
+            return 'Återbetald';
+        case 'No Invoice':
+            return 'Ingen faktura';
+        case 'Unknown':
+            return 'Okänd';
+        default:
+            return status;
+    }
+}
+
+// Load registrations when tab is shown
+function loadCompetitionRegistrations() {
+    showCompetitionLoading();
+    const currentCompetitionId = $('.competition-registration-management').data('competition-id');
+
+    fetch(`/umbraco/surface/Competition/GetCompetitionRegistrations?competitionId=${currentCompetitionId}`, {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            competitionRegistrations = data.registrations || [];
+            populateCompetitionClubFilter();
+            // updateCompetitionStatistics(data.statistics || {}); // Removed - statistics cards no longer exist
+            filterCompetitionRegistrations();
+        } else {
+            showCompetitionError(data.message || 'Failed to load registrations');
+        }
+    })
+    .catch(error => {
+        console.error('Error loading competition registrations:', error);
+        showCompetitionError('Failed to load registrations. Please try again.');
+    });
+}
+
+function filterCompetitionRegistrations() {
+    const classFilter = document.getElementById('competitionClassFilter').value;
+    const clubFilter = document.getElementById('competitionClubFilter').value;
+    const preferenceFilter = document.getElementById('competitionPreferenceFilter').value;
+
+    filteredCompetitionRegistrations = competitionRegistrations.filter(reg => {
+        // Check if any class in the shootingClasses array matches
+        const matchesClass = !classFilter || (reg.shootingClasses && reg.shootingClasses.some(sc => sc.class === classFilter));
+        const matchesClub = !clubFilter || reg.memberClub === clubFilter;
+        // Check if any class has the matching start preference
+        const matchesPreference = !preferenceFilter || (reg.shootingClasses && reg.shootingClasses.some(sc => sc.startPreference === preferenceFilter));
+
+        return matchesClass && matchesClub && matchesPreference;
+    });
+
+    currentCompetitionPage = 1;
+    displayCompetitionRegistrations();
+}
+
+function populateCompetitionClubFilter() {
+    const select = document.getElementById('competitionClubFilter');
+    if (!select) return;
+    const clubs = Array.from(new Set(competitionRegistrations.map(r => r.memberClub).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+    const current = select.value;
+    select.innerHTML = '<option value="">All Clubs</option>';
+    clubs.forEach(club => {
+        const opt = document.createElement('option');
+        opt.value = club;
+        opt.textContent = club;
+        select.appendChild(opt);
+    });
+    if (clubs.includes(current)) {
+        select.value = current;
+    }
+}
+
+function populateShootingClassFilter() {
+    const select = document.getElementById('competitionClassFilter');
+    if (!select) return;
+
+    // All 39 shooting classes from ShootingClasses.All
+    const shootingClasses = [
+        // A Classes
+        { id: "A1", name: "A1" },
+        { id: "A2", name: "A2" },
+        { id: "A3", name: "A3" },
+
+        // B Classes
+        { id: "B1", name: "B1" },
+        { id: "B2", name: "B2" },
+        { id: "B3", name: "B3" },
+
+        // C Classes
+        { id: "C1", name: "C1" },
+        { id: "C2", name: "C2" },
+        { id: "C3", name: "C3" },
+        { id: "C_Vet_Y", name: "C Vet Y" },
+        { id: "C_Vet_A", name: "C Vet Ä" },
+        { id: "C_Jun", name: "C Jun" },
+        { id: "C1_Dam", name: "C1 Dam" },
+        { id: "C2_Dam", name: "C2 Dam" },
+        { id: "C3_Dam", name: "C3 Dam" },
+
+        // R Classes
+        { id: "R1", name: "R1" },
+        { id: "R2", name: "R2" },
+        { id: "R3", name: "R3" },
+
+        // M Classes
+        { id: "M1", name: "M1" },
+        { id: "M2", name: "M2" },
+        { id: "M3", name: "M3" },
+        { id: "M4", name: "M4" },
+        { id: "M5", name: "M5" },
+        { id: "M6", name: "M6" },
+        { id: "M7", name: "M7" },
+        { id: "M8", name: "M8" },
+        { id: "M9", name: "M9" },
+
+        // L Classes
+        { id: "L1", name: "L1" },
+        { id: "L2", name: "L2" },
+        { id: "L3", name: "L3" },
+        { id: "L_Vet_Y", name: "L Vet Y" },
+        { id: "L_Vet_A", name: "L Vet Ä" },
+        { id: "L_Jun", name: "L Jun" },
+        { id: "L1_Dam", name: "L1 Dam" },
+        { id: "L2_Dam", name: "L2 Dam" },
+        { id: "L3_Dam", name: "L3 Dam" }
+    ];
+
+    // Keep first option ("Alla klasser") and add all shooting classes
+    select.innerHTML = '<option value="">Alla klasser</option>';
+
+    // Add all shooting classes
+    shootingClasses.forEach(sc => {
+        const option = document.createElement('option');
+        option.value = sc.id;        // Use ID for filtering (e.g., "C_Vet_A")
+        option.textContent = sc.name; // Display name for user (e.g., "C Vet Ä")
+        select.appendChild(option);
+    });
+}
+
+function displayCompetitionRegistrations() {
+    const tbody = document.getElementById('competitionRegistrationsTableBody');
+    const startIndex = (currentCompetitionPage - 1) * competitionPageSize;
+    const endIndex = startIndex + competitionPageSize;
+    const pageRegistrations = filteredCompetitionRegistrations.slice(startIndex, endIndex);
+
+    if (filteredCompetitionRegistrations.length === 0) {
+        showCompetitionNoResults();
+        return;
+    }
+
+    tbody.innerHTML = '';
+
+    pageRegistrations.forEach(reg => {
+        // Build class badges from shootingClasses array (small badges)
+        let classBadges = '';
+
+        if (reg.shootingClasses && Array.isArray(reg.shootingClasses) && reg.shootingClasses.length > 0) {
+            classBadges = reg.shootingClasses.map(sc => {
+                // sc should be an object with 'class', 'className', and 'startPreference' properties
+                const classId = sc.class || sc.className || '';
+                const normalizedClass = normalizeShootingClass(classId);
+                return `<span class="badge bg-primary me-1 mb-1" style="font-size: 0.85em;">${normalizedClass}</span>`;
+            }).join('');
+        }
+
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td>
+                <strong>${reg.memberName}</strong>
+            </td>
+            <td>${reg.memberClub}</td>
+            <td>
+                ${classBadges}
+            </td>
+            <td>
+                ${new Date(reg.registrationDate).toLocaleString('sv-SE', {year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'})}
+            </td>
+            <td>
+                <span class="badge ${getPaymentStatusBadgeClass(reg.paymentStatus)}">
+                    ${getPaymentStatusText(reg.paymentStatus)}
+                </span>
+            </td>
+            <td>
+                <button class="btn btn-sm btn-outline-primary me-1"
+                        onclick="editCompetitionRegistration(${reg.id})"
+                        title="Edit Registration">
+                    <i class="bi bi-pencil"></i>
+                </button>
+                <button class="btn btn-sm btn-outline-success me-1"
+                        onclick="showPaymentOptionsForRegistration(${reg.id})"
+                        title="Betalningsalternativ">
+                    <i class="bi bi-wallet2"></i>
+                </button>
+                ${reg.paymentStatus === 'Pending' ? `
+                    <button class="btn btn-sm btn-success me-1"
+                            onclick="markAsPaid(${reg.id})"
+                            title="Markera som betald">
+                        <i class="bi bi-check-circle"></i>
+                    </button>
+                ` : ''}
+                <button class="btn btn-sm btn-outline-danger"
+                        onclick="confirmDeleteCompetitionRegistration(${reg.id})"
+                        title="Delete Registration">
+                    <i class="bi bi-trash"></i>
+                </button>
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
+
+    showCompetitionTable();
+    updateCompetitionPagination();
+}
+
+// REMOVED: Statistics cards no longer exist on the page
+// function updateCompetitionStatistics(statistics) {
+//     const uniqueMembers = new Set(competitionRegistrations.map(r => r.memberId)).size;
+//
+//     // Count total classes across all registrations
+//     let totalClasses = 0;
+//     let totalA = 0;
+//     let totalB = 0;
+//     let totalC = 0;
+//
+//     competitionRegistrations.forEach(reg => {
+//         if (reg.shootingClasses && reg.shootingClasses.length > 0) {
+//             totalClasses += reg.shootingClasses.length;
+//
+//             reg.shootingClasses.forEach(sc => {
+//                 const normalizedClass = normalizeShootingClass(sc.class);
+//                 if (normalizedClass.startsWith('A')) totalA++;
+//                 else if (normalizedClass.startsWith('B')) totalB++;
+//                 else if (normalizedClass.startsWith('C')) totalC++;
+//             });
+//         }
+//     });
+//
+//     document.getElementById('competitionTotalRegistrations').textContent = totalClasses;
+//     document.getElementById('competitionUniqueMembers').textContent = uniqueMembers;
+//     document.getElementById('competitionTotalAClasses').textContent = totalA;
+//     document.getElementById('competitionTotalBClasses').textContent = totalB;
+//     document.getElementById('competitionTotalCClasses').textContent = totalC;
+// }
+
+function showCompetitionLoading() {
+    document.getElementById('competitionRegistrationsLoading').classList.remove('d-none');
+    document.getElementById('competitionRegistrationsError').classList.add('d-none');
+    document.getElementById('competitionRegistrationsTableContainer').classList.add('d-none');
+    document.getElementById('competitionNoRegistrations').classList.add('d-none');
+}
+
+function showCompetitionError(message) {
+    document.getElementById('competitionRegistrationsErrorMessage').textContent = message;
+    document.getElementById('competitionRegistrationsError').classList.remove('d-none');
+    document.getElementById('competitionRegistrationsLoading').classList.add('d-none');
+    document.getElementById('competitionRegistrationsTableContainer').classList.add('d-none');
+    document.getElementById('competitionNoRegistrations').classList.add('d-none');
+}
+
+function showCompetitionTable() {
+    document.getElementById('competitionRegistrationsTableContainer').classList.remove('d-none');
+    document.getElementById('competitionRegistrationsLoading').classList.add('d-none');
+    document.getElementById('competitionRegistrationsError').classList.add('d-none');
+    document.getElementById('competitionNoRegistrations').classList.add('d-none');
+}
+
+function showCompetitionNoResults() {
+    document.getElementById('competitionNoRegistrations').classList.remove('d-none');
+    document.getElementById('competitionRegistrationsLoading').classList.add('d-none');
+    document.getElementById('competitionRegistrationsError').classList.add('d-none');
+    document.getElementById('competitionRegistrationsTableContainer').classList.add('d-none');
+}
+
+function updateCompetitionPagination() {
+    const pagination = document.getElementById('competitionRegistrationsPagination');
+    const totalPages = Math.ceil(filteredCompetitionRegistrations.length / competitionPageSize);
+
+    if (totalPages <= 1) {
+        pagination.innerHTML = '';
+        return;
+    }
+
+    let html = '';
+    for (let i = 1; i <= totalPages; i++) {
+        html += `
+            <li class="page-item ${i === currentCompetitionPage ? 'active' : ''}">
+                <button class="page-link" onclick="gotoCompetitionPage(${i})">${i}</button>
+            </li>
+        `;
+    }
+
+    pagination.innerHTML = html;
+}
+
+function gotoCompetitionPage(page) {
+    currentCompetitionPage = page;
+    displayCompetitionRegistrations();
+}
+
+function refreshCompetitionRegistrations() {
+    loadCompetitionRegistrations();
+}
+
+function exportCompetitionRegistrations() {
+    const currentCompetitionId = $('.competition-registration-management').data('competition-id');
+    window.open(`/umbraco/surface/RegistrationAdmin/ExportCompetitionRegistrations?competitionId=${currentCompetitionId}`, '_blank');
+}
+
+function testHubCreation() {
+    const currentCompetitionId = $('.competition-registration-management').data('competition-id');
+
+    if (!currentCompetitionId) {
+        alert('Competition ID not found');
+        return;
+    }
+
+    // Show loading
+    const button = event.target;
+    const originalText = button.innerHTML;
+    button.innerHTML = '<i class="bi bi-gear-fill"></i> Testing...';
+    button.disabled = true;
+
+    // Test hub creation - try GET first to avoid CSRF issues
+    fetch(`/umbraco/surface/Competition/TestHubCreation?competitionId=${currentCompetitionId}`, {
+        method: 'GET'
+    })
+    .then(response => response.json())
+    .then(data => {
+        console.log('=== HUB TEST RESULT ===');
+        console.log('Full Response:', data);
+        console.log('Success:', data.success);
+        console.log('Message:', data.message);
+        console.log('Hub ID:', data.hubId);
+        console.log('Hub Name:', data.hubName);
+        console.log('Hub Alias:', data.hubAlias);
+        console.log('Is Actual Hub:', data.isActualHub);
+        console.log('Is Competition Fallback:', data.isCompetitionFallback);
+        console.log('=== DEBUG INFO ===');
+        console.log('Competition ID:', data.debug?.competitionId);
+        console.log('Competition Name:', data.debug?.competitionName);
+        console.log('Children Count:', data.debug?.childrenCount);
+        console.log('Hub Doc Type Found:', data.debug?.hubDocTypeFound);
+        console.log('ContentPage Doc Type Found:', data.debug?.contentPageDocTypeFound);
+        console.log('Existing Hub Found:', data.debug?.existingHubFound);
+        console.log('Existing Hub ID:', data.debug?.existingHubId);
+        console.log('Existing Hub Name:', data.debug?.existingHubName);
+        console.log('Existing Hub Alias:', data.debug?.existingHubAlias);
+        console.log('==================');
+
+        if (data.success) {
+            alert(`✅ SUCCESS!\n\nHub: ${data.hubName}\nID: ${data.hubId}\nType: ${data.hubAlias}\n\nMessage: ${data.message}\n\nCheck console for detailed logs.`);
+        } else {
+            alert(`❌ FAILED!\n\nError: ${data.message}\n\nCheck console for details.`);
+        }
+
+        // Reset button
+        button.innerHTML = originalText;
+        button.disabled = false;
+    })
+    .catch(error => {
+        console.error('Test Error:', error);
+        alert('❌ Test failed - check console for details');
+
+        // Reset button
+        button.innerHTML = originalText;
+        button.disabled = false;
+    });
+}
+
+function editCompetitionRegistration(registrationId) {
+    const registration = competitionRegistrations.find(r => r.id === registrationId);
+    if (!registration) return;
+
+    // Build comma-separated list of classes
+    let classesDisplay = '';
+    if (registration.shootingClasses && registration.shootingClasses.length > 0) {
+        classesDisplay = registration.shootingClasses.map(sc => normalizeShootingClass(sc.class)).join(', ');
+    }
+
+    // Build comma-separated list of start preferences
+    let preferencesDisplay = '';
+    if (registration.shootingClasses && registration.shootingClasses.length > 0) {
+        preferencesDisplay = registration.shootingClasses.map(sc => sc.startPreference).join(', ');
+    }
+
+    // Populate modal fields
+    document.getElementById('competitionEditRegistrationId').value = registration.id;
+    document.getElementById('competitionEditMemberName').value = registration.memberName;
+    document.getElementById('competitionEditShootingClass').value = classesDisplay;
+    document.getElementById('competitionEditStartPreference').value = preferencesDisplay;
+    document.getElementById('competitionEditMemberClub').value = registration.memberClub;
+    document.getElementById('competitionEditIsActive').checked = registration.isActive;
+
+    // Show modal
+    new bootstrap.Modal(document.getElementById('competitionEditRegistrationModal')).show();
+}
+
+function saveCompetitionRegistrationChanges() {
+    const registrationId = document.getElementById('competitionEditRegistrationId').value;
+    const startPreference = document.getElementById('competitionEditStartPreference').value;
+    const isActive = document.getElementById('competitionEditIsActive').checked;
+
+    const data = {
+        registrationId: parseInt(registrationId),
+        startPreference: startPreference,
+        isActive: isActive
+    };
+
+    fetch('/umbraco/surface/RegistrationAdmin/UpdateCompetitionRegistration', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'RequestVerificationToken': $('input[name="__RequestVerificationToken"]').val()
+        },
+        body: JSON.stringify(data)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            bootstrap.Modal.getInstance(document.getElementById('competitionEditRegistrationModal')).hide();
+            loadCompetitionRegistrations();
+        } else {
+            alert('Error updating registration: ' + (data.message || 'Unknown error'));
+        }
+    })
+    .catch(error => {
+        console.error('Error updating registration:', error);
+        alert('Error updating registration. Please try again.');
+    });
+}
+
+function confirmDeleteCompetitionRegistration(registrationId) {
+    if (confirm('Are you sure you want to delete this registration? This action cannot be undone.')) {
+        deleteRegistrationById(registrationId);
+    }
+}
+
+function deleteCompetitionRegistration() {
+    const registrationId = document.getElementById('competitionEditRegistrationId').value;
+    if (confirm('Are you sure you want to delete this registration? This action cannot be undone.')) {
+        bootstrap.Modal.getInstance(document.getElementById('competitionEditRegistrationModal')).hide();
+        deleteRegistrationById(parseInt(registrationId));
+    }
+}
+
+function deleteRegistrationById(registrationId) {
+    const data = {
+        registrationId: registrationId
+    };
+
+    fetch('/umbraco/surface/RegistrationAdmin/DeleteCompetitionRegistration', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'RequestVerificationToken': $('input[name="__RequestVerificationToken"]').val()
+        },
+        body: JSON.stringify(data)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            loadCompetitionRegistrations();
+        } else {
+            alert('Error deleting registration: ' + (data.message || 'Unknown error'));
+        }
+    })
+    .catch(error => {
+        console.error('Error deleting registration:', error);
+        alert('Error deleting registration. Please try again.');
+    });
+}
+
+function markAsPaid(registrationId) {
+    if (!confirm('Markera denna anmälan som betald?')) return;
+
+    const token = $('input[name="__RequestVerificationToken"]').val();
+
+    // Get invoice ID from registration
+    fetch(`/umbraco/surface/Payment/GetRegistrationPaymentStatus?registrationId=${registrationId}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.data && data.data.invoiceId) {
+                // Update payment status
+                return fetch('/umbraco/surface/Payment/UpdatePaymentStatus', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'RequestVerificationToken': token
+                    },
+                    body: JSON.stringify({
+                        invoiceId: data.data.invoiceId,
+                        newStatus: 'Paid',
+                        notes: 'Manually marked as paid by admin'
+                    })
+                });
+            } else {
+                throw new Error('No invoice found for this registration');
+            }
+        })
+        .then(response => response.json())
+        .then(result => {
+            if (result.success) {
+                alert('Betalning markerad som betald!');
+                loadCompetitionRegistrations(); // Refresh list
+            } else {
+                alert('Kunde inte uppdatera: ' + result.message);
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Ett fel uppstod: ' + error.message);
+        });
+}
+
+function getPreferenceBadgeClass(preference) {
+    switch (preference) {
+        case 'Tidig Start': return 'bg-info';
+        case 'Sen Start': return 'bg-warning';
+        default: return 'bg-secondary';
+    }
+}
+
+function normalizeShootingClass(raw) {
+    if (!raw) return '';
+    let s = String(raw).trim();
+    // Normalize separators and uppercase where needed
+    s = s.replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
+
+    // Common compact forms → spaced
+    s = s.replace(/^C\s?Jun$/i, 'C Jun');
+    s = s.replace(/^C1\s?Dam$/i, 'C1 Dam');
+    s = s.replace(/^C2\s?Dam$/i, 'C2 Dam');
+    s = s.replace(/^C3\s?Dam$/i, 'C3 Dam');
+
+    // Veteran Younger/Older variants
+    // Map various CVY forms to 'C Vet Y'
+    if (/^C\s*V(e|ä)?t\s*Y$/i.test(s) || /^CVY$/i.test(s)) {
+        return 'C Vet Y';
+    }
+    // Map various CVÄ/CVAE forms to 'C Vet Ä'
+    if (/^C\s*V(e|ä)?t\s*(Ä|A)$/i.test(s) || /^CVÄ$/i.test(s) || /^CVA$/i.test(s)) {
+        // Force Swedish Ä
+        return 'C Vet Ä';
+    }
+
+    // Map CD3 or C D3 to C3 Dam
+    if (/^C\s*D3$/i.test(s) || /^CD3$/i.test(s)) {
+        return 'C3 Dam';
+    }
+
+    // Uppercase A/B/C categories like A1/A2/A3/B1... keep as-is
+    if (/^[ABC][0-9]$/i.test(s)) return s.toUpperCase();
+
+    return s;
+}
+
+// Load data when the registrations tab is shown
+$(document).ready(function() {
+    // Populate shooting class filter dropdown with all 39 classes
+    populateShootingClassFilter();
+
+    // Support both admin page (comp-registrations) and standalone page (registrations)
+    $('button[data-bs-target="#comp-registrations"], button[data-bs-target="#registrations"]').on('shown.bs.tab shown.bs.pill click', function () {
+        console.log('Registrations tab activated');
+        if (competitionRegistrations.length === 0) {
+            loadCompetitionRegistrations();
+        }
+    });
+
+    // Also trigger load on document ready if this tab is active
+    if ($('#comp-registrations').hasClass('active') || $('#comp-registrations').hasClass('show') ||
+        $('#registrations').hasClass('active') || $('#registrations').hasClass('show')) {
+        console.log('Registrations tab is active on page load');
+        if (competitionRegistrations.length === 0) {
+            loadCompetitionRegistrations();
+        }
+    }
+});
+
+// Make loadCompetitionRegistrations available globally for refresh
+window.loadCompetitionRegistrations = loadCompetitionRegistrations;
+
+// Payment functionality for registration management
+let currentPaymentRegistrationId = null;
+
+function showPaymentOptionsForRegistration(registrationId) {
+    const registration = competitionRegistrations.find(r => r.id === registrationId);
+    if (!registration) {
+        alert('Anmälan hittades inte');
+        return;
+    }
+
+    // Store registration ID for payment functions
+    currentPaymentRegistrationId = registrationId;
+
+    // Show payment options modal
+    new bootstrap.Modal(document.getElementById('paymentOptionsModal')).show();
+}
+
+function showSwishPaymentModalForRegistration() {
+    const competitionId = $('.competition-registration-management').data('competition-id');
+
+    if (!competitionId) {
+        alert('Tävlings-ID saknas');
+        return;
+    }
+
+    if (!currentPaymentRegistrationId) {
+        alert('Ingen anmälan vald för betalning');
+        return;
+    }
+
+    // Get the registration to find member ID
+    const registration = competitionRegistrations.find(r => r.id === currentPaymentRegistrationId);
+    if (!registration) {
+        alert('Anmälan hittades inte');
+        return;
+    }
+
+    // Close payment options modal
+    bootstrap.Modal.getInstance(document.getElementById('paymentOptionsModal')).hide();
+
+    // Show Swish QR modal
+    const swishModal = new bootstrap.Modal(document.getElementById('swishPaymentModalAdmin'));
+    swishModal.show();
+
+    // Load QR code using GeneratePaymentQR endpoint
+    const modalBody = document.getElementById('swishPaymentModalAdminBody');
+    modalBody.innerHTML = '<div class="spinner-border text-primary" role="status"><span class="visually-hidden">Laddar QR-kod...</span></div>';
+
+    // Call GeneratePaymentQR with targetMemberId parameter
+    fetch(`/umbraco/surface/Swish/GeneratePaymentQR?competitionId=${competitionId}&targetMemberId=${registration.memberId}`, {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Display QR code
+            let html = '<div class="text-center">';
+            html += `<h5 class="mb-3">Swish QR-kod</h5>`;
+            html += `<img src="${data.qrCode}" alt="Swish QR Code" class="img-fluid mb-3" style="max-width: 300px;" />`;
+            html += `<p><strong>Belopp:</strong> ${data.amount} SEK</p>`;
+            html += `<p><strong>Klasser:</strong> ${data.shootingClasses}</p>`;
+            html += `<p><strong>Fakturanummer:</strong> ${data.invoiceNumber}</p>`;
+            html += `<p class="text-muted small">Skanna QR-koden med Swish-appen för att betala.</p>`;
+            html += '</div>';
+            modalBody.innerHTML = html;
+        } else {
+            modalBody.innerHTML = `<div class="alert alert-danger">${data.message || 'Kunde inte ladda QR-kod'}</div>`;
+        }
+    })
+    .catch(error => {
+        console.error('Error loading Swish QR code:', error);
+        modalBody.innerHTML = '<div class="alert alert-danger">Ett fel uppstod när QR-koden skulle laddas.</div>';
+    });
+}
+
+async function sendSwishQRCodeEmailForRegistration() {
+    const competitionId = $('.competition-registration-management').data('competition-id');
+
+    if (!competitionId) {
+        alert('Tävlings-ID saknas');
+        return;
+    }
+
+    if (!currentPaymentRegistrationId) {
+        alert('Ingen anmälan vald för betalning');
+        return;
+    }
+
+    // Get the registration to find member ID
+    const registration = competitionRegistrations.find(r => r.id === currentPaymentRegistrationId);
+    if (!registration) {
+        alert('Anmälan hittades inte');
+        return;
+    }
+
+    try {
+        // Show loading state on button
+        const button = event.target;
+        const originalContent = button.innerHTML;
+        button.disabled = true;
+        button.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Skickar...';
+
+        const formData = new FormData();
+        formData.append('competitionId', competitionId);
+        formData.append('targetMemberId', registration.memberId);
+
+        const response = await fetch('/umbraco/surface/Swish/SendQRCodeEmail', {
+            method: 'POST',
+            body: formData,
+            headers: {
+                'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value,
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            // Close payment options modal
+            bootstrap.Modal.getInstance(document.getElementById('paymentOptionsModal')).hide();
+
+            // Show success message
+            alert(`QR-koden har skickats till ${result.email}`);
+
+            // Reset button
+            button.innerHTML = originalContent;
+            button.disabled = false;
+        } else {
+            // Show error
+            button.innerHTML = originalContent;
+            button.disabled = false;
+            alert('Fel: ' + result.message);
+        }
+    } catch (error) {
+        console.error('Error sending Swish QR code email:', error);
+        alert('Ett fel uppstod när e-posten skulle skickas. Försök igen.');
+        event.target.innerHTML = '<i class="bi bi-envelope"></i> Skicka QR-kod via e-post';
+        event.target.disabled = false;
+    }
+}
+</script>

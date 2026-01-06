@@ -1,0 +1,636 @@
+@*
+ * Registration Management Partial View
+ * Admin interface for managing competition registrations
+ * Redesigned with Club Management pattern and Swedish translation
+*@
+
+<div class="registration-management">
+    <!-- Header Section -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h3><i class="bi bi-clipboard-check me-2"></i>Tävlingsanmälningar</h3>
+        <div>
+            <button class="btn btn-primary" onclick="refreshRegistrations()">
+                <i class="bi bi-arrow-clockwise me-1"></i>Uppdatera
+            </button>
+        </div>
+    </div>
+
+    <!-- Filter Section -->
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label for="competitionFilter" class="form-label">Tävling</label>
+                    <select class="form-select" id="competitionFilter" onchange="filterRegistrations()">
+                        <option value="">Alla tävlingar</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label for="classFilter" class="form-label">Klass</label>
+                    <select class="form-select" id="classFilter" onchange="filterRegistrations()">
+                        <option value="">Alla klasser</option>
+                        <option value="A1">A1</option>
+                        <option value="A2">A2</option>
+                        <option value="A3">A3</option>
+                        <option value="B1">B1</option>
+                        <option value="B2">B2</option>
+                        <option value="B3">B3</option>
+                        <option value="C1">C1</option>
+                        <option value="C2">C2</option>
+                        <option value="C3">C3</option>
+                        <option value="CVÄ">CVÄ</option>
+                        <option value="CVY">CVY</option>
+                        <option value="CD3">CD3</option>
+                        <option value="CJun">CJun</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label for="statusFilter" class="form-label">Status</label>
+                    <select class="form-select" id="statusFilter" onchange="filterRegistrations()">
+                        <option value="">Alla</option>
+                        <option value="active">Aktiv</option>
+                        <option value="inactive">Inaktiv</option>
+                    </select>
+                </div>
+                <div class="col-md-2 d-flex align-items-end">
+                    <button class="btn btn-outline-secondary w-100" onclick="clearFilters()">
+                        <i class="bi bi-x-circle me-1"></i>Rensa
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Statistics Cards -->
+    <div class="row mb-4" id="registrationStats">
+        <div class="col-md-3">
+            <div class="card bg-primary text-white">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h6 class="card-title">Totalt antal anmälningar</h6>
+                            <h4 id="totalRegistrations">-</h4>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="bi bi-people fs-1"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-success text-white">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h6 class="card-title">Aktiva tävlingar</h6>
+                            <h4 id="activeCompetitions">-</h4>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="bi bi-trophy fs-1"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-info text-white">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h6 class="card-title">Unika medlemmar</h6>
+                            <h4 id="uniqueMembers">-</h4>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="bi bi-person-check fs-1"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-warning text-white">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h6 class="card-title">Populäraste klass</h6>
+                            <h4 id="popularClass">-</h4>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="bi bi-graph-up fs-1"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading State -->
+    <div id="registrationsLoading" class="text-center py-4">
+        <div class="spinner-border" role="status">
+            <span class="visually-hidden">Laddar...</span>
+        </div>
+        <p class="mt-2">Laddar anmälningar...</p>
+    </div>
+
+    <!-- Error State -->
+    <div id="registrationsError" class="alert alert-danger d-none">
+        <h6>Fel vid laddning av anmälningar</h6>
+        <p id="registrationsErrorMessage"></p>
+        <button class="btn btn-outline-danger" onclick="loadRegistrations()">Försök igen</button>
+    </div>
+
+    <!-- No Results -->
+    <div id="noRegistrations" class="text-center py-4 d-none">
+        <i class="bi bi-inbox display-1 text-muted"></i>
+        <h4 class="mt-3">Inga anmälningar hittades</h4>
+        <p class="text-muted">Inga tävlingsanmälningar matchar de valda filtren.</p>
+    </div>
+
+    <!-- Registrations Table -->
+    <div id="registrationsTableContainer" class="d-none">
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead class="table-light">
+                    <tr>
+                        <th>Tävling / Medlem</th>
+                        <th>Klubb</th>
+                        <th>Klass</th>
+                        <th>Startpreferens</th>
+                        <th>Anmälningsdatum</th>
+                        <th>Status</th>
+                        <th class="text-end">Åtgärder</th>
+                    </tr>
+                </thead>
+                <tbody id="registrationsTableBody">
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Pagination -->
+        <nav aria-label="Sidnumrering" id="registrationsPagination" class="d-none">
+            <ul class="pagination justify-content-center" id="registrationsPaginationList">
+            </ul>
+        </nav>
+    </div>
+</div>
+
+<!-- Edit Registration Modal -->
+<div class="modal fade" id="editRegistrationModal" tabindex="-1" aria-labelledby="editRegistrationModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="editRegistrationModalLabel">Redigera anmälan</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <form id="editRegistrationForm">
+                    <input type="hidden" id="editRegistrationId" />
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="editMemberName" class="form-label">Medlemsnamn</label>
+                                <input type="text" class="form-control" id="editMemberName" readonly />
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="editCompetitionName" class="form-label">Tävling</label>
+                                <input type="text" class="form-control" id="editCompetitionName" readonly />
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="editShootingClass" class="form-label">Skytteklass</label>
+                                <input type="text" class="form-control" id="editShootingClass" readonly />
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="editStartPreference" class="form-label">Startpreferens</label>
+                                <select class="form-select" id="editStartPreference">
+                                    <option value="Inget">Inget (ingen preferens)</option>
+                                    <option value="Tidig Start">Tidig Start</option>
+                                    <option value="Sen Start">Sen Start</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="editMemberClub" class="form-label">Klubb</label>
+                                <input type="text" class="form-control" id="editMemberClub" readonly />
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="editRegistrationDate" class="form-label">Anmälningsdatum</label>
+                                <input type="text" class="form-control" id="editRegistrationDate" readonly />
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="editIsActive" />
+                            <label class="form-check-label" for="editIsActive">
+                                Anmälan aktiv
+                            </label>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-danger" onclick="deleteRegistration()">
+                    <i class="bi bi-trash me-1"></i>Ta bort anmälan
+                </button>
+                <div class="ms-auto">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                    <button type="button" class="btn btn-primary" onclick="saveRegistrationChanges()">Spara ändringar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Template for registration rows (Club Management pattern) -->
+<script type="text/html" id="registration-row-template">
+    <tr data-registration-id="{id}">
+        <td>
+            <strong>{competitionName}</strong><br>
+            <small class="text-muted">{memberName}</small>
+        </td>
+        <td>
+            <span class="badge bg-secondary">{memberClub}</span>
+        </td>
+        <td>
+            <span class="badge bg-primary">{shootingClass}</span>
+        </td>
+        <td>
+            <span class="badge {preferenceBadgeClass}">{startPreference}</span>
+        </td>
+        <td>
+            <strong>{regDate}</strong><br>
+            <small class="text-muted">{regTime}</small>
+        </td>
+        <td>
+            <span class="badge {statusBadgeClass}">{statusText}</span>
+        </td>
+        <td class="text-end">
+            <button class="btn btn-sm btn-outline-primary" onclick="editRegistration({id})" title="Redigera">
+                <i class="bi bi-pencil"></i>
+            </button>
+            <button class="btn btn-sm btn-outline-danger" onclick="confirmDeleteRegistration({id})" title="Ta bort">
+                <i class="bi bi-trash"></i>
+            </button>
+        </td>
+    </tr>
+</script>
+
+<script>
+// Registration Management JavaScript
+let allRegistrations = [];
+let filteredRegistrations = [];
+let currentPage = 1;
+const pageSize = 20;
+
+// Lazy load registration management data
+let registrationManagementLoaded = false;
+
+document.addEventListener('DOMContentLoaded', function() {
+    const registrationsTab = document.getElementById('registrations-tab');
+
+    // Load when tab is clicked for the first time
+    if (registrationsTab) {
+        registrationsTab.addEventListener('shown.bs.tab', function() {
+            if (!registrationManagementLoaded) {
+                loadRegistrations();
+                loadCompetitions();
+                registrationManagementLoaded = true;
+            }
+        });
+    }
+});
+
+function loadRegistrations() {
+    showLoading();
+
+    fetch('/umbraco/surface/RegistrationAdmin/GetCompetitionRegistrations', {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            allRegistrations = data.registrations || [];
+            updateStatistics(data.statistics || {});
+            filterRegistrations();
+        } else {
+            showError(data.message || 'Kunde inte ladda anmälningar');
+        }
+    })
+    .catch(error => {
+        console.error('Error loading registrations:', error);
+        showError('Kunde inte ladda anmälningar. Försök igen.');
+    });
+}
+
+function loadCompetitions() {
+    fetch('/umbraco/surface/RegistrationAdmin/GetActiveCompetitions', {
+        method: 'GET'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            const select = document.getElementById('competitionFilter');
+            select.innerHTML = '<option value="">Alla tävlingar</option>';
+
+            data.competitions.forEach(comp => {
+                const option = document.createElement('option');
+                option.value = comp.id;
+                option.textContent = comp.name;
+                select.appendChild(option);
+            });
+        }
+    })
+    .catch(error => {
+        console.error('Error loading competitions:', error);
+    });
+}
+
+function filterRegistrations() {
+    const competitionFilter = document.getElementById('competitionFilter').value;
+    const classFilter = document.getElementById('classFilter').value;
+    const statusFilter = document.getElementById('statusFilter').value;
+
+    filteredRegistrations = allRegistrations.filter(reg => {
+        const matchesCompetition = !competitionFilter || reg.competitionId == competitionFilter;
+        const matchesClass = !classFilter || reg.shootingClass === classFilter;
+        const matchesStatus = !statusFilter ||
+            (statusFilter === 'active' && reg.isActive) ||
+            (statusFilter === 'inactive' && !reg.isActive);
+
+        return matchesCompetition && matchesClass && matchesStatus;
+    });
+
+    currentPage = 1;
+    displayRegistrations();
+}
+
+function clearFilters() {
+    document.getElementById('competitionFilter').value = '';
+    document.getElementById('classFilter').value = '';
+    document.getElementById('statusFilter').value = '';
+    filterRegistrations();
+}
+
+function displayRegistrations() {
+    const tbody = document.getElementById('registrationsTableBody');
+    const template = document.getElementById('registration-row-template').innerHTML;
+    const startIndex = (currentPage - 1) * pageSize;
+    const endIndex = startIndex + pageSize;
+    const pageRegistrations = filteredRegistrations.slice(startIndex, endIndex);
+
+    if (filteredRegistrations.length === 0) {
+        showNoResults();
+        return;
+    }
+
+    tbody.innerHTML = pageRegistrations.map(reg => {
+        const regDate = new Date(reg.registrationDate).toLocaleDateString('sv-SE');
+        const regTime = new Date(reg.registrationDate).toLocaleTimeString('sv-SE', {hour: '2-digit', minute: '2-digit'});
+        const shootingClassName = getShootingClassName(reg.shootingClass);
+        const preferenceBadgeClass = getPreferenceBadgeClass(reg.startPreference);
+        const statusText = reg.isActive ? 'Aktiv' : 'Inaktiv';
+        const statusBadgeClass = reg.isActive ? 'bg-success' : 'bg-warning';
+
+        return template
+            .replace(/{id}/g, reg.id)
+            .replace(/{competitionName}/g, escapeHtml(reg.competitionName))
+            .replace(/{memberName}/g, escapeHtml(reg.memberName))
+            .replace(/{memberClub}/g, escapeHtml(reg.memberClub))
+            .replace(/{shootingClass}/g, shootingClassName)
+            .replace(/{startPreference}/g, reg.startPreference)
+            .replace(/{preferenceBadgeClass}/g, preferenceBadgeClass)
+            .replace(/{regDate}/g, regDate)
+            .replace(/{regTime}/g, regTime)
+            .replace(/{statusText}/g, statusText)
+            .replace(/{statusBadgeClass}/g, statusBadgeClass);
+    }).join('');
+
+    showTable();
+    updatePagination();
+}
+
+function getPreferenceBadgeClass(preference) {
+    switch (preference) {
+        case 'Tidig Start': return 'bg-info';
+        case 'Sen Start': return 'bg-warning';
+        default: return 'bg-secondary';
+    }
+}
+
+function getShootingClassName(classId) {
+    switch (classId) {
+        case 'C_Vet_Y': return 'C Vet Y';
+        case 'C_Vet_A': return 'C Vet Ä';
+        case 'C_Jun': return 'C Jun';
+        case 'C1_Dam': return 'C1 Dam';
+        case 'C2_Dam': return 'C2 Dam';
+        case 'C3_Dam': return 'C3 Dam';
+        default: return classId; // Return original if no mapping found
+    }
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function updateStatistics(stats) {
+    document.getElementById('totalRegistrations').textContent = stats.totalRegistrations || '0';
+    document.getElementById('activeCompetitions').textContent = stats.activeCompetitions || '0';
+    document.getElementById('uniqueMembers').textContent = stats.uniqueMembers || '0';
+    document.getElementById('popularClass').textContent = stats.popularClass || '-';
+}
+
+function updatePagination() {
+    const totalPages = Math.ceil(filteredRegistrations.length / pageSize);
+    const paginationList = document.getElementById('registrationsPaginationList');
+    const pagination = document.getElementById('registrationsPagination');
+
+    if (totalPages <= 1) {
+        pagination.classList.add('d-none');
+        return;
+    }
+
+    pagination.classList.remove('d-none');
+    paginationList.innerHTML = '';
+
+    // Previous button
+    const prevLi = document.createElement('li');
+    prevLi.className = `page-item ${currentPage === 1 ? 'disabled' : ''}`;
+    prevLi.innerHTML = `<a class="page-link" href="#" onclick="changePage(${currentPage - 1}); return false;">Föregående</a>`;
+    paginationList.appendChild(prevLi);
+
+    // Page numbers (show max 7 pages)
+    let startPage = Math.max(1, currentPage - 3);
+    let endPage = Math.min(totalPages, startPage + 6);
+    startPage = Math.max(1, endPage - 6);
+
+    for (let i = startPage; i <= endPage; i++) {
+        const li = document.createElement('li');
+        li.className = `page-item ${i === currentPage ? 'active' : ''}`;
+        li.innerHTML = `<a class="page-link" href="#" onclick="changePage(${i}); return false;">${i}</a>`;
+        paginationList.appendChild(li);
+    }
+
+    // Next button
+    const nextLi = document.createElement('li');
+    nextLi.className = `page-item ${currentPage === totalPages ? 'disabled' : ''}`;
+    nextLi.innerHTML = `<a class="page-link" href="#" onclick="changePage(${currentPage + 1}); return false;">Nästa</a>`;
+    paginationList.appendChild(nextLi);
+}
+
+function changePage(page) {
+    const totalPages = Math.ceil(filteredRegistrations.length / pageSize);
+    if (page < 1 || page > totalPages) return;
+
+    currentPage = page;
+    displayRegistrations();
+}
+
+function editRegistration(registrationId) {
+    const registration = allRegistrations.find(r => r.id === registrationId);
+    if (!registration) return;
+
+    // Populate modal
+    document.getElementById('editRegistrationId').value = registration.id;
+    document.getElementById('editMemberName').value = registration.memberName;
+    document.getElementById('editCompetitionName').value = registration.competitionName;
+    document.getElementById('editShootingClass').value = registration.shootingClass;
+    document.getElementById('editStartPreference').value = registration.startPreference;
+    document.getElementById('editMemberClub').value = registration.memberClub;
+    document.getElementById('editRegistrationDate').value = new Date(registration.registrationDate).toLocaleString('sv-SE');
+    document.getElementById('editIsActive').checked = registration.isActive;
+
+    // Show modal
+    new bootstrap.Modal(document.getElementById('editRegistrationModal')).show();
+}
+
+function saveRegistrationChanges() {
+    const registrationId = document.getElementById('editRegistrationId').value;
+    const startPreference = document.getElementById('editStartPreference').value;
+    const isActive = document.getElementById('editIsActive').checked;
+
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value;
+
+    fetch('/umbraco/surface/RegistrationAdmin/UpdateCompetitionRegistration', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'RequestVerificationToken': token
+        },
+        body: JSON.stringify({
+            registrationId: parseInt(registrationId),
+            startPreference: startPreference,
+            isActive: isActive
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            bootstrap.Modal.getInstance(document.getElementById('editRegistrationModal')).hide();
+            loadRegistrations(); // Reload data
+        } else {
+            alert('Fel vid uppdatering av anmälan: ' + (data.message || 'Okänt fel'));
+        }
+    })
+    .catch(error => {
+        console.error('Error updating registration:', error);
+        alert('Fel vid uppdatering av anmälan. Försök igen.');
+    });
+}
+
+function confirmDeleteRegistration(registrationId) {
+    const registration = allRegistrations.find(r => r.id === registrationId);
+    if (!registration) return;
+
+    if (confirm(`Är du säker på att du vill ta bort anmälan för ${registration.memberName} i ${registration.shootingClass} för ${registration.competitionName}?`)) {
+        const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value;
+
+        fetch('/umbraco/surface/RegistrationAdmin/DeleteCompetitionRegistration', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': token
+            },
+            body: JSON.stringify({
+                registrationId: parseInt(registrationId)
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                loadRegistrations(); // Reload data
+            } else {
+                alert('Fel vid borttagning av anmälan: ' + (data.message || 'Okänt fel'));
+            }
+        })
+        .catch(error => {
+            console.error('Error deleting registration:', error);
+            alert('Fel vid borttagning av anmälan. Försök igen.');
+        });
+    }
+}
+
+function deleteRegistration() {
+    const registrationId = document.getElementById('editRegistrationId').value;
+    bootstrap.Modal.getInstance(document.getElementById('editRegistrationModal')).hide();
+    confirmDeleteRegistration(parseInt(registrationId));
+}
+
+function refreshRegistrations() {
+    loadRegistrations();
+}
+
+// UI State Management
+function showLoading() {
+    document.getElementById('registrationsLoading').classList.remove('d-none');
+    document.getElementById('registrationsError').classList.add('d-none');
+    document.getElementById('registrationsTableContainer').classList.add('d-none');
+    document.getElementById('noRegistrations').classList.add('d-none');
+}
+
+function showError(message) {
+    document.getElementById('registrationsLoading').classList.add('d-none');
+    document.getElementById('registrationsError').classList.remove('d-none');
+    document.getElementById('registrationsTableContainer').classList.add('d-none');
+    document.getElementById('noRegistrations').classList.add('d-none');
+    document.getElementById('registrationsErrorMessage').textContent = message;
+}
+
+function showTable() {
+    document.getElementById('registrationsLoading').classList.add('d-none');
+    document.getElementById('registrationsError').classList.add('d-none');
+    document.getElementById('registrationsTableContainer').classList.remove('d-none');
+    document.getElementById('noRegistrations').classList.add('d-none');
+}
+
+function showNoResults() {
+    document.getElementById('registrationsLoading').classList.add('d-none');
+    document.getElementById('registrationsError').classList.add('d-none');
+    document.getElementById('registrationsTableContainer').classList.add('d-none');
+    document.getElementById('noRegistrations').classList.remove('d-none');
+}
+</script>

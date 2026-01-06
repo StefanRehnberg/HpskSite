@@ -1,0 +1,500 @@
+@using HpskSite.Models
+@{
+    var competitionId = ViewData["CompetitionId"]?.ToString() ?? "";
+    var competitionName = ViewData["CompetitionName"]?.ToString() ?? "";
+    var aClasses = ViewData["AClasses"] as List<ShootingClass> ?? new List<ShootingClass>();
+    var bClasses = ViewData["BClasses"] as List<ShootingClass> ?? new List<ShootingClass>();
+    var cRegularClasses = ViewData["CRegularClasses"] as List<ShootingClass> ?? new List<ShootingClass>();
+    var cVetClasses = ViewData["CVetClasses"] as List<ShootingClass> ?? new List<ShootingClass>();
+    var cJuniorClasses = ViewData["CJuniorClasses"] as List<ShootingClass> ?? new List<ShootingClass>();
+    var cDamClasses = ViewData["CDamClasses"] as List<ShootingClass> ?? new List<ShootingClass>();
+    var cClasses = ViewData["CClasses"] as List<ShootingClass> ?? new List<ShootingClass>();
+    var rClasses = ViewData["RClasses"] as List<ShootingClass> ?? new List<ShootingClass>();
+    var lClasses = ViewData["LClasses"] as List<ShootingClass> ?? new List<ShootingClass>();
+    var lRegularClasses = ViewData["LRegularClasses"] as List<ShootingClass> ?? new List<ShootingClass>();
+    var lVetClasses = ViewData["LVetClasses"] as List<ShootingClass> ?? new List<ShootingClass>();
+    var lJuniorClasses = ViewData["LJuniorClasses"] as List<ShootingClass> ?? new List<ShootingClass>();
+    var lDamClasses = ViewData["LDamClasses"] as List<ShootingClass> ?? new List<ShootingClass>();
+    var mClasses = ViewData["MClasses"] as List<ShootingClass> ?? new List<ShootingClass>();
+    var allowDualCClassRegistration = ViewData["AllowDualCClassRegistration"] != null && (bool)ViewData["AllowDualCClassRegistration"];
+}
+
+<!-- Registration Modal -->
+<div class="modal fade" id="registrationModal" tabindex="-1" aria-labelledby="registrationModalLabel" aria-hidden="true">
+	<div class="modal-dialog modal-lg">
+		<div class="modal-content">
+			<div class="modal-header">
+				<h5 class="modal-title" id="registrationModalLabel">
+					<i class="bi bi-person-plus"></i> Anmälan till @competitionName
+				</h5>
+				<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+			</div>
+			<div class="modal-body">
+				@using (Html.BeginUmbracoForm("RegisterForCompetition", "Competition"))
+				{
+					<input type="hidden" name="competitionId" value="@competitionId" />
+					<input type="hidden" name="onBehalfOfMemberId" id="onBehalfOfMemberId" value="" />
+
+					<!-- Club and Member Selection Section -->
+					<div id="registrationTargetSection" class="mb-4 p-3 rounded border" style="background-color: var(--bs-tertiary-bg);">
+						<h6 class="text-primary mb-3">
+							<i class="bi bi-people"></i> Registreringsdetaljer
+						</h6>
+
+						<div class="row">
+							<div class="col-md-6">
+								<label for="clubSelect" class="form-label">Klubb:</label>
+								<select class="form-select" id="clubSelect" onchange="handleClubSelection()">
+									<option value="">Laddar klubbar...</option>
+								</select>
+							</div>
+							<div class="col-md-6">
+								<label for="memberSelect" class="form-label">Medlem:</label>
+								<select class="form-select" id="memberSelect" onchange="handleMemberSelection()">
+									<option value="">Välj klubb först...</option>
+								</select>
+							</div>
+						</div>
+
+						<!-- Member Info Display -->
+						<div id="selectedMemberInfo" class="mt-3 p-2 rounded border d-none" style="background-color: var(--bs-body-bg);">
+							<div class="row">
+								<div class="col-md-4">
+									<strong>Namn:</strong> <span id="selectedMemberName">-</span>
+								</div>
+								<div class="col-md-4">
+									<strong>Klubb:</strong> <span id="selectedMemberClub">-</span>
+								</div>
+								<div class="col-md-4">
+									<strong>E-post:</strong> <span id="selectedMemberEmail">-</span>
+								</div>
+							</div>
+						</div>
+					</div>
+
+					<div id="classSelections">
+						@* A Classes Group *@
+						@if (aClasses.Any())
+						{
+							<div class="mb-3">
+								<h6 class="text-primary border-bottom border-primary pb-1 mb-2">
+									<i class="bi bi-trophy"></i> A-klasser
+								</h6>
+								@foreach (var shootingClass in aClasses)
+								{
+									<div class="row align-items-center">
+										<div class="col-1">
+											<input class="form-check-input" type="radio" name="selectedAClass" value="@shootingClass.Id" id="class_A_@shootingClass.Id">
+										</div>
+										<div class="col-9">
+											<label class="form-check-label" for="class_A_@shootingClass.Id">
+												<strong>@shootingClass.Name</strong> - <small class="text-muted">@shootingClass.Description</small>
+											</label>
+										</div>
+										<div class="col-2 text-end">
+											<button type="button" class="btn p-1 border-0 text-secondary"
+													onclick="openPreferenceModal('@shootingClass.Id', '@shootingClass.Name', 'A')"
+													disabled data-class="A_@shootingClass.Id">
+												<i class="bi bi-pencil" style="font-size: 0.8rem;"></i>
+											</button>
+										</div>
+									</div>
+								}
+							</div>
+						}
+
+						@* B Classes Group *@
+						@if (bClasses.Any())
+						{
+							<div class="mb-3">
+								<h6 class="text-success border-bottom border-success pb-1 mb-2">
+									<i class="bi bi-award"></i> B-klasser
+								</h6>
+								@foreach (var shootingClass in bClasses)
+								{
+									<div class="row align-items-center">
+										<div class="col-1">
+											<input class="form-check-input" type="radio" name="selectedBClass" value="@shootingClass.Id" id="class_B_@shootingClass.Id">
+										</div>
+										<div class="col-9">
+											<label class="form-check-label" for="class_B_@shootingClass.Id">
+												<strong>@shootingClass.Name</strong> - <small class="text-muted">@shootingClass.Description</small>
+											</label>
+										</div>
+										<div class="col-2 text-end">
+											<button type="button" class="btn p-1 border-0 text-secondary"
+													onclick="openPreferenceModal('@shootingClass.Id', '@shootingClass.Name', 'B')"
+													disabled data-class="B_@shootingClass.Id">
+												<i class="bi bi-pencil" style="font-size: 0.8rem;"></i>
+											</button>
+										</div>
+									</div>
+								}
+							</div>
+						}
+
+						@* R Classes Group *@
+						@if (rClasses.Any())
+						{
+							<div class="mb-3">
+								<h6 class="text-danger border-bottom border-danger pb-1 mb-2">
+									<i class="bi bi-bullseye"></i> R-klasser (Revolver)
+								</h6>
+								@foreach (var shootingClass in rClasses)
+								{
+									<div class="row align-items-center">
+										<div class="col-1">
+											<input class="form-check-input" type="radio" name="selectedRClass" value="@shootingClass.Id" id="class_R_@shootingClass.Id">
+										</div>
+										<div class="col-9">
+											<label class="form-check-label" for="class_R_@shootingClass.Id">
+												<strong>@shootingClass.Name</strong> - <small class="text-muted">@shootingClass.Description</small>
+											</label>
+										</div>
+										<div class="col-2 text-end">
+											<button type="button" class="btn p-1 border-0 text-secondary"
+													onclick="openPreferenceModal('@shootingClass.Id', '@shootingClass.Name', 'R')"
+													disabled data-class="R_@shootingClass.Id">
+												<i class="bi bi-pencil" style="font-size: 0.8rem;"></i>
+											</button>
+										</div>
+									</div>
+								}
+							</div>
+						}
+
+						@* C-Class Rules Information *@
+						@if (cClasses.Any())
+						{
+							<div class="alert alert-info mb-3">
+								<small class="mb-0">
+									<i class="bi bi-info-circle"></i>
+									@if (allowDualCClassRegistration)
+									{
+										<text><strong>C-klass regler:</strong> Du kan välja maximalt två C-klasser från olika kategorier.</text>
+									}
+									else
+									{
+										<text><strong>C-klass regler:</strong> Du kan välja endast en C-klass för denna tävling.</text>
+									}
+								</small>
+							</div>
+						}
+
+						@* C Regular Classes Group *@
+						@if (cRegularClasses.Any())
+						{
+							<div class="mb-3">
+								<h6 class="text-warning border-bottom border-warning pb-1 mb-2">
+									<i class="bi bi-star"></i> C-klasser (Öppna)
+								</h6>
+								@foreach (var shootingClass in cRegularClasses)
+								{
+									<div class="row align-items-center">
+										<div class="col-1">
+											<input class="form-check-input" type="radio" name="selectedCRegular" value="@shootingClass.Id" id="class_CR_@shootingClass.Id">
+										</div>
+										<div class="col-9">
+											<label class="form-check-label" for="class_CR_@shootingClass.Id">
+												<strong>@shootingClass.Name</strong> - <small class="text-muted">@shootingClass.Description</small>
+											</label>
+										</div>
+										<div class="col-2 text-end">
+											<button type="button" class="btn p-1 border-0 text-secondary"
+													onclick="openPreferenceModal('@shootingClass.Id', '@shootingClass.Name', 'CR')"
+													disabled data-class="CR_@shootingClass.Id">
+												<i class="bi bi-pencil" style="font-size: 0.8rem;"></i>
+											</button>
+										</div>
+									</div>
+								}
+							</div>
+						}
+
+						@* C Veteran Classes Group *@
+						@if (cVetClasses.Any())
+						{
+							<div class="mb-3">
+								<h6 class="text-secondary border-bottom border-secondary pb-1 mb-2">
+									<i class="bi bi-star"></i> C-klasser (Veteran)
+								</h6>
+								@foreach (var shootingClass in cVetClasses)
+								{
+									<div class="row align-items-center">
+										<div class="col-1">
+											<input class="form-check-input" type="radio" name="selectedCVet" value="@shootingClass.Id" id="class_CV_@shootingClass.Id">
+										</div>
+										<div class="col-9">
+											<label class="form-check-label" for="class_CV_@shootingClass.Id">
+												<strong>@shootingClass.Name</strong> - <small class="text-muted">@shootingClass.Description</small>
+											</label>
+										</div>
+										<div class="col-2 text-end">
+											<button type="button" class="btn p-1 border-0 text-secondary"
+													onclick="openPreferenceModal('@shootingClass.Id', '@shootingClass.Name', 'CV')"
+													disabled data-class="CV_@shootingClass.Id">
+												<i class="bi bi-pencil" style="font-size: 0.8rem;"></i>
+											</button>
+										</div>
+									</div>
+								}
+							</div>
+						}
+
+						@* C Ladies Classes Group *@
+						@if (cDamClasses.Any())
+						{
+							<div class="mb-3">
+								<h6 class="text-info border-bottom border-info pb-1 mb-2">
+									<i class="bi bi-star"></i> C-klasser (Dam)
+								</h6>
+								@foreach (var shootingClass in cDamClasses)
+								{
+									<div class="row align-items-center">
+										<div class="col-1">
+											<input class="form-check-input" type="radio" name="selectedCDam" value="@shootingClass.Id" id="class_CD_@shootingClass.Id">
+										</div>
+										<div class="col-9">
+											<label class="form-check-label" for="class_CD_@shootingClass.Id">
+												<strong>@shootingClass.Name</strong> - <small class="text-muted">@shootingClass.Description</small>
+											</label>
+										</div>
+										<div class="col-2 text-end">
+											<button type="button" class="btn p-1 border-0 text-secondary"
+													onclick="openPreferenceModal('@shootingClass.Id', '@shootingClass.Name', 'CD')"
+													disabled data-class="CD_@shootingClass.Id">
+												<i class="bi bi-pencil" style="font-size: 0.8rem;"></i>
+											</button>
+										</div>
+									</div>
+								}
+							</div>
+						}
+
+						@* C Junior Classes Group *@
+						@if (cJuniorClasses.Any())
+						{
+							<div class="mb-3">
+								<h6 class="text-dark border-bottom border-dark pb-1 mb-2">
+									<i class="bi bi-star"></i> C-klasser (Junior)
+								</h6>
+								@foreach (var shootingClass in cJuniorClasses)
+								{
+									<div class="row align-items-center">
+										<div class="col-1">
+											<input class="form-check-input" type="radio" name="selectedCJun" value="@shootingClass.Id" id="class_CJ_@shootingClass.Id">
+										</div>
+										<div class="col-9">
+											<label class="form-check-label" for="class_CJ_@shootingClass.Id">
+												<strong>@shootingClass.Name</strong> - <small class="text-muted">@shootingClass.Description</small>
+											</label>
+										</div>
+										<div class="col-2 text-end">
+											<button type="button" class="btn p-1 border-0 text-secondary"
+													onclick="openPreferenceModal('@shootingClass.Id', '@shootingClass.Name', 'CJ')"
+													disabled data-class="CJ_@shootingClass.Id">
+												<i class="bi bi-pencil" style="font-size: 0.8rem;"></i>
+											</button>
+										</div>
+									</div>
+								}
+							</div>
+						}
+
+						@* L Regular Classes Group *@
+						@if (lRegularClasses.Any())
+						{
+							<div class="mb-3">
+								<h6 class="text-info border-bottom border-info pb-1 mb-2">
+									<i class="bi bi-wind"></i> L-klasser (Luftpistol - Öppna)
+								</h6>
+								@foreach (var shootingClass in lRegularClasses)
+								{
+									<div class="row align-items-center">
+										<div class="col-1">
+											<input class="form-check-input" type="radio" name="selectedLRegular" value="@shootingClass.Id" id="class_LR_@shootingClass.Id">
+										</div>
+										<div class="col-9">
+											<label class="form-check-label" for="class_LR_@shootingClass.Id">
+												<strong>@shootingClass.Name</strong> - <small class="text-muted">@shootingClass.Description</small>
+											</label>
+										</div>
+										<div class="col-2 text-end">
+											<button type="button" class="btn p-1 border-0 text-secondary"
+													onclick="openPreferenceModal('@shootingClass.Id', '@shootingClass.Name', 'LR')"
+													disabled data-class="LR_@shootingClass.Id">
+												<i class="bi bi-pencil" style="font-size: 0.8rem;"></i>
+											</button>
+										</div>
+									</div>
+								}
+							</div>
+						}
+
+						@* L Veteran Classes Group *@
+						@if (lVetClasses.Any())
+						{
+							<div class="mb-3">
+								<h6 class="text-secondary border-bottom border-secondary pb-1 mb-2">
+									<i class="bi bi-shield-check"></i> L-klasser (Luftpistol - Veteran)
+								</h6>
+								@foreach (var shootingClass in lVetClasses)
+								{
+									<div class="row align-items-center">
+										<div class="col-1">
+											<input class="form-check-input" type="radio" name="selectedLVet" value="@shootingClass.Id" id="class_LV_@shootingClass.Id">
+										</div>
+										<div class="col-9">
+											<label class="form-check-label" for="class_LV_@shootingClass.Id">
+												<strong>@shootingClass.Name</strong> - <small class="text-muted">@shootingClass.Description</small>
+											</label>
+										</div>
+										<div class="col-2 text-end">
+											<button type="button" class="btn p-1 border-0 text-secondary"
+													onclick="openPreferenceModal('@shootingClass.Id', '@shootingClass.Name', 'LV')"
+													disabled data-class="LV_@shootingClass.Id">
+												<i class="bi bi-pencil" style="font-size: 0.8rem;"></i>
+											</button>
+										</div>
+									</div>
+								}
+							</div>
+						}
+
+						@* L Ladies Classes Group *@
+						@if (lDamClasses.Any())
+						{
+							<div class="mb-3">
+								<h6 class="text-pink border-bottom border-pink pb-1 mb-2">
+									<i class="bi bi-star"></i> L-klasser (Luftpistol - Dam)
+								</h6>
+								@foreach (var shootingClass in lDamClasses)
+								{
+									<div class="row align-items-center">
+										<div class="col-1">
+											<input class="form-check-input" type="radio" name="selectedLDam" value="@shootingClass.Id" id="class_LD_@shootingClass.Id">
+										</div>
+										<div class="col-9">
+											<label class="form-check-label" for="class_LD_@shootingClass.Id">
+												<strong>@shootingClass.Name</strong> - <small class="text-muted">@shootingClass.Description</small>
+											</label>
+										</div>
+										<div class="col-2 text-end">
+											<button type="button" class="btn p-1 border-0 text-secondary"
+													onclick="openPreferenceModal('@shootingClass.Id', '@shootingClass.Name', 'LD')"
+													disabled data-class="LD_@shootingClass.Id">
+												<i class="bi bi-pencil" style="font-size: 0.8rem;"></i>
+											</button>
+										</div>
+									</div>
+								}
+							</div>
+						}
+
+						@* L Junior Classes Group *@
+						@if (lJuniorClasses.Any())
+						{
+							<div class="mb-3">
+								<h6 class="text-dark border-bottom border-dark pb-1 mb-2">
+									<i class="bi bi-star"></i> L-klasser (Luftpistol - Junior)
+								</h6>
+								@foreach (var shootingClass in lJuniorClasses)
+								{
+									<div class="row align-items-center">
+										<div class="col-1">
+											<input class="form-check-input" type="radio" name="selectedLJun" value="@shootingClass.Id" id="class_LJ_@shootingClass.Id">
+										</div>
+										<div class="col-9">
+											<label class="form-check-label" for="class_LJ_@shootingClass.Id">
+												<strong>@shootingClass.Name</strong> - <small class="text-muted">@shootingClass.Description</small>
+											</label>
+										</div>
+										<div class="col-2 text-end">
+											<button type="button" class="btn p-1 border-0 text-secondary"
+													onclick="openPreferenceModal('@shootingClass.Id', '@shootingClass.Name', 'LJ')"
+													disabled data-class="LJ_@shootingClass.Id">
+												<i class="bi bi-pencil" style="font-size: 0.8rem;"></i>
+											</button>
+										</div>
+									</div>
+								}
+							</div>
+						}
+
+						@* M Classes Group *@
+						@if (mClasses.Any())
+						{
+							<div class="mb-3">
+								<h6 class="text-warning border-bottom border-warning pb-1 mb-2">
+									<i class="bi bi-lightning"></i> M-klasser (Magnum)
+								</h6>
+								@foreach (var shootingClass in mClasses)
+								{
+									<div class="row align-items-center">
+										<div class="col-1">
+											<input class="form-check-input" type="radio" name="selectedMClass" value="@shootingClass.Id" id="class_M_@shootingClass.Id">
+										</div>
+										<div class="col-9">
+											<label class="form-check-label" for="class_M_@shootingClass.Id">
+												<strong>@shootingClass.Name</strong> - <small class="text-muted">@shootingClass.Description</small>
+											</label>
+										</div>
+										<div class="col-2 text-end">
+											<button type="button" class="btn p-1 border-0 text-secondary"
+													onclick="openPreferenceModal('@shootingClass.Id', '@shootingClass.Name', 'M')"
+													disabled data-class="M_@shootingClass.Id">
+												<i class="bi bi-pencil" style="font-size: 0.8rem;"></i>
+											</button>
+										</div>
+									</div>
+								}
+							</div>
+						}
+
+					</div>
+
+					<div class="mt-3 d-flex justify-content-end">
+						<button type="button" class="btn btn-secondary me-2" data-bs-dismiss="modal">
+							<i class="bi bi-x-circle"></i> Avbryt
+						</button>
+						<button type="submit" class="btn btn-success" id="modalRegisterBtn" disabled>
+							<i class="bi bi-person-plus"></i> Anmäl
+						</button>
+					</div>
+				}
+			</div>
+			<div class="modal-footer d-none">
+				<!-- Footer content moved inside form -->
+			</div>
+		</div>
+	</div>
+</div>
+
+@* Login Required Modal - Shown when user tries to register without being logged in *@
+<div class="modal fade" id="loginRequiredModal" tabindex="-1" aria-labelledby="loginRequiredModalLabel" aria-hidden="true">
+	<div class="modal-dialog modal-dialog-centered">
+		<div class="modal-content">
+			<div class="modal-header bg-primary text-white">
+				<h5 class="modal-title" id="loginRequiredModalLabel">
+					<i class="bi bi-person-check me-2"></i>Välkommen! Du behöver ett konto först
+				</h5>
+				<button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Stäng"></button>
+			</div>
+			<div class="modal-body text-center py-4">
+				<div class="mb-4">
+					<i class="bi bi-person-plus-fill text-primary" style="font-size: 4rem;"></i>
+				</div>
+				<p class="lead mb-3">För att anmäla dig till tävlingar behöver du först skapa ett kostnadsfritt konto.</p>
+				<p class="text-muted">Det tar bara en minut!</p>
+			</div>
+			<div class="modal-footer justify-content-center">
+				<a href="/login-register" class="btn btn-primary btn-lg">
+					<i class="bi bi-person-plus me-2"></i>Skapa konto
+				</a>
+				<a href="/login-register" class="btn btn-outline-primary btn-lg">
+					<i class="bi bi-box-arrow-in-right me-2"></i>Jag har redan konto
+				</a>
+			</div>
+		</div>
+	</div>
+</div>

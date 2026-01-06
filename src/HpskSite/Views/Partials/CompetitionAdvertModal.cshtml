@@ -1,0 +1,472 @@
+@*
+ * Competition Advertisement Creation Modal
+ * Simplified form for creating external competition advertisements
+ * Sets isExternal=true automatically
+ *@
+
+<!-- Flatpickr CSS and JS from CDN -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
+
+<div class="modal fade" id="competitionAdvertModal" tabindex="-1" aria-labelledby="competitionAdvertModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-info text-white">
+                <h5 class="modal-title" id="competitionAdvertModalLabel">
+                    <i class="bi bi-megaphone me-2"></i>Ny Extern Tävlingsannons
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <!-- Info Alert -->
+                <div class="alert alert-info" role="alert">
+                    <i class="bi bi-info-circle me-2"></i>
+                    <strong>Externa tävlingar</strong> visas som annonser i tävlingslistan men har ingen intern hantering (inga anmälningar, startlistor, eller resultat).
+                </div>
+
+                <!-- Error Container -->
+                <div id="advertFormErrors" class="alert alert-danger d-none" role="alert">
+                    <strong>Fel vid sparning:</strong>
+                    <ul id="advertErrorList" class="mb-0 mt-2"></ul>
+                </div>
+
+                <form id="competitionAdvertForm">
+                    <!-- Basic Information -->
+                    <div class="row">
+                        <div class="col-12">
+                            <h6 class="mb-3 text-primary">
+                                <i class="bi bi-info-circle me-1"></i>Grundinformation
+                            </h6>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="advert_competitionSeriesId" class="form-label">Tävlingsserie (valfritt)</label>
+                        <select class="form-select" id="advert_competitionSeriesId" name="seriesId">
+                            <option value="">Ingen serie</option>
+                        </select>
+                        <small class="form-text text-muted">Välj serie som tävlingen ingår i</small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="advert_clubId" class="form-label">Ansvarig klubb</label>
+                        <select class="form-select" id="advert_clubId" name="clubId">
+                            <option value="">-- Välj klubb --</option>
+                        </select>
+                        <small class="form-text text-muted">Klubben som arrangerar tävlingen</small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="advert_competitionName" class="form-label">Tävlingsnamn <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="advert_competitionName" name="competitionName" required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="advert_competitionType" class="form-label">Tävlingstyp</label>
+                        <input type="text" class="form-control" id="advert_competitionType" name="competitionType" value="Precision">
+                        <small class="form-text text-muted">T.ex. Precision, Fält, Multikal</small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="advert_description" class="form-label">Beskrivning</label>
+                        <textarea class="form-control" id="advert_description" name="description" rows="3"></textarea>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="advert_venue" class="form-label">Plats <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="advert_venue" name="venue" required>
+                    </div>
+
+                    <hr>
+
+                    <!-- Dates -->
+                    <div class="row">
+                        <div class="col-12">
+                            <h6 class="mb-3 text-primary"><i class="bi bi-calendar me-1"></i>Datum</h6>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="advert_competitionDate" class="form-label">Tävlingsdatum <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control" id="advert_competitionDate" name="competitionDate" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="advert_competitionEndDate" class="form-label">Slutdatum (om fler dagar)</label>
+                                <input type="text" class="form-control" id="advert_competitionEndDate" name="competitionEndDate">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="advert_registrationOpenDate" class="form-label">Anmälan öppnar <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control" id="advert_registrationOpenDate" name="registrationOpenDate" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="advert_registrationCloseDate" class="form-label">Anmälan stänger <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control" id="advert_registrationCloseDate" name="registrationCloseDate" required>
+                            </div>
+                        </div>
+                    </div>
+
+                    <hr>
+
+                    <!-- External Registration -->
+                    <div class="row">
+                        <div class="col-12">
+                            <h6 class="mb-3 text-primary"><i class="bi bi-box-arrow-up-right me-1"></i>Extern Anmälan</h6>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="advert_externalUrl" class="form-label">Extern URL</label>
+                        <input type="url" class="form-control" id="advert_externalUrl" name="externalUrl" placeholder="https://...">
+                        <small class="form-text text-muted">Länk till extern hemsida för mer information</small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="advert_externalRegistrationEmail" class="form-label">Anmälningsmail</label>
+                        <input type="email" class="form-control" id="advert_externalRegistrationEmail" name="externalRegistrationEmail" placeholder="anmalan@exempel.se">
+                        <small class="form-text text-muted">E-post för anmälan (visas som mailto: länk)</small>
+                    </div>
+
+                    <div class="alert alert-info" role="alert">
+                        <i class="bi bi-info-circle me-2"></i>
+                        <strong>Inbjudningsfil:</strong> Ladda upp inbjudan (PDF/Word) via redigeringsläget efter att annonsen har skapats.
+                    </div>
+
+                    <hr>
+
+                    <!-- Optional Configuration -->
+                    <div class="row">
+                        <div class="col-12">
+                            <h6 class="mb-3 text-primary"><i class="bi bi-gear me-1"></i>Övrig Information (valfritt)</h6>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Skytteklasser (valfritt)</label>
+                        <div id="advert_shootingClassesContainer" class="border rounded p-3" style="max-height: 250px; overflow-y: auto;">
+                            <div class="text-center text-muted">
+                                <small>Laddar klasser...</small>
+                            </div>
+                        </div>
+                        <input type="hidden" id="advert_shootingClassIds" name="shootingClassIds" value="">
+                        <small class="form-text text-muted">Välj vilka klasser som tävlingen är öppen för (kan lämnas tomt)</small>
+                    </div>
+
+                    <hr>
+
+                    <!-- Competition Format -->
+                    <div class="row">
+                        <div class="col-12">
+                            <h6 class="mb-3 text-primary"><i class="bi bi-list-ol me-1"></i>Tävlingsformat</h6>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="advert_numberOfSeriesOrStations" class="form-label">
+                                    Antal serier/stationer <span class="text-danger">*</span>
+                                </label>
+                                <input type="number" class="form-control" id="advert_numberOfSeriesOrStations"
+                                       name="numberOfSeriesOrStations" min="1" max="20" value="6" required>
+                                <small class="form-text text-muted">Antal ordinarie serier (vanligtvis 6 för precision)</small>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="advert_numberOfFinalSeries" class="form-label">
+                                    Antal finalserier
+                                </label>
+                                <input type="number" class="form-control" id="advert_numberOfFinalSeries"
+                                       name="numberOfFinalSeries" min="0" max="10" value="0">
+                                <small class="form-text text-muted">0 om ingen final, annars antal finalserier</small>
+                            </div>
+                        </div>
+                    </div>
+
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    <i class="bi bi-x-circle me-1"></i>Avbryt
+                </button>
+                <button type="button" class="btn btn-info" id="saveAdvertBtn" onclick="saveAdvertisement()">
+                    <i class="bi bi-megaphone me-1"></i>Skapa Annons
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Initialize Flatpickr date pickers when modal is shown
+document.getElementById('competitionAdvertModal')?.addEventListener('shown.bs.modal', function() {
+    console.log('CompetitionAdvertModal opened, initializing Flatpickr');
+
+    // Competition dates (date + time)
+    flatpickr('#advert_competitionDate', {
+        locale: 'sv',
+        enableTime: true,
+        time_24hr: true,
+        dateFormat: 'Y-m-d H:i'
+    });
+
+    flatpickr('#advert_competitionEndDate', {
+        locale: 'sv',
+        enableTime: false,
+        dateFormat: 'Y-m-d'
+    });
+
+    // Registration dates (date + time)
+    flatpickr('#advert_registrationOpenDate', {
+        locale: 'sv',
+        enableTime: true,
+        time_24hr: true,
+        dateFormat: 'Y-m-d H:i'
+    });
+
+    flatpickr('#advert_registrationCloseDate', {
+        locale: 'sv',
+        enableTime: true,
+        time_24hr: true,
+        dateFormat: 'Y-m-d H:i'
+    });
+
+    // Load series list
+    loadAdvertSeriesList();
+
+    // Load clubs list
+    loadAdvertClubsList();
+
+    // Load shooting classes
+    loadAdvertShootingClasses();
+});
+
+// Load series list for dropdown
+function loadAdvertSeriesList() {
+    fetch('/umbraco/surface/CompetitionAdmin/GetSeriesList')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.data && Array.isArray(data.data)) {
+                const select = document.getElementById('advert_competitionSeriesId');
+                select.innerHTML = '<option value="">Ingen serie</option>';
+
+                data.data.forEach(series => {
+                    const option = document.createElement('option');
+                    option.value = series.id;
+                    option.textContent = series.name;
+                    select.appendChild(option);
+                });
+            }
+        })
+        .catch(error => console.error('Error loading series:', error));
+}
+
+// Load clubs list for dropdown
+function loadAdvertClubsList() {
+    fetch('/umbraco/surface/ClubAdmin/GetClubsForRegistration')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.clubs) {
+                const select = document.getElementById('advert_clubId');
+                select.innerHTML = '<option value="">-- Välj klubb --</option>';
+
+                data.clubs.forEach(club => {
+                    const option = document.createElement('option');
+                    option.value = club.id;
+                    option.textContent = club.name;
+                    select.appendChild(option);
+                });
+            }
+        })
+        .catch(error => console.error('Error loading clubs:', error));
+}
+
+// Load shooting classes for checkbox selection
+function loadAdvertShootingClasses() {
+    const container = document.getElementById('advert_shootingClassesContainer');
+
+    fetch('/umbraco/surface/CompetitionEdit/GetShootingClasses')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.data && Array.isArray(data.data)) {
+                container.innerHTML = '';
+
+                data.data.forEach(classItem => {
+                    const div = document.createElement('div');
+                    div.className = 'form-check';
+
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.className = 'form-check-input advert-shooting-class-checkbox';
+                    checkbox.id = `advert_class_${classItem.id}`;
+                    checkbox.value = classItem.id;
+
+                    const label = document.createElement('label');
+                    label.className = 'form-check-label';
+                    label.htmlFor = `advert_class_${classItem.id}`;
+                    label.textContent = `${classItem.name}`;
+                    if (classItem.description) {
+                        label.textContent += ` - ${classItem.description}`;
+                    }
+
+                    div.appendChild(checkbox);
+                    div.appendChild(label);
+                    container.appendChild(div);
+                });
+            } else {
+                container.innerHTML = '<div class="text-muted"><small>Kunde inte ladda skytteklasser</small></div>';
+            }
+        })
+        .catch(error => {
+            console.error('Error loading shooting classes:', error);
+            container.innerHTML = '<div class="text-danger"><small>Fel vid laddning av klasser</small></div>';
+        });
+}
+
+// Reset form when modal is closed
+window.resetAdvertForm = function() {
+    document.getElementById('competitionAdvertForm').reset();
+    document.getElementById('advertFormErrors').classList.add('d-none');
+
+    // Clear all checkboxes
+    document.querySelectorAll('.advert-shooting-class-checkbox').forEach(cb => {
+        cb.checked = false;
+    });
+};
+
+// Save advertisement
+function saveAdvertisement() {
+    const form = document.getElementById('competitionAdvertForm');
+    const formData = new FormData(form);
+
+    // Build fields object
+    const fields = {};
+    formData.forEach((value, key) => {
+        fields[key] = value;
+    });
+
+    // Collect selected shooting classes
+    const selectedClasses = [];
+    document.querySelectorAll('.advert-shooting-class-checkbox:checked').forEach(cb => {
+        selectedClasses.push(cb.value);
+    });
+    fields.shootingClassIds = selectedClasses;
+
+    // Set external competition flags
+    fields.isExternal = true;
+    fields.isActive = true;
+    fields.isClubOnly = false;
+
+    // Validate required fields
+    if (!fields.competitionName || !fields.venue || !fields.competitionDate || !fields.registrationOpenDate || !fields.registrationCloseDate) {
+        showAdvertNotification('Fyll i alla obligatoriska fält', 'error');
+        return;
+    }
+
+    // Validate series count
+    if (!fields.numberOfSeriesOrStations || fields.numberOfSeriesOrStations < 1) {
+        showAdvertNotification('Antal serier/stationer måste vara minst 1', 'error');
+        return;
+    }
+
+    const saveBtn = document.getElementById('saveAdvertBtn');
+    const originalText = saveBtn.innerHTML;
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<i class="spinner-border spinner-border-sm me-1"></i>Skapar...';
+
+    // Use FormData to support file upload (file will be added via Edit modal later)
+    const requestData = new FormData();
+    requestData.append('fields', JSON.stringify(fields));
+
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+
+    fetch('/umbraco/surface/CompetitionAdmin/CreateAdvertisement', {
+        method: 'POST',
+        headers: {
+            'RequestVerificationToken': token
+        },
+        body: requestData
+    })
+    .then(response => {
+        if (!response.ok) {
+            return response.text().then(text => {
+                throw new Error(`HTTP ${response.status}: ${text}`);
+            });
+        }
+        return response.json();
+    })
+    .then(data => {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = originalText;
+
+        if (data.success) {
+            document.getElementById('advertFormErrors').classList.add('d-none');
+            showAdvertNotification('Tävlingsannons skapades framgångsrikt!', 'success');
+
+            // Close modal
+            bootstrap.Modal.getInstance(document.getElementById('competitionAdvertModal')).hide();
+
+            // Reload competitions list
+            if (typeof loadCompetitionsList === 'function') {
+                setTimeout(() => {
+                    loadCompetitionsList();
+                }, 500);
+            }
+        } else {
+            const errorList = document.getElementById('advertErrorList');
+            errorList.innerHTML = '';
+
+            if (data.errors && typeof data.errors === 'object' && Object.keys(data.errors).length > 0) {
+                for (let [field, error] of Object.entries(data.errors)) {
+                    const li = document.createElement('li');
+                    li.textContent = error;
+                    errorList.appendChild(li);
+                }
+            } else {
+                const li = document.createElement('li');
+                li.textContent = data.message || 'Ett okänt fel uppstod';
+                errorList.appendChild(li);
+            }
+
+            document.getElementById('advertFormErrors').classList.remove('d-none');
+        }
+    })
+    .catch(error => {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = originalText;
+        console.error('Error saving advertisement:', error);
+        showAdvertNotification('Fel vid sparning: ' + error.message, 'error');
+    });
+}
+
+function showAdvertNotification(message, type) {
+    const alertClass = type === 'success' ? 'alert-success' : 'alert-danger';
+    const notification = document.createElement('div');
+    notification.className = `alert ${alertClass} alert-dismissible fade show position-fixed`;
+    notification.style.cssText = 'top: 20px; right: 20px; z-index: 9999; max-width: 400px;';
+    notification.innerHTML = `
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+
+    document.body.appendChild(notification);
+
+    setTimeout(() => {
+        if (notification.parentNode) {
+            notification.remove();
+        }
+    }, 5000);
+}
+</script>

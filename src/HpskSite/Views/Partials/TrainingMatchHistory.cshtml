@@ -1,0 +1,438 @@
+@* Training Match History - Compact table with filters and pagination *@
+
+<div id="matchHistoryContainer">
+    <!-- Filter Bar -->
+    <div class="filter-bar mb-3">
+        <!-- Row 1: Search + My Matches toggle -->
+        <div class="row g-2 mb-2 align-items-center">
+            <div class="col">
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text"><i class="bi bi-search"></i></span>
+                    <input type="text" class="form-control" placeholder="Sök matchnamn..."
+                           id="historySearchName" onkeyup="debounceHistorySearch()">
+                </div>
+            </div>
+            <div class="col-auto">
+                <div class="form-check form-switch mb-0">
+                    <input class="form-check-input" type="checkbox" id="historyMyMatchesOnly"
+                           onchange="applyHistoryFilters()">
+                    <label class="form-check-label small" for="historyMyMatchesOnly">Mina matcher</label>
+                </div>
+            </div>
+        </div>
+
+        <!-- Row 2: Weapon class + Date range -->
+        <div class="row g-2 align-items-center">
+            <div class="col-auto">
+                <select class="form-select form-select-sm" id="historyWeaponClass"
+                        onchange="applyHistoryFilters()">
+                    <option value="">Alla vapenklasser</option>
+                    <option value="A">A - Tjänstevapen</option>
+                    <option value="B">B - Kal. 32-45</option>
+                    <option value="C">C - Kal. 22</option>
+                    <option value="R">R - Revolver</option>
+                    <option value="M">M - Magnum</option>
+                    <option value="L">L - Luftpistol</option>
+                </select>
+            </div>
+            <div class="col-auto">
+                <input type="text" class="form-control form-control-sm" style="width: 120px;"
+                       placeholder="Från" id="historyDateFrom">
+            </div>
+            <div class="col-auto">
+                <input type="text" class="form-control form-control-sm" style="width: 120px;"
+                       placeholder="Till" id="historyDateTo">
+            </div>
+            <div class="col-auto">
+                <button class="btn btn-sm btn-outline-secondary" onclick="clearHistoryFilters()" title="Rensa filter">
+                    <i class="bi bi-x-circle"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading state -->
+    <div id="historyLoading" class="text-center py-4">
+        <div class="spinner-border spinner-border-sm text-primary" role="status">
+            <span class="visually-hidden">Laddar...</span>
+        </div>
+        <span class="ms-2 text-muted">Laddar historik...</span>
+    </div>
+
+    <!-- Results info -->
+    <div id="historyResultsInfo" class="d-flex justify-content-between align-items-center mb-2" style="display: none !important;">
+        <small class="text-muted">
+            Visar <span id="historyShowingCount">0</span> av <span id="historyTotalCount">0</span> matcher
+        </small>
+    </div>
+
+    <!-- History table -->
+    <div id="historyTableContainer" style="display: none;">
+        <div class="table-responsive">
+            <table class="table table-striped table-hover">
+                <thead>
+                    <tr>
+                        <th>Datum</th>
+                        <th class="d-none d-md-table-cell">Match</th>
+                        <th>Klass</th>
+                        <th>Poäng</th>
+                        <th class="d-none d-md-table-cell">Plac.</th>
+                        <th class="d-none d-md-table-cell">Deltagare</th>
+                        <th>Åtgärder</th>
+                    </tr>
+                </thead>
+                <tbody id="historyTableBody">
+                    <!-- Rows rendered by JS -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Empty state -->
+    <div id="historyEmpty" style="display: none;" class="text-center py-4">
+        <i class="bi bi-inbox text-muted" style="font-size: 2rem;"></i>
+        <p class="text-muted mt-2 mb-0">Inga matcher hittades</p>
+    </div>
+
+    <!-- Load More Button -->
+    <div id="loadMoreContainer" class="text-center mt-3" style="display: none;">
+        <button class="btn btn-outline-primary btn-sm" onclick="loadMoreHistory()">
+            <i class="bi bi-arrow-down-circle me-1"></i>Ladda fler
+            <span class="badge bg-primary ms-1" id="remainingCount">0</span>
+        </button>
+    </div>
+</div>
+
+<!-- Flatpickr for date pickers -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
+
+<script>
+// History state
+let historyPage = 1;
+let historyTotalCount = 0;
+let historyHasMore = false;
+let historySearchTimeout = null;
+
+// Initialize date pickers when DOM is ready
+document.addEventListener('DOMContentLoaded', function() {
+    flatpickr('#historyDateFrom', {
+        locale: 'sv',
+        dateFormat: 'Y-m-d',
+        onChange: function() { applyHistoryFilters(); }
+    });
+    flatpickr('#historyDateTo', {
+        locale: 'sv',
+        dateFormat: 'Y-m-d',
+        onChange: function() { applyHistoryFilters(); }
+    });
+});
+
+// Debounce search input
+function debounceHistorySearch() {
+    clearTimeout(historySearchTimeout);
+    historySearchTimeout = setTimeout(function() {
+        applyHistoryFilters();
+    }, 300);
+}
+
+// Apply filters and reload
+function applyHistoryFilters() {
+    historyPage = 1;
+    loadMatchHistory();
+}
+
+// Clear all filters
+function clearHistoryFilters() {
+    document.getElementById('historySearchName').value = '';
+    document.getElementById('historyWeaponClass').value = '';
+    document.getElementById('historyMyMatchesOnly').checked = false;
+
+    // Clear flatpickr instances
+    const dateFrom = document.getElementById('historyDateFrom');
+    const dateTo = document.getElementById('historyDateTo');
+    if (dateFrom._flatpickr) dateFrom._flatpickr.clear();
+    if (dateTo._flatpickr) dateTo._flatpickr.clear();
+
+    applyHistoryFilters();
+}
+
+// Get current filter values
+function getHistoryFilters() {
+    return {
+        searchName: document.getElementById('historySearchName')?.value || '',
+        weaponClass: document.getElementById('historyWeaponClass')?.value || '',
+        myMatchesOnly: document.getElementById('historyMyMatchesOnly')?.checked || false,
+        dateFrom: document.getElementById('historyDateFrom')?.value || '',
+        dateTo: document.getElementById('historyDateTo')?.value || ''
+    };
+}
+
+// Load match history
+function loadMatchHistory() {
+    const historyLoading = document.getElementById('historyLoading');
+    const historyTableContainer = document.getElementById('historyTableContainer');
+    const historyEmpty = document.getElementById('historyEmpty');
+    const loadMoreContainer = document.getElementById('loadMoreContainer');
+    const resultsInfo = document.getElementById('historyResultsInfo');
+
+    historyLoading.style.display = 'block';
+    historyTableContainer.style.display = 'none';
+    historyEmpty.style.display = 'none';
+    loadMoreContainer.style.display = 'none';
+    resultsInfo.style.display = 'none';
+
+    const filters = getHistoryFilters();
+    const params = new URLSearchParams({
+        page: historyPage,
+        pageSize: 20,
+        weaponClass: filters.weaponClass,
+        dateFrom: filters.dateFrom,
+        dateTo: filters.dateTo,
+        searchName: filters.searchName,
+        myMatchesOnly: filters.myMatchesOnly
+    });
+
+    fetch(`/umbraco/surface/TrainingMatch/GetMatchHistory?${params}`)
+        .then(response => response.json())
+        .then(result => {
+            historyLoading.style.display = 'none';
+
+            if (result.success) {
+                historyTotalCount = result.totalCount;
+                historyHasMore = result.hasMore;
+
+                if (result.matches.length === 0) {
+                    historyEmpty.style.display = 'block';
+                } else {
+                    renderHistoryTable(result.matches, historyPage > 1);
+                    historyTableContainer.style.display = 'block';
+
+                    // Update results info
+                    const showingCount = document.getElementById('historyTableBody').rows.length;
+                    document.getElementById('historyShowingCount').textContent = showingCount;
+                    document.getElementById('historyTotalCount').textContent = historyTotalCount;
+                    resultsInfo.style.display = 'flex';
+
+                    // Show/hide load more button
+                    if (historyHasMore) {
+                        const remaining = historyTotalCount - showingCount;
+                        document.getElementById('remainingCount').textContent = remaining;
+                        loadMoreContainer.style.display = 'block';
+                    }
+                }
+
+                matchHistoryLoaded = true;
+            } else {
+                console.error('Error loading history:', result.message);
+                historyEmpty.style.display = 'block';
+            }
+        })
+        .catch(error => {
+            console.error('Error loading match history:', error);
+            historyLoading.style.display = 'none';
+            historyEmpty.style.display = 'block';
+        });
+}
+
+// Load more matches
+function loadMoreHistory() {
+    historyPage++;
+
+    const filters = getHistoryFilters();
+    const params = new URLSearchParams({
+        page: historyPage,
+        pageSize: 20,
+        weaponClass: filters.weaponClass,
+        dateFrom: filters.dateFrom,
+        dateTo: filters.dateTo,
+        searchName: filters.searchName,
+        myMatchesOnly: filters.myMatchesOnly
+    });
+
+    // Show loading state on button
+    const loadMoreBtn = document.querySelector('#loadMoreContainer button');
+    const originalText = loadMoreBtn.innerHTML;
+    loadMoreBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Laddar...';
+    loadMoreBtn.disabled = true;
+
+    fetch(`/umbraco/surface/TrainingMatch/GetMatchHistory?${params}`)
+        .then(response => response.json())
+        .then(result => {
+            loadMoreBtn.innerHTML = originalText;
+            loadMoreBtn.disabled = false;
+
+            if (result.success) {
+                historyHasMore = result.hasMore;
+                renderHistoryTable(result.matches, true);
+
+                // Update results info
+                const showingCount = document.getElementById('historyTableBody').rows.length;
+                document.getElementById('historyShowingCount').textContent = showingCount;
+
+                // Update or hide load more button
+                if (historyHasMore) {
+                    const remaining = historyTotalCount - showingCount;
+                    document.getElementById('remainingCount').textContent = remaining;
+                } else {
+                    document.getElementById('loadMoreContainer').style.display = 'none';
+                }
+            }
+        })
+        .catch(error => {
+            console.error('Error loading more history:', error);
+            loadMoreBtn.innerHTML = originalText;
+            loadMoreBtn.disabled = false;
+        });
+}
+
+// Render table rows
+function renderHistoryTable(matches, append = false) {
+    const tbody = document.getElementById('historyTableBody');
+
+    if (!append) {
+        tbody.innerHTML = '';
+    }
+
+    matches.forEach(match => {
+        const row = document.createElement('tr');
+
+        // Date with icon
+        const matchDate = new Date(match.completedDate || match.createdDate);
+        const dateStr = matchDate.toLocaleDateString('sv-SE', { year: 'numeric', month: 'short', day: 'numeric' });
+
+        // Ranking display
+        let rankingHtml = '-';
+        if (match.isParticipant && match.userRanking) {
+            if (match.userRanking === 1) {
+                rankingHtml = '<span title="1:a plats">🥇</span>';
+            } else if (match.userRanking === 2) {
+                rankingHtml = '<span title="2:a plats">🥈</span>';
+            } else if (match.userRanking === 3) {
+                rankingHtml = '<span title="3:e plats">🥉</span>';
+            } else {
+                rankingHtml = `${match.userRanking}:e`;
+            }
+        }
+
+        // Score display
+        const scoreHtml = match.isParticipant
+            ? `${match.userScore || 0} <small class="text-muted">(${match.userSeriesCount || 0} serier)</small>`
+            : '-';
+
+        // Participant avatars
+        let avatarsHtml = '';
+        const maxAvatars = 4;
+        match.participants.slice(0, maxAvatars).forEach((p, i) => {
+            const initials = ((p.firstName?.[0] || '') + (p.lastName?.[0] || '')).toUpperCase();
+            const marginLeft = i === 0 ? '0' : '-8px';
+            const zIndex = maxAvatars - i;
+
+            if (p.profilePictureUrl) {
+                avatarsHtml += `<img src="${p.profilePictureUrl}" class="rounded-circle"
+                    style="width: 28px; height: 28px; margin-left: ${marginLeft}; z-index: ${zIndex}; object-fit: cover; border: 2px solid var(--bs-body-bg); position: relative;"
+                    title="${p.firstName} ${p.lastName}">`;
+            } else {
+                avatarsHtml += `<span class="rounded-circle bg-primary text-white d-inline-flex align-items-center justify-content-center"
+                    style="width: 28px; height: 28px; margin-left: ${marginLeft}; z-index: ${zIndex}; font-size: 0.7rem; border: 2px solid var(--bs-body-bg); position: relative;"
+                    title="${p.firstName} ${p.lastName}">${initials}</span>`;
+            }
+        });
+
+        if (match.participantCount > maxAvatars) {
+            avatarsHtml += `<span class="rounded-circle d-inline-flex align-items-center justify-content-center"
+                style="width: 28px; height: 28px; margin-left: -8px; z-index: 0; font-size: 0.65rem; background-color: var(--bs-secondary-bg); color: var(--bs-secondary-color); border: 2px solid var(--bs-body-bg); position: relative;">
+                +${match.participantCount - maxAvatars}</span>`;
+        }
+
+        // Match name
+        const matchName = match.matchName || match.matchCode;
+
+        // Delete button (for creator or admin)
+        const canDelete = match.isCreator || isCurrentUserAdmin;
+        const deleteBtn = canDelete
+            ? `<button type="button" class="btn btn-sm btn-outline-danger"
+                       onclick="event.stopPropagation(); deleteMatchConfirm('${match.matchCode}', '${(match.matchName || match.matchCode).replace(/'/g, "\\'")}')"
+                       title="Ta bort">
+                   <i class="bi bi-trash"></i>
+               </button>`
+            : '';
+
+        // View button
+        const viewBtn = `<button type="button" class="btn btn-sm btn-outline-primary me-1"
+                       onclick="viewCompletedMatch('${match.matchCode}')"
+                       title="Visa">
+                   <i class="bi bi-eye"></i>
+               </button>`;
+
+        row.innerHTML = `
+            <td>
+                <i class="bi bi-people text-success me-2"></i>${dateStr}
+            </td>
+            <td class="d-none d-md-table-cell">${matchName}</td>
+            <td><span class="badge bg-secondary">${match.weaponClass}</span></td>
+            <td>${scoreHtml}</td>
+            <td class="d-none d-md-table-cell">${rankingHtml}</td>
+            <td class="d-none d-md-table-cell">
+                <div class="d-flex align-items-center">${avatarsHtml}</div>
+            </td>
+            <td>
+                ${viewBtn}${deleteBtn}
+            </td>
+        `;
+
+        tbody.appendChild(row);
+    });
+}
+
+// Confirm delete match
+function deleteMatchConfirm(matchCode, matchName) {
+    if (confirm(`Radera "${matchName}"?\n\nMatchen och alla deltagare tas bort, men individuella träningsresultat bevaras.`)) {
+        deleteMatch(matchCode);
+    }
+}
+
+// Delete match
+function deleteMatch(matchCode) {
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value;
+
+    fetch('/umbraco/surface/TrainingMatch/DeleteMatch', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'RequestVerificationToken': token || ''
+        },
+        body: JSON.stringify({ matchCode: matchCode })
+    })
+    .then(response => response.json())
+    .then(result => {
+        if (result.success) {
+            // Reload history
+            historyPage = 1;
+            loadMatchHistory();
+        } else {
+            alert(result.message || 'Kunde inte radera matchen');
+        }
+    })
+    .catch(error => {
+        console.error('Error deleting match:', error);
+        alert('Något gick fel vid radering av matchen');
+    });
+}
+</script>
+
+<style>
+/* Filter bar styling - dark mode compatible */
+.filter-bar {
+    background: var(--bs-tertiary-bg);
+    padding: 0.75rem;
+    border-radius: 0.5rem;
+    border: 1px solid var(--bs-border-color);
+}
+
+/* Results info styling */
+#historyResultsInfo {
+    padding: 0.25rem 0;
+}
+</style>

@@ -1,0 +1,288 @@
+@*
+    Training Score Detail Modal
+    Modal for viewing detailed training score information
+*@
+
+<!-- View Training Score Modal -->
+<div class="modal fade" id="viewTrainingScoreModal" tabindex="-1" aria-labelledby="viewTrainingScoreModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="viewTrainingScoreModalLabel">
+                    <i class="bi bi-eye"></i> Träningsresultat
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="scoreDetailContent">
+                <div class="text-center py-3">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Laddar...</span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-danger" id="deleteScoreBtn" onclick="deleteTrainingScore()">
+                    <i class="bi bi-trash"></i> Ta bort
+                </button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let currentViewingScoreId = null;
+
+function viewScoreDetails(scoreId) {
+    currentViewingScoreId = scoreId;
+
+    // Show modal
+    const modal = new bootstrap.Modal(document.getElementById('viewTrainingScoreModal'));
+    modal.show();
+
+    // Load score details
+    loadScoreDetails(scoreId);
+}
+
+function loadScoreDetails(scoreId) {
+    const content = document.getElementById('scoreDetailContent');
+
+    // Show loading
+    content.innerHTML = `
+        <div class="text-center py-3">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Laddar...</span>
+            </div>
+        </div>
+    `;
+
+    // Fetch score details from the scores list already loaded
+    fetch(`/umbraco/surface/TrainingScoring/GetMyTrainingScores`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                const score = data.scores.find(s => s.id === scoreId);
+                if (score) {
+                    content.innerHTML = renderScoreDetails(score);
+                } else {
+                    content.innerHTML = `
+                        <div class="alert alert-warning">
+                            <i class="bi bi-exclamation-triangle"></i> Kunde inte hitta träningsresultatet
+                        </div>
+                    `;
+                }
+            } else {
+                content.innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="bi bi-exclamation-triangle"></i> Fel vid inläsning av data
+                    </div>
+                `;
+            }
+        })
+        .catch(error => {
+            console.error('Error loading score details:', error);
+            content.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="bi bi-exclamation-triangle"></i> Fel vid inläsning
+                </div>
+            `;
+        });
+}
+
+function renderScoreDetails(score) {
+    const series = score.series || [];
+
+    return `
+        <div class="mb-4">
+            <div class="row">
+                <div class="col-md-6">
+                    <h6 class="text-muted mb-1">Datum</h6>
+                    <p class="h5">${new Date(score.trainingDate).toLocaleDateString('sv-SE', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+                </div>
+                <div class="col-md-6">
+                    <h6 class="text-muted mb-1">Vapenklass</h6>
+                    <p class="h5"><span class="badge bg-secondary">${score.weaponClass || '-'}</span></p>
+                </div>
+            </div>
+        </div>
+
+        ${score.isCompetition ? `
+            <div class="mb-4">
+                <div class="alert alert-info">
+                    <h6 class="mb-2"><i class="bi bi-trophy"></i> Tävlingsresultat</h6>
+                    <div class="row">
+                        ${score.competitionPlace ? `
+                            <div class="col-md-4">
+                                <small class="text-muted d-block">Placering</small>
+                                <strong class="h5">#${score.competitionPlace}</strong>
+                            </div>
+                        ` : ''}
+                        ${score.competitionShootingClass ? `
+                            <div class="col-md-4">
+                                <small class="text-muted d-block">Klass</small>
+                                <strong class="h5">${score.competitionShootingClass}</strong>
+                            </div>
+                        ` : ''}
+                        ${score.competitionStdMedal ? `
+                            <div class="col-md-4">
+                                <small class="text-muted d-block">Standard Medalj</small>
+                                <strong class="h5">${score.competitionStdMedal === 'B' ? '🥉 Brons' : score.competitionStdMedal === 'S' ? '🥈 Silver' : score.competitionStdMedal}</strong>
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>
+            </div>
+        ` : ''}
+
+        <div class="row mb-4">
+            <div class="col-md-4 text-center">
+                <div class="card" style="background-color: var(--bs-tertiary-bg);">
+                    <div class="card-body">
+                        <h3 class="text-primary mb-0">${score.totalScore}</h3>
+                        <small class="text-muted">Totalt poäng</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4 text-center">
+                <div class="card" style="background-color: var(--bs-tertiary-bg);">
+                    <div class="card-body">
+                        <h3 class="text-success mb-0">${score.xCount}</h3>
+                        <small class="text-muted">X-antal</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4 text-center">
+                <div class="card" style="background-color: var(--bs-tertiary-bg);">
+                    <div class="card-body">
+                        <h3 class="text-info mb-0">${series.length > 0 && series[0].entryMethod === 'TotalOnly' && series[0].seriesCount ? series[0].seriesCount : series.length}</h3>
+                        <small class="text-muted">Serier</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <h6 class="mb-3">Detaljer per serie:</h6>
+        <div class="accordion" id="seriesAccordion">
+            ${series.map((s, index) => {
+                // Determine entry method
+                const entryMethod = s.entryMethod || 'ShotByShot';
+                const hasShots = s.shots && s.shots.length > 0;
+
+                return `
+                <div class="accordion-item">
+                    <h2 class="accordion-header" id="heading${index}">
+                        <button class="accordion-button ${index === 0 ? '' : 'collapsed'}" type="button" data-bs-toggle="collapse" data-bs-target="#collapse${index}">
+                            <strong>${entryMethod === 'TotalOnly' ? 'Totalt' : `Serie ${s.seriesNumber}`}</strong>
+                            <span class="ms-auto me-3">
+                                ${s.total}p
+                                ${s.xCount > 0 ? `<span class="badge bg-warning text-dark ms-2">${s.xCount} X</span>` : ''}
+                                ${entryMethod === 'TotalOnly' && s.seriesCount ? `<span class="badge bg-info text-dark ms-2">${s.seriesCount} serier</span>` : ''}
+                            </span>
+                        </button>
+                    </h2>
+                    <div id="collapse${index}" class="accordion-collapse collapse ${index === 0 ? 'show' : ''}" data-bs-parent="#seriesAccordion">
+                        <div class="accordion-body">
+                            ${hasShots ? `
+                                <div class="row g-2">
+                                    ${s.shots.map((shot, shotIndex) => `
+                                        <div class="col text-center">
+                                            <div class="card ${shot.toUpperCase() === 'X' ? 'bg-warning text-dark' : shot == '10' ? 'bg-success text-white' : ''}" style="${shot.toUpperCase() !== 'X' && shot != '10' ? 'background-color: var(--bs-tertiary-bg);' : ''}">
+                                                <div class="card-body py-2">
+                                                    <h4 class="mb-0">${shot}</h4>
+                                                    <small class="${shot.toUpperCase() === 'X' || shot == '10' ? '' : 'text-muted'}">Skott ${shotIndex + 1}</small>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            ` : `
+                                <div class="alert alert-info mb-0">
+                                    ${entryMethod === 'TotalOnly'
+                                        ? `<i class="bi bi-info-circle"></i> Totalt: <strong>${s.total}p</strong> över <strong>${s.seriesCount}</strong> serier (snitt: <strong>${(s.total / s.seriesCount).toFixed(1)}p</strong> per serie)`
+                                        : `<i class="bi bi-info-circle"></i> Serie-total: <strong>${s.total}p</strong>${s.xCount > 0 ? ` med <strong>${s.xCount} X</strong>` : ''}`
+                                    }
+                                </div>
+                            `}
+                        </div>
+                    </div>
+                </div>
+                `;
+            }).join('')}
+        </div>
+
+        ${score.notes ? `
+        <div class="mt-4">
+            <h6 class="text-muted mb-2">Anteckningar:</h6>
+            <div class="alert alert-secondary mb-0">
+                <i class="bi bi-sticky"></i> ${score.notes}
+            </div>
+        </div>
+        ` : ''}
+
+        <div class="mt-4">
+            <small class="text-muted">
+                <i class="bi bi-clock"></i> Loggat: ${new Date(score.createdAt).toLocaleString('sv-SE')}
+                ${score.updatedAt !== score.createdAt ? `<br><i class="bi bi-pencil"></i> Uppdaterat: ${new Date(score.updatedAt).toLocaleString('sv-SE')}` : ''}
+            </small>
+        </div>
+    `;
+}
+
+function deleteTrainingScore() {
+    if (!currentViewingScoreId) {
+        alert('Inget resultat valt');
+        return;
+    }
+
+    if (!confirm('Är du säker på att du vill ta bort detta träningsresultat? Detta går inte att ångra.')) {
+        return;
+    }
+
+    // Get anti-forgery token
+    const token = document.querySelector('input[name="__RequestVerificationToken"]').value;
+
+    fetch(`/umbraco/surface/TrainingScoring/DeleteTrainingScore?id=${currentViewingScoreId}`, {
+        method: 'DELETE',
+        headers: {
+            'RequestVerificationToken': token
+        }
+    })
+    .then(response => response.json())
+    .then(result => {
+        if (result.success) {
+            alert('Träningsresultat borttaget');
+
+            // Close modal
+            const modal = bootstrap.Modal.getInstance(document.getElementById('viewTrainingScoreModal'));
+            modal.hide();
+
+            // Refresh list
+            if (typeof loadTrainingScoresDashboard === 'function') {
+                loadTrainingScoresDashboard();
+            }
+
+            // Also refresh results tab if it exists
+            if (typeof loadResults === 'function') {
+                loadResults();
+            }
+        } else {
+            alert('Fel: ' + result.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error deleting score:', error);
+        alert('Kunde inte ta bort träningsresultat');
+    });
+}
+</script>
+
+<style>
+.accordion-button::after {
+    margin-left: 0.5rem;
+}
+
+.accordion-button:not(.collapsed) {
+    background-color: #e7f1ff;
+    color: #0d6efd;
+}
+</style>

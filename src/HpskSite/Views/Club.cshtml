@@ -1,0 +1,393 @@
+@using Umbraco.Cms.Web.Common.PublishedModels;
+@using Umbraco.Extensions;
+@using Umbraco.Cms.Core.Security;
+@using Umbraco.Cms.Core.Services;
+@inject IMemberManager MemberManager
+@inject IMemberService MemberService
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+
+    // Get club properties directly from this Club node
+    var clubId = Model?.Id ?? 0;
+    // Try to read custom clubName property first, fall back to page name
+    var clubName = Model?.Value<string>("clubName") ?? Model?.Name ?? "Club";
+
+    ViewBag.Title = clubName;
+
+    // Get club properties from this node
+    var description = Model?.Value<string>("description") ?? ""; // Short description (for SEO, meta tags, etc.)
+    var aboutClub = Model?.Value<string>("aboutClub") ?? ""; // Rich text content for welcome section
+    var logo = Model?.Value<IPublishedContent>("logo");
+    var bannerImage = Model?.Value<IPublishedContent>("bannerImage");
+    var contactPerson = Model?.Value<string>("contactPerson") ?? "";
+    var contactEmail = Model?.Value<string>("contactEmail") ?? "";
+    var contactPhone = Model?.Value<string>("contactPhone") ?? "";
+
+    // Welcome message: use rich text aboutClub content, fallback to description if empty
+    var welcomeMessage = !string.IsNullOrEmpty(aboutClub) ? aboutClub : description;
+
+    // Get current member to check permissions
+    var currentMember = await MemberManager.GetCurrentMemberAsync();
+    var isLoggedIn = currentMember != null;
+    var isClubAdmin = false;
+    var isClubMember = false;
+
+    // Check if current member is club admin or member for this specific club
+    if (currentMember != null && clubId > 0)
+    {
+        // Get the member from MemberService using Email (most reliable way)
+        var member = MemberService.GetByEmail(currentMember.Email);
+
+        if (member != null)
+        {
+            var memberRoles = MemberService.GetAllRoles(member.Id).ToList();
+            var clubAdminGroupName = $"ClubAdmin_{clubId}";
+
+            // Check if member is in ClubAdmin_{clubId} group OR Administrators group (site admins)
+            isClubAdmin = memberRoles.Contains(clubAdminGroupName) || memberRoles.Contains("Administrators");
+
+            // Check if member belongs to this club (primary or additional)
+            var primaryClubId = member.GetValue("primaryClubId")?.ToString();
+            var memberClubIds = member.GetValue("memberClubIds")?.ToString() ?? "";
+            isClubMember = primaryClubId == clubId.ToString() ||
+                          memberClubIds.Split(',').Select(s => s.Trim()).Contains(clubId.ToString());
+        }
+    }
+
+    // Find login page dynamically (same approach as Master.cshtml)
+    var loginPage = Model.Root().Children.FirstOrDefault(x => x.Name == "Login & Register")
+                    ?? Model.Root().Children.FirstOrDefault(x => x.Name.ToLower().Contains("login"));
+    var loginUrl = loginPage != null ? loginPage.Url() : "/login-register";
+}
+
+@{
+    ViewBag.clubId = clubId;
+    ViewBag.clubName = clubName;
+    ViewBag.description = description;
+    ViewBag.logo = logo;
+    ViewBag.bannerImage = bannerImage;
+    ViewBag.isClubMember = isClubMember;
+    ViewBag.isClubAdmin = isClubAdmin;
+}
+
+<!-- JavaScript global variables - MUST come before partials that use them -->
+<script>
+// Declare clubId and isLoggedIn in global scope so partials can access them
+const clubId = @clubId;
+const isLoggedIn = @isLoggedIn.ToString().ToLower();
+// Make clubId available to wizard modal
+window.currentClubId = clubId;
+</script>
+
+<div class="club-page container-fluid">
+    <!-- Club Header with Logo and Banner -->
+    @await Html.PartialAsync("ClubHeader")
+
+    @if (!isLoggedIn)
+    {
+        <!-- TIER 1: PUBLIC VIEW - About section only -->
+        <div class="container mt-4">
+            <div class="row">
+                <div class="col-lg-8">
+                    <!-- About Club -->
+                    @if (!string.IsNullOrEmpty(welcomeMessage))
+                    {
+                        <div class="card mb-4">
+                            <div class="card-header">
+                                <h5 class="mb-0">
+                                    <i class="bi bi-info-circle me-2"></i>Om Klubben
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                @Html.Raw(welcomeMessage)
+                            </div>
+                        </div>
+                    }
+                </div>
+
+                <div class="col-lg-4">
+                    <!-- Contact Information -->
+                    <div class="card mb-4">
+                        <div class="card-header">
+                            <h5 class="mb-0">
+                                <i class="bi bi-telephone me-2"></i>Kontaktinformation
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            @if (!string.IsNullOrEmpty(contactPerson))
+                            {
+                                <p class="mb-2">
+                                    <strong>Kontaktperson:</strong><br />
+                                    @contactPerson
+                                </p>
+                            }
+                            @if (!string.IsNullOrEmpty(contactEmail))
+                            {
+                                <p class="mb-2">
+                                    <strong>E-post:</strong><br />
+                                    <a href="mailto:@contactEmail">@contactEmail</a>
+                                </p>
+                            }
+                            @if (!string.IsNullOrEmpty(contactPhone))
+                            {
+                                <p class="mb-0">
+                                    <strong>Telefon:</strong><br />
+                                    @contactPhone
+                                </p>
+                            }
+                        </div>
+                    </div>
+
+                    <!-- Login Prompt -->
+                    <div class="card">
+                        <div class="card-body text-center">
+                            <i class="bi bi-lock fs-1 text-muted mb-3 d-block"></i>
+                            <h6 class="mb-2">Medlemsinloggning</h6>
+                            <p class="text-muted small mb-3">Logga in för att se händelser, nyheter, kalender och mer</p>
+                            <a href="@loginUrl" class="btn btn-primary btn-sm">
+                                <i class="bi bi-box-arrow-in-right me-1"></i>Logga in
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+    else
+    {
+        <!-- TIER 2 & 3: MEMBER/ADMIN VIEW - With tabs and role-based functionality -->
+        <div class="container mt-4">
+            @await Html.PartialAsync("ClubNavigation")
+
+            <!-- Tab Content -->
+            <div class="tab-content mt-3" id="clubTabContent">
+
+                <!-- TIER 2: About Tab (All logged-in users) -->
+                <div class="tab-pane fade show active" id="clubHome" role="tabpanel">
+                    <!-- Welcome Message (Optional) -->
+                    @if (!string.IsNullOrEmpty(welcomeMessage))
+                    {
+                        <div class="card mb-4">
+                            <div class="card-body">
+                                @Html.Raw(welcomeMessage)
+                            </div>
+                        </div>
+                    }
+
+                    <!-- Upcoming Events -->
+                    <div class="card mb-4">
+                        <div class="card-header">
+                            <h5 class="mb-0">
+                                <i class="bi bi-calendar-event me-2"></i>Kommande Händelser
+                            </h5>
+                        </div>
+                        <div class="card-body" id="upcomingEventsContainer">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Laddar händelser...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TIER 2: Calendar Tab (All logged-in users) -->
+                <div class="tab-pane fade" id="clubCalendar" role="tabpanel">
+                    @await Html.PartialAsync("ClubCalendar")
+                </div>
+
+                <!-- TIER 2: Members Directory (All logged-in users) -->
+                <div class="tab-pane fade" id="clubMembers" role="tabpanel">
+                    @await Html.PartialAsync("ClubMembersDirectory")
+                </div>
+
+                @if (isClubAdmin)
+                {
+                    <!-- TIER 3: Admin Tab (Club admins only) -->
+                    <div class="tab-pane fade" id="clubAdmin" role="tabpanel">
+                        @await Html.PartialAsync("ClubAdminPanel")
+                    </div>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+<!-- Bootstrap Icons -->
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+
+<!-- CKEditor for rich text editing -->
+<script src="https://cdn.ckeditor.com/ckeditor5/41.0.0/classic/ckeditor.js"></script>
+
+<!-- Anti-forgery token for AJAX requests -->
+@Html.AntiForgeryToken()
+
+<!-- Competition Management Modals (for club admin) -->
+@if (isClubAdmin)
+{
+    @await Html.PartialAsync("CompetitionWizardModal")
+    @await Html.PartialAsync("CompetitionEditModal")
+    @await Html.PartialAsync("CompetitionDeleteConfirmModal")
+}
+
+<!-- JavaScript for club page functionality -->
+<script>
+// clubId and isLoggedIn are already declared globally above, before the partials
+
+// Color map for event types (matches ClubCalendar.cshtml)
+const eventTypeColors = {
+    'Tävling': '#0d6efd',    // Blue
+    'Träning': '#198754',    // Green
+    'Städning': '#d63384',   // Pink
+    'Möte': '#fd7e14',       // Orange
+    'Socialt': '#0dcaf0',    // Cyan
+    'Annat': '#6c757d',      // Gray
+    'default': '#6c757d'
+};
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Only load events for logged-in users (they appear in the tabs)
+    // Public visitors don't see events or news - only the about section
+    if (clubId > 0 && isLoggedIn) {
+        loadUpcomingEvents();
+    }
+});
+
+function loadUpcomingEvents() {
+    fetch(`/umbraco/surface/Club/GetClubEvents?clubId=${clubId}`)
+        .then(response => response.json())
+        .then(data => {
+            const container = document.getElementById('upcomingEventsContainer');
+            if (data.success && data.data && data.data.length > 0) {
+                // Filter to only future events
+                const now = new Date();
+                const futureEvents = data.data.filter(event => new Date(event.date) >= now);
+
+                if (futureEvents.length > 0) {
+                    let html = '<ul class="list-group list-group-flush">';
+                    futureEvents.slice(0, 5).forEach(event => {
+                        const date = new Date(event.date).toLocaleDateString('sv-SE');
+                        const color = eventTypeColors[event.type] || eventTypeColors.default;
+                        html += `
+                            <li class="list-group-item">
+                                <div class="d-flex justify-content-between align-items-start">
+                                    <div>
+                                        <h6 class="mb-1">${event.name}</h6>
+                                        <small class="text-muted">${date}${event.venue ? ' - ' + event.venue : ''}</small>
+                                    </div>
+                                    <span class="badge" style="background-color: ${color}">${event.type}</span>
+                                </div>
+                            </li>
+                        `;
+                    });
+                    html += '</ul>';
+                    container.innerHTML = html;
+                } else {
+                    container.innerHTML = '<p class="text-muted">Inga kommande händelser planerade.</p>';
+                }
+            } else {
+                container.innerHTML = '<p class="text-muted">Inga händelser hittades.</p>';
+            }
+        })
+        .catch(error => {
+            console.error('Error loading events:', error);
+            document.getElementById('upcomingEventsContainer').innerHTML = '<p class="text-danger">Fel vid hämtning av händelser.</p>';
+        });
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const map = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;'
+    };
+    return text.replace(/[&<>"']/g, m => map[m]);
+}
+
+// Open edit modal for club admin (same as admin page)
+window.openAdminEditModal = function(competitionId) {
+    console.log('Opening edit modal for competition ID:', competitionId);
+
+    // Update modal title for edit mode
+    const modalLabel = document.getElementById('competitionEditModalLabel');
+    modalLabel.innerHTML = '<i class="bi bi-pencil me-2"></i>Redigera Tävling';
+
+    // Fetch competition data
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+    console.log('CSRF token found:', !!token);
+
+    const url = `/umbraco/surface/CompetitionEdit/GetCompetitionData?competitionId=${competitionId}`;
+    console.log('Fetching from URL:', url);
+
+    fetch(url, {
+        method: 'GET',
+        headers: {
+            'RequestVerificationToken': token
+        },
+        credentials: 'same-origin'
+    })
+    .then(response => {
+        console.log('Response status:', response.status);
+        console.log('Response ok:', response.ok);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        return response.json();
+    })
+    .then(data => {
+        console.log('Received data:', data);
+        if (data.success) {
+            // Store the competition data to populate after modal is shown
+            window.currentCompetitionData = data.data;
+
+            // Show modal first, then populate data after Flatpickr is initialized
+            const modalElement = document.getElementById('competitionEditModal');
+            console.log('Modal element found:', !!modalElement);
+            // Reuse existing modal instance or create new one
+            const modal = window.competitionEditModalInstance || new bootstrap.Modal(modalElement);
+            window.competitionEditModalInstance = modal;
+            console.log('Showing modal...');
+            modal.show();
+            console.log('Modal shown');
+
+            // Populate data after modal is shown and Flatpickr is initialized
+            setTimeout(() => {
+                console.log('Checking if populateEditModal is defined:', typeof window.populateEditModal);
+                if (typeof window.populateEditModal === 'function') {
+                    populateEditModal(window.currentCompetitionData);
+                    loadEditModalShootingClasses();
+                } else {
+                    console.error('populateEditModal function is not defined. Retrying in 500ms...');
+                    setTimeout(() => {
+                        if (typeof window.populateEditModal === 'function') {
+                            populateEditModal(window.currentCompetitionData);
+                            loadEditModalShootingClasses();
+                        } else {
+                            console.error('populateEditModal still not defined after retry');
+                        }
+                    }, 500);
+                }
+            }, 200); // Increased delay to ensure Flatpickr is ready
+        } else {
+            console.error('API returned success=false:', data);
+            alert('Failed to load competition data: ' + (data.message || 'Unknown error'));
+        }
+    })
+    .catch(error => {
+        console.error('Error loading competition:', error);
+        alert('Error loading competition data: ' + error.message);
+    });
+};
+</script>
+
+<style>
+.club-page {
+    padding-bottom: 2rem;
+}
+
+.list-group-item:hover {
+    background-color: var(--bs-secondary-bg);
+}
+</style>

@@ -1,0 +1,121 @@
+@using HpskSite.Extensions
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = null;
+    var competition = Model.Parent;
+}
+
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex align-items-center mb-4">
+            <div>
+                <h1><i class="bi bi-list-ul text-primary me-2"></i>Startlistor</h1>
+                <nav aria-label="breadcrumb">
+                    <ol class="breadcrumb">
+                        <li class="breadcrumb-item"><a href="@competition.CompetitionUrl()">@competition.Name</a></li>
+                        <li class="breadcrumb-item active" aria-current="page">Startlistor</li>
+                    </ol>
+                </nav>
+            </div>
+        </div>
+
+        @{
+            var description = Model.Value<string>("description");
+        }
+        @if (!string.IsNullOrEmpty(description))
+        {
+            <div class="alert alert-info">
+                <p class="mb-0">@description</p>
+            </div>
+        }
+
+        <div class="row">
+            @if (Model.Children.Any())
+            {
+                @foreach (var startList in Model.Children.OrderByDescending(x => x.CreateDate))
+                {
+                    var teamFormat = startList.Value<string>("teamFormat") ?? "Okänd format";
+                    var generatedDate = startList.Value<DateTime>("generatedDate");
+                    var generatedBy = startList.Value<string>("generatedBy") ?? "Okänd";
+                    var isPublished = startList.Value<bool>("isOfficialStartList");
+
+                    <div class="col-md-6 col-lg-4 mb-4">
+                        <div class="card h-100 @(!isPublished ? "border-secondary" : "")">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <small class="text-muted">
+                                    <i class="bi bi-calendar3 me-1"></i>
+                                    @generatedDate.ToString("yyyy-MM-dd HH:mm")
+                                </small>
+                                @if (isPublished)
+                                {
+                                    <span class="badge bg-success">Publicerad</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-secondary">Ej publicerad</span>
+                                }
+                            </div>
+                            <div class="card-body">
+                                <h5 class="card-title">@startList.Name</h5>
+                                <p class="card-text">
+                                    <strong>Format:</strong> @teamFormat<br>
+                                    <strong>Skapad av:</strong> @generatedBy
+                                </p>
+                            </div>
+                            <div class="card-footer">
+                                <a href="@startList.Url()" class="btn btn-primary btn-sm">
+                                    <i class="bi bi-eye me-1"></i>Visa
+                                </a>
+                                @{
+                                    var configData = startList.Value<string>("configurationData");
+                                }
+                                @if (!string.IsNullOrEmpty(configData))
+                                {
+                                    <button class="btn btn-outline-secondary btn-sm ms-2" onclick="showConfiguration(@startList.Id)">
+                                        <i class="bi bi-gear me-1"></i>Konfiguration
+                                    </button>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                }
+            }
+            else
+            {
+                <div class="col-12">
+                    <div class="alert alert-warning">
+                        <h4 class="alert-heading">Inga startlistor ännu</h4>
+                        <p class="mb-0">Det finns inga genererade startlistor för denna tävling ännu. Startlistor skapas automatiskt när de genereras från tävlingshanteringen.</p>
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@if (Model.Children.Any())
+{
+    <!-- Configuration Modal -->
+    <div class="modal fade" id="configurationModal" tabindex="-1" aria-labelledby="configurationModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="configurationModalLabel">Startlista Konfiguration</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <pre id="configurationData" class="bg-light p-3 rounded"></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function showConfiguration(startListId) {
+            // This would need to be implemented to fetch configuration data
+            // For now, show a placeholder
+            document.getElementById('configurationData').textContent = 'Konfigurationsinformation för startlista ' + startListId;
+            new bootstrap.Modal(document.getElementById('configurationModal')).show();
+        }
+    </script>
+}

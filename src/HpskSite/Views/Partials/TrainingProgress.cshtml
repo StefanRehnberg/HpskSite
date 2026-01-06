@@ -1,0 +1,170 @@
+@using HpskSite.Models.ViewModels.Training
+@model MemberProgress
+
+@{
+    var allLevels = TrainingDefinitions.GetAllLevels();
+    var currentLevel = allLevels.FirstOrDefault(l => l.LevelId == Model.CurrentLevel);
+    var currentStep = currentLevel?.Steps.FirstOrDefault(s => s.StepNumber == Model.CurrentStep);
+
+    var progressPercent = Model.GetOverallCompletionPercentage();
+    var levelPercent = Model.GetLevelCompletionPercentage();
+}
+
+<div class="member-progress-card">
+    <div class="row align-items-center">
+        <div class="col-md-8">
+            <h4>
+                <span class="badge-level">@(currentLevel?.Badge ?? "🎯")</span>
+                @(currentLevel?.Name ?? "Okänd nivå")
+            </h4>
+            <p class="mb-2">
+                <strong>Nuvarande steg:</strong> @Model.CurrentStep av @(currentLevel?.Steps.Count ?? 0)
+            </p>
+            <p class="mb-3">@(currentStep?.Description ?? "Inget aktuellt steg")</p>
+
+            <div class="mb-2">
+                <small class="text-muted">Framsteg denna nivå:</small>
+                <div class="progress" style="height: 8px;">
+                    <div class="progress-bar" role="progressbar" style="width: @levelPercent%"
+                         aria-valuenow="@levelPercent" aria-valuemin="0" aria-valuemax="100"></div>
+                </div>
+                <small class="text-muted">@Math.Round(levelPercent, 1)%</small>
+            </div>
+
+            <div class="mb-2">
+                <small class="text-muted">Total framsteg:</small>
+                <div class="progress" style="height: 8px;">
+                    <div class="progress-bar bg-success" role="progressbar" style="width: @progressPercent%"
+                         aria-valuenow="@progressPercent" aria-valuemin="0" aria-valuemax="100"></div>
+                </div>
+                <small class="text-muted">@Math.Round(progressPercent, 1)%</small>
+            </div>
+
+            @if (currentStep?.IsCompetitionRequired == true)
+            {
+                <div class="alert alert-info mt-3">
+                    <i class="bi bi-trophy"></i>
+                    <strong>Tävling krävs:</strong> Detta steg kräver resultat från tävling.
+                </div>
+            }
+        </div>
+        <div class="col-md-4 text-center">
+            <div class="position-relative d-inline-block">
+                <svg width="80" height="80" class="progress-ring">
+                    <circle cx="40" cy="40" r="35" stroke="#e9ecef" stroke-width="6" fill="transparent"/>
+                    <circle cx="40" cy="40" r="35" stroke="#28a745" stroke-width="6" fill="transparent"
+                            stroke-dasharray="@(2 * Math.PI * 35)"
+                            stroke-dashoffset="@(2 * Math.PI * 35 * (1 - progressPercent / 100))"
+                            stroke-linecap="round"
+                            transform="rotate(-90 40 40)"/>
+                </svg>
+                <div class="position-absolute top-50 start-50 translate-middle">
+                    <div class="fw-bold">@Math.Round(progressPercent)%</div>
+                </div>
+            </div>
+
+            <div class="mt-3">
+                <small class="text-muted">
+                    <strong>@Model.CompletedSteps.Count</strong> steg slutförda<br>
+                    @if (Model.TrainingStartDate.HasValue)
+                    {
+                        <span>Påbörjad: @Model.TrainingStartDate.Value.ToString("yyyy-MM-dd")</span>
+                    }
+                    @if (Model.LastActivityDate.HasValue)
+                    {
+                        <br><span>Senaste aktivitet: @Model.LastActivityDate.Value.ToString("yyyy-MM-dd")</span>
+                    }
+                </small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recent Completions -->
+    @if (Model.CompletedSteps.Any())
+    {
+        <hr class="my-3">
+        <h6><i class="bi bi-check-circle"></i> Senaste Slutförda Steg</h6>
+        <div class="row">
+            @foreach (var completion in Model.CompletedSteps.OrderByDescending(c => c.CompletedDate).Take(3))
+            {
+                var completionLevel = allLevels.FirstOrDefault(l => l.LevelId == completion.LevelId);
+                <div class="col-md-4 mb-2">
+                    <div class="card card-body py-2">
+                        <small class="fw-bold">@(completionLevel?.Badge) @(completionLevel?.Name)</small>
+                        <small class="text-muted">Steg @completion.StepNumber</small>
+                        <small class="text-muted">@completion.CompletedDate.ToString("yyyy-MM-dd")</small>
+                        @if (!string.IsNullOrEmpty(completion.InstructorName))
+                        {
+                            <small class="text-muted">Av: @completion.InstructorName</small>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+
+    <!-- Next Steps Preview -->
+    @if (currentLevel != null)
+    {
+        <hr class="my-3">
+        <h6><i class="bi bi-arrow-right"></i> Kommande Steg</h6>
+        <div class="upcoming-steps">
+            @{
+                var upcomingSteps = currentLevel.Steps
+                    .Where(s => s.StepNumber >= Model.CurrentStep)
+                    .Take(3)
+                    .ToList();
+            }
+
+            @foreach (var step in upcomingSteps)
+            {
+                var isCurrentStep = step.StepNumber == Model.CurrentStep;
+                var stepClass = isCurrentStep ? "border-warning bg-light" : "border-light";
+
+                <div class="card @stepClass mb-2">
+                    <div class="card-body py-2">
+                        <div class="d-flex align-items-start">
+                            <span class="me-2">
+                                @if (isCurrentStep)
+                                {
+                                    <i class="bi bi-arrow-right-circle-fill text-warning"></i>
+                                }
+                                else
+                                {
+                                    <i class="bi bi-circle text-muted"></i>
+                                }
+                            </span>
+                            <div class="flex-grow-1">
+                                <div class="fw-bold">Steg @step.StepNumber @(isCurrentStep ? "(Pågående)" : "")</div>
+                                <div class="small">@step.Description</div>
+                                @if (step.IsCompetitionRequired)
+                                {
+                                    <span class="badge bg-info text-dark mt-1">Tävling krävs</span>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+<style>
+    .member-progress-card {
+        border-left: 4px solid #28a745;
+    }
+
+    .progress-ring circle {
+        transition: stroke-dashoffset 0.5s ease-in-out;
+    }
+
+    .upcoming-steps .card {
+        transition: all 0.2s ease-in-out;
+    }
+
+    .upcoming-steps .card:hover {
+        transform: translateX(5px);
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+</style>

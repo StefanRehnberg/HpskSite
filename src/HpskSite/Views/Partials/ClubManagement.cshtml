@@ -1,0 +1,1013 @@
+@{
+    // This partial handles club management UI
+}
+
+<div id="clubManagement">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h4>Club Management</h4>
+        <button class="btn btn-success" onclick="showAddClubModal()">Add New Club</button>
+    </div>
+
+    <!-- Krets Filter -->
+    <div class="row mb-3">
+        <div class="col-md-4">
+            <label for="adminKretsFilter" class="form-label">Välj krets</label>
+            <select class="form-select" id="adminKretsFilter" onchange="filterAdminClubsByKrets()">
+                <option value="">Alla kretsar</option>
+            </select>
+        </div>
+    </div>
+
+    <div id="clubsList">
+        <div class="text-center">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p>Loading clubs...</p>
+        </div>
+    </div>
+</div>
+
+<!-- Add/Edit Club Modal -->
+<div class="modal fade" id="clubModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="clubModalTitle">Add New Club</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="clubForm">
+                    <input type="hidden" id="clubManagementId" name="id">
+                    
+                    <div class="row">
+                        <div class="col-md-8">
+                            <div class="mb-3">
+                                <label for="clubName" class="form-label">Club Name *</label>
+                                <input type="text" class="form-control" id="clubName" name="name" required>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="form-check mt-4">
+                                <input class="form-check-input" type="checkbox" id="isActive" name="isActive" checked>
+                                <label class="form-check-label" for="isActive">
+                                    Active Club
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="clubIdNumber" class="form-label">Klubb-ID (SPSF)</label>
+                                <input type="number" class="form-control" id="clubIdNumber" name="clubIdNumber" placeholder="T.ex. 12345">
+                                <div class="form-text">ID-nummer från Svenska Pistolskytteförbundet</div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="regionalFederation" class="form-label">Krets</label>
+                                <select class="form-select" id="regionalFederation" name="regionalFederation">
+                                    <option value="">-- Välj krets --</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="clubDescription" class="form-label">Description</label>
+                        <textarea class="form-control" id="clubDescription" name="description" rows="3"></textarea>
+                    </div>
+                    
+                    <h6>Contact Information</h6>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="contactPersonSelect" class="form-label">Contact Person</label>
+                                <select class="form-control" id="contactPersonSelect" name="contactPersonSelect">
+                                    <option value="">-- Select from club members --</option>
+                                </select>
+                                <input type="hidden" id="contactPerson" name="contactPerson">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="contactEmail" class="form-label">Contact Email</label>
+                                <input type="email" class="form-control" id="contactEmail" name="contactEmail">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="contactPhone" class="form-label">Contact Phone</label>
+                                <input type="tel" class="form-control" id="contactPhone" name="contactPhone">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="webSite" class="form-label">Web Site</label>
+                                <input type="url" class="form-control" id="webSite" name="webSite" placeholder="https://example.com">
+                            </div>
+                        </div>
+                    </div>
+
+                    <h6>Address</h6>
+                    <div class="mb-3">
+                        <label for="address" class="form-label">Street Address</label>
+                        <input type="text" class="form-control" id="address" name="address">
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-8">
+                            <div class="mb-3">
+                                <label for="city" class="form-label">City</label>
+                                <input type="text" class="form-control" id="city" name="city">
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label for="postalCode" class="form-label">Postal Code</label>
+                                <input type="text" class="form-control" id="postalCode" name="postalCode">
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-danger" id="deleteClubBtn" onclick="deleteClubFromModal()" style="display: none;">
+                    <i class="bi bi-trash"></i> Delete Club
+                </button>
+                <div class="ms-auto">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="saveClub()">Save Club</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Club Members Modal -->
+<div class="modal fade" id="clubMembersModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="clubMembersModalTitle">Club Members</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="clubMembersList">
+                    <div class="text-center">
+                        <div class="spinner-border spinner-border-sm" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p>Loading members...</p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Club Deletion Error Modal -->
+<div class="modal fade" id="deletionErrorModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title">
+                    <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                    Cannot Delete Club
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="deletionErrorMessage"></div>
+                <div class="mt-3">
+                    <strong>To delete this club, you must:</strong>
+                    <ol class="mt-2">
+                        <li>Go to User Management</li>
+                        <li>Find all members linked to this club</li>
+                        <li>Either delete those members or reassign them to different clubs</li>
+                        <li>Then try deleting the club again</li>
+                    </ol>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-primary" onclick="switchToUserManagement()" data-bs-dismiss="modal">
+                    Go to User Management
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Club Admins Modal -->
+<div class="modal fade" id="clubAdminsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="clubAdminsModalTitle">Manage Club Admins</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6>Current Club Admins</h6>
+                        <div id="currentClubAdmins">
+                            <div class="text-center">
+                                <div class="spinner-border spinner-border-sm" role="status"></div>
+                                Loading...
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <h6>Assign New Admin</h6>
+                        <div class="mb-3">
+                            <label for="availableMembersSelect" class="form-label">Select Member</label>
+                            <select class="form-select" id="availableMembersSelect">
+                                <option value="">Loading available members...</option>
+                            </select>
+                        </div>
+                        <button type="button" class="btn btn-primary" id="assignAdminBtn" onclick="assignSelectedAdmin()" disabled>
+                            <i class="bi bi-person-plus"></i> Assign as Admin
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Clubs Table Template -->
+<script id="clubsTableTemplate" type="text/template">
+    <div class="table-responsive">
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Krets</th>
+                    <th>City</th>
+                    <th>Contact</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="clubsTableBody">
+            </tbody>
+        </table>
+    </div>
+</script>
+
+<!-- Club Row Template -->
+<script id="clubRowTemplate" type="text/template">
+    <tr>
+        <td>
+            <strong>{name}</strong>
+            <br><small class="text-muted">{description}</small>
+        </td>
+        <td>{kretsDisplay}</td>
+        <td>{city}</td>
+        <td>{contactDisplay}</td>
+        <td>
+            <button class="btn btn-sm btn-warning me-1" onclick="editClub({id})" title="Edit club">
+                <i class="bi bi-pencil"></i>
+            </button>
+            <button class="btn btn-sm btn-info me-1" onclick="showClubMembers({id}, '{name}')" title="View members">
+                <i class="bi bi-people"></i>
+            </button>
+            <button class="btn btn-sm btn-secondary" onclick="showClubAdmins({id}, '{name}')" title="Manage admins">
+                <i class="bi bi-person-gear"></i>
+            </button>
+        </td>
+    </tr>
+</script>
+
+<!-- Club Members Table Template -->
+<script id="clubMembersTableTemplate" type="text/template">
+    <div class="table-responsive">
+        <table class="table table-sm">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Type</th>
+                </tr>
+            </thead>
+            <tbody id="clubMembersTableBody">
+            </tbody>
+        </table>
+    </div>
+</script>
+
+<script>
+// Lazy load club management data
+let clubManagementLoaded = false;
+let allAdminClubs = []; // Store all clubs for filtering
+
+// Regional Federations data (from Models/Federations.cs)
+const regionalFederations = [
+    { value: 'Blekinge', description: 'Blekinge Pistolskyttekrets' },
+    { value: 'Dalarna', description: 'Dalarnas Pistolskyttekrets' },
+    { value: 'Gotland', description: 'Gotlands Pistolskyttekrets' },
+    { value: 'Gavleborg', description: 'Gävleborgs Pistolskyttekrets' },
+    { value: 'GoteborgOchBohuslan', description: 'Göteborg och Bohusläns Pistol.Krets' },
+    { value: 'Halland', description: 'Hallands Pistolskyttekrets' },
+    { value: 'Jamtland', description: 'Jämtlands Läns Pistolskyttekrets' },
+    { value: 'Jonkoping', description: 'Jönköpings Läns Pistolskyttekrets' },
+    { value: 'KalmarNorra', description: 'Kalmar Läns Norra Pistolskyttekrets' },
+    { value: 'KalmarSodra', description: 'Kalmar Läns Södra Pistolskyttekrets' },
+    { value: 'Kristianstad', description: 'Kristianstads Pistolskyttekrets' },
+    { value: 'Kronoberg', description: 'Kronobergs Läns Pistolskyttekrets' },
+    { value: 'Malmohus', description: 'Malmöhus Pistolskyttekrets' },
+    { value: 'Norrbotten', description: 'Norrbottens Pistolskyttekrets' },
+    { value: 'Skaraborg', description: 'Skaraborgs Pistolskyttekrets' },
+    { value: 'Stockholm', description: 'Stockholms Pistolskyttekrets' },
+    { value: 'Sodermanland', description: 'Södermanlands Pistolskyttekrets' },
+    { value: 'Uppsala', description: 'Uppsala Läns Pistolskyttekrets' },
+    { value: 'Varmland', description: 'Värmlands Pistolskyttekrets' },
+    { value: 'Vasterbotten', description: 'Västerbottens Läns Pistolskyttekrets' },
+    { value: 'Vasternorrland', description: 'Västernorrlands Läns Pistolskyttekrets' },
+    { value: 'VastgotaDal', description: 'Västgöta-Dals Pistolskyttekrets' },
+    { value: 'Vastmanland', description: 'Västmanlands Pistolskyttekrets' },
+    { value: 'Alvsborg', description: 'Älvsborgs Pistolskyttekrets' },
+    { value: 'Orebro', description: 'Örebro Läns Pistolskyttekrets' },
+    { value: 'Ostergotland', description: 'Östergötlands Pistolskyttekrets' }
+];
+
+function getKretsDescription(value) {
+    if (!value) return '';
+    const krets = regionalFederations.find(f => f.value === value);
+    return krets ? krets.description : value;
+}
+
+function populateRegionalFederationsDropdown(selectedValue) {
+    const select = document.getElementById('regionalFederation');
+    select.innerHTML = '<option value="">-- Välj krets --</option>';
+    regionalFederations.forEach(f => {
+        const selected = f.value === selectedValue ? 'selected' : '';
+        select.innerHTML += `<option value="${f.value}" ${selected}>${f.description}</option>`;
+    });
+}
+
+function populateAdminKretsFilter() {
+    const select = document.getElementById('adminKretsFilter');
+    if (!select) return;
+    select.innerHTML = '<option value="">Alla kretsar</option>';
+    regionalFederations.forEach(f => {
+        const selected = f.value === 'Halland' ? 'selected' : '';
+        select.innerHTML += `<option value="${f.value}" ${selected}>${f.description}</option>`;
+    });
+}
+
+function filterAdminClubsByKrets() {
+    // Use server-side filtering for performance
+    loadClubs();
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    const clubsTab = document.getElementById('clubs-tab');
+
+    // Load when tab is clicked for the first time
+    if (clubsTab) {
+        clubsTab.addEventListener('shown.bs.tab', function() {
+            if (!clubManagementLoaded) {
+                populateAdminKretsFilter();
+                loadClubs();
+                clubManagementLoaded = true;
+            }
+        });
+    }
+});
+
+function loadClubs() {
+    const container = document.getElementById('clubsList');
+    const selectedKrets = document.getElementById('adminKretsFilter')?.value || '';
+
+    // Show loading state
+    container.innerHTML = `
+        <div class="text-center">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p>Loading clubs...</p>
+        </div>
+    `;
+
+    // Use server-side filtering endpoint for performance
+    const url = `/umbraco/surface/ClubAdmin/GetClubsByKrets?krets=${encodeURIComponent(selectedKrets)}`;
+
+    fetch(url)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                allAdminClubs = data.clubs;
+                displayClubs(data.clubs);
+            } else {
+                container.innerHTML =
+                    '<div class="alert alert-danger">Error: ' + data.message + '</div>';
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            container.innerHTML =
+                '<div class="alert alert-danger">Network error: ' + error.message + '</div>';
+        });
+}
+
+function displayClubs(clubs) {
+    const tableTemplate = document.getElementById('clubsTableTemplate').innerHTML;
+    const rowTemplate = document.getElementById('clubRowTemplate').innerHTML;
+
+    document.getElementById('clubsList').innerHTML = tableTemplate;
+
+    const tbody = document.getElementById('clubsTableBody');
+    tbody.innerHTML = '';
+
+    clubs.forEach(club => {
+        // Build contact display - show person and/or email, or "No contact" if both empty
+        let contactDisplay = '';
+        if (club.contactPerson && club.contactEmail) {
+            contactDisplay = `${club.contactPerson}<br><small class="text-muted">${club.contactEmail}</small>`;
+        } else if (club.contactPerson) {
+            contactDisplay = club.contactPerson;
+        } else if (club.contactEmail) {
+            contactDisplay = `<small class="text-muted">${club.contactEmail}</small>`;
+        } else {
+            contactDisplay = '<span class="text-muted">-</span>';
+        }
+
+        const row = rowTemplate
+            .replace(/{name}/g, club.name || '')
+            .replace(/{description}/g, club.description || '')
+            .replace(/{kretsDisplay}/g, getKretsDescription(club.regionalFederation))
+            .replace(/{city}/g, club.city || '-')
+            .replace(/{contactDisplay}/g, contactDisplay)
+            .replace(/{id}/g, club.id);
+
+        tbody.innerHTML += row;
+    });
+}
+
+function showAddClubModal() {
+    document.getElementById('clubModalTitle').textContent = 'Add New Club';
+    document.getElementById('clubForm').reset();
+    document.getElementById('clubManagementId').value = '';
+    document.getElementById('isActive').checked = true;
+    document.getElementById('clubIdNumber').value = '';
+
+    // Hide delete button for new clubs
+    document.getElementById('deleteClubBtn').style.display = 'none';
+
+    // Clear contact person dropdown
+    renderContactPersonDropdown([], '');
+
+    // Populate regional federations dropdown
+    populateRegionalFederationsDropdown('');
+
+    new bootstrap.Modal(document.getElementById('clubModal')).show();
+}
+
+function editClub(clubId) {
+    document.getElementById('clubModalTitle').textContent = 'Edit Club';
+
+    fetch(`/umbraco/surface/ClubAdmin/GetClub?id=${clubId}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                const club = data.data;
+
+                document.getElementById('clubManagementId').value = club.id;
+                document.getElementById('clubName').value = club.name;
+                document.getElementById('clubDescription').value = club.description;
+                document.getElementById('contactPerson').value = club.contactPerson;
+                document.getElementById('contactEmail').value = club.contactEmail;
+                document.getElementById('contactPhone').value = club.contactPhone;
+                document.getElementById('webSite').value = club.webSite || '';
+                document.getElementById('address').value = club.address;
+                document.getElementById('city').value = club.city;
+                document.getElementById('postalCode').value = club.postalCode;
+                document.getElementById('isActive').checked = club.isActive;
+                document.getElementById('clubIdNumber').value = club.clubIdNumber || '';
+
+                // Populate contact person dropdown
+                renderContactPersonDropdown(club.clubMembers || [], club.contactPerson);
+
+                // Populate regional federations dropdown
+                populateRegionalFederationsDropdown(club.regionalFederation || '');
+
+                // Show delete button for existing clubs
+                document.getElementById('deleteClubBtn').style.display = 'block';
+
+                new bootstrap.Modal(document.getElementById('clubModal')).show();
+            } else {
+                alert('Error loading club: ' + data.message);
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Failed to load club data');
+        });
+}
+
+function renderContactPersonDropdown(clubMembers, currentContactPerson) {
+    const select = document.getElementById('contactPersonSelect');
+    select.innerHTML = '<option value="">-- Select from club members --</option>';
+    
+    clubMembers.forEach(member => {
+        const isSelected = member.name === currentContactPerson;
+        const option = `<option value="${member.name}" data-email="${member.email}" ${isSelected ? 'selected' : ''}>${member.name} (${member.email})</option>`;
+        select.innerHTML += option;
+    });
+    
+    // Add event listener for contact person selection
+    select.onchange = function() {
+        const selectedOption = this.options[this.selectedIndex];
+        if (selectedOption.value) {
+            document.getElementById('contactPerson').value = selectedOption.value;
+            document.getElementById('contactEmail').value = selectedOption.getAttribute('data-email') || '';
+        }
+    };
+}
+
+function saveClub() {
+    const formData = new FormData();
+
+    // Add anti-forgery token
+    const token = document.querySelector('input[name="__RequestVerificationToken"]');
+    if (token) {
+        formData.append('__RequestVerificationToken', token.value);
+    }
+
+    formData.append('id', document.getElementById('clubManagementId').value);
+    formData.append('name', document.getElementById('clubName').value);
+    formData.append('description', document.getElementById('clubDescription').value);
+    formData.append('contactPerson', document.getElementById('contactPerson').value);
+    formData.append('contactEmail', document.getElementById('contactEmail').value);
+    formData.append('contactPhone', document.getElementById('contactPhone').value);
+    formData.append('webSite', document.getElementById('webSite').value);
+    formData.append('address', document.getElementById('address').value);
+    formData.append('city', document.getElementById('city').value);
+    formData.append('postalCode', document.getElementById('postalCode').value);
+    formData.append('isActive', document.getElementById('isActive').checked);
+    formData.append('clubIdNumber', document.getElementById('clubIdNumber').value);
+    formData.append('regionalFederation', document.getElementById('regionalFederation').value);
+
+    fetch('/umbraco/surface/ClubAdmin/SaveClub', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => {
+        if (!response.ok) {
+            return response.text().then(text => {
+                throw new Error(`HTTP ${response.status}: ${text}`);
+            });
+        }
+        return response.json();
+    })
+    .then(data => {
+        if (data.success) {
+            bootstrap.Modal.getInstance(document.getElementById('clubModal')).hide();
+            loadClubs(); // Refresh the list
+        } else {
+            alert('Error: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Failed to save club: ' + error.message);
+    });
+}
+
+function deleteClub(clubId) {
+    // First check if the club can be deleted (no members linked)
+    fetch(`/umbraco/surface/ClubAdmin/CheckClubCanBeDeleted?clubId=${clubId}`)
+        .then(response => {
+            if (!response.ok) {
+                return response.text().then(text => {
+                    throw new Error(`HTTP ${response.status}: ${text}`);
+                });
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (data.canDelete === true) {
+                // Club has no members - show confirmation dialog
+                if (confirm('Are you sure you want to delete this club? This action cannot be undone.')) {
+                    performClubDeletion(clubId);
+                }
+            } else {
+                // Club has members - show prevention dialog immediately
+                showDeletionErrorDialog(data.message, data.linkedMembers || []);
+            }
+        })
+        .catch(error => {
+            console.error('Error checking club:', error);
+            alert('Failed to check if club can be deleted: ' + error.message);
+        });
+}
+
+function performClubDeletion(clubId) {
+    const formData = new FormData();
+
+    // Add anti-forgery token
+    const token = document.querySelector('input[name="__RequestVerificationToken"]');
+    if (token) {
+        formData.append('__RequestVerificationToken', token.value);
+    }
+
+    formData.append('clubId', clubId);
+
+    fetch('/umbraco/surface/ClubAdmin/DeleteClub', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => {
+        if (!response.ok) {
+            return response.text().then(text => {
+                throw new Error(`HTTP ${response.status}: ${text}`);
+            });
+        }
+        return response.json();
+    })
+    .then(data => {
+        if (data.success) {
+            alert('Club deleted successfully!');
+            loadClubs(); // Refresh the list
+        } else {
+            // This should rarely happen since we pre-checked, but handle it
+            showDeletionErrorDialog(data.message, data.linkedMembers || []);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Failed to delete club: ' + error.message);
+    });
+}
+
+function deleteClubFromModal() {
+    const clubId = document.getElementById('clubManagementId').value;
+    if (!clubId) {
+        alert('No club selected for deletion.');
+        return;
+    }
+
+    // First check if the club can be deleted (no members linked)
+    fetch(`/umbraco/surface/ClubAdmin/CheckClubCanBeDeleted?clubId=${clubId}`)
+        .then(response => {
+            if (!response.ok) {
+                return response.text().then(text => {
+                    throw new Error(`HTTP ${response.status}: ${text}`);
+                });
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (data.canDelete === true) {
+                // Club has no members - show confirmation dialog
+                if (confirm('Are you sure you want to delete this club? This action cannot be undone.')) {
+                    performClubDeletionFromModal(clubId);
+                }
+            } else {
+                // Club has members - show prevention dialog
+                bootstrap.Modal.getInstance(document.getElementById('clubModal')).hide();
+                showDeletionErrorDialog(data.message, data.linkedMembers || []);
+            }
+        })
+        .catch(error => {
+            console.error('Error checking club:', error);
+            alert('Failed to check if club can be deleted: ' + error.message);
+        });
+}
+
+function performClubDeletionFromModal(clubId) {
+    const formData = new FormData();
+
+    // Add anti-forgery token
+    const token = document.querySelector('input[name="__RequestVerificationToken"]');
+    if (token) {
+        formData.append('__RequestVerificationToken', token.value);
+    }
+
+    formData.append('clubId', clubId);
+
+    fetch('/umbraco/surface/ClubAdmin/DeleteClub', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => {
+        if (!response.ok) {
+            return response.text().then(text => {
+                throw new Error(`HTTP ${response.status}: ${text}`);
+            });
+        }
+        return response.json();
+    })
+    .then(data => {
+        if (data.success) {
+            bootstrap.Modal.getInstance(document.getElementById('clubModal')).hide();
+            loadClubs(); // Refresh the list
+        } else {
+            // This should rarely happen since we pre-checked, but handle it
+            bootstrap.Modal.getInstance(document.getElementById('clubModal')).hide();
+            showDeletionErrorDialog(data.message, data.linkedMembers || []);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Failed to delete club: ' + error.message);
+    });
+}
+
+function showClubMembers(clubId, clubName) {
+    document.getElementById('clubMembersModalTitle').textContent = clubName + ' - Members';
+    document.getElementById('clubMembersList').innerHTML = `
+        <div class="text-center">
+            <div class="spinner-border spinner-border-sm" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p>Loading members...</p>
+        </div>
+    `;
+    
+    new bootstrap.Modal(document.getElementById('clubMembersModal')).show();
+    
+    fetch(`/umbraco/surface/ClubAdmin/GetClubMembers?clubId=${clubId}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                displayClubMembers(data.data);
+            } else {
+                document.getElementById('clubMembersList').innerHTML = 
+                    '<div class="alert alert-warning">Error: ' + data.message + '</div>';
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            document.getElementById('clubMembersList').innerHTML = 
+                '<div class="alert alert-danger">Failed to load members</div>';
+        });
+}
+
+function displayClubMembers(members) {
+    const tableTemplate = document.getElementById('clubMembersTableTemplate').innerHTML;
+    document.getElementById('clubMembersList').innerHTML = tableTemplate;
+    
+    const tbody = document.getElementById('clubMembersTableBody');
+    tbody.innerHTML = '';
+    
+    if (members.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">No members found</td></tr>';
+        return;
+    }
+    
+    members.forEach(member => {
+        const row = `
+            <tr>
+                <td>${member.memberName}</td>
+                <td>${member.email}</td>
+                <td><span class="badge bg-primary">Primary</span></td>
+            </tr>
+        `;
+        tbody.innerHTML += row;
+    });
+}
+
+function showDeletionErrorDialog(errorMessage, linkedMembers) {
+    var content = '<div class="alert alert-warning mb-0"><strong>Deletion Blocked:</strong><br>' + errorMessage + '</div>';
+
+    if (linkedMembers && linkedMembers.length > 0) {
+        content += '<div class="mt-3"><strong>Linked Members:</strong>';
+        content += '<div class="table-responsive mt-2">';
+        content += '<table class="table table-sm table-bordered">';
+        content += '<thead><tr><th>Name</th><th>Email</th><th>Link Type</th></tr></thead><tbody>';
+
+        linkedMembers.forEach(function(member) {
+            var badgeClass = member.linkType === 'Primary Club' ? 'bg-danger' : 'bg-warning';
+            content += '<tr>';
+            content += '<td>' + (member.name || 'Unknown') + '</td>';
+            content += '<td>' + (member.email || 'No email') + '</td>';
+            content += '<td><span class="badge ' + badgeClass + '">' + member.linkType + '</span></td>';
+            content += '</tr>';
+        });
+
+        content += '</tbody></table></div></div>';
+    }
+
+    document.getElementById('deletionErrorMessage').innerHTML = content;
+    new bootstrap.Modal(document.getElementById('deletionErrorModal')).show();
+}
+
+function switchToUserManagement() {
+    // This function should switch to the User Management tab
+    // Assuming there's a tab system in the parent page
+    if (typeof showUserManagement === 'function') {
+        showUserManagement();
+    } else if (document.getElementById('userManagementTab')) {
+        document.getElementById('userManagementTab').click();
+    } else {
+        alert('Please navigate to User Management manually to unlink members from this club.');
+    }
+}
+
+// Club Admin Management Functions
+let currentClubForAdmins = null;
+
+function showClubAdmins(clubId, clubName) {
+    currentClubForAdmins = clubId;
+    document.getElementById('clubAdminsModalTitle').textContent = `Manage Club Admins - ${clubName}`;
+
+    // Load current admins
+    loadClubAdmins(clubId);
+
+    // Load available members for dropdown
+    loadAvailableMembers(clubId);
+
+    new bootstrap.Modal(document.getElementById('clubAdminsModal')).show();
+}
+
+async function loadClubAdmins(clubId) {
+    const container = document.getElementById('currentClubAdmins');
+    container.innerHTML = '<div class="text-center"><div class="spinner-border spinner-border-sm" role="status"></div> Loading...</div>';
+
+    try {
+        const response = await fetch(`/umbraco/surface/ClubAdmin/GetClubAdmins?clubId=${clubId}`);
+        const data = await response.json();
+
+        if (data.success) {
+            displayClubAdmins(data.admins);
+        } else {
+            container.innerHTML = `<div class="alert alert-warning">${data.message}</div>`;
+        }
+    } catch (error) {
+        console.error('Error loading club admins:', error);
+        container.innerHTML = '<div class="alert alert-danger">Error loading club admins</div>';
+    }
+}
+
+function displayClubAdmins(admins) {
+    const container = document.getElementById('currentClubAdmins');
+
+    if (admins.length === 0) {
+        container.innerHTML = '<p class="text-muted">No club admins assigned</p>';
+        return;
+    }
+
+    let html = '<div class="list-group">';
+    admins.forEach(admin => {
+        html += `
+            <div class="list-group-item d-flex justify-content-between align-items-center">
+                <div>
+                    <strong>${admin.name || 'Unknown'}</strong>
+                    <br><small class="text-muted">${admin.email}</small>
+                </div>
+                <button class="btn btn-sm btn-outline-danger" onclick="removeClubAdmin(${admin.id}, '${admin.name}')">
+                    Remove
+                </button>
+            </div>
+        `;
+    });
+    html += '</div>';
+
+    container.innerHTML = html;
+}
+
+async function loadAvailableMembers(clubId) {
+    const select = document.getElementById('availableMembersSelect');
+    const assignBtn = document.getElementById('assignAdminBtn');
+
+    select.innerHTML = '<option value="">Loading available members...</option>';
+    assignBtn.disabled = true;
+
+    try {
+        const response = await fetch(`/umbraco/surface/ClubAdmin/GetAvailableMembersForClubAdmin?clubId=${clubId}`);
+        const data = await response.json();
+
+        if (data.success) {
+            populateMemberDropdown(data.members);
+        } else {
+            select.innerHTML = '<option value="">Error loading members</option>';
+        }
+    } catch (error) {
+        console.error('Error loading available members:', error);
+        select.innerHTML = '<option value="">Error loading members</option>';
+    }
+}
+
+function populateMemberDropdown(members) {
+    const select = document.getElementById('availableMembersSelect');
+    const assignBtn = document.getElementById('assignAdminBtn');
+
+    if (!members || members.length === 0) {
+        select.innerHTML = '<option value="">No available members</option>';
+        assignBtn.disabled = true;
+        return;
+    }
+
+    let options = '<option value="">Select a member to assign...</option>';
+    members.forEach(member => {
+        options += `<option value="${member.id}" data-name="${member.name}">${member.name} (${member.email})</option>`;
+    });
+
+    select.innerHTML = options;
+
+    // Enable assign button when selection changes
+    select.addEventListener('change', function() {
+        assignBtn.disabled = !this.value;
+    });
+}
+
+function assignSelectedAdmin() {
+    const select = document.getElementById('availableMembersSelect');
+    const selectedOption = select.options[select.selectedIndex];
+
+    if (!selectedOption.value) {
+        alert('Please select a member to assign as admin.');
+        return;
+    }
+
+    const memberId = selectedOption.value;
+    const memberName = selectedOption.getAttribute('data-name');
+
+    assignClubAdmin(memberId, memberName);
+}
+
+async function assignClubAdmin(memberId, memberName) {
+    if (!currentClubForAdmins) return;
+
+    try {
+        const formData = new FormData();
+        const token = document.querySelector('input[name="__RequestVerificationToken"]').value;
+        formData.append('__RequestVerificationToken', token);
+        formData.append('memberId', memberId);
+        formData.append('clubId', currentClubForAdmins);
+
+        const response = await fetch('/umbraco/surface/ClubAdmin/AssignClubAdmin', {
+            method: 'POST',
+            body: formData
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            // Refresh the admin list
+            loadClubAdmins(currentClubForAdmins);
+            // Refresh available members dropdown (removes the newly assigned admin)
+            loadAvailableMembers(currentClubForAdmins);
+            // Refresh the clubs table to update admin count
+            loadClubs();
+            // Show success message
+            alert(`Successfully assigned ${memberName} as club admin!`);
+        } else {
+            alert('Error: ' + data.message);
+        }
+    } catch (error) {
+        console.error('Error assigning club admin:', error);
+        alert('Error assigning club admin');
+    }
+}
+
+async function removeClubAdmin(memberId, memberName) {
+    if (!confirm(`Remove ${memberName} as club admin?`)) return;
+
+    if (!currentClubForAdmins) return;
+
+    try {
+        const formData = new FormData();
+        const token = document.querySelector('input[name="__RequestVerificationToken"]').value;
+        formData.append('__RequestVerificationToken', token);
+        formData.append('memberId', memberId);
+        formData.append('clubId', currentClubForAdmins);
+
+        const response = await fetch('/umbraco/surface/ClubAdmin/RemoveClubAdmin', {
+            method: 'POST',
+            body: formData
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            // Refresh the admin list
+            loadClubAdmins(currentClubForAdmins);
+            // Refresh available members dropdown (adds the removed admin back)
+            loadAvailableMembers(currentClubForAdmins);
+            // Refresh the clubs table to update admin count
+            loadClubs();
+            // Show success message
+            alert(`Successfully removed ${memberName} as club admin.`);
+        } else {
+            alert('Error: ' + data.message);
+        }
+    } catch (error) {
+        console.error('Error removing club admin:', error);
+        alert('Error removing club admin');
+    }
+}
+</script>

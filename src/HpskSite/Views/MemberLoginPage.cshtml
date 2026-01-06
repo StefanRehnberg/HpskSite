@@ -1,0 +1,108 @@
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+}
+
+<div class="container mt-5">
+    <div class="row justify-content-center">
+        <div class="col-md-6 col-lg-5">
+            <div class="text-center mb-4">
+                <h1 class="h3">@Model.Name</h1>
+                <p class="text-muted">Välkommen till HPSK medlemsportalen</p>
+            </div>
+
+            @* Show login status if user is already logged in *@
+            @await Html.PartialAsync("LoginStatus")
+
+            <!-- Tabbed Interface for Login/Register -->
+            <div class="card shadow">
+                <div class="card-header p-0">
+                    <ul class="nav nav-tabs card-header-tabs" id="authTabs" role="tablist">
+                        <li class="nav-item flex-fill" role="presentation">
+                            <button class="nav-link active w-100 text-center" id="login-tab" data-bs-toggle="tab" data-bs-target="#login-panel" type="button" role="tab" aria-controls="login-panel" aria-selected="true">
+                                <i class="bi bi-box-arrow-in-right me-1"></i>Logga in
+                            </button>
+                        </li>
+                        <li class="nav-item flex-fill" role="presentation">
+                            <button class="nav-link w-100 text-center" id="register-tab" data-bs-toggle="tab" data-bs-target="#register-panel" type="button" role="tab" aria-controls="register-panel" aria-selected="false">
+                                <i class="bi bi-person-plus me-1"></i>Registrera
+                            </button>
+                        </li>
+                    </ul>
+                </div>
+                <div class="card-body">
+                    <div class="tab-content" id="authTabContent">
+                        <!-- Login Panel - Active by default -->
+                        <div class="tab-pane fade show active" id="login-panel" role="tabpanel" aria-labelledby="login-tab">
+                            <div class="text-center mb-3">
+                                <h5 class="card-title">Logga in</h5>
+                                <p class="text-muted small">Ange dina inloggningsuppgifter</p>
+                            </div>
+                            @await Html.PartialAsync("Login")
+                        </div>
+
+                        <!-- Register Panel -->
+                        <div class="tab-pane fade" id="register-panel" role="tabpanel" aria-labelledby="register-tab">
+                            <div class="text-center mb-3">
+                                <h5 class="card-title">Bli medlem</h5>
+                                <p class="text-muted small">Skapa ett nytt medlemskonto</p>
+                            </div>
+                            @await Html.PartialAsync("Register")
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quick Links -->
+            <div class="text-center mt-4">
+                <small class="text-muted">
+                    <a href="/" class="text-decoration-none me-3">? Tillbaka till startsidan</a>
+                    <a href="/training-page" class="text-decoration-none">Skyttetrappan ?</a>
+                </small>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* Password Reset Modal *@
+@await Html.PartialAsync("PasswordResetRequestModal")
+
+<script>
+// Tab activation from URL parameter
+document.addEventListener('DOMContentLoaded', function() {
+    // Check URL for tab parameter
+    const urlParams = new URLSearchParams(window.location.search);
+    const tabParam = urlParams.get('tab');
+
+    if (tabParam === 'register') {
+        // Activate register tab
+        const registerTab = document.getElementById('register-tab');
+        if (registerTab) {
+            const tab = new bootstrap.Tab(registerTab);
+            tab.show();
+        }
+    } else if (tabParam === 'login') {
+        // Activate login tab (default, but explicit)
+        const loginTab = document.getElementById('login-tab');
+        if (loginTab) {
+            const tab = new bootstrap.Tab(loginTab);
+            tab.show();
+        }
+    }
+});
+
+// Global function to switch to login tab (called from Register.cshtml)
+function switchToLoginTab() {
+    const loginTab = document.getElementById('login-tab');
+    if (loginTab) {
+        const tab = new bootstrap.Tab(loginTab);
+        tab.show();
+
+        // Optional: Scroll to top of card
+        document.querySelector('.card.shadow').scrollIntoView({
+            behavior: 'smooth',
+            block: 'start'
+        });
+    }
+}
+</script>

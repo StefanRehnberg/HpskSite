@@ -1,0 +1,1059 @@
+@{
+    var clubId = ViewBag.clubId as int? ?? 0;
+    var clubName = ViewBag.clubName as string ?? "Club";
+}
+
+<!-- Flatpickr Date/Time Picker -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
+
+<div class="club-admin-panel">
+    <div class="alert alert-info mb-4">
+        <i class="bi bi-shield-check me-2"></i>
+        <strong>Klubbadministration</strong> - Du kan hantera klubbhändelser, tävlingar och inställningar här.
+    </div>
+
+    <!-- Admin Tabs -->
+    <ul class="nav nav-tabs mb-3" id="adminTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="events-tab" data-bs-toggle="tab" data-bs-target="#eventsTab" type="button">
+                <i class="bi bi-calendar-event me-2"></i>Händelser
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="competitions-tab" data-bs-toggle="tab" data-bs-target="#competitionsTab" type="button">
+                <i class="bi bi-trophy me-2"></i>Tävlingar
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="members-tab" data-bs-toggle="tab" data-bs-target="#membersTab" type="button">
+                <i class="bi bi-people me-2"></i>Medlemmar
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="invoices-tab" data-bs-toggle="tab" data-bs-target="#invoicesTab" type="button">
+                <i class="bi bi-receipt me-2"></i>Fakturor
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="settings-tab" data-bs-toggle="tab" data-bs-target="#settingsTab" type="button">
+                <i class="bi bi-gear me-2"></i>Inställningar
+            </button>
+        </li>
+    </ul>
+
+    <!-- Tab Content -->
+    <div class="tab-content" id="adminTabContent">
+        <!-- Events Tab -->
+        <div class="tab-pane fade show active" id="eventsTab">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5>Klubbhändelser</h5>
+                <button class="btn btn-primary" onclick="showCreateEventModal()">
+                    <i class="bi bi-plus-circle me-2"></i>Ny Händelse
+                </button>
+            </div>
+
+            <div id="eventsTableContainer">
+                <div class="text-center py-4">
+                    <div class="spinner-border" role="status">
+                        <span class="visually-hidden">Laddar händelser...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Competitions Tab -->
+        <div class="tab-pane fade" id="competitionsTab">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5>Klubbtävlingar</h5>
+                <button class="btn btn-primary" onclick="showCreateClubCompetitionModal()">
+                    <i class="bi bi-plus-circle me-2"></i>Ny Tävling
+                </button>
+            </div>
+
+            <div id="competitionsTableContainer">
+                <div class="text-center py-4">
+                    <div class="spinner-border" role="status">
+                        <span class="visually-hidden">Laddar tävlingar...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Members Tab -->
+        <div class="tab-pane fade" id="membersTab">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5>Klubbmedlemmar</h5>
+                <button class="btn btn-success" onclick="showAddClubMemberModal()">
+                    <i class="bi bi-person-plus-fill me-2"></i>Lägg till ny klubbmedlem
+                </button>
+            </div>
+
+            <div id="clubMembersTableContainer">
+                <div class="text-center py-4">
+                    <div class="spinner-border" role="status">
+                        <span class="visually-hidden">Laddar medlemmar...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Invoices Tab -->
+        <div class="tab-pane fade" id="invoicesTab">
+            @await Html.PartialAsync("ClubAdminInvoicesList")
+        </div>
+
+        <!-- Settings Tab -->
+        <div class="tab-pane fade" id="settingsTab">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title mb-4">
+                        <i class="bi bi-gear me-2"></i>Klubbinställningar
+                    </h5>
+                    <form id="clubSettingsForm">
+                        <!-- Contact Information Section -->
+                        <h6 class="text-muted mb-3">
+                            <i class="bi bi-person-lines-fill me-2"></i>Kontaktinformation
+                        </h6>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Kontaktperson</label>
+                                <input type="text" class="form-control" id="contactPerson" name="contactPerson" placeholder="Namn på kontaktperson">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Kontakt Telefon</label>
+                                <input type="tel" class="form-control" id="contactPhone" name="contactPhone" placeholder="+46 70 123 45 67">
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Kontakt E-post</label>
+                                <input type="email" class="form-control" id="contactEmail" name="contactEmail" placeholder="kontakt@klubb.se">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Webbplats</label>
+                                <input type="url" class="form-control" id="webSite" name="webSite" placeholder="https://www.klubb.se">
+                            </div>
+                        </div>
+
+                        <hr class="my-4">
+
+                        <!-- Address Section -->
+                        <h6 class="text-muted mb-3">
+                            <i class="bi bi-geo-alt-fill me-2"></i>Adress
+                        </h6>
+                        <div class="row">
+                            <div class="col-md-12 mb-3">
+                                <label class="form-label">Gatuadress</label>
+                                <input type="text" class="form-control" id="address" name="address" placeholder="Gatugatan 123">
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label">Postnummer</label>
+                                <input type="text" class="form-control" id="postalCode" name="postalCode" placeholder="123 45">
+                            </div>
+                            <div class="col-md-8 mb-3">
+                                <label class="form-label">Stad</label>
+                                <input type="text" class="form-control" id="city" name="city" placeholder="Stockholm">
+                            </div>
+                        </div>
+
+                        <hr class="my-4">
+
+                        <!-- Description Section -->
+                        <h6 class="text-muted mb-3">
+                            <i class="bi bi-card-text me-2"></i>Om Klubben
+                        </h6>
+                        <div class="mb-3">
+                            <label class="form-label">Kort Beskrivning</label>
+                            <textarea class="form-control" id="club_description" name="description" rows="3" placeholder="En kort beskrivning av klubben (används för SEO och sammanfattning)"></textarea>
+                            <small class="text-muted">Används som kort sammanfattning i sökresultat och listor</small>
+                        </div>
+                        <div class="mb-4">
+                            <label class="form-label">Utförlig Information (Om Klubben)</label>
+                            <textarea class="form-control" id="aboutClub" name="aboutClub" rows="8" placeholder="Utförlig information om klubben, historia, verksamhet, etc. (kan innehålla HTML)"></textarea>
+                            <small class="text-muted">Visas på klubbsidan under "Om Klubben". Stöder grundläggande HTML-formatering.</small>
+                        </div>
+
+                        <div class="d-flex justify-content-end">
+                            <button type="submit" class="btn btn-success btn-lg">
+                                <i class="bi bi-save me-2"></i>Spara Inställningar
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Event Create/Edit Modal -->
+<div class="modal fade" id="eventModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="eventModalTitle">Ny Händelse</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="eventForm">
+                    <input type="hidden" id="eventId" name="eventId">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Händelsenamn *</label>
+                            <input type="text" class="form-control" id="eventName" name="eventName" required>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Typ *</label>
+                            <select class="form-select" id="eventType" name="eventType" required>
+                                <option value="Tävling">Tävling</option>
+                                <option value="Träning">Träning</option>
+                                <option value="Städning">Städning</option>
+                                <option value="Möte">Möte</option>
+                                <option value="Socialt">Socialt</option>
+                                <option value="Annat">Annat</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Datum *</label>
+                        <input type="text" class="form-control" id="eventDate" name="eventDate" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Plats</label>
+                        <input type="text" class="form-control" id="event_venue" name="venue">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Beskrivning</label>
+                        <textarea class="form-control" id="eventDescription" name="description" rows="3"></textarea>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">Kontaktperson</label>
+                            <input type="text" class="form-control" id="eventContactPerson" name="contactPerson">
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">Kontakt E-post</label>
+                            <input type="email" class="form-control" id="eventContactEmail" name="contactEmail">
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">Kontakt Telefon</label>
+                            <input type="tel" class="form-control" id="eventContactPhone" name="contactPhone">
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" onclick="saveEvent()">
+                    <i class="bi bi-save me-2"></i>Spara
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div class="modal fade" id="deleteConfirmModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title">Bekräfta Radering</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Är du säker på att du vill radera <strong id="deleteItemName"></strong>?</p>
+                <p class="text-muted small">Denna åtgärd kan inte ångras.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-danger" id="confirmDeleteBtn">
+                    <i class="bi bi-trash me-2"></i>Radera
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Club Member Modal -->
+<div class="modal fade" id="addClubMemberModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title">
+                    <i class="bi bi-person-plus-fill me-2"></i>Lägg till ny klubbmedlem
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-info mb-4">
+                    <i class="bi bi-info-circle me-2"></i>
+                    <strong>OBS:</strong> Medlemmen läggs automatiskt till i denna klubb och blir godkänd direkt.
+                    Efter att du lagt till medlemmen kan du skicka en inbjudan så att medlemmen kan sätta sitt lösenord.
+                </div>
+                <form id="addClubMemberForm">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="newMemberFirstName" class="form-label">Förnamn <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control" id="newMemberFirstName" name="firstName" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="newMemberLastName" class="form-label">Efternamn <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control" id="newMemberLastName" name="lastName" required>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="newMemberEmail" class="form-label">E-post <span class="text-danger">*</span></label>
+                        <input type="email" class="form-control" id="newMemberEmail" name="email" required>
+                        <div class="form-text">Används för inloggning och kommunikation</div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="newMemberPhoneNumber" class="form-label">Telefonnummer</label>
+                                <input type="tel" class="form-control" id="newMemberPhoneNumber" name="phoneNumber">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="newMemberShooterIdNumber" class="form-label">Skytte-ID</label>
+                                <input type="text" class="form-control" id="newMemberShooterIdNumber" name="shooterIdNumber">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="newMemberAddress" class="form-label">Adress</label>
+                        <input type="text" class="form-control" id="newMemberAddress" name="address">
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="newMemberPostalCode" class="form-label">Postnummer</label>
+                                <input type="text" class="form-control" id="newMemberPostalCode" name="postalCode">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="newMemberCity" class="form-label">Ort</label>
+                                <input type="text" class="form-control" id="newMemberCity" name="city">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="newMemberPersonNumber" class="form-label">Personnummer</label>
+                                <input type="text" class="form-control" id="newMemberPersonNumber" name="personNumber">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="newMemberMemberSince" class="form-label">Medlem sedan</label>
+                                <input type="text" class="form-control" id="newMemberMemberSince" name="memberSince">
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-success" onclick="saveClubMember()">
+                    <i class="bi bi-person-plus-fill me-2"></i>Lägg till medlem
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Global variables to store loaded data
+let allEvents = [];
+let aboutClubEditor = null; // CKEditor instance for About Club field
+
+// Note: eventTypeColors is declared in Club.cshtml parent page
+
+// Helper function to get anti-forgery token
+function getAntiForgeryToken() {
+    const tokenInput = document.querySelector('input[name="__RequestVerificationToken"]');
+    return tokenInput ? tokenInput.value : '';
+}
+
+// Load events when tabs are clicked
+document.getElementById('events-tab').addEventListener('shown.bs.tab', function () {
+    loadEvents();
+});
+
+document.getElementById('settings-tab').addEventListener('shown.bs.tab', function () {
+    loadClubSettings();
+
+    // Initialize CKEditor for About Club field if not already initialized
+    if (!aboutClubEditor) {
+        ClassicEditor
+            .create(document.querySelector('#aboutClub'), {
+                toolbar: ['heading', '|', 'bold', 'italic', 'link', 'bulletedList', 'numberedList', '|', 'blockQuote', 'undo', 'redo']
+            })
+            .then(editor => {
+                aboutClubEditor = editor;
+                console.log('CKEditor initialized for About Club field');
+            })
+            .catch(error => {
+                console.error('Error initializing CKEditor:', error);
+            });
+    }
+});
+
+document.getElementById('competitions-tab').addEventListener('shown.bs.tab', function () {
+    loadClubCompetitions();
+});
+
+document.getElementById('members-tab').addEventListener('shown.bs.tab', function () {
+    loadClubMembers();
+});
+
+document.getElementById('invoices-tab').addEventListener('shown.bs.tab', function () {
+    if (!clubInvoicesListLoaded) {
+        loadClubInvoices();
+        clubInvoicesListLoaded = true;
+    }
+});
+
+// Load events initially
+document.addEventListener('DOMContentLoaded', function() {
+    loadEvents();
+
+    // Initialize Flatpickr date/time pickers
+    flatpickr('#eventDate', {
+        locale: 'sv',
+        enableTime: true,
+        time_24hr: true,
+        dateFormat: 'Y-m-d H:i'
+    });
+
+    flatpickr('#newMemberMemberSince', {
+        locale: 'sv',
+        dateFormat: 'Y-m-d'
+    });
+});
+
+// Load Events
+function loadEvents() {
+    fetch(`/umbraco/surface/Club/GetClubEvents?clubId=${clubId}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                displayEvents(data.data);
+            } else {
+                document.getElementById('eventsTableContainer').innerHTML =
+                    '<div class="alert alert-warning">Inga händelser hittades.</div>';
+            }
+        })
+        .catch(error => {
+            console.error('Error loading events:', error);
+            document.getElementById('eventsTableContainer').innerHTML =
+                '<div class="alert alert-danger">Fel vid laddning av händelser.</div>';
+        });
+}
+
+function displayEvents(events) {
+    const container = document.getElementById('eventsTableContainer');
+
+    // Store events globally for editing
+    allEvents = events || [];
+
+    if (!events || events.length === 0) {
+        container.innerHTML = '<div class="alert alert-info">Inga händelser har skapats ännu.</div>';
+        return;
+    }
+
+    let html = '<div class="table-responsive"><table class="table table-striped">';
+    html += '<thead><tr><th>Namn</th><th>Typ</th><th>Datum</th><th>Plats</th><th>Åtgärder</th></tr></thead><tbody>';
+
+    events.forEach(event => {
+        const date = new Date(event.date).toLocaleString('sv-SE');
+        const color = eventTypeColors[event.type] || eventTypeColors.default;
+        html += `
+            <tr>
+                <td><strong>${event.name}</strong></td>
+                <td><span class="badge" style="background-color: ${color}">${event.type}</span></td>
+                <td>${date}</td>
+                <td>${event.venue || '-'}</td>
+                <td>
+                    <button class="btn btn-sm btn-outline-primary" onclick="editEvent(${event.id})">
+                        <i class="bi bi-pencil"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteEvent(${event.id}, '${event.name}')">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </td>
+            </tr>
+        `;
+    });
+
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+}
+
+// Load Club Settings
+function loadClubSettings() {
+    fetch(`/umbraco/surface/Club/GetClubInfo?clubId=${clubId}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.data) {
+                // Contact Information
+                document.getElementById('contactPerson').value = data.data.contactPerson || '';
+                document.getElementById('contactEmail').value = data.data.contactEmail || '';
+                document.getElementById('contactPhone').value = data.data.contactPhone || '';
+                document.getElementById('webSite').value = data.data.webSite || '';
+
+                // Address
+                document.getElementById('address').value = data.data.address || '';
+                document.getElementById('city').value = data.data.city || '';
+                document.getElementById('postalCode').value = data.data.postalCode || '';
+
+                // Description
+                document.getElementById('club_description').value = data.data.description || '';
+
+                // Set About Club content - use CKEditor if initialized, otherwise textarea
+                const aboutClubContent = data.data.aboutClub || '';
+                if (aboutClubEditor) {
+                    aboutClubEditor.setData(aboutClubContent);
+                } else {
+                    document.getElementById('aboutClub').value = aboutClubContent;
+                }
+            }
+        })
+        .catch(error => {
+            console.error('Error loading club settings:', error);
+        });
+}
+
+// Event Modal Functions
+function showCreateEventModal() {
+    document.getElementById('eventModalTitle').textContent = 'Ny Händelse';
+    document.getElementById('eventForm').reset();
+    document.getElementById('eventId').value = '';
+    new bootstrap.Modal(document.getElementById('eventModal')).show();
+}
+
+function editEvent(eventId) {
+    const event = allEvents.find(e => e.id === eventId);
+    if (!event) {
+        alert('Händelse hittades inte');
+        return;
+    }
+
+    // Update modal title
+    document.getElementById('eventModalTitle').textContent = 'Redigera Händelse';
+
+    // Populate form fields
+    document.getElementById('eventId').value = event.id;
+    document.getElementById('eventName').value = event.name || '';
+    document.getElementById('eventType').value = event.type || 'Träning';
+    document.getElementById('eventDescription').value = event.description || '';
+    document.getElementById('event_venue').value = event.venue || '';
+    document.getElementById('eventContactPerson').value = event.contactPerson || '';
+    document.getElementById('eventContactEmail').value = event.contactEmail || '';
+    document.getElementById('eventContactPhone').value = event.contactPhone || '';
+
+    // Format date for datetime-local input
+    if (event.date) {
+        const eventDate = new Date(event.date);
+        const formattedDate = eventDate.toISOString().slice(0, 16);
+        document.getElementById('eventDate').value = formattedDate;
+    }
+
+    // Show modal
+    new bootstrap.Modal(document.getElementById('eventModal')).show();
+}
+
+function saveEvent() {
+    const form = document.getElementById('eventForm');
+    if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+    }
+
+    // Disable button and show loading state
+    const saveBtn = document.querySelector('#eventModal .modal-footer .btn-primary');
+    if (!saveBtn) return;
+    const originalBtnText = saveBtn.innerHTML;
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Sparar...';
+
+    const formData = new FormData(form);
+    const eventId = formData.get('eventId');
+    const url = eventId ? '/umbraco/surface/Club/EditClubEvent' : '/umbraco/surface/Club/CreateClubEvent';
+
+    // Add clubId and anti-forgery token
+    formData.append('clubId', clubId);
+    formData.append('__RequestVerificationToken', getAntiForgeryToken());
+
+    fetch(url, {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            bootstrap.Modal.getInstance(document.getElementById('eventModal')).hide();
+            loadEvents();
+            alert('Händelse sparad!');
+            // Reset button (modal will close, so this is cleanup)
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = originalBtnText;
+        } else {
+            alert('Fel: ' + data.message);
+            // Re-enable button on error
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = originalBtnText;
+        }
+    })
+    .catch(error => {
+        console.error('Error saving event:', error);
+        alert('Fel vid sparande av händelse.');
+        // Re-enable button on error
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = originalBtnText;
+    });
+}
+
+function deleteEvent(eventId, eventName) {
+    showDeleteConfirmation(eventName, () => {
+        const formData = new FormData();
+        formData.append('__RequestVerificationToken', getAntiForgeryToken());
+
+        fetch(`/umbraco/surface/Club/DeleteClubEvent?eventId=${eventId}`, {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                loadEvents();
+                alert('Händelse raderad!');
+            } else {
+                alert('Fel: ' + data.message);
+            }
+        })
+        .catch(error => {
+            console.error('Error deleting event:', error);
+            alert('Fel vid radering av händelse.');
+        });
+    });
+}
+
+// Delete Confirmation
+function showDeleteConfirmation(itemName, onConfirm) {
+    document.getElementById('deleteItemName').textContent = itemName;
+    const modal = new bootstrap.Modal(document.getElementById('deleteConfirmModal'));
+
+    document.getElementById('confirmDeleteBtn').onclick = function() {
+        modal.hide();
+        onConfirm();
+    };
+
+    modal.show();
+}
+
+// ===== COMPETITIONS TAB FUNCTIONS =====
+
+// Load Club Competitions
+function loadClubCompetitions() {
+    const container = document.getElementById('competitionsTableContainer');
+    container.innerHTML = '<div class="text-center py-4"><div class="spinner-border" role="status"><span class="visually-hidden">Laddar tävlingar...</span></div></div>';
+
+    fetch('/umbraco/surface/CompetitionAdmin/GetCompetitionsList')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                // Filter for club-specific competitions only
+                const clubCompetitions = (data.data || []).filter(comp =>
+                    comp.clubId === clubId && comp.isClubOnly === true
+                );
+                displayClubCompetitions(clubCompetitions);
+            } else {
+                container.innerHTML = '<div class="alert alert-warning">Kunde inte ladda tävlingar.</div>';
+            }
+        })
+        .catch(error => {
+            console.error('Error loading club competitions:', error);
+            container.innerHTML = '<div class="alert alert-danger">Fel vid laddning av tävlingar.</div>';
+        });
+}
+
+function displayClubCompetitions(competitions) {
+    const container = document.getElementById('competitionsTableContainer');
+
+    if (!competitions || competitions.length === 0) {
+        container.innerHTML = '<div class="alert alert-info">Inga tävlingar har skapats ännu för denna klubb.</div>';
+        return;
+    }
+
+    let html = '<div class="table-responsive"><table class="table table-striped">';
+    html += '<thead><tr><th>Namn</th><th>Typ</th><th>Startdatum</th><th>Status</th><th>Anmälningar</th><th>Åtgärder</th></tr></thead><tbody>';
+
+    competitions.forEach(comp => {
+        const startDate = comp.startDate ? new Date(comp.startDate).toLocaleDateString('sv-SE') : '-';
+        const statusBadge = getCompetitionStatusBadge(comp.status);
+
+        html += `
+            <tr>
+                <td><strong>${escapeHtml(comp.name)}</strong></td>
+                <td><span class="badge bg-secondary">${escapeHtml(comp.type)}</span></td>
+                <td>${startDate}</td>
+                <td>${statusBadge}</td>
+                <td><span class="badge bg-info">${comp.registrationCount || 0}</span></td>
+                <td>
+                    <a href="/competitions/${comp.id}/" class="btn btn-sm btn-outline-secondary" title="Öppna" target="_blank">
+                        <i class="bi bi-eye"></i>
+                    </a>
+                    <button class="btn btn-sm btn-outline-primary" onclick="editClubCompetition(${comp.id})" title="Redigera">
+                        <i class="bi bi-pencil"></i>
+                    </button>
+                    <a href="/competitionmanagement?competitionId=${comp.id}" class="btn btn-sm btn-outline-info" title="Hantera tävling">
+                        <i class="bi bi-gear"></i>
+                    </a>
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteClubCompetition(${comp.id}, '${escapeHtml(comp.name)}')" title="Radera">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </td>
+            </tr>
+        `;
+    });
+
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+}
+
+function getCompetitionStatusBadge(status) {
+    const badges = {
+        'Draft': '<span class="badge bg-secondary">Utkast</span>',
+        'Scheduled': '<span class="badge bg-info">Schemalagd</span>',
+        'Active': '<span class="badge bg-success">Aktiv</span>',
+        'Completed': '<span class="badge bg-dark">Avslutad</span>'
+    };
+    return badges[status] || '<span class="badge bg-secondary">-</span>';
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Create new club competition using wizard
+function showCreateClubCompetitionModal() {
+    // Check if the wizard modal exists
+    const modalElement = document.getElementById('competitionWizardModal');
+    if (!modalElement) {
+        alert('Tävlingsguide kunde inte hittas. Kontakta administratören.');
+        return;
+    }
+
+    // Show the wizard modal
+    const modal = window.competitionWizardModalInstance || new bootstrap.Modal(modalElement);
+    window.competitionWizardModalInstance = modal;
+    modal.show();
+
+    // Reset wizard to step 0 when opened
+    if (typeof window.resetWizard === 'function') {
+        window.resetWizard();
+    }
+
+    // Set callback to reload competitions list after save
+    window.onCompetitionSaved = function() {
+        loadClubCompetitions();
+    };
+}
+
+// Edit existing club competition
+function editClubCompetition(competitionId) {
+    // Use the global openAdminEditModal function if it exists
+    if (typeof window.openAdminEditModal === 'function') {
+        window.openAdminEditModal(competitionId);
+
+        // Set callback to reload competitions list after save
+        window.onCompetitionSaved = function() {
+            loadClubCompetitions();
+        };
+    } else {
+        alert('Redigeringsfunktion kunde inte hittas. Kontakta administratören.');
+    }
+}
+
+// Delete club competition
+function deleteClubCompetition(competitionId, competitionName) {
+    showDeleteConfirmation(competitionName, () => {
+        const token = getAntiForgeryToken();
+        const payload = {
+            competitionId: competitionId
+        };
+
+        fetch('/umbraco/surface/CompetitionAdmin/DeleteCompetition', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': token
+            },
+            credentials: 'include',
+            body: JSON.stringify(payload)
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                loadClubCompetitions();
+                alert('Tävling raderad!');
+            } else {
+                alert('Fel: ' + (data.message || 'Kunde inte radera tävlingen'));
+            }
+        })
+        .catch(error => {
+            console.error('Error deleting competition:', error);
+            alert('Fel vid radering av tävling.');
+        });
+    });
+}
+
+// ===== MEMBERS TAB FUNCTIONS =====
+
+// Load Club Members
+function loadClubMembers() {
+    const container = document.getElementById('clubMembersTableContainer');
+    container.innerHTML = '<div class="text-center py-4"><div class="spinner-border" role="status"><span class="visually-hidden">Laddar medlemmar...</span></div></div>';
+
+    fetch(`/umbraco/surface/ClubAdmin/GetClubMembers?clubId=${clubId}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                displayClubMembers(data.data || []);
+            } else {
+                container.innerHTML = '<div class="alert alert-warning">Kunde inte ladda medlemmar.</div>';
+            }
+        })
+        .catch(error => {
+            console.error('Error loading club members:', error);
+            container.innerHTML = '<div class="alert alert-danger">Fel vid laddning av medlemmar.</div>';
+        });
+}
+
+function getInitials(firstName, lastName) {
+    let initials = '';
+    if (firstName) initials += firstName.charAt(0).toUpperCase();
+    if (lastName) initials += lastName.charAt(0).toUpperCase();
+    return initials || '?';
+}
+
+function renderMemberAvatar(member) {
+    const fullName = `${member.firstName || ''} ${member.lastName || ''}`.trim();
+    if (member.profilePictureUrl) {
+        return `<span class="member-avatar"><img src="${escapeHtml(member.profilePictureUrl)}" alt="${escapeHtml(fullName)}"></span>`;
+    } else {
+        return `<span class="member-avatar">${getInitials(member.firstName, member.lastName)}</span>`;
+    }
+}
+
+function displayClubMembers(members) {
+    const container = document.getElementById('clubMembersTableContainer');
+
+    if (!members || members.length === 0) {
+        container.innerHTML = '<div class="alert alert-info">Inga medlemmar har lagts till ännu för denna klubb.</div>';
+        return;
+    }
+
+    let html = '<div class="table-responsive"><table class="table table-striped">';
+    html += '<thead><tr><th>Namn</th><th>E-post</th><th>Telefon</th><th>Status</th><th>Åtgärder</th></tr></thead><tbody>';
+
+    members.forEach(member => {
+        const fullName = `${member.firstName || ''} ${member.lastName || ''}`.trim() || 'Okänt namn';
+        const statusBadge = member.isApproved
+            ? '<span class="badge bg-success">Godkänd</span>'
+            : '<span class="badge bg-warning text-dark">Väntande</span>';
+
+        html += `
+            <tr>
+                <td>
+                    <div class="member-name-cell">
+                        ${renderMemberAvatar(member)}
+                        <strong>${escapeHtml(fullName)}</strong>
+                    </div>
+                </td>
+                <td>${escapeHtml(member.email || '-')}</td>
+                <td>${escapeHtml(member.phoneNumber || '-')}</td>
+                <td>${statusBadge}</td>
+                <td>
+                    <button class="btn btn-sm btn-outline-info" onclick="sendMemberInvitation(${member.id})" title="Skicka inbjudan">
+                        <i class="bi bi-envelope"></i> Inbjudan
+                    </button>
+                </td>
+            </tr>
+        `;
+    });
+
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+}
+
+function showAddClubMemberModal() {
+    // Open modal
+    const modal = new bootstrap.Modal(document.getElementById('addClubMemberModal'));
+    modal.show();
+
+    // Reset form
+    document.getElementById('addClubMemberForm').reset();
+}
+
+function saveClubMember() {
+    const form = document.getElementById('addClubMemberForm');
+    if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+    }
+
+    const formData = new FormData(form);
+    formData.append('clubId', clubId);
+    formData.append('__RequestVerificationToken', getAntiForgeryToken());
+
+    fetch('/umbraco/surface/ClubAdmin/AddClubMember', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            bootstrap.Modal.getInstance(document.getElementById('addClubMemberModal')).hide();
+            loadClubMembers();
+            alert('Medlem tillagd! Du kan nu skicka en inbjudan till medlemmen.');
+        } else {
+            alert('Fel: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error adding club member:', error);
+        alert('Fel vid tillägg av medlem.');
+    });
+}
+
+function sendMemberInvitation(memberId) {
+    if (!confirm('Skicka inbjudan till denna medlem? Medlemmen får ett email med länk för att sätta sitt lösenord.')) {
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('__RequestVerificationToken', getAntiForgeryToken());
+    formData.append('memberId', memberId);
+
+    fetch('/umbraco/surface/MemberAdmin/SendInvitation', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => {
+        if (!response.ok) {
+            return response.text().then(text => {
+                throw new Error(`HTTP ${response.status}: ${text}`);
+            });
+        }
+        return response.json();
+    })
+    .then(data => {
+        if (data.success) {
+            alert('✅ Inbjudan skickad! Medlemmen kommer att få ett email.');
+        } else {
+            alert('❌ Fel: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Invitation error:', error);
+        alert('❌ Kunde inte skicka inbjudan: ' + error.message);
+    });
+}
+
+// Settings Form Submit
+document.getElementById('clubSettingsForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+
+    // Sync CKEditor content to textarea before submitting
+    if (aboutClubEditor) {
+        document.getElementById('aboutClub').value = aboutClubEditor.getData();
+    }
+
+    const formData = new FormData(this);
+    formData.append('clubId', clubId);
+    formData.append('__RequestVerificationToken', getAntiForgeryToken());
+
+    fetch('/umbraco/surface/Club/UpdateClubInfo', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('Inställningar sparade!');
+        } else {
+            alert('Fel: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error saving settings:', error);
+        alert('Fel vid sparande av inställningar.');
+    });
+});
+</script>
+
+<style>
+.club-admin-panel .nav-tabs .nav-link {
+    color: #666;
+}
+
+.club-admin-panel .nav-tabs .nav-link.active {
+    color: #0d6efd;
+    border-bottom: 3px solid #0d6efd;
+}
+
+.club-admin-panel .table {
+    margin-top: 1rem;
+}
+
+.club-admin-panel .modal-header.bg-danger {
+    border-bottom: none;
+}
+
+/* Member Avatar Styling */
+.member-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: bold;
+    color: white;
+    background-color: var(--bs-primary);
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.member-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.member-name-cell {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+</style>

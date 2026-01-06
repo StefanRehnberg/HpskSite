@@ -1,0 +1,1624 @@
+@using Umbraco.Cms.Web.Website.Controllers
+@{
+    // This partial handles user management UI
+    // Redesigned with Club Management pattern and Swedish translation
+}
+
+<!-- Flatpickr Date/Time Picker -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
+
+<div id="userManagement">
+    <!-- Pending Approvals Section -->
+    <div class="card mb-3 border-warning">
+        <div class="card-header bg-warning text-dark">
+            <h5 class="mb-0">
+                <i class="bi bi-clock-history"></i>
+                Väntande godkännanden
+                <span class="badge bg-dark ms-2" id="pendingCount">0</span>
+            </h5>
+        </div>
+        <div class="card-body" id="pendingApprovals">
+            <div class="text-center">
+                <div class="spinner-border spinner-border-sm" role="status"></div>
+                Laddar väntande godkännanden...
+            </div>
+        </div>
+    </div>
+
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h4>Användarhantering</h4>
+        <div>
+            <button class="btn btn-success" onclick="showAddUserModal()">
+                <i class="bi bi-plus-circle me-1"></i>Ny användare
+            </button>
+        </div>
+    </div>
+
+    <!-- Loading State -->
+    <div class="spinner-border text-primary d-none" id="usersLoadingSpinner" role="status">
+        <span class="visually-hidden">Laddar...</span>
+    </div>
+
+    <!-- Error Alert -->
+    <div class="alert alert-danger d-none" id="usersErrorAlert" role="alert">
+        <strong>Fel:</strong> <span id="usersErrorMessage"></span>
+    </div>
+
+    <!-- Empty State -->
+    <div class="alert alert-info d-none text-center" id="noUsersAlert">
+        <i class="bi bi-inbox me-2"></i>
+        Inga användare hittades.
+    </div>
+
+    <!-- Users Table -->
+    <div class="table-responsive" id="usersTableContainer">
+        <table class="table table-hover">
+            <thead class="table-light">
+                <tr>
+                    <th class="sortable" data-sort="name">Namn <i class="bi bi-arrow-down-up"></i></th>
+                    <th class="sortable" data-sort="primaryClubName">Klubb <i class="bi bi-arrow-down-up"></i></th>
+                    <th class="sortable" data-sort="lastActiveSortValue">Webb <i class="bi bi-arrow-down-up"></i></th>
+                    <th class="sortable" data-sort="lastMobileActiveSortValue">App <i class="bi bi-arrow-down-up"></i></th>
+                    <th>Grupper</th>
+                    <th>Status</th>
+                    <th class="text-end">Åtgärder</th>
+                </tr>
+            </thead>
+            <tbody id="usersTableBody">
+                <tr class="text-muted">
+                    <td colspan="7" class="text-center py-4">Laddar användare...</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Add/Edit Member Modal -->
+<div class="modal fade" id="memberModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="memberModalTitle">Lägg till ny medlem</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="memberForm">
+                    <input type="hidden" id="memberId" name="id">
+
+                    <!-- Profile Picture Section -->
+                    <div class="text-center mb-4" id="profilePictureSection" style="display: none;">
+                        <div class="position-relative d-inline-block">
+                            <div id="adminProfilePictureContainer" class="rounded-circle overflow-hidden bg-light d-flex align-items-center justify-content-center" style="width: 100px; height: 100px; border: 3px solid #dee2e6;">
+                                <div id="adminProfileInitials" class="d-flex align-items-center justify-content-center w-100 h-100 bg-primary text-white" style="font-size: 2rem; font-weight: bold;">
+                                    ?
+                                </div>
+                            </div>
+                            <label for="adminProfilePictureInput" class="btn btn-primary btn-sm position-absolute" style="bottom: 0; right: 0; border-radius: 50%; width: 32px; height: 32px; padding: 0;" title="Byt profilbild">
+                                <i class="bi bi-camera"></i>
+                            </label>
+                            <input type="file" id="adminProfilePictureInput" accept="image/*" class="d-none" onchange="uploadAdminProfilePicture(this)">
+                        </div>
+                        <div class="mt-2">
+                            <small class="text-muted">Klicka på kameran för att byta bild</small>
+                            <br><button type="button" class="btn btn-link btn-sm text-danger p-0" id="removeProfilePictureBtn" onclick="removeAdminProfilePicture()" style="display: none;">
+                                <i class="bi bi-trash"></i> Ta bort bild
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="firstName" class="form-label">Förnamn *</label>
+                                <input type="text" class="form-control" id="firstName" name="firstName" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="lastName" class="form-label">Efternamn *</label>
+                                <input type="text" class="form-control" id="lastName" name="lastName" required>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="email" class="form-label">E-post *</label>
+                        <input type="email" class="form-control" id="email" name="email" required>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="phoneNumber" class="form-label">Telefonnummer</label>
+                                <input type="tel" class="form-control" id="phoneNumber" name="phoneNumber">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="shooterIdNumber" class="form-label">Skytte-ID</label>
+                                <input type="text" class="form-control" id="shooterIdNumber" name="shooterIdNumber">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="address" class="form-label">Adress</label>
+                        <input type="text" class="form-control" id="address" name="address">
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="postalCode" class="form-label">Postnummer</label>
+                                <input type="text" class="form-control" id="postalCode" name="postalCode">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="city" class="form-label">Ort</label>
+                                <input type="text" class="form-control" id="city" name="city">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="personNumber" class="form-label">Personnummer</label>
+                                <input type="text" class="form-control" id="personNumber" name="personNumber">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="memberSince" class="form-label">Medlem sedan</label>
+                                <input type="text" class="form-control" id="memberSince" name="memberSince">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-12">
+                            <div class="mb-3">
+                                <label for="primaryClub" class="form-label">Primär klubb</label>
+                                <select class="form-control" id="primaryClub" name="primaryClubId">
+                                    <option value="">-- Ingen primär klubb --</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="additionalClubsDropdown" class="form-label">Ytterligare klubbar</label>
+                        <div class="dropdown">
+                            <button class="btn btn-outline-secondary dropdown-toggle w-100 text-start"
+                                    type="button" id="additionalClubsDropdown"
+                                    data-bs-toggle="dropdown"
+                                    aria-expanded="false">
+                                <span id="selectedClubsText">Välj klubbar</span>
+                            </button>
+                            <div class="dropdown-menu w-100 p-3" id="additionalClubsDropdownMenu"
+                                 style="max-height: 300px; overflow-y: auto;">
+                                <!-- Checkboxes will be rendered here -->
+                            </div>
+                        </div>
+                        <div class="form-text" id="selectedClubsCount">Inga ytterligare klubbar valda</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="memberGroupsDropdown" class="form-label">Medlemsgrupper</label>
+                        <div class="dropdown">
+                            <button class="btn btn-outline-secondary dropdown-toggle w-100 text-start"
+                                    type="button" id="memberGroupsDropdown"
+                                    data-bs-toggle="dropdown"
+                                    aria-expanded="false">
+                                <span id="selectedGroupsText">Välj grupper</span>
+                            </button>
+                            <div class="dropdown-menu w-100 p-3" id="memberGroupsDropdownMenu"
+                                 style="max-height: 300px; overflow-y: auto;">
+                                <!-- Checkboxes will be rendered here -->
+                            </div>
+                        </div>
+                        <div class="form-text" id="selectedGroupsCount">Inga grupper valda</div>
+                    </div>
+
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="isApproved" name="isApproved" checked>
+                        <label class="form-check-label" for="isApproved">
+                            Medlem godkänd
+                        </label>
+                    </div>
+
+                    <!-- Precisionsskytte Section (shown only when editing, collapsible) -->
+                    <div id="adminPrecisionSection" class="mt-3" style="display: none;">
+                        <hr>
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <a class="text-decoration-none text-body fw-semibold"
+                               data-bs-toggle="collapse"
+                               href="#adminPrecisionCollapse"
+                               role="button"
+                               aria-expanded="false"
+                               aria-controls="adminPrecisionCollapse">
+                                <i class="bi bi-chevron-right me-1" id="precisionCollapseIcon"></i>
+                                <i class="bi bi-bullseye me-1"></i> Precisionsskytte
+                            </a>
+                        </div>
+                        <div class="collapse" id="adminPrecisionCollapse">
+                            <!-- Shooter Class Selection -->
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold">Skytteklass</label>
+                                <div class="ms-1">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="precisionShooterClass" id="adminClass1" value="Klass 1 - Nybörjare">
+                                        <label class="form-check-label" for="adminClass1">Klass 1 - Nybörjare</label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="precisionShooterClass" id="adminClass2" value="Klass 2 - Guldmärkesskytt">
+                                        <label class="form-check-label" for="adminClass2">Klass 2 - Guldmärkesskytt</label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="precisionShooterClass" id="adminClass3" value="Klass 3 - Riksmästare">
+                                        <label class="form-check-label" for="adminClass3">Klass 3 - Riksmästare</label>
+                                    </div>
+                                </div>
+                                <small class="form-text text-muted">Skytteklassen påverkar handicapberäkningen</small>
+                            </div>
+
+                            <!-- Handicap Information -->
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span class="fw-semibold">Handicapindex</span>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="recalculateAdminHandicap()" id="adminRecalculateHandicapBtn" title="Omberäkna handicap från alla resultat">
+                                    <i class="bi bi-arrow-clockwise"></i> Omberäkna
+                                </button>
+                            </div>
+                            <div id="adminHandicapInfoContainer">
+                                <div class="text-center py-3">
+                                    <div class="spinner-border spinner-border-sm text-primary" role="status">
+                                        <span class="visually-hidden">Laddar...</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-danger" id="deleteMemberBtn" onclick="deleteMemberFromModal()" style="display: none;">
+                    <i class="bi bi-trash"></i> Ta bort medlem
+                </button>
+                <div class="ms-auto">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                    <button type="button" class="btn btn-primary" onclick="saveMember()">Spara medlem</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* Include user management specific rejection reason modal *@
+@await Html.PartialAsync("~/Views/Partials/RejectionReasonModal_UserManagement.cshtml")
+
+<!-- Template for user rows (Club Management pattern) -->
+<script type="text/html" id="user-row-template">
+    <tr data-user-id="{id}" data-last-active-sort="{lastActiveSortValue}">
+        <td>
+            <div class="member-name-cell">
+                {avatarHtml}
+                <div>
+                    <strong>{firstName} {lastName}</strong><br>
+                    <small class="text-muted">{email}</small>
+                </div>
+            </div>
+        </td>
+        <td class="{clubClass}">
+            <span class="badge bg-secondary">{primaryClubName}</span>
+            {additionalClubsBadges}
+        </td>
+        <td class="{lastActiveClass}">{lastActiveDisplay}</td>
+        <td class="{lastMobileActiveClass}">{lastMobileActiveDisplay}</td>
+        <td>{groupsBadges}</td>
+        <td><span class="badge {statusClass}">{statusText}</span></td>
+        <td class="text-end">
+            <button class="btn btn-sm btn-outline-primary" onclick="editUser({id})" title="Redigera">
+                <i class="bi bi-pencil"></i>
+            </button>
+        </td>
+    </tr>
+</script>
+
+<!-- Template for pending approval rows -->
+<script type="text/html" id="pending-row-template">
+    <tr data-pending-id="{id}">
+        <td>
+            <strong>{name}</strong><br>
+            <small class="text-muted">{email}</small>
+        </td>
+        <td><span class="badge bg-secondary">{clubName}</span></td>
+        <td>{regDate}</td>
+        <td class="text-end">
+            <button class="btn btn-success btn-sm me-1" onclick="approvePendingMember({id})" title="Godkänn">
+                <i class="bi bi-check"></i>
+            </button>
+            <button class="btn btn-danger btn-sm" onclick="rejectPendingMember({id})" title="Avvisa">
+                <i class="bi bi-x"></i>
+            </button>
+        </td>
+    </tr>
+</script>
+
+<script>
+let availableGroups = [];
+let availableClubs = [];
+let allUsers = [];
+let currentSortField = 'lastActiveSortValue';  // Default sort by last active
+let currentSortDirection = 'desc';  // Newest first
+
+// Lazy load user management data
+let userManagementLoaded = false;
+
+// Lazy load handicap data (only when accordion expands)
+let handicapLoadedForMember = null;  // Track which member's handicap is loaded
+
+document.addEventListener('DOMContentLoaded', function() {
+    const usersTab = document.getElementById('users-tab');
+
+    // Load when tab is clicked for the first time
+    if (usersTab) {
+        usersTab.addEventListener('shown.bs.tab', function() {
+            if (!userManagementLoaded) {
+                loadUsers();
+                loadMemberGroups();
+                loadClubsForDropdown();
+                loadPendingApprovals();
+                userManagementLoaded = true;
+            }
+        });
+    }
+
+    // Prevent dropdown from closing when clicking inside
+    const dropdownMenu = document.getElementById('memberGroupsDropdownMenu');
+    if (dropdownMenu) {
+        dropdownMenu.addEventListener('click', function(e) {
+            e.stopPropagation();
+        });
+    }
+
+    const clubsDropdownMenu = document.getElementById('additionalClubsDropdownMenu');
+    if (clubsDropdownMenu) {
+        clubsDropdownMenu.addEventListener('click', function(e) {
+            e.stopPropagation();
+        });
+    }
+
+    // Add sortable column click handlers
+    document.querySelectorAll('.sortable').forEach(header => {
+        header.addEventListener('click', function() {
+            const sortField = this.dataset.sort;
+            if (currentSortField === sortField) {
+                // Toggle direction if same column
+                currentSortDirection = currentSortDirection === 'asc' ? 'desc' : 'asc';
+            } else {
+                // New column, default to descending (newest/highest first)
+                currentSortField = sortField;
+                currentSortDirection = 'desc';
+            }
+            sortAndDisplayUsers();
+        });
+    });
+
+    // Initialize Flatpickr date picker
+    flatpickr('#memberSince', {
+        locale: 'sv',
+        dateFormat: 'Y-m-d'
+    });
+});
+
+function loadClubsForDropdown() {
+    fetch('/umbraco/surface/ClubAdmin/GetClubs')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                availableClubs = data.data.filter(club => club.isActive);
+            }
+        })
+        .catch(error => console.error('Error loading clubs:', error));
+}
+
+function loadUsers() {
+    const spinner = document.getElementById('usersLoadingSpinner');
+    const tableContainer = document.getElementById('usersTableContainer');
+    const tbody = document.getElementById('usersTableBody');
+    const errorAlert = document.getElementById('usersErrorAlert');
+    const errorMessage = document.getElementById('usersErrorMessage');
+    const noUsersAlert = document.getElementById('noUsersAlert');
+
+    spinner?.classList.remove('d-none');
+    errorAlert?.classList.add('d-none');
+    noUsersAlert?.classList.add('d-none');
+
+    fetch('/umbraco/surface/MemberAdmin/GetMembers')
+        .then(response => response.json())
+        .then(data => {
+            spinner?.classList.add('d-none');
+
+            if (!data.success) {
+                errorMessage.textContent = data.message || 'Kunde inte ladda användare';
+                errorAlert.classList.remove('d-none');
+                tbody.innerHTML = '<tr class="text-muted"><td colspan="7" class="text-center py-4">Fel vid laddning av användare</td></tr>';
+                return;
+            }
+
+            allUsers = data.data || [];
+
+            if (allUsers.length === 0) {
+                tableContainer.classList.add('d-none');
+                noUsersAlert.classList.remove('d-none');
+                tbody.innerHTML = '';
+            } else {
+                tableContainer.classList.remove('d-none');
+                noUsersAlert.classList.add('d-none');
+                sortAndDisplayUsers();  // Sort by last active (default) before displaying
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            spinner?.classList.add('d-none');
+            errorMessage.textContent = error.message || 'Nätverksfel';
+            errorAlert.classList.remove('d-none');
+        });
+}
+
+function loadMemberGroups() {
+    fetch('/umbraco/surface/MemberAdmin/GetMemberGroups')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                availableGroups = data.data;
+            }
+        })
+        .catch(error => console.error('Error loading groups:', error));
+}
+
+function displayUsers() {
+    const tbody = document.getElementById('usersTableBody');
+    const template = document.getElementById('user-row-template').innerHTML;
+
+    if (allUsers.length === 0) {
+        tbody.innerHTML = '<tr class="text-muted"><td colspan="7" class="text-center py-4">Inga användare hittades</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = allUsers.map(user => {
+        const clubClass = user.hasInvalidClubReference ? 'text-danger fw-bold' : '';
+        const clubName = user.primaryClubName || 'Ingen klubb';
+
+        // Build additional clubs badges
+        let additionalClubsBadges = '';
+        if (user.additionalClubNames && user.additionalClubNames.length > 0) {
+            additionalClubsBadges = '<br>' + user.additionalClubNames
+                .map(name => `<span class="badge bg-info me-1 mt-1">${escapeHtml(name)}</span>`)
+                .join('');
+        }
+
+        // Build groups badges
+        const groupsBadges = user.groups && user.groups.length > 0
+            ? user.groups.map(group => `<span class="badge bg-primary me-1 mb-1">${escapeHtml(group)}</span>`).join('')
+            : '<span class="text-muted">Inga grupper</span>';
+
+        const statusText = user.isApproved ? 'Godkänd' : 'Väntande';
+        const statusClass = user.isApproved ? 'bg-success' : 'bg-warning';
+
+        // Last active formatting
+        const lastActiveDisplay = user.lastActiveDisplay || 'Never';
+        const lastActiveSortValue = user.lastActiveSortValue || 0;
+        const lastActiveClass = lastActiveDisplay === 'Never' ? 'text-muted' : '';
+
+        // Mobile app last active formatting
+        const lastMobileActiveDisplay = user.lastMobileActiveDisplay || 'Never';
+        const lastMobileActiveSortValue = user.lastMobileActiveSortValue || 0;
+        const lastMobileActiveClass = lastMobileActiveDisplay === 'Never' ? 'text-muted' : '';
+
+        // Render avatar
+        const avatarHtml = renderUserAvatar(user);
+
+        return template
+            .replace(/{id}/g, user.id)
+            .replace(/{avatarHtml}/g, avatarHtml)
+            .replace(/{firstName}/g, escapeHtml(user.firstName || ''))
+            .replace(/{lastName}/g, escapeHtml(user.lastName || ''))
+            .replace(/{email}/g, escapeHtml(user.email || ''))
+            .replace(/{primaryClubName}/g, escapeHtml(clubName))
+            .replace(/{clubClass}/g, clubClass)
+            .replace(/{additionalClubsBadges}/g, additionalClubsBadges)
+            .replace(/{groupsBadges}/g, groupsBadges)
+            .replace(/{statusText}/g, statusText)
+            .replace(/{statusClass}/g, statusClass)
+            .replace(/{lastActiveDisplay}/g, lastActiveDisplay)
+            .replace(/{lastActiveSortValue}/g, lastActiveSortValue)
+            .replace(/{lastActiveClass}/g, lastActiveClass)
+            .replace(/{lastMobileActiveDisplay}/g, lastMobileActiveDisplay)
+            .replace(/{lastMobileActiveSortValue}/g, lastMobileActiveSortValue)
+            .replace(/{lastMobileActiveClass}/g, lastMobileActiveClass);
+    }).join('');
+}
+
+function sortAndDisplayUsers() {
+    // Sort allUsers array based on current sort field and direction
+    allUsers.sort((a, b) => {
+        let aValue, bValue;
+
+        if (currentSortField === 'lastActiveSortValue') {
+            aValue = a.lastActiveSortValue || 0;
+            bValue = b.lastActiveSortValue || 0;
+        } else if (currentSortField === 'lastMobileActiveSortValue') {
+            aValue = a.lastMobileActiveSortValue || 0;
+            bValue = b.lastMobileActiveSortValue || 0;
+        } else {
+            aValue = a[currentSortField];
+            bValue = b[currentSortField];
+        }
+
+        // Handle numeric comparison
+        if (typeof aValue === 'number' && typeof bValue === 'number') {
+            return currentSortDirection === 'asc' ? aValue - bValue : bValue - aValue;
+        }
+
+        // Handle string comparison
+        const aStr = String(aValue || '').toLowerCase();
+        const bStr = String(bValue || '').toLowerCase();
+
+        if (currentSortDirection === 'asc') {
+            return aStr.localeCompare(bStr);
+        } else {
+            return bStr.localeCompare(aStr);
+        }
+    });
+
+    // Re-display the sorted users
+    displayUsers();
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function getInitials(firstName, lastName) {
+    let initials = '';
+    if (firstName) initials += firstName.charAt(0).toUpperCase();
+    if (lastName) initials += lastName.charAt(0).toUpperCase();
+    return initials || '?';
+}
+
+function renderUserAvatar(user) {
+    if (user.profilePictureUrl) {
+        return `<span class="member-avatar"><img src="${escapeHtml(user.profilePictureUrl)}" alt="${escapeHtml(user.firstName)} ${escapeHtml(user.lastName)}"></span>`;
+    } else {
+        return `<span class="member-avatar">${getInitials(user.firstName, user.lastName)}</span>`;
+    }
+}
+
+function showAddUserModal() {
+    document.getElementById('memberModalTitle').textContent = 'Lägg till ny medlem';
+    document.getElementById('memberForm').reset();
+    document.getElementById('memberId').value = '';
+
+    // Clear new fields explicitly
+    document.getElementById('phoneNumber').value = '';
+    document.getElementById('shooterIdNumber').value = '';
+    document.getElementById('address').value = '';
+    document.getElementById('postalCode').value = '';
+    document.getElementById('city').value = '';
+    document.getElementById('personNumber').value = '';
+    document.getElementById('memberSince').value = '';
+
+    // Hide delete button for new members
+    document.getElementById('deleteMemberBtn').style.display = 'none';
+
+    // Hide profile picture section for new members
+    document.getElementById('profilePictureSection').style.display = 'none';
+
+    // Hide precision section for new members
+    document.getElementById('adminPrecisionSection').style.display = 'none';
+
+    // Clear shooter class selection
+    document.querySelectorAll('input[name="precisionShooterClass"]').forEach(radio => radio.checked = false);
+
+    renderMemberGroups([]);
+    renderClubSelectors(null, []);
+    new bootstrap.Modal(document.getElementById('memberModal')).show();
+}
+
+function editUser(userId) {
+    document.getElementById('memberModalTitle').textContent = 'Redigera medlem';
+
+    // Reset form and show loading state immediately
+    document.getElementById('memberForm').reset();
+    document.getElementById('memberId').value = userId;
+
+    // Show loading overlay on form
+    showMemberFormLoading(true);
+
+    // Hide sections that will be populated later
+    document.getElementById('deleteMemberBtn').style.display = 'none';
+    document.getElementById('profilePictureSection').style.display = 'none';
+    document.getElementById('adminPrecisionSection').style.display = 'none';
+
+    // Show modal immediately
+    const modal = new bootstrap.Modal(document.getElementById('memberModal'));
+    modal.show();
+
+    // Load member data in background
+    fetch(`/umbraco/surface/MemberAdmin/GetMember?id=${userId}`)
+        .then(response => response.json())
+        .then(data => {
+            showMemberFormLoading(false);
+
+            if (data.success) {
+                const member = data.data;
+
+                document.getElementById('memberId').value = member.id;
+                document.getElementById('firstName').value = member.firstName;
+                document.getElementById('lastName').value = member.lastName;
+                document.getElementById('email').value = member.email;
+                document.getElementById('phoneNumber').value = member.phoneNumber || '';
+                document.getElementById('shooterIdNumber').value = member.shooterIdNumber || '';
+                document.getElementById('address').value = member.address || '';
+                document.getElementById('postalCode').value = member.postalCode || '';
+                document.getElementById('city').value = member.city || '';
+                document.getElementById('personNumber').value = member.personNumber || '';
+                document.getElementById('memberSince').value = member.memberSince || '';
+                document.getElementById('isApproved').checked = member.isApproved;
+
+                // Show delete button for existing members
+                document.getElementById('deleteMemberBtn').style.display = 'block';
+
+                // Show and populate profile picture section
+                document.getElementById('profilePictureSection').style.display = 'block';
+                updateAdminProfilePictureDisplay(member.profilePictureUrl, member.firstName, member.lastName);
+
+                renderMemberGroups(member.groups);
+                renderClubSelectors(member.primaryClubId, member.additionalClubIds || []);
+
+                // Show precision section for existing members
+                document.getElementById('adminPrecisionSection').style.display = 'block';
+
+                // Populate shooter class
+                if (member.precisionShooterClass) {
+                    const radio = document.querySelector(`input[name="precisionShooterClass"][value="${member.precisionShooterClass}"]`);
+                    if (radio) radio.checked = true;
+                } else {
+                    // Clear all shooter class radios if none selected
+                    document.querySelectorAll('input[name="precisionShooterClass"]').forEach(radio => radio.checked = false);
+                }
+
+                // Reset handicap section for lazy loading
+                handicapLoadedForMember = null;
+                const precisionCollapse = document.getElementById('adminPrecisionCollapse');
+                if (precisionCollapse) {
+                    precisionCollapse.classList.remove('show');
+                }
+                // Reset chevron icon to closed state
+                const chevronIcon = document.getElementById('precisionCollapseIcon');
+                if (chevronIcon) {
+                    chevronIcon.classList.remove('bi-chevron-down');
+                    chevronIcon.classList.add('bi-chevron-right');
+                }
+                // Reset handicap container to prompt state
+                const handicapContainer = document.getElementById('adminHandicapInfoContainer');
+                if (handicapContainer) {
+                    handicapContainer.innerHTML = '<p class="text-muted small mb-0">Klicka för att visa handicapinformation...</p>';
+                }
+            } else {
+                alert('Fel vid laddning av medlem: ' + data.message);
+                bootstrap.Modal.getInstance(document.getElementById('memberModal')).hide();
+            }
+        })
+        .catch(error => {
+            showMemberFormLoading(false);
+            console.error('Error:', error);
+            alert('Kunde inte ladda medlemsdata');
+            bootstrap.Modal.getInstance(document.getElementById('memberModal')).hide();
+        });
+}
+
+function showMemberFormLoading(show) {
+    const form = document.getElementById('memberForm');
+    let overlay = document.getElementById('memberFormLoadingOverlay');
+
+    if (show) {
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'memberFormLoadingOverlay';
+            overlay.className = 'member-form-loading-overlay';
+            overlay.innerHTML = `
+                <div class="text-center">
+                    <div class="spinner-border text-primary mb-2" role="status">
+                        <span class="visually-hidden">Laddar...</span>
+                    </div>
+                    <div class="text-muted">Laddar medlemsdata...</div>
+                </div>
+            `;
+            form.parentElement.style.position = 'relative';
+            form.parentElement.appendChild(overlay);
+        }
+        overlay.style.display = 'flex';
+    } else {
+        if (overlay) {
+            overlay.style.display = 'none';
+        }
+    }
+}
+
+function renderClubSelectors(primaryClubId, additionalClubIds) {
+    // Render primary club dropdown - build HTML string first, then set once
+    const primaryClubSelect = document.getElementById('primaryClub');
+    let optionsHtml = '<option value="">-- Ingen primär klubb --</option>';
+
+    availableClubs.forEach(club => {
+        const isSelected = primaryClubId && primaryClubId.toString() === club.id.toString();
+        optionsHtml += `<option value="${club.id}" ${isSelected ? 'selected' : ''}>${club.name}</option>`;
+    });
+    primaryClubSelect.innerHTML = optionsHtml;
+
+    // Render additional clubs checkboxes in dropdown
+    const additionalClubsContainer = document.getElementById('additionalClubsDropdownMenu');
+
+    if (availableClubs.length === 0) {
+        additionalClubsContainer.innerHTML = '<p class="text-muted mb-0">Inga klubbar tillgängliga</p>';
+        return;
+    }
+
+    // Build HTML string first, then set once (innerHTML += in loop is very slow)
+    let checkboxesHtml = '';
+    availableClubs.forEach(club => {
+        const isChecked = additionalClubIds.includes(club.id);
+        checkboxesHtml += `
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" value="${club.id}"
+                       id="additionalClub_${club.id}" name="additionalClubs" ${isChecked ? 'checked' : ''}
+                       onchange="updateSelectedClubsDisplay()">
+                <label class="form-check-label" for="additionalClub_${club.id}">
+                    ${club.name}
+                </label>
+            </div>
+        `;
+    });
+    additionalClubsContainer.innerHTML = checkboxesHtml;
+
+    // Update display
+    updateSelectedClubsDisplay();
+}
+
+function renderMemberGroups(selectedGroups) {
+    const container = document.getElementById('memberGroupsDropdownMenu');
+
+    // Build HTML string first, then set once (innerHTML += in loop is very slow)
+    let checkboxesHtml = '';
+    availableGroups.forEach(group => {
+        const isChecked = selectedGroups.includes(group);
+        checkboxesHtml += `
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" value="${group}"
+                       id="group_${group}" name="groups" ${isChecked ? 'checked' : ''}
+                       onchange="updateSelectedGroupsDisplay()">
+                <label class="form-check-label" for="group_${group}">
+                    ${group}
+                </label>
+            </div>
+        `;
+    });
+    container.innerHTML = checkboxesHtml;
+
+    // Update display
+    updateSelectedGroupsDisplay();
+}
+
+function updateSelectedGroupsDisplay() {
+    const selectedCheckboxes = document.querySelectorAll('#memberGroupsDropdownMenu input[type="checkbox"]:checked');
+    const selectedCount = selectedCheckboxes.length;
+    const selectedNames = Array.from(selectedCheckboxes).map(cb => cb.value);
+
+    const displayText = document.getElementById('selectedGroupsText');
+    const countText = document.getElementById('selectedGroupsCount');
+
+    if (selectedCount === 0) {
+        displayText.textContent = 'Välj grupper';
+        countText.textContent = 'Inga grupper valda';
+    } else if (selectedCount === 1) {
+        displayText.textContent = selectedNames[0];
+        countText.textContent = '1 grupp vald';
+    } else {
+        displayText.textContent = selectedNames[0] + ` (+${selectedCount - 1} till)`;
+        countText.textContent = `${selectedCount} grupper valda`;
+    }
+}
+
+function updateSelectedClubsDisplay() {
+    const selectedCheckboxes = document.querySelectorAll('#additionalClubsDropdownMenu input[type="checkbox"]:checked');
+    const selectedCount = selectedCheckboxes.length;
+
+    const displayText = document.getElementById('selectedClubsText');
+    const countText = document.getElementById('selectedClubsCount');
+
+    if (selectedCount === 0) {
+        displayText.textContent = 'Välj klubbar';
+        countText.textContent = 'Inga ytterligare klubbar valda';
+    } else if (selectedCount === 1) {
+        // Find the club name from availableClubs
+        const clubId = parseInt(selectedCheckboxes[0].value);
+        const club = availableClubs.find(c => c.id === clubId);
+        displayText.textContent = club ? club.name : 'Klubb vald';
+        countText.textContent = '1 klubb vald';
+    } else {
+        // Show first club name + count
+        const firstClubId = parseInt(selectedCheckboxes[0].value);
+        const firstClub = availableClubs.find(c => c.id === firstClubId);
+        const firstName = firstClub ? firstClub.name : 'Klubb';
+        displayText.textContent = firstName + ` (+${selectedCount - 1} till)`;
+        countText.textContent = `${selectedCount} klubbar valda`;
+    }
+}
+
+function saveMember() {
+    const formData = new FormData();
+
+    const memberData = {
+        id: document.getElementById('memberId').value,
+        firstName: document.getElementById('firstName').value,
+        lastName: document.getElementById('lastName').value,
+        email: document.getElementById('email').value,
+        primaryClubId: document.getElementById('primaryClub').value,
+        isApproved: document.getElementById('isApproved').checked
+    };
+
+    console.log('Posting member data:', memberData);
+
+    // Add anti-forgery token
+    const token = document.querySelector('input[name="__RequestVerificationToken"]');
+    if (token) {
+        formData.append('__RequestVerificationToken', token.value);
+        console.log('Anti-forgery token added:', token.value.substring(0, 20) + '...');
+    } else {
+        console.warn('Anti-forgery token not found');
+    }
+
+    formData.append('id', memberData.id);
+    formData.append('firstName', memberData.firstName);
+    formData.append('lastName', memberData.lastName);
+    formData.append('email', memberData.email);
+    formData.append('phoneNumber', document.getElementById('phoneNumber').value);
+    formData.append('shooterIdNumber', document.getElementById('shooterIdNumber').value);
+    formData.append('address', document.getElementById('address').value);
+    formData.append('postalCode', document.getElementById('postalCode').value);
+    formData.append('city', document.getElementById('city').value);
+    formData.append('personNumber', document.getElementById('personNumber').value);
+    formData.append('memberSince', document.getElementById('memberSince').value);
+    formData.append('primaryClubId', memberData.primaryClubId);
+    formData.append('isApproved', memberData.isApproved);
+
+    // Add precision shooter class
+    const shooterClassRadio = document.querySelector('input[name="precisionShooterClass"]:checked');
+    formData.append('precisionShooterClass', shooterClassRadio ? shooterClassRadio.value : '');
+
+    // Add selected additional clubs
+    const selectedAdditionalClubs = Array.from(document.querySelectorAll('input[name="additionalClubs"]:checked'))
+        .map(cb => cb.value);
+    console.log('Selected additional clubs:', selectedAdditionalClubs);
+    formData.append('additionalClubIds', selectedAdditionalClubs.join(','));
+
+    // Add selected groups
+    const selectedGroups = Array.from(document.querySelectorAll('input[name="groups"]:checked'))
+        .map(cb => cb.value);
+    console.log('Selected groups:', selectedGroups);
+    selectedGroups.forEach(group => formData.append('groups', group));
+
+    // Log all form data
+    for (let pair of formData.entries()) {
+        if (pair[0] !== '__RequestVerificationToken') {
+            console.log(pair[0] + ': ' + pair[1]);
+        }
+    }
+
+    fetch('/umbraco/surface/MemberAdmin/SaveMember', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => {
+        console.log('Save response status:', response.status);
+        console.log('Save response ok:', response.ok);
+        if (!response.ok) {
+            return response.text().then(text => {
+                console.log('Error response text:', text);
+                throw new Error(`HTTP ${response.status}: ${text}`);
+            });
+        }
+        return response.json();
+    })
+    .then(data => {
+        console.log('Save response data:', data);
+        if (data.success) {
+            bootstrap.Modal.getInstance(document.getElementById('memberModal')).hide();
+            loadUsers(); // Refresh the list
+            loadPendingApprovals(); // Refresh pending approvals in case approval status changed
+        } else {
+            alert('Fel: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Save error details:', error);
+        alert('Kunde inte spara medlem: ' + error.message);
+    });
+}
+
+function deleteUser(userId) {
+    if (confirm('Är du säker på att du vill ta bort denna användare?')) {
+        const formData = new FormData();
+
+        // Add anti-forgery token
+        const token = document.querySelector('input[name="__RequestVerificationToken"]');
+        if (token) {
+            formData.append('__RequestVerificationToken', token.value);
+        }
+
+        formData.append('memberId', userId);
+
+        fetch('/umbraco/surface/MemberAdmin/DeleteMember', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => {
+            console.log('Delete response status:', response.status);
+            if (!response.ok) {
+                return response.text().then(text => {
+                    console.log('Delete error response:', text);
+                    throw new Error(`HTTP ${response.status}: ${text}`);
+                });
+            }
+            return response.json();
+        })
+        .then(data => {
+            console.log('Delete response data:', data);
+            if (data.success) {
+                loadUsers(); // Reload the list
+            } else {
+                alert('Fel: ' + data.message);
+            }
+        })
+        .catch(error => {
+            console.error('Delete error:', error);
+            alert('Kunde inte ta bort användare: ' + error.message);
+        });
+    }
+}
+
+function deleteMemberFromModal() {
+    const memberId = document.getElementById('memberId').value;
+    if (!memberId) {
+        alert('Ingen medlem vald för borttagning.');
+        return;
+    }
+
+    if (confirm('Är du säker på att du vill ta bort denna medlem? Denna åtgärd kan inte ångras.')) {
+        const formData = new FormData();
+
+        // Add anti-forgery token
+        const token = document.querySelector('input[name="__RequestVerificationToken"]');
+        if (token) {
+            formData.append('__RequestVerificationToken', token.value);
+        }
+
+        formData.append('memberId', memberId);
+
+        fetch('/umbraco/surface/MemberAdmin/DeleteMember', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => {
+            if (!response.ok) {
+                return response.text().then(text => {
+                    throw new Error(`HTTP ${response.status}: ${text}`);
+                });
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (data.success) {
+                bootstrap.Modal.getInstance(document.getElementById('memberModal')).hide();
+                loadUsers(); // Reload the list
+            } else {
+                alert('Fel: ' + data.message);
+            }
+        })
+        .catch(error => {
+            console.error('Delete error:', error);
+            alert('Kunde inte ta bort medlem: ' + error.message);
+        });
+    }
+}
+
+function loadPendingApprovals() {
+    const container = document.getElementById('pendingApprovals');
+    const countBadge = document.getElementById('pendingCount');
+
+    fetch('/umbraco/surface/MemberAdmin/GetPendingApprovals')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                const pendingMembers = data.data || [];
+                countBadge.textContent = pendingMembers.length;
+
+                if (pendingMembers.length === 0) {
+                    container.innerHTML = '<div class="alert alert-info mb-0">Inga väntande godkännanden.</div>';
+                } else {
+                    displayPendingApprovals(pendingMembers);
+                }
+            } else {
+                container.innerHTML = '<div class="alert alert-danger">Fel: ' + data.message + '</div>';
+                countBadge.textContent = '!';
+            }
+        })
+        .catch(error => {
+            console.error('Error loading pending approvals:', error);
+            container.innerHTML = '<div class="alert alert-danger">Fel vid laddning av väntande godkännanden.</div>';
+            countBadge.textContent = '!';
+        });
+}
+
+function displayPendingApprovals(pendingMembers) {
+    const container = document.getElementById('pendingApprovals');
+    const template = document.getElementById('pending-row-template').innerHTML;
+
+    let html = `
+        <div class="table-responsive">
+            <table class="table table-sm table-hover">
+                <thead>
+                    <tr>
+                        <th>Namn</th>
+                        <th>Klubb</th>
+                        <th>Registreringsdatum</th>
+                        <th class="text-end">Åtgärder</th>
+                    </tr>
+                </thead>
+                <tbody>
+    `;
+
+    pendingMembers.forEach(member => {
+        const regDate = new Date(member.registrationDate).toLocaleDateString('sv-SE');
+        const clubName = member.clubName || 'Ingen klubb';
+
+        html += template
+            .replace(/{id}/g, member.id)
+            .replace(/{name}/g, escapeHtml(member.name))
+            .replace(/{email}/g, escapeHtml(member.email))
+            .replace(/{clubName}/g, escapeHtml(clubName))
+            .replace(/{regDate}/g, regDate);
+    });
+
+    html += `
+                </tbody>
+            </table>
+        </div>
+    `;
+
+    container.innerHTML = html;
+}
+
+function approvePendingMember(memberId) {
+    if (!confirm('Godkänn denna medlem? Ett godkännandemail kommer att skickas till medlemmen.')) {
+        return;
+    }
+
+    const formData = new FormData();
+
+    // Add anti-forgery token
+    const token = document.querySelector('input[name="__RequestVerificationToken"]');
+    if (token) {
+        formData.append('__RequestVerificationToken', token.value);
+    }
+
+    formData.append('memberId', memberId);
+
+    fetch('/umbraco/surface/MemberAdmin/ApproveMember', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => {
+        if (!response.ok) {
+            return response.text().then(text => {
+                throw new Error(`HTTP ${response.status}: ${text}`);
+            });
+        }
+        return response.json();
+    })
+    .then(data => {
+        if (data.success) {
+            alert('✅ Medlem godkänd! Ett bekräftelsemail har skickats.');
+            loadPendingApprovals(); // Reload pending approvals
+            loadUsers(); // Reload users list
+        } else {
+            alert('❌ Fel: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Approval error:', error);
+        alert('❌ Kunde inte godkänna medlem: ' + error.message);
+    });
+}
+
+function rejectPendingMember(memberId) {
+    // Store member ID and show rejection reason modal
+    document.getElementById('userMgmtRejectionMemberId').value = memberId;
+    document.getElementById('userMgmtRejectionReason').value = '';
+    new bootstrap.Modal(document.getElementById('userMgmtRejectionModal')).show();
+}
+
+function confirmRejectMemberUserMgmt() {
+    const memberId = document.getElementById('userMgmtRejectionMemberId').value;
+    const reason = document.getElementById('userMgmtRejectionReason').value.trim();
+
+    const formData = new FormData();
+
+    // Add anti-forgery token
+    const token = document.querySelector('input[name="__RequestVerificationToken"]');
+    if (token) {
+        formData.append('__RequestVerificationToken', token.value);
+    }
+
+    formData.append('memberId', memberId);
+    formData.append('reason', reason);
+
+    fetch('/umbraco/surface/MemberAdmin/RejectMember', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => {
+        if (!response.ok) {
+            return response.text().then(text => {
+                throw new Error(`HTTP ${response.status}: ${text}`);
+            });
+        }
+        return response.json();
+    })
+    .then(data => {
+        if (data.success) {
+            // Close the rejection modal
+            bootstrap.Modal.getInstance(document.getElementById('userMgmtRejectionModal')).hide();
+
+            alert('✅ Medlem avvisad. Ett avvisningsmail har skickats.');
+            loadPendingApprovals(); // Reload pending approvals
+            loadUsers(); // Reload users list
+        } else {
+            alert('❌ Fel: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Rejection error:', error);
+        alert('❌ Kunde inte avvisa medlem: ' + error.message);
+    });
+}
+
+function sendInvitation(memberId) {
+    if (!confirm('Skicka inbjudan till denna medlem? Medlemmen får ett email med länk för att sätta sitt lösenord.')) {
+        return;
+    }
+
+    const formData = new FormData();
+
+    // Add anti-forgery token
+    const token = document.querySelector('input[name="__RequestVerificationToken"]');
+    if (token) {
+        formData.append('__RequestVerificationToken', token.value);
+    }
+
+    formData.append('memberId', memberId);
+
+    fetch('/umbraco/surface/MemberAdmin/SendInvitation', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => {
+        if (!response.ok) {
+            return response.text().then(text => {
+                throw new Error(`HTTP ${response.status}: ${text}`);
+            });
+        }
+        return response.json();
+    })
+    .then(data => {
+        if (data.success) {
+            alert('✅ Inbjudan skickad! Medlemmen kommer att få ett email.');
+            loadPendingApprovals(); // Reload pending approvals
+        } else {
+            alert('❌ Fel: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Invitation error:', error);
+        alert('❌ Kunde inte skicka inbjudan: ' + error.message);
+    });
+}
+
+// ========== ADMIN PROFILE PICTURE FUNCTIONS ==========
+
+function updateAdminProfilePictureDisplay(profilePictureUrl, firstName, lastName) {
+    const container = document.getElementById('adminProfilePictureContainer');
+    const removeBtn = document.getElementById('removeProfilePictureBtn');
+
+    if (profilePictureUrl) {
+        container.innerHTML = `<img src="${escapeHtml(profilePictureUrl)}" alt="Profilbild" class="w-100 h-100" style="object-fit: cover;">`;
+        removeBtn.style.display = 'inline';
+    } else {
+        const initials = getInitials(firstName, lastName);
+        container.innerHTML = `
+            <div id="adminProfileInitials" class="d-flex align-items-center justify-content-center w-100 h-100 bg-primary text-white" style="font-size: 2rem; font-weight: bold;">
+                ${initials}
+            </div>
+        `;
+        removeBtn.style.display = 'none';
+    }
+}
+
+function uploadAdminProfilePicture(input) {
+    if (!input.files || !input.files[0]) {
+        return;
+    }
+
+    const file = input.files[0];
+    const memberId = document.getElementById('memberId').value;
+
+    if (!memberId) {
+        alert('Spara medlemmen först innan du laddar upp en profilbild.');
+        input.value = '';
+        return;
+    }
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+        alert('Vänligen välj en bildfil (JPG, PNG, etc.)');
+        return;
+    }
+
+    // Validate file size (max 5MB)
+    const maxSize = 5 * 1024 * 1024; // 5MB
+    if (file.size > maxSize) {
+        alert('Bilden är för stor. Max storlek är 5MB.');
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('profilePicture', file);
+    formData.append('memberId', memberId);
+
+    // Get anti-forgery token
+    const token = document.querySelector('input[name="__RequestVerificationToken"]');
+    if (token) {
+        formData.append('__RequestVerificationToken', token.value);
+    }
+
+    // Show loading state
+    const container = document.getElementById('adminProfilePictureContainer');
+    const originalContent = container.innerHTML;
+    container.innerHTML = `
+        <div class="d-flex align-items-center justify-content-center w-100 h-100">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Laddar upp...</span>
+            </div>
+        </div>
+    `;
+
+    fetch('/umbraco/surface/MemberAdmin/UploadMemberProfilePicture', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Update the profile picture display
+            const firstName = document.getElementById('firstName').value;
+            const lastName = document.getElementById('lastName').value;
+            updateAdminProfilePictureDisplay(data.imageUrl, firstName, lastName);
+            // Reload the users list to update avatars
+            loadUsers();
+        } else {
+            container.innerHTML = originalContent;
+            alert('Fel vid uppladdning: ' + (data.message || 'Okänt fel'));
+        }
+    })
+    .catch(error => {
+        console.error('Error uploading profile picture:', error);
+        container.innerHTML = originalContent;
+        alert('Kunde inte ladda upp bild. Försök igen.');
+    });
+
+    // Clear the input
+    input.value = '';
+}
+
+function removeAdminProfilePicture() {
+    if (!confirm('Är du säker på att du vill ta bort profilbilden?')) {
+        return;
+    }
+
+    const memberId = document.getElementById('memberId').value;
+    if (!memberId) {
+        alert('Ingen medlem vald.');
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('memberId', memberId);
+
+    // Get anti-forgery token
+    const token = document.querySelector('input[name="__RequestVerificationToken"]');
+    if (token) {
+        formData.append('__RequestVerificationToken', token.value);
+    }
+
+    // Show loading state
+    const container = document.getElementById('adminProfilePictureContainer');
+    const originalContent = container.innerHTML;
+    container.innerHTML = `
+        <div class="d-flex align-items-center justify-content-center w-100 h-100">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Tar bort...</span>
+            </div>
+        </div>
+    `;
+
+    fetch('/umbraco/surface/MemberAdmin/RemoveMemberProfilePicture', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Update the profile picture display to show initials
+            const firstName = document.getElementById('firstName').value;
+            const lastName = document.getElementById('lastName').value;
+            updateAdminProfilePictureDisplay(null, firstName, lastName);
+            // Reload the users list to update avatars
+            loadUsers();
+        } else {
+            container.innerHTML = originalContent;
+            alert('Fel vid borttagning: ' + (data.message || 'Okänt fel'));
+        }
+    })
+    .catch(error => {
+        console.error('Error removing profile picture:', error);
+        container.innerHTML = originalContent;
+        alert('Kunde inte ta bort bild. Försök igen.');
+    });
+}
+
+// =============================================
+// Handicap Profile Functions
+// =============================================
+
+// Toggle chevron icon on collapse for Precisionsskytte section + lazy load handicap
+document.addEventListener('DOMContentLoaded', function() {
+    const precisionCollapse = document.getElementById('adminPrecisionCollapse');
+    if (precisionCollapse) {
+        precisionCollapse.addEventListener('show.bs.collapse', function () {
+            document.getElementById('precisionCollapseIcon').classList.replace('bi-chevron-right', 'bi-chevron-down');
+
+            // Lazy load handicap data when accordion expands
+            const memberId = document.getElementById('memberId').value;
+            if (memberId && memberId !== '0' && handicapLoadedForMember !== memberId) {
+                loadAdminHandicapProfile(memberId);
+                handicapLoadedForMember = memberId;
+            }
+        });
+        precisionCollapse.addEventListener('hide.bs.collapse', function () {
+            document.getElementById('precisionCollapseIcon').classList.replace('bi-chevron-down', 'bi-chevron-right');
+        });
+    }
+});
+
+// Load handicap profile for a specific member (admin only)
+function loadAdminHandicapProfile(memberId) {
+    const container = document.getElementById('adminHandicapInfoContainer');
+    container.innerHTML = `
+        <div class="text-center py-3">
+            <div class="spinner-border spinner-border-sm text-primary" role="status">
+                <span class="visually-hidden">Laddar...</span>
+            </div>
+        </div>
+    `;
+
+    fetch(`/umbraco/surface/Member/GetHandicapProfileForMember?memberId=${memberId}`)
+        .then(response => response.json())
+        .then(response => {
+            if (response.success && response.data) {
+                const data = response.data;
+                renderAdminHandicapInfo(data.weaponClasses, data.shooterClass, data.settings);
+            } else {
+                container.innerHTML = '<p class="text-muted small mb-0">Ingen handicapinformation tillgänglig.</p>';
+            }
+        })
+        .catch(error => {
+            console.error('Error loading handicap profile:', error);
+            container.innerHTML = '<p class="text-muted small mb-0">Kunde inte ladda handicapinformation.</p>';
+        });
+}
+
+// Helper functions for quarter-point handicap display
+function roundToQuarterAdmin(value) {
+    return Math.round(value * 4) / 4;
+}
+
+function formatHandicapAdmin(value) {
+    const rounded = roundToQuarterAdmin(value);
+    const sign = rounded >= 0 ? '+' : '';
+    // Show decimals only if not a whole number
+    const formatted = Number.isInteger(rounded) ? rounded.toString() : rounded.toFixed(2);
+    return sign + formatted;
+}
+
+// Render handicap info cards for admin view
+function renderAdminHandicapInfo(weaponClasses, shooterClass, settings) {
+    const container = document.getElementById('adminHandicapInfoContainer');
+
+    // Check for shooter class
+    if (!shooterClass) {
+        container.innerHTML = `
+            <div class="alert alert-info py-2 mb-0 small">
+                <i class="bi bi-info-circle me-1"></i>
+                Medlemmen har inte valt skytteklass än. Inget handicap kan beräknas.
+            </div>
+        `;
+        return;
+    }
+
+    // Check for any statistics
+    if (!weaponClasses || weaponClasses.length === 0) {
+        container.innerHTML = `
+            <div class="alert alert-info py-2 mb-0 small">
+                <i class="bi bi-info-circle me-1"></i>
+                Medlemmen har inga registrerade resultat att beräkna handicap på.
+            </div>
+        `;
+        return;
+    }
+
+    // Build the handicap cards HTML
+    let html = `
+        <div class="small text-muted mb-2">
+            Skytteklass: <strong>${shooterClass}</strong>
+        </div>
+    `;
+
+    weaponClasses.forEach(wc => {
+        const provBadge = wc.isProvisional
+            ? '<span class="badge bg-warning text-dark ms-2" title="Provisoriskt handicap">(P)</span>'
+            : '';
+        const handicapDisplay = formatHandicapAdmin(wc.handicapPerSeries);
+        const progress = Math.min((wc.completedMatches / wc.requiredMatches) * 100, 100);
+        const rawHandicap = wc.referenceScore - wc.effectiveAverage;
+        const roundedHandicap = roundToQuarterAdmin(rawHandicap);
+
+        html += `
+            <div class="card mb-2 border">
+                <div class="card-body py-2 px-3">
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <strong class="small">${wc.weaponClass} <span class="text-muted fw-normal">(${wc.weaponClassName})</span></strong>
+                        <span class="small">Handicap: <strong>${handicapDisplay}</strong>${provBadge}</span>
+                    </div>
+                    <div class="small text-muted">
+                        <div class="mb-1">
+                            <strong>Beräkning:</strong> Referens (${wc.referenceScore}) − Snitt (${wc.effectiveAverage.toFixed(1)}) = ${rawHandicap.toFixed(2)} → <strong>${handicapDisplay}</strong>
+                        </div>
+                        <div>
+                            Faktiskt snitt: ${wc.actualAverage.toFixed(1)} p/serie
+                            ${wc.isProvisional ? `<br>Viktat med skytteklass tills ${wc.requiredMatches} matcher genomförda.` : ''}
+                        </div>
+                    </div>
+                    ${wc.isProvisional ? `
+                    <div class="mt-2">
+                        <div class="progress" style="height: 6px;">
+                            <div class="progress-bar bg-primary" role="progressbar" style="width: ${progress}%"></div>
+                        </div>
+                        <small class="text-muted">${wc.completedMatches} av ${wc.requiredMatches} matcher</small>
+                    </div>
+                    ` : `
+                    <small class="text-success d-block mt-1"><i class="bi bi-check-circle me-1"></i>Fullständigt handicap</small>
+                    `}
+                </div>
+            </div>
+        `;
+    });
+
+    container.innerHTML = html;
+}
+
+// Recalculate handicap for the member being edited (admin function)
+function recalculateAdminHandicap() {
+    const memberId = document.getElementById('memberId').value;
+    if (!memberId) {
+        alert('Ingen medlem vald');
+        return;
+    }
+
+    const btn = document.getElementById('adminRecalculateHandicapBtn');
+    const originalContent = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span> Beräknar...';
+
+    fetch('/umbraco/surface/Member/RecalculateHandicapForMember', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value
+        },
+        body: JSON.stringify({ memberId: parseInt(memberId) })
+    })
+    .then(response => response.json())
+    .then(data => {
+        btn.disabled = false;
+        btn.innerHTML = originalContent;
+
+        if (data.success) {
+            // Reload handicap profile to show updated values
+            loadAdminHandicapProfile(memberId);
+        } else {
+            alert('Kunde inte omberäkna handicap: ' + (data.message || 'Okänt fel'));
+        }
+    })
+    .catch(error => {
+        console.error('Error recalculating handicap:', error);
+        btn.disabled = false;
+        btn.innerHTML = originalContent;
+        alert('Fel vid omberäkning av handicap');
+    });
+}
+
+</script>
+
+<style>
+/* Member Avatar Styling */
+.member-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: bold;
+    color: white;
+    background-color: var(--bs-primary);
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.member-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.member-name-cell {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+/* Loading overlay for member form */
+.member-form-loading-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: var(--bs-modal-bg, var(--bs-body-bg));
+    opacity: 0.95;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    border-radius: 0.375rem;
+}
+</style>

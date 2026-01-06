@@ -1,0 +1,19 @@
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+}
+
+<div class="row">
+    <div class="col-12">
+        <div class="jumbotron bg-primary text-white p-5 rounded mb-4">
+            <h1 class="display-4">@(Model.Value<string>("welcomeTitle") ?? "Welcome to HPSK")</h1>
+            @{
+                var welcomeText = Model.Value<string>("welcomeText");
+            }
+            @if (!string.IsNullOrEmpty(welcomeText))
+            {
+                <p class="lead">@Html.Raw(welcomeText)</p>
+            }
+        </div>
+    </div>
+</div>

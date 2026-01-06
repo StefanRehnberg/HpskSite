@@ -1,0 +1,266 @@
+@using HpskSite.Models.ViewModels.Training
+@model List<dynamic>
+
+@{
+    var hasData = Model != null && Model.Any();
+}
+
+<div class="training-leaderboard">
+    @if (!hasData)
+    {
+        <div class="text-center py-4">
+            <i class="bi bi-trophy text-muted" style="font-size: 3rem;"></i>
+            <h5 class="text-muted mt-2">Inga aktiva deltagare än</h5>
+            <p class="text-muted">Bli först att börja träningsprogrammet!</p>
+        </div>
+    }
+    else
+    {
+        <!-- Statistics Summary -->
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h4 class="text-primary">@Model.Count</h4>
+                        <small class="text-muted">Aktiva Deltagare</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h4 class="text-success">@Model.Sum(m => (int)m.completedSteps)</h4>
+                        <small class="text-muted">Slutförda Steg</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card text-center">
+                    <div class="card-body">
+                        @{
+                            var maxLevel = Model.Max(m => (int)m.currentLevel);
+                            var topLevel = TrainingDefinitions.GetLevel(maxLevel);
+                        }
+                        <h4 class="text-warning">@(topLevel?.Badge ?? "🎯")</h4>
+                        <small class="text-muted">Högsta Nivå</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card text-center">
+                    <div class="card-body">
+                        @{
+                            var avgProgress = Model.Average(m => (double)m.overallProgress);
+                        }
+                        <h4 class="text-info">@Math.Round(avgProgress, 1)%</h4>
+                        <small class="text-muted">Genomsnittlig Framsteg</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Top Performers -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <h5><i class="bi bi-award"></i> Topppresterare</h5>
+                <div class="row">
+                    @{
+                        var topPerformers = Model.Take(3).ToList();
+                    }
+                    @for (int i = 0; i < topPerformers.Count && i < 3; i++)
+                    {
+                        var member = topPerformers[i];
+                        var medalColors = new[] { "gold", "silver", "#cd7f32" }; // Bronze
+                        var medalIcons = new[] { "🥇", "🥈", "🥉" };
+
+                        <div class="col-md-4">
+                            <div class="card h-100 border-@(i == 0 ? "warning" : i == 1 ? "secondary" : "dark")">
+                                <div class="card-body text-center">
+                                    <div class="display-6 mb-2">@medalIcons[i]</div>
+                                    <h6 class="fw-bold">@member.memberName</h6>
+                                    <p class="small text-muted mb-2">@(member.clubName ?? "Ingen klubb")</p>
+                                    <div class="mb-2">
+                                        <span class="badge-level">@member.levelBadge</span>
+                                        <div class="small">@member.levelName</div>
+                                        <div class="small text-muted">Steg @member.currentStep</div>
+                                    </div>
+                                    <div class="progress" style="height: 12px;">
+                                        <div class="progress-bar bg-@(i == 0 ? "warning" : i == 1 ? "secondary" : "dark")"
+                                             style="width: @member.overallProgress%"></div>
+                                    </div>
+                                    <small class="text-muted">@Math.Round((double)member.overallProgress, 1)% slutfört</small>
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <!-- Full Leaderboard Table -->
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead class="table-light">
+                    <tr>
+                        <th width="80">
+                            <i class="bi bi-hash"></i> Plats
+                        </th>
+                        <th>
+                            <i class="bi bi-person"></i> Namn
+                        </th>
+                        <th>
+                            <i class="bi bi-building"></i> Klubb
+                        </th>
+                        <th>
+                            <i class="bi bi-ladder"></i> Nivå
+                        </th>
+                        <th width="80">
+                            <i class="bi bi-arrow-right"></i> Steg
+                        </th>
+                        <th width="120">
+                            <i class="bi bi-graph-up"></i> Framsteg
+                        </th>
+                        <th>
+                            <i class="bi bi-clock"></i> Senaste Aktivitet
+                        </th>
+                        <th width="120">
+                            <i class="bi bi-check-square"></i> Slutförda
+                        </th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @for (int i = 0; i < Model.Count; i++)
+                    {
+                        var member = Model[i];
+                        var lastActivity = member.lastActivity != null
+                            ? ((DateTime)member.lastActivity).ToString("yyyy-MM-dd")
+                            : "Aldrig";
+                        var progress = Math.Round((double)member.overallProgress, 1);
+
+                        var rowClass = "";
+                        if (i < 3)
+                        {
+                            rowClass = i == 0 ? "table-warning" : i == 1 ? "table-secondary" : "table-light";
+                        }
+
+                        <tr class="leaderboard-row @rowClass">
+                            <td>
+                                <div class="d-flex align-items-center">
+                                    @if (i < 3)
+                                    {
+                                        var medalIcons = new[] { "🥇", "🥈", "🥉" };
+                                        <span class="me-1">@medalIcons[i]</span>
+                                    }
+                                    <span class="fw-bold">#@(i + 1)</span>
+                                </div>
+                            </td>
+                            <td>
+                                <div class="fw-bold">@member.memberName</div>
+                            </td>
+                            <td>
+                                <span class="text-muted">@(member.clubName ?? "Ingen klubb")</span>
+                            </td>
+                            <td>
+                                <div class="d-flex align-items-center">
+                                    <span class="badge-level me-1">@member.levelBadge</span>
+                                    <div>
+                                        <div class="small fw-bold">@member.levelName</div>
+                                    </div>
+                                </div>
+                            </td>
+                            <td>
+                                <span class="badge bg-primary">@member.currentStep</span>
+                            </td>
+                            <td>
+                                <div class="progress mb-1" style="height: 8px;">
+                                    <div class="progress-bar bg-success" style="width: @progress%"></div>
+                                </div>
+                                <small class="text-muted">@progress%</small>
+                            </td>
+                            <td>
+                                <small class="text-muted">@lastActivity</small>
+                            </td>
+                            <td>
+                                <span class="badge bg-info">@member.completedSteps</span>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Level Distribution Chart -->
+        <div class="row mt-4">
+            <div class="col-12">
+                <h5><i class="bi bi-bar-chart"></i> Fördelning per Nivå</h5>
+                <div class="level-distribution">
+                    @{
+                        var levelGroups = Model.GroupBy(m => (int)m.currentLevel)
+                            .Select(g => new { Level = g.Key, Count = g.Count() })
+                            .OrderBy(g => g.Level)
+                            .ToList();
+
+                        var maxCount = levelGroups.Max(g => g.Count);
+                    }
+
+                    @foreach (var group in levelGroups)
+                    {
+                        var level = TrainingDefinitions.GetLevel(group.Level);
+                        var percentage = (double)group.Count / maxCount * 100;
+
+                        <div class="mb-2">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span>
+                                    <span class="badge-level">@(level?.Badge ?? "🎯")</span>
+                                    @(level?.Name ?? $"Nivå {group.Level}")
+                                </span>
+                                <span class="badge bg-secondary">@group.Count</span>
+                            </div>
+                            <div class="progress" style="height: 20px;">
+                                <div class="progress-bar" style="width: @percentage%"></div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+<style>
+    .training-leaderboard .leaderboard-row {
+        transition: all 0.2s ease-in-out;
+    }
+
+    .training-leaderboard .leaderboard-row:hover {
+        background-color: #f8f9fa !important;
+        transform: translateX(2px);
+    }
+
+    .badge-level {
+        font-size: 1.1em;
+    }
+
+    .level-distribution .progress {
+        height: 20px;
+        background-color: #f8f9fa;
+    }
+
+    .level-distribution .progress-bar {
+        background: linear-gradient(90deg, #007bff, #28a745);
+    }
+
+    .table th {
+        border-top: none;
+        font-weight: 600;
+        font-size: 0.9rem;
+    }
+
+    .card {
+        transition: transform 0.2s ease-in-out;
+    }
+
+    .card:hover {
+        transform: translateY(-2px);
+    }
+</style>

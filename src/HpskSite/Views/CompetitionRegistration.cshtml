@@ -1,0 +1,179 @@
+@using HpskSite.Extensions
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+    var registrationsHub = Model.Parent;
+    var competition = registrationsHub?.Parent;
+}
+
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex align-items-center mb-4">
+            <div>
+                <h1><i class="bi bi-person text-primary me-2"></i>@Model.Name</h1>
+                <nav aria-label="breadcrumb">
+                    <ol class="breadcrumb">
+                        @if (competition != null)
+                        {
+                            <li class="breadcrumb-item"><a href="@competition.CompetitionUrl()">@competition.Name</a></li>
+                        }
+                        @if (registrationsHub != null)
+                        {
+                            <li class="breadcrumb-item"><a href="@registrationsHub.Url()">Anmälningar</a></li>
+                        }
+                        <li class="breadcrumb-item active" aria-current="page">@Model.Value<string>("memberName")</li>
+                    </ol>
+                </nav>
+            </div>
+        </div>
+
+        @{
+            var memberName = Model.Value<string>("memberName") ?? "Okänt namn";
+            var memberEmail = Model.Value<string>("memberEmail") ?? "";
+            var memberClub = Model.Value<string>("memberClub") ?? "Okänd klubb";
+            var shootingClass = Model.Value<string>("shootingClass") ?? "Okänd klass";
+            var registrationDate = Model.Value<DateTime>("registrationDate");
+            var startPreference = Model.Value<string>("startPreference") ?? "Ingen preferens";
+            var registeredBy = Model.Value<string>("registeredBy") ?? "Okänd";
+            var isActive = Model.Value<bool>("isActive");
+            var notes = Model.Value<string>("notes");
+        }
+
+        <div class="row">
+            <!-- Registration Details -->
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Anmälningsdetaljer</h5>
+                        @if (isActive)
+                        {
+                            <span class="badge bg-success">Aktiv Anmälan</span>
+                        }
+                        else
+                        {
+                            <span class="badge bg-secondary">Inaktiv Anmälan</span>
+                        }
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-sm-6">
+                                <div class="mb-3">
+                                    <label class="form-label fw-bold">Namn:</label>
+                                    <p class="mb-0">@memberName</p>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label fw-bold">Klubb:</label>
+                                    <p class="mb-0">@memberClub</p>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label fw-bold">Skytteklass:</label>
+                                    <span class="badge bg-info">@shootingClass</span>
+                                </div>
+                            </div>
+                            <div class="col-sm-6">
+                                <div class="mb-3">
+                                    <label class="form-label fw-bold">Anmälningsdatum:</label>
+                                    <p class="mb-0">@registrationDate.ToString("yyyy-MM-dd HH:mm")</p>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label fw-bold">Startpreferens:</label>
+                                    <p class="mb-0">@startPreference</p>
+                                </div>
+                                @if (!string.IsNullOrEmpty(memberEmail))
+                                {
+                                    <div class="mb-3">
+                                        <label class="form-label fw-bold">E-post:</label>
+                                        <p class="mb-0"><a href="mailto:@memberEmail">@memberEmail</a></p>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+
+                        @if (registeredBy != memberName)
+                        {
+                            <hr>
+                            <div class="alert alert-info">
+                                <i class="bi bi-info-circle me-2"></i>
+                                <strong>Anmäld av:</strong> @registeredBy
+                            </div>
+                        }
+
+                        @if (!string.IsNullOrEmpty(notes))
+                        {
+                            <hr>
+                            <div class="mb-3">
+                                <label class="form-label fw-bold">Anteckningar:</label>
+                                <div class="bg-light p-3 rounded">@notes</div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            <!-- Competition Information -->
+            <div class="col-md-4">
+                @if (competition != null)
+                {
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="mb-0">Tävlingsinformation</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="mb-3">
+                                <label class="form-label fw-bold">Tävling:</label>
+                                <p class="mb-0"><a href="@competition.CompetitionUrl()">@competition.Name</a></p>
+                            </div>
+                            @{
+                                var competitionDate = competition.Value<DateTime>("eventDate");
+                                var location = competition.Value<string>("location");
+                                var description = competition.Value<string>("description");
+                            }
+                            @if (competitionDate != default)
+                            {
+                                <div class="mb-3">
+                                    <label class="form-label fw-bold">Datum:</label>
+                                    <p class="mb-0">@competitionDate.ToString("yyyy-MM-dd")</p>
+                                </div>
+                            }
+                            @if (!string.IsNullOrEmpty(location))
+                            {
+                                <div class="mb-3">
+                                    <label class="form-label fw-bold">Plats:</label>
+                                    <p class="mb-0">@location</p>
+                                </div>
+                            }
+                            @if (!string.IsNullOrEmpty(description))
+                            {
+                                <div class="mb-3">
+                                    <label class="form-label fw-bold">Beskrivning:</label>
+                                    <p class="mb-0 small">@Html.Raw(description)</p>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                }
+
+                <!-- Quick Actions -->
+                <div class="card mt-3">
+                    <div class="card-header">
+                        <h5 class="mb-0">Åtgärder</h5>
+                    </div>
+                    <div class="card-body">
+                        @if (registrationsHub != null)
+                        {
+                            <a href="@registrationsHub.Url()" class="btn btn-outline-primary btn-sm mb-2 w-100">
+                                <i class="bi bi-arrow-left me-1"></i>Tillbaka till Anmälningar
+                            </a>
+                        }
+                        @if (competition != null)
+                        {
+                            <a href="@competition.CompetitionUrl()" class="btn btn-outline-secondary btn-sm w-100">
+                                <i class="bi bi-arrow-left me-1"></i>Tillbaka till Tävling
+                            </a>
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

@@ -1,0 +1,303 @@
+@using Umbraco.Cms.Web.Common.PublishedModels;
+@using Umbraco.Extensions;
+@using Umbraco.Cms.Core.Security;
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@inject IMemberManager MemberManager
+
+@{
+    Layout = "Master.cshtml";
+    ViewBag.Title = Model?.Name ?? "Club Page";
+
+    // Get club ID from content
+    var clubId = Model?.Value<int>("clubId") ?? 0;
+    var welcomeMessage = Model?.Value<string>("welcomeMessage") ?? "";
+    var logo = Model?.Value<IPublishedContent>("logo");
+    var bannerImage = Model?.Value<IPublishedContent>("bannerImage");
+
+    // Get current member to check permissions
+    var currentMember = await MemberManager.GetCurrentMemberAsync();
+    var isClubAdmin = false;
+
+    if (currentMember != null && clubId > 0)
+    {
+        // Check if user is club admin for this club
+        var groups = await MemberManager.GetAllRolesAsync(currentMember.Id);
+        isClubAdmin = groups.Any(g => g.Name == $"ClubAdmin_{clubId}");
+    }
+}
+
+<div class="club-page container-fluid">
+    <!-- Club Header with Logo and Banner -->
+    @await Html.PartialAsync("ClubHeader", new { clubId = clubId, logo = logo, bannerImage = bannerImage, isClubAdmin = isClubAdmin })
+
+    <!-- Club Navigation Tabs -->
+    <div class="container mt-4">
+        @await Html.PartialAsync("ClubNavigation", new { clubId = clubId, isClubAdmin = isClubAdmin })
+
+        <!-- Tab Content -->
+        <div class="tab-content mt-3" id="clubTabContent">
+
+            <!-- Home Tab -->
+            <div class="tab-pane fade show active" id="clubHome" role="tabpanel">
+                <div class="row">
+                    <div class="col-lg-8">
+                        @if (!string.IsNullOrEmpty(welcomeMessage))
+                        {
+                            <div class="card mb-4">
+                                <div class="card-body">
+                                    <h5 class="card-title">Welcome</h5>
+                                    <p class="card-text">@Html.Raw(welcomeMessage)</p>
+                                </div>
+                            </div>
+                        }
+
+                        <!-- Upcoming Events Preview -->
+                        <div class="card mb-4">
+                            <div class="card-header">
+                                <h5 class="mb-0">
+                                    <i class="bi bi-calendar-event me-2"></i>Upcoming Events
+                                </h5>
+                            </div>
+                            <div class="card-body" id="upcomingEventsContainer">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Loading events...</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Recent Results -->
+                        <div class="card">
+                            <div class="card-header">
+                                <h5 class="mb-0">
+                                    <i class="bi bi-trophy me-2"></i>Recent Competition Results
+                                </h5>
+                            </div>
+                            <div class="card-body" id="recentResultsContainer">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Loading results...</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Sidebar Stats -->
+                    <div class="col-lg-4">
+                        <div class="card mb-4 bg-light">
+                            <div class="card-header">
+                                <h6 class="mb-0">Club Stats</h6>
+                            </div>
+                            <div class="card-body">
+                                <div class="stat-item mb-3">
+                                    <small class="text-muted">Members</small>
+                                    <div class="h4 mb-0" id="memberCount">
+                                        <span class="spinner-border spinner-border-sm" role="status"></span>
+                                    </div>
+                                </div>
+                                <div class="stat-item mb-3">
+                                    <small class="text-muted">Upcoming Events</small>
+                                    <div class="h4 mb-0" id="eventCount">
+                                        <span class="spinner-border spinner-border-sm" role="status"></span>
+                                    </div>
+                                </div>
+                                <div class="stat-item">
+                                    <small class="text-muted">Active Members</small>
+                                    <div class="h4 mb-0" id="activeCount">
+                                        <span class="spinner-border spinner-border-sm" role="status"></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        @if (isClubAdmin)
+                        {
+                            <div class="card bg-info bg-opacity-10 border-info">
+                                <div class="card-header bg-info bg-opacity-25">
+                                    <h6 class="mb-0">
+                                        <i class="bi bi-shield-check me-2"></i>Club Admin
+                                    </h6>
+                                </div>
+                                <div class="card-body">
+                                    <p class="small mb-2">You have admin access to this club.</p>
+                                    <a href="#" onclick="navigateToTab('clubAdmin')" class="btn btn-sm btn-info">
+                                        <i class="bi bi-gear me-1"></i>Manage Club
+                                    </a>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            <!-- Calendar Tab -->
+            <div class="tab-pane fade" id="clubCalendar" role="tabpanel">
+                <div id="calendarContainer">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading calendar...</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Members Tab -->
+            <div class="tab-pane fade" id="clubMembers" role="tabpanel">
+                <div id="membersContainer">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading members...</span>
+                    </div>
+                </div>
+            </div>
+
+            @if (isClubAdmin)
+            {
+                <!-- Admin Tab (only for club admins) -->
+                <div class="tab-pane fade" id="clubAdmin" role="tabpanel">
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle me-2"></i>
+                        Club administration features coming soon.
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+<!-- JavaScript for club page functionality -->
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const clubId = @clubId;
+
+    if (clubId > 0) {
+        loadClubStats();
+        loadUpcomingEvents();
+        loadRecentResults();
+    }
+});
+
+function navigateToTab(tabName) {
+    const tab = new bootstrap.Tab(document.querySelector(`#${tabName}-tab`));
+    tab.show();
+}
+
+function loadClubStats() {
+    // Load club statistics via API
+    fetch(`/umbraco/surface/Club/GetClubStats?clubId=@clubId`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                document.getElementById('memberCount').textContent = data.data.memberCount || 0;
+                document.getElementById('eventCount').textContent = data.data.upcomingEventCount || 0;
+                document.getElementById('activeCount').textContent = data.data.activeMembers || 0;
+            }
+        })
+        .catch(error => console.error('Error loading club stats:', error));
+}
+
+function loadUpcomingEvents() {
+    // Load upcoming events
+    fetch(`/umbraco/surface/Club/GetUpcomingEvents?clubId=@clubId&days=30`)
+        .then(response => response.json())
+        .then(data => {
+            const container = document.getElementById('upcomingEventsContainer');
+            if (data.success && data.data.length > 0) {
+                let html = '<ul class="list-group list-group-flush">';
+                data.data.slice(0, 5).forEach(event => {
+                    html += `
+                        <li class="list-group-item">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div>
+                                    <h6 class="mb-1">${event.name}</h6>
+                                    <small class="text-muted">${new Date(event.date).toLocaleDateString('sv-SE')}</small>
+                                </div>
+                                <span class="badge bg-secondary">${event.type}</span>
+                            </div>
+                        </li>
+                    `;
+                });
+                html += '</ul>';
+                container.innerHTML = html;
+            } else {
+                container.innerHTML = '<p class="text-muted">No upcoming events scheduled.</p>';
+            }
+        })
+        .catch(error => {
+            console.error('Error loading events:', error);
+            document.getElementById('upcomingEventsContainer').innerHTML = '<p class="text-danger">Error loading events.</p>';
+        });
+}
+
+function loadRecentResults() {
+    // Load recent competition results for club members
+    fetch(`/umbraco/surface/Club/GetRecentResults?clubId=@clubId&limit=5`)
+        .then(response => response.json())
+        .then(data => {
+            const container = document.getElementById('recentResultsContainer');
+            if (data.success && data.data.length > 0) {
+                let html = '<ul class="list-group list-group-flush">';
+                data.data.forEach(result => {
+                    html += `
+                        <li class="list-group-item">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div>
+                                    <h6 class="mb-1">${result.memberName}</h6>
+                                    <small class="text-muted">${result.competitionName}</small>
+                                </div>
+                                <div class="text-end">
+                                    <div class="h6 mb-0">${result.score || 'N/A'}</div>
+                                    <small class="text-muted">${result.placement ? result.placement + ' place' : ''}</small>
+                                </div>
+                            </div>
+                        </li>
+                    `;
+                });
+                html += '</ul>';
+                container.innerHTML = html;
+            } else {
+                container.innerHTML = '<p class="text-muted">No recent results found.</p>';
+            }
+        })
+        .catch(error => {
+            console.error('Error loading results:', error);
+            document.getElementById('recentResultsContainer').innerHTML = '<p class="text-danger">Error loading results.</p>';
+        });
+}
+</script>
+
+<style>
+.club-page {
+    padding-bottom: 2rem;
+}
+
+.stat-item {
+    padding: 0;
+}
+
+.stat-item small {
+    display: block;
+    font-weight: 500;
+}
+
+#clubPage .nav-tabs .nav-link {
+    border-bottom: 3px solid transparent;
+    color: #6c757d;
+}
+
+#clubPage .nav-tabs .nav-link:hover {
+    border-bottom-color: #0d6efd;
+    color: #0d6efd;
+}
+
+#clubPage .nav-tabs .nav-link.active {
+    border-bottom-color: #0d6efd;
+    color: #0d6efd;
+    background-color: transparent;
+}
+
+.list-group-item {
+    border-left: 4px solid transparent;
+    transition: all 0.2s ease;
+}
+
+.list-group-item:hover {
+    border-left-color: #0d6efd;
+    background-color: #f8f9fa;
+}
+</style>

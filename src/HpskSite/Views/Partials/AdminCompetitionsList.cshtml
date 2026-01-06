@@ -1,0 +1,772 @@
+@*
+ * Admin Competitions List View
+ * Displays table of all competitions with CRUD actions
+ * Swedish translation, smart status logic, and Club Management design pattern
+*@
+@inject Umbraco.Cms.Core.Security.IMemberManager MemberManager
+@{
+    var currentMember = await MemberManager.GetCurrentMemberAsync();
+}
+
+<div class="admin-competitions-list">
+    <!-- Header with Create Buttons -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h3><i class="bi bi-list-task me-2"></i>Tävlingar</h3>
+        <div class="btn-group">
+            <button class="btn btn-success" onclick="openCreateModal()">
+                <i class="bi bi-plus-circle me-1"></i>Ny Tävling
+            </button>
+            <button class="btn btn-outline-info" onclick="openAdvertModal()">
+                <i class="bi bi-megaphone me-1"></i>Ny Annons
+            </button>
+        </div>
+    </div>
+
+    <!-- Filter Section -->
+    <div class="card mb-4">
+        <div class="card-body">
+            <div class="row g-3 align-items-end">
+                <div class="col-md-3">
+                    <label for="yearFilter" class="form-label">År</label>
+                    <select class="form-select" id="yearFilter" onchange="onYearFilterChange()">
+                        <!-- Populated by JavaScript -->
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label for="typeFilter" class="form-label">Tävlingstyp</label>
+                    <select class="form-select" id="typeFilter" onchange="applyClientFilters()">
+                        <option value="">Alla typer</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="showCompleted" onchange="onShowCompletedChange()">
+                        <label class="form-check-label" for="showCompleted">
+                            Visa avslutade tävlingar
+                        </label>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <button class="btn btn-outline-secondary w-100" onclick="clearFilters()">
+                        <i class="bi bi-x-circle me-1"></i>Rensa filter
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading State -->
+    <div class="spinner-border text-primary d-none" id="competitionsLoadingSpinner" role="status">
+        <span class="visually-hidden">Laddar...</span>
+    </div>
+
+    <!-- Competitions Table -->
+    <div class="table-responsive" id="competitionsTableContainer">
+        <table class="table table-hover">
+            <thead class="table-light">
+                <tr>
+                    <th>Namn</th>
+                    <th>Typ</th>
+                    <th>Datum</th>
+                    <th>Status</th>
+                    <th class="text-center">Anmälningar</th>
+                    <th class="text-end">Åtgärder</th>
+                </tr>
+            </thead>
+            <tbody id="competitionsTableBody">
+                <tr class="text-muted">
+                    <td colspan="6" class="text-center py-4">Laddar tävlingar...</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Empty State -->
+    <div class="alert alert-info d-none text-center" id="noCompetitionsAlert">
+        <i class="bi bi-inbox me-2"></i>
+        Inga tävlingar hittades. <a href="#" onclick="openCreateModal(); return false;">Skapa en</a>
+    </div>
+
+    <!-- Error Alert -->
+    <div class="alert alert-danger d-none" id="competitionsErrorAlert" role="alert">
+        <strong>Fel:</strong> <span id="competitionsErrorMessage"></span>
+    </div>
+</div>
+
+<!-- HTML Template for Competition Row -->
+<script type="text/html" id="competition-row-template">
+    <tr data-competition-id="{id}">
+        <td>
+            {name}
+            {externalBadge}
+        </td>
+        <td><span class="badge bg-secondary">{type}</span></td>
+        <td>{competitionDate}</td>
+        <td><span class="badge bg-{statusClass}">{statusText}</span></td>
+        <td class="text-center">
+            <span class="badge bg-info">{registrationCount}</span>
+        </td>
+        <td class="text-end">
+            <button class="btn btn-sm btn-outline-primary" onclick="openAdminEditModal({id}, {isExternal})" title="Redigera">
+                <i class="bi bi-pencil"></i>
+            </button>
+            <button class="btn btn-sm btn-outline-info" onclick="openAdminCopyModal({id})" title="Kopiera">
+                <i class="bi bi-files"></i>
+            </button>
+            {uploadInvitationButton}
+            <button class="btn btn-sm btn-outline-danger" onclick="openDeleteModal({id}, '{nameEscaped}')" title="Ta bort">
+                <i class="bi bi-trash"></i>
+            </button>
+        </td>
+    </tr>
+</script>
+
+<!-- Anti-forgery token for AJAX -->
+@Html.AntiForgeryToken()
+
+<script>
+// Global variables
+let competitionsListLoaded = false;
+let allCompetitions = [];
+let filteredCompetitions = [];
+
+// Server-side filter state (defaults: current year, hide completed)
+let serverFilters = {
+    year: new Date().getFullYear(),
+    includeCompleted: false
+};
+
+// Populate year filter dropdown (2024 to current year + 1)
+function populateYearFilter() {
+    const select = document.getElementById('yearFilter');
+    const currentYear = new Date().getFullYear();
+    select.innerHTML = '<option value="">Alla år</option>';
+
+    for (let year = 2024; year <= currentYear + 1; year++) {
+        const selected = year === currentYear ? 'selected' : '';
+        select.innerHTML += `<option value="${year}" ${selected}>${year}</option>`;
+    }
+}
+
+// Server-side filter change handlers
+function onYearFilterChange() {
+    const yearValue = document.getElementById('yearFilter').value;
+    serverFilters.year = yearValue ? parseInt(yearValue) : null;
+    loadCompetitionsList();
+}
+
+function onShowCompletedChange() {
+    serverFilters.includeCompleted = document.getElementById('showCompleted').checked;
+    loadCompetitionsList();
+}
+
+// Load competitions list when tab is shown
+document.addEventListener('DOMContentLoaded', function() {
+    const competitionsTab = document.getElementById('competitions-tab');
+
+    // Populate year filter on page load
+    populateYearFilter();
+
+    // Load immediately if competitions tab is active (default)
+    if (competitionsTab && competitionsTab.classList.contains('active')) {
+        loadCompetitionsList();
+        competitionsListLoaded = true;
+    }
+
+    // Load when tab is clicked for the first time
+    if (competitionsTab) {
+        competitionsTab.addEventListener('shown.bs.tab', function() {
+            if (!competitionsListLoaded) {
+                loadCompetitionsList();
+                competitionsListLoaded = true;
+            }
+        });
+    }
+});
+
+function loadCompetitionsList() {
+    const spinner = document.getElementById('competitionsLoadingSpinner');
+    const tableContainer = document.getElementById('competitionsTableContainer');
+    const tbody = document.getElementById('competitionsTableBody');
+    const errorAlert = document.getElementById('competitionsErrorAlert');
+    const errorMessage = document.getElementById('competitionsErrorMessage');
+    const noCompetitionsAlert = document.getElementById('noCompetitionsAlert');
+
+    spinner.classList.remove('d-none');
+    errorAlert.classList.add('d-none');
+    noCompetitionsAlert.classList.add('d-none');
+    tbody.innerHTML = '<tr class="text-muted"><td colspan="6" class="text-center py-4">Laddar tävlingar...</td></tr>';
+
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+
+    // Build URL with server-side filter parameters
+    let url = '/umbraco/surface/CompetitionAdmin/GetCompetitionsList?';
+    if (serverFilters.year) {
+        url += `year=${serverFilters.year}&`;
+    }
+    url += `includeCompleted=${serverFilters.includeCompleted}`;
+
+    fetch(url, {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json',
+            'RequestVerificationToken': token
+        },
+        credentials: 'include'
+    })
+        .then(response => response.json())
+        .then(data => {
+            spinner.classList.add('d-none');
+
+            if (!data.success) {
+                errorMessage.textContent = data.message || 'Kunde inte ladda tävlingar';
+                errorAlert.classList.remove('d-none');
+                tbody.innerHTML = '<tr class="text-muted"><td colspan="6" class="text-center py-4">Fel vid laddning av tävlingar</td></tr>';
+                return;
+            }
+
+            allCompetitions = data.data || [];
+
+            if (allCompetitions.length === 0) {
+                tableContainer.classList.add('d-none');
+                noCompetitionsAlert.classList.remove('d-none');
+                tbody.innerHTML = '';
+            } else {
+                tableContainer.classList.remove('d-none');
+                noCompetitionsAlert.classList.add('d-none');
+                populateTypeFilter();
+                applyClientFilters();
+            }
+        })
+        .catch(error => {
+            spinner.classList.add('d-none');
+            errorMessage.textContent = error.message || 'Nätverksfel';
+            errorAlert.classList.remove('d-none');
+        });
+}
+
+function populateTypeFilter() {
+    // Populate type filter from loaded data
+    const typeFilter = document.getElementById('typeFilter');
+    const types = [...new Set(allCompetitions.map(c => c.type).filter(t => t))].sort();
+
+    typeFilter.innerHTML = '<option value="">Alla typer</option>' +
+        types.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
+}
+
+function applyClientFilters() {
+    // Client-side type filter only (year and status are server-side)
+    const typeFilter = document.getElementById('typeFilter').value;
+
+    filteredCompetitions = allCompetitions.filter(comp => {
+        // Type filter (client-side)
+        if (typeFilter && comp.type !== typeFilter) return false;
+        return true;
+    });
+
+    renderCompetitions();
+}
+
+function clearFilters() {
+    // Reset to defaults: current year, hide completed, no type filter
+    const currentYear = new Date().getFullYear();
+    document.getElementById('yearFilter').value = currentYear.toString();
+    document.getElementById('typeFilter').value = '';
+    document.getElementById('showCompleted').checked = false;
+
+    // Update server filters and reload
+    serverFilters.year = currentYear;
+    serverFilters.includeCompleted = false;
+    loadCompetitionsList();
+}
+
+function renderCompetitions() {
+    const tbody = document.getElementById('competitionsTableBody');
+    const tableContainer = document.getElementById('competitionsTableContainer');
+    const noCompetitionsAlert = document.getElementById('noCompetitionsAlert');
+    const template = document.getElementById('competition-row-template').innerHTML;
+
+    if (filteredCompetitions.length === 0) {
+        tableContainer.classList.add('d-none');
+        noCompetitionsAlert.classList.remove('d-none');
+        tbody.innerHTML = '';
+    } else {
+        tableContainer.classList.remove('d-none');
+        noCompetitionsAlert.classList.add('d-none');
+
+        // Group competitions by series
+        const groupedCompetitions = {};
+        const noSeriesCompetitions = [];
+
+        filteredCompetitions.forEach(comp => {
+            if (comp.seriesId && comp.seriesName) {
+                if (!groupedCompetitions[comp.seriesId]) {
+                    groupedCompetitions[comp.seriesId] = {
+                        seriesName: comp.seriesName,
+                        competitions: []
+                    };
+                }
+                groupedCompetitions[comp.seriesId].competitions.push(comp);
+            } else {
+                noSeriesCompetitions.push(comp);
+            }
+        });
+
+        // Render groups
+        let html = '';
+
+        // Render competitions not in any series first
+        if (noSeriesCompetitions.length > 0) {
+            html += `<tr class="table-secondary">
+                <td colspan="6" class="fw-bold">
+                    <i class="bi bi-calendar me-2"></i>Individuella tävlingar
+                    <span class="badge bg-secondary ms-2">${noSeriesCompetitions.length}</span>
+                </td>
+            </tr>`;
+
+            noSeriesCompetitions.forEach(comp => {
+                html += renderCompetitionRow(comp, template);
+            });
+        }
+
+        // Render series groups
+        const seriesGroups = Object.values(groupedCompetitions).sort((a, b) =>
+            b.seriesName.localeCompare(a.seriesName, 'sv')
+        );
+
+        seriesGroups.forEach(group => {
+            // Series header row
+            html += `<tr class="table-primary">
+                <td colspan="6" class="fw-bold">
+                    <i class="bi bi-collection me-2"></i>Tävlingar som ingår i: ${escapeHtml(group.seriesName)}
+                    <span class="badge bg-primary ms-2">${group.competitions.length}</span>
+                </td>
+            </tr>`;
+
+            // Competitions in this series
+            group.competitions.forEach(comp => {
+                html += renderCompetitionRow(comp, template);
+            });
+        });
+
+        tbody.innerHTML = html;
+    }
+}
+
+function renderCompetitionRow(comp, template) {
+    const status = calculateStatus(comp);
+    const statusInfo = getCompetitionStatusInfo(status);
+
+    // Add external badge if applicable
+    const externalBadge = comp.isExternal
+        ? '<span class="badge bg-info ms-2"><i class="bi bi-box-arrow-up-right me-1"></i>Extern</span>'
+        : '';
+
+    // Generate upload invitation button (only for external competitions)
+    const uploadInvitationButton = comp.isExternal
+        ? `<button class="btn btn-sm btn-outline-success"
+                   onclick="openUploadInvitationModal(${comp.id}, '${escapeHtml(comp.name).replace(/'/g, "\\'")}')"
+                   title="Ladda upp inbjudan">
+               <i class="bi bi-file-earmark-arrow-up"></i>
+           </button>`
+        : '';
+
+    return template
+        .replace(/{id}/g, comp.id)
+        .replace(/{name}/g, escapeHtml(comp.name))
+        .replace(/{nameEscaped}/g, escapeHtml(comp.name).replace(/'/g, "\\'"))
+        .replace(/{type}/g, escapeHtml(comp.type || '-'))
+        .replace(/{competitionDate}/g, formatDate(comp.startDate))
+        .replace(/{statusText}/g, statusInfo.text)
+        .replace(/{statusClass}/g, statusInfo.badgeClass)
+        .replace(/{registrationCount}/g, comp.registrationCount || 0)
+        .replace(/{externalBadge}/g, externalBadge)
+        .replace(/{isExternal}/g, comp.isExternal ? 'true' : 'false')
+        .replace(/{uploadInvitationButton}/g, uploadInvitationButton);
+}
+
+function calculateStatus(comp) {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()); // Strip time for date-only comparison
+
+    const compDate = comp.startDate ? new Date(comp.startDate) : null;
+    const compDateOnly = compDate ? new Date(compDate.getFullYear(), compDate.getMonth(), compDate.getDate()) : null;
+
+    const regOpen = comp.registrationOpenDate ? new Date(comp.registrationOpenDate) : null;
+    const regClose = comp.registrationCloseDate ? new Date(comp.registrationCloseDate) : null;
+
+    // Match logic from CompetitionsHub.cshtml lines 487-521
+    // If isActive AND compDate >= today
+    if (comp.isActive && compDateOnly && compDateOnly >= today) {
+        // Check if registration is currently open
+        if (regOpen && regClose && regOpen <= now && regClose >= now) {
+            return 'open'; // Anmälan öppen
+        }
+        // Check if registration hasn't opened yet
+        else if (regOpen && regOpen > now) {
+            return 'upcoming'; // Anmälan öppnar snart
+        }
+        // Check if competition is today
+        else if (compDateOnly.getTime() === today.getTime()) {
+            return 'ongoing'; // Pågående tävling
+        }
+        // Check if registration closed but competition is in future
+        else if (regClose && regClose < now && compDateOnly > today) {
+            return 'ongoing'; // Pågående tävling
+        }
+    }
+
+    // Otherwise it's completed/closed
+    return 'closed'; // Avslutad
+}
+
+function getCompetitionStatusInfo(status) {
+    const statusMap = {
+        'open': { text: 'Öppen', badgeClass: 'success' },
+        'upcoming': { text: 'Kommande', badgeClass: 'warning' },
+        'ongoing': { text: 'Pågående', badgeClass: 'primary' },
+        'closed': { text: 'Avslutad', badgeClass: 'secondary' }
+    };
+    return statusMap[status] || statusMap['closed'];
+}
+
+function formatDate(dateStr) {
+    if (!dateStr) return '-';
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('sv-SE');
+}
+
+function formatRegistrationDates(openDate, closeDate) {
+    if (!openDate || !closeDate) return '-';
+    return `${formatDate(openDate)} - ${formatDate(closeDate)}`;
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function openDeleteModal(competitionId, competitionName) {
+    window.deleteCompetitionId = competitionId;
+    const modal = new bootstrap.Modal(document.getElementById('competitionDeleteConfirmModal'));
+    document.getElementById('deleteCompetitionName').textContent = competitionName;
+    modal.show();
+}
+
+// Open wizard modal for new competition (create mode)
+function openCreateModal() {
+    console.log('Opening create competition wizard modal');
+
+    // Show the CompetitionWizardModal
+    const modalElement = document.getElementById('competitionWizardModal');
+    if (!modalElement) {
+        console.error('CompetitionWizardModal not found');
+        alert('Wizard modal could not be found. Please contact the administrator.');
+        return;
+    }
+
+    const modal = window.competitionWizardModalInstance || new bootstrap.Modal(modalElement);
+    window.competitionWizardModalInstance = modal;
+    modal.show();
+
+    // Reset wizard to step 0 when opened
+    if (typeof window.resetWizard === 'function') {
+        window.resetWizard();
+    }
+}
+
+// Open advert modal for new external competition (advertisement mode)
+function openAdvertModal() {
+    console.log('Opening create competition advert modal');
+
+    // Show the CompetitionAdvertModal
+    const modalElement = document.getElementById('competitionAdvertModal');
+    if (!modalElement) {
+        console.error('CompetitionAdvertModal not found');
+        alert('Advert modal could not be found. Please contact the administrator.');
+        return;
+    }
+
+    const modal = window.competitionAdvertModalInstance || new bootstrap.Modal(modalElement);
+    window.competitionAdvertModalInstance = modal;
+    modal.show();
+
+    // Reset form when opened
+    if (typeof window.resetAdvertForm === 'function') {
+        window.resetAdvertForm();
+    }
+}
+
+// Reload list after successful operations
+window.reloadCompetitionsList = function() {
+    loadCompetitionsList();
+};
+
+// Open edit modal for admin page
+window.openAdminEditModal = function(competitionId, isExternal) {
+    console.log('Opening edit modal for competition ID:', competitionId, 'isExternal:', isExternal);
+
+    // Route to correct modal based on competition type
+    if (isExternal === true) {
+        openAdvertEditModal(competitionId);
+        return;
+    }
+
+    // Internal competition - use regular edit modal
+    openInternalEditModal(competitionId);
+};
+
+// Open internal competition edit modal
+function openInternalEditModal(competitionId) {
+    console.log('Opening INTERNAL edit modal for competition ID:', competitionId);
+
+    // Update modal title for edit mode
+    const modalLabel = document.getElementById('competitionEditModalLabel');
+    modalLabel.innerHTML = '<i class="bi bi-pencil me-2"></i>Redigera Tävling';
+
+    // Fetch competition data
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+    console.log('CSRF token found:', !!token);
+
+    const url = `/umbraco/surface/CompetitionEdit/GetCompetitionData?competitionId=${competitionId}`;
+    console.log('Fetching from URL:', url);
+
+    fetch(url, {
+        method: 'GET',
+        headers: {
+            'RequestVerificationToken': token
+        },
+        credentials: 'same-origin'
+    })
+    .then(response => {
+        console.log('Response status:', response.status);
+        console.log('Response ok:', response.ok);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        return response.json();
+    })
+    .then(data => {
+        console.log('Received data:', data);
+        if (data.success) {
+            // Store the competition data to populate after modal is shown
+            window.currentCompetitionData = data.data;
+
+            // Show modal first, then populate data after Flatpickr is initialized
+            const modalElement = document.getElementById('competitionEditModal');
+            console.log('Modal element found:', !!modalElement);
+            // Reuse existing modal instance or create new one
+            const modal = window.competitionEditModalInstance || new bootstrap.Modal(modalElement);
+            window.competitionEditModalInstance = modal;
+            console.log('Showing modal...');
+            modal.show();
+            console.log('Modal shown');
+
+            // Populate data after modal is shown and Flatpickr is initialized
+            setTimeout(() => {
+                console.log('Checking if populateEditModal is defined:', typeof window.populateEditModal);
+                if (typeof window.populateEditModal === 'function') {
+                    populateEditModal(window.currentCompetitionData);
+                    loadEditModalShootingClasses();
+                } else {
+                    console.error('populateEditModal function is not defined. Retrying in 500ms...');
+                    setTimeout(() => {
+                        if (typeof window.populateEditModal === 'function') {
+                            populateEditModal(window.currentCompetitionData);
+                            loadEditModalShootingClasses();
+                        } else {
+                            console.error('populateEditModal still not defined after retry');
+                        }
+                    }, 500);
+                }
+            }, 200);
+        } else {
+            console.error('API returned success=false:', data);
+            alert('Kunde inte ladda tävlingsdata: ' + (data.message || 'Okänt fel'));
+        }
+    })
+    .catch(error => {
+        console.error('Error loading competition:', error);
+        alert('Fel vid laddning av tävlingsdata: ' + error.message);
+    });
+}
+
+// Open external competition (advertisement) edit modal
+function openAdvertEditModal(competitionId) {
+    console.log('Opening EXTERNAL edit modal for competition ID:', competitionId);
+
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+
+    // Fetch competition data using the admin controller's GetCompetition endpoint
+    fetch(`/umbraco/surface/CompetitionAdmin/GetCompetition?id=${competitionId}`, {
+        method: 'GET',
+        headers: {
+            'RequestVerificationToken': token
+        },
+        credentials: 'same-origin'
+    })
+    .then(response => {
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        return response.json();
+    })
+    .then(data => {
+        console.log('Received external competition data:', data);
+        if (data.success) {
+            // Populate data BEFORE showing modal so selected IDs are stored
+            if (typeof window.populateAdvertEditModal === 'function') {
+                populateAdvertEditModal(data.competition);
+            } else {
+                console.error('populateAdvertEditModal function is not defined');
+            }
+
+            // Now show modal - the shown.bs.modal event will use the stored selected IDs
+            const modalElement = document.getElementById('competitionAdvertEditModal');
+            if (!modalElement) {
+                console.error('competitionAdvertEditModal element not found!');
+                alert('Edit modal inte tillgänglig. Kontakta administratör.');
+                return;
+            }
+
+            const modal = window.competitionAdvertEditModalInstance || new bootstrap.Modal(modalElement);
+            window.competitionAdvertEditModalInstance = modal;
+            modal.show();
+        } else {
+            console.error('API returned success=false:', data);
+            alert('Kunde inte ladda tävlingsdata: ' + (data.message || 'Okänt fel'));
+        }
+    })
+    .catch(error => {
+        console.error('Error loading external competition:', error);
+        alert('Fel vid laddning av tävlingsdata: ' + error.message);
+    });
+}
+
+// Open copy modal for admin page
+window.openAdminCopyModal = function(competitionId) {
+    // For copy, we need to load data and then clear the form but keep the values
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+
+    fetch(`/umbraco/surface/CompetitionEdit/GetCompetitionData?competitionId=${competitionId}`, {
+        method: 'GET',
+        headers: {
+            'RequestVerificationToken': token
+        },
+        credentials: 'same-origin'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Store the data for population after modal is shown
+            window.currentCompetitionData = data.data;
+
+            // Clear ID to indicate this is a copy
+            document.getElementById('competitionId').value = '';
+
+            // Update modal title for copy
+            const modalLabel = document.getElementById('competitionEditModalLabel');
+            modalLabel.innerHTML = '<i class="bi bi-files me-2"></i>Kopiera Tävling';
+
+            // Show modal first, then load shooting classes
+            const modalElement = document.getElementById('competitionEditModal');
+            const modal = window.competitionEditModalInstance || new bootstrap.Modal(modalElement);
+            window.competitionEditModalInstance = modal;
+            modal.show();
+
+            // Populate and load shooting classes after modal is shown
+            setTimeout(() => {
+                console.log('Checking if populateEditModal is defined for copy:', typeof window.populateEditModal);
+                if (typeof window.populateEditModal === 'function') {
+                    // Clear the ID to indicate this is a new competition
+                    window.currentCompetitionData.id = 0;
+
+                    // Clear all date fields for copy
+                    window.currentCompetitionData.competitionDate = null;
+                    window.currentCompetitionData.competitionEndDate = null;
+                    window.currentCompetitionData.registrationOpenDate = null;
+                    window.currentCompetitionData.registrationCloseDate = null;
+
+                    // Add " - Kopia" suffix to competition name if not already present
+                    if (window.currentCompetitionData.competitionName && !window.currentCompetitionData.competitionName.includes('- Kopia')) {
+                        window.currentCompetitionData.competitionName += ' - Kopia';
+                    }
+
+                    populateEditModal(window.currentCompetitionData);
+                    loadEditModalShootingClasses();
+                } else {
+                    console.error('populateEditModal function is not defined for copy. Retrying in 500ms...');
+                    setTimeout(() => {
+                        if (typeof window.populateEditModal === 'function') {
+                            // Clear the ID to indicate this is a new competition
+                            window.currentCompetitionData.id = 0;
+
+                            // Clear all date fields for copy
+                            window.currentCompetitionData.competitionDate = null;
+                            window.currentCompetitionData.competitionEndDate = null;
+                            window.currentCompetitionData.registrationOpenDate = null;
+                            window.currentCompetitionData.registrationCloseDate = null;
+
+                            // Add " - Kopia" suffix to competition name if not already present
+                            if (window.currentCompetitionData.competitionName && !window.currentCompetitionData.competitionName.includes('- Kopia')) {
+                                window.currentCompetitionData.competitionName += ' - Kopia';
+                            }
+
+                            populateEditModal(window.currentCompetitionData);
+                            loadEditModalShootingClasses();
+                        } else {
+                            console.error('populateEditModal still not defined after retry for copy');
+                        }
+                    }, 500);
+                }
+            }, 100);
+        } else {
+            alert('Kunde inte ladda tävlingsdata: ' + (data.message || 'Okänt fel'));
+        }
+    })
+    .catch(error => {
+        console.error('Error loading competition:', error);
+        alert('Fel vid laddning av tävlingsdata');
+    });
+};
+
+// OPTIMIZED: Add single competition to table without full reload
+window.addCompetitionToTable = function(comp) {
+    // Simply reload the entire list to maintain filter state and proper rendering
+    loadCompetitionsList();
+};
+
+// Remove competition from table after delete
+window.removeCompetitionFromTable = function(competitionId) {
+    // Remove from allCompetitions array
+    allCompetitions = allCompetitions.filter(c => c.id !== competitionId);
+    // Reapply filters to update display
+    applyFilters();
+};
+</script>
+
+<style>
+/* Compact table rows for admin competitions list */
+.admin-competitions-list .table td,
+.admin-competitions-list .table th {
+    padding: 0.5rem 0.75rem;
+    vertical-align: middle;
+}
+
+.admin-competitions-list .table-secondary td,
+.admin-competitions-list .table-primary td {
+    padding: 0.5rem 0.75rem;
+}
+
+.admin-competitions-list .btn-sm {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.875rem;
+}
+
+.admin-competitions-list .badge {
+    padding: 0.25em 0.6em;
+    font-size: 0.875rem;
+}
+</style>

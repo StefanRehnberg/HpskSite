@@ -1,0 +1,379 @@
+/* ============================================
+   HPSK Video Tutorial System - Styles
+   ============================================ */
+
+/* ============================================
+   PERSISTENT TUTORIAL ICON - Fixed Top-Right
+   ============================================ */
+
+.tutorial-persistent-icon {
+    /* Fixed Positioning */
+    position: fixed;
+    top: 100px;
+    right: 20px;
+    z-index: 1000;
+
+    /* Visual Styling */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 56px;
+    height: 56px;
+
+    /* Icon Styling */
+    font-size: 2.5rem;
+    color: #0d6efd;
+    opacity: 0.6;
+
+    /* Background Circle */
+    background: white;
+    border-radius: 50%;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+
+    /* Interaction */
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.tutorial-persistent-icon:hover {
+    opacity: 1;
+    transform: scale(1.2);
+    box-shadow: 0 4px 12px rgba(13, 110, 253, 0.3);
+}
+
+/* Hide on mobile/small screens */
+@media (max-width: 767px) {
+    .tutorial-persistent-icon {
+        display: none;
+    }
+}
+
+/* Pulse animation for first 6 seconds (after banner dismissal) */
+@keyframes pulse-tutorial {
+    0%, 100% {
+        opacity: 0.6;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 1;
+        transform: scale(1.1);
+    }
+}
+
+.tutorial-persistent-icon.first-show {
+    animation: pulse-tutorial 2s ease-in-out 3; /* 3 pulses = 6 seconds */
+}
+
+/* ============================================
+   TUTORIAL BANNER (First-time notification)
+   ============================================ */
+
+.tutorial-banner {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 1rem 1.5rem;
+    border-radius: 8px;
+    margin-bottom: 1.5rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+
+.tutorial-banner-content {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex: 1;
+}
+
+.tutorial-banner-icon {
+    font-size: 2.5rem;
+}
+
+.tutorial-banner-actions {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.tutorial-play-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.95);
+    border-radius: 12px;
+    padding: 0.75rem 1.25rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    min-width: 100px;
+}
+
+.tutorial-play-card:hover {
+    background: white;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.tutorial-play-icon {
+    font-size: 2rem;
+    color: #0d6efd;
+    margin-bottom: 0.25rem;
+}
+
+.tutorial-play-text {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #495057;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.tutorial-banner .btn-close {
+    filter: invert(1);
+    opacity: 0.8;
+}
+
+.tutorial-banner .btn-close:hover {
+    opacity: 1;
+}
+
+/* ============================================
+   TUTORIAL OVERLAY (Fullscreen Video Player)
+   ============================================ */
+
+.tutorial-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.95);
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+
+.tutorial-overlay-content {
+    width: 100%;
+    max-width: 1400px;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.tutorial-overlay-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    color: white;
+    padding: 0 1rem;
+}
+
+.tutorial-overlay-header h5 {
+    margin: 0;
+    font-size: 1.5rem;
+    font-weight: 600;
+}
+
+.tutorial-close-btn {
+    background: rgba(255, 255, 255, 0.1);
+    border: none;
+    color: white;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 1.2rem;
+}
+
+.tutorial-close-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+    transform: scale(1.1);
+}
+
+.tutorial-video-container {
+    position: relative;
+    width: 100%;
+    padding-bottom: 56.25%; /* 16:9 aspect ratio */
+    background: #000;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.tutorial-video-container iframe {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    border: none;
+}
+
+.tutorial-overlay-footer {
+    color: white;
+    padding: 0 1rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+}
+
+.tutorial-description {
+    margin: 0;
+    flex: 1;
+    opacity: 0.8;
+}
+
+.tutorial-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+    .tutorial-overlay {
+        padding: 10px;
+    }
+
+    .tutorial-overlay-content {
+        max-width: 100%;
+    }
+
+    .tutorial-overlay-footer {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .tutorial-actions {
+        width: 100%;
+        justify-content: flex-start;
+    }
+}
+
+/* ============================================
+   TUTORIAL CARDS (for tutorial hub page)
+   ============================================ */
+
+.tutorial-card {
+    position: relative;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    cursor: pointer;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.tutorial-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 16px rgba(0,0,0,0.15);
+}
+
+.tutorial-card .watched-badge {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: #28a745;
+    color: white;
+    padding: 0.25rem 0.5rem;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    display: none;
+}
+
+.tutorial-card.watched .watched-badge {
+    display: inline-block;
+}
+
+.tutorial-thumbnail {
+    width: 100%;
+    height: 180px;
+    object-fit: cover;
+    border-radius: 8px 8px 0 0;
+}
+
+.tutorial-duration {
+    position: absolute;
+    bottom: 10px;
+    right: 10px;
+    background: rgba(0,0,0,0.8);
+    color: white;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+}
+
+/* ============================================
+   HELP DROPDOWN in Header
+   ============================================ */
+
+.nav-item .help-icon {
+    color: #667eea;
+    margin-right: 0.25rem;
+}
+
+/* ============================================
+   RESPONSIVE ADJUSTMENTS
+   ============================================ */
+
+@media (max-width: 768px) {
+    .tutorial-banner {
+        flex-direction: column;
+        text-align: center;
+        gap: 1rem;
+    }
+
+    .tutorial-banner-content {
+        flex-direction: column;
+        text-align: center;
+    }
+
+    .tutorial-banner-actions {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .tutorial-play-card {
+        min-width: 120px;
+    }
+}
+
+/* ============================================
+   DARK MODE SUPPORT (optional)
+   ============================================ */
+
+[data-bs-theme="dark"] .tutorial-persistent-icon {
+    background: #212529;
+    box-shadow: 0 2px 8px rgba(255,255,255,0.1);
+}
+
+[data-bs-theme="dark"] .tutorial-persistent-icon:hover {
+    box-shadow: 0 4px 12px rgba(13, 110, 253, 0.5);
+}
+
+[data-bs-theme="dark"] .tutorial-play-card {
+    background: rgba(33, 37, 41, 0.95);
+}
+
+[data-bs-theme="dark"] .tutorial-play-card:hover {
+    background: #212529;
+}
+
+[data-bs-theme="dark"] .tutorial-play-text {
+    color: #dee2e6;
+}
+
+[data-bs-theme="dark"] .tutorial-card {
+    background: #212529;
+}
+
+[data-bs-theme="dark"] .tutorial-card:hover {
+    box-shadow: 0 8px 16px rgba(255,255,255,0.1);
+}

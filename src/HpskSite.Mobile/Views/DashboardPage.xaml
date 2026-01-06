@@ -1,0 +1,398 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage x:Class="HpskSite.Mobile.Views.DashboardPage"
+             xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:dtos="clr-namespace:HpskSite.Shared.DTOs;assembly=HpskSite.Shared"
+             xmlns:viewmodels="clr-namespace:HpskSite.Mobile.ViewModels"
+             Title="{Binding Title}"
+             x:DataType="viewmodels:DashboardViewModel"
+             BackgroundColor="{StaticResource OffBlack}">
+
+    <RefreshView Command="{Binding LoadDataCommand}" IsRefreshing="{Binding IsRefreshing}">
+        <ScrollView>
+            <VerticalStackLayout Padding="16" Spacing="16">
+
+                <!--  Error Message  -->
+                <Border Padding="12" BackgroundColor="#FEE2E2"
+                        IsVisible="{Binding HasError}"
+                        Stroke="{StaticResource Danger}"
+                        StrokeShape="RoundRectangle 8">
+                    <Label HorizontalTextAlignment="Center"
+                           Text="{Binding ErrorMessage}"
+                           TextColor="{StaticResource Danger}" />
+                </Border>
+
+                <!--  Main Card Container (like website)  -->
+                <Border Padding="0"
+                        BackgroundColor="{StaticResource CardBackgroundDark}"
+                        Stroke="Transparent" StrokeShape="RoundRectangle 12">
+                    <Border.Shadow>
+                        <Shadow Brush="Black" Opacity="0.1" Radius="8"
+                                Offset="0,2" />
+                    </Border.Shadow>
+
+                    <VerticalStackLayout Spacing="0">
+
+                        <!--  Card Header  -->
+                        <Border Padding="16"
+                                BackgroundColor="{StaticResource Gray600}"
+                                StrokeThickness="0">
+                            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+                                <!--  User Avatar  -->
+                                <Grid Grid.Column="0" HeightRequest="48" VerticalOptions="Center"
+                                      WidthRequest="48">
+                                    <!--  Profile Picture (if available)  -->
+                                    <Border HeightRequest="48"
+                                            IsVisible="{Binding ProfilePictureUrl, Converter={StaticResource StringToBoolConverter}}"
+                                            Stroke="#6b7280" StrokeShape="RoundRectangle 24" StrokeThickness="2"
+                                            WidthRequest="48">
+                                        <Border.Clip>
+                                            <EllipseGeometry Center="24,24" RadiusX="24" RadiusY="24" />
+                                        </Border.Clip>
+                                        <Image Aspect="AspectFill" HeightRequest="48"
+                                               Source="{Binding ProfilePictureUrl}"
+                                               WidthRequest="48" />
+                                    </Border>
+                                    <!--  Initials Fallback (when no profile picture)  -->
+                                    <Border BackgroundColor="{StaticResource Primary}"
+                                            HeightRequest="48"
+                                            IsVisible="{Binding ProfilePictureUrl, Converter={StaticResource InvertedStringToBoolConverter}}"
+                                            Stroke="#6b7280" StrokeShape="RoundRectangle 24" StrokeThickness="2"
+                                            WidthRequest="48">
+                                        <Label FontAttributes="Bold" FontSize="16" HorizontalOptions="Center"
+                                               Text="{Binding UserInitials}"
+                                               TextColor="White" VerticalOptions="Center" />
+                                    </Border>
+                                </Grid>
+
+                                <VerticalStackLayout Grid.Column="1" VerticalOptions="Center">
+                                    <Label FontAttributes="Bold" FontSize="20"
+                                           TextColor="{StaticResource White}">
+                                        <Label.FormattedText>
+                                            <FormattedString>
+                                                <Span Text="Hej " />
+                                                <Span Text="{Binding UserName}" TextColor="{StaticResource Primary}" />
+                                            </FormattedString>
+                                        </Label.FormattedText>
+                                    </Label>
+                                    <Label FontSize="12" Text="Din aktivitet"
+                                           TextColor="{StaticResource Gray400}" />
+                                </VerticalStackLayout>
+
+                                <!--  Year Selector  -->
+                                <Border Grid.Column="2" Padding="8,4"
+                                        BackgroundColor="{StaticResource Gray600}"
+                                        Stroke="{StaticResource Gray500}"
+                                        StrokeShape="RoundRectangle 6" VerticalOptions="Center">
+                                    <Picker FontSize="14"
+                                            ItemsSource="{Binding Years}"
+                                            SelectedItem="{Binding SelectedYear}"
+                                            WidthRequest="80" />
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!--  Divider  -->
+                        <BoxView HeightRequest="1" Color="{StaticResource Gray600}" />
+
+                        <!--  Card Body  -->
+                        <VerticalStackLayout Padding="16" Spacing="16">
+
+                            <!--  Quick Stats Section Header  -->
+                            <HorizontalStackLayout Spacing="6">
+                                <Label FontSize="14" Text="📊" VerticalOptions="Center" />
+                                <Label FontAttributes="Bold" FontSize="14" Text="Snabbstatistik"
+                                       TextColor="{StaticResource Gray300}"
+                                       VerticalOptions="Center" />
+                            </HorizontalStackLayout>
+
+                            <!--  Stats Grid (2x2 like website's quick stats)  -->
+                            <Grid ColumnDefinitions="*,*" ColumnSpacing="12" RowDefinitions="Auto,Auto"
+                                  RowSpacing="12">
+
+                                <!--  Total Sessions  -->
+                                <Border Grid.Row="0" Grid.Column="0" Padding="16"
+                                        BackgroundColor="{StaticResource Primary}"
+                                        Stroke="Transparent" StrokeShape="RoundRectangle 8">
+                                    <VerticalStackLayout>
+                                        <Label FontAttributes="Bold" FontSize="36"
+                                               Text="{Binding Statistics.TotalSessions}"
+                                               TextColor="White" />
+                                        <Label FontSize="12" Opacity="0.8" Text="Totalt pass"
+                                               TextColor="White" />
+                                    </VerticalStackLayout>
+                                </Border>
+
+                                <!--  30 Day Average  -->
+                                <Border Grid.Row="0" Grid.Column="1" Padding="16"
+                                        BackgroundColor="{StaticResource Success}"
+                                        Stroke="Transparent" StrokeShape="RoundRectangle 8">
+                                    <VerticalStackLayout>
+                                        <Label FontAttributes="Bold" FontSize="36"
+                                               Text="{Binding Statistics.ThirtyDayAverage, StringFormat='{0:F1}'}"
+                                               TextColor="White" />
+                                        <Label FontSize="12" Opacity="0.8" Text="30-dagars snitt"
+                                               TextColor="White" />
+                                    </VerticalStackLayout>
+                                </Border>
+
+                                <!--  Training Sessions  -->
+                                <Border Grid.Row="1" Grid.Column="0" Padding="16"
+                                        BackgroundColor="{StaticResource Gray600}"
+                                        Stroke="Transparent" StrokeShape="RoundRectangle 8">
+                                    <VerticalStackLayout HorizontalOptions="Start">
+                                        <Label FontAttributes="Bold" FontSize="28"
+                                               Text="{Binding Statistics.TrainingSessions}"
+                                               TextColor="{StaticResource Primary}" />
+                                        <Label FontSize="12" Text="Traning"
+                                               TextColor="{StaticResource Gray300}" />
+                                    </VerticalStackLayout>
+                                </Border>
+
+                                <!--  Competition Sessions  -->
+                                <Border Grid.Row="1" Grid.Column="1" Padding="16"
+                                        BackgroundColor="{StaticResource Gray600}"
+                                        Stroke="Transparent" StrokeShape="RoundRectangle 8">
+                                    <VerticalStackLayout HorizontalOptions="Start">
+                                        <Label FontAttributes="Bold" FontSize="28"
+                                               Text="{Binding Statistics.CompetitionSessions}"
+                                               TextColor="{StaticResource Warning}" />
+                                        <Label FontSize="12" Text="Tavling"
+                                               TextColor="{StaticResource Gray300}" />
+                                    </VerticalStackLayout>
+                                </Border>
+                            </Grid>
+
+                            <!--  Best Score Highlight  -->
+                            <Border Padding="16" BackgroundColor="#1B4332"
+                                    Stroke="{StaticResource Success}"
+                                    StrokeShape="RoundRectangle 8" StrokeThickness="2">
+                                <HorizontalStackLayout Spacing="12">
+                                    <Label FontSize="20" Text="🏆" VerticalOptions="Center" />
+                                    <Label FontSize="14" Text="Basta resultat:"
+                                           TextColor="{StaticResource White}"
+                                           VerticalOptions="Center" />
+                                    <Label FontAttributes="Bold" FontSize="24"
+                                           Text="{Binding Statistics.BestMatchScore}"
+                                           TextColor="{StaticResource Success}"
+                                           VerticalOptions="Center" />
+                                </HorizontalStackLayout>
+                            </Border>
+
+                        </VerticalStackLayout>
+                    </VerticalStackLayout>
+                </Border>
+
+                <!--  Handicap Card  -->
+                <Border Padding="0"
+                        BackgroundColor="{StaticResource CardBackgroundDark}"
+                        IsVisible="{Binding Handicaps.Count, Converter={StaticResource IntToBoolConverter}}"
+                        Stroke="Transparent" StrokeShape="RoundRectangle 12">
+                    <Border.Shadow>
+                        <Shadow Brush="Black" Opacity="0.1" Radius="8" Offset="0,2" />
+                    </Border.Shadow>
+
+                    <VerticalStackLayout Spacing="0">
+                        <!--  Card Header  -->
+                        <Border Padding="16"
+                                BackgroundColor="{StaticResource Gray600}"
+                                StrokeThickness="0">
+                            <HorizontalStackLayout Spacing="8">
+                                <Label FontSize="16" Text="➕" VerticalOptions="Center" />
+                                <Label FontAttributes="Bold" FontSize="16"
+                                       Text="Handicap i Träningsmatcher"
+                                       TextColor="{StaticResource White}"
+                                       VerticalOptions="Center" />
+                            </HorizontalStackLayout>
+                        </Border>
+
+                        <!--  Divider  -->
+                        <BoxView HeightRequest="1" Color="{StaticResource Gray600}" />
+
+                        <!--  Handicap Items  -->
+                        <VerticalStackLayout Padding="12" Spacing="8"
+                                             BindableLayout.ItemsSource="{Binding Handicaps}">
+                            <BindableLayout.ItemTemplate>
+                                <DataTemplate x:DataType="dtos:WeaponClassHandicap">
+                                    <Border Padding="12"
+                                            BackgroundColor="{StaticResource Gray700}"
+                                            Stroke="Transparent"
+                                            StrokeShape="RoundRectangle 8">
+                                        <VerticalStackLayout Spacing="4">
+                                            <!--  Header row: Weapon class + Handicap value  -->
+                                            <Grid ColumnDefinitions="*,Auto">
+                                                <Label FontAttributes="Bold" FontSize="14"
+                                                       TextColor="{StaticResource White}">
+                                                    <Label.FormattedText>
+                                                        <FormattedString>
+                                                            <Span Text="Vapenklass " TextColor="{StaticResource White}" />
+                                                            <Span Text="{Binding WeaponClass}" TextColor="{StaticResource White}" />
+                                                            <Span Text=" (" TextColor="{StaticResource White}" />
+                                                            <Span Text="{Binding WeaponClassName}" TextColor="{StaticResource White}" />
+                                                            <Span Text=")" TextColor="{StaticResource White}" />
+                                                        </FormattedString>
+                                                    </Label.FormattedText>
+                                                </Label>
+                                                <HorizontalStackLayout Grid.Column="1" Spacing="4">
+                                                    <Label FontSize="12" Text="Handicap:"
+                                                           TextColor="{StaticResource Gray400}"
+                                                           VerticalOptions="Center" />
+                                                    <Label FontAttributes="Bold" FontSize="14"
+                                                           Text="{Binding HandicapPerSeries, Converter={StaticResource HandicapFormatConverter}}"
+                                                           TextColor="{StaticResource Primary}"
+                                                           VerticalOptions="Center" />
+                                                    <!--  Provisional badge  -->
+                                                    <Border Padding="4,2"
+                                                            BackgroundColor="{StaticResource Warning}"
+                                                            IsVisible="{Binding IsProvisional}"
+                                                            Stroke="Transparent"
+                                                            StrokeShape="RoundRectangle 4">
+                                                        <Label FontAttributes="Bold" FontSize="10"
+                                                               Text="P" TextColor="White" />
+                                                    </Border>
+                                                </HorizontalStackLayout>
+                                            </Grid>
+
+                                            <!--  Calculation breakdown  -->
+                                            <Label FontSize="11" TextColor="{StaticResource Gray300}">
+                                                <Label.FormattedText>
+                                                    <FormattedString>
+                                                        <Span Text="Beräkning: Referens (" TextColor="{StaticResource Gray300}" />
+                                                        <Span Text="{Binding ReferenceScore, StringFormat='{0:F0}'}" TextColor="{StaticResource Gray300}" />
+                                                        <Span Text=") − Effektivt snitt (" TextColor="{StaticResource Gray300}" />
+                                                        <Span Text="{Binding EffectiveAverage, StringFormat='{0:F1}'}" TextColor="{StaticResource Gray300}" />
+                                                        <Span Text=") = " TextColor="{StaticResource Gray300}" />
+                                                        <Span Text="{Binding HandicapPerSeries, StringFormat='{0:F2}'}" TextColor="{StaticResource Gray300}" />
+                                                    </FormattedString>
+                                                </Label.FormattedText>
+                                            </Label>
+
+                                            <!--  Actual average  -->
+                                            <Label FontSize="11" TextColor="{StaticResource Gray300}">
+                                                <Label.FormattedText>
+                                                    <FormattedString>
+                                                        <Span Text="Ditt faktiska snitt: " TextColor="{StaticResource Gray300}" />
+                                                        <Span Text="{Binding ActualAverage, StringFormat='{0:F1}'}" TextColor="{StaticResource Gray300}" />
+                                                        <Span Text=" poäng/serie" TextColor="{StaticResource Gray300}" />
+                                                    </FormattedString>
+                                                </Label.FormattedText>
+                                            </Label>
+
+                                            <!--  Status: Full handicap  -->
+                                            <Label FontAttributes="Italic" FontSize="11"
+                                                   IsVisible="{Binding IsProvisional, Converter={StaticResource InvertedBoolConverter}}"
+                                                   Text="Fullständigt handicap baserat på ditt faktiska snitt"
+                                                   TextColor="{StaticResource Success}" />
+
+                                            <!--  Status: Provisional progress  -->
+                                            <Label FontAttributes="Italic" FontSize="11"
+                                                   IsVisible="{Binding IsProvisional}"
+                                                   TextColor="{StaticResource Warning}">
+                                                <Label.FormattedText>
+                                                    <FormattedString>
+                                                        <Span Text="{Binding CompletedMatches}" TextColor="{StaticResource Warning}" />
+                                                        <Span Text=" av " TextColor="{StaticResource Warning}" />
+                                                        <Span Text="{Binding RequiredMatches}" TextColor="{StaticResource Warning}" />
+                                                        <Span Text=" matcher för fullständigt handicap" TextColor="{StaticResource Warning}" />
+                                                    </FormattedString>
+                                                </Label.FormattedText>
+                                            </Label>
+                                        </VerticalStackLayout>
+                                    </Border>
+                                </DataTemplate>
+                            </BindableLayout.ItemTemplate>
+                        </VerticalStackLayout>
+                    </VerticalStackLayout>
+                </Border>
+
+                <!--  Recent Activity Card  -->
+                <Border Padding="0"
+                        BackgroundColor="{StaticResource CardBackgroundDark}"
+                        Stroke="Transparent" StrokeShape="RoundRectangle 12">
+                    <Border.Shadow>
+                        <Shadow Brush="Black" Opacity="0.1" Radius="8"
+                                Offset="0,2" />
+                    </Border.Shadow>
+
+                    <VerticalStackLayout Spacing="0">
+
+                        <!--  Card Header  -->
+                        <Border Padding="16"
+                                BackgroundColor="{StaticResource Gray600}"
+                                StrokeThickness="0">
+                            <HorizontalStackLayout Spacing="8">
+                                <Label FontSize="16" Text="📅" VerticalOptions="Center" />
+                                <Label FontAttributes="Bold" FontSize="16" Text="Resultat Historik"
+                                       TextColor="{StaticResource White}"
+                                       VerticalOptions="Center" />
+                            </HorizontalStackLayout>
+                        </Border>
+
+                        <!--  Divider  -->
+                        <BoxView HeightRequest="1" Color="{StaticResource Gray600}" />
+
+                        <!--  Result History  -->
+                        <CollectionView Margin="0" ItemsSource="{Binding RecentActivity}">
+                            <CollectionView.ItemTemplate>
+                                <DataTemplate x:DataType="dtos:ActivityEntry">
+                                    <VerticalStackLayout>
+                                        <Grid Padding="8,10" ColumnDefinitions="36,Auto,*,Auto" ColumnSpacing="8">
+                                            <!--  Date  -->
+                                            <Label FontSize="12"
+                                                   Text="{Binding Date, StringFormat='{0:d/M}'}"
+                                                   TextColor="{StaticResource Gray400}"
+                                                   VerticalOptions="Center" />
+
+                                            <!--  Source Type Icon  -->
+                                            <Label Grid.Column="1" FontSize="16"
+                                                   Text="{Binding SourceType, Converter={StaticResource SourceTypeToIconConverter}}"
+                                                   VerticalOptions="Center" />
+
+                                            <!--  Details  -->
+                                            <HorizontalStackLayout Grid.Column="2" Spacing="10" VerticalOptions="Center">
+                                                <Label FontSize="14"
+                                                       Text="{Binding WeaponClass}"
+                                                       TextColor="{StaticResource White}" />
+                                                <Label FontSize="14" TextColor="{StaticResource Gray400}">
+                                                    <Label.Text>
+                                                        <MultiBinding StringFormat="{}{0} serier | {1}X">
+                                                            <Binding Path="SeriesCount" />
+                                                            <Binding Path="XCount" />
+                                                        </MultiBinding>
+                                                    </Label.Text>
+                                                </Label>
+                                            </HorizontalStackLayout>
+
+                                            <!--  Score  -->
+                                            <Label Grid.Column="3" FontAttributes="Bold" FontSize="20"
+                                                   Text="{Binding Score}"
+                                                   TextColor="{StaticResource Primary}"
+                                                   VerticalOptions="Center" />
+                                        </Grid>
+
+                                        <!--  Row Divider  -->
+                                        <BoxView Margin="16,0" HeightRequest="1"
+                                                 Color="{StaticResource Gray600}" />
+                                    </VerticalStackLayout>
+                                </DataTemplate>
+                            </CollectionView.ItemTemplate>
+                            <CollectionView.EmptyView>
+                                <VerticalStackLayout Padding="16">
+                                    <Label HorizontalOptions="Center" Text="Ingen aktivitet hittades"
+                                           TextColor="{StaticResource Gray400}" />
+                                </VerticalStackLayout>
+                            </CollectionView.EmptyView>
+                        </CollectionView>
+                    </VerticalStackLayout>
+                </Border>
+
+                <!--  Loading Indicator  -->
+                <ActivityIndicator IsRunning="{Binding IsBusy}"
+                                   IsVisible="{Binding IsBusy}"
+                                   Color="{StaticResource Primary}" />
+
+            </VerticalStackLayout>
+        </ScrollView>
+    </RefreshView>
+
+</ContentPage>

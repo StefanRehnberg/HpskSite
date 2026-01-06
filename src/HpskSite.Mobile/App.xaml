@@ -1,0 +1,39 @@
+<?xml version = "1.0" encoding = "UTF-8" ?>
+<Application xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:local="clr-namespace:HpskSite.Mobile"
+             xmlns:converters="clr-namespace:HpskSite.Mobile.Converters"
+             x:Class="HpskSite.Mobile.App">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Resources/Styles/Colors.xaml" />
+                <ResourceDictionary Source="Resources/Styles/Styles.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <!-- Converters -->
+            <converters:InvertedBoolConverter x:Key="InvertedBoolConverter" />
+            <converters:InvertedBoolConverter x:Key="InverseBoolConverter" />
+            <converters:BoolToColorConverter x:Key="BoolToColorConverter" />
+            <converters:BoolToFontAttributeConverter x:Key="BoolToFontAttributeConverter" />
+            <converters:BoolToTabTextColorConverter x:Key="BoolToTabTextColorConverter" />
+            <converters:StringNotEmptyConverter x:Key="StringNotEmptyConverter" />
+            <converters:SeriesScoreConverter x:Key="SeriesScoreConverter" />
+            <converters:SeriesScoreBackgroundConverter x:Key="SeriesScoreBackgroundConverter" />
+            <converters:SeriesXCountConverter x:Key="SeriesXCountConverter" />
+            <converters:SeriesHasXCountConverter x:Key="SeriesHasXCountConverter" />
+            <converters:HandicapFormatConverter x:Key="HandicapFormatConverter" />
+            <converters:HasHandicapConverter x:Key="HasHandicapConverter" />
+            <converters:BoolToStrokeThicknessConverter x:Key="BoolToStrokeThicknessConverter" />
+            <converters:IntToBoolConverter x:Key="IntToBoolConverter" />
+            <converters:StringToBoolConverter x:Key="StringToBoolConverter" />
+            <converters:InvertedStringToBoolConverter x:Key="InvertedStringToBoolConverter" />
+            <converters:SubtotalScoreConverter x:Key="SubtotalScoreConverter" />
+            <converters:SubtotalXCountConverter x:Key="SubtotalXCountConverter" />
+            <converters:SubtotalHasXCountConverter x:Key="SubtotalHasXCountConverter" />
+            <converters:ProfilePictureUrlConverter x:Key="ProfilePictureUrlConverter" />
+            <converters:SourceTypeToIconConverter x:Key="SourceTypeToIconConverter" />
+            <converters:ReactionSelectedConverter x:Key="ReactionSelectedConverter" />
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

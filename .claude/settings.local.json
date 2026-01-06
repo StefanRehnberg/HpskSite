@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(if not exist \"C:\\\\Repos\\\\HpskSite\\\\.github\\\\workflows\" mkdir \"C:\\\\Repos\\\\HpskSite\\\\.github\\\\workflows\")",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:thewissen.io)",
+      "WebFetch(domain:blog.taranissoftware.com)",
+      "Bash(dotnet workload config:*)",
+      "Bash(dotnet workload install:*)",
+      "Bash(git rm:*)",
+      "Bash(\"/c/Program Files/Java/jre1.8.0_201/bin/keytool\" -genkey -v -keystore hpsk-upload-key.keystore -alias hpsk -keyalg RSA -keysize 2048 -validity 10000 -storepass Hpsk2024! -keypass Hpsk2024! -dname \"CN=HPSK, OU=Mobile, O=HPSK, L=Stockholm, ST=Stockholm, C=SE\")",
+      "Bash(dotnet publish:*)",
+      "Bash(ls:*)",
+      "Bash(Select-Object -First 5)",
+      "Bash(dotnet build:*)",
+      "WebSearch",
+      "Bash(dotnet restore:*)",
+      "WebFetch(domain:hpsktest.se)",
+      "Bash(git restore:*)",
+      "Bash(find:*)",
+      "Bash(git log:*)",
+      "Bash(rm:*)",
+      "Bash($env:CI=\"true\")",
+      "Bash(CI=true dotnet restore:*)",
+      "Bash(CI=true dotnet build:*)",
+      "Bash(cat:*)",
+      "WebFetch(domain:www.simply.com)",
+      "Bash(git ls-files:*)",
+      "Bash(git init:*)",
+      "Bash(git remote add:*)",
+      "Bash(git reset:*)"
+    ]
+  }
+}

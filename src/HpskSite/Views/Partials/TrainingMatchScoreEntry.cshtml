@@ -1,0 +1,762 @@
+@*
+    Training Match Score Entry Modal
+    Simplified score entry for training matches (shot-by-shot or series total)
+    Supports both create and edit modes
+*@
+
+<!-- Score Entry Modal (Bottom Sheet on mobile) -->
+<div class="modal fade" id="matchScoreEntryModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-fullscreen-sm-down modal-dialog-bottom-sheet">
+        <div class="modal-content">
+            <div class="modal-header" id="matchModalHeader">
+                <div class="drag-handle d-sm-none"></div>
+                <h5 class="modal-title">
+                    <i class="bi bi-bullseye me-2" id="modalIcon"></i>
+                    <span id="modalTitleText">Serie</span> <span id="entrySeriesNumber">1</span>
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <!-- Entry Method Toggle -->
+                <div class="btn-group w-100 mb-3" role="group">
+                    <input type="radio" class="btn-check" name="matchEntryMethod" id="matchMethodDetailed" value="ShotByShot" checked>
+                    <label class="btn btn-outline-primary" for="matchMethodDetailed">
+                        <i class="bi bi-grid-3x3"></i> Detaljerad
+                    </label>
+
+                    <input type="radio" class="btn-check" name="matchEntryMethod" id="matchMethodTotal" value="SeriesTotal">
+                    <label class="btn btn-outline-primary" for="matchMethodTotal">
+                        <i class="bi bi-hash"></i> Serie-total
+                    </label>
+                </div>
+
+                <!-- Shot-by-Shot Entry -->
+                <div id="matchShotByShotEntry">
+                    <!-- Shot Display -->
+                    <div class="shot-display mb-3 text-center">
+                        <div class="shot-circles">
+                            <span class="shot-circle" id="match-shot-0" onclick="selectShotForEdit(0)">_</span>
+                            <span class="shot-circle" id="match-shot-1" onclick="selectShotForEdit(1)">_</span>
+                            <span class="shot-circle" id="match-shot-2" onclick="selectShotForEdit(2)">_</span>
+                            <span class="shot-circle" id="match-shot-3" onclick="selectShotForEdit(3)">_</span>
+                            <span class="shot-circle" id="match-shot-4" onclick="selectShotForEdit(4)">_</span>
+                        </div>
+                        <div class="mt-2" id="matchShotEditHint" style="display: none;">
+                            <small class="text-primary">
+                                <i class="bi bi-hand-index-thumb"></i> Tryck på ett skott för att ändra det
+                            </small>
+                        </div>
+                        <div class="mt-2" id="matchShotTotals">
+                            <strong>Totalt: <span id="matchSeriesTotal">0</span>p</strong> |
+                            <strong>X: <span id="matchSeriesX">0</span></strong>
+                        </div>
+                    </div>
+
+                    <!-- Button Grid -->
+                    <div class="match-button-grid">
+                        <div class="button-row">
+                            <button type="button" class="btn btn-primary shot-btn" onclick="matchAddShot('X')">X</button>
+                            <button type="button" class="btn btn-primary shot-btn" onclick="matchAddShot('10')">10</button>
+                            <button type="button" class="btn btn-primary shot-btn" onclick="matchAddShot('9')">9</button>
+                            <button type="button" class="btn btn-primary shot-btn" onclick="matchAddShot('8')">8</button>
+                        </div>
+                        <div class="button-row">
+                            <button type="button" class="btn btn-primary shot-btn" onclick="matchAddShot('7')">7</button>
+                            <button type="button" class="btn btn-primary shot-btn" onclick="matchAddShot('6')">6</button>
+                            <button type="button" class="btn btn-primary shot-btn" onclick="matchAddShot('5')">5</button>
+                            <button type="button" class="btn btn-primary shot-btn" onclick="matchAddShot('4')">4</button>
+                        </div>
+                        <div class="button-row">
+                            <button type="button" class="btn btn-primary shot-btn" onclick="matchAddShot('3')">3</button>
+                            <button type="button" class="btn btn-primary shot-btn" onclick="matchAddShot('2')">2</button>
+                            <button type="button" class="btn btn-primary shot-btn" onclick="matchAddShot('1')">1</button>
+                            <button type="button" class="btn btn-primary shot-btn" onclick="matchAddShot('0')">0</button>
+                        </div>
+                        <div class="button-row action-row">
+                            <button type="button" class="btn btn-warning" onclick="matchClearShots()">
+                                <i class="bi bi-x-circle"></i> Rensa
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="form-text text-center mt-2">
+                        <i class="bi bi-keyboard"></i> Tangentbord: 0-9, X | Esc = rensa
+                    </div>
+                    <!-- Action buttons for shot-by-shot mode -->
+                    <div class="d-flex justify-content-end gap-2 mt-3">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                        <button type="button" class="btn btn-success" id="matchSaveScoreBtn" onclick="matchSaveScore()" disabled>
+                            <i class="bi bi-check-circle"></i> <span id="saveButtonText">Spara serie</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Series Total Entry -->
+                <div id="matchSeriesTotalEntry" style="display: none;">
+                    <div class="row mb-3">
+                        <div class="col-6">
+                            <label for="matchTotalScore" class="form-label">Poäng (0-50)</label>
+                            <input type="number" class="form-control form-control-lg text-center light-placeholder"
+                                   id="matchTotalScore" min="0" max="50" placeholder="48"
+                                   oninput="updateMatchTotalPreview()">
+                        </div>
+                        <div class="col-6">
+                            <label for="matchTotalX" class="form-label">X-antal (0-5)</label>
+                            <input type="number" class="form-control form-control-lg text-center light-placeholder"
+                                   id="matchTotalX" min="0" max="5" placeholder="2"
+                                   oninput="updateMatchTotalPreview()">
+                        </div>
+                    </div>
+                    <!-- Action buttons for serie-total mode -->
+                    <div class="d-flex justify-content-end gap-2 mt-3">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                        <button type="button" class="btn btn-success" id="matchSaveScoreBtnInline" onclick="matchSaveScore()" disabled>
+                            <i class="bi bi-check-circle"></i> <span class="inline-save-text">Spara serie</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer" id="matchModalFooter" style="display: none;">
+                <button type="button" class="btn btn-outline-danger" id="matchDeleteSeriesBtn" onclick="matchDeleteSeries()">
+                    <i class="bi bi-trash"></i> Ta bort
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Match score entry state
+let matchEntryState = {
+    shots: [],
+    seriesNumber: 1,
+    modal: null,
+    isEditMode: false,
+    originalScore: null,  // Store original data when editing
+    editingShotIndex: -1,  // For single-shot edit mode (-1 = all shots, 0-4 = specific shot)
+    singleShotEditMode: false // Whether we're in single-shot edit mode
+};
+
+// Initialize
+document.addEventListener('DOMContentLoaded', function() {
+    matchEntryState.modal = new bootstrap.Modal(document.getElementById('matchScoreEntryModal'));
+
+    // Entry method toggle - save preference to localStorage
+    document.querySelectorAll('input[name="matchEntryMethod"]').forEach(radio => {
+        radio.addEventListener('change', function() {
+            const isShotByShot = this.value === 'ShotByShot';
+            document.getElementById('matchShotByShotEntry').style.display = isShotByShot ? 'block' : 'none';
+            document.getElementById('matchSeriesTotalEntry').style.display = isShotByShot ? 'none' : 'block';
+            updateMatchSaveButton();
+            // Save preference (only if not editing)
+            if (!matchEntryState.isEditMode) {
+                localStorage.setItem('matchEntryMethod', this.value);
+            }
+            // Set focus based on mode
+            setEntryFocus(isShotByShot);
+        });
+    });
+
+    // Reset on modal close
+    document.getElementById('matchScoreEntryModal').addEventListener('hidden.bs.modal', function() {
+        matchResetEntry();
+    });
+
+    // Set focus when modal opens
+    document.getElementById('matchScoreEntryModal').addEventListener('shown.bs.modal', function() {
+        const isShotByShot = document.getElementById('matchMethodDetailed').checked;
+        setEntryFocus(isShotByShot);
+    });
+});
+
+// Set focus based on entry mode
+function setEntryFocus(isShotByShot) {
+    setTimeout(() => {
+        if (isShotByShot) {
+            // Focus on modal body to enable keyboard input for shots
+            document.getElementById('matchScoreEntryModal').focus();
+        } else {
+            // Focus on score input field
+            document.getElementById('matchTotalScore').focus();
+        }
+    }, 100);
+}
+
+// Open score entry modal for new entry
+function openScoreEntryModal() {
+    if (!currentMatch) {
+        alert('Ingen aktiv match');
+        return;
+    }
+
+    // Determine next series number
+    const myParticipant = getMyParticipant();
+
+    matchEntryState.seriesNumber = (myParticipant?.scores?.length || 0) + 1;
+    matchEntryState.isEditMode = false;
+    matchEntryState.originalScore = null;
+    matchEntryState.editingShotIndex = -1;
+
+    document.getElementById('entrySeriesNumber').textContent = matchEntryState.seriesNumber;
+
+    matchResetEntry();
+    setModalMode(false);
+    matchEntryState.modal.show();
+}
+
+// Open score entry modal for editing an existing series
+function openScoreEditModal(seriesNumber, scoreData) {
+    if (!currentMatch) {
+        alert('Ingen aktiv match');
+        return;
+    }
+
+    matchEntryState.seriesNumber = seriesNumber;
+    matchEntryState.isEditMode = true;
+    matchEntryState.originalScore = { ...scoreData };
+    matchEntryState.editingShotIndex = -1;
+
+    document.getElementById('entrySeriesNumber').textContent = seriesNumber;
+
+    // Set the modal to edit mode UI
+    setModalMode(true);
+
+    // Pre-populate the form with existing data
+    if (scoreData.shots && scoreData.shots.length === 5) {
+        // Shot-by-shot mode
+        document.getElementById('matchMethodDetailed').checked = true;
+        document.getElementById('matchMethodTotal').checked = false;
+        document.getElementById('matchShotByShotEntry').style.display = 'block';
+        document.getElementById('matchSeriesTotalEntry').style.display = 'none';
+
+        matchEntryState.shots = [...scoreData.shots];
+        updateMatchShotDisplay();
+    } else {
+        // Series total mode
+        document.getElementById('matchMethodDetailed').checked = false;
+        document.getElementById('matchMethodTotal').checked = true;
+        document.getElementById('matchShotByShotEntry').style.display = 'none';
+        document.getElementById('matchSeriesTotalEntry').style.display = 'block';
+
+        document.getElementById('matchTotalScore').value = scoreData.total;
+        document.getElementById('matchTotalX').value = scoreData.xCount || 0;
+        updateMatchTotalPreview();
+    }
+
+    updateMatchSaveButton();
+    matchEntryState.modal.show();
+}
+
+// Set modal appearance for create vs edit mode
+function setModalMode(isEdit) {
+    const header = document.getElementById('matchModalHeader');
+    const titleText = document.getElementById('modalTitleText');
+    const saveButtonText = document.getElementById('saveButtonText');
+    const inlineSaveText = document.querySelector('.inline-save-text');
+    const modalFooter = document.getElementById('matchModalFooter');
+
+    if (isEdit) {
+        header.classList.remove('bg-success');
+        header.classList.add('bg-warning');
+        titleText.textContent = 'Redigera serie';
+        saveButtonText.textContent = 'Spara ändringar';
+        if (inlineSaveText) inlineSaveText.textContent = 'Spara ändringar';
+        modalFooter.style.display = 'flex';
+    } else {
+        header.classList.remove('bg-warning');
+        header.classList.add('bg-success');
+        titleText.textContent = 'Serie';
+        saveButtonText.textContent = 'Spara serie';
+        if (inlineSaveText) inlineSaveText.textContent = 'Spara serie';
+        modalFooter.style.display = 'none';
+    }
+}
+
+// Get current user's participant data
+function getMyParticipant() {
+    if (!currentMatch || !currentMatch.participants) return null;
+
+    // Try to find by memberId stored in body data attribute
+    const myMemberId = document.body.dataset.memberId;
+    if (myMemberId) {
+        const found = currentMatch.participants.find(p => p.memberId == myMemberId);
+        if (found) return found;
+    }
+
+    // Fallback: return first participant (usually the current user in simple cases)
+    return currentMatch.participants[0];
+}
+
+// Reset entry state
+function matchResetEntry() {
+    matchEntryState.shots = [];
+    matchEntryState.isEditMode = false;
+    matchEntryState.originalScore = null;
+    matchEntryState.editingShotIndex = -1;
+    matchEntryState.singleShotEditMode = false;
+
+    updateMatchShotDisplay();
+    document.getElementById('matchTotalScore').value = '';
+    document.getElementById('matchTotalX').value = '';
+
+    // Restore saved entry method preference
+    const savedMethod = localStorage.getItem('matchEntryMethod') || 'ShotByShot';
+    const isShotByShot = savedMethod === 'ShotByShot';
+
+    document.getElementById('matchMethodDetailed').checked = isShotByShot;
+    document.getElementById('matchMethodTotal').checked = !isShotByShot;
+    document.getElementById('matchShotByShotEntry').style.display = isShotByShot ? 'block' : 'none';
+    document.getElementById('matchSeriesTotalEntry').style.display = isShotByShot ? 'none' : 'block';
+
+    // Reset modal to create mode appearance
+    setModalMode(false);
+    updateMatchSaveButton();
+}
+
+// Select a shot for editing (single-shot edit mode)
+function selectShotForEdit(index) {
+    // Only allow selection if we're in edit mode AND all 5 shots exist
+    if (!matchEntryState.isEditMode || matchEntryState.shots.length !== 5) {
+        return;
+    }
+
+    matchEntryState.editingShotIndex = index;
+    matchEntryState.singleShotEditMode = true;
+
+    // Update visual state
+    updateMatchShotDisplay();
+}
+
+// Add or replace shot
+function matchAddShot(value) {
+    if (matchEntryState.singleShotEditMode && matchEntryState.editingShotIndex >= 0) {
+        // Replace the selected shot
+        matchEntryState.shots[matchEntryState.editingShotIndex] = value;
+
+        // Exit single-shot edit mode
+        matchEntryState.editingShotIndex = -1;
+        matchEntryState.singleShotEditMode = false;
+    } else {
+        // Normal mode: add shot sequentially
+        if (matchEntryState.shots.length >= 5) return;
+        matchEntryState.shots.push(value);
+    }
+
+    updateMatchShotDisplay();
+    updateMatchSaveButton();
+}
+
+// Clear shots
+function matchClearShots() {
+    matchEntryState.shots = [];
+    matchEntryState.editingShotIndex = -1;
+    matchEntryState.singleShotEditMode = false;
+    updateMatchShotDisplay();
+    updateMatchSaveButton();
+}
+
+// Update shot display
+function updateMatchShotDisplay() {
+    let total = 0;
+    let xCount = 0;
+
+    for (let i = 0; i < 5; i++) {
+        const circle = document.getElementById(`match-shot-${i}`);
+
+        // Remove editing state first
+        circle.classList.remove('editing');
+
+        if (i < matchEntryState.shots.length) {
+            const shot = matchEntryState.shots[i];
+            circle.textContent = shot;
+            circle.classList.add('filled');
+
+            // Highlight selected shot in edit mode
+            if (matchEntryState.singleShotEditMode && i === matchEntryState.editingShotIndex) {
+                circle.classList.add('editing');
+            }
+
+            if (shot === 'X') {
+                total += 10;
+                xCount++;
+                circle.classList.add('shot-x');
+                circle.classList.remove('shot-10');
+            } else {
+                total += parseInt(shot);
+                circle.classList.remove('shot-x');
+                if (shot === '10') {
+                    circle.classList.add('shot-10');
+                } else {
+                    circle.classList.remove('shot-10');
+                }
+            }
+
+            // Make shot circles clickable when in edit mode with all shots
+            if (matchEntryState.isEditMode && matchEntryState.shots.length === 5) {
+                circle.classList.add('editable-shot');
+            } else {
+                circle.classList.remove('editable-shot');
+            }
+        } else {
+            circle.textContent = '_';
+            circle.classList.remove('filled', 'shot-x', 'shot-10', 'editable-shot');
+        }
+    }
+
+    document.getElementById('matchSeriesTotal').textContent = total;
+    document.getElementById('matchSeriesX').textContent = xCount;
+
+    // Show/hide hint text
+    const hintElement = document.getElementById('matchShotEditHint');
+    if (matchEntryState.isEditMode && matchEntryState.shots.length === 5 && !matchEntryState.singleShotEditMode) {
+        hintElement.style.display = 'block';
+    } else {
+        hintElement.style.display = 'none';
+    }
+
+    // Disable shot buttons when 5 shots (unless in single-shot edit mode)
+    document.querySelectorAll('#matchShotByShotEntry .shot-btn').forEach(btn => {
+        btn.disabled = matchEntryState.shots.length >= 5 && !matchEntryState.singleShotEditMode;
+    });
+}
+
+// Update save button when total score changes
+function updateMatchTotalPreview() {
+    updateMatchSaveButton();
+}
+
+// Update save button state
+function updateMatchSaveButton() {
+    const btn = document.getElementById('matchSaveScoreBtn');
+    const btnInline = document.getElementById('matchSaveScoreBtnInline');
+    const isShotByShot = document.getElementById('matchMethodDetailed').checked;
+
+    let isDisabled;
+    if (isShotByShot) {
+        isDisabled = matchEntryState.shots.length !== 5;
+    } else {
+        const score = parseInt(document.getElementById('matchTotalScore').value) || 0;
+        isDisabled = score <= 0;
+    }
+
+    btn.disabled = isDisabled;
+    if (btnInline) btnInline.disabled = isDisabled;
+}
+
+// Save score (handles both create and update)
+function matchSaveScore() {
+    const isShotByShot = document.getElementById('matchMethodDetailed').checked;
+
+    let total, xCount, shots, entryMethod;
+
+    if (isShotByShot) {
+        if (matchEntryState.shots.length !== 5) {
+            alert('Du måste ange alla 5 skott');
+            return;
+        }
+
+        // Calculate from shots
+        total = 0;
+        xCount = 0;
+        shots = [...matchEntryState.shots];
+
+        shots.forEach(shot => {
+            if (shot === 'X') {
+                total += 10;
+                xCount++;
+            } else {
+                total += parseInt(shot);
+            }
+        });
+        entryMethod = 'ShotByShot';
+    } else {
+        total = parseInt(document.getElementById('matchTotalScore').value) || 0;
+        xCount = parseInt(document.getElementById('matchTotalX').value) || 0;
+        shots = null;
+        entryMethod = 'SeriesTotal';
+
+        if (total <= 0) {
+            alert('Ange ett giltigt poäng');
+            return;
+        }
+    }
+
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value;
+
+    // Choose endpoint based on edit mode
+    const endpoint = matchEntryState.isEditMode
+        ? '/umbraco/surface/TrainingMatch/UpdateScore'
+        : '/umbraco/surface/TrainingMatch/SaveScore';
+
+    fetch(endpoint, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'RequestVerificationToken': token || ''
+        },
+        body: JSON.stringify({
+            matchCode: currentMatchCode,
+            seriesNumber: matchEntryState.seriesNumber,
+            total: total,
+            xCount: xCount,
+            shots: shots,
+            entryMethod: entryMethod
+        })
+    })
+    .then(response => response.json())
+    .then(result => {
+        if (result.success) {
+            matchEntryState.modal.hide();
+            refreshMatch();
+        } else {
+            alert(result.message || 'Kunde inte spara serien');
+        }
+    })
+    .catch(error => {
+        console.error('Error saving score:', error);
+        alert('Något gick fel vid sparande');
+    });
+}
+
+// Delete a series
+function matchDeleteSeries() {
+    if (!matchEntryState.isEditMode) return;
+
+    if (!confirm(`Vill du verkligen ta bort serie ${matchEntryState.seriesNumber}?`)) {
+        return;
+    }
+
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value;
+
+    fetch('/umbraco/surface/TrainingMatch/DeleteSeries', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'RequestVerificationToken': token || ''
+        },
+        body: JSON.stringify({
+            matchCode: currentMatchCode,
+            seriesNumber: matchEntryState.seriesNumber
+        })
+    })
+    .then(response => response.json())
+    .then(result => {
+        if (result.success) {
+            matchEntryState.modal.hide();
+            refreshMatch();
+        } else {
+            alert(result.message || 'Kunde inte ta bort serien');
+        }
+    })
+    .catch(error => {
+        console.error('Error deleting series:', error);
+        alert('Något gick fel vid borttagning');
+    });
+}
+
+// Keyboard shortcuts
+document.addEventListener('keydown', (e) => {
+    const modal = document.getElementById('matchScoreEntryModal');
+    if (!modal.classList.contains('show')) return;
+
+    // Prevent if typing in inputs
+    if (e.target.tagName === 'INPUT') {
+        if (e.key === 'Escape') {
+            matchClearShots();
+        }
+        return;
+    }
+
+    // Only for shot-by-shot mode
+    if (!document.getElementById('matchMethodDetailed').checked) return;
+
+    if (e.key >= '0' && e.key <= '9') {
+        e.preventDefault();
+        matchAddShot(e.key);
+    } else if (e.key.toLowerCase() === 'x') {
+        e.preventDefault();
+        matchAddShot('X');
+    } else if (e.key === 'Escape') {
+        e.preventDefault();
+        matchClearShots();
+    } else if (e.key === 'Enter' && matchEntryState.shots.length === 5) {
+        e.preventDefault();
+        matchSaveScore();
+    }
+});
+</script>
+
+<style>
+/* Lighter placeholder text for number inputs */
+.light-placeholder::placeholder {
+    opacity: 0.3;
+    color: #6c757d;
+}
+
+/* Bottom Sheet Modal (mobile) */
+@@media (max-width: 575.98px) {
+    .modal-dialog-bottom-sheet {
+        margin: 0;
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        max-width: 100%;
+        transform: translateY(100%);
+        transition: transform 0.3s ease-out;
+    }
+
+    .modal.show .modal-dialog-bottom-sheet {
+        transform: translateY(0);
+    }
+
+    .modal-dialog-bottom-sheet .modal-content {
+        border-radius: 1rem 1rem 0 0;
+        border-bottom: none;
+        max-height: 90vh;
+        overflow-y: auto;
+    }
+
+    .drag-handle {
+        width: 40px;
+        height: 4px;
+        background: rgba(255,255,255,0.5);
+        border-radius: 2px;
+        margin: 0 auto 0.5rem;
+    }
+}
+
+/* Match Score Entry Styles */
+.match-button-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    max-width: 350px;
+    margin: 0 auto;
+}
+
+.match-button-grid .button-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.5rem;
+}
+
+.match-button-grid .action-row {
+    grid-template-columns: 1fr;
+}
+
+.match-button-grid .shot-btn {
+    height: 60px;
+    font-size: 1.5rem;
+    font-weight: bold;
+}
+
+.match-button-grid .shot-btn:disabled {
+    opacity: 0.4;
+}
+
+/* Reuse shot display styles */
+#matchScoreEntryModal .shot-display {
+    background-color: #f8f9fa;
+    padding: 1rem;
+    border-radius: 0.5rem;
+    border: 2px solid #dee2e6;
+}
+
+#matchScoreEntryModal .shot-circles {
+    display: flex;
+    justify-content: center;
+    gap: 0.75rem;
+    font-size: 1.5rem;
+    font-weight: bold;
+}
+
+#matchScoreEntryModal .shot-circle {
+    width: 45px;
+    height: 45px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 3px solid #dee2e6;
+    border-radius: 50%;
+    background-color: white;
+    color: #6c757d;
+}
+
+#matchScoreEntryModal .shot-circle.filled {
+    border-color: #0d6efd;
+    color: #000;
+}
+
+#matchScoreEntryModal .shot-circle.shot-x {
+    background-color: #ffc107;
+    border-color: #ffc107;
+    color: #000;
+}
+
+#matchScoreEntryModal .shot-circle.shot-10 {
+    background-color: #198754;
+    border-color: #198754;
+    color: white;
+}
+
+/* Editable shot circles (when in edit mode) */
+#matchScoreEntryModal .shot-circle.editable-shot {
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+#matchScoreEntryModal .shot-circle.editable-shot:hover {
+    transform: scale(1.1);
+    box-shadow: 0 2px 8px rgba(13, 110, 253, 0.3);
+}
+
+/* Selected shot for editing */
+#matchScoreEntryModal .shot-circle.editing {
+    border-color: #0d6efd;
+    border-width: 4px;
+    box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.2);
+    animation: pulse-border 1s ease-in-out infinite;
+}
+
+@@keyframes pulse-border {
+    0%, 100% {
+        box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.2);
+    }
+    50% {
+        box-shadow: 0 0 0 6px rgba(13, 110, 253, 0.3);
+    }
+}
+
+/* Mobile adjustments */
+@@media (max-width: 480px) {
+    .match-button-grid .shot-btn {
+        height: 55px;
+        font-size: 1.3rem;
+    }
+
+    #matchScoreEntryModal .shot-circle {
+        width: 40px;
+        height: 40px;
+        font-size: 1.2rem;
+    }
+}
+
+
+/* Dark Mode Support */
+[data-bs-theme="dark"] #matchScoreEntryModal .shot-display {
+    background-color: #343a40;
+    border-color: #495057;
+}
+
+[data-bs-theme="dark"] #matchScoreEntryModal .shot-circle {
+    background-color: #212529;
+    border-color: #495057;
+    color: #adb5bd;
+}
+
+[data-bs-theme="dark"] #matchScoreEntryModal .shot-circle.filled {
+    border-color: #0d6efd;
+    color: #e9ecef;
+}
+</style>

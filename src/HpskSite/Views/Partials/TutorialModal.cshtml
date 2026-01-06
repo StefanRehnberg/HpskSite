@@ -1,0 +1,39 @@
+@*
+    Tutorial Modal Partial
+    Fullscreen video overlay optimized for landscape videos
+*@
+
+<!-- Custom Fullscreen Tutorial Overlay -->
+<div id="tutorialModal" class="tutorial-overlay" style="display: none;" onclick="if(event.target === this) TutorialHelper.closeModal()">
+    <div class="tutorial-overlay-content">
+        <!-- Header -->
+        <div class="tutorial-overlay-header">
+            <h5 id="tutorialModalLabel">Tutorial</h5>
+            <button type="button" class="tutorial-close-btn" onclick="TutorialHelper.closeModal()">
+                <i class="bi bi-x-lg"></i>
+            </button>
+        </div>
+
+        <!-- Video Container -->
+        <div class="tutorial-video-container">
+            <iframe id="tutorialVideo"
+                    src=""
+                    frameborder="0"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowfullscreen></iframe>
+        </div>
+
+        <!-- Description & Actions -->
+        <div class="tutorial-overlay-footer">
+            <p id="tutorialDescription" class="tutorial-description"></p>
+            <div class="tutorial-actions">
+                <button class="btn btn-success btn-sm" id="markWatchedBtn">
+                    <i class="bi bi-check-circle"></i> Markera som sedd
+                </button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="TutorialHelper.closeModal()">
+                    Stäng
+                </button>
+            </div>
+        </div>
+    </div>
+</div>

@@ -1,0 +1,761 @@
+@* Competition Management Dashboard *@
+<div id="competitionDashboard" class="mt-4">
+    <!-- Dashboard Header -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-gear"></i> Tävlingshantering</h2>
+        <div class="btn-group" role="group">
+            <button type="button" class="btn btn-outline-primary" onclick="refreshDashboard()">
+                <i class="bi bi-arrow-clockwise"></i> Uppdatera
+            </button>
+            <button type="button" class="btn btn-success" onclick="exportResults()">
+                <i class="bi bi-download"></i> Exportera
+            </button>
+        </div>
+    </div>
+
+    <!-- Loading State -->
+    <div id="dashboardLoading" class="text-center py-5">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Laddar...</span>
+        </div>
+        <p class="mt-2">Laddar dashboard...</p>
+    </div>
+
+    <!-- Dashboard Content -->
+    <div id="dashboardContent" style="display: none;">
+
+        <!-- Competition Info Card -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="card-title mb-0"><i class="bi bi-trophy"></i> Tävlingsinformation</h5>
+            </div>
+            <div class="card-body">
+                <div class="row" id="competitionInfo">
+                    <!-- Populated by JavaScript -->
+                </div>
+                <div class="row mt-3">
+                    <div class="col-12">
+                        <h6>Tävlingsstatus</h6>
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="isActiveSwitch">
+                            <label class="form-check-label" for="isActiveSwitch">
+                                Tävling aktiv
+                            </label>
+                        </div>
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="showLiveResultsSwitch">
+                            <label class="form-check-label" for="showLiveResultsSwitch">
+                                Visa live resultat
+                            </label>
+                        </div>
+                        <button type="button" class="btn btn-primary btn-sm mt-2" onclick="updateCompetitionStatus()">
+                            <i class="bi bi-check"></i> Spara ändringar
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Statistics Cards -->
+        <div class="row mb-4" id="statisticsCards">
+            <!-- Populated by JavaScript -->
+        </div>
+
+        <!-- Navigation Tabs -->
+        <ul class="nav nav-tabs" id="dashboardTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="participants-tab" data-bs-toggle="tab" data-bs-target="#participants" type="button" role="tab">
+                    <i class="bi bi-people"></i> Deltagare <span class="badge bg-primary ms-1" id="participantCount">0</span>
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="results-tab" data-bs-toggle="tab" data-bs-target="#results" type="button" role="tab">
+                    <i class="bi bi-clipboard-data"></i> Resultat
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="analytics-tab" data-bs-toggle="tab" data-bs-target="#analytics" type="button" role="tab">
+                    <i class="bi bi-graph-up"></i> Statistik
+                </button>
+            </li>
+        </ul>
+
+        <!-- Tab Content -->
+        <div class="tab-content" id="dashboardTabContent">
+
+            <!-- Participants Tab -->
+            <div class="tab-pane fade show active" id="participants" role="tabpanel">
+                <div class="card">
+                    <div class="card-header">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <h6 class="mb-0">Registrerade deltagare</h6>
+                            <div class="input-group" style="width: 300px;">
+                                <input type="text" class="form-control" id="participantSearch" placeholder="Sök deltagare...">
+                                <button class="btn btn-outline-secondary" type="button" onclick="searchParticipants()">
+                                    <i class="bi bi-search"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-hover" id="participantsTable">
+                                <thead>
+                                    <tr>
+                                        <th>Namn</th>
+                                        <th>Klass</th>
+                                        <th>Klubb</th>
+                                        <th>Anmäld</th>
+                                        <th>Resultat</th>
+                                        <th>Status</th>
+                                        <th>Åtgärder</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="participantsTableBody">
+                                    <!-- Populated by JavaScript -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Results Tab -->
+            <div class="tab-pane fade" id="results" role="tabpanel">
+                <div class="card">
+                    <div class="card-header">
+                        <h6 class="mb-0">Resultatöversikt</h6>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <h6>Senaste resultat</h6>
+                                <div id="recentResults">
+                                    <!-- Populated by JavaScript -->
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <h6>Topplista</h6>
+                                <div id="topResults">
+                                    <!-- Populated by JavaScript -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Analytics Tab -->
+            <div class="tab-pane fade" id="analytics" role="tabpanel">
+                <div class="card">
+                    <div class="card-header">
+                        <h6 class="mb-0">Tävlingsstatistik</h6>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <canvas id="classDistributionChart" width="400" height="200"></canvas>
+                            </div>
+                            <div class="col-md-6">
+                                <canvas id="scoreDistributionChart" width="400" height="200"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Participant Details Modal -->
+<div class="modal fade" id="participantModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Deltagardetaljer</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="participantModalBody">
+                <!-- Populated by JavaScript -->
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+                <button type="button" class="btn btn-danger" onclick="removeParticipant()">
+                    <i class="bi bi-trash"></i> Ta bort anmälan
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Export Modal -->
+<div class="modal fade" id="exportModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Exportera resultat</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label for="exportFormat" class="form-label">Välj format:</label>
+                    <select class="form-select" id="exportFormat">
+                        <option value="csv">CSV (Excel)</option>
+                        <option value="pdf">PDF</option>
+                        <option value="json">JSON</option>
+                    </select>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="includeDetailedShots" checked>
+                    <label class="form-check-label" for="includeDetailedShots">
+                        Inkludera detaljerade skottresultat
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-success" onclick="performExport()">
+                    <i class="bi bi-download"></i> Exportera
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Global variables
+let currentCompetitionId = '@Model.Id';
+let currentParticipantId = null;
+let dashboardData = null;
+
+// Initialize dashboard on page load
+document.addEventListener('DOMContentLoaded', function() {
+    loadDashboard();
+});
+
+// Load dashboard data
+async function loadDashboard() {
+    try {
+        document.getElementById('dashboardLoading').style.display = 'block';
+        document.getElementById('dashboardContent').style.display = 'none';
+
+        const response = await fetch(`/umbraco/surface/Competition/GetCompetitionDashboard?competitionId=${currentCompetitionId}`);
+        const result = await response.json();
+
+        if (result.success) {
+            dashboardData = result.data;
+            renderDashboard();
+        } else {
+            showError('Fel vid laddning av dashboard: ' + result.message);
+        }
+    } catch (error) {
+        showError('Fel vid laddning av dashboard: ' + error.message);
+    } finally {
+        document.getElementById('dashboardLoading').style.display = 'none';
+        document.getElementById('dashboardContent').style.display = 'block';
+    }
+}
+
+// Render dashboard components
+function renderDashboard() {
+    renderCompetitionInfo();
+    renderStatistics();
+    renderParticipants();
+    renderResults();
+}
+
+// Render competition information
+function renderCompetitionInfo() {
+    const comp = dashboardData.competition;
+    const infoHtml = `
+        <div class="col-md-4">
+            <strong>Tävling:</strong><br>
+            <span class="text-primary">${comp.name}</span>
+        </div>
+        <div class="col-md-4">
+            <strong>Datum:</strong><br>
+            ${new Date(comp.date).toLocaleDateString('sv-SE')}
+        </div>
+        <div class="col-md-4">
+            <strong>Plats:</strong><br>
+            ${comp.venue}
+        </div>
+        <div class="col-md-4 mt-2">
+            <strong>Arrangör:</strong><br>
+            ${comp.director}
+        </div>
+        <div class="col-md-4 mt-2">
+            <strong>Max deltagare:</strong><br>
+            ${comp.maxParticipants}
+        </div>
+        <div class="col-md-4 mt-2">
+            <strong>Status:</strong><br>
+            <span class="badge ${comp.isActive ? 'bg-success' : 'bg-secondary'}">
+                ${comp.isActive ? 'Aktiv' : 'Inaktiv'}
+            </span>
+        </div>
+    `;
+
+    document.getElementById('competitionInfo').innerHTML = infoHtml;
+    document.getElementById('isActiveSwitch').checked = comp.isActive;
+    document.getElementById('showLiveResultsSwitch').checked = comp.showLiveResults;
+}
+
+// Render statistics cards
+function renderStatistics() {
+    const stats = dashboardData.statistics;
+    const cardsHtml = `
+        <div class="col-md-3">
+            <div class="card bg-primary text-white">
+                <div class="card-body text-center">
+                    <h3 class="card-title">${stats.totalRegistrations}</h3>
+                    <p class="card-text">Totalt anmälda</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-success text-white">
+                <div class="card-body text-center">
+                    <h3 class="card-title">${stats.completedResults}</h3>
+                    <p class="card-text">Klara resultat</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-warning text-dark">
+                <div class="card-body text-center">
+                    <h3 class="card-title">${stats.pendingResults}</h3>
+                    <p class="card-text">Väntande resultat</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-info text-white">
+                <div class="card-body text-center">
+                    <h3 class="card-title">${stats.averageScore.toFixed(1)}</h3>
+                    <p class="card-text">Medelpoäng</p>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.getElementById('statisticsCards').innerHTML = cardsHtml;
+    document.getElementById('participantCount').textContent = stats.totalRegistrations;
+}
+
+// Render participants table
+function renderParticipants() {
+    const tbody = document.getElementById('participantsTableBody');
+    let rows = '';
+
+    dashboardData.registrations.forEach(participant => {
+        const statusBadge = participant.hasResults ?
+            '<span class="badge bg-success">Klar</span>' :
+            '<span class="badge bg-warning">Väntar</span>';
+
+        const score = participant.totalScore ?
+            participant.totalScore.toFixed(1) + ' p' :
+            '-';
+
+        rows += `
+            <tr>
+                <td>
+                    <strong>${participant.memberName}</strong>
+                </td>
+                <td>${participant.memberClass}</td>
+                <td>${participant.club}</td>
+                <td>${new Date(participant.registrationDate).toLocaleDateString('sv-SE')}</td>
+                <td>${score}</td>
+                <td>${statusBadge}</td>
+                <td>
+                    <div class="btn-group btn-group-sm" role="group">
+                        <button type="button" class="btn btn-outline-primary" onclick="viewParticipant(${participant.registrationId})">
+                            <i class="bi bi-eye"></i>
+                        </button>
+                        <button type="button" class="btn btn-outline-danger" onclick="confirmRemoveParticipant(${participant.registrationId})">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    });
+
+    tbody.innerHTML = rows;
+}
+
+// Render results overview
+function renderResults() {
+    // Recent results
+    const recentHtml = dashboardData.registrations
+        .filter(p => p.hasResults)
+        .sort((a, b) => new Date(b.lastActivity) - new Date(a.lastActivity))
+        .slice(0, 5)
+        .map(p => `
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <div>
+                    <strong>${p.memberName}</strong><br>
+                    <small class="text-muted">${new Date(p.lastActivity).toLocaleDateString('sv-SE')}</small>
+                </div>
+                <div class="text-end">
+                    <strong>${p.totalScore.toFixed(1)} p</strong><br>
+                    <small class="text-muted">${p.memberClass}</small>
+                </div>
+            </div>
+        `).join('');
+
+    // Top results
+    const topHtml = dashboardData.registrations
+        .filter(p => p.hasResults)
+        .sort((a, b) => b.totalScore - a.totalScore)
+        .slice(0, 5)
+        .map((p, index) => {
+            const medals = ['🥇', '🥈', '🥉'];
+            const medal = medals[index] || `${index + 1}.`;
+            return `
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <div>
+                        <span style="font-size: 1.2em;">${medal}</span>
+                        <strong>${p.memberName}</strong><br>
+                        <small class="text-muted">${p.memberClass} - ${p.club}</small>
+                    </div>
+                    <div class="text-end">
+                        <strong>${p.totalScore.toFixed(1)} p</strong>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+    document.getElementById('recentResults').innerHTML = recentHtml;
+    document.getElementById('topResults').innerHTML = topHtml;
+}
+
+// View participant details
+async function viewParticipant(registrationId) {
+    try {
+        const response = await fetch(`/umbraco/surface/Competition/GetParticipantDetails?registrationId=${registrationId}`);
+        const result = await response.json();
+
+        if (result.success) {
+            showParticipantModal(result.data);
+        } else {
+            showError(result.message);
+        }
+    } catch (error) {
+        showError('Fel vid hämtning av deltagardetaljer: ' + error.message);
+    }
+}
+
+// Show participant modal
+function showParticipantModal(participant) {
+    currentParticipantId = participant.registrationId;
+
+    const modalBody = document.getElementById('participantModalBody');
+    const progressPercent = (participant.completedSeries / participant.maxSeries) * 100;
+
+    let seriesHtml = '';
+    participant.seriesResults.forEach(series => {
+        const shotsHtml = series.shots.map(shot => {
+            const shotClass = shot === 'X' ? 'x-shot' : shot === '10' ? 'ten-shot' : shot >= 9 ? 'nine-shot' : 'other-shot';
+            return `<span class="shot-value ${shotClass}">${shot}</span>`;
+        }).join(' ');
+
+        seriesHtml += `
+            <div class="mb-3">
+                <h6>Serie ${series.seriesNumber} - ${series.seriesType}</h6>
+                <div class="row">
+                    <div class="col-md-8">
+                        <div class="shots-display mb-2">
+                            ${shotsHtml}
+                        </div>
+                    </div>
+                    <div class="col-md-4 text-end">
+                        <strong>${series.score.toFixed(1)} p</strong><br>
+                        <small>X: ${series.innerTens}, 10-tal: ${series.tens}</small><br>
+                        <small class="text-muted">${new Date(series.completedDate).toLocaleString('sv-SE')}</small>
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+
+    modalBody.innerHTML = `
+        <div class="row">
+            <div class="col-md-6">
+                <h6>Grundinformation</h6>
+                <table class="table table-borderless table-sm">
+                    <tr><td><strong>Namn:</strong></td><td>${participant.memberName}</td></tr>
+                    <tr><td><strong>Klass:</strong></td><td>${participant.memberClass}</td></tr>
+                    <tr><td><strong>Klubb:</strong></td><td>${participant.club}</td></tr>
+                    <tr><td><strong>Anmäld:</strong></td><td>${new Date(participant.registrationDate).toLocaleDateString('sv-SE')}</td></tr>
+                </table>
+            </div>
+            <div class="col-md-6">
+                <h6>Resultatöversikt</h6>
+                <table class="table table-borderless table-sm">
+                    <tr><td><strong>Total poäng:</strong></td><td>${participant.totalScore.toFixed(1)} p</td></tr>
+                    <tr><td><strong>X-tal:</strong></td><td>${participant.innerTens}</td></tr>
+                    <tr><td><strong>10-tal:</strong></td><td>${participant.tens}</td></tr>
+                    <tr><td><strong>Procent:</strong></td><td>${participant.percentage.toFixed(1)}%</td></tr>
+                </table>
+                <div class="progress mb-2">
+                    <div class="progress-bar" style="width: ${progressPercent}%"></div>
+                </div>
+                <small class="text-muted">Serie-progress: ${participant.completedSeries}/${participant.maxSeries}</small>
+            </div>
+        </div>
+
+        <hr>
+
+        <h6>Serieresultat</h6>
+        ${seriesHtml}
+    `;
+
+    new bootstrap.Modal(document.getElementById('participantModal')).show();
+}
+
+// Update competition status
+async function updateCompetitionStatus() {
+    try {
+        const isActive = document.getElementById('isActiveSwitch').checked;
+        const showLiveResults = document.getElementById('showLiveResultsSwitch').checked;
+
+        const formData = new FormData();
+        formData.append('competitionId', currentCompetitionId);
+        formData.append('isActive', isActive);
+        formData.append('showLiveResults', showLiveResults);
+        formData.append('__RequestVerificationToken', getAntiForgeryToken());
+
+        const response = await fetch('/umbraco/surface/Competition/UpdateCompetitionStatus', {
+            method: 'POST',
+            body: formData
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            showSuccess(result.message);
+            // Update dashboard data
+            dashboardData.competition.isActive = isActive;
+            dashboardData.competition.showLiveResults = showLiveResults;
+            renderCompetitionInfo();
+        } else {
+            showError(result.message);
+        }
+    } catch (error) {
+        showError('Fel vid uppdatering: ' + error.message);
+    }
+}
+
+// Export results
+function exportResults() {
+    new bootstrap.Modal(document.getElementById('exportModal')).show();
+}
+
+// Perform export
+async function performExport() {
+    try {
+        const format = document.getElementById('exportFormat').value;
+        const includeDetailed = document.getElementById('includeDetailedShots').checked;
+
+        const formData = new FormData();
+        formData.append('competitionId', currentCompetitionId);
+        formData.append('format', format);
+        formData.append('includeDetailedShots', includeDetailed);
+        formData.append('__RequestVerificationToken', getAntiForgeryToken());
+
+        const response = await fetch('/umbraco/surface/Competition/ExportCompetitionResults', {
+            method: 'POST',
+            body: formData
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            showSuccess(result.message);
+
+            // Create download link for mock data
+            const blob = new Blob([result.data], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = result.fileName;
+            a.click();
+            window.URL.revokeObjectURL(url);
+
+            bootstrap.Modal.getInstance(document.getElementById('exportModal')).hide();
+        } else {
+            showError(result.message);
+        }
+    } catch (error) {
+        showError('Fel vid export: ' + error.message);
+    }
+}
+
+// Remove participant confirmation
+function confirmRemoveParticipant(registrationId) {
+    if (confirm('Är du säker på att du vill ta bort denna anmälan? Detta kan inte ångras.')) {
+        currentParticipantId = registrationId;
+        removeParticipant();
+    }
+}
+
+// Remove participant
+async function removeParticipant() {
+    try {
+        const formData = new FormData();
+        formData.append('registrationId', currentParticipantId);
+        formData.append('__RequestVerificationToken', getAntiForgeryToken());
+
+        const response = await fetch('/umbraco/surface/Competition/RemoveRegistration', {
+            method: 'POST',
+            body: formData
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            showSuccess(result.message);
+
+            // Close modal if open
+            const modal = bootstrap.Modal.getInstance(document.getElementById('participantModal'));
+            if (modal) modal.hide();
+
+            // Refresh dashboard
+            await loadDashboard();
+        } else {
+            showError(result.message);
+        }
+    } catch (error) {
+        showError('Fel vid borttagning: ' + error.message);
+    }
+}
+
+// Search participants
+function searchParticipants() {
+    const searchTerm = document.getElementById('participantSearch').value.toLowerCase();
+    const rows = document.querySelectorAll('#participantsTableBody tr');
+
+    rows.forEach(row => {
+        const text = row.textContent.toLowerCase();
+        row.style.display = text.includes(searchTerm) ? '' : 'none';
+    });
+}
+
+// Refresh dashboard
+function refreshDashboard() {
+    loadDashboard();
+}
+
+// Utility functions
+function getAntiForgeryToken() {
+    return document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+}
+
+function showSuccess(message) {
+    showNotification(message, 'success');
+}
+
+function showError(message) {
+    showNotification(message, 'error');
+}
+
+function showNotification(message, type) {
+    const notification = document.createElement('div');
+    notification.className = `alert alert-${type === 'success' ? 'success' : 'danger'} alert-dismissible fade show position-fixed`;
+    notification.style.cssText = 'top: 20px; right: 20px; z-index: 9999; max-width: 400px;';
+    notification.innerHTML = `
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+
+    document.body.appendChild(notification);
+
+    setTimeout(() => {
+        if (notification.parentNode) {
+            notification.remove();
+        }
+    }, 5000);
+}
+</script>
+
+<style>
+.shot-value {
+    display: inline-block;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    text-align: center;
+    line-height: 24px;
+    font-size: 12px;
+    font-weight: bold;
+    margin: 1px;
+}
+
+.x-shot {
+    background-color: #28a745;
+    color: white;
+}
+
+.ten-shot {
+    background-color: #17a2b8;
+    color: white;
+}
+
+.nine-shot {
+    background-color: #ffc107;
+    color: black;
+}
+
+.other-shot {
+    background-color: #6c757d;
+    color: white;
+}
+
+.shots-display {
+    font-family: monospace;
+    margin-bottom: 8px;
+}
+
+.progress {
+    height: 8px;
+}
+
+.card {
+    transition: transform 0.2s;
+}
+
+.card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+.table th {
+    border-top: none;
+    font-weight: 600;
+    color: #495057;
+}
+
+.btn-group-sm .btn {
+    padding: 0.25rem 0.5rem;
+}
+
+.modal-lg {
+    max-width: 800px;
+}
+
+@@media (max-width: 768px) {
+    .modal-lg {
+        max-width: 95%;
+    }
+
+    .btn-group {
+        flex-direction: column;
+    }
+
+    .btn-group .btn {
+        border-radius: 0.375rem !important;
+        margin-bottom: 0.25rem;
+    }
+}
+</style>

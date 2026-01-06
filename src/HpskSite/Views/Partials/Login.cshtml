@@ -1,0 +1,164 @@
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+
+
+@using Umbraco.Cms.Web.Common.Models
+@using Umbraco.Cms.Web.Common.Security
+@using Umbraco.Cms.Web.Website.Controllers
+@using Umbraco.Cms.Core.Services
+@using Umbraco.Extensions
+@inject IMemberExternalLoginProviders memberExternalLoginProviders
+@inject ITwoFactorLoginService twoFactorLoginService
+@{
+    var loginModel = new LoginModel();
+    // Redirect to previous page or home page after successful login
+    var returnUrl = Context.Request.Query["returnUrl"].ToString();
+    if (string.IsNullOrEmpty(returnUrl))
+    {
+        returnUrl = Context.Request.Headers["Referer"].ToString();
+        // If referrer is the login page itself, go to home instead
+        if (!string.IsNullOrEmpty(returnUrl) && returnUrl.Contains("/member-login"))
+        {
+            returnUrl = "/";
+        }
+    }
+    loginModel.RedirectUrl = string.IsNullOrEmpty(returnUrl) ? "/" : returnUrl;
+}
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery-validate/1.19.0/jquery.validate.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery-validation-unobtrusive/3.2.11/jquery.validate.unobtrusive.min.js"></script>
+
+
+@if (ViewData.TryGetTwoFactorProviderNames(out var providerNames))
+{
+
+    foreach (var providerName in providerNames)
+    {
+        <div class="2fa-form">
+            <h4>Two factor with @providerName.</h4>
+            <div asp-validation-summary="All" class="text-danger"></div>
+            @using (Html.BeginUmbracoForm<UmbTwoFactorLoginController>(nameof(UmbTwoFactorLoginController.Verify2FACode)))
+            {
+
+                <text>
+                    <input type="hidden" name="provider" value="@providerName"/>
+                    Input security code: <input name="code" value=""/><br/>
+                    <button type="submit" class="btn btn-primary">Validate</button>
+                    <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+                </text>
+            }
+        </div>
+    }
+
+}
+else
+{
+
+
+<div class="login-form">
+
+    @* Custom error message div *@
+    <div id="loginErrorMessage" style="display: none;" class="alert alert-danger mb-3"></div>
+
+    @using (Html.BeginUmbracoForm<UmbLoginController>(
+        "HandleLogin", new { RedirectUrl = loginModel.RedirectUrl })) {
+
+            <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+            <div class="mb-3">
+                <label for="@Html.IdFor(m => loginModel.Username)" class="form-label">E-postadress</label>
+                <input asp-for="@loginModel.Username" class="form-control" type="email" autocomplete="username" />
+                <span asp-validation-for="@loginModel.Username" class="form-text text-danger"></span>
+            </div>
+            <div class="mb-3">
+                <label for="@Html.IdFor(m => loginModel.Password)" class="form-label">Lösenord</label>
+                <input asp-for="@loginModel.Password" class="form-control" />
+                <span asp-validation-for="@loginModel.Password" class="form-text text-danger"></span>
+                <div class="text-end mt-1">
+                    <a href="#" class="text-muted small" data-bs-toggle="modal" data-bs-target="#passwordResetModal">Glömt lösenord?</a>
+                </div>
+            </div>
+            <div class="mb-3 form-check">
+                <input asp-for="@loginModel.RememberMe" class="form-check-input" checked>
+                <label asp-for="@loginModel.RememberMe" class="form-check-label">
+                    Kom ihåg mig
+                </label>
+            </div>
+
+            <button type="submit" class="btn btn-primary w-100">Logga in</button>
+
+
+        }
+@{
+    var loginProviders = await memberExternalLoginProviders.GetMemberProvidersAsync();
+    var externalSignInError = ViewData.GetExternalSignInProviderErrors();
+
+    if (loginProviders.Any())
+    {
+        <hr/>
+        <h4>Or using external providers</h4>
+        if (externalSignInError?.AuthenticationType is null && externalSignInError?.Errors.Any() == true)
+        {
+            @Html.DisplayFor(x => externalSignInError.Errors);
+        }
+
+        @foreach (var login in await memberExternalLoginProviders.GetMemberProvidersAsync())
+        {
+
+            @using (Html.BeginUmbracoForm<UmbExternalLoginController>(nameof(UmbExternalLoginController.ExternalLogin)))
+            {
+                <button type="submit" name="provider" value="@login.ExternalLoginProvider.AuthenticationType">
+                    Sign in with @login.AuthenticationScheme.DisplayName
+                </button>
+
+                if (externalSignInError?.AuthenticationType == login.ExternalLoginProvider.AuthenticationType)
+                {
+                    @Html.DisplayFor(x => externalSignInError.Errors);
+                }
+            }
+        }
+    }
+}
+</div>
+
+<script>
+// Enhanced login error handling
+$(document).ready(function() {
+    var form = $('form');
+    var errorDiv = $('#loginErrorMessage');
+
+    form.on('submit', function() {
+        errorDiv.hide();
+    });
+
+    // Check for validation errors after page load
+    setTimeout(function() {
+        var validationSummary = $('.validation-summary-errors, .text-danger').filter(':visible');
+        if (validationSummary.length > 0) {
+            var errorText = validationSummary.text().trim();
+
+            // Parse and enhance error messages
+            if (errorText) {
+                var enhancedMessage = errorText;
+
+                // Check for common error patterns and enhance them
+                if (errorText.toLowerCase().includes('invalid') || errorText.toLowerCase().includes('incorrect')) {
+                    enhancedMessage = 'Inloggningen misslyckades. Kontrollera att e-postadress och lösenord är korrekta.';
+                }
+                else if (errorText.toLowerCase().includes('not found') || errorText.toLowerCase().includes('does not exist')) {
+                    enhancedMessage = 'E-postadressen hittades inte. Kontrollera att du har registrerat dig.';
+                }
+                else if (errorText.toLowerCase().includes('not approved') || errorText.toLowerCase().includes('pending')) {
+                    enhancedMessage = 'Ditt konto väntar på godkännande från en klubbadministratör. Du kommer att meddelas via e-post när ditt konto har godkänts.';
+                }
+                else if (errorText.toLowerCase().includes('locked')) {
+                    enhancedMessage = 'Ditt konto har låsts. Kontakta administratören för hjälp.';
+                }
+
+                errorDiv.html('<strong>Inloggning misslyckades:</strong> ' + enhancedMessage).show();
+                validationSummary.hide();
+            }
+        }
+    }, 100);
+});
+</script>
+}

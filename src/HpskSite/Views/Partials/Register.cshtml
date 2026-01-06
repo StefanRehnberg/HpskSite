@@ -1,0 +1,285 @@
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery-validate/1.19.0/jquery.validate.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery-validation-unobtrusive/3.2.11/jquery.validate.unobtrusive.min.js"></script>
+
+@* Custom registration form using our MemberController *@
+
+@* Explanatory alert about registration and approval process *@
+<div class="alert alert-info mb-4">
+    <i class="bi bi-info-circle me-2"></i>
+    <strong>Viktigt att veta:</strong>
+    <p class="mb-2 mt-2">Efter registrering måste en administratör för den valda klubben godkänna ditt medlemskap innan du kan logga in.</p>
+    <p class="mb-0">Du kommer att meddelas via e-post när ditt konto har godkänts.</p>
+</div>
+
+<div id="registrationResult"></div>
+
+<form id="registrationForm">
+    @Html.AntiForgeryToken()
+
+    <div class="mb-3">
+        <label for="firstName" class="form-label">Förnamn</label>
+        <input type="text" id="firstName" name="firstName" class="form-control" required />
+        <div class="invalid-feedback"></div>
+    </div>
+
+    <div class="mb-3">
+        <label for="lastName" class="form-label">Efternamn</label>
+        <input type="text" id="lastName" name="lastName" class="form-control" required />
+        <div class="invalid-feedback"></div>
+    </div>
+
+    <div class="mb-3">
+        <label for="email" class="form-label">E-postadress</label>
+        <input type="email" id="email" name="email" class="form-control" autocomplete="username" required />
+        <div class="invalid-feedback"></div>
+    </div>
+
+    <div class="mb-3">
+        <label for="password" class="form-label">Lösenord</label>
+        <input type="password" id="password" name="password" class="form-control" autocomplete="new-password" required />
+        <div class="invalid-feedback"></div>
+    </div>
+
+    <div class="mb-3">
+        <label for="confirmPassword" class="form-label">Bekräfta lösenord</label>
+        <input type="password" id="confirmPassword" name="confirmPassword" class="form-control" autocomplete="new-password" required />
+        <div class="invalid-feedback"></div>
+    </div>
+
+    <div class="mb-3">
+        <label for="primaryClubId" class="form-label">Huvudklubb <span class="text-danger">*</span></label>
+        <select id="primaryClubId" name="primaryClubId" class="form-select" required>
+            <option value="">Välj en klubb...</option>
+        </select>
+        <div class="form-text">
+            <i class="bi bi-question-circle me-1"></i>
+            Saknas din klubb i listan? <a href="#" data-bs-toggle="modal" data-bs-target="#requestMissingClubModal">Begär att lägga till klubb</a>
+        </div>
+        <div class="invalid-feedback"></div>
+    </div>
+
+    <div class="mb-3">
+        <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="privacyConsent" name="privacyConsent" required>
+            <label class="form-check-label" for="privacyConsent">
+                Jag godkänner behandling av mina personuppgifter enligt
+                <a href="/integritetspolicy" target="_blank">integritetspolicyn</a> <span class="text-danger">*</span>
+            </label>
+            <div class="invalid-feedback">Du måste godkänna integritetspolicyn för att registrera dig.</div>
+        </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary w-100">Registrera</button>
+</form>
+
+@* Include the missing club request modal *@
+@await Html.PartialAsync("RequestMissingClubModal")
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Load clubs for dropdown
+    loadClubs();
+
+    // Handle form submission
+    document.getElementById('registrationForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        submitRegistration();
+    });
+
+    async function loadClubs() {
+        try {
+            const response = await fetch('/umbraco/surface/ClubAdmin/GetClubsForRegistration');
+            const data = await response.json();
+
+            const clubSelect = document.getElementById('primaryClubId');
+            if (data.success && data.clubs) {
+                // Clear existing options except the first one
+                clubSelect.innerHTML = '<option value="">Välj en klubb...</option>';
+
+                // Add clubs to dropdown
+                data.clubs.forEach(club => {
+                    const option = document.createElement('option');
+                    option.value = club.id;
+                    option.textContent = club.name;
+                    clubSelect.appendChild(option);
+                });
+            }
+        } catch (error) {
+            console.error('Error loading clubs:', error);
+        }
+    }
+
+    async function submitRegistration() {
+        const form = document.getElementById('registrationForm');
+        const resultDiv = document.getElementById('registrationResult');
+
+        // Clear previous results
+        resultDiv.innerHTML = '';
+
+        // Get form data
+        const formData = new FormData(form);
+
+        // Client-side validation
+        const password = formData.get('password');
+        const confirmPassword = formData.get('confirmPassword');
+
+        if (password !== confirmPassword) {
+            showError('Lösenorden matchar inte');
+            return;
+        }
+
+        if (password.length < 6) {
+            showError('Lösenordet måste vara minst 6 tecken långt');
+            return;
+        }
+
+        try {
+            const response = await fetch('/umbraco/surface/Member/RegisterMember', {
+                method: 'POST',
+                body: formData
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                // Show comprehensive success screen
+                showRegistrationSuccess(formData.get('firstName'));
+                // Clear the form
+                document.getElementById('registrationForm').reset();
+            } else {
+                showError(data.message);
+            }
+        } catch (error) {
+            console.error('Registration error:', error);
+            showError('Ett fel uppstod vid registrering. Försök igen.');
+        }
+    }
+
+    function showError(message) {
+        const resultDiv = document.getElementById('registrationResult');
+        resultDiv.innerHTML = `<div class="alert alert-danger">${message}</div>`;
+    }
+
+    function showSuccess(message) {
+        const resultDiv = document.getElementById('registrationResult');
+        resultDiv.innerHTML = `<div class="alert alert-success">${message}</div>`;
+    }
+
+    function showRegistrationSuccess(firstName) {
+        const form = document.getElementById('registrationForm');
+        const resultDiv = document.getElementById('registrationResult');
+
+        // Hide the registration form
+        form.style.display = 'none';
+
+        // Show comprehensive success screen
+        resultDiv.innerHTML = `
+            <div class="registration-success-screen">
+                <!-- Success Header -->
+                <div class="text-center mb-4">
+                    <i class="bi bi-check-circle-fill text-success" style="font-size: 4rem;"></i>
+                    <h3 class="mt-3 mb-2">Registrering slutförd!</h3>
+                    <p class="text-muted">Välkommen ${firstName}!</p>
+                </div>
+
+                <!-- What Happens Next -->
+                <div class="alert alert-info mb-4">
+                    <h5 class="alert-heading">
+                        <i class="bi bi-clock-history me-2"></i>Vad händer nu?
+                    </h5>
+                    <p class="mb-2">Din registrering har skickats till din klubbadministratör för godkännande.</p>
+                    <p class="mb-0">
+                        <i class="bi bi-envelope me-1"></i>
+                        <strong>Du får ett e-postmeddelande</strong> när ditt konto har godkänts och du kan logga in.
+                    </p>
+                </div>
+
+                <!-- What You Can Do Now -->
+                <div class="alert alert-success mb-4">
+                    <h5 class="alert-heading">
+                        <i class="bi bi-eye me-2"></i>Du kan redan börja utforska:
+                    </h5>
+                    <ul class="mb-0">
+                        <li><i class="bi bi-trophy me-1"></i> Bläddra kommande tävlingar</li>
+                        <li><i class="bi bi-bar-chart me-1"></i> Se resultat från tidigare tävlingar</li>
+                        <li><i class="bi bi-building me-1"></i> Läs om klubbarna i Halland</li>
+                    </ul>
+                </div>
+
+                <!-- After Approval -->
+                <div class="alert alert-primary mb-4">
+                    <h5 class="alert-heading">
+                        <i class="bi bi-unlock me-2"></i>Efter godkännande får du tillgång till:
+                    </h5>
+                    <ul class="mb-0">
+                        <li><i class="bi bi-person-plus me-1"></i> Anmäla dig till tävlingar</li>
+                        <li><i class="bi bi-clipboard-data me-1"></i> Registrera dina träningsresultat</li>
+                        <li><i class="bi bi-ladder me-1"></i> Delta i Skyttetrappan</li>
+                        <li><i class="bi bi-calendar-event me-1"></i> Se och delta i klubbaktiviteter</li>
+                    </ul>
+                </div>
+
+                <!-- Need Help -->
+                <div class="text-center mb-4">
+                    <small class="text-muted">
+                        <i class="bi bi-question-circle me-1"></i>
+                        Behöver du hjälp? Kontakta din klubbadministratör eller
+                        <a href="#" data-bs-toggle="modal" data-bs-target="#bugReportModal">rapportera ett problem</a>.
+                    </small>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="row g-2">
+                    <div class="col-6 col-md-3">
+                        <button type="button" class="btn btn-primary w-100" onclick="goToLogin()">
+                            <i class="bi bi-box-arrow-in-right me-1"></i>
+                            <span class="d-none d-md-inline">Till </span>Inloggning
+                        </button>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <a href="/" class="btn btn-secondary w-100">
+                            <i class="bi bi-house me-1"></i>
+                            Hem
+                        </a>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <a href="/competitions" class="btn btn-outline-primary w-100">
+                            <i class="bi bi-trophy me-1"></i>
+                            Tävlingar
+                        </a>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <button type="button" class="btn btn-outline-secondary w-100" onclick="closeSuccessMessage()">
+                            <i class="bi bi-x-circle me-1"></i>
+                            Stäng
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+});
+
+// Global functions for success screen
+function goToLogin() {
+    if (typeof switchToLoginTab === 'function') {
+        switchToLoginTab();
+    } else {
+        window.location.href = '/login-register?tab=login';
+    }
+}
+
+function closeSuccessMessage() {
+    const form = document.getElementById('registrationForm');
+    const resultDiv = document.getElementById('registrationResult');
+
+    // Show form again
+    form.style.display = 'block';
+
+    // Clear success message
+    resultDiv.innerHTML = '';
+}
+</script>

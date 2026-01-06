@@ -1,0 +1,58 @@
+/* HPSK Theme System - Hybrid Approach */
+/* Bootstrap handles 90%, these variables handle custom styles */
+
+:root {
+  /* Navbar Custom Colors */
+  --navbar-bg: #007bff;
+  --navbar-bg-hover: #0056b3;
+  --navbar-text: rgba(255, 255, 255, 0.9);
+  --navbar-text-hover: #ffffff;
+  --navbar-icon-bg: rgba(255, 255, 255, 0.3);
+  --navbar-icon-border: rgba(255, 255, 255, 0.5);
+  --navbar-icon-hover-bg: rgba(255, 255, 255, 0.4);
+  --navbar-subtitle: rgba(255, 255, 255, 0.8);
+  --navbar-active-border: #ffffff;
+
+  /* Footer */
+  --footer-bg: #f8f9fa;
+  --footer-text: #212529;
+  --footer-border: #dee2e6;
+
+  /* Jumbotron */
+  --jumbotron-gradient: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
+
+  /* Chart.js Colors */
+  --chart-primary: #0d6efd;
+  --chart-success: #198754;
+  --chart-danger: #dc3545;
+  --chart-text: #212529;
+  --chart-grid: rgba(0, 0, 0, 0.1);
+}
+
+[data-bs-theme="dark"] {
+  /* Navbar Dark Mode */
+  --navbar-bg: #1a1a1a;
+  --navbar-bg-hover: #2d2d2d;
+  --navbar-text: rgba(224, 224, 224, 0.9);
+  --navbar-text-hover: #ffffff;
+  --navbar-icon-bg: rgba(224, 224, 224, 0.2);
+  --navbar-icon-border: rgba(224, 224, 224, 0.4);
+  --navbar-icon-hover-bg: rgba(224, 224, 224, 0.3);
+  --navbar-subtitle: rgba(224, 224, 224, 0.7);
+  --navbar-active-border: #4da3ff;
+
+  /* Footer Dark Mode */
+  --footer-bg: #1a1a1a;
+  --footer-text: #e0e0e0;
+  --footer-border: #404040;
+
+  /* Jumbotron Dark Mode */
+  --jumbotron-gradient: linear-gradient(135deg, #1a4d7a 0%, #0d2942 100%);
+
+  /* Chart.js Dark Mode */
+  --chart-primary: #6ea8fe;
+  --chart-success: #75b798;
+  --chart-danger: #e35d6a;
+  --chart-text: #f8f9fa;
+  --chart-grid: rgba(255, 255, 255, 0.1);
+}

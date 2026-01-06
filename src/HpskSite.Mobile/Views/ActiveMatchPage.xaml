@@ -1,0 +1,984 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage x:Class="HpskSite.Mobile.Views.ActiveMatchPage"
+             xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:models="clr-namespace:HpskSite.Shared.Models;assembly=HpskSite.Shared"
+             xmlns:localmodels="clr-namespace:HpskSite.Mobile.Models"
+             xmlns:services="clr-namespace:HpskSite.Mobile.Services"
+             xmlns:viewmodels="clr-namespace:HpskSite.Mobile.ViewModels"
+             Title="{Binding Title}"
+             x:DataType="viewmodels:ActiveMatchViewModel"
+             BackgroundColor="#1f2937"
+             Shell.BackgroundColor="#1f2937"
+             Shell.ForegroundColor="White"
+             Shell.NavBarIsVisible="True">
+
+    <Grid>
+
+        <!--  Main Scrollable Content  -->
+        <ScrollView Grid.Row="0" Margin="0,0,0,80">
+            <VerticalStackLayout Padding="12" Spacing="12">
+
+                <!--  Spectator Mode Banner (only show for active/ongoing matches, not history)  -->
+                <Border Padding="10"
+                        BackgroundColor="#fff3cd"
+                        Stroke="Transparent" StrokeShape="RoundRectangle 8">
+                    <Border.Triggers>
+                        <!--  Show only when IsSpectator AND match is active  -->
+                        <MultiTrigger TargetType="Border">
+                            <MultiTrigger.Conditions>
+                                <BindingCondition Binding="{Binding IsSpectator}" Value="True" />
+                                <BindingCondition Binding="{Binding IsMatchActive}" Value="True" />
+                            </MultiTrigger.Conditions>
+                            <Setter Property="IsVisible" Value="True" />
+                        </MultiTrigger>
+                    </Border.Triggers>
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="IsVisible" Value="False" />
+                        </Style>
+                    </Border.Style>
+                    <HorizontalStackLayout HorizontalOptions="Center" Spacing="8">
+                        <Label FontSize="14" Text="👁️" VerticalOptions="Center" />
+                        <Label FontAttributes="Bold" FontSize="14"
+                               Text="Visningsläge - du kan se matchen men inte rapportera resultat"
+                               TextColor="#856404" VerticalOptions="Center" />
+                    </HorizontalStackLayout>
+                </Border>
+
+                <!--  Match Header Card  -->
+                <Border Padding="12"
+                        BackgroundColor="{StaticResource Primary}"
+                        Stroke="Transparent" StrokeShape="RoundRectangle 12">
+                    <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="8">
+                        <VerticalStackLayout>
+                            <HorizontalStackLayout Spacing="8">
+                                <Label FontAttributes="Bold" FontSize="18"
+                                       Text="{Binding Match.DisplayName}"
+                                       TextColor="White" VerticalOptions="Center" />
+                                <!--  HCP Badge  -->
+                                <Border Padding="6,2" BackgroundColor="Orange"
+                                        IsVisible="{Binding Match.IsHandicapEnabled}"
+                                        StrokeShape="RoundRectangle 4" StrokeThickness="0" VerticalOptions="Center">
+                                    <Label FontAttributes="Bold" FontSize="11" Text="HCP"
+                                           TextColor="#343a40" />
+                                </Border>
+                            </HorizontalStackLayout>
+                            <HorizontalStackLayout Spacing="8">
+                                <Label FontSize="12" Opacity="0.9"
+                                       Text="{Binding Match.WeaponClass, StringFormat='Klass {0}'}"
+                                       TextColor="White" />
+                                <Label FontSize="12" Opacity="0.7" Text="|"
+                                       TextColor="White" />
+                                <Label FontAttributes="Bold" FontSize="12"
+                                       Text="{Binding Match.MatchCode, StringFormat='Kod: {0}'}"
+                                       TextColor="White" />
+                            </HorizontalStackLayout>
+                        </VerticalStackLayout>
+
+                        <!--  Share Button  -->
+                        <Button Grid.Column="1" Padding="22,0" BackgroundColor="White"
+                                CornerRadius="6" FontSize="12" HeightRequest="32"
+                                Text="Dela"
+                                TextColor="{StaticResource Primary}" />
+
+                        <!--  Leave Button (participants only, not host, not spectator)  -->
+                        <Button Grid.Column="2" Padding="12,0"
+                                BackgroundColor="{StaticResource Warning}"
+                                Command="{Binding LeaveMatchCommand}"
+                                CornerRadius="6" FontSize="12" HeightRequest="32"
+                                Text="Lämna" TextColor="White">
+                            <Button.Triggers>
+                                <!--  Hide for match host  -->
+                                <DataTrigger Binding="{Binding IsMatchHost}" TargetType="Button" Value="True">
+                                    <Setter Property="IsVisible" Value="False" />
+                                </DataTrigger>
+                                <!--  Hide for spectators  -->
+                                <DataTrigger Binding="{Binding IsSpectator}" TargetType="Button" Value="True">
+                                    <Setter Property="IsVisible" Value="False" />
+                                </DataTrigger>
+                            </Button.Triggers>
+                        </Button>
+
+                        <!--  End Match Button (Host only, not spectator)  -->
+                        <Button Grid.Column="3" Padding="12,0"
+                                BackgroundColor="{StaticResource Danger}"
+                                Clicked="OnCompleteMatchClicked" CornerRadius="6" FontSize="12"
+                                HeightRequest="32"
+                                Text="Avsluta" TextColor="White">
+                            <Button.Triggers>
+                                <!--  Show only for match host  -->
+                                <DataTrigger Binding="{Binding IsMatchHost}" TargetType="Button" Value="False">
+                                    <Setter Property="IsVisible" Value="False" />
+                                </DataTrigger>
+                                <!--  Hide for spectators  -->
+                                <DataTrigger Binding="{Binding IsSpectator}" TargetType="Button" Value="True">
+                                    <Setter Property="IsVisible" Value="False" />
+                                </DataTrigger>
+                            </Button.Triggers>
+                        </Button>
+                    </Grid>
+                </Border>
+
+                <!--  Error Message  -->
+                <Border Padding="12" BackgroundColor="#FEE2E2"
+                        IsVisible="{Binding HasError}"
+                        Stroke="{StaticResource Danger}"
+                        StrokeShape="RoundRectangle 8">
+                    <HorizontalStackLayout Spacing="8">
+                        <Label FontAttributes="Bold" FontSize="16" Text="!"
+                               TextColor="{StaticResource Danger}"
+                               VerticalOptions="Center" />
+                        <Label LineBreakMode="WordWrap"
+                               Text="{Binding ErrorMessage}"
+                               TextColor="{StaticResource Danger}"
+                               VerticalOptions="Center" />
+                    </HorizontalStackLayout>
+                </Border>
+
+                <!--  Spectators Section (only visible for active matches with spectators)  -->
+                <Border Padding="8,6"
+                        BackgroundColor="#4b5563"
+                        Stroke="Transparent" StrokeShape="RoundRectangle 8">
+                    <Border.Triggers>
+                        <!--  Show only when match is active AND has spectators  -->
+                        <MultiTrigger TargetType="Border">
+                            <MultiTrigger.Conditions>
+                                <BindingCondition Binding="{Binding IsMatchActive}" Value="True" />
+                                <BindingCondition Binding="{Binding Spectators.Count, Converter={StaticResource IntToBoolConverter}}" Value="True" />
+                            </MultiTrigger.Conditions>
+                            <Setter Property="IsVisible" Value="True" />
+                        </MultiTrigger>
+                    </Border.Triggers>
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="IsVisible" Value="False" />
+                        </Style>
+                    </Border.Style>
+                    <Border.GestureRecognizers>
+                        <TapGestureRecognizer Command="{Binding OpenSpectatorsModalCommand}" />
+                    </Border.GestureRecognizers>
+                    <HorizontalStackLayout Spacing="8">
+                        <Label FontSize="12" Text="👁️" TextColor="#9ca3af" VerticalOptions="Center" />
+                        <Label FontSize="12" Text="Tittar:" TextColor="#9ca3af" VerticalOptions="Center" />
+                        <HorizontalStackLayout Spacing="-6" BindableLayout.ItemsSource="{Binding Spectators}">
+                            <BindableLayout.ItemTemplate>
+                                <DataTemplate x:DataType="services:MatchSpectator">
+                                    <Grid HeightRequest="28" WidthRequest="28">
+                                        <!--  Profile Picture (if available)  -->
+                                        <Border HeightRequest="28"
+                                                IsVisible="{Binding ProfilePictureUrl, Converter={StaticResource StringToBoolConverter}}"
+                                                Stroke="#6b7280" StrokeShape="RoundRectangle 14" StrokeThickness="2"
+                                                WidthRequest="28">
+                                            <Border.Clip>
+                                                <EllipseGeometry Center="14,14" RadiusX="14" RadiusY="14" />
+                                            </Border.Clip>
+                                            <Image Aspect="AspectFill" HeightRequest="28"
+                                                   Source="{Binding ProfilePictureUrl}"
+                                                   WidthRequest="28" />
+                                        </Border>
+                                        <!--  Initials Fallback  -->
+                                        <Border BackgroundColor="#6b7280" HeightRequest="28"
+                                                IsVisible="{Binding ProfilePictureUrl, Converter={StaticResource InvertedStringToBoolConverter}}"
+                                                Stroke="#4b5563" StrokeShape="RoundRectangle 14" StrokeThickness="2"
+                                                WidthRequest="28">
+                                            <Label FontAttributes="Bold" FontSize="10" HorizontalOptions="Center"
+                                                   Text="{Binding Initials}"
+                                                   TextColor="White" VerticalOptions="Center" />
+                                        </Border>
+                                    </Grid>
+                                </DataTemplate>
+                            </BindableLayout.ItemTemplate>
+                        </HorizontalStackLayout>
+                    </HorizontalStackLayout>
+                </Border>
+
+                <!--  Scoreboard Card  -->
+                <Border Padding="0" BackgroundColor="#374151" Stroke="Transparent"
+                        StrokeShape="RoundRectangle 12">
+                    <Border.Shadow>
+                        <Shadow Brush="Black" Opacity="0.1" Radius="6"
+                                Offset="0,2" />
+                    </Border.Shadow>
+
+                    <!--  Scoreboard (full width, no horizontal scroll)  -->
+                    <VerticalStackLayout Spacing="0">
+
+                        <!--  Participant Header Row  -->
+                        <Border Padding="0" BackgroundColor="#4b5563" StrokeThickness="0">
+                            <FlexLayout BindableLayout.ItemsSource="{Binding Participants}"
+                                        JustifyContent="SpaceEvenly" Wrap="NoWrap">
+                                <BindableLayout.ItemTemplate>
+                                    <DataTemplate x:DataType="models:TrainingMatchParticipant">
+                                        <VerticalStackLayout Padding="8,8" HorizontalOptions="FillAndExpand" MinimumWidthRequest="80">
+                                            <!--  Avatar with Profile Picture or Initials Fallback  -->
+                                            <Grid HeightRequest="48" HorizontalOptions="Center" WidthRequest="48">
+                                                <!--  Profile Picture (if available)  -->
+                                                <Border HeightRequest="48"
+                                                        IsVisible="{Binding ProfilePictureUrl, Converter={StaticResource StringToBoolConverter}}"
+                                                        Stroke="#6b7280" StrokeShape="RoundRectangle 24" StrokeThickness="2"
+                                                        WidthRequest="48">
+                                                    <Border.Clip>
+                                                        <EllipseGeometry Center="24,24" RadiusX="24" RadiusY="24" />
+                                                    </Border.Clip>
+                                                    <Image Aspect="AspectFill" HeightRequest="48"
+                                                           Source="{Binding ProfilePictureUrl}"
+                                                           WidthRequest="48" />
+                                                </Border>
+                                                <!--  Initials Fallback (when no profile picture)  -->
+                                                <Border BackgroundColor="{StaticResource Primary}"
+                                                        HeightRequest="48"
+                                                        IsVisible="{Binding ProfilePictureUrl, Converter={StaticResource InvertedStringToBoolConverter}}"
+                                                        Stroke="#6b7280" StrokeShape="RoundRectangle 24" StrokeThickness="2"
+                                                        WidthRequest="48">
+                                                    <Label FontAttributes="Bold" FontSize="16" HorizontalOptions="Center"
+                                                           Text="{Binding Initials}"
+                                                           TextColor="White" VerticalOptions="Center" />
+                                                </Border>
+                                            </Grid>
+                                            <!--  Name  -->
+                                            <Label FontAttributes="Bold" FontSize="11" HorizontalOptions="Center"
+                                                   HorizontalTextAlignment="Center" LineBreakMode="TailTruncation" MaxLines="1"
+                                                   Text="{Binding FirstName}"
+                                                   TextColor="White" />
+                                            <!--  Handicap Badge (if applicable)  -->
+                                            <Border Padding="6,2" BackgroundColor="#444444" HorizontalOptions="Center"
+                                                    IsVisible="{Binding HandicapPerSeries, Converter={StaticResource HasHandicapConverter}}"
+                                                    StrokeShape="RoundRectangle 10" StrokeThickness="0">
+                                                <HorizontalStackLayout Spacing="2">
+                                                    <Label FontAttributes="Bold" FontSize="11"
+                                                           Text="{Binding HandicapPerSeries, Converter={StaticResource HandicapFormatConverter}}"
+                                                           TextColor="#17a2b8" />
+                                                    <Label FontAttributes="Bold" FontSize="9"
+                                                           IsVisible="{Binding IsProvisional}"
+                                                           Text="(P)"
+                                                           TextColor="{StaticResource Warning}" />
+                                                </HorizontalStackLayout>
+                                            </Border>
+                                        </VerticalStackLayout>
+                                    </DataTemplate>
+                                </BindableLayout.ItemTemplate>
+                            </FlexLayout>
+                        </Border>
+
+                        <!--  Divider  -->
+                        <BoxView HeightRequest="1" Color="#4b5563" />
+
+                        <!--  Dynamic Series Rows with Subtotals  -->
+                        <VerticalStackLayout BindableLayout.ItemsSource="{Binding ScoreboardRows}" Spacing="0">
+                            <BindableLayout.ItemTemplate>
+                                <DataTemplate x:DataType="localmodels:ScoreboardRow">
+                                    <VerticalStackLayout Spacing="0">
+                                        <!--  Score Row (visible for Score type rows)  -->
+                                        <FlexLayout BindableLayout.ItemsSource="{Binding Cells}"
+                                                    IsVisible="{Binding IsScoreRow}"
+                                                    JustifyContent="SpaceEvenly" Wrap="NoWrap">
+                                            <BindableLayout.ItemTemplate>
+                                                <DataTemplate x:DataType="localmodels:ScoreboardCell">
+                                                    <Border BackgroundColor="{Binding BackgroundColorHex}"
+                                                            HeightRequest="44" HorizontalOptions="FillAndExpand" MinimumWidthRequest="80"
+                                                            Stroke="#4b5563" StrokeThickness="0.5">
+                                                        <Border.GestureRecognizers>
+                                                            <!--  Photo viewer for cells with photos  -->
+                                                            <TapGestureRecognizer
+                                                                Command="{Binding Source={RelativeSource AncestorType={x:Type viewmodels:ActiveMatchViewModel}}, Path=OpenPhotoViewerCommand}"
+                                                                CommandParameter="{Binding .}" />
+                                                        </Border.GestureRecognizers>
+                                                        <Grid Padding="4">
+                                                            <Label FontAttributes="Bold" FontSize="18" HorizontalOptions="Center"
+                                                                   Text="{Binding ScoreText}"
+                                                                   TextColor="White" VerticalOptions="Center" />
+                                                            <Label FontAttributes="Bold" FontSize="10" HorizontalOptions="End"
+                                                                   IsVisible="{Binding HasXCount}"
+                                                                   Text="{Binding XCountText}"
+                                                                   TextColor="#9ACD32" VerticalOptions="Start" />
+                                                            <!--  Reaction emoji indicator (above camera)  -->
+                                                            <Label FontSize="10" HorizontalOptions="Start"
+                                                                   IsVisible="{Binding HasReactions}"
+                                                                   Text="{Binding FirstReactionEmoji}"
+                                                                   VerticalOptions="Start" />
+                                                            <!--  Photo indicator (shows for ALL cells with photos)  -->
+                                                            <Label FontSize="10" HorizontalOptions="Start"
+                                                                   IsVisible="{Binding HasPhoto}"
+                                                                   Text="📷"
+                                                                   VerticalOptions="End" />
+                                                        </Grid>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </BindableLayout.ItemTemplate>
+                                        </FlexLayout>
+
+                                        <!--  Subtotal Row (visible for Subtotal type rows)  -->
+                                        <Border BackgroundColor="#1a365d"
+                                                IsVisible="{Binding IsSubtotalRow}"
+                                                StrokeThickness="0">
+                                            <FlexLayout BindableLayout.ItemsSource="{Binding Cells}"
+                                                        JustifyContent="SpaceEvenly" Wrap="NoWrap">
+                                                <BindableLayout.ItemTemplate>
+                                                    <DataTemplate x:DataType="localmodels:ScoreboardCell">
+                                                        <Border BackgroundColor="Transparent" HeightRequest="36" HorizontalOptions="FillAndExpand"
+                                                                MinimumWidthRequest="80" Stroke="#4b5563" StrokeThickness="0.5">
+                                                            <Grid Padding="4">
+                                                                <Label FontAttributes="Bold" FontSize="14" HorizontalOptions="Center"
+                                                                       Text="{Binding ScoreText}"
+                                                                       TextColor="#90caf9" VerticalOptions="Center" />
+                                                                <Label FontAttributes="Bold" FontSize="9" HorizontalOptions="End"
+                                                                       IsVisible="{Binding HasXCount}"
+                                                                       Text="{Binding XCountText}"
+                                                                       TextColor="#9ACD32" VerticalOptions="Start" />
+                                                            </Grid>
+                                                        </Border>
+                                                    </DataTemplate>
+                                                </BindableLayout.ItemTemplate>
+                                            </FlexLayout>
+                                        </Border>
+                                    </VerticalStackLayout>
+                                </DataTemplate>
+                            </BindableLayout.ItemTemplate>
+                        </VerticalStackLayout>
+
+                        <!--  Summary Row (Raw totals before handicap)  -->
+                        <Border BackgroundColor="#374151" StrokeThickness="0">
+                            <FlexLayout BindableLayout.ItemsSource="{Binding Participants}"
+                                        JustifyContent="SpaceEvenly" Wrap="NoWrap">
+                                <BindableLayout.ItemTemplate>
+                                    <DataTemplate x:DataType="models:TrainingMatchParticipant">
+                                        <Border BackgroundColor="Transparent" HeightRequest="36" HorizontalOptions="FillAndExpand"
+                                                MinimumWidthRequest="80" Stroke="#4b5563" StrokeThickness="0.5">
+                                            <HorizontalStackLayout HorizontalOptions="Center" Spacing="2" VerticalOptions="Center">
+                                                <Label FontAttributes="Bold" FontSize="14"
+                                                       Text="{Binding TotalScore}"
+                                                       TextColor="White" />
+                                                <Label FontSize="12"
+                                                       Text="{Binding EffectiveSeriesCount, StringFormat='({0})'}"
+                                                       TextColor="#9ca3af" />
+                                            </HorizontalStackLayout>
+                                        </Border>
+                                    </DataTemplate>
+                                </BindableLayout.ItemTemplate>
+                            </FlexLayout>
+                        </Border>
+
+                        <!--  Total Row  -->
+                        <Border BackgroundColor="#1565c0" StrokeThickness="0">
+                            <FlexLayout BindableLayout.ItemsSource="{Binding Participants}"
+                                        JustifyContent="SpaceEvenly" Wrap="NoWrap">
+                                <BindableLayout.ItemTemplate>
+                                    <DataTemplate x:DataType="models:TrainingMatchParticipant">
+                                        <VerticalStackLayout Padding="6,10" HorizontalOptions="FillAndExpand" MinimumWidthRequest="80">
+                                            <!--  Main Score (Adjusted if handicap, otherwise Raw)  -->
+                                            <Label FontAttributes="Bold" FontSize="28" HorizontalOptions="Center"
+                                                   Text="{Binding AdjustedTotalScore}">
+                                                <Label.Triggers>
+                                                    <DataTrigger Binding="{Binding HandicapPerSeries, Converter={StaticResource HasHandicapConverter}}"
+                                                                 TargetType="Label" Value="True">
+                                                        <Setter Property="TextColor" Value="#4FC3F7" />
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding HandicapPerSeries, Converter={StaticResource HasHandicapConverter}}"
+                                                                 TargetType="Label" Value="False">
+                                                        <Setter Property="TextColor" Value="White" />
+                                                    </DataTrigger>
+                                                </Label.Triggers>
+                                            </Label>
+                                            <!--  Handicap Breakdown  -->
+                                            <HorizontalStackLayout HorizontalOptions="Center"
+                                                                   IsVisible="{Binding HandicapPerSeries, Converter={StaticResource HasHandicapConverter}}"
+                                                                   Spacing="2">
+                                                <Label FontSize="11" Opacity="0.8"
+                                                       Text="{Binding TotalScore}"
+                                                       TextColor="White" />
+                                                <Label FontSize="11"
+                                                       Text="{Binding TotalHandicap, Converter={StaticResource HandicapFormatConverter}}"
+                                                       TextColor="#90EE90" />
+                                            </HorizontalStackLayout>
+                                            <!--  Series Count and X Count (using effective/equalized count)  -->
+                                            <HorizontalStackLayout HorizontalOptions="Center" Spacing="4">
+                                                <Label FontSize="10" Opacity="0.7"
+                                                       Text="{Binding EffectiveSeriesCount, StringFormat='{0} serier'}"
+                                                       TextColor="White" />
+                                                <Label FontSize="10"
+                                                       IsVisible="{Binding TotalXCount, Converter={StaticResource IntToBoolConverter}}"
+                                                       Opacity="0.5" Text="|" TextColor="White" />
+                                                <Label FontSize="10"
+                                                       IsVisible="{Binding TotalXCount, Converter={StaticResource IntToBoolConverter}}"
+                                                       Opacity="0.7"
+                                                       Text="{Binding TotalXCount, StringFormat='{0}x'}"
+                                                       TextColor="White" />
+                                            </HorizontalStackLayout>
+                                        </VerticalStackLayout>
+                                    </DataTemplate>
+                                </BindableLayout.ItemTemplate>
+                            </FlexLayout>
+                        </Border>
+
+                    </VerticalStackLayout>
+                </Border>
+
+            </VerticalStackLayout>
+        </ScrollView>
+
+        <!--  Floating Add Score Button (only for participants, not spectators)  -->
+        <Button Grid.Row="0" Margin="16,0,16,16" VerticalOptions="End"
+                BackgroundColor="{StaticResource Success}"
+                Command="{Binding OpenScoreEntryCommand}"
+                CornerRadius="25" FontAttributes="Bold" FontSize="16"
+                HeightRequest="50"
+                Shadow="{Shadow Brush=Black,
+                                Offset='0,4',
+                                Radius=8,
+                                Opacity=0.2}"
+                Text="+ Lägg till serie" TextColor="White">
+            <Button.Triggers>
+                <!--  Hide when score entry is open  -->
+                <DataTrigger Binding="{Binding IsScoreEntryOpen}" TargetType="Button" Value="True">
+                    <Setter Property="IsVisible" Value="False" />
+                </DataTrigger>
+                <!--  Hide for spectators  -->
+                <DataTrigger Binding="{Binding IsSpectator}" TargetType="Button" Value="True">
+                    <Setter Property="IsVisible" Value="False" />
+                </DataTrigger>
+            </Button.Triggers>
+        </Button>
+
+        <!--  Join From Spectator Button (only for spectators who can join)  -->
+        <Button Grid.Row="0" Margin="16,0,16,16" VerticalOptions="End"
+                BackgroundColor="{StaticResource Primary}"
+                Command="{Binding JoinFromSpectatorCommand}"
+                CornerRadius="25" FontAttributes="Bold" FontSize="16"
+                HeightRequest="50"
+                IsVisible="{Binding CanJoinFromSpectator}"
+                Shadow="{Shadow Brush=Black,
+                                Offset='0,4',
+                                Radius=8,
+                                Opacity=0.2}"
+                Text="Gå med i matchen" TextColor="White" />
+
+        <!--  Score Entry Panel (Slide up from bottom) - only for participants  -->
+        <Border Grid.Row="0" Padding="16,16,16,20"
+                BackgroundColor="#374151"
+                Stroke="Transparent" StrokeShape="RoundRectangle 20,20,0,0" VerticalOptions="End">
+            <Border.Triggers>
+                <!--  Show only when score entry is open AND not spectator  -->
+                <MultiTrigger TargetType="Border">
+                    <MultiTrigger.Conditions>
+                        <BindingCondition Binding="{Binding IsScoreEntryOpen}" Value="True" />
+                        <BindingCondition Binding="{Binding IsSpectator}" Value="False" />
+                    </MultiTrigger.Conditions>
+                    <Setter Property="IsVisible" Value="True" />
+                </MultiTrigger>
+            </Border.Triggers>
+            <Border.Style>
+                <Style TargetType="Border">
+                    <Setter Property="IsVisible" Value="False" />
+                </Style>
+            </Border.Style>
+            <Border.Shadow>
+                <Shadow Brush="Black" Opacity="0.2" Radius="12"
+                        Offset="0,-4" />
+            </Border.Shadow>
+
+            <VerticalStackLayout Spacing="12">
+
+                <!--  Panel Header with Close Button  -->
+                <Grid ColumnDefinitions="*,Auto">
+                    <!--  New entry mode header  -->
+                    <Label FontAttributes="Bold" FontSize="18"
+                           IsVisible="{Binding IsEditMode, Converter={StaticResource InverseBoolConverter}}"
+                           Text="{Binding CurrentSeriesNumber, StringFormat='Serie {0}'}"
+                           TextColor="White" VerticalOptions="Center" />
+                    <!--  Edit mode header  -->
+                    <Label FontAttributes="Bold" FontSize="18"
+                           IsVisible="{Binding IsEditMode}"
+                           Text="{Binding EditingSeriesNumber, StringFormat='Redigera serie {0}'}"
+                           TextColor="{StaticResource Warning}" VerticalOptions="Center" />
+                    <Button Grid.Column="1" Padding="0" BackgroundColor="#4b5563"
+                            Command="{Binding CloseScoreEntryCommand}"
+                            CornerRadius="18" FontAttributes="Bold" FontSize="14"
+                            HeightRequest="36" Text="X" TextColor="White"
+                            WidthRequest="36" />
+                </Grid>
+
+                <!--  Error Message in Score Entry Panel  -->
+                <Border Padding="8" BackgroundColor="#FEE2E2"
+                        IsVisible="{Binding HasError}"
+                        Stroke="{StaticResource Danger}"
+                        StrokeShape="RoundRectangle 8">
+                    <HorizontalStackLayout Spacing="6">
+                        <Label FontAttributes="Bold" FontSize="14" Text="!"
+                               TextColor="{StaticResource Danger}"
+                               VerticalOptions="Center" />
+                        <Label FontSize="13" LineBreakMode="WordWrap"
+                               Text="{Binding ErrorMessage}"
+                               TextColor="{StaticResource Danger}"
+                               VerticalOptions="Center" />
+                    </HorizontalStackLayout>
+                </Border>
+
+                <!--  Target Photo Display (visible in edit mode when photo exists)  -->
+                <Border Padding="8" BackgroundColor="#1f2937"
+                        IsVisible="{Binding EditingSeriesPhotoUrl, Converter={StaticResource StringToBoolConverter}}"
+                        Stroke="#4b5563" StrokeShape="RoundRectangle 8">
+                    <VerticalStackLayout Spacing="8">
+                        <Label Text="📷 Tavelfoto" FontSize="12" TextColor="#9ca3af" />
+                        <Image Source="{Binding EditingSeriesPhotoUrl}"
+                               Aspect="AspectFit"
+                               HeightRequest="150"
+                               HorizontalOptions="Center" />
+                    </VerticalStackLayout>
+                </Border>
+
+                <!--  Shot Circles (5 tappable circles)  -->
+                <HorizontalStackLayout HorizontalOptions="Center" Spacing="8">
+                    <!--  Shot 1  -->
+                    <Border BackgroundColor="#4b5563" HeightRequest="48"
+                            Stroke="{Binding IsShot1Selected, Converter={StaticResource BoolToTabTextColorConverter}}"
+                            StrokeShape="RoundRectangle 24"
+                            StrokeThickness="{Binding IsShot1Selected, Converter={StaticResource BoolToStrokeThicknessConverter}}"
+                            WidthRequest="48">
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding SelectShotCommand}">
+                                <TapGestureRecognizer.CommandParameter>
+                                    <x:Int32>0</x:Int32>
+                                </TapGestureRecognizer.CommandParameter>
+                            </TapGestureRecognizer>
+                        </Border.GestureRecognizers>
+                        <Label FontAttributes="Bold" FontSize="16" HorizontalOptions="Center"
+                               Text="{Binding Shot1}"
+                               TextColor="White" VerticalOptions="Center" />
+                    </Border>
+                    <!--  Shot 2  -->
+                    <Border BackgroundColor="#4b5563" HeightRequest="48"
+                            Stroke="{Binding IsShot2Selected, Converter={StaticResource BoolToTabTextColorConverter}}"
+                            StrokeShape="RoundRectangle 24"
+                            StrokeThickness="{Binding IsShot2Selected, Converter={StaticResource BoolToStrokeThicknessConverter}}"
+                            WidthRequest="48">
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding SelectShotCommand}">
+                                <TapGestureRecognizer.CommandParameter>
+                                    <x:Int32>1</x:Int32>
+                                </TapGestureRecognizer.CommandParameter>
+                            </TapGestureRecognizer>
+                        </Border.GestureRecognizers>
+                        <Label FontAttributes="Bold" FontSize="16" HorizontalOptions="Center"
+                               Text="{Binding Shot2}"
+                               TextColor="White" VerticalOptions="Center" />
+                    </Border>
+                    <!--  Shot 3  -->
+                    <Border BackgroundColor="#4b5563" HeightRequest="48"
+                            Stroke="{Binding IsShot3Selected, Converter={StaticResource BoolToTabTextColorConverter}}"
+                            StrokeShape="RoundRectangle 24"
+                            StrokeThickness="{Binding IsShot3Selected, Converter={StaticResource BoolToStrokeThicknessConverter}}"
+                            WidthRequest="48">
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding SelectShotCommand}">
+                                <TapGestureRecognizer.CommandParameter>
+                                    <x:Int32>2</x:Int32>
+                                </TapGestureRecognizer.CommandParameter>
+                            </TapGestureRecognizer>
+                        </Border.GestureRecognizers>
+                        <Label FontAttributes="Bold" FontSize="16" HorizontalOptions="Center"
+                               Text="{Binding Shot3}"
+                               TextColor="White" VerticalOptions="Center" />
+                    </Border>
+                    <!--  Shot 4  -->
+                    <Border BackgroundColor="#4b5563" HeightRequest="48"
+                            Stroke="{Binding IsShot4Selected, Converter={StaticResource BoolToTabTextColorConverter}}"
+                            StrokeShape="RoundRectangle 24"
+                            StrokeThickness="{Binding IsShot4Selected, Converter={StaticResource BoolToStrokeThicknessConverter}}"
+                            WidthRequest="48">
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding SelectShotCommand}">
+                                <TapGestureRecognizer.CommandParameter>
+                                    <x:Int32>3</x:Int32>
+                                </TapGestureRecognizer.CommandParameter>
+                            </TapGestureRecognizer>
+                        </Border.GestureRecognizers>
+                        <Label FontAttributes="Bold" FontSize="16" HorizontalOptions="Center"
+                               Text="{Binding Shot4}"
+                               TextColor="White" VerticalOptions="Center" />
+                    </Border>
+                    <!--  Shot 5  -->
+                    <Border BackgroundColor="#4b5563" HeightRequest="48"
+                            Stroke="{Binding IsShot5Selected, Converter={StaticResource BoolToTabTextColorConverter}}"
+                            StrokeShape="RoundRectangle 24"
+                            StrokeThickness="{Binding IsShot5Selected, Converter={StaticResource BoolToStrokeThicknessConverter}}"
+                            WidthRequest="48">
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding SelectShotCommand}">
+                                <TapGestureRecognizer.CommandParameter>
+                                    <x:Int32>4</x:Int32>
+                                </TapGestureRecognizer.CommandParameter>
+                            </TapGestureRecognizer>
+                        </Border.GestureRecognizers>
+                        <Label FontAttributes="Bold" FontSize="16" HorizontalOptions="Center"
+                               Text="{Binding Shot5}"
+                               TextColor="White" VerticalOptions="Center" />
+                    </Border>
+                </HorizontalStackLayout>
+
+                <!--  Series Total and X Count  -->
+                <HorizontalStackLayout HorizontalOptions="Center" Spacing="16">
+                    <Label FontAttributes="Bold" FontSize="16"
+                           Text="{Binding SeriesTotal, StringFormat='Totalt: {0}p'}"
+                           TextColor="{StaticResource Primary}" />
+                    <Label FontSize="16"
+                           Text="{Binding SeriesXCount, StringFormat='X: {0}'}"
+                           TextColor="#9ca3af" />
+                </HorizontalStackLayout>
+
+                <!--  Number Pad (4x3 grid matching website: X,10,9,8 / 7,6,5,4 / 3,2,1,0)  -->
+                <Grid ColumnDefinitions="*,*,*,*" ColumnSpacing="6" RowDefinitions="Auto,Auto,Auto"
+                      RowSpacing="6">
+                    <!--  Row 1: X, 10, 9, 8  -->
+                    <Button Grid.Row="0" Grid.Column="0"
+                            BackgroundColor="{StaticResource Success}"
+                            Command="{Binding SetXCommand}"
+                            CornerRadius="8" FontAttributes="Bold" FontSize="22"
+                            HeightRequest="52" Text="X" TextColor="White" />
+                    <Button Grid.Row="0" Grid.Column="1"
+                            BackgroundColor="{StaticResource Success}"
+                            Command="{Binding SetScoreCommand}"
+                            CommandParameter="10" CornerRadius="8" FontAttributes="Bold"
+                            FontSize="18" HeightRequest="52" Text="10"
+                            TextColor="White" />
+                    <Button Grid.Row="0" Grid.Column="2" BackgroundColor="#4b5563"
+                            Command="{Binding SetScoreCommand}"
+                            CommandParameter="9" CornerRadius="8" FontAttributes="Bold"
+                            FontSize="18" HeightRequest="52" Text="9"
+                            TextColor="White" />
+                    <Button Grid.Row="0" Grid.Column="3" BackgroundColor="#4b5563"
+                            Command="{Binding SetScoreCommand}"
+                            CommandParameter="8" CornerRadius="8" FontAttributes="Bold"
+                            FontSize="18" HeightRequest="52" Text="8"
+                            TextColor="White" />
+
+                    <!--  Row 2: 7, 6, 5, 4  -->
+                    <Button Grid.Row="1" Grid.Column="0" BackgroundColor="#4b5563"
+                            Command="{Binding SetScoreCommand}"
+                            CommandParameter="7" CornerRadius="8" FontAttributes="Bold"
+                            FontSize="18" HeightRequest="52" Text="7"
+                            TextColor="White" />
+                    <Button Grid.Row="1" Grid.Column="1" BackgroundColor="#4b5563"
+                            Command="{Binding SetScoreCommand}"
+                            CommandParameter="6" CornerRadius="8" FontAttributes="Bold"
+                            FontSize="18" HeightRequest="52" Text="6"
+                            TextColor="White" />
+                    <Button Grid.Row="1" Grid.Column="2" BackgroundColor="#4b5563"
+                            Command="{Binding SetScoreCommand}"
+                            CommandParameter="5" CornerRadius="8" FontAttributes="Bold"
+                            FontSize="18" HeightRequest="52" Text="5"
+                            TextColor="White" />
+                    <Button Grid.Row="1" Grid.Column="3" BackgroundColor="#4b5563"
+                            Command="{Binding SetScoreCommand}"
+                            CommandParameter="4" CornerRadius="8" FontAttributes="Bold"
+                            FontSize="18" HeightRequest="52" Text="4"
+                            TextColor="White" />
+
+                    <!--  Row 3: 3, 2, 1, 0  -->
+                    <Button Grid.Row="2" Grid.Column="0" BackgroundColor="#4b5563"
+                            Command="{Binding SetScoreCommand}"
+                            CommandParameter="3" CornerRadius="8" FontAttributes="Bold"
+                            FontSize="18" HeightRequest="52" Text="3"
+                            TextColor="White" />
+                    <Button Grid.Row="2" Grid.Column="1" BackgroundColor="#4b5563"
+                            Command="{Binding SetScoreCommand}"
+                            CommandParameter="2" CornerRadius="8" FontAttributes="Bold"
+                            FontSize="18" HeightRequest="52" Text="2"
+                            TextColor="White" />
+                    <Button Grid.Row="2" Grid.Column="2" BackgroundColor="#4b5563"
+                            Command="{Binding SetScoreCommand}"
+                            CommandParameter="1" CornerRadius="8" FontAttributes="Bold"
+                            FontSize="18" HeightRequest="52" Text="1"
+                            TextColor="White" />
+                    <Button Grid.Row="2" Grid.Column="3" BackgroundColor="#4b5563"
+                            Command="{Binding SetScoreCommand}"
+                            CommandParameter="0" CornerRadius="8" FontAttributes="Bold"
+                            FontSize="18" HeightRequest="52" Text="0"
+                            TextColor="White" />
+                </Grid>
+
+                <!--  Action Buttons: C (clear), Spara (save only), Spara+📷 (save + photo)  -->
+                <Grid ColumnDefinitions="Auto,*,*" ColumnSpacing="8" IsVisible="{Binding IsUploadingPhoto, Converter={StaticResource InverseBoolConverter}}">
+                    <!--  C = Clear current shot  -->
+                    <Button Grid.Column="0"
+                            BackgroundColor="{StaticResource Warning}"
+                            Command="{Binding ClearCurrentShotCommand}"
+                            CornerRadius="8" FontAttributes="Bold" FontSize="18"
+                            HeightRequest="52" Text="C" TextColor="White"
+                            WidthRequest="52" />
+                    <!--  Spara = Save score only  -->
+                    <Button Grid.Column="1"
+                            BackgroundColor="#4b5563"
+                            Command="{Binding SaveScoreOnlyCommand}"
+                            CornerRadius="8" FontAttributes="Bold" FontSize="14"
+                            HeightRequest="52"
+                            IsEnabled="{Binding IsNotBusy}"
+                            Text="Spara" TextColor="White" />
+                    <!--  Spara+📷 = Save score and capture photo (disabled when editing series with existing photo)  -->
+                    <Button Grid.Column="2"
+                            BackgroundColor="{StaticResource Primary}"
+                            Command="{Binding SaveScoreWithPhotoCommand}"
+                            CornerRadius="8" FontAttributes="Bold" FontSize="12"
+                            HeightRequest="52"
+                            IsEnabled="{Binding CanCaptureNewPhoto}"
+                            Text="Spara + 📷" TextColor="White" />
+                </Grid>
+
+                <!--  Upload progress indicator  -->
+                <VerticalStackLayout IsVisible="{Binding IsUploadingPhoto}" Spacing="8" HorizontalOptions="Center">
+                    <ActivityIndicator IsRunning="{Binding IsUploadingPhoto}"
+                                       Color="{StaticResource Primary}"
+                                       HeightRequest="32" WidthRequest="32" />
+                    <Label Text="Sparar och laddar upp bild..."
+                           FontSize="12"
+                           TextColor="#9ca3af"
+                           HorizontalOptions="Center" />
+                </VerticalStackLayout>
+
+            </VerticalStackLayout>
+        </Border>
+
+        <!--  Spectators Modal (Slide up from bottom)  -->
+        <Border Grid.Row="0" Padding="16,16,16,20"
+                BackgroundColor="#374151"
+                IsVisible="{Binding IsSpectatorsModalOpen}"
+                Stroke="Transparent" StrokeShape="RoundRectangle 20,20,0,0" VerticalOptions="End">
+            <Border.Shadow>
+                <Shadow Brush="Black" Opacity="0.2" Radius="12"
+                        Offset="0,-4" />
+            </Border.Shadow>
+
+            <VerticalStackLayout Spacing="12">
+
+                <!--  Modal Header with Close Button  -->
+                <Grid ColumnDefinitions="*,Auto">
+                    <HorizontalStackLayout Spacing="8">
+                        <Label FontSize="18" Text="👁️" VerticalOptions="Center" />
+                        <Label FontAttributes="Bold" FontSize="18"
+                               Text="Tittar på matchen"
+                               TextColor="White" VerticalOptions="Center" />
+                        <Label FontSize="14"
+                               Text="{Binding Spectators.Count, StringFormat='({0})'}"
+                               TextColor="#9ca3af" VerticalOptions="Center" />
+                    </HorizontalStackLayout>
+                    <Button Grid.Column="1" Padding="0" BackgroundColor="#4b5563"
+                            Command="{Binding CloseSpectatorsModalCommand}"
+                            CornerRadius="18" FontAttributes="Bold" FontSize="14"
+                            HeightRequest="36" Text="X" TextColor="White"
+                            WidthRequest="36" />
+                </Grid>
+
+                <!--  Spectators List  -->
+                <CollectionView ItemsSource="{Binding Spectators}" MaximumHeightRequest="300">
+                    <CollectionView.ItemTemplate>
+                        <DataTemplate x:DataType="services:MatchSpectator">
+                            <Border Margin="0,4" Padding="12,10"
+                                    BackgroundColor="#4b5563"
+                                    Stroke="Transparent" StrokeShape="RoundRectangle 8">
+                                <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+                                    <!--  Avatar  -->
+                                    <Grid HeightRequest="44" WidthRequest="44">
+                                        <!--  Profile Picture (if available)  -->
+                                        <Border HeightRequest="44"
+                                                IsVisible="{Binding ProfilePictureUrl, Converter={StaticResource StringToBoolConverter}}"
+                                                Stroke="#6b7280" StrokeShape="RoundRectangle 22" StrokeThickness="2"
+                                                WidthRequest="44">
+                                            <Border.Clip>
+                                                <EllipseGeometry Center="22,22" RadiusX="22" RadiusY="22" />
+                                            </Border.Clip>
+                                            <Image Aspect="AspectFill" HeightRequest="44"
+                                                   Source="{Binding ProfilePictureUrl}"
+                                                   WidthRequest="44" />
+                                        </Border>
+                                        <!--  Initials Fallback  -->
+                                        <Border BackgroundColor="{StaticResource Primary}" HeightRequest="44"
+                                                IsVisible="{Binding ProfilePictureUrl, Converter={StaticResource InvertedStringToBoolConverter}}"
+                                                Stroke="#6b7280" StrokeShape="RoundRectangle 22" StrokeThickness="2"
+                                                WidthRequest="44">
+                                            <Label FontAttributes="Bold" FontSize="14" HorizontalOptions="Center"
+                                                   Text="{Binding Initials}"
+                                                   TextColor="White" VerticalOptions="Center" />
+                                        </Border>
+                                    </Grid>
+                                    <!--  Name and Club  -->
+                                    <VerticalStackLayout Grid.Column="1" VerticalOptions="Center">
+                                        <Label FontAttributes="Bold" FontSize="15"
+                                               Text="{Binding Name}"
+                                               TextColor="White" />
+                                        <Label FontSize="12"
+                                               IsVisible="{Binding ClubName, Converter={StaticResource StringToBoolConverter}}"
+                                               Text="{Binding ClubName}"
+                                               TextColor="#9ca3af" />
+                                    </VerticalStackLayout>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </CollectionView.ItemTemplate>
+                    <CollectionView.EmptyView>
+                        <VerticalStackLayout Padding="20">
+                            <Label FontSize="14" HorizontalOptions="Center"
+                                   Text="Inga tittare just nu"
+                                   TextColor="#9ca3af" />
+                        </VerticalStackLayout>
+                    </CollectionView.EmptyView>
+                </CollectionView>
+
+            </VerticalStackLayout>
+        </Border>
+
+        <!--  Photo Viewer Modal (Full screen overlay)  -->
+        <Grid Grid.Row="0" BackgroundColor="#CC000000"
+              IsVisible="{Binding IsPhotoViewerOpen}">
+            <Border Margin="16" Padding="0"
+                    BackgroundColor="#374151"
+                    HorizontalOptions="Fill" VerticalOptions="Center"
+                    Stroke="Transparent" StrokeShape="RoundRectangle 16"
+                    MaximumHeightRequest="600">
+                <Border.Shadow>
+                    <Shadow Brush="Black" Opacity="0.3" Radius="16"
+                            Offset="0,8" />
+                </Border.Shadow>
+
+                <VerticalStackLayout Spacing="0">
+
+                    <!--  Modal Header  -->
+                    <Grid Padding="16,12" ColumnDefinitions="*,Auto" BackgroundColor="#4b5563">
+                        <VerticalStackLayout>
+                            <Label FontAttributes="Bold" FontSize="16"
+                                   Text="{Binding ViewingPhotoShooterName}"
+                                   TextColor="White" />
+                            <Label FontSize="12"
+                                   Text="{Binding ViewingPhotoSeriesNumber, StringFormat='Serie {0}'}"
+                                   TextColor="#9ca3af" />
+                        </VerticalStackLayout>
+                        <Button Grid.Column="1" Padding="0" BackgroundColor="#6b7280"
+                                Command="{Binding ClosePhotoViewerCommand}"
+                                CornerRadius="18" FontAttributes="Bold" FontSize="14"
+                                HeightRequest="36" Text="X" TextColor="White"
+                                WidthRequest="36" />
+                    </Grid>
+
+                    <!--  Photo  -->
+                    <Image Source="{Binding ViewingPhotoUrl}"
+                           Aspect="AspectFit"
+                           HeightRequest="300"
+                           HorizontalOptions="Fill"
+                           BackgroundColor="#1f2937" />
+
+                    <!--  Reactions Section  -->
+                    <VerticalStackLayout Padding="16" Spacing="12" BackgroundColor="#374151">
+
+                        <!--  Current Reactions Display  -->
+                        <HorizontalStackLayout Spacing="12" HorizontalOptions="Center"
+                                               BindableLayout.ItemsSource="{Binding ViewingPhotoReactions}"
+                                               IsVisible="{Binding ViewingPhotoReactions.Count, Converter={StaticResource IntToBoolConverter}}">
+                            <BindableLayout.ItemTemplate>
+                                <DataTemplate x:DataType="models:PhotoReaction">
+                                    <VerticalStackLayout Spacing="2">
+                                        <Label Text="{Binding Emoji}" FontSize="18" HorizontalOptions="Center" />
+                                        <Label Text="{Binding FirstName}" FontSize="10" TextColor="#9ca3af" HorizontalOptions="Center" />
+                                    </VerticalStackLayout>
+                                </DataTemplate>
+                            </BindableLayout.ItemTemplate>
+                        </HorizontalStackLayout>
+
+                        <!--  Reaction Summary (emoji counts)  -->
+                        <HorizontalStackLayout Spacing="16" HorizontalOptions="Center">
+                            <!--  Show reaction counts grouped by emoji  -->
+                            <Label FontSize="14" TextColor="#9ca3af"
+                                   IsVisible="{Binding ViewingPhotoReactions.Count, Converter={StaticResource IntToBoolConverter}}">
+                                <Label.Text>
+                                    <MultiBinding StringFormat="{}{0} reaktioner">
+                                        <Binding Path="ViewingPhotoReactions.Count" />
+                                    </MultiBinding>
+                                </Label.Text>
+                            </Label>
+                            <Label FontSize="14" TextColor="#9ca3af"
+                                   IsVisible="{Binding ViewingPhotoReactions.Count, Converter={StaticResource InverseBoolConverter}}"
+                                   Text="Inga reaktioner ännu" />
+                        </HorizontalStackLayout>
+
+                        <!--  Reaction Buttons (hidden for own photos)  -->
+                        <HorizontalStackLayout Spacing="8" HorizontalOptions="Center"
+                                               IsVisible="{Binding IsCurrentUserPhotoOwner, Converter={StaticResource InverseBoolConverter}}">
+                            <!--  Heart  -->
+                            <Border Padding="12,8"
+                                    BackgroundColor="{Binding CurrentUserReaction, Converter={StaticResource ReactionSelectedConverter}, ConverterParameter='❤️'}"
+                                    Stroke="#4b5563" StrokeShape="RoundRectangle 8" StrokeThickness="1">
+                                <Border.GestureRecognizers>
+                                    <TapGestureRecognizer Command="{Binding AddReactionCommand}" CommandParameter="❤️" />
+                                </Border.GestureRecognizers>
+                                <Label Text="❤️" FontSize="20" />
+                            </Border>
+                            <!--  Thumbs Up  -->
+                            <Border Padding="12,8"
+                                    BackgroundColor="{Binding CurrentUserReaction, Converter={StaticResource ReactionSelectedConverter}, ConverterParameter='👍'}"
+                                    Stroke="#4b5563" StrokeShape="RoundRectangle 8" StrokeThickness="1">
+                                <Border.GestureRecognizers>
+                                    <TapGestureRecognizer Command="{Binding AddReactionCommand}" CommandParameter="👍" />
+                                </Border.GestureRecognizers>
+                                <Label Text="👍" FontSize="20" />
+                            </Border>
+                            <!--  Fire  -->
+                            <Border Padding="12,8"
+                                    BackgroundColor="{Binding CurrentUserReaction, Converter={StaticResource ReactionSelectedConverter}, ConverterParameter='🔥'}"
+                                    Stroke="#4b5563" StrokeShape="RoundRectangle 8" StrokeThickness="1">
+                                <Border.GestureRecognizers>
+                                    <TapGestureRecognizer Command="{Binding AddReactionCommand}" CommandParameter="🔥" />
+                                </Border.GestureRecognizers>
+                                <Label Text="🔥" FontSize="20" />
+                            </Border>
+                            <!--  Crying  -->
+                            <Border Padding="12,8"
+                                    BackgroundColor="{Binding CurrentUserReaction, Converter={StaticResource ReactionSelectedConverter}, ConverterParameter='😢'}"
+                                    Stroke="#4b5563" StrokeShape="RoundRectangle 8" StrokeThickness="1">
+                                <Border.GestureRecognizers>
+                                    <TapGestureRecognizer Command="{Binding AddReactionCommand}" CommandParameter="😢" />
+                                </Border.GestureRecognizers>
+                                <Label Text="😢" FontSize="20" />
+                            </Border>
+                            <!--  Bullseye  -->
+                            <Border Padding="12,8"
+                                    BackgroundColor="{Binding CurrentUserReaction, Converter={StaticResource ReactionSelectedConverter}, ConverterParameter='🎯'}"
+                                    Stroke="#4b5563" StrokeShape="RoundRectangle 8" StrokeThickness="1">
+                                <Border.GestureRecognizers>
+                                    <TapGestureRecognizer Command="{Binding AddReactionCommand}" CommandParameter="🎯" />
+                                </Border.GestureRecognizers>
+                                <Label Text="🎯" FontSize="20" />
+                            </Border>
+                        </HorizontalStackLayout>
+
+                        <!--  Sending Reaction Indicator  -->
+                        <ActivityIndicator IsRunning="{Binding IsSendingReaction}"
+                                           IsVisible="{Binding IsSendingReaction}"
+                                           HeightRequest="24" WidthRequest="24"
+                                           HorizontalOptions="Center"
+                                           Color="{StaticResource Primary}" />
+
+                        <!--  Edit Button (only for owner)  -->
+                        <Button Text="Redigera"
+                                BackgroundColor="{StaticResource Warning}"
+                                TextColor="White"
+                                CornerRadius="8"
+                                HeightRequest="44"
+                                FontAttributes="Bold"
+                                HorizontalOptions="Fill"
+                                IsVisible="{Binding IsCurrentUserPhotoOwner}"
+                                Command="{Binding EditFromPhotoViewerCommand}" />
+
+                    </VerticalStackLayout>
+
+                </VerticalStackLayout>
+            </Border>
+        </Grid>
+
+        <!--  Loading Indicator  -->
+        <ActivityIndicator Grid.Row="0" HorizontalOptions="Center"
+                           IsRunning="{Binding IsBusy}"
+                           IsVisible="{Binding IsBusy}"
+                           VerticalOptions="Center"
+                           Color="{StaticResource Primary}" />
+
+    </Grid>
+
+</ContentPage>

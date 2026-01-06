@@ -1,0 +1,97 @@
+@{
+    var clubId = ViewBag.clubId as int? ?? 0;
+    var clubName = ViewBag.clubName as string ?? "Club";
+    var description = ViewBag.description as string ?? "";
+    var logo = ViewBag.logo as IPublishedContent;
+    var bannerImage = ViewBag.bannerImage as IPublishedContent;
+    var isClubAdmin = ViewBag.isClubAdmin as bool? ?? false;
+}
+
+<div class="club-header">
+    @if (bannerImage != null)
+    {
+        <div class="club-banner" style="background-image: url('@bannerImage.Url()'); background-size: cover; background-position: center; height: 300px;">
+        </div>
+    }
+    else
+    {
+        <div class="club-banner bg-gradient" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); height: 200px;">
+        </div>
+    }
+
+    <div class="container position-relative" style="margin-top: -60px;">
+        <div class="row align-items-end">
+            <div class="col-auto">
+                @if (logo != null)
+                {
+                    <img src="@logo.Url()" alt="@clubName Logo" class="club-logo rounded shadow" style="width: 120px; height: 120px; object-fit: cover;">
+                }
+                else
+                {
+                    <div class="club-logo-placeholder rounded shadow d-flex align-items-center justify-content-center" style="width: 120px; height: 120px;">
+                        <i class="bi bi-shield-fill text-primary" style="font-size: 3rem;"></i>
+                    </div>
+                }
+            </div>
+            <div class="col flex-grow-1 ms-3 mb-3">
+                <div class="club-info-overlay">
+                    <h1 class="mb-1 club-name-text">@clubName</h1>
+                    @if (!string.IsNullOrEmpty(description))
+                    {
+                        <p class="mb-0 club-description-text">@description</p>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+<style>
+.club-header {
+    margin-bottom: 2rem;
+    background: var(--bs-body-bg);
+}
+
+.club-banner {
+    position: relative;
+}
+
+.club-banner::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.2);
+}
+
+.club-logo {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
+    background: var(--bs-body-bg);
+    border: 3px solid var(--bs-body-bg);
+}
+
+.club-logo-placeholder {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    background: var(--bs-body-bg);
+    border: 3px solid var(--bs-body-bg);
+}
+
+.club-info-overlay {
+    background: rgba(0, 0, 0, 0.6);
+    padding: 15px 20px;
+    border-radius: 8px;
+}
+
+.club-name-text {
+    color: #ffffff;
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
+}
+
+.club-description-text {
+    color: #f0f0f0;
+    text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.8);
+}
+</style>

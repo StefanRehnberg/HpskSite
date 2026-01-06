@@ -1,0 +1,229 @@
+@*
+    Training Match Join Partial
+    Form for joining an existing training match
+*@
+
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="card border-primary">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="bi bi-box-arrow-in-right me-2"></i>Gå med i match</h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted mb-3">Ange matchkoden som du fått från den som skapade matchen.</p>
+
+                <form id="joinMatchForm" onsubmit="handleJoinMatch(event)">
+                    <div class="mb-3">
+                        <label for="joinMatchCode" class="form-label">Matchkod</label>
+                        <input type="text" class="form-control form-control-lg text-center text-uppercase light-placeholder"
+                               id="joinMatchCode" placeholder="ABC123" maxlength="6"
+                               style="letter-spacing: 0.3em; font-weight: bold;"
+                               oninput="this.value = this.value.toUpperCase(); validateJoinButton()">
+                    </div>
+
+                    <div class="row g-2">
+                        <div class="col-6">
+                            <button type="button" class="btn btn-outline-primary w-100" onclick="openQrScanner()">
+                                <i class="bi bi-qr-code-scan me-1"></i> Skanna QR
+                            </button>
+                        </div>
+                        <div class="col-6">
+                            <button type="submit" class="btn btn-primary w-100" id="joinMatchBtn" disabled>
+                                <i class="bi bi-arrow-right-circle me-1"></i> Gå med
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- QR Scanner Modal -->
+<div class="modal fade" id="qrScannerModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-fullscreen-sm-down modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title"><i class="bi bi-qr-code-scan me-2"></i>Skanna QR-kod</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body p-0">
+                <!-- Camera preview -->
+                <div id="qrReaderContainer" style="width: 100%; min-height: 300px;">
+                    <div id="qrReader" style="width: 100%;"></div>
+                </div>
+
+                <!-- Status messages -->
+                <div class="p-3">
+                    <div id="qrScanStatus" class="text-center text-muted">
+                        <i class="bi bi-camera me-1"></i> Rikta kameran mot QR-koden
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- html5-qrcode library -->
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+
+<script>
+let qrScannerModal = null;
+let html5QrCode = null;
+
+function validateJoinButton() {
+    const matchCode = document.getElementById('joinMatchCode').value.trim();
+    const joinBtn = document.getElementById('joinMatchBtn');
+
+    // Enable button if at least 4 characters entered
+    joinBtn.disabled = matchCode.length < 4;
+}
+
+function handleJoinMatch(e) {
+    e.preventDefault();
+
+    const matchCode = document.getElementById('joinMatchCode').value.trim().toUpperCase();
+
+    if (!matchCode || matchCode.length < 4) {
+        alert('Ange en giltig matchkod');
+        return;
+    }
+
+    joinMatchByCode(matchCode);
+}
+
+function openQrScanner() {
+    if (!qrScannerModal) {
+        qrScannerModal = new bootstrap.Modal(document.getElementById('qrScannerModal'));
+
+        // Start scanner when modal opens
+        document.getElementById('qrScannerModal').addEventListener('shown.bs.modal', startQrScanner);
+
+        // Stop scanner when modal closes
+        document.getElementById('qrScannerModal').addEventListener('hidden.bs.modal', stopQrScanner);
+    }
+
+    qrScannerModal.show();
+}
+
+function startQrScanner() {
+    if (html5QrCode) {
+        return; // Already running
+    }
+
+    html5QrCode = new Html5Qrcode("qrReader");
+
+    const config = {
+        fps: 10,
+        qrbox: { width: 250, height: 250 },
+        aspectRatio: 1.0
+    };
+
+    html5QrCode.start(
+        { facingMode: "environment" }, // Use back camera
+        config,
+        onQrCodeScanned,
+        onQrCodeScanError
+    ).catch(err => {
+        console.error("Error starting QR scanner:", err);
+        document.getElementById('qrScanStatus').innerHTML =
+            '<i class="bi bi-exclamation-triangle text-danger me-1"></i> Kunde inte starta kameran. Kontrollera att du gett tillåtelse.';
+    });
+}
+
+function stopQrScanner() {
+    if (html5QrCode) {
+        html5QrCode.stop().then(() => {
+            html5QrCode = null;
+        }).catch(err => {
+            console.error("Error stopping QR scanner:", err);
+            html5QrCode = null;
+        });
+    }
+}
+
+function onQrCodeScanned(decodedText, decodedResult) {
+    // Update status
+    document.getElementById('qrScanStatus').innerHTML =
+        '<i class="bi bi-check-circle text-success me-1"></i> QR-kod hittad! Ansluter...';
+
+    // Stop scanner
+    stopQrScanner();
+
+    // Close modal
+    qrScannerModal.hide();
+
+    // Extract match code from URL
+    let matchCode = extractMatchCodeFromUrl(decodedText);
+
+    if (matchCode) {
+        // Join the match
+        joinMatchByCode(matchCode);
+    } else {
+        alert('Ogiltig QR-kod. Kontrollera att du skannar rätt kod.');
+    }
+}
+
+function onQrCodeScanError(errorMessage) {
+    // Ignore scan errors (they happen continuously while scanning)
+    // We only show success messages
+}
+
+function extractMatchCodeFromUrl(url) {
+    try {
+        // Check if it's a direct match code (6 characters)
+        if (/^[A-Z0-9]{6}$/.test(url)) {
+            return url;
+        }
+
+        // Try to parse as URL
+        const urlObj = new URL(url);
+        const joinParam = urlObj.searchParams.get('join');
+
+        if (joinParam && /^[A-Z0-9]{6}$/.test(joinParam)) {
+            return joinParam.toUpperCase();
+        }
+
+        return null;
+    } catch (e) {
+        // Not a valid URL, check if it's a plain match code
+        const cleaned = url.trim().toUpperCase();
+        if (/^[A-Z0-9]{6}$/.test(cleaned)) {
+            return cleaned;
+        }
+        return null;
+    }
+}
+</script>
+
+<style>
+/* Lighter placeholder text */
+.light-placeholder::placeholder {
+    opacity: 0.3;
+    color: #6c757d;
+}
+
+#qrReader video {
+    width: 100% !important;
+    height: auto !important;
+    border-radius: 0;
+}
+
+#qrReader {
+    border: none !important;
+}
+
+#qrReaderContainer {
+    background-color: #000;
+}
+
+/* Mobile fullscreen adjustments */
+@@media (max-width: 575.98px) {
+    .modal-fullscreen-sm-down #qrReaderContainer {
+        min-height: 60vh;
+    }
+}
+</style>

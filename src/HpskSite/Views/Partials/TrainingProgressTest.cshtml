@@ -1,0 +1,169 @@
+@using HpskSite.Models.ViewModels.Training
+@model MemberProgress
+
+@{
+    var allLevels = TrainingDefinitions.GetAllLevels();
+    var currentLevel = allLevels.FirstOrDefault(l => l.LevelId == Model.CurrentLevel);
+}
+
+<div class="training-progress-card">
+    <div class="header-section">
+        <h4 class="level-title">@(currentLevel?.Badge ?? "🎯") @(currentLevel?.Name ?? "Level " + Model.CurrentLevel)</h4>
+        <div class="current-info">
+            <p>Nuvarande steg: <strong>@Model.CurrentStep</strong></p>
+            <p>Slutförda steg: <strong>@Model.CompletedSteps.Count</strong></p>
+        </div>
+    </div>
+
+    @if (Model.CompletedSteps.Count > 0)
+    {
+        <div class="completions-section">
+            <h5>Senaste Slutförda Steg</h5>
+            <div class="completion-list">
+                @for (int i = 0; i < Math.Min(3, Model.CompletedSteps.Count); i++)
+                {
+                    var step = Model.CompletedSteps[Model.CompletedSteps.Count - 1 - i];
+                    var stepLevel = allLevels.FirstOrDefault(l => l.LevelId == step.LevelId);
+                    var stepLevelName = stepLevel?.Name ?? "Level " + step.LevelId;
+                    var stepLevelBadge = stepLevel?.Badge ?? "🎯";
+
+                    <div class="completion-item">
+                        <div class="completion-badge">@stepLevelBadge</div>
+                        <div class="step-info">
+                            <strong>@stepLevelName - Steg @step.StepNumber</strong>
+                            <br>
+                            <small>@step.CompletedDate.ToString("yyyy-MM-dd")</small>
+                            @if (!string.IsNullOrEmpty(step.InstructorName))
+                            {
+                                <span> • @step.InstructorName</span>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+<style>
+    .training-progress-card {
+        background: white;
+        border: 1px solid #e9ecef;
+        border-radius: 12px;
+        padding: 24px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        border-left: 4px solid #28a745;
+    }
+
+    .level-title {
+        color: #2c3e50;
+        margin-bottom: 16px;
+        font-size: 1.5em;
+    }
+
+    .current-info p {
+        margin-bottom: 8px;
+        color: #495057;
+    }
+
+    .completions-section {
+        margin-top: 24px;
+        padding-top: 24px;
+        border-top: 1px solid #e9ecef;
+    }
+
+    .completions-section h5 {
+        color: #495057;
+        margin-bottom: 16px;
+    }
+
+    .completion-item {
+        background: #f8f9fa;
+        border-radius: 8px;
+        padding: 12px;
+        margin-bottom: 8px;
+        border-left: 3px solid #28a745;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+
+    .completion-badge {
+        font-size: 24px;
+        min-width: 40px;
+        text-align: center;
+    }
+
+    .step-info {
+        color: #495057;
+    }
+
+    .step-info strong {
+        color: #2c3e50;
+    }
+
+    .step-info small {
+        color: #6c757d;
+    }
+
+    /* Enhanced current step display */
+    .current-step-display {
+        background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+        border: 1px solid #dee2e6;
+        border-radius: 12px;
+        padding: 16px;
+        border-left: 4px solid #007bff;
+    }
+
+    .step-title {
+        color: #2c3e50;
+        font-size: 1.1em;
+        line-height: 1.4;
+        margin-bottom: 8px;
+    }
+
+    .step-number-badge {
+        background: linear-gradient(135deg, #007bff, #0056b3);
+        color: white;
+        border-radius: 50%;
+        width: 28px;
+        height: 28px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        font-size: 0.9em;
+        margin-right: 8px;
+        box-shadow: 0 2px 4px rgba(0,123,255,0.3);
+    }
+
+    .competition-badge {
+        background: linear-gradient(135deg, #ffc107, #e0a800);
+        color: #212529;
+        padding: 6px 12px;
+        border-radius: 6px;
+        font-size: 0.85em;
+        font-weight: 500;
+        display: inline-flex;
+        align-items: center;
+        box-shadow: 0 2px 4px rgba(255,193,7,0.3);
+        margin-top: 8px;
+    }
+
+    .competition-badge i {
+        color: #856404;
+    }
+
+    /* Responsive adjustments */
+    @media (max-width: 768px) {
+        .step-title {
+            font-size: 1em;
+        }
+
+        .step-number-badge {
+            width: 24px;
+            height: 24px;
+            font-size: 0.8em;
+        }
+    }
+</style>

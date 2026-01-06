@@ -1,0 +1,972 @@
+@using HpskSite.Models.ViewModels.Training
+
+<div class="training-admin-panel">
+    <!-- Admin Navigation Tabs -->
+    <ul class="nav nav-tabs" id="adminTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="overview-tab" data-bs-toggle="tab" data-bs-target="#overview-content"
+                    type="button" role="tab">
+                <i class="bi bi-graph-up"></i> Översikt
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="members-tab" data-bs-toggle="tab" data-bs-target="#members-content"
+                    type="button" role="tab">
+                <i class="bi bi-people"></i> Medlemshantering
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="progress-tab" data-bs-toggle="tab" data-bs-target="#progress-content"
+                    type="button" role="tab">
+                <i class="bi bi-check-square"></i> Stegvalidering
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="statistics-tab" data-bs-toggle="tab" data-bs-target="#statistics-content"
+                    type="button" role="tab">
+                <i class="bi bi-bar-chart"></i> Statistik
+            </button>
+        </li>
+    </ul>
+
+    <!-- Tab Content -->
+    <div class="tab-content mt-3" id="adminTabContent">
+        <!-- Overview Tab -->
+        <div class="tab-pane fade show active" id="overview-content" role="tabpanel">
+            <div class="row">
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5><i class="bi bi-speedometer2"></i> Snabba Åtgärder</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="d-grid gap-2">
+                                <button class="btn btn-primary" onclick="refreshAllData()">
+                                    <i class="bi bi-arrow-clockwise"></i> Uppdatera All Data
+                                </button>
+                                <button class="btn btn-info" onclick="showBulkActions()">
+                                    <i class="bi bi-layers"></i> Bulkåtgärder
+                                </button>
+                                <button class="btn btn-success" onclick="showQuickComplete()">
+                                    <i class="bi bi-check-circle"></i> Snabbvalidering
+                                </button>
+                                <button class="btn btn-warning" onclick="exportProgressReport()">
+                                    <i class="bi bi-download"></i> Exportera Rapport
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5><i class="bi bi-exclamation-triangle"></i> Varningar & Notiser</h5>
+                        </div>
+                        <div class="card-body" id="adminWarnings">
+                            <p class="text-muted">Laddar varningar...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row mt-3">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5><i class="bi bi-activity"></i> Senaste Aktivitet</h5>
+                        </div>
+                        <div class="card-body" id="recentActivity">
+                            <p class="text-muted">Laddar aktivitet...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Members Management Tab -->
+        <div class="tab-pane fade" id="members-content" role="tabpanel">
+            <div class="row mb-3">
+                <div class="col-md-8">
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="text" class="form-control" id="memberSearch"
+                               placeholder="Sök medlem (namn, e-post, klubb)...">
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <select class="form-select" id="memberFilter">
+                        <option value="">Alla medlemmar</option>
+                        <option value="active">Aktiva i träning</option>
+                        <option value="inactive">Inte påbörjat</option>
+                        <option value="level1">Nivå 1</option>
+                        <option value="level2">Nivå 2</option>
+                        <option value="level3">Nivå 3</option>
+                        <option value="advanced">Avancerad (4+)</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="table-responsive" id="membersTable">
+                <p class="text-muted">Laddar medlemsdata...</p>
+            </div>
+        </div>
+
+        <!-- Progress Validation Tab -->
+        <div class="tab-pane fade" id="progress-content" role="tabpanel">
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-header">
+                            <h6><i class="bi bi-clock"></i> Väntande Valideringar</h6>
+                        </div>
+                        <div class="card-body" id="pendingValidations">
+                            <p class="text-muted">Laddar väntande valideringar...</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-header">
+                            <h6><i class="bi bi-lightning"></i> Snabbvalidering</h6>
+                        </div>
+                        <div class="card-body">
+                            <form id="quickValidationForm">
+                                <div class="mb-3">
+                                    <label for="quickMemberSelect" class="form-label">Välj Medlem</label>
+                                    <select class="form-select" id="quickMemberSelect">
+                                        <option value="">Välj medlem...</option>
+                                    </select>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="quickNotes" class="form-label">Anteckningar</label>
+                                    <textarea class="form-control" id="quickNotes" rows="2"
+                                              placeholder="Resultat, datum, kommentarer..."></textarea>
+                                </div>
+                                <button type="button" class="btn btn-success w-100" onclick="quickValidateCurrentStep()">
+                                    <i class="bi bi-check-circle"></i> Validera Nuvarande Steg
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header">
+                            <h6><i class="bi bi-list-check"></i> Validerade Steg (Senaste)</h6>
+                        </div>
+                        <div class="card-body" id="recentValidations">
+                            <p class="text-muted">Laddar senaste valideringar...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Statistics Tab -->
+        <div class="tab-pane fade" id="statistics-content" role="tabpanel">
+            <div class="row">
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-header">
+                            <h6><i class="bi bi-graph-up"></i> Deltagande Statistik</h6>
+                        </div>
+                        <div class="card-body" id="participationStats">
+                            <p class="text-muted">Laddar statistik...</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-header">
+                            <h6><i class="bi bi-trophy"></i> Prestationsstatistik</h6>
+                        </div>
+                        <div class="card-body" id="performanceStats">
+                            <p class="text-muted">Laddar prestationer...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row mt-3">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header">
+                            <h6><i class="bi bi-calendar"></i> Månatlig Aktivitet</h6>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="monthlyActivityChart" height="100"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Member Detail Modal -->
+<div class="modal fade" id="memberDetailModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="memberDetailTitle">Medlemsdetaljer</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="memberDetailBody">
+                <!-- Member details will be loaded here -->
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+                <button type="button" class="btn btn-warning" onclick="resetMemberProgress()">
+                    <i class="bi bi-arrow-counterclockwise"></i> Återställ Framsteg
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Bulk Actions Modal -->
+<div class="modal fade" id="bulkActionsModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Bulkåtgärder</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="bulkActionsForm">
+                    <div class="mb-3">
+                        <label class="form-label">Välj Åtgärd</label>
+                        <select class="form-select" id="bulkAction">
+                            <option value="">Välj åtgärd...</option>
+                            <option value="complete-step">Slutför specifikt steg</option>
+                            <option value="reset-progress">Återställ framsteg</option>
+                            <option value="assign-instructor">Tilldela instruktör</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Filterkriterier</label>
+                        <select class="form-select" id="bulkFilter">
+                            <option value="all">Alla aktiva medlemmar</option>
+                            <option value="level">Specifik nivå</option>
+                            <option value="club">Specifik klubb</option>
+                            <option value="inactive">Inaktiva medlemmar</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-3" id="bulkParameters" style="display: none;">
+                        <!-- Dynamic parameters based on action -->
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="bulkNotes" class="form-label">Anteckningar</label>
+                        <textarea class="form-control" id="bulkNotes" rows="3"
+                                  placeholder="Förklaring eller kommentarer för bulkåtgärden..."></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-warning" onclick="executeBulkAction()">
+                    <i class="bi bi-lightning"></i> Utför Åtgärd
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .training-admin-panel .nav-tabs .nav-link {
+        color: #6c757d;
+        border: none;
+        border-bottom: 2px solid transparent;
+    }
+
+    .training-admin-panel .nav-tabs .nav-link.active {
+        color: #495057;
+        border-bottom-color: #007bff;
+        background: none;
+    }
+
+    .training-admin-panel .card {
+        border: none;
+        box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+    }
+
+    .training-admin-panel .card-header {
+        background-color: #f8f9fa;
+        border-bottom: 1px solid #dee2e6;
+    }
+
+    .admin-quick-action {
+        transition: all 0.2s ease-in-out;
+    }
+
+    .admin-quick-action:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 0.25rem 0.5rem rgba(0, 0, 0, 0.1);
+    }
+
+    .member-row {
+        cursor: pointer;
+        transition: background-color 0.2s ease-in-out;
+    }
+
+    .member-row:hover {
+        background-color: #f8f9fa;
+    }
+
+    .validation-item {
+        border-left: 4px solid #ffc107;
+        background-color: #fff3cd;
+        padding: 0.75rem;
+        margin-bottom: 0.5rem;
+        border-radius: 0.25rem;
+    }
+
+    .validation-item.completed {
+        border-left-color: #28a745;
+        background-color: #d4edda;
+    }
+
+    .admin-stat-card {
+        text-align: center;
+        padding: 1.5rem;
+        border-radius: 0.5rem;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        margin-bottom: 1rem;
+    }
+
+    .admin-stat-number {
+        font-size: 2.5rem;
+        font-weight: bold;
+        line-height: 1;
+    }
+
+    .admin-stat-label {
+        font-size: 0.875rem;
+        opacity: 0.9;
+    }
+</style>
+
+<script>
+let selectedMemberId = null;
+let adminData = null;
+
+// Initialize admin panel
+document.addEventListener('DOMContentLoaded', function() {
+    if (typeof isAdmin !== 'undefined' && isAdmin) {
+        loadAdminData();
+        setupAdminEventListeners();
+    }
+});
+
+function setupAdminEventListeners() {
+    // Member search
+    document.getElementById('memberSearch')?.addEventListener('input', filterMembers);
+    document.getElementById('memberFilter')?.addEventListener('change', filterMembers);
+
+    // Bulk actions setup
+    document.getElementById('bulkAction')?.addEventListener('change', updateBulkParameters);
+    document.getElementById('bulkFilter')?.addEventListener('change', updateBulkParameters);
+}
+
+async function loadAdminData() {
+    try {
+        // Load comprehensive admin data
+        const [overviewResponse, membersResponse] = await Promise.all([
+            fetch('/umbraco/surface/Training/GetTrainingOverview'),
+            fetch('/umbraco/surface/Training/GetLeaderboard')
+        ]);
+
+        const overviewData = await overviewResponse.json();
+        const membersData = await membersResponse.json();
+
+        if (overviewData.success && membersData.success) {
+            adminData = {
+                overview: overviewData.data,
+                members: membersData.data
+            };
+
+            displayAdminOverview();
+            displayMembersTable();
+            displayPendingValidations();
+            displayStatistics();
+        }
+    } catch (error) {
+        console.error('Error loading admin data:', error);
+        showAdminError('Kunde inte ladda administrationsdata');
+    }
+}
+
+function displayAdminOverview() {
+    // Display warnings and recent activity
+    displayAdminWarnings();
+    displayRecentActivity();
+}
+
+function displayAdminWarnings() {
+    const container = document.getElementById('adminWarnings');
+    if (!container || !adminData) return;
+
+    const warnings = [];
+
+    // Check for inactive members
+    const inactiveMembers = adminData.members.filter(m => {
+        const lastActivity = new Date(m.lastActivity);
+        const monthsAgo = new Date();
+        monthsAgo.setMonth(monthsAgo.getMonth() - 3);
+        return lastActivity < monthsAgo;
+    });
+
+    if (inactiveMembers.length > 0) {
+        warnings.push({
+            type: 'warning',
+            icon: 'clock',
+            title: 'Inaktiva Medlemmar',
+            message: `${inactiveMembers.length} medlemmar har inte varit aktiva på 3 månader.`
+        });
+    }
+
+    // Check for members stuck on same step
+    const stuckMembers = adminData.members.filter(m => {
+        const lastActivity = new Date(m.lastActivity);
+        const weeksAgo = new Date();
+        weeksAgo.setDate(weeksAgo.getDate() - 14);
+        return lastActivity < weeksAgo && m.currentStep > 1;
+    });
+
+    if (stuckMembers.length > 0) {
+        warnings.push({
+            type: 'info',
+            icon: 'question-circle',
+            title: 'Medlemmar som Behöver Hjälp',
+            message: `${stuckMembers.length} medlemmar har varit på samma steg i över 2 veckor.`
+        });
+    }
+
+    if (warnings.length === 0) {
+        container.innerHTML = '<p class="text-success"><i class="bi bi-check-circle"></i> Inga varningar!</p>';
+        return;
+    }
+
+    let html = '';
+    warnings.forEach(warning => {
+        html += `
+            <div class="alert alert-${warning.type} alert-dismissible fade show" role="alert">
+                <i class="bi bi-${warning.icon}"></i>
+                <strong>${warning.title}:</strong> ${warning.message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        `;
+    });
+
+    container.innerHTML = html;
+}
+
+function displayRecentActivity() {
+    const container = document.getElementById('recentActivity');
+    if (!container || !adminData) return;
+
+    // Mock recent activity - in real app, this would come from completion records
+    const activities = [
+        { member: 'Anna Andersson', action: 'Slutförde Steg 3', level: 'Brons', time: '2 timmar sedan' },
+        { member: 'Erik Eriksson', action: 'Påbörjade träning', level: 'Brons', time: '5 timmar sedan' },
+        { member: 'Maria Johansson', action: 'Slutförde Steg 1', level: 'Silver', time: '1 dag sedan' }
+    ];
+
+    let html = '<div class="list-group list-group-flush">';
+    activities.forEach(activity => {
+        html += `
+            <div class="list-group-item">
+                <div class="d-flex w-100 justify-content-between">
+                    <h6 class="mb-1">${activity.member}</h6>
+                    <small>${activity.time}</small>
+                </div>
+                <p class="mb-1">${activity.action} (${activity.level})</p>
+            </div>
+        `;
+    });
+    html += '</div>';
+
+    container.innerHTML = html;
+}
+
+function displayMembersTable() {
+    const container = document.getElementById('membersTable');
+    if (!container || !adminData) return;
+
+    let html = `
+        <table class="table table-hover" id="adminMembersTable">
+            <thead>
+                <tr>
+                    <th>Namn</th>
+                    <th>Klubb</th>
+                    <th>Nivå</th>
+                    <th>Steg</th>
+                    <th>Framsteg</th>
+                    <th>Senaste Aktivitet</th>
+                    <th>Åtgärder</th>
+                </tr>
+            </thead>
+            <tbody>
+    `;
+
+    adminData.members.forEach(member => {
+        const lastActivity = member.lastActivity ? formatDate(member.lastActivity) : 'Aldrig';
+        const progress = Math.round(member.overallProgress || 0);
+
+        html += `
+            <tr class="member-row" onclick="showMemberDetail(${member.memberId})">
+                <td>${member.memberName}</td>
+                <td>${member.clubName || 'Ingen klubb'}</td>
+                <td>
+                    <span class="badge-level">${member.levelBadge}</span>
+                    ${member.levelName}
+                </td>
+                <td><span class="badge bg-primary">${member.currentStep}</span></td>
+                <td>
+                    <div class="progress" style="width: 80px; height: 20px;">
+                        <div class="progress-bar" style="width: ${progress}%"></div>
+                    </div>
+                </td>
+                <td>${lastActivity}</td>
+                <td onclick="event.stopPropagation()">
+                    <button class="btn btn-sm btn-success me-1" onclick="showCompleteStepModal(${member.memberId}, '${member.memberName}')">
+                        <i class="bi bi-check"></i>
+                    </button>
+                    <button class="btn btn-sm btn-info" onclick="showMemberDetail(${member.memberId})">
+                        <i class="bi bi-eye"></i>
+                    </button>
+                </td>
+            </tr>
+        `;
+    });
+
+    html += '</tbody></table>';
+    container.innerHTML = html;
+
+    // Load quick member select
+    loadQuickMemberSelect();
+}
+
+function loadQuickMemberSelect() {
+    const select = document.getElementById('quickMemberSelect');
+    if (!select || !adminData) return;
+
+    let html = '<option value="">Välj medlem...</option>';
+    adminData.members.forEach(member => {
+        html += `<option value="${member.memberId}">${member.memberName} (${member.levelName} - Steg ${member.currentStep})</option>`;
+    });
+
+    select.innerHTML = html;
+}
+
+function displayPendingValidations() {
+    const container = document.getElementById('pendingValidations');
+    if (!container) return;
+
+    // Mock pending validations - in real app, this would track pending validations
+    container.innerHTML = `
+        <div class="validation-item">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <strong>Anna Andersson</strong><br>
+                    <small>Brons - Steg 4: Väntar på validering</small>
+                </div>
+                <button class="btn btn-sm btn-success" onclick="quickValidateSpecific(123, 1, 4)">
+                    <i class="bi bi-check"></i>
+                </button>
+            </div>
+        </div>
+        <p class="text-muted mt-2">Inga väntande valideringar för tillfället.</p>
+    `;
+}
+
+function displayStatistics() {
+    const participationContainer = document.getElementById('participationStats');
+    const performanceContainer = document.getElementById('performanceStats');
+
+    if (!participationContainer || !performanceContainer || !adminData) return;
+
+    // Participation statistics
+    const totalMembers = adminData.members.length;
+    const activeMembers = adminData.members.filter(m => m.lastActivity).length;
+    const avgProgress = adminData.members.reduce((sum, m) => sum + (m.overallProgress || 0), 0) / totalMembers;
+
+    participationContainer.innerHTML = `
+        <div class="admin-stat-card">
+            <div class="admin-stat-number">${totalMembers}</div>
+            <div class="admin-stat-label">Totalt Deltagare</div>
+        </div>
+        <div class="admin-stat-card">
+            <div class="admin-stat-number">${activeMembers}</div>
+            <div class="admin-stat-label">Aktiva Medlemmar</div>
+        </div>
+        <div class="admin-stat-card">
+            <div class="admin-stat-number">${Math.round(avgProgress)}%</div>
+            <div class="admin-stat-label">Genomsnittlig Framsteg</div>
+        </div>
+    `;
+
+    // Performance statistics
+    const completedSteps = adminData.members.reduce((sum, m) => sum + (m.completedSteps || 0), 0);
+    const topLevel = Math.max(...adminData.members.map(m => m.currentLevel));
+    const topLevelData = TrainingDefinitions?.GetLevel ? TrainingDefinitions.GetLevel(topLevel) : null;
+
+    performanceContainer.innerHTML = `
+        <div class="admin-stat-card">
+            <div class="admin-stat-number">${completedSteps}</div>
+            <div class="admin-stat-label">Slutförda Steg</div>
+        </div>
+        <div class="admin-stat-card">
+            <div class="admin-stat-number">${topLevelData?.badge || 'ðŸ†'}</div>
+            <div class="admin-stat-label">Högsta Nivå</div>
+        </div>
+        <div class="admin-stat-card">
+            <div class="admin-stat-number">${adminData.members.filter(m => m.currentLevel >= 4).length}</div>
+            <div class="admin-stat-label">Avancerade Skyttar</div>
+        </div>
+    `;
+}
+
+function filterMembers() {
+    const search = document.getElementById('memberSearch')?.value.toLowerCase() || '';
+    const filter = document.getElementById('memberFilter')?.value || '';
+
+    const table = document.getElementById('adminMembersTable');
+    if (!table) return;
+
+    const rows = table.querySelectorAll('tbody tr');
+
+    rows.forEach(row => {
+        const text = row.textContent.toLowerCase();
+        const matchesSearch = text.includes(search);
+
+        let matchesFilter = true;
+        if (filter) {
+            // Apply filter logic based on filter value
+            const member = adminData.members.find(m => text.includes(m.memberName.toLowerCase()));
+            if (member) {
+                switch (filter) {
+                    case 'active':
+                        matchesFilter = member.lastActivity !== null;
+                        break;
+                    case 'inactive':
+                        matchesFilter = member.lastActivity === null;
+                        break;
+                    case 'level1':
+                        matchesFilter = member.currentLevel === 1;
+                        break;
+                    case 'level2':
+                        matchesFilter = member.currentLevel === 2;
+                        break;
+                    case 'level3':
+                        matchesFilter = member.currentLevel === 3;
+                        break;
+                    case 'advanced':
+                        matchesFilter = member.currentLevel >= 4;
+                        break;
+                }
+            }
+        }
+
+        row.style.display = matchesSearch && matchesFilter ? '' : 'none';
+    });
+}
+
+async function quickValidateCurrentStep() {
+    const memberId = document.getElementById('quickMemberSelect')?.value;
+    const notes = document.getElementById('quickNotes')?.value;
+
+    if (!memberId) {
+        alert('Välj en medlem först');
+        return;
+    }
+
+    const member = adminData.members.find(m => m.memberId == memberId);
+    if (!member) {
+        alert('Kunde inte hitta medlem');
+        return;
+    }
+
+    try {
+        const token = document.querySelector('input[name="__RequestVerificationToken"]').value;
+        const formData = new FormData();
+
+        formData.append('__RequestVerificationToken', token);
+        formData.append('memberId', memberId);
+        formData.append('levelId', member.currentLevel);
+        formData.append('stepNumber', member.currentStep);
+        formData.append('notes', notes);
+
+        const response = await fetch('/umbraco/surface/Training/CompleteStep', {
+            method: 'POST',
+            body: formData
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            alert(`Steg ${member.currentStep} slutfört för ${member.memberName}!`);
+            document.getElementById('quickNotes').value = '';
+            await loadAdminData(); // Refresh data
+            await refreshAllData(); // Refresh main page
+        } else {
+            alert('Fel: ' + data.message);
+        }
+    } catch (error) {
+        console.error('Error validating step:', error);
+        alert('Ett fel uppstod vid validering');
+    }
+}
+
+function showMemberDetail(memberId) {
+    selectedMemberId = memberId;
+    const member = adminData.members.find(m => m.memberId === memberId);
+
+    if (!member) {
+        alert('Kunde inte hitta medlem');
+        return;
+    }
+
+    document.getElementById('memberDetailTitle').textContent = `${member.memberName} - Träningsdetaljer`;
+
+    // Load detailed member progress
+    loadMemberDetailData(memberId);
+    new bootstrap.Modal(document.getElementById('memberDetailModal')).show();
+}
+
+async function loadMemberDetailData(memberId) {
+    try {
+        const response = await fetch(`/umbraco/surface/Training/GetMemberProgress?memberId=${memberId}`);
+        const data = await response.json();
+
+        if (data.success) {
+            displayMemberDetailData(data.data);
+        } else {
+            document.getElementById('memberDetailBody').innerHTML =
+                `<div class="alert alert-danger">Kunde inte ladda medlemsdata: ${data.message}</div>`;
+        }
+    } catch (error) {
+        console.error('Error loading member detail:', error);
+        document.getElementById('memberDetailBody').innerHTML =
+            '<div class="alert alert-danger">Ett fel uppstod vid inläsning av medlemsdata</div>';
+    }
+}
+
+function displayMemberDetailData(data) {
+    const container = document.getElementById('memberDetailBody');
+    const progress = data.progress;
+    const currentLevel = data.currentLevel;
+    const currentStep = data.currentStep;
+
+    let html = `
+        <div class="row">
+            <div class="col-md-6">
+                <h6>Grundinformation</h6>
+                <p><strong>Namn:</strong> ${progress.memberName}</p>
+                <p><strong>E-post:</strong> ${progress.memberEmail}</p>
+                <p><strong>Klubb:</strong> ${progress.primaryClubName || 'Ingen klubb'}</p>
+                <p><strong>Påbörjad:</strong> ${progress.trainingStartDate ? formatDate(progress.trainingStartDate) : 'Inte påbörjat'}</p>
+                <p><strong>Senaste aktivitet:</strong> ${progress.lastActivityDate ? formatDate(progress.lastActivityDate) : 'Aldrig'}</p>
+            </div>
+            <div class="col-md-6">
+                <h6>Nuvarande Position</h6>
+                <p><strong>Nivå:</strong> ${currentLevel?.name || 'Okänd'} ${currentLevel?.badge || ''}</p>
+                <p><strong>Steg:</strong> ${progress.currentStep} av ${currentLevel?.steps.length || 0}</p>
+                <p><strong>Nästa steg:</strong> ${currentStep?.description || 'Inget steg'}</p>
+                <div class="progress mb-2">
+                    <div class="progress-bar" style="width: ${progress.overallProgress || 0}%"></div>
+                </div>
+                <small class="text-muted">${Math.round(progress.overallProgress || 0)}% total framsteg</small>
+            </div>
+        </div>
+
+        <hr>
+
+        <h6>Slutförda Steg (${progress.completedSteps.length})</h6>
+        <div class="table-responsive">
+            <table class="table table-sm">
+                <thead>
+                    <tr>
+                        <th>Nivå</th>
+                        <th>Steg</th>
+                        <th>Beskrivning</th>
+                        <th>Slutfört</th>
+                        <th>Instruktör</th>
+                    </tr>
+                </thead>
+                <tbody>
+    `;
+
+    progress.completedSteps.forEach(completion => {
+        const level = data.allLevels.find(l => l.levelId === completion.levelId);
+        const step = level?.steps.find(s => s.stepNumber === completion.stepNumber);
+
+        html += `
+            <tr>
+                <td>${level?.badge || ''} ${level?.name || 'Okänd'}</td>
+                <td>${completion.stepNumber}</td>
+                <td>${step?.description || completion.stepDescription || 'Okänd'}</td>
+                <td>${formatDate(completion.completedDate)}</td>
+                <td>${completion.instructorName || 'Okänd'}</td>
+            </tr>
+        `;
+    });
+
+    html += `
+                </tbody>
+            </table>
+        </div>
+    `;
+
+    if (progress.notes) {
+        html += `
+            <hr>
+            <h6>Anteckningar</h6>
+            <p class="text-muted">${progress.notes}</p>
+        `;
+    }
+
+    container.innerHTML = html;
+}
+
+async function resetMemberProgress() {
+    if (!selectedMemberId) return;
+
+    const member = adminData.members.find(m => m.memberId === selectedMemberId);
+    if (!member) return;
+
+    if (!confirm(`Är du säker på att du vill återställa all träningsframsteg för ${member.memberName}? Detta kan inte ångras.`)) {
+        return;
+    }
+
+    try {
+        const token = document.querySelector('input[name="__RequestVerificationToken"]').value;
+        const formData = new FormData();
+
+        formData.append('__RequestVerificationToken', token);
+        formData.append('memberId', selectedMemberId);
+
+        const response = await fetch('/umbraco/surface/Training/ResetProgress', {
+            method: 'POST',
+            body: formData
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            alert('Framsteg återställt!');
+            bootstrap.Modal.getInstance(document.getElementById('memberDetailModal')).hide();
+            await loadAdminData();
+            await refreshAllData();
+        } else {
+            alert('Fel: ' + data.message);
+        }
+    } catch (error) {
+        console.error('Error resetting progress:', error);
+        alert('Ett fel uppstod vid återställning');
+    }
+}
+
+async function refreshAllData() {
+    await loadAdminData();
+    await loadTrainingData(); // Refresh main page data
+}
+
+function showBulkActions() {
+    new bootstrap.Modal(document.getElementById('bulkActionsModal')).show();
+}
+
+function showQuickComplete() {
+    // Focus on quick validation tab
+    const tab = document.getElementById('progress-tab');
+    if (tab) {
+        tab.click();
+        document.getElementById('quickMemberSelect')?.focus();
+    }
+}
+
+function exportProgressReport() {
+    // Mock export - in real app, this would generate a CSV/Excel file
+    alert('Exporterar träningsrapport... (Denna funktion kommer att implementeras)');
+}
+
+function updateBulkParameters() {
+    const action = document.getElementById('bulkAction')?.value;
+    const filter = document.getElementById('bulkFilter')?.value;
+    const container = document.getElementById('bulkParameters');
+
+    if (!container) return;
+
+    let html = '';
+
+    if (action === 'complete-step') {
+        html = `
+            <label class="form-label">Nivå och Steg</label>
+            <div class="row">
+                <div class="col-6">
+                    <select class="form-select" id="bulkLevel">
+                        <option value="">Välj nivå...</option>
+                        <option value="1">Brons</option>
+                        <option value="2">Silver</option>
+                        <option value="3">Guld</option>
+                    </select>
+                </div>
+                <div class="col-6">
+                    <select class="form-select" id="bulkStep">
+                        <option value="">Välj steg...</option>
+                        <option value="1">Steg 1</option>
+                        <option value="2">Steg 2</option>
+                        <option value="3">Steg 3</option>
+                    </select>
+                </div>
+            </div>
+        `;
+    } else if (filter === 'level') {
+        html = `
+            <label class="form-label">Välj Nivå</label>
+            <select class="form-select" id="bulkLevelFilter">
+                <option value="">Välj nivå...</option>
+                <option value="1">Brons</option>
+                <option value="2">Silver</option>
+                <option value="3">Guld</option>
+            </select>
+        `;
+    } else if (filter === 'club') {
+        html = `
+            <label class="form-label">Välj Klubb</label>
+            <select class="form-select" id="bulkClubFilter">
+                <option value="">Välj klubb...</option>
+                <!-- Club options would be loaded here -->
+            </select>
+        `;
+    }
+
+    container.innerHTML = html;
+    container.style.display = html ? 'block' : 'none';
+}
+
+function executeBulkAction() {
+    alert('Bulkåtgärd kommer att implementeras i nästa version');
+}
+
+function showAdminError(message) {
+    const alert = `
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <i class="bi bi-exclamation-triangle"></i> ${message}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+    `;
+
+    const container = document.querySelector('.training-admin-panel');
+    if (container) {
+        container.insertAdjacentHTML('afterbegin', alert);
+    }
+}
+</script>

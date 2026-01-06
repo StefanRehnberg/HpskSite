@@ -1,0 +1,130 @@
+@*
+    Training Match Create Partial
+    Form for creating a new training match
+*@
+
+<style>
+/* Subtle placeholder text */
+#createMatchForm input::placeholder {
+    color: var(--bs-secondary-color);
+    opacity: 0.5;
+}
+#createMatchForm .form-text {
+    opacity: 0.7;
+    font-size: 0.8rem;
+}
+</style>
+
+<!-- Flatpickr Date/Time Picker -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
+
+<div class="row justify-content-center mb-4">
+    <div class="col-md-6">
+        <div class="card border-success">
+            <div class="card-header bg-success text-white">
+                <h5 class="mb-0"><i class="bi bi-plus-circle me-2"></i>Skapa ny match</h5>
+            </div>
+            <div class="card-body">
+                <form id="createMatchForm" onsubmit="handleCreateMatch(event)">
+                    <div class="mb-3">
+                        <label for="createMatchName" class="form-label">Matchnamn (valfritt)</label>
+                        <input type="text" class="form-control" id="createMatchName"
+                               placeholder="T.ex. 'Fredagsträning' eller lämna tomt">
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="createWeaponClass" class="form-label">Vapenklass</label>
+                        <select class="form-select" id="createWeaponClass" required>
+                            <option value="C" selected>C - Kal. 22</option>
+                            <option value="A">A - Tjänstevapen</option>
+                            <option value="B">B - Kal. 32-45</option>
+                            <option value="R">R - Revolver</option>
+                            <option value="M">M - Magnum</option>
+                            <option value="L">L - Luftpistol</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="createStartDate" class="form-label">
+                            <i class="bi bi-calendar-event me-1"></i>Starttid (valfritt)
+                        </label>
+                        <input type="text" class="form-control" id="createStartDate"
+                               placeholder="Lämna tomt för omedelbar start">
+                        <div class="form-text">
+                            Schemalägg matchen. Deltagare kan inte registrera poäng förrän matchen startat.
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="createIsOpen" checked>
+                            <label class="form-check-label" for="createIsOpen">
+                                <i class="bi bi-unlock me-1"></i>Öppen
+                            </label>
+                            <div class="form-text">
+                                Alla medlemmar kan ansluta. Avmarkera för att endast tillåta anslutning via länk eller QR-kod.
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="createHasHandicap" checked>
+                            <label class="form-check-label" for="createHasHandicap">
+                                <i class="bi bi-balance-scale me-1"></i>Aktivera handicap
+                            </label>
+                            <div class="form-text">
+                                Använd handicapsystem för rättvis tävling mellan olika skyttenivåer.
+                                Handicap beräknas per skytt och läggs till poängen.
+                            </div>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-success w-100">
+                        <i class="bi bi-play-fill me-1"></i> Starta match
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Initialize Flatpickr for start date
+document.addEventListener('DOMContentLoaded', function() {
+    flatpickr('#createStartDate', {
+        locale: 'sv',
+        enableTime: true,
+        time_24hr: true,
+        dateFormat: 'Y-m-d H:i',
+        minDate: 'today',
+        defaultHour: new Date().getHours() + 1,
+        defaultMinute: 0,
+        placeholder: 'Välj datum och tid...'
+    });
+});
+
+function handleCreateMatch(e) {
+    e.preventDefault();
+
+    const matchName = document.getElementById('createMatchName').value.trim();
+    const weaponClass = document.getElementById('createWeaponClass').value;
+    const startDateStr = document.getElementById('createStartDate').value.trim();
+    const isOpen = document.getElementById('createIsOpen').checked;
+    const hasHandicap = document.getElementById('createHasHandicap').checked;
+
+    // Convert date string to ISO format for .NET
+    let startDate = null;
+    if (startDateStr) {
+        // Parse "2025-12-13 14:00" format and convert to ISO
+        const date = new Date(startDateStr.replace(' ', 'T'));
+        if (!isNaN(date.getTime())) {
+            startDate = date.toISOString();
+        }
+    }
+
+    createMatch(matchName || null, weaponClass, startDate, isOpen, hasHandicap);
+}
+</script>
