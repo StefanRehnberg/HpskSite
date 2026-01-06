@@ -804,11 +804,7 @@ namespace HpskSite.Controllers.Api
 
             var series = seriesList[seriesIndex];
 
-            // Check if photo exists
-            if (!series.TryGetValue("targetPhotoUrl", out var photoUrl) || photoUrl == null || string.IsNullOrEmpty(photoUrl.ToString()))
-            {
-                return BadRequest(ApiResponse<List<PhotoReaction>>.Error("Ingen bild att reagera på"));
-            }
+            // Note: Reactions are now allowed on any series, not just ones with photos
 
             // Get current reactions
             List<PhotoReaction> reactions;

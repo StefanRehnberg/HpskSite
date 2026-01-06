@@ -50,20 +50,24 @@
                 <Border Padding="12"
                         BackgroundColor="{StaticResource Primary}"
                         Stroke="Transparent" StrokeShape="RoundRectangle 12">
-                    <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="8">
-                        <VerticalStackLayout>
-                            <HorizontalStackLayout Spacing="8">
-                                <Label FontAttributes="Bold" FontSize="18"
-                                       Text="{Binding Match.DisplayName}"
-                                       TextColor="White" VerticalOptions="Center" />
-                                <!--  HCP Badge  -->
-                                <Border Padding="6,2" BackgroundColor="Orange"
-                                        IsVisible="{Binding Match.IsHandicapEnabled}"
-                                        StrokeShape="RoundRectangle 4" StrokeThickness="0" VerticalOptions="Center">
-                                    <Label FontAttributes="Bold" FontSize="11" Text="HCP"
-                                           TextColor="#343a40" />
-                                </Border>
-                            </HorizontalStackLayout>
+                    <Grid RowDefinitions="Auto,Auto" RowSpacing="8">
+                        <!--  Row 0: Title with HCP badge  -->
+                        <HorizontalStackLayout Spacing="8">
+                            <Label FontAttributes="Bold" FontSize="18"
+                                   Text="{Binding Match.DisplayName}"
+                                   TextColor="White" VerticalOptions="Center"
+                                   LineBreakMode="TailTruncation" />
+                            <!--  HCP Badge  -->
+                            <Border Padding="6,2" BackgroundColor="Orange"
+                                    IsVisible="{Binding Match.IsHandicapEnabled}"
+                                    StrokeShape="RoundRectangle 4" StrokeThickness="0" VerticalOptions="Center">
+                                <Label FontAttributes="Bold" FontSize="11" Text="HCP"
+                                       TextColor="#343a40" />
+                            </Border>
+                        </HorizontalStackLayout>
+
+                        <!--  Row 1: Info and buttons  -->
+                        <Grid Grid.Row="1" ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="8">
                             <HorizontalStackLayout Spacing="8">
                                 <Label FontSize="12" Opacity="0.9"
                                        Text="{Binding Match.WeaponClass, StringFormat='Klass {0}'}"
@@ -74,49 +78,52 @@
                                        Text="{Binding Match.MatchCode, StringFormat='Kod: {0}'}"
                                        TextColor="White" />
                             </HorizontalStackLayout>
-                        </VerticalStackLayout>
 
-                        <!--  Share Button  -->
-                        <Button Grid.Column="1" Padding="22,0" BackgroundColor="White"
-                                CornerRadius="6" FontSize="12" HeightRequest="32"
-                                Text="Dela"
-                                TextColor="{StaticResource Primary}" />
+                            <!--  Spacer  -->
+                            <BoxView Grid.Column="1" />
 
-                        <!--  Leave Button (participants only, not host, not spectator)  -->
-                        <Button Grid.Column="2" Padding="12,0"
-                                BackgroundColor="{StaticResource Warning}"
-                                Command="{Binding LeaveMatchCommand}"
-                                CornerRadius="6" FontSize="12" HeightRequest="32"
-                                Text="Lämna" TextColor="White">
-                            <Button.Triggers>
-                                <!--  Hide for match host  -->
-                                <DataTrigger Binding="{Binding IsMatchHost}" TargetType="Button" Value="True">
-                                    <Setter Property="IsVisible" Value="False" />
-                                </DataTrigger>
-                                <!--  Hide for spectators  -->
-                                <DataTrigger Binding="{Binding IsSpectator}" TargetType="Button" Value="True">
-                                    <Setter Property="IsVisible" Value="False" />
-                                </DataTrigger>
-                            </Button.Triggers>
-                        </Button>
+                            <!--  Share Button  -->
+                            <Button Grid.Column="2" Padding="12,0" BackgroundColor="White"
+                                    CornerRadius="6" FontSize="12" HeightRequest="32"
+                                    Text="Dela"
+                                    TextColor="{StaticResource Primary}" />
 
-                        <!--  End Match Button (Host only, not spectator)  -->
-                        <Button Grid.Column="3" Padding="12,0"
-                                BackgroundColor="{StaticResource Danger}"
-                                Clicked="OnCompleteMatchClicked" CornerRadius="6" FontSize="12"
-                                HeightRequest="32"
-                                Text="Avsluta" TextColor="White">
-                            <Button.Triggers>
-                                <!--  Show only for match host  -->
-                                <DataTrigger Binding="{Binding IsMatchHost}" TargetType="Button" Value="False">
-                                    <Setter Property="IsVisible" Value="False" />
-                                </DataTrigger>
-                                <!--  Hide for spectators  -->
-                                <DataTrigger Binding="{Binding IsSpectator}" TargetType="Button" Value="True">
-                                    <Setter Property="IsVisible" Value="False" />
-                                </DataTrigger>
-                            </Button.Triggers>
-                        </Button>
+                            <!--  Leave Button (participants only, not host, not spectator)  -->
+                            <Button Grid.Column="3" Padding="12,0"
+                                    BackgroundColor="{StaticResource Warning}"
+                                    Command="{Binding LeaveMatchCommand}"
+                                    CornerRadius="6" FontSize="12" HeightRequest="32"
+                                    Text="Lämna" TextColor="White">
+                                <Button.Triggers>
+                                    <!--  Hide for match host  -->
+                                    <DataTrigger Binding="{Binding IsMatchHost}" TargetType="Button" Value="True">
+                                        <Setter Property="IsVisible" Value="False" />
+                                    </DataTrigger>
+                                    <!--  Hide for spectators  -->
+                                    <DataTrigger Binding="{Binding IsSpectator}" TargetType="Button" Value="True">
+                                        <Setter Property="IsVisible" Value="False" />
+                                    </DataTrigger>
+                                </Button.Triggers>
+                            </Button>
+
+                            <!--  End Match Button (Host only, not spectator)  -->
+                            <Button Grid.Column="4" Padding="12,0"
+                                    BackgroundColor="{StaticResource Danger}"
+                                    Clicked="OnCompleteMatchClicked" CornerRadius="6" FontSize="12"
+                                    HeightRequest="32"
+                                    Text="Avsluta" TextColor="White">
+                                <Button.Triggers>
+                                    <!--  Show only for match host  -->
+                                    <DataTrigger Binding="{Binding IsMatchHost}" TargetType="Button" Value="False">
+                                        <Setter Property="IsVisible" Value="False" />
+                                    </DataTrigger>
+                                    <!--  Hide for spectators  -->
+                                    <DataTrigger Binding="{Binding IsSpectator}" TargetType="Button" Value="True">
+                                        <Setter Property="IsVisible" Value="False" />
+                                    </DataTrigger>
+                                </Button.Triggers>
+                            </Button>
+                        </Grid>
                     </Grid>
                 </Border>
 
@@ -858,12 +865,38 @@
                                 WidthRequest="36" />
                     </Grid>
 
-                    <!--  Photo  -->
+                    <!--  Photo (when available)  -->
                     <Image Source="{Binding ViewingPhotoUrl}"
                            Aspect="AspectFit"
                            HeightRequest="300"
                            HorizontalOptions="Fill"
-                           BackgroundColor="#1f2937" />
+                           BackgroundColor="#1f2937"
+                           IsVisible="{Binding HasViewingPhoto}" />
+
+                    <!--  Score display (when no photo)  -->
+                    <VerticalStackLayout IsVisible="{Binding HasViewingPhoto, Converter={StaticResource InverseBoolConverter}}"
+                                         HorizontalOptions="Center"
+                                         VerticalOptions="Center"
+                                         Padding="20"
+                                         HeightRequest="300"
+                                         BackgroundColor="#1f2937">
+                        <Label Text="{Binding ViewingSeriesScore}"
+                               FontSize="72"
+                               FontAttributes="Bold"
+                               TextColor="White"
+                               HorizontalOptions="Center"
+                               VerticalOptions="Center" />
+                        <Label Text="{Binding ViewingSeriesXCount, StringFormat='{0}x'}"
+                               FontSize="24"
+                               TextColor="#9ACD32"
+                               HorizontalOptions="Center"
+                               IsVisible="{Binding ViewingSeriesXCount, Converter={StaticResource IntToBoolConverter}}" />
+                        <Label Text="{Binding ViewingShotsDisplay}"
+                               FontSize="14"
+                               TextColor="#9ca3af"
+                               HorizontalOptions="Center"
+                               Margin="0,10,0,0" />
+                    </VerticalStackLayout>
 
                     <!--  Reactions Section  -->
                     <VerticalStackLayout Padding="16" Spacing="12" BackgroundColor="#374151">

@@ -336,10 +336,45 @@ public partial class ActiveMatchViewModel : BaseViewModel
     private bool _isPhotoViewerOpen;
 
     /// <summary>
-    /// The photo URL being viewed
+    /// The photo URL being viewed (may be null when viewing a score without photo)
     /// </summary>
     [ObservableProperty]
     private string? _viewingPhotoUrl;
+
+    partial void OnViewingPhotoUrlChanged(string? value)
+    {
+        OnPropertyChanged(nameof(HasViewingPhoto));
+    }
+
+    /// <summary>
+    /// Whether the series being viewed has a photo
+    /// </summary>
+    public bool HasViewingPhoto => !string.IsNullOrEmpty(ViewingPhotoUrl);
+
+    /// <summary>
+    /// The series score being viewed (for display when no photo)
+    /// </summary>
+    [ObservableProperty]
+    private int _viewingSeriesScore;
+
+    /// <summary>
+    /// The X count for the series being viewed
+    /// </summary>
+    [ObservableProperty]
+    private int _viewingSeriesXCount;
+
+    /// <summary>
+    /// The individual shots for the series being viewed
+    /// </summary>
+    [ObservableProperty]
+    private List<string>? _viewingSeriesShots;
+
+    /// <summary>
+    /// Display string for individual shots (e.g., "10 - X - 9 - 10 - X")
+    /// </summary>
+    public string ViewingShotsDisplay => ViewingSeriesShots != null && ViewingSeriesShots.Count > 0
+        ? string.Join(" - ", ViewingSeriesShots)
+        : "";
 
     /// <summary>
     /// The shooter's name for the photo being viewed
@@ -465,7 +500,7 @@ public partial class ActiveMatchViewModel : BaseViewModel
     }
 
     /// <summary>
-    /// Open photo viewer for a cell with a photo, or edit mode for own scores
+    /// Open reaction modal for a cell with a score, or edit mode for own scores without photo
     /// </summary>
     [RelayCommand]
     private void OpenPhotoViewer(ScoreboardCell cell)
@@ -473,28 +508,37 @@ public partial class ActiveMatchViewModel : BaseViewModel
         if (cell == null)
             return;
 
-        // If cell has photo, open photo viewer (for any participant)
-        if (cell.HasPhoto)
+        // Open reaction modal if:
+        // - Cell has a score AND (has photo OR is another user's cell)
+        // This allows viewing/reacting to any series with a score, showing photo or score display
+        if (cell.HasScore && (cell.HasPhoto || !cell.IsCurrentUserCell))
         {
-            System.Diagnostics.Debug.WriteLine($"OpenPhotoViewer: Opening photo for member {cell.MemberId}, series {cell.SeriesNumber}");
+            System.Diagnostics.Debug.WriteLine($"OpenPhotoViewer: Opening for member {cell.MemberId}, series {cell.SeriesNumber}, HasPhoto={cell.HasPhoto}");
 
             // Find the participant to get their name
             var participant = Participants.FirstOrDefault(p => p.MemberId == cell.MemberId);
             var shooterName = participant?.DisplayName ?? "Okänd";
 
+            // Set photo URL (may be null if no photo)
             ViewingPhotoUrl = cell.TargetPhotoUrl;
             ViewingPhotoShooterName = shooterName;
             ViewingPhotoSeriesNumber = cell.SeriesNumber;
             ViewingPhotoMemberId = cell.MemberId;
 
+            // Set score display properties
+            ViewingSeriesScore = cell.HasScore && int.TryParse(cell.ScoreText, out var score) ? score : 0;
+            ViewingSeriesXCount = cell.HasXCount && int.TryParse(cell.XCountText?.Replace("x", ""), out var xCount) ? xCount : 0;
+            ViewingSeriesShots = cell.Shots;
+            OnPropertyChanged(nameof(ViewingShotsDisplay));
+
             // Get reactions from the score
             ViewingPhotoReactions.Clear();
             if (participant?.Scores != null)
             {
-                var score = participant.Scores.FirstOrDefault(s => s.SeriesNumber == cell.SeriesNumber);
-                if (score?.Reactions != null)
+                var scoreData = participant.Scores.FirstOrDefault(s => s.SeriesNumber == cell.SeriesNumber);
+                if (scoreData?.Reactions != null)
                 {
-                    foreach (var reaction in score.Reactions)
+                    foreach (var reaction in scoreData.Reactions)
                     {
                         ViewingPhotoReactions.Add(reaction);
                     }
@@ -527,6 +571,10 @@ public partial class ActiveMatchViewModel : BaseViewModel
         ViewingPhotoMemberId = 0;
         ViewingPhotoReactions.Clear();
         CurrentUserReaction = null;
+        // Reset score display properties
+        ViewingSeriesScore = 0;
+        ViewingSeriesXCount = 0;
+        ViewingSeriesShots = null;
     }
 
     /// <summary>
@@ -1435,7 +1483,10 @@ public partial class ActiveMatchViewModel : BaseViewModel
                 }
             }
 
-            // If viewing this photo, update the displayed reactions
+            // Refresh scoreboard to update reaction indicators on cells
+            UpdateScoreboardRows();
+
+            // If viewing this series, update the displayed reactions
             if (IsPhotoViewerOpen &&
                 ViewingPhotoMemberId == update.TargetMemberId &&
                 ViewingPhotoSeriesNumber == update.SeriesNumber)
