@@ -1085,6 +1085,13 @@
                 }
             });
 
+            hubConnection.on("ReactionUpdated", (data) => {
+                console.log("ReactionUpdated:", data);
+                if (typeof updateReactionDisplay === 'function') {
+                    updateReactionDisplay(data.targetMemberId, data.seriesNumber, data.reactions);
+                }
+            });
+
             // Start connection
             hubConnection.start()
                 .then(() => {
@@ -1739,6 +1746,298 @@
             document.body.appendChild(container);
             return container;
         }
+
+        // ===== Emoji Reactions & Photo Viewer =====
+
+        let emojiPickerTarget = null; // { memberId, seriesNumber, scoreData }
+        let currentPhotoViewerData = null; // For photo modal reactions
+
+        // Handle click on non-editable score cell (for reactions and photo viewing)
+        function handleScoreCellClick(event, memberId, seriesNumber, scoreData) {
+            event.stopPropagation();
+
+            // Don't allow reacting to own scores
+            if (memberId === currentMemberId) {
+                // If it has a photo, still allow viewing it
+                if (scoreData.targetPhotoUrl) {
+                    openPhotoViewer(memberId, seriesNumber, scoreData);
+                }
+                return;
+            }
+
+            // If score has a photo, open photo viewer (which has reaction buttons)
+            if (scoreData.targetPhotoUrl) {
+                openPhotoViewer(memberId, seriesNumber, scoreData);
+            } else {
+                // No photo - open emoji picker directly
+                openEmojiPicker(event, memberId, seriesNumber, scoreData);
+            }
+        }
+
+        // Open emoji picker popup at click position
+        function openEmojiPicker(event, memberId, seriesNumber, scoreData) {
+            const picker = document.getElementById('emojiPicker');
+            const rect = event.target.getBoundingClientRect();
+
+            // Position picker near the click
+            picker.style.display = 'block';
+            picker.style.left = `${Math.min(rect.left, window.innerWidth - 250)}px`;
+            picker.style.top = `${rect.bottom + 5}px`;
+
+            emojiPickerTarget = { memberId, seriesNumber, scoreData };
+
+            // Highlight current user's reaction if any
+            highlightCurrentReaction(scoreData.reactions);
+        }
+
+        // Close emoji picker
+        function closeEmojiPicker() {
+            const picker = document.getElementById('emojiPicker');
+            if (picker) {
+                picker.style.display = 'none';
+            }
+            emojiPickerTarget = null;
+        }
+
+        // Highlight the user's current reaction in the picker
+        function highlightCurrentReaction(reactions) {
+            // Clear all highlights
+            document.querySelectorAll('.emoji-btn').forEach(btn => {
+                btn.classList.remove('selected');
+            });
+
+            if (!reactions) return;
+
+            // Find current user's reaction
+            const myReaction = reactions.find(r => r.memberId === currentMemberId);
+            if (myReaction) {
+                const btn = document.querySelector(`.emoji-btn[data-emoji="${myReaction.emoji}"]`);
+                if (btn) {
+                    btn.classList.add('selected');
+                }
+            }
+        }
+
+        // Send reaction to API
+        async function addReaction(emoji, fromModal = false) {
+            const target = fromModal ? currentPhotoViewerData : emojiPickerTarget;
+            if (!target) return;
+
+            try {
+                const response = await fetch(`/api/match/${currentMatchCode}/series/${target.seriesNumber}/reaction`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        targetMemberId: target.memberId,
+                        emoji: emoji
+                    })
+                });
+
+                if (response.ok) {
+                    if (!fromModal) {
+                        closeEmojiPicker();
+                    } else {
+                        // Update modal button states
+                        updateModalReactionButtons(emoji);
+                    }
+                    // SignalR will handle the UI update
+                } else {
+                    const result = await response.json();
+                    showToast(result.message || 'Kunde inte spara reaktion', 'danger');
+                }
+            } catch (error) {
+                console.error('Failed to add reaction:', error);
+                showToast('Något gick fel', 'danger');
+            }
+        }
+
+        // Update modal reaction button states
+        function updateModalReactionButtons(selectedEmoji) {
+            document.querySelectorAll('.emoji-modal-btn').forEach(btn => {
+                const isSelected = btn.dataset.emoji === selectedEmoji;
+                btn.classList.toggle('active', isSelected);
+            });
+        }
+
+        // Open photo viewer modal
+        function openPhotoViewer(memberId, seriesNumber, scoreData) {
+            currentPhotoViewerData = { memberId, seriesNumber, scoreData };
+
+            // Update modal content
+            document.getElementById('photoSeriesNumber').textContent = seriesNumber;
+            document.getElementById('photoScoreTotal').textContent = scoreData.total;
+
+            // X count
+            const xCountContainer = document.getElementById('photoXCountContainer');
+            const xCountEl = document.getElementById('photoXCount');
+            if (scoreData.xCount > 0) {
+                xCountEl.textContent = `${scoreData.xCount}x`;
+                xCountContainer.style.display = 'block';
+            } else {
+                xCountContainer.style.display = 'none';
+            }
+
+            // Find shooter name from current match data
+            const shooter = currentMatch?.participants?.find(p => p.memberId === memberId);
+            document.getElementById('photoShooterName').textContent = shooter?.firstName || 'Okänd';
+
+            // Photo handling
+            const loadingSpinner = document.getElementById('photoLoadingSpinner');
+            const photoImage = document.getElementById('targetPhotoImage');
+            const noPhotoMsg = document.getElementById('noPhotoMessage');
+
+            if (scoreData.targetPhotoUrl) {
+                loadingSpinner.style.display = 'block';
+                photoImage.style.display = 'none';
+                noPhotoMsg.style.display = 'none';
+
+                photoImage.onload = () => {
+                    loadingSpinner.style.display = 'none';
+                    photoImage.style.display = 'block';
+                };
+                photoImage.onerror = () => {
+                    loadingSpinner.style.display = 'none';
+                    noPhotoMsg.style.display = 'block';
+                };
+                photoImage.src = scoreData.targetPhotoUrl;
+            } else {
+                loadingSpinner.style.display = 'none';
+                photoImage.style.display = 'none';
+                noPhotoMsg.style.display = 'block';
+            }
+
+            // Update modal reaction buttons - highlight user's current reaction
+            document.querySelectorAll('.emoji-modal-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            if (scoreData.reactions) {
+                const myReaction = scoreData.reactions.find(r => r.memberId === currentMemberId);
+                if (myReaction) {
+                    const btn = document.querySelector(`.emoji-modal-btn[data-emoji="${myReaction.emoji}"]`);
+                    if (btn) btn.classList.add('active');
+                }
+            }
+
+            // Show/hide reaction buttons based on whether it's own score
+            const reactionRow = document.querySelector('.emoji-reaction-row');
+            if (reactionRow) {
+                reactionRow.style.display = memberId === currentMemberId ? 'none' : 'flex';
+            }
+
+            // Show modal
+            const modal = new bootstrap.Modal(document.getElementById('targetPhotoModal'));
+            modal.show();
+        }
+
+        // Update reaction display when SignalR fires
+        function updateReactionDisplay(memberId, seriesNumber, reactions) {
+            // Find the score-clickable div with the matching data attributes
+            const clickableDiv = document.querySelector(
+                `.score-clickable[data-member-id="${memberId}"][data-series="${seriesNumber}"]`
+            );
+
+            if (clickableDiv) {
+                // Find or create the reaction-display span (new responsive version)
+                let reactionSpan = clickableDiv.querySelector('.reaction-display');
+
+                if (reactions && reactions.length > 0) {
+                    // Group reactions by emoji (same logic as buildInlineReactionHtml)
+                    const grouped = {};
+                    reactions.forEach(r => {
+                        if (!grouped[r.emoji]) {
+                            grouped[r.emoji] = { emoji: r.emoji, count: 0, names: [] };
+                        }
+                        grouped[r.emoji].count++;
+                        grouped[r.emoji].names.push(r.firstName || 'Okänd');
+                    });
+
+                    const groups = Object.values(grouped).sort((a, b) => b.count - a.count);
+                    const totalCount = reactions.length;
+                    const tooltip = reactions.map(r => `${r.firstName || 'Okänd'}: ${r.emoji}`).join(', ');
+                    const groupsJson = JSON.stringify(groups).replace(/'/g, '&#39;').replace(/"/g, '&quot;');
+
+                    if (reactionSpan) {
+                        // Update existing span's data attributes
+                        reactionSpan.dataset.reactions = groupsJson;
+                        reactionSpan.dataset.total = totalCount;
+                        reactionSpan.title = tooltip;
+                    } else {
+                        // Create new reaction span after score-value
+                        const scoreValue = clickableDiv.querySelector('.score-value');
+                        if (scoreValue) {
+                            reactionSpan = document.createElement('span');
+                            reactionSpan.className = 'reaction-display';
+                            reactionSpan.dataset.reactions = groupsJson;
+                            reactionSpan.dataset.total = totalCount;
+                            reactionSpan.title = tooltip;
+                            reactionSpan.onclick = function(e) {
+                                e.stopPropagation();
+                                openReactorsPopup(this);
+                            };
+                            scoreValue.insertAdjacentElement('afterend', reactionSpan);
+                        }
+                    }
+
+                    // Update the responsive display content
+                    if (typeof updateReactionDisplays === 'function') {
+                        setTimeout(updateReactionDisplays, 50);
+                    }
+                } else {
+                    // Remove reaction if no reactions
+                    if (reactionSpan) {
+                        reactionSpan.remove();
+                    }
+                }
+            }
+
+            // Also update photo modal if open for this score
+            if (currentPhotoViewerData &&
+                currentPhotoViewerData.memberId === memberId &&
+                currentPhotoViewerData.seriesNumber === seriesNumber) {
+                // Update the scoreData reference
+                currentPhotoViewerData.scoreData.reactions = reactions;
+                // Update button states
+                document.querySelectorAll('.emoji-modal-btn').forEach(btn => {
+                    btn.classList.remove('active');
+                });
+                if (reactions) {
+                    const myReaction = reactions.find(r => r.memberId === currentMemberId);
+                    if (myReaction) {
+                        const btn = document.querySelector(`.emoji-modal-btn[data-emoji="${myReaction.emoji}"]`);
+                        if (btn) btn.classList.add('active');
+                    }
+                }
+            }
+        }
+
+        // Event listeners for emoji picker
+        document.addEventListener('DOMContentLoaded', function() {
+            // Click outside to close picker
+            document.addEventListener('click', (e) => {
+                const picker = document.getElementById('emojiPicker');
+                if (picker && picker.style.display !== 'none') {
+                    if (!e.target.closest('.emoji-picker') && !e.target.closest('.score-clickable')) {
+                        closeEmojiPicker();
+                    }
+                }
+            });
+
+            // Emoji picker buttons
+            document.querySelectorAll('.emoji-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    addReaction(btn.dataset.emoji, false);
+                });
+            });
+
+            // Photo modal emoji buttons
+            document.querySelectorAll('.emoji-modal-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    addReaction(btn.dataset.emoji, true);
+                });
+            });
+        });
 
         // ===== Android App Test Access =====
 

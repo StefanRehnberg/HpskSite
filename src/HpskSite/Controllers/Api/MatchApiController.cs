@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using NPoco;
 using Umbraco.Cms.Core.Services;
+using Umbraco.Cms.Core.Security;
 using Umbraco.Cms.Infrastructure.Scoping;
 using HpskSite.Hubs;
 using System.Text.Json;
@@ -23,6 +24,7 @@ namespace HpskSite.Controllers.Api
     {
         private readonly IScopeProvider _scopeProvider;
         private readonly IMemberService _memberService;
+        private readonly IMemberManager _memberManager;
         private readonly JwtTokenService _jwtTokenService;
         private readonly IHubContext<TrainingMatchHub> _hubContext;
         private readonly IHandicapCalculator _handicapCalculator;
@@ -36,6 +38,7 @@ namespace HpskSite.Controllers.Api
         public MatchApiController(
             IScopeProvider scopeProvider,
             IMemberService memberService,
+            IMemberManager memberManager,
             JwtTokenService jwtTokenService,
             IHubContext<TrainingMatchHub> hubContext,
             IHandicapCalculator handicapCalculator,
@@ -48,6 +51,7 @@ namespace HpskSite.Controllers.Api
         {
             _scopeProvider = scopeProvider;
             _memberService = memberService;
+            _memberManager = memberManager;
             _jwtTokenService = jwtTokenService;
             _hubContext = hubContext;
             _handicapCalculator = handicapCalculator;
@@ -60,11 +64,35 @@ namespace HpskSite.Controllers.Api
         }
 
         /// <summary>
-        /// Get current member ID from JWT token
+        /// Get current member ID from JWT token or cookie-based authentication
+        /// Supports both mobile (JWT) and website (cookie) authentication
         /// </summary>
         private int? GetCurrentMemberId()
         {
-            return _jwtTokenService.GetMemberIdFromClaims(User);
+            // First try JWT claims (mobile app)
+            var memberId = _jwtTokenService.GetMemberIdFromClaims(User);
+            if (memberId.HasValue)
+            {
+                return memberId;
+            }
+
+            // Fallback to cookie-based authentication (website)
+            // Use synchronous check since we're in a private helper method
+            try
+            {
+                var member = _memberManager.GetCurrentMemberAsync().GetAwaiter().GetResult();
+                if (member != null)
+                {
+                    var memberData = _memberService.GetByEmail(member.Email ?? "");
+                    return memberData?.Id;
+                }
+            }
+            catch
+            {
+                // Cookie auth not available, return null
+            }
+
+            return null;
         }
 
         /// <summary>
@@ -749,8 +777,10 @@ namespace HpskSite.Controllers.Api
 
         /// <summary>
         /// Add or toggle a reaction to a target photo
+        /// Supports both JWT (mobile) and cookie-based (website) authentication
         /// </summary>
         [HttpPost("{code}/series/{seriesNumber}/reaction")]
+        [Authorize(AuthenticationSchemes = "JwtBearer,Identity.Application")]
         public async Task<IActionResult> AddReaction(string code, int seriesNumber, [FromBody] AddReactionRequest request)
         {
             var memberId = GetCurrentMemberId();

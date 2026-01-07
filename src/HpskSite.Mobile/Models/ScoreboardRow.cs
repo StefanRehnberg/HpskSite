@@ -136,6 +136,21 @@ public class ScoreboardCell
     /// First emoji from reactions (for indicator display)
     /// </summary>
     public string? FirstReactionEmoji => Reactions?.FirstOrDefault()?.Emoji;
+
+    /// <summary>
+    /// Total count of all reactions for compact display (alias for ReactionCount)
+    /// </summary>
+    public int TotalReactionCount => ReactionCount;
+
+    /// <summary>
+    /// Whether there are more than one reaction (for showing +N badge)
+    /// </summary>
+    public bool HasMultipleReactions => TotalReactionCount > 1;
+
+    /// <summary>
+    /// Additional count text (+2, +3, etc.) for compact display
+    /// </summary>
+    public string AdditionalReactionsText => TotalReactionCount > 1 ? $"+{TotalReactionCount - 1}" : "";
 }
 
 /// <summary>

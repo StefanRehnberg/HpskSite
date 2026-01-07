@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using HpskSite.Shared.Models;
 
 namespace HpskSite.Models.ViewModels.TrainingScoring
 {
@@ -42,6 +43,19 @@ namespace HpskSite.Models.ViewModels.TrainingScoring
         /// </summary>
         [JsonPropertyName("seriesCount")]
         public int? SeriesCount { get; set; }
+
+        /// <summary>
+        /// URL to the target photo for this series (optional).
+        /// Relative URL format: /media/target-photos/{filename}
+        /// </summary>
+        [JsonPropertyName("targetPhotoUrl")]
+        public string? TargetPhotoUrl { get; set; }
+
+        /// <summary>
+        /// Emoji reactions to the target photo from other participants.
+        /// </summary>
+        [JsonPropertyName("reactions")]
+        public List<PhotoReaction>? Reactions { get; set; }
 
         /// <summary>
         /// Calculate total and X-count from shots array (only for ShotByShot method)

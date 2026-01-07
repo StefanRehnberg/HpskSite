@@ -116,6 +116,86 @@
     </div>
 </div>
 
+<!-- Emoji Reaction Picker -->
+<div id="emojiPicker" class="emoji-picker" style="display: none;">
+    <div class="emoji-picker-content">
+        <button type="button" class="emoji-btn" data-emoji="❤️" title="Hjärta">❤️</button>
+        <button type="button" class="emoji-btn" data-emoji="👍" title="Tumme upp">👍</button>
+        <button type="button" class="emoji-btn" data-emoji="🔥" title="Eld">🔥</button>
+        <button type="button" class="emoji-btn" data-emoji="😢" title="Ledsen">😢</button>
+        <button type="button" class="emoji-btn" data-emoji="🎯" title="Prickskytt">🎯</button>
+    </div>
+</div>
+
+<!-- Target Photo Viewer Modal -->
+<div class="modal fade" id="targetPhotoModal" tabindex="-1" aria-labelledby="targetPhotoModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="targetPhotoModalLabel">
+                    <i class="bi bi-camera me-2"></i>Målfoto - Serie <span id="photoSeriesNumber">1</span>
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body text-center p-3">
+                <div id="photoLoadingSpinner" class="py-5">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Laddar...</span>
+                    </div>
+                </div>
+                <img id="targetPhotoImage" src="" alt="Målfoto" class="img-fluid rounded" style="max-height: 70vh; display: none;">
+                <div id="noPhotoMessage" class="py-5 text-muted" style="display: none;">
+                    <i class="bi bi-camera-video-off fs-1 d-block mb-3"></i>
+                    <p>Inget målfoto för denna serie</p>
+                </div>
+                <!-- Score info -->
+                <div id="photoScoreInfo" class="mt-3 p-3 bg-light rounded">
+                    <div class="d-flex justify-content-center align-items-center gap-4">
+                        <div>
+                            <span class="fs-3 fw-bold" id="photoScoreTotal">48</span>
+                            <small class="text-muted d-block">Poäng</small>
+                        </div>
+                        <div id="photoXCountContainer">
+                            <span class="fs-4 text-warning fw-bold" id="photoXCount">2x</span>
+                            <small class="text-muted d-block">X-träffar</small>
+                        </div>
+                        <div id="photoShooterContainer">
+                            <span class="fs-5" id="photoShooterName">Stefan</span>
+                            <small class="text-muted d-block">Skytt</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer justify-content-between">
+                <div class="emoji-reaction-row">
+                    <span class="me-2 text-muted small">Reagera:</span>
+                    <button type="button" class="btn btn-outline-secondary btn-sm emoji-modal-btn" data-emoji="❤️">❤️</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm emoji-modal-btn" data-emoji="👍">👍</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm emoji-modal-btn" data-emoji="🔥">🔥</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm emoji-modal-btn" data-emoji="😢">😢</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm emoji-modal-btn" data-emoji="🎯">🎯</button>
+                </div>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Reactors Popup Modal -->
+<div class="modal fade" id="reactorsModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="bi bi-emoji-smile me-2"></i>Reaktioner</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body py-2">
+                <div id="reactorsList"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Add Score Button (floating) -->
 <div class="fixed-bottom pb-4 pe-4 text-end" style="pointer-events: none;">
     <button type="button" class="btn btn-success btn-lg shadow" id="addScoreBtn"
@@ -128,6 +208,110 @@
 // Helper functions for quarter-point handicap display
 function roundToQuarter(value) {
     return Math.round(value * 4) / 4;
+}
+
+// Build inline reaction HTML with responsive display
+function buildInlineReactionHtml(reactions) {
+    if (!reactions || reactions.length === 0) {
+        return '';
+    }
+
+    // Group reactions by emoji
+    const grouped = {};
+    reactions.forEach(r => {
+        if (!grouped[r.emoji]) {
+            grouped[r.emoji] = { emoji: r.emoji, count: 0, names: [] };
+        }
+        grouped[r.emoji].count++;
+        grouped[r.emoji].names.push(r.firstName || 'Okänd');
+    });
+
+    const groups = Object.values(grouped).sort((a, b) => b.count - a.count);
+    const totalCount = reactions.length;
+    const tooltip = reactions.map(r => `${r.firstName || 'Okänd'}: ${r.emoji}`).join(', ');
+
+    // Escape data for HTML attributes
+    const groupsJson = JSON.stringify(groups).replace(/'/g, '&#39;').replace(/"/g, '&quot;');
+    const reactionsJson = JSON.stringify(reactions).replace(/'/g, '&#39;').replace(/"/g, '&quot;');
+
+    return ` <span class="reaction-display"
+                   data-reactions="${groupsJson}"
+                   data-total="${totalCount}"
+                   title="${tooltip}"
+                   onclick="event.stopPropagation(); openReactorsPopup(this)">
+             </span>`;
+}
+
+// Update all reaction displays based on available cell width
+function updateReactionDisplays() {
+    document.querySelectorAll('.reaction-display').forEach(container => {
+        try {
+            const groupsData = container.dataset.reactions;
+            if (!groupsData) return;
+
+            const groups = JSON.parse(groupsData.replace(/&quot;/g, '"').replace(/&#39;/g, "'"));
+            const total = parseInt(container.dataset.total) || 0;
+            const cell = container.closest('.score-cell');
+            const cellWidth = cell ? cell.offsetWidth : 80;
+
+            let html = '';
+
+            if (cellWidth >= 120) {
+                // Wide: All unique emojis in a row
+                html = groups.map(g => `<span class="reaction-emoji">${g.emoji}</span>`).join('');
+            } else if (cellWidth >= 90) {
+                // Medium: Grouped with counts (top 2)
+                html = groups.slice(0, 2).map(g =>
+                    `<span class="reaction-grouped">${g.emoji}${g.count > 1 ? g.count : ''}</span>`
+                ).join('');
+            } else {
+                // Narrow: First emoji + count badge
+                const first = groups[0];
+                html = `<span class="reaction-compact">${first.emoji}${total > 1 ? '+' + (total - 1) : ''}</span>`;
+            }
+
+            container.innerHTML = html;
+        } catch (e) {
+            console.error('Error updating reaction display:', e);
+        }
+    });
+}
+
+// Debounce helper for resize events
+function debounce(func, wait) {
+    let timeout;
+    return function(...args) {
+        clearTimeout(timeout);
+        timeout = setTimeout(() => func.apply(this, args), wait);
+    };
+}
+
+// Update reaction displays on window resize
+window.addEventListener('resize', debounce(updateReactionDisplays, 150));
+
+// Open reactors popup showing who reacted with what
+function openReactorsPopup(triggerElement) {
+    const list = document.getElementById('reactorsList');
+    if (!list) return;
+
+    try {
+        const groupsData = triggerElement.dataset.reactions;
+        if (!groupsData) return;
+
+        const groups = JSON.parse(groupsData.replace(/&quot;/g, '"').replace(/&#39;/g, "'"));
+
+        list.innerHTML = groups.map(g => `
+            <div class="d-flex align-items-center gap-2 py-1">
+                <span class="fs-4">${g.emoji}</span>
+                <span class="text-muted small flex-grow-1">${g.names.join(', ')}</span>
+                <span class="badge bg-secondary">${g.count}</span>
+            </div>
+        `).join('');
+
+        new bootstrap.Modal(document.getElementById('reactorsModal')).show();
+    } catch (e) {
+        console.error('Error opening reactors popup:', e);
+    }
 }
 
 function formatHandicap(value) {
@@ -347,6 +531,10 @@ function renderScoreboard(match) {
             const td = document.createElement('td');
             td.className = 'score-cell';
 
+            // Add data attributes for reactions and photo viewing
+            td.dataset.memberId = participant.memberId;
+            td.dataset.series = seriesNum;
+
             const score = participant.scores?.find(s => s.seriesNumber === seriesNum);
             if (score) {
                 runningTotals[pIndex] += score.total;
@@ -359,21 +547,34 @@ function renderScoreboard(match) {
                 const matchHasStarted = match.hasStarted !== false;
                 const canEdit = (isMyScore || isFirstParticipantFallback) && match.status === 'Active' && !isSpectatorMode && matchHasStarted;
 
+                // Build inline reaction emoji (just the first emoji, inline with score)
+                const inlineReaction = buildInlineReactionHtml(score.reactions);
+
+                // Check if score has a target photo
+                const hasPhoto = score.targetPhotoUrl && score.targetPhotoUrl.length > 0;
+                const photoIndicator = hasPhoto ? '<i class="bi bi-camera-fill photo-indicator" title="Har målfoto"></i>' : '';
+
                 if (canEdit) {
                     td.innerHTML = `
+                        ${photoIndicator}
                         <div class="score-editable" onclick="editSeriesScore(${seriesNum}, ${JSON.stringify(score).replace(/"/g, '&quot;')})">
-                            <span class="score-value">${score.total}</span>
-                            ${score.xCount > 0 ? `<span class="x-count">${score.xCount}x</span>` : ''}
+                            <span class="score-value">${score.total}</span>${inlineReaction}
                             <i class="bi bi-pencil edit-icon"></i>
                         </div>
+                        ${score.xCount > 0 ? `<span class="x-count">${score.xCount}x</span>` : ''}
                     `;
                     td.classList.add('has-score', 'editable');
                 } else {
+                    // Non-editable score - can click for reactions or photo viewing
                     td.innerHTML = `
-                        <span class="score-value">${score.total}</span>
+                        ${photoIndicator}
+                        <div class="score-clickable" onclick="handleScoreCellClick(event, ${participant.memberId}, ${seriesNum}, ${JSON.stringify(score).replace(/"/g, '&quot;')})"
+                             data-member-id="${participant.memberId}" data-series="${seriesNum}">
+                            <span class="score-value">${score.total}</span>${inlineReaction}
+                        </div>
                         ${score.xCount > 0 ? `<span class="x-count">${score.xCount}x</span>` : ''}
                     `;
-                    td.classList.add('has-score');
+                    td.classList.add('has-score', 'clickable');
                 }
             } else {
                 td.innerHTML = '<span class="score-empty">-</span>';
@@ -467,6 +668,9 @@ function renderScoreboard(match) {
     });
 
     tbody.appendChild(totalRow);
+
+    // Update responsive reaction displays after DOM is ready
+    setTimeout(updateReactionDisplays, 50);
 }
 
 // Render avatar helper
@@ -980,5 +1184,165 @@ function showSpectatorsModal() {
 
 #spectatorsDisplay:hover {
     background: rgba(255,255,255,0.25);
+}
+
+/* ===== Emoji Reactions & Photo Viewer ===== */
+
+/* Inline Reaction (after score) */
+.inline-reaction {
+    font-size: 1rem;
+    margin-left: 4px;
+    vertical-align: middle;
+}
+
+/* Responsive Reaction Display */
+.reaction-display {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    cursor: pointer;
+    margin-left: 4px;
+    vertical-align: middle;
+}
+
+.reaction-display:hover {
+    opacity: 0.8;
+}
+
+.reaction-emoji {
+    font-size: 0.85rem;
+}
+
+.reaction-grouped {
+    font-size: 0.8rem;
+    background: rgba(0,0,0,0.1);
+    border-radius: 10px;
+    padding: 0 4px;
+}
+
+.reaction-compact {
+    font-size: 0.85rem;
+}
+
+[data-bs-theme="dark"] .reaction-grouped {
+    background: rgba(255,255,255,0.15);
+}
+
+/* Photo Indicator (left side of cell) */
+.photo-indicator {
+    font-size: 1.1rem;
+    color: #17a2b8;
+    position: absolute;
+    left: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    opacity: 0.85;
+}
+
+/* Make score cells position relative for photo indicator */
+.score-cell {
+    position: relative;
+}
+
+/* Emoji Picker Popup */
+.emoji-picker {
+    position: fixed;
+    background: var(--bs-body-bg);
+    border: 1px solid var(--bs-border-color);
+    border-radius: 12px;
+    padding: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    z-index: 1050;
+}
+
+.emoji-picker-content {
+    display: flex;
+    gap: 4px;
+}
+
+.emoji-btn {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    padding: 6px 8px;
+    cursor: pointer;
+    border-radius: 8px;
+    transition: background-color 0.15s, transform 0.1s;
+}
+
+.emoji-btn:hover {
+    background: var(--bs-tertiary-bg);
+    transform: scale(1.15);
+}
+
+.emoji-btn.selected {
+    background: var(--bs-primary);
+    opacity: 0.8;
+}
+
+/* Clickable score cells (for reactions/photos) */
+.score-cell.clickable {
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+.score-cell.clickable:hover {
+    background: #e8f4f8 !important;
+}
+
+.score-cell.clickable:active {
+    background: #d1ecf1 !important;
+}
+
+.score-clickable {
+    position: relative;
+    display: inline-block;
+    width: 100%;
+    height: 100%;
+}
+
+/* Photo modal emoji row */
+.emoji-reaction-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.emoji-modal-btn {
+    font-size: 1.2rem;
+    padding: 4px 8px;
+    border-radius: 8px;
+}
+
+.emoji-modal-btn.active {
+    background-color: var(--bs-primary);
+    border-color: var(--bs-primary);
+    color: white;
+}
+
+/* Dark Mode for Emoji/Photo Features */
+[data-bs-theme="dark"] .emoji-picker {
+    background: #2b3035;
+    border-color: #495057;
+}
+
+[data-bs-theme="dark"] .emoji-btn:hover {
+    background: #495057;
+}
+
+[data-bs-theme="dark"] .score-cell.clickable:hover {
+    background: #1a3a3a !important;
+}
+
+[data-bs-theme="dark"] .score-cell.clickable:active {
+    background: #2a4a4a !important;
+}
+
+[data-bs-theme="dark"] .photo-indicator {
+    color: #5bc0de;
+}
+
+[data-bs-theme="dark"] #photoScoreInfo {
+    background: #343a40 !important;
 }
 </style>

@@ -313,7 +313,9 @@ namespace HpskSite.Controllers
                                                 total = s.Total,
                                                 xCount = s.XCount,
                                                 shots = s.Shots,
-                                                entryMethod = s.EntryMethod
+                                                entryMethod = s.EntryMethod,
+                                                targetPhotoUrl = s.TargetPhotoUrl,
+                                                reactions = s.Reactions
                                             });
                                         }
                                     }
@@ -2171,7 +2173,9 @@ namespace HpskSite.Controllers
                                                 total = s.Total,
                                                 xCount = s.XCount,
                                                 shots = s.Shots,
-                                                entryMethod = s.EntryMethod
+                                                entryMethod = s.EntryMethod,
+                                                targetPhotoUrl = s.TargetPhotoUrl,
+                                                reactions = s.Reactions
                                             });
                                         }
                                     }

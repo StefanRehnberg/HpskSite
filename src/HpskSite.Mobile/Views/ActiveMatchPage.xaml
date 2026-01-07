@@ -286,11 +286,17 @@
                                                                    IsVisible="{Binding HasXCount}"
                                                                    Text="{Binding XCountText}"
                                                                    TextColor="#9ACD32" VerticalOptions="Start" />
-                                                            <!--  Reaction emoji indicator (above camera)  -->
-                                                            <Label FontSize="10" HorizontalOptions="Start"
-                                                                   IsVisible="{Binding HasReactions}"
-                                                                   Text="{Binding FirstReactionEmoji}"
-                                                                   VerticalOptions="Start" />
+                                                            <!--  Compact reaction indicator with count (emoji+N)  -->
+                                                            <HorizontalStackLayout HorizontalOptions="Start"
+                                                                                   IsVisible="{Binding HasReactions}"
+                                                                                   Spacing="1"
+                                                                                   VerticalOptions="Start">
+                                                                <Label FontSize="10" Text="{Binding FirstReactionEmoji}" />
+                                                                <Label FontSize="8"
+                                                                       IsVisible="{Binding HasMultipleReactions}"
+                                                                       Text="{Binding AdditionalReactionsText}"
+                                                                       TextColor="#9ca3af" />
+                                                            </HorizontalStackLayout>
                                                             <!--  Photo indicator (shows for ALL cells with photos)  -->
                                                             <Label FontSize="10" HorizontalOptions="Start"
                                                                    IsVisible="{Binding HasPhoto}"
