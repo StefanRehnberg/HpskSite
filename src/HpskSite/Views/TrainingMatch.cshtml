@@ -851,10 +851,25 @@
             const headerRow = document.getElementById('historyParticipantHeaderRow');
             headerRow.innerHTML = '';
 
-            // Helper to calculate final score (with handicap if applicable)
+            // Find minimum series count for equalized scoring (like mobile app)
+            const participantsWithScores = match.participants.filter(p => p.scores && p.scores.length > 0);
+            const minSeriesCount = participantsWithScores.length > 0
+                ? Math.min(...participantsWithScores.map(p => p.scores.length))
+                : 0;
+
+            // Helper to get equalized scores (first N series, sorted by seriesNumber)
+            function getEqualizedScores(participant) {
+                if (!participant.scores || participant.scores.length === 0) return [];
+                return [...participant.scores]
+                    .sort((a, b) => a.seriesNumber - b.seriesNumber)
+                    .slice(0, minSeriesCount);
+            }
+
+            // Helper to calculate final score using equalized series (with handicap if applicable)
             function calculateFinalScore(participant) {
-                const totalScore = participant.scores?.reduce((sum, s) => sum + s.total, 0) || 0;
-                const seriesCount = participant.scores?.length || 0;
+                const equalizedScores = getEqualizedScores(participant);
+                const totalScore = equalizedScores.reduce((sum, s) => sum + s.total, 0);
+                const seriesCount = equalizedScores.length;
 
                 if (match.hasHandicap && participant.handicapPerSeries !== null && participant.handicapPerSeries !== undefined) {
                     const hcpPerSeries = roundToQuarter(participant.handicapPerSeries);
@@ -925,6 +940,9 @@
             const tbody = document.getElementById('historyScoreboardBody');
             tbody.innerHTML = '';
 
+            // Summary row insertion points (after these series numbers)
+            const summaryAfter = [6, 7, 10, 12];
+
             for (let seriesNum = 1; seriesNum <= maxSeries; seriesNum++) {
                 const tr = document.createElement('tr');
 
@@ -934,11 +952,34 @@
 
                     const score = participant.scores?.find(s => s.seriesNumber === seriesNum);
                     if (score) {
+                        // Build photo indicator
+                        const hasPhoto = score.targetPhotoUrl && score.targetPhotoUrl.length > 0;
+                        const photoIndicator = hasPhoto
+                            ? '<i class="bi bi-camera-fill photo-indicator" style="position:absolute;left:4px;top:4px;font-size:0.7rem;color:#60a5fa;"></i>'
+                            : '';
+
+                        // Build reaction display
+                        let reactionHtml = '';
+                        if (score.reactions && score.reactions.length > 0) {
+                            const firstEmoji = score.reactions[0].emoji;
+                            const count = score.reactions.length;
+                            reactionHtml = count > 1
+                                ? `<span class="reaction-indicator">${firstEmoji}<small>+${count-1}</small></span>`
+                                : `<span class="reaction-indicator">${firstEmoji}</span>`;
+                        }
+
                         td.innerHTML = `
+                            ${photoIndicator}
                             <span class="score-value">${score.total}</span>
                             ${score.xCount > 0 ? `<span class="x-count">${score.xCount}x</span>` : ''}
+                            ${reactionHtml}
                         `;
                         td.classList.add('has-score');
+                        td.style.position = 'relative';
+                        td.style.cursor = 'pointer';
+
+                        // Click to open photo viewer
+                        td.onclick = () => openHistoryPhotoViewer(participant, score, match);
                     } else {
                         td.innerHTML = '<span class="score-empty">-</span>';
                     }
@@ -947,9 +988,35 @@
                 });
 
                 tbody.appendChild(tr);
+
+                // Add summary row after series 6, 7, 10, 12
+                if (summaryAfter.includes(seriesNum) && seriesNum <= maxSeries) {
+                    const summaryRow = document.createElement('tr');
+                    summaryRow.className = 'summary-row';
+
+                    match.participants.forEach((participant) => {
+                        const td = document.createElement('td');
+                        td.className = 'summary-cell';
+
+                        // Calculate sum up to this series (using equalized approach - only count actual scores)
+                        const scoresUpToSeries = (participant.scores || [])
+                            .filter(s => s.seriesNumber <= seriesNum)
+                            .sort((a, b) => a.seriesNumber - b.seriesNumber);
+                        const sumTotal = scoresUpToSeries.reduce((sum, s) => sum + s.total, 0);
+                        const sumX = scoresUpToSeries.reduce((sum, s) => sum + (s.xCount || 0), 0);
+
+                        td.innerHTML = `
+                            <span class="summary-total">${sumTotal}</span>
+                            ${sumX > 0 ? `<span class="summary-x">(${sumX}x)</span>` : ''}
+                        `;
+                        summaryRow.appendChild(td);
+                    });
+
+                    tbody.appendChild(summaryRow);
+                }
             }
 
-            // Add total row
+            // Add total row (using equalized scores for fair comparison)
             const totalRow = document.createElement('tr');
             totalRow.className = 'total-row';
 
@@ -957,16 +1024,24 @@
                 const td = document.createElement('td');
                 td.className = 'total-cell';
 
-                const totalScore = participant.scores?.reduce((sum, s) => sum + s.total, 0) || 0;
-                const totalX = participant.scores?.reduce((sum, s) => sum + (s.xCount || 0), 0) || 0;
-                const seriesCount = participant.scores?.length || 0;
+                // Use equalized scores (first N series where N = min series count)
+                const equalizedScores = getEqualizedScores(participant);
+                const totalScore = equalizedScores.reduce((sum, s) => sum + s.total, 0);
+                const totalX = equalizedScores.reduce((sum, s) => sum + (s.xCount || 0), 0);
+                const effectiveSeriesCount = equalizedScores.length;
+                const actualSeriesCount = participant.scores?.length || 0;
+
+                // Show equalized series count, and actual if different
+                const seriesDisplay = effectiveSeriesCount !== actualSeriesCount
+                    ? `${effectiveSeriesCount} av ${actualSeriesCount} serier`
+                    : `${effectiveSeriesCount} serier`;
 
                 // Check if handicap is enabled and participant has handicap data
                 if (match.hasHandicap && participant.handicapPerSeries !== null && participant.handicapPerSeries !== undefined) {
                     // Use quarter-point handicap, then round final score to integer
                     const hcpPerSeries = roundToQuarter(participant.handicapPerSeries);
-                    const handicapTotal = hcpPerSeries * seriesCount;
-                    const maxPossible = 50 * seriesCount;
+                    const handicapTotal = hcpPerSeries * effectiveSeriesCount;
+                    const maxPossible = 50 * effectiveSeriesCount;
                     let finalScore = totalScore + handicapTotal;
                     finalScore = Math.min(Math.round(finalScore), maxPossible);
                     const hcpTotalDisplay = formatHandicap(handicapTotal);
@@ -977,12 +1052,12 @@
                             <span class="raw-score">${totalScore}</span>
                             <span class="hcp-addition">${hcpTotalDisplay}</span>
                         </div>
-                        <div class="total-details">${seriesCount} serier${totalX > 0 ? ` | ${totalX}x` : ''}</div>
+                        <div class="total-details">${seriesDisplay}${totalX > 0 ? ` | ${totalX}x` : ''}</div>
                     `;
                 } else {
                     td.innerHTML = `
                         <div class="total-score">${totalScore}</div>
-                        <div class="total-details">${seriesCount} serier${totalX > 0 ? ` | ${totalX}x` : ''}</div>
+                        <div class="total-details">${seriesDisplay}${totalX > 0 ? ` | ${totalX}x` : ''}</div>
                     `;
                 }
                 totalRow.appendChild(td);
@@ -1000,6 +1075,87 @@
 
             const initials = ((participant.firstName?.[0] || '') + (participant.lastName?.[0] || '')).toUpperCase();
             return `<div class="participant-avatar participant-avatar-initials">${initials}</div>`;
+        }
+
+        // Open photo viewer for history modal (read-only, shows photo/score and reactions)
+        function openHistoryPhotoViewer(participant, score, match) {
+            const shooterName = participant.firstName || 'Skytt';
+            const hasPhoto = score.targetPhotoUrl && score.targetPhotoUrl.length > 0;
+
+            // Build shots display if available
+            let shotsHtml = '';
+            if (score.shots && score.shots.length > 0) {
+                shotsHtml = `<div class="history-shots mt-2">
+                    <small class="text-muted">Skott:</small>
+                    <span class="ms-2">${score.shots.join(' - ')}</span>
+                </div>`;
+            }
+
+            // Build reactions list
+            let reactionsHtml = '';
+            if (score.reactions && score.reactions.length > 0) {
+                // Group reactions by emoji
+                const grouped = {};
+                score.reactions.forEach(r => {
+                    if (!grouped[r.emoji]) grouped[r.emoji] = [];
+                    grouped[r.emoji].push(r.firstName || 'Okänd');
+                });
+
+                reactionsHtml = `<div class="history-reactions mt-3">
+                    <small class="text-muted d-block mb-2">Reaktioner:</small>
+                    ${Object.entries(grouped).map(([emoji, names]) => `
+                        <div class="d-flex align-items-center gap-2 py-1">
+                            <span class="fs-5">${emoji}</span>
+                            <span class="text-muted small flex-grow-1">${names.join(', ')}</span>
+                            <span class="badge bg-secondary">${names.length}</span>
+                        </div>
+                    `).join('')}
+                </div>`;
+            }
+
+            // Build modal content
+            const modalContent = `
+                <div class="modal fade" id="historyPhotoModal" tabindex="-1">
+                    <div class="modal-dialog modal-dialog-centered ${hasPhoto ? 'modal-lg' : ''}">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title">
+                                    ${shooterName} - Serie ${score.seriesNumber}
+                                </h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body">
+                                ${hasPhoto ? `
+                                    <div class="text-center mb-3">
+                                        <img src="${score.targetPhotoUrl}" class="img-fluid rounded"
+                                             style="max-height: 400px;" alt="Tavla">
+                                    </div>
+                                ` : ''}
+                                <div class="text-center">
+                                    <div class="fs-2 fw-bold">${score.total}</div>
+                                    ${score.xCount > 0 ? `<div class="text-muted">${score.xCount}x</div>` : ''}
+                                    ${shotsHtml}
+                                </div>
+                                ${reactionsHtml}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            // Remove existing modal if any
+            const existingModal = document.getElementById('historyPhotoModal');
+            if (existingModal) existingModal.remove();
+
+            // Add modal to DOM and show
+            document.body.insertAdjacentHTML('beforeend', modalContent);
+            const modal = new bootstrap.Modal(document.getElementById('historyPhotoModal'));
+            modal.show();
+
+            // Clean up modal on hide
+            document.getElementById('historyPhotoModal').addEventListener('hidden.bs.modal', function() {
+                this.remove();
+            });
         }
 
         // ===== SignalR Integration =====
@@ -2265,6 +2421,48 @@
             background-color: rgba(25, 135, 84, 0.1);
             border-color: var(--bs-success);
         }
+
+    /* History modal summary rows */
+    #historyScoreboardBody .summary-row {
+        background-color: var(--bs-tertiary-bg);
+        border-top: 2px solid var(--bs-border-color);
+        border-bottom: 2px solid var(--bs-border-color);
+    }
+
+    #historyScoreboardBody .summary-cell {
+        text-align: center;
+        padding: 6px 8px !important;
+        font-weight: 600;
+    }
+
+    #historyScoreboardBody .summary-total {
+        font-size: 1rem;
+        color: var(--bs-primary);
+    }
+
+    #historyScoreboardBody .summary-x {
+        font-size: 0.75rem;
+        color: var(--bs-secondary-color);
+        margin-left: 4px;
+    }
+
+    /* History modal reaction indicator */
+    #historyScoreboardBody .reaction-indicator {
+        display: inline-block;
+        font-size: 0.8rem;
+        margin-left: 4px;
+        vertical-align: middle;
+    }
+
+    #historyScoreboardBody .reaction-indicator small {
+        font-size: 0.65rem;
+        color: var(--bs-secondary-color);
+    }
+
+    /* History modal score cells */
+    #historyScoreboardBody .score-cell.has-score:hover {
+        background-color: var(--bs-tertiary-bg);
+    }
 </style>
 
 @Html.AntiForgeryToken()

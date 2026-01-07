@@ -1325,42 +1325,60 @@ namespace HpskSite.Controllers
 
                         if (isParticipant)
                         {
-                            var userScore = db.SingleOrDefault<dynamic>(
-                                @"SELECT TotalScore, SeriesScores FROM TrainingScores
-                                  WHERE MemberId = @0 AND TrainingMatchId = @1",
-                                member.Id, (int)m.Id);
+                            // Fetch all scores with series data for equalized calculation
+                            var allScoresWithSeries = db.Fetch<dynamic>(
+                                @"SELECT ts.MemberId, ts.TotalScore, ts.SeriesScores
+                                  FROM TrainingScores ts
+                                  WHERE ts.TrainingMatchId = @0", (int)m.Id);
 
-                            userTotalScore = userScore != null ? (int)userScore.TotalScore : 0;
+                            // Calculate series counts and find minimum
+                            var participantData = new List<(int MemberId, int SeriesCount, List<int> SeriesTotals)>();
 
-                            // Count series from JSON
-                            if (userScore != null && userScore.SeriesScores != null)
+                            foreach (var score in allScoresWithSeries)
                             {
-                                try
+                                var seriesTotals = new List<int>();
+                                if (score.SeriesScores != null)
                                 {
-                                    var seriesJson = (string)userScore.SeriesScores;
-                                    var seriesArray = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(seriesJson);
-                                    userSeriesCount = seriesArray.GetArrayLength();
+                                    try
+                                    {
+                                        var seriesJson = (string)score.SeriesScores;
+                                        var seriesArray = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(seriesJson);
+                                        foreach (var series in seriesArray.EnumerateArray())
+                                        {
+                                            if (series.TryGetProperty("total", out var totalProp))
+                                            {
+                                                seriesTotals.Add(totalProp.GetInt32());
+                                            }
+                                        }
+                                    }
+                                    catch { }
                                 }
-                                catch
-                                {
-                                    userSeriesCount = 0;
-                                }
+                                participantData.Add(((int)score.MemberId, seriesTotals.Count, seriesTotals));
                             }
 
-                            // Calculate user's ranking
-                            var allScores = db.Fetch<dynamic>(
-                                @"SELECT ts.MemberId, ts.TotalScore
-                                  FROM TrainingScores ts
-                                  WHERE ts.TrainingMatchId = @0
-                                  ORDER BY ts.TotalScore DESC", (int)m.Id);
+                            // Find minimum series count (only from participants with scores)
+                            var participantsWithScores = participantData.Where(p => p.SeriesCount > 0).ToList();
+                            int minSeriesCount = participantsWithScores.Any()
+                                ? participantsWithScores.Min(p => p.SeriesCount)
+                                : 0;
 
-                            for (int i = 0; i < allScores.Count; i++)
+                            // Calculate equalized scores and rank
+                            var equalizedScores = participantData
+                                .Select(p => new {
+                                    MemberId = p.MemberId,
+                                    EqualizedScore = p.SeriesTotals.Take(minSeriesCount).Sum(),
+                                    SeriesCount = p.SeriesCount
+                                })
+                                .OrderByDescending(p => p.EqualizedScore)
+                                .ToList();
+
+                            // Find user's data
+                            var userData = equalizedScores.FirstOrDefault(p => p.MemberId == member.Id);
+                            if (userData != null)
                             {
-                                if ((int)allScores[i].MemberId == member.Id)
-                                {
-                                    userRanking = i + 1;
-                                    break;
-                                }
+                                userTotalScore = userData.EqualizedScore;
+                                userSeriesCount = minSeriesCount; // Show the equalized series count
+                                userRanking = equalizedScores.FindIndex(p => p.MemberId == member.Id) + 1;
                             }
                         }
 
