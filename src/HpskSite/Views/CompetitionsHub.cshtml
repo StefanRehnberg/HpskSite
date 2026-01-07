@@ -147,7 +147,7 @@
 
             <!-- Advanced Filters (Collapsible) -->
             <div class="collapse" id="advancedFilters">
-                <div class="card bg-light">
+                <div class="card" style="background-color: var(--bs-tertiary-bg);">
                     <div class="card-body">
                         <div class="row g-3">
                             <!-- Search Box -->
@@ -220,8 +220,8 @@
                                     <i class="bi bi-sort-down"></i> Sortera
                                 </label>
                                 <select class="form-select" id="sortCompetitions">
-                                    <option value="date-desc">Datum ?</option>
-                                    <option value="date-asc">Datum ?</option>
+                                    <option value="date-asc">Datum (närmast först)</option>
+                                    <option value="date-desc">Datum (senast först)</option>
                                     <option value="name-asc">Namn A-Z</option>
                                     <option value="name-desc">Namn Z-A</option>
                                 </select>
@@ -1315,7 +1315,7 @@ document.addEventListener('DOMContentLoaded', function() {
         shootingClassFilter.value = '';
         seasonFilter.value = '';
         venueFilter.value = '';
-        sortSelect.value = 'date-desc';
+        sortSelect.value = 'date-asc';
 
         // Reset to all statuses active
         activeStatuses = new Set(['open', 'upcoming', 'active', 'completed']);
