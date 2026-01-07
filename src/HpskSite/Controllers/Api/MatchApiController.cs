@@ -772,7 +772,7 @@ namespace HpskSite.Controllers.Api
             }
 
             // Validate emoji
-            var allowedEmojis = new[] { "❤️", "👍", "🔥", "💪", "🎯" };
+            var allowedEmojis = new[] { "❤️", "👍", "🔥", "😢", "🎯" };
             if (!allowedEmojis.Contains(request.Emoji))
             {
                 return BadRequest(ApiResponse<List<PhotoReaction>>.Error("Ogiltig emoji"));

@@ -47,59 +47,55 @@
                 </Border>
 
                 <!--  Match Header Card  -->
-                <Border Padding="12"
+                <Border Padding="10,8"
                         BackgroundColor="{StaticResource Primary}"
                         Stroke="Transparent" StrokeShape="RoundRectangle 12">
-                    <Grid RowDefinitions="Auto,Auto" RowSpacing="8">
-                        <!--  Row 0: Title with HCP badge  -->
-                        <HorizontalStackLayout Spacing="8">
-                            <Label FontAttributes="Bold" FontSize="18"
-                                   Text="{Binding Match.DisplayName}"
-                                   TextColor="White" VerticalOptions="Center"
-                                   LineBreakMode="TailTruncation" />
-                            <!--  HCP Badge  -->
-                            <Border Padding="6,2" BackgroundColor="Orange"
-                                    IsVisible="{Binding Match.IsHandicapEnabled}"
-                                    StrokeShape="RoundRectangle 4" StrokeThickness="0" VerticalOptions="Center">
-                                <Label FontAttributes="Bold" FontSize="11" Text="HCP"
-                                       TextColor="#343a40" />
-                            </Border>
-                        </HorizontalStackLayout>
-
-                        <!--  Row 1: Info and buttons  -->
-                        <Grid Grid.Row="1" ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="8">
-                            <HorizontalStackLayout Spacing="8">
-                                <Label FontSize="12" Opacity="0.9"
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                        <!--  Left: Title, info  -->
+                        <VerticalStackLayout Spacing="2" VerticalOptions="Center">
+                            <HorizontalStackLayout Spacing="6">
+                                <Label FontAttributes="Bold" FontSize="16"
+                                       Text="{Binding Match.DisplayName}"
+                                       TextColor="White" VerticalOptions="Center"
+                                       LineBreakMode="TailTruncation" />
+                                <!--  HCP Badge  -->
+                                <Border Padding="5,1" BackgroundColor="Orange"
+                                        IsVisible="{Binding Match.IsHandicapEnabled}"
+                                        StrokeShape="RoundRectangle 3" StrokeThickness="0" VerticalOptions="Center">
+                                    <Label FontAttributes="Bold" FontSize="10" Text="HCP"
+                                           TextColor="#343a40" />
+                                </Border>
+                            </HorizontalStackLayout>
+                            <HorizontalStackLayout Spacing="6">
+                                <Label FontSize="11" Opacity="0.9"
                                        Text="{Binding Match.WeaponClass, StringFormat='Klass {0}'}"
                                        TextColor="White" />
-                                <Label FontSize="12" Opacity="0.7" Text="|"
+                                <Label FontSize="11" Opacity="0.7" Text="|"
                                        TextColor="White" />
-                                <Label FontAttributes="Bold" FontSize="12"
+                                <Label FontAttributes="Bold" FontSize="11"
                                        Text="{Binding Match.MatchCode, StringFormat='Kod: {0}'}"
                                        TextColor="White" />
                             </HorizontalStackLayout>
+                        </VerticalStackLayout>
 
-                            <!--  Spacer  -->
-                            <BoxView Grid.Column="1" />
-
+                        <!--  Right: Buttons  -->
+                        <HorizontalStackLayout Grid.Column="1" Spacing="6" VerticalOptions="Center">
                             <!--  Share Button  -->
-                            <Button Grid.Column="2" Padding="12,0" BackgroundColor="White"
-                                    CornerRadius="6" FontSize="12" HeightRequest="32"
+                            <Button Padding="10,0" BackgroundColor="White"
+                                    CornerRadius="6" FontSize="11" HeightRequest="28"
                                     Text="Dela"
                                     TextColor="{StaticResource Primary}" />
 
                             <!--  Leave Button (participants only, not host, not spectator)  -->
-                            <Button Grid.Column="3" Padding="12,0"
+                            <Button Padding="10,0"
                                     BackgroundColor="{StaticResource Warning}"
                                     Command="{Binding LeaveMatchCommand}"
-                                    CornerRadius="6" FontSize="12" HeightRequest="32"
+                                    CornerRadius="6" FontSize="11" HeightRequest="28"
                                     Text="Lämna" TextColor="White">
                                 <Button.Triggers>
-                                    <!--  Hide for match host  -->
                                     <DataTrigger Binding="{Binding IsMatchHost}" TargetType="Button" Value="True">
                                         <Setter Property="IsVisible" Value="False" />
                                     </DataTrigger>
-                                    <!--  Hide for spectators  -->
                                     <DataTrigger Binding="{Binding IsSpectator}" TargetType="Button" Value="True">
                                         <Setter Property="IsVisible" Value="False" />
                                     </DataTrigger>
@@ -107,23 +103,21 @@
                             </Button>
 
                             <!--  End Match Button (Host only, not spectator)  -->
-                            <Button Grid.Column="4" Padding="12,0"
+                            <Button Padding="10,0"
                                     BackgroundColor="{StaticResource Danger}"
-                                    Clicked="OnCompleteMatchClicked" CornerRadius="6" FontSize="12"
-                                    HeightRequest="32"
+                                    Clicked="OnCompleteMatchClicked" CornerRadius="6" FontSize="11"
+                                    HeightRequest="28"
                                     Text="Avsluta" TextColor="White">
                                 <Button.Triggers>
-                                    <!--  Show only for match host  -->
                                     <DataTrigger Binding="{Binding IsMatchHost}" TargetType="Button" Value="False">
                                         <Setter Property="IsVisible" Value="False" />
                                     </DataTrigger>
-                                    <!--  Hide for spectators  -->
                                     <DataTrigger Binding="{Binding IsSpectator}" TargetType="Button" Value="True">
                                         <Setter Property="IsVisible" Value="False" />
                                     </DataTrigger>
                                 </Button.Triggers>
                             </Button>
-                        </Grid>
+                        </HorizontalStackLayout>
                     </Grid>
                 </Border>
 
