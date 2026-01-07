@@ -53,11 +53,14 @@
                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
                         <!--  Left: Title, info  -->
                         <VerticalStackLayout Spacing="2" VerticalOptions="Center">
+                            <Label FontAttributes="Bold" FontSize="16"
+                                   Text="{Binding Match.DisplayName}"
+                                   TextColor="White" VerticalOptions="Center"
+                                   LineBreakMode="TailTruncation" />
                             <HorizontalStackLayout Spacing="6">
-                                <Label FontAttributes="Bold" FontSize="16"
-                                       Text="{Binding Match.DisplayName}"
-                                       TextColor="White" VerticalOptions="Center"
-                                       LineBreakMode="TailTruncation" />
+                                <Label FontSize="11" Opacity="0.9"
+                                       Text="{Binding Match.WeaponClass, StringFormat='Klass {0}'}"
+                                       TextColor="White" VerticalOptions="Center" />
                                 <!--  HCP Badge  -->
                                 <Border Padding="5,1" BackgroundColor="Orange"
                                         IsVisible="{Binding Match.IsHandicapEnabled}"
@@ -65,16 +68,6 @@
                                     <Label FontAttributes="Bold" FontSize="10" Text="HCP"
                                            TextColor="#343a40" />
                                 </Border>
-                            </HorizontalStackLayout>
-                            <HorizontalStackLayout Spacing="6">
-                                <Label FontSize="11" Opacity="0.9"
-                                       Text="{Binding Match.WeaponClass, StringFormat='Klass {0}'}"
-                                       TextColor="White" />
-                                <Label FontSize="11" Opacity="0.7" Text="|"
-                                       TextColor="White" />
-                                <Label FontAttributes="Bold" FontSize="11"
-                                       Text="{Binding Match.MatchCode, StringFormat='Kod: {0}'}"
-                                       TextColor="White" />
                             </HorizontalStackLayout>
                         </VerticalStackLayout>
 

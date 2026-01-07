@@ -44,7 +44,7 @@ namespace HpskSite.Hubs
         /// </summary>
         public async Task JoinMatchGroup(string matchCode)
         {
-            await Groups.AddToGroupAsync(Context.ConnectionId, $"match_{matchCode}");
+            await Groups.AddToGroupAsync(Context.ConnectionId, $"match_{matchCode.ToUpperInvariant()}");
         }
 
         /// <summary>
@@ -53,7 +53,7 @@ namespace HpskSite.Hubs
         /// </summary>
         public async Task LeaveMatchGroup(string matchCode)
         {
-            await Groups.RemoveFromGroupAsync(Context.ConnectionId, $"match_{matchCode}");
+            await Groups.RemoveFromGroupAsync(Context.ConnectionId, $"match_{matchCode.ToUpperInvariant()}");
         }
 
         /// <summary>
@@ -61,6 +61,8 @@ namespace HpskSite.Hubs
         /// </summary>
         public async Task RegisterSpectator(string matchCode, int memberId, string name, string profilePictureUrl, string clubName)
         {
+            var normalizedCode = matchCode.ToUpperInvariant();
+
             // Remove from previous match if any
             if (_connectionMatches.TryGetValue(Context.ConnectionId, out var previousMatch))
             {
@@ -68,7 +70,7 @@ namespace HpskSite.Hubs
             }
 
             // Add to new match
-            var spectators = _matchSpectators.GetOrAdd(matchCode, _ => new ConcurrentDictionary<string, MatchSpectator>());
+            var spectators = _matchSpectators.GetOrAdd(normalizedCode, _ => new ConcurrentDictionary<string, MatchSpectator>());
             var spectator = new MatchSpectator
             {
                 MemberId = memberId,
@@ -78,10 +80,10 @@ namespace HpskSite.Hubs
                 ConnectionId = Context.ConnectionId
             };
             spectators[Context.ConnectionId] = spectator;
-            _connectionMatches[Context.ConnectionId] = matchCode;
+            _connectionMatches[Context.ConnectionId] = normalizedCode;
 
             // Broadcast updated spectator list to all match viewers
-            await BroadcastSpectatorList(matchCode);
+            await BroadcastSpectatorList(normalizedCode);
         }
 
         /// <summary>
@@ -89,8 +91,9 @@ namespace HpskSite.Hubs
         /// </summary>
         public async Task UnregisterSpectator(string matchCode)
         {
-            await UnregisterSpectatorInternal(matchCode, Context.ConnectionId);
-            await BroadcastSpectatorList(matchCode);
+            var normalizedCode = matchCode.ToUpperInvariant();
+            await UnregisterSpectatorInternal(normalizedCode, Context.ConnectionId);
+            await BroadcastSpectatorList(normalizedCode);
         }
 
         private async Task UnregisterSpectatorInternal(string matchCode, string connectionId)
@@ -105,6 +108,7 @@ namespace HpskSite.Hubs
 
         private async Task BroadcastSpectatorList(string matchCode)
         {
+            // matchCode should already be normalized by callers
             var spectatorList = GetSpectatorList(matchCode);
             await Clients.Group($"match_{matchCode}").SendAsync("SpectatorListUpdated", spectatorList);
         }
@@ -114,7 +118,8 @@ namespace HpskSite.Hubs
         /// </summary>
         public static List<MatchSpectator> GetSpectatorList(string matchCode)
         {
-            if (_matchSpectators.TryGetValue(matchCode, out var spectators))
+            var normalizedCode = matchCode.ToUpperInvariant();
+            if (_matchSpectators.TryGetValue(normalizedCode, out var spectators))
             {
                 return spectators.Values.ToList();
             }
@@ -127,7 +132,7 @@ namespace HpskSite.Hubs
         /// </summary>
         public async Task JoinOrganizerGroup(string matchCode)
         {
-            await Groups.AddToGroupAsync(Context.ConnectionId, $"organizer_{matchCode}");
+            await Groups.AddToGroupAsync(Context.ConnectionId, $"organizer_{matchCode.ToUpperInvariant()}");
         }
 
         /// <summary>
@@ -135,7 +140,7 @@ namespace HpskSite.Hubs
         /// </summary>
         public async Task LeaveOrganizerGroup(string matchCode)
         {
-            await Groups.RemoveFromGroupAsync(Context.ConnectionId, $"organizer_{matchCode}");
+            await Groups.RemoveFromGroupAsync(Context.ConnectionId, $"organizer_{matchCode.ToUpperInvariant()}");
         }
 
         /// <summary>
@@ -245,7 +250,7 @@ namespace HpskSite.Hubs
             string matchCode,
             object joinRequest)
         {
-            await hubContext.Clients.Group($"organizer_{matchCode}")
+            await hubContext.Clients.Group($"organizer_{matchCode.ToUpperInvariant()}")
                 .SendAsync("JoinRequestReceived", joinRequest);
         }
 
@@ -281,7 +286,7 @@ namespace HpskSite.Hubs
             string matchCode,
             object participant)
         {
-            await hubContext.Clients.Group($"match_{matchCode}")
+            await hubContext.Clients.Group($"match_{matchCode.ToUpperInvariant()}")
                 .SendAsync("ParticipantJoined", participant);
         }
 
@@ -293,7 +298,7 @@ namespace HpskSite.Hubs
             string matchCode,
             int memberId)
         {
-            await hubContext.Clients.Group($"match_{matchCode}")
+            await hubContext.Clients.Group($"match_{matchCode.ToUpperInvariant()}")
                 .SendAsync("ParticipantLeft", memberId);
         }
 
@@ -305,7 +310,7 @@ namespace HpskSite.Hubs
             string matchCode,
             object scoreData)
         {
-            await hubContext.Clients.Group($"match_{matchCode}")
+            await hubContext.Clients.Group($"match_{matchCode.ToUpperInvariant()}")
                 .SendAsync("ScoreUpdated", scoreData);
         }
 
@@ -316,7 +321,7 @@ namespace HpskSite.Hubs
             this IHubContext<TrainingMatchHub> hubContext,
             string matchCode)
         {
-            await hubContext.Clients.Group($"match_{matchCode}")
+            await hubContext.Clients.Group($"match_{matchCode.ToUpperInvariant()}")
                 .SendAsync("MatchCompleted", matchCode);
         }
 
@@ -327,7 +332,7 @@ namespace HpskSite.Hubs
             this IHubContext<TrainingMatchHub> hubContext,
             string matchCode)
         {
-            await hubContext.Clients.Group($"match_{matchCode}")
+            await hubContext.Clients.Group($"match_{matchCode.ToUpperInvariant()}")
                 .SendAsync("MatchRefresh", matchCode);
         }
 
@@ -338,7 +343,7 @@ namespace HpskSite.Hubs
             this IHubContext<TrainingMatchHub> hubContext,
             string matchCode)
         {
-            await hubContext.Clients.Group($"match_{matchCode}")
+            await hubContext.Clients.Group($"match_{matchCode.ToUpperInvariant()}")
                 .SendAsync("MatchStarted", matchCode);
         }
     }
