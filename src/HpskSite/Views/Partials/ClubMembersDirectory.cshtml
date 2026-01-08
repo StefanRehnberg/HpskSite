@@ -722,6 +722,18 @@ function renderMemberDashboard(data, container) {
             </div>
         </div>
 
+        <!-- Handicap Row -->
+        <div class="row mb-3">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-body py-2">
+                        <h6 class="text-muted mb-2"><i class="bi bi-sliders me-1"></i>Handicap (Precisionsskytte)</h6>
+                        ${renderHandicapSummary(data.handicapProfiles || [], data.shooterClass)}
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Stats Summary -->
         <div class="text-center text-muted small">
             <span>Totalt genomsnitt: <strong>${data.overallAverage}p</strong></span>
@@ -775,6 +787,54 @@ function renderPersonalBestsTable(personalBests) {
 
     html += '</div>';
     return html;
+}
+
+function formatHandicapValue(value) {
+    const rounded = Math.round(value * 4) / 4; // Round to quarter points
+    const sign = rounded >= 0 ? '+' : '';
+    const formatted = Number.isInteger(rounded) ? rounded.toString() : rounded.toFixed(2);
+    return sign + formatted;
+}
+
+function renderHandicapSummary(handicapProfiles, shooterClass) {
+    if (!shooterClass) {
+        return `<div class="text-muted small"><i class="bi bi-info-circle me-1"></i>Skytteklass ej vald - handicap kan inte beräknas</div>`;
+    }
+
+    if (!handicapProfiles || handicapProfiles.length === 0) {
+        return `<div class="text-muted small"><i class="bi bi-info-circle me-1"></i>Ingen handicap-statistik tillgänglig</div>`;
+    }
+
+    // Build compact handicap badges
+    const badges = handicapProfiles.map(hp => {
+        const handicapDisplay = formatHandicapValue(hp.handicapPerSeries);
+        const provBadge = hp.isProvisional ? ' (P)' : '';
+        const progress = Math.min((hp.completedMatches / hp.requiredMatches) * 100, 100);
+
+        if (hp.isProvisional) {
+            return `
+                <div class="d-inline-flex align-items-center me-3 mb-2">
+                    <span class="badge bg-secondary me-1">${hp.weaponClass}</span>
+                    <span class="fw-bold">${handicapDisplay}</span>
+                    <span class="badge bg-warning text-dark ms-1" title="Provisoriskt handicap">(P)</span>
+                    <div class="ms-2 d-flex align-items-center" style="width: 60px;" title="${hp.completedMatches} av ${hp.requiredMatches} matcher">
+                        <div class="progress flex-grow-1" style="height: 6px;">
+                            <div class="progress-bar bg-primary" role="progressbar" style="width: ${progress}%"></div>
+                        </div>
+                        <small class="text-muted ms-1">${hp.completedMatches}/${hp.requiredMatches}</small>
+                    </div>
+                </div>`;
+        } else {
+            return `
+                <div class="d-inline-flex align-items-center me-3 mb-2">
+                    <span class="badge bg-secondary me-1">${hp.weaponClass}</span>
+                    <span class="fw-bold">${handicapDisplay}</span>
+                    <i class="bi bi-check-circle-fill text-success ms-1" title="Fullständigt handicap"></i>
+                </div>`;
+        }
+    }).join('');
+
+    return `<div class="d-flex flex-wrap align-items-center">${badges}</div>`;
 }
 </script>
 

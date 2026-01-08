@@ -736,7 +736,8 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetClubMembers(int clubId)
         {
-            if (!await _authService.IsCurrentUserAdminAsync())
+            // Allow site admins or club admins for this specific club
+            if (!await _authService.IsClubAdminForClub(clubId))
             {
                 return Json(new { success = false, message = "Access denied" });
             }

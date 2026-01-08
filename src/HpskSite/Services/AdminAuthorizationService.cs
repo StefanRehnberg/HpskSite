@@ -68,6 +68,42 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// Checks if the current user can edit a specific member.
+        /// Returns true if user is site admin OR club admin for any of the member's clubs.
+        /// </summary>
+        public async Task<bool> CanEditMemberAsync(int memberId)
+        {
+            // Site admins can edit anyone
+            if (await IsCurrentUserAdminAsync()) return true;
+
+            // Get the member to check their clubs
+            var member = _memberService.GetById(memberId);
+            if (member == null) return false;
+
+            // Check primary club
+            var primaryClubIdStr = member.GetValue("primaryClubId")?.ToString();
+            if (!string.IsNullOrEmpty(primaryClubIdStr) && int.TryParse(primaryClubIdStr, out int primaryClubId))
+            {
+                if (await IsClubAdminForClub(primaryClubId)) return true;
+            }
+
+            // Check additional clubs
+            var additionalClubIds = member.GetValue("memberClubIds")?.ToString() ?? "";
+            if (!string.IsNullOrEmpty(additionalClubIds))
+            {
+                foreach (var clubIdStr in additionalClubIds.Split(',', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    if (int.TryParse(clubIdStr.Trim(), out int clubId))
+                    {
+                        if (await IsClubAdminForClub(clubId)) return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
         /// Gets list of club IDs that the current user can administer
         /// Returns all clubs for site administrators
         /// </summary>

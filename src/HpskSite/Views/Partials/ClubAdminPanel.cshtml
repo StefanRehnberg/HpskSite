@@ -376,6 +376,241 @@
     </div>
 </div>
 
+<!-- Edit Club Member Modal -->
+<div class="modal fade" id="editClubMemberModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="editClubMemberModalTitle">Redigera medlem</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <!-- Loading overlay -->
+                <div id="editMemberLoadingOverlay" class="position-absolute top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center bg-white bg-opacity-75" style="z-index: 10; display: none !important;">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Laddar...</span>
+                    </div>
+                </div>
+
+                <form id="editClubMemberForm">
+                    <input type="hidden" id="editMemberId" name="id">
+
+                    <!-- Profile Picture Section -->
+                    <div class="text-center mb-4" id="editMemberProfilePictureSection">
+                        <div class="position-relative d-inline-block">
+                            <div id="editMemberProfilePictureContainer" class="rounded-circle overflow-hidden bg-light d-flex align-items-center justify-content-center" style="width: 100px; height: 100px; border: 3px solid #dee2e6;">
+                                <div id="editMemberProfileInitials" class="d-flex align-items-center justify-content-center w-100 h-100 bg-primary text-white" style="font-size: 2rem; font-weight: bold;">
+                                    ?
+                                </div>
+                            </div>
+                            <label for="editMemberProfilePictureInput" class="btn btn-primary btn-sm position-absolute" style="bottom: 0; right: 0; border-radius: 50%; width: 32px; height: 32px; padding: 0;" title="Byt profilbild">
+                                <i class="bi bi-camera"></i>
+                            </label>
+                            <input type="file" id="editMemberProfilePictureInput" accept="image/*" class="d-none" onchange="uploadEditMemberProfilePicture(this)">
+                        </div>
+                        <div class="mt-2">
+                            <small class="text-muted">Klicka på kameran för att byta bild</small>
+                            <br><button type="button" class="btn btn-link btn-sm text-danger p-0" id="editMemberRemoveProfilePictureBtn" onclick="removeEditMemberProfilePicture()" style="display: none;">
+                                <i class="bi bi-trash"></i> Ta bort bild
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="editMemberFirstName" class="form-label">Förnamn *</label>
+                                <input type="text" class="form-control" id="editMemberFirstName" name="firstName" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="editMemberLastName" class="form-label">Efternamn *</label>
+                                <input type="text" class="form-control" id="editMemberLastName" name="lastName" required>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="editMemberEmail" class="form-label">E-post *</label>
+                        <input type="email" class="form-control" id="editMemberEmail" name="email" required>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="editMemberPhoneNumber" class="form-label">Telefonnummer</label>
+                                <input type="tel" class="form-control" id="editMemberPhoneNumber" name="phoneNumber">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="editMemberShooterIdNumber" class="form-label">Skytte-ID</label>
+                                <input type="text" class="form-control" id="editMemberShooterIdNumber" name="shooterIdNumber">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="editMemberAddress" class="form-label">Adress</label>
+                        <input type="text" class="form-control" id="editMemberAddress" name="address">
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="editMemberPostalCode" class="form-label">Postnummer</label>
+                                <input type="text" class="form-control" id="editMemberPostalCode" name="postalCode">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="editMemberCity" class="form-label">Ort</label>
+                                <input type="text" class="form-control" id="editMemberCity" name="city">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="editMemberPersonNumber" class="form-label">Personnummer</label>
+                                <input type="text" class="form-control" id="editMemberPersonNumber" name="personNumber"
+                                       placeholder="ÅÅÅÅMMDD-XXXX" pattern="^(19|20)\d{6}[-]?\d{4}$"
+                                       title="Ange personnummer i formatet ÅÅÅÅMMDD-XXXX (t.ex. 19850115-1234)">
+                                <div class="form-text">Format: ÅÅÅÅMMDD-XXXX</div>
+                                <div class="invalid-feedback" id="editMemberPersonNumberError">Ogiltigt personnummer. Använd formatet ÅÅÅÅMMDD-XXXX</div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="editMemberMemberSince" class="form-label">Medlem sedan</label>
+                                <input type="text" class="form-control" id="editMemberMemberSince" name="memberSince" placeholder="ÅÅÅÅ-MM-DD">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Primary Club -->
+                    <div class="row">
+                        <div class="col-md-12">
+                            <div class="mb-3">
+                                <label for="editMemberPrimaryClub" class="form-label">Primär klubb</label>
+                                <select class="form-control" id="editMemberPrimaryClub" name="primaryClubId">
+                                    <option value="">-- Ingen primär klubb --</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Additional Clubs -->
+                    <div class="mb-3">
+                        <label for="editMemberAdditionalClubsDropdown" class="form-label">Ytterligare klubbar</label>
+                        <div class="dropdown">
+                            <button class="btn btn-outline-secondary dropdown-toggle w-100 text-start"
+                                    type="button" id="editMemberAdditionalClubsDropdown"
+                                    data-bs-toggle="dropdown"
+                                    aria-expanded="false">
+                                <span id="editMemberSelectedClubsText">Välj klubbar</span>
+                            </button>
+                            <div class="dropdown-menu w-100 p-3" id="editMemberAdditionalClubsDropdownMenu"
+                                 style="max-height: 300px; overflow-y: auto;">
+                                <!-- Checkboxes will be rendered here -->
+                            </div>
+                        </div>
+                        <div class="form-text" id="editMemberSelectedClubsCount">Inga ytterligare klubbar valda</div>
+                    </div>
+
+                    <!-- Member Groups (site admins only) -->
+                    <div class="mb-3" id="editMemberGroupsSection" style="display: none;">
+                        <label for="editMemberGroupsDropdown" class="form-label">Medlemsgrupper</label>
+                        <div class="dropdown">
+                            <button class="btn btn-outline-secondary dropdown-toggle w-100 text-start"
+                                    type="button" id="editMemberGroupsDropdown"
+                                    data-bs-toggle="dropdown"
+                                    aria-expanded="false">
+                                <span id="editMemberSelectedGroupsText">Välj grupper</span>
+                            </button>
+                            <div class="dropdown-menu w-100 p-3" id="editMemberGroupsDropdownMenu"
+                                 style="max-height: 300px; overflow-y: auto;">
+                                <!-- Checkboxes will be rendered here -->
+                            </div>
+                        </div>
+                        <div class="form-text" id="editMemberSelectedGroupsCount">Inga grupper valda</div>
+                    </div>
+
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="editMemberIsApproved" name="isApproved" checked>
+                        <label class="form-check-label" for="editMemberIsApproved">
+                            Medlem godkänd
+                        </label>
+                    </div>
+
+                    <!-- Precisionsskytte Section -->
+                    <div id="editMemberPrecisionSection" class="mt-3">
+                        <hr>
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <a class="text-decoration-none text-body fw-semibold"
+                               data-bs-toggle="collapse"
+                               href="#editMemberPrecisionCollapse"
+                               role="button"
+                               aria-expanded="false"
+                               aria-controls="editMemberPrecisionCollapse">
+                                <i class="bi bi-chevron-right me-1" id="editMemberPrecisionCollapseIcon"></i>
+                                <i class="bi bi-bullseye me-1"></i> Precisionsskytte
+                            </a>
+                        </div>
+                        <div class="collapse" id="editMemberPrecisionCollapse">
+                            <!-- Shooter Class Selection -->
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold">Skytteklass</label>
+                                <div class="ms-1">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="editMemberShooterClass" id="editMemberClass1" value="Klass 1 - Nybörjare">
+                                        <label class="form-check-label" for="editMemberClass1">Klass 1 - Nybörjare</label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="editMemberShooterClass" id="editMemberClass2" value="Klass 2 - Guldmärkesskytt">
+                                        <label class="form-check-label" for="editMemberClass2">Klass 2 - Guldmärkesskytt</label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="editMemberShooterClass" id="editMemberClass3" value="Klass 3 - Riksmästare">
+                                        <label class="form-check-label" for="editMemberClass3">Klass 3 - Riksmästare</label>
+                                    </div>
+                                </div>
+                                <small class="form-text text-muted">Skytteklassen påverkar handicapberäkningen</small>
+                            </div>
+
+                            <!-- Handicap Information -->
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span class="fw-semibold">Handicapindex</span>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="recalculateEditMemberHandicap()" id="editMemberRecalculateHandicapBtn" title="Omberäkna handicap från alla resultat">
+                                    <i class="bi bi-arrow-clockwise"></i> Omberäkna
+                                </button>
+                            </div>
+                            <div id="editMemberHandicapInfoContainer">
+                                <div class="text-center py-3">
+                                    <div class="spinner-border spinner-border-sm text-primary" role="status">
+                                        <span class="visually-hidden">Laddar...</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-danger" id="editMemberDeleteBtn" onclick="deleteEditMember()" style="display: none;">
+                    <i class="bi bi-trash"></i> Ta bort medlem
+                </button>
+                <div class="ms-auto">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                    <button type="button" class="btn btn-primary" onclick="saveEditClubMember()">Spara medlem</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 // Global variables to store loaded data
 let allEvents = [];
@@ -893,6 +1128,9 @@ function displayClubMembers(members) {
                 <td>${escapeHtml(member.phoneNumber || '-')}</td>
                 <td>${statusBadge}</td>
                 <td>
+                    <button class="btn btn-sm btn-outline-primary me-1" onclick="editClubMember(${member.id})" title="Redigera">
+                        <i class="bi bi-pencil"></i>
+                    </button>
                     <button class="btn btn-sm btn-outline-info" onclick="sendMemberInvitation(${member.id})" title="Skicka inbjudan">
                         <i class="bi bi-envelope"></i> Inbjudan
                     </button>
@@ -1009,16 +1247,632 @@ document.getElementById('clubSettingsForm').addEventListener('submit', function(
         alert('Fel vid sparande av inställningar.');
     });
 });
+
+// ========== MEMBER EDIT FUNCTIONS ==========
+
+// Store data for edit modal
+let editMemberAvailableClubs = [];
+let editMemberAvailableGroups = [];
+let editMemberCurrentMemberId = null;
+let editMemberIsSiteAdmin = false;
+
+// Initialize edit member data (load clubs and groups)
+async function initEditMemberData() {
+    // Load clubs and member groups in parallel for faster loading
+    const [clubsResult, groupsResult] = await Promise.allSettled([
+        fetch('/umbraco/surface/ClubAdmin/GetClubs').then(r => r.json()),
+        fetch('/umbraco/surface/MemberAdmin/GetMemberGroups').then(r => r.json())
+    ]);
+
+    // Process clubs result
+    if (clubsResult.status === 'fulfilled' && clubsResult.value.success) {
+        editMemberAvailableClubs = clubsResult.value.data.filter(c => c.isActive);
+    } else {
+        console.error('Error loading clubs:', clubsResult.reason || 'Failed');
+        editMemberAvailableClubs = [];
+    }
+
+    // Process groups result (may fail for non-site-admins, that's OK)
+    if (groupsResult.status === 'fulfilled' && groupsResult.value.success) {
+        editMemberAvailableGroups = groupsResult.value.data || [];
+    } else {
+        editMemberAvailableGroups = [];
+    }
+}
+
+// Pre-load edit member data when page loads (runs in background)
+document.addEventListener('DOMContentLoaded', function() {
+    // Delay slightly to not block initial page render
+    setTimeout(() => initEditMemberData(), 500);
+});
+
+// Show/hide loading overlay
+function showEditMemberLoading(show) {
+    const overlay = document.getElementById('editMemberLoadingOverlay');
+    overlay.style.display = show ? 'flex' : 'none';
+    overlay.style.setProperty('display', show ? 'flex' : 'none', 'important');
+}
+
+// Main edit function
+async function editClubMember(memberId) {
+    editMemberCurrentMemberId = memberId;
+
+    const modalEl = document.getElementById('editClubMemberModal');
+    // Use getOrCreateInstance to avoid creating duplicate modal instances
+    const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+
+    // Reset form and show loading state
+    document.getElementById('editClubMemberForm').reset();
+    document.getElementById('editMemberId').value = memberId;
+    showEditMemberLoading(true);
+    modal.show();
+
+    try {
+        // Run member fetch and init data in parallel for faster loading
+        const needsInit = editMemberAvailableClubs.length === 0;
+        const memberPromise = fetch(`/umbraco/surface/MemberAdmin/GetMember?id=${memberId}`).then(r => {
+            if (!r.ok) throw new Error(`HTTP error: ${r.status}`);
+            return r.json();
+        });
+
+        // Wait for both in parallel if init is needed, otherwise just member
+        if (needsInit) {
+            await Promise.all([initEditMemberData(), memberPromise]);
+        }
+
+        const result = await memberPromise;
+
+        showEditMemberLoading(false);
+
+        if (result.success) {
+            editMemberIsSiteAdmin = result.isSiteAdmin || false;
+            populateEditMemberForm(result.data);
+        } else {
+            alert('Fel vid laddning av medlem: ' + (result.message || 'Okänt fel'));
+            modal.hide();
+        }
+    } catch (error) {
+        showEditMemberLoading(false);
+        console.error('Error loading member:', error);
+        alert('Kunde inte ladda medlemsdata: ' + error.message);
+        modal.hide();
+    }
+}
+
+// Populate form with member data
+function populateEditMemberForm(member) {
+    // Basic fields
+    document.getElementById('editMemberId').value = member.id;
+    document.getElementById('editMemberFirstName').value = member.firstName || '';
+    document.getElementById('editMemberLastName').value = member.lastName || '';
+    document.getElementById('editMemberEmail').value = member.email || '';
+    document.getElementById('editMemberPhoneNumber').value = member.phoneNumber || '';
+    document.getElementById('editMemberShooterIdNumber').value = member.shooterIdNumber || '';
+    document.getElementById('editMemberAddress').value = member.address || '';
+    document.getElementById('editMemberPostalCode').value = member.postalCode || '';
+    document.getElementById('editMemberCity').value = member.city || '';
+    document.getElementById('editMemberPersonNumber').value = member.personNumber || '';
+    document.getElementById('editMemberMemberSince').value = member.memberSince || '';
+    document.getElementById('editMemberIsApproved').checked = member.isApproved;
+
+    // Profile picture
+    updateEditMemberProfilePicture(member.profilePictureUrl, member.firstName, member.lastName);
+
+    // Primary club dropdown
+    renderEditMemberPrimaryClub(member.primaryClubId);
+
+    // Additional clubs
+    renderEditMemberAdditionalClubs(member.additionalClubIds || []);
+
+    // Member groups (site admin only)
+    if (editMemberIsSiteAdmin) {
+        document.getElementById('editMemberGroupsSection').style.display = 'block';
+        renderEditMemberGroups(member.groups || []);
+    } else {
+        document.getElementById('editMemberGroupsSection').style.display = 'none';
+    }
+
+    // Show/hide site admin only features (delete button)
+    document.getElementById('editMemberDeleteBtn').style.display = editMemberIsSiteAdmin ? 'block' : 'none';
+
+    // Shooter class
+    const shooterClassRadios = document.querySelectorAll('input[name="editMemberShooterClass"]');
+    shooterClassRadios.forEach(radio => radio.checked = false);
+    if (member.precisionShooterClass) {
+        const radio = document.querySelector(`input[name="editMemberShooterClass"][value="${member.precisionShooterClass}"]`);
+        if (radio) radio.checked = true;
+    }
+
+    // Load handicap info when precision section is expanded
+    const precisionCollapse = document.getElementById('editMemberPrecisionCollapse');
+    precisionCollapse.addEventListener('shown.bs.collapse', function handler() {
+        loadEditMemberHandicapInfo(member.id);
+        precisionCollapse.removeEventListener('shown.bs.collapse', handler);
+    }, { once: true });
+
+    // Update collapse icon
+    const collapseIcon = document.getElementById('editMemberPrecisionCollapseIcon');
+    precisionCollapse.addEventListener('show.bs.collapse', () => {
+        collapseIcon.classList.remove('bi-chevron-right');
+        collapseIcon.classList.add('bi-chevron-down');
+    });
+    precisionCollapse.addEventListener('hide.bs.collapse', () => {
+        collapseIcon.classList.remove('bi-chevron-down');
+        collapseIcon.classList.add('bi-chevron-right');
+    });
+}
+
+// Profile picture functions
+function updateEditMemberProfilePicture(url, firstName, lastName) {
+    const container = document.getElementById('editMemberProfilePictureContainer');
+    const removeBtn = document.getElementById('editMemberRemoveProfilePictureBtn');
+
+    if (url) {
+        container.innerHTML = `<img src="${escapeHtml(url)}" alt="Profilbild" class="w-100 h-100" style="object-fit: cover;">`;
+        removeBtn.style.display = 'inline';
+    } else {
+        const initials = getEditMemberInitials(firstName, lastName);
+        container.innerHTML = `<div id="editMemberProfileInitials" class="d-flex align-items-center justify-content-center w-100 h-100 bg-primary text-white" style="font-size: 2rem; font-weight: bold;">${initials}</div>`;
+        removeBtn.style.display = 'none';
+    }
+}
+
+function getEditMemberInitials(firstName, lastName) {
+    let initials = '';
+    if (firstName) initials += firstName.charAt(0).toUpperCase();
+    if (lastName) initials += lastName.charAt(0).toUpperCase();
+    return initials || '?';
+}
+
+async function uploadEditMemberProfilePicture(input) {
+    if (!input.files || !input.files[0]) return;
+
+    const file = input.files[0];
+    const memberId = document.getElementById('editMemberId').value;
+
+    if (!memberId) {
+        alert('Spara medlemmen först innan du laddar upp en profilbild.');
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('memberId', memberId);
+    formData.append('file', file);
+
+    try {
+        const response = await fetch('/umbraco/surface/MemberAdmin/UploadMemberProfilePicture', {
+            method: 'POST',
+            body: formData
+        });
+        const result = await response.json();
+
+        if (result.success) {
+            updateEditMemberProfilePicture(result.profilePictureUrl,
+                document.getElementById('editMemberFirstName').value,
+                document.getElementById('editMemberLastName').value);
+        } else {
+            alert('Fel vid uppladdning: ' + result.message);
+        }
+    } catch (error) {
+        console.error('Upload error:', error);
+        alert('Fel vid uppladdning av profilbild');
+    }
+
+    input.value = '';
+}
+
+async function removeEditMemberProfilePicture() {
+    const memberId = document.getElementById('editMemberId').value;
+    if (!memberId) return;
+
+    if (!confirm('Är du säker på att du vill ta bort profilbilden?')) return;
+
+    try {
+        const formData = new FormData();
+        formData.append('memberId', memberId);
+
+        const response = await fetch('/umbraco/surface/MemberAdmin/RemoveMemberProfilePicture', {
+            method: 'POST',
+            body: formData
+        });
+        const result = await response.json();
+
+        if (result.success) {
+            updateEditMemberProfilePicture(null,
+                document.getElementById('editMemberFirstName').value,
+                document.getElementById('editMemberLastName').value);
+        } else {
+            alert('Fel: ' + result.message);
+        }
+    } catch (error) {
+        console.error('Remove error:', error);
+        alert('Fel vid borttagning av profilbild');
+    }
+}
+
+// Club selection functions
+function renderEditMemberPrimaryClub(selectedClubId) {
+    const select = document.getElementById('editMemberPrimaryClub');
+    select.innerHTML = '<option value="">-- Ingen primär klubb --</option>';
+
+    editMemberAvailableClubs.forEach(club => {
+        const option = document.createElement('option');
+        option.value = club.id;
+        option.textContent = club.name;
+        if (club.id === selectedClubId) option.selected = true;
+        select.appendChild(option);
+    });
+}
+
+function renderEditMemberAdditionalClubs(selectedClubIds) {
+    const menu = document.getElementById('editMemberAdditionalClubsDropdownMenu');
+    menu.innerHTML = '';
+
+    editMemberAvailableClubs.forEach(club => {
+        const checked = selectedClubIds.includes(club.id) ? 'checked' : '';
+        menu.innerHTML += `
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="editMemberAdditionalClubs"
+                       value="${club.id}" id="editMemberClub_${club.id}" ${checked}
+                       onchange="updateEditMemberSelectedClubsDisplay()">
+                <label class="form-check-label" for="editMemberClub_${club.id}">${escapeHtml(club.name)}</label>
+            </div>
+        `;
+    });
+
+    updateEditMemberSelectedClubsDisplay();
+}
+
+function updateEditMemberSelectedClubsDisplay() {
+    const checkboxes = document.querySelectorAll('input[name="editMemberAdditionalClubs"]:checked');
+    const count = checkboxes.length;
+    const textEl = document.getElementById('editMemberSelectedClubsText');
+    const countEl = document.getElementById('editMemberSelectedClubsCount');
+
+    if (count === 0) {
+        textEl.textContent = 'Välj klubbar';
+        countEl.textContent = 'Inga ytterligare klubbar valda';
+    } else {
+        const names = Array.from(checkboxes).map(cb => {
+            const club = editMemberAvailableClubs.find(c => c.id == cb.value);
+            return club ? club.name : cb.value;
+        });
+        textEl.textContent = names.length <= 2 ? names.join(', ') : `${names.length} klubbar valda`;
+        countEl.textContent = `${count} klubb(ar) valda`;
+    }
+}
+
+// Member groups functions
+function renderEditMemberGroups(selectedGroups) {
+    const menu = document.getElementById('editMemberGroupsDropdownMenu');
+    menu.innerHTML = '';
+
+    // editMemberAvailableGroups is an array of group name strings (not objects)
+    // Filter out ClubAdmin groups from display
+    const displayGroups = (editMemberAvailableGroups || []).filter(groupName =>
+        typeof groupName === 'string' && !groupName.startsWith('ClubAdmin_')
+    );
+
+    if (displayGroups.length === 0) {
+        menu.innerHTML = '<div class="text-muted small">Inga grupper tillgängliga</div>';
+        updateEditMemberSelectedGroupsDisplay();
+        return;
+    }
+
+    displayGroups.forEach((groupName, index) => {
+        const checked = selectedGroups.includes(groupName) ? 'checked' : '';
+        menu.innerHTML += `
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="editMemberGroups"
+                       value="${escapeHtml(groupName)}" id="editMemberGroup_${index}" ${checked}
+                       onchange="updateEditMemberSelectedGroupsDisplay()">
+                <label class="form-check-label" for="editMemberGroup_${index}">${escapeHtml(groupName)}</label>
+            </div>
+        `;
+    });
+
+    updateEditMemberSelectedGroupsDisplay();
+}
+
+function updateEditMemberSelectedGroupsDisplay() {
+    const checkboxes = document.querySelectorAll('input[name="editMemberGroups"]:checked');
+    const count = checkboxes.length;
+    const textEl = document.getElementById('editMemberSelectedGroupsText');
+    const countEl = document.getElementById('editMemberSelectedGroupsCount');
+
+    if (count === 0) {
+        textEl.textContent = 'Välj grupper';
+        countEl.textContent = 'Inga grupper valda';
+    } else {
+        const names = Array.from(checkboxes).map(cb => cb.value);
+        textEl.textContent = names.length <= 2 ? names.join(', ') : `${names.length} grupper valda`;
+        countEl.textContent = `${count} grupp(er) valda`;
+    }
+}
+
+// Handicap functions
+async function loadEditMemberHandicapInfo(memberId) {
+    const container = document.getElementById('editMemberHandicapInfoContainer');
+    container.innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm text-primary" role="status"><span class="visually-hidden">Laddar...</span></div></div>';
+
+    try {
+        const response = await fetch(`/umbraco/surface/Member/GetHandicapProfileForMember?memberId=${memberId}`);
+        const result = await response.json();
+
+        if (result.success && result.data) {
+            renderEditMemberHandicapInfo(result.data);
+        } else {
+            container.innerHTML = '<div class="alert alert-info small">Ingen handicapdata tillgänglig.</div>';
+        }
+    } catch (error) {
+        console.error('Error loading handicap:', error);
+        container.innerHTML = '<div class="alert alert-warning small">Kunde inte ladda handicapdata.</div>';
+    }
+}
+
+function renderEditMemberHandicapInfo(data) {
+    const container = document.getElementById('editMemberHandicapInfoContainer');
+
+    if (!data.weaponClasses || data.weaponClasses.length === 0) {
+        container.innerHTML = '<div class="alert alert-info small mb-0">Ingen statistik tillgänglig ännu.</div>';
+        return;
+    }
+
+    let html = '';
+    data.weaponClasses.forEach(wc => {
+        const provBadge = wc.isProvisional ? '<span class="badge bg-warning text-dark ms-1">(P)</span>' : '';
+        const handicap = wc.handicapPerSeries >= 0 ? '+' + wc.handicapPerSeries.toFixed(2) : wc.handicapPerSeries.toFixed(2);
+
+        html += `
+            <div class="d-flex justify-content-between align-items-center border-bottom py-2">
+                <span><strong>${wc.weaponClass}</strong> (${wc.weaponClassName})</span>
+                <span>
+                    <strong>${handicap}</strong>${provBadge}
+                    <small class="text-muted ms-2">${wc.completedMatches}/${wc.requiredMatches} matcher</small>
+                </span>
+            </div>
+        `;
+    });
+
+    container.innerHTML = html;
+}
+
+async function recalculateEditMemberHandicap() {
+    const memberId = document.getElementById('editMemberId').value;
+    if (!memberId) return;
+
+    const btn = document.getElementById('editMemberRecalculateHandicapBtn');
+    const originalContent = btn.innerHTML;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span>';
+    btn.disabled = true;
+
+    try {
+        const formData = new FormData();
+        formData.append('MemberId', memberId);
+
+        const response = await fetch('/umbraco/surface/Member/RecalculateHandicapForMember', {
+            method: 'POST',
+            body: formData
+        });
+        const result = await response.json();
+
+        if (result.success) {
+            await loadEditMemberHandicapInfo(memberId);
+        } else {
+            alert('Fel: ' + result.message);
+        }
+    } catch (error) {
+        console.error('Recalculate error:', error);
+        alert('Fel vid omberäkning av handicap');
+    } finally {
+        btn.innerHTML = originalContent;
+        btn.disabled = false;
+    }
+}
+
+// Save member
+async function saveEditClubMember() {
+    // Validate personnummer before saving
+    const personNumberField = document.getElementById('editMemberPersonNumber');
+    if (!validateSwedishPersonnummer(personNumberField.value)) {
+        personNumberField.classList.add('is-invalid');
+        personNumberField.focus();
+        alert('Ogiltigt personnummer. Vänligen ange ett giltigt svenskt personnummer i formatet ÅÅÅÅMMDD-XXXX.');
+        return;
+    }
+    personNumberField.classList.remove('is-invalid');
+
+    const memberId = document.getElementById('editMemberId').value;
+
+    const formData = new FormData();
+    formData.append('id', memberId);
+    formData.append('firstName', document.getElementById('editMemberFirstName').value);
+    formData.append('lastName', document.getElementById('editMemberLastName').value);
+    formData.append('email', document.getElementById('editMemberEmail').value);
+    formData.append('phoneNumber', document.getElementById('editMemberPhoneNumber').value);
+    formData.append('shooterIdNumber', document.getElementById('editMemberShooterIdNumber').value);
+    formData.append('address', document.getElementById('editMemberAddress').value);
+    formData.append('postalCode', document.getElementById('editMemberPostalCode').value);
+    formData.append('city', document.getElementById('editMemberCity').value);
+    formData.append('personNumber', document.getElementById('editMemberPersonNumber').value);
+    formData.append('memberSince', document.getElementById('editMemberMemberSince').value);
+    formData.append('primaryClubId', document.getElementById('editMemberPrimaryClub').value);
+    formData.append('isApproved', document.getElementById('editMemberIsApproved').checked);
+
+    // Additional clubs
+    const additionalClubs = Array.from(document.querySelectorAll('input[name="editMemberAdditionalClubs"]:checked'))
+        .map(cb => cb.value);
+    formData.append('additionalClubIds', additionalClubs.join(','));
+
+    // Member groups
+    const groups = Array.from(document.querySelectorAll('input[name="editMemberGroups"]:checked'))
+        .map(cb => cb.value);
+    groups.forEach(g => formData.append('groups', g));
+
+    // Shooter class
+    const shooterClassRadio = document.querySelector('input[name="editMemberShooterClass"]:checked');
+    formData.append('precisionShooterClass', shooterClassRadio ? shooterClassRadio.value : '');
+
+    // Anti-forgery token
+    const token = getAntiForgeryToken();
+    if (token) {
+        formData.append('__RequestVerificationToken', token);
+    }
+
+    try {
+        const response = await fetch('/umbraco/surface/MemberAdmin/SaveMember', {
+            method: 'POST',
+            body: formData
+        });
+        const result = await response.json();
+
+        if (result.success) {
+            bootstrap.Modal.getInstance(document.getElementById('editClubMemberModal')).hide();
+            loadClubMembers();
+            alert('Medlem sparad!');
+        } else {
+            alert('Fel: ' + result.message);
+        }
+    } catch (error) {
+        console.error('Save error:', error);
+        alert('Kunde inte spara medlem: ' + error.message);
+    }
+}
+
+// Delete member
+async function deleteEditMember() {
+    const memberId = document.getElementById('editMemberId').value;
+    if (!memberId) return;
+
+    const memberName = `${document.getElementById('editMemberFirstName').value} ${document.getElementById('editMemberLastName').value}`;
+
+    if (!confirm(`Är du säker på att du vill ta bort ${memberName}? Detta kan inte ångras.`)) {
+        return;
+    }
+
+    try {
+        const formData = new FormData();
+        formData.append('id', memberId);
+        const token = getAntiForgeryToken();
+        if (token) {
+            formData.append('__RequestVerificationToken', token);
+        }
+
+        const response = await fetch('/umbraco/surface/MemberAdmin/DeleteMember', {
+            method: 'POST',
+            body: formData
+        });
+        const result = await response.json();
+
+        if (result.success) {
+            bootstrap.Modal.getInstance(document.getElementById('editClubMemberModal')).hide();
+            loadClubMembers();
+            alert('Medlem borttagen.');
+        } else {
+            alert('Fel: ' + result.message);
+        }
+    } catch (error) {
+        console.error('Delete error:', error);
+        alert('Kunde inte ta bort medlem: ' + error.message);
+    }
+}
+
+// Initialize on members tab shown
+const membersTab = document.getElementById('members-tab');
+if (membersTab) {
+    membersTab.addEventListener('shown.bs.tab', function () {
+        initEditMemberData();
+    });
+}
+
+// Initialize Flatpickr for Member Since date field (Swedish locale, date only)
+let editMemberSincePicker = null;
+
+function initEditMemberDatePicker() {
+    if (editMemberSincePicker) {
+        editMemberSincePicker.destroy();
+    }
+    editMemberSincePicker = flatpickr('#editMemberMemberSince', {
+        locale: 'sv',
+        dateFormat: 'Y-m-d',
+        allowInput: true,
+        maxDate: 'today'
+    });
+}
+
+// Initialize date picker when modal is shown
+document.getElementById('editClubMemberModal').addEventListener('shown.bs.modal', function () {
+    initEditMemberDatePicker();
+});
+
+// Personnummer validation
+function validateSwedishPersonnummer(value) {
+    if (!value || value.trim() === '') {
+        return true; // Empty is allowed (not required)
+    }
+
+    // Remove any spaces
+    value = value.replace(/\s/g, '');
+
+    // Check format: YYYYMMDD-XXXX or YYYYMMDDXXXX
+    const regex = /^(19|20)\d{6}[-]?\d{4}$/;
+    if (!regex.test(value)) {
+        return false;
+    }
+
+    // Normalize to 12 digits (remove hyphen if present)
+    const digits = value.replace('-', '');
+
+    // Extract date parts
+    const year = parseInt(digits.substring(0, 4));
+    const month = parseInt(digits.substring(4, 6));
+    const day = parseInt(digits.substring(6, 8));
+
+    // Validate date
+    const date = new Date(year, month - 1, day);
+    if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
+        return false;
+    }
+
+    // Luhn algorithm checksum validation
+    const checkDigits = digits.substring(2); // Use last 10 digits for Luhn
+    let sum = 0;
+    for (let i = 0; i < 10; i++) {
+        let digit = parseInt(checkDigits[i]);
+        if (i % 2 === 0) {
+            digit *= 2;
+            if (digit > 9) digit -= 9;
+        }
+        sum += digit;
+    }
+
+    return sum % 10 === 0;
+}
+
+// Add validation on blur and before save
+document.getElementById('editMemberPersonNumber').addEventListener('blur', function() {
+    const isValid = validateSwedishPersonnummer(this.value);
+    if (!isValid && this.value.trim() !== '') {
+        this.classList.add('is-invalid');
+    } else {
+        this.classList.remove('is-invalid');
+    }
+});
 </script>
 
 <style>
 .club-admin-panel .nav-tabs .nav-link {
-    color: #666;
+    color: var(--bs-secondary-color);
+}
+
+.club-admin-panel .nav-tabs .nav-link:hover {
+    color: var(--bs-body-color);
 }
 
 .club-admin-panel .nav-tabs .nav-link.active {
-    color: #0d6efd;
-    border-bottom: 3px solid #0d6efd;
+    color: var(--bs-primary);
+    border-bottom: 3px solid var(--bs-primary);
+    background-color: transparent;
 }
 
 .club-admin-panel .table {

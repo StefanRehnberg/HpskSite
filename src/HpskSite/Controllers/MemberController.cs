@@ -2368,6 +2368,23 @@ namespace HpskSite.Controllers
                 // Calculate medal statistics for the selected year
                 var medalStats = GetMemberMedalStats(memberId, selectedYear);
 
+                // Calculate handicap profiles for precision shooting
+                var shooterClass = targetMember.GetValue<string>("precisionShooterClass") ?? "";
+                var allHandicapStats = await _statisticsService.GetAllStatisticsAsync(memberId);
+                var handicapProfiles = new List<object>();
+                foreach (var handicapStats in allHandicapStats)
+                {
+                    var profile = _handicapCalculator.CalculateHandicap(handicapStats, shooterClass);
+                    handicapProfiles.Add(new
+                    {
+                        weaponClass = handicapStats.WeaponClass,
+                        handicapPerSeries = profile.HandicapPerSeries,
+                        isProvisional = profile.IsProvisional,
+                        completedMatches = profile.CompletedMatches,
+                        requiredMatches = _handicapCalculator.Settings.RequiredMatches
+                    });
+                }
+
                 var stats = new
                 {
                     memberName,
@@ -2384,7 +2401,9 @@ namespace HpskSite.Controllers
                     availableYears,
                     selectedYear,
                     personalBestsBySeriesCount,
-                    medalStats
+                    medalStats,
+                    handicapProfiles,
+                    shooterClass
                 };
 
                 return Json(new { success = true, data = stats });

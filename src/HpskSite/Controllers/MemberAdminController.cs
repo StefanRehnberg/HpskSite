@@ -132,13 +132,16 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetMember(int id)
         {
-            if (!await _authService.IsCurrentUserAdminAsync())
+            // Allow site admins or club admins for member's clubs
+            if (!await _authService.CanEditMemberAsync(id))
             {
                 return Json(new { success = false, message = "Access denied" });
             }
 
             try
             {
+                // Check if current user is site admin (for frontend to show/hide certain features)
+                var isSiteAdmin = await _authService.IsCurrentUserAdminAsync();
                 var member = _memberService.GetById(id);
                 if (member == null)
                 {
@@ -188,7 +191,7 @@ namespace HpskSite.Controllers
                         .ToArray()
                 };
 
-                return Json(new { success = true, data = memberData });
+                return Json(new { success = true, data = memberData, isSiteAdmin = isSiteAdmin });
             }
             catch (Exception ex)
             {
@@ -221,9 +224,24 @@ namespace HpskSite.Controllers
         {
             try
             {
-                if (!await _authService.IsCurrentUserAdminAsync())
+                // Check authorization: site admins can do anything, club admins can edit members of their clubs
+                bool isSiteAdmin = await _authService.IsCurrentUserAdminAsync();
+
+                if (id.HasValue && id.Value > 0)
                 {
-                    return Json(new { success = false, message = "Access denied" });
+                    // Editing existing member - check if allowed
+                    if (!await _authService.CanEditMemberAsync(id.Value))
+                    {
+                        return Json(new { success = false, message = "Access denied" });
+                    }
+                }
+                else
+                {
+                    // Creating new member - require site admin (club admins use the Add Member flow in club admin panel)
+                    if (!isSiteAdmin)
+                    {
+                        return Json(new { success = false, message = "Access denied" });
+                    }
                 }
 
                 Console.WriteLine($"SaveMember - ID: {id}, Email: {email}, FirstName: {firstName}");
