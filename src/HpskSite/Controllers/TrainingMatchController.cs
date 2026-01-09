@@ -686,6 +686,9 @@ namespace HpskSite.Controllers
                             totalScore);
                     }
 
+                    // Notify all viewers via SignalR
+                    await _hubContext.SendMatchCompleted(request.MatchCode ?? "");
+
                     return Json(new { success = true, message = "Matchen har avslutats" });
                 }
             }
@@ -743,6 +746,9 @@ namespace HpskSite.Controllers
                           SET MaxSeriesCount = @0
                           WHERE Id = @1",
                         request.MaxSeriesCount, (int)match.Id);
+
+                    // Notify all viewers via SignalR
+                    await _hubContext.SendSettingsUpdated(request.MatchCode ?? "", request.MaxSeriesCount);
 
                     return Json(new { success = true, message = "Inställningar sparade" });
                 }
@@ -1557,6 +1563,9 @@ namespace HpskSite.Controllers
 
                     // Delete the match
                     db.Execute("DELETE FROM TrainingMatches WHERE Id = @0", (int)match.Id);
+
+                    // Notify all viewers via SignalR
+                    await _hubContext.SendMatchDeleted(request.MatchCode ?? "");
 
                     return Json(new { success = true, message = "Matchen har raderats" });
                 }

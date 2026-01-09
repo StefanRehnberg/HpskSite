@@ -1212,6 +1212,16 @@
                 }
             });
 
+            hubConnection.on("MatchDeleted", (matchCode) => {
+                if (currentMatchCode === matchCode) {
+                    showToast('Matchen har raderats', 'warning');
+                    // Redirect back to match list after short delay
+                    setTimeout(() => {
+                        window.location.href = '/traningsmatchen';
+                    }, 2000);
+                }
+            });
+
             hubConnection.on("MatchStarted", (matchCode) => {
                 if (currentMatchCode === matchCode) {
                     // Update global state
@@ -1245,6 +1255,14 @@
                 console.log("ReactionUpdated:", data);
                 if (typeof updateReactionDisplay === 'function') {
                     updateReactionDisplay(data.targetMemberId, data.seriesNumber, data.reactions);
+                }
+            });
+
+            hubConnection.on("SettingsUpdated", (data) => {
+                console.log("SettingsUpdated:", data);
+                // Reload match data to get updated settings and recalculated totals
+                if (currentMatch && typeof loadMatchData === 'function') {
+                    loadMatchData(currentMatch.matchCode, isSpectator);
                 }
             });
 

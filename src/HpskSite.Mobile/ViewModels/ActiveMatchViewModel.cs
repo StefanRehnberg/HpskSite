@@ -45,6 +45,7 @@ public partial class ActiveMatchViewModel : BaseViewModel
         _signalRService.JoinRequestAccepted += OnJoinRequestAccepted;
         _signalRService.JoinRequestBlocked += OnJoinRequestBlocked;
         _signalRService.ReactionUpdated += OnReactionUpdated;
+        _signalRService.SettingsUpdated += OnSettingsUpdated;
     }
 
     private string _matchCode = string.Empty;
@@ -1692,6 +1693,17 @@ public partial class ActiveMatchViewModel : BaseViewModel
                 var currentUserId = _authService.CurrentUser?.MemberId;
                 CurrentUserReaction = ViewingPhotoReactions.FirstOrDefault(r => r.MemberId == currentUserId)?.Emoji;
             }
+        });
+    }
+
+    private void OnSettingsUpdated(object? sender, SettingsUpdate update)
+    {
+        MainThread.BeginInvokeOnMainThread(async () =>
+        {
+            System.Diagnostics.Debug.WriteLine($"SignalR: SettingsUpdated - MaxSeriesCount={update.MaxSeriesCount}");
+
+            // Reload match data to get updated settings and recalculate totals
+            await LoadMatchDataAsync();
         });
     }
 

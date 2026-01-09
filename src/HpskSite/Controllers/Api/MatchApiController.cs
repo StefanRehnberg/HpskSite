@@ -482,6 +482,10 @@ namespace HpskSite.Controllers.Api
 
             scope.Complete();
 
+            // Notify all participants via SignalR to reload match data
+            await _hubContext.Clients.Group($"match_{code.ToUpper()}")
+                .SendAsync("SettingsUpdated", new { maxSeriesCount = request.MaxSeriesCount });
+
             return Ok(ApiResponse.Ok("Inställningar sparade"));
         }
 
@@ -1530,7 +1534,8 @@ namespace HpskSite.Controllers.Api
                 CompletedDate = match.CompletedDate,
                 StartDate = match.StartDate,
                 IsHandicapEnabled = match.HasHandicap,
-                IsOpen = match.IsOpen
+                IsOpen = match.IsOpen,
+                MaxSeriesCount = match.MaxSeriesCount
             };
 
             // Get creator name
@@ -1624,6 +1629,7 @@ namespace HpskSite.Controllers.Api
         public DateTime? StartDate { get; set; }
         public bool IsOpen { get; set; } = true;
         public bool HasHandicap { get; set; }
+        public int? MaxSeriesCount { get; set; }
     }
 
     [TableName("TrainingMatchParticipants")]

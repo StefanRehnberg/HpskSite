@@ -346,5 +346,28 @@ namespace HpskSite.Hubs
             await hubContext.Clients.Group($"match_{matchCode.ToUpperInvariant()}")
                 .SendAsync("MatchStarted", matchCode);
         }
+
+        /// <summary>
+        /// Notify all match viewers that match settings were updated
+        /// </summary>
+        public static async Task SendSettingsUpdated(
+            this IHubContext<TrainingMatchHub> hubContext,
+            string matchCode,
+            int? maxSeriesCount)
+        {
+            await hubContext.Clients.Group($"match_{matchCode.ToUpperInvariant()}")
+                .SendAsync("SettingsUpdated", new { maxSeriesCount });
+        }
+
+        /// <summary>
+        /// Notify all match viewers that a match was deleted
+        /// </summary>
+        public static async Task SendMatchDeleted(
+            this IHubContext<TrainingMatchHub> hubContext,
+            string matchCode)
+        {
+            await hubContext.Clients.Group($"match_{matchCode.ToUpperInvariant()}")
+                .SendAsync("MatchDeleted", matchCode);
+        }
     }
 }

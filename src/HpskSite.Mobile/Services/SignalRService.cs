@@ -39,6 +39,7 @@ public class SignalRService : ISignalRService, IAsyncDisposable
     public event EventHandler<string>? JoinRequestAccepted;  // matchCode
     public event EventHandler<string>? JoinRequestBlocked;   // matchCode
     public event EventHandler<ReactionUpdate>? ReactionUpdated;
+    public event EventHandler<SettingsUpdate>? SettingsUpdated;
     public event EventHandler? Disconnected;
     public event EventHandler? Reconnected;
 
@@ -311,6 +312,23 @@ public class SignalRService : ISignalRService, IAsyncDisposable
 
             ReactionUpdated?.Invoke(this, update);
         });
+
+        // Server sends: SettingsUpdated with { maxSeriesCount }
+        _hubConnection.On<JsonElement>("SettingsUpdated", jsonElement =>
+        {
+            System.Diagnostics.Debug.WriteLine($"SignalR SettingsUpdated: {jsonElement.GetRawText()}");
+            var update = new SettingsUpdate();
+
+            if (jsonElement.TryGetProperty("maxSeriesCount", out var msc))
+            {
+                if (msc.ValueKind == JsonValueKind.Null)
+                    update.MaxSeriesCount = null;
+                else
+                    update.MaxSeriesCount = msc.GetInt32();
+            }
+
+            SettingsUpdated?.Invoke(this, update);
+        });
     }
 
     private Task OnConnectionClosed(Exception? exception)
@@ -342,6 +360,11 @@ public class ReactionUpdate
     public int TargetMemberId { get; set; }
     public int SeriesNumber { get; set; }
     public List<PhotoReaction>? Reactions { get; set; }
+}
+
+public class SettingsUpdate
+{
+    public int? MaxSeriesCount { get; set; }
 }
 
 public class MatchSpectator
@@ -406,6 +429,7 @@ public interface ISignalRService
     event EventHandler<string>? JoinRequestAccepted;
     event EventHandler<string>? JoinRequestBlocked;
     event EventHandler<ReactionUpdate>? ReactionUpdated;
+    event EventHandler<SettingsUpdate>? SettingsUpdated;
     event EventHandler? Disconnected;
     event EventHandler? Reconnected;
 
