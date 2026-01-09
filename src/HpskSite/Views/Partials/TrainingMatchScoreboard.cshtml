@@ -60,15 +60,22 @@
                 <span id="spectatorCount" class="badge bg-light text-primary">0</span>
             </div>
             <div class="btn-group" id="matchActionButtons">
+                <!-- Settings button (creator only) -->
+                <button type="button" class="btn btn-light btn-sm" id="matchSettingsBtn" onclick="showMatchSettingsModal()" title="Inställningar" style="display:none;">
+                    <i class="bi bi-gear-fill"></i>
+                </button>
+                <!-- Share and Leave buttons (non-creator participants) -->
                 <button type="button" class="btn btn-light btn-sm" onclick="showShareModal()" title="Dela" id="shareMatchBtn">
-                    <i class="bi bi-share"></i> Dela
+                    <i class="bi bi-share"></i> <span class="d-none d-sm-inline">Dela</span>
                 </button>
                 <button type="button" class="btn btn-warning btn-sm" id="leaveMatchBtn" onclick="leaveMatch()" title="Lämna">
                     <i class="bi bi-box-arrow-left"></i>
                 </button>
+                <!-- Spectator exit button -->
                 <button type="button" class="btn btn-secondary btn-sm" id="exitSpectatorBtn" onclick="exitSpectatorMode()" title="Stäng" style="display:none;">
                     <i class="bi bi-x-lg"></i>
                 </button>
+                <!-- End match button (hidden, only shown in settings modal for creator) -->
                 <button type="button" class="btn btn-danger btn-sm" id="endMatchBtn" onclick="completeMatch()" title="Avsluta" style="display:none;">
                     <i class="bi bi-stop-circle"></i>
                 </button>
@@ -95,6 +102,72 @@
                     <i class="bi bi-eye-slash fs-3 d-block mb-2"></i>
                     Inga åskådare just nu
                 </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Match Settings Modal (Creator only) -->
+<div class="modal fade" id="matchSettingsModal" tabindex="-1" aria-labelledby="matchSettingsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="matchSettingsModalLabel">
+                    <i class="bi bi-gear me-2"></i>Matchinställningar
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <!-- Max Series Count Setting -->
+                <div class="mb-4">
+                    <label for="maxSeriesCountInput" class="form-label fw-bold">
+                        <i class="bi bi-list-ol me-1"></i>Max antal serier
+                    </label>
+                    <input type="number" class="form-control" id="maxSeriesCountInput"
+                           min="1" max="20" placeholder="Lämna tomt för automatiskt">
+                    <div class="form-text">
+                        Begränsa totalsumman till detta antal serier. Lämna tomt för att använda minsta antal skjutna serier.
+                    </div>
+                </div>
+
+                <!-- Share Section -->
+                <div class="mb-4">
+                    <label class="form-label fw-bold">
+                        <i class="bi bi-share me-1"></i>Dela match
+                    </label>
+
+                    <!-- QR Code -->
+                    <div class="text-center mb-3">
+                        <img id="settingsQrCode" src="" alt="QR-kod" class="img-fluid" style="max-width: 180px; border-radius: 8px;">
+                    </div>
+
+                    <!-- Match Code -->
+                    <div class="text-center mb-3">
+                        <span class="text-muted small">Matchkod:</span>
+                        <div class="fs-3 fw-bold font-monospace" id="settingsMatchCode"></div>
+                    </div>
+
+                    <!-- Share Link -->
+                    <div class="input-group input-group-sm">
+                        <input type="text" class="form-control" id="settingsMatchLink" readonly>
+                        <button class="btn btn-outline-primary" type="button" onclick="copyMatchLinkFromSettings()">
+                            <i class="bi bi-clipboard"></i> Kopiera
+                        </button>
+                    </div>
+                </div>
+
+                <!-- End Match Button -->
+                <div class="border-top pt-3">
+                    <button type="button" class="btn btn-danger w-100" onclick="completeMatch(); bootstrap.Modal.getInstance(document.getElementById('matchSettingsModal')).hide();">
+                        <i class="bi bi-stop-circle me-2"></i>Avsluta match
+                    </button>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" onclick="saveMatchSettings()">
+                    <i class="bi bi-check-lg me-1"></i>Spara
+                </button>
             </div>
         </div>
     </div>
@@ -324,6 +397,9 @@ function formatHandicap(value) {
 
 // Render the scoreboard
 function renderScoreboard(match) {
+    // Store match data for settings modal
+    window.currentMatchData = match;
+
     // Update header info
     document.getElementById('matchNameDisplay').textContent = match.matchName || 'Träningsmatch';
     document.getElementById('matchCodeDisplay').textContent = match.matchCode;
@@ -452,22 +528,36 @@ function renderScoreboard(match) {
     );
 
     // Show/hide buttons based on participant status (only if not spectator)
+    const settingsBtn = document.getElementById('matchSettingsBtn');
+    // Note: shareBtn already declared above
+
     if (typeof isSpectator === 'undefined' || !isSpectator) {
         const myMemberId = parseInt(document.body.dataset.memberId) || 0;
         const isCreator = match.createdByMemberId === myMemberId;
         const isParticipant = match.participants.some(p => p.memberId === myMemberId);
 
         if (isCreator && match.status === 'Active') {
-            if (endBtn) endBtn.style.display = 'inline-block';
+            // Creator sees settings button (cog) only
+            if (settingsBtn) settingsBtn.style.display = 'inline-block';
+            if (shareBtn) shareBtn.style.display = 'none';
+            if (endBtn) endBtn.style.display = 'none'; // End is in settings modal
             if (leaveBtn) leaveBtn.style.display = 'none';
         } else if (isParticipant && match.status === 'Active') {
+            // Participants see share and leave buttons
+            if (settingsBtn) settingsBtn.style.display = 'none';
+            if (shareBtn) shareBtn.style.display = 'inline-block';
             if (endBtn) endBtn.style.display = 'none';
             if (leaveBtn) leaveBtn.style.display = 'inline-block';
         } else {
             // Match completed or user is not participant
+            if (settingsBtn) settingsBtn.style.display = 'none';
+            if (shareBtn) shareBtn.style.display = match.status === 'Active' ? 'inline-block' : 'none';
             if (endBtn) endBtn.style.display = 'none';
             if (leaveBtn) leaveBtn.style.display = 'none';
         }
+    } else {
+        // Spectators - hide settings and creator buttons
+        if (settingsBtn) settingsBtn.style.display = 'none';
     }
 
     // Build participant header row
@@ -623,16 +713,27 @@ function renderScoreboard(match) {
         const td = document.createElement('td');
         td.className = 'total-cell';
 
-        // Use only the first minSeriesCount series for equalized totals
+        // Determine effective series count for this participant
         const allScores = participant.scores || [];
+        const actualSeriesCount = allScores.length;
+
+        // If maxSeriesCount is set, use it as limit; otherwise use minimum among all participants
+        let effectiveLimit;
+        if (match.maxSeriesCount) {
+            // Max is set - each participant limited to max or their actual, whichever is less
+            effectiveLimit = Math.min(match.maxSeriesCount, actualSeriesCount);
+        } else {
+            // No max - use current minimum behavior
+            effectiveLimit = Math.min(minSeriesCount, actualSeriesCount);
+        }
+
         const effectiveScores = allScores
             .sort((a, b) => a.seriesNumber - b.seriesNumber)
-            .slice(0, minSeriesCount);
+            .slice(0, effectiveLimit);
 
         const totalScore = effectiveScores.reduce((sum, s) => sum + s.total, 0);
         const totalX = effectiveScores.reduce((sum, s) => sum + (s.xCount || 0), 0);
         const effectiveSeriesCount = effectiveScores.length;
-        const actualSeriesCount = allScores.length;
 
         // Show "6/10 serier" format if participant has more series than minimum
         const seriesDisplay = actualSeriesCount > effectiveSeriesCount
@@ -805,6 +906,93 @@ function showSpectatorsModal() {
 
     const modal = new bootstrap.Modal(document.getElementById('spectatorsModal'));
     modal.show();
+}
+
+// Show match settings modal (creator only)
+function showMatchSettingsModal() {
+    const match = window.currentMatchData;
+    if (!match) return;
+
+    // Populate the modal with current values
+    const maxSeriesInput = document.getElementById('maxSeriesCountInput');
+    const matchCodeDisplay = document.getElementById('settingsMatchCode');
+    const qrCodeImg = document.getElementById('settingsQrCode');
+    const matchLinkInput = document.getElementById('settingsMatchLink');
+
+    if (maxSeriesInput) {
+        maxSeriesInput.value = match.maxSeriesCount || '';
+    }
+    if (matchCodeDisplay) {
+        matchCodeDisplay.textContent = match.matchCode || '';
+    }
+    if (qrCodeImg) {
+        qrCodeImg.src = '/umbraco/surface/TrainingMatch/GetJoinQrCode?matchCode=' + match.matchCode;
+    }
+    if (matchLinkInput) {
+        matchLinkInput.value = window.location.origin + '/traningsmatch/?join=' + match.matchCode;
+    }
+
+    const modal = new bootstrap.Modal(document.getElementById('matchSettingsModal'));
+    modal.show();
+}
+
+// Save match settings
+async function saveMatchSettings() {
+    const match = window.currentMatchData;
+    if (!match) return;
+
+    const maxSeriesInput = document.getElementById('maxSeriesCountInput');
+    const maxSeriesCount = maxSeriesInput.value ? parseInt(maxSeriesInput.value) : null;
+
+    try {
+        const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value;
+        const response = await fetch('/umbraco/surface/TrainingMatch/UpdateMatchSettings', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': token
+            },
+            body: JSON.stringify({
+                matchCode: match.matchCode,
+                maxSeriesCount: maxSeriesCount
+            })
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            // Update local match data
+            window.currentMatchData.maxSeriesCount = maxSeriesCount;
+            // Re-render scoreboard to update totals
+            renderScoreboard(window.currentMatchData);
+            // Close modal
+            bootstrap.Modal.getInstance(document.getElementById('matchSettingsModal')).hide();
+        } else {
+            alert(result.message || 'Kunde inte spara inställningar');
+        }
+    } catch (error) {
+        console.error('Error saving settings:', error);
+        alert('Ett fel uppstod vid sparning av inställningar');
+    }
+}
+
+// Copy match link from settings modal
+function copyMatchLinkFromSettings() {
+    const input = document.getElementById('settingsMatchLink');
+    if (input) {
+        navigator.clipboard.writeText(input.value).then(() => {
+            // Show brief feedback on button
+            const btn = input.nextElementSibling;
+            const originalHtml = btn.innerHTML;
+            btn.innerHTML = '<i class="bi bi-check"></i> Kopierad!';
+            btn.classList.remove('btn-outline-primary');
+            btn.classList.add('btn-success');
+            setTimeout(() => {
+                btn.innerHTML = originalHtml;
+                btn.classList.remove('btn-success');
+                btn.classList.add('btn-outline-primary');
+            }, 2000);
+        });
+    }
 }
 </script>
 

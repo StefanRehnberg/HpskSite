@@ -88,6 +88,14 @@ namespace HpskSite.Shared.Models
         public DateTime? StartDate { get; set; }
 
         /// <summary>
+        /// Maximum number of series to include in total score calculations.
+        /// When set, limits each participant's total to this many series (or their actual count if less).
+        /// When null, falls back to using the minimum series count among all participants.
+        /// </summary>
+        [JsonPropertyName("maxSeriesCount")]
+        public int? MaxSeriesCount { get; set; }
+
+        /// <summary>
         /// List of participants in this match
         /// </summary>
         [JsonPropertyName("participants")]

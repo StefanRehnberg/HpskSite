@@ -76,6 +76,33 @@ namespace HpskSite.Controllers
             return memberData?.Id;
         }
 
+        /// <summary>
+        /// Safely get MaxSeriesCount from a dynamic match object.
+        /// Returns null if the property doesn't exist (e.g., migration hasn't run yet).
+        /// </summary>
+        private static int? GetMaxSeriesCount(dynamic match)
+        {
+            try
+            {
+                if (match is IDictionary<string, object> dict)
+                {
+                    if (dict.TryGetValue("MaxSeriesCount", out var value) && value != null)
+                    {
+                        return Convert.ToInt32(value);
+                    }
+                    return null;
+                }
+                // Fallback for other dynamic types
+                var maxSeriesCount = match.MaxSeriesCount;
+                return maxSeriesCount != null ? (int?)maxSeriesCount : null;
+            }
+            catch
+            {
+                // Property doesn't exist - migration hasn't run yet
+                return null;
+            }
+        }
+
         #endregion
 
         #region Match Management
@@ -383,6 +410,7 @@ namespace HpskSite.Controllers
                             status = (string)match.Status,
                             completedDate = match.CompletedDate != null ? (DateTime?)match.CompletedDate : null,
                             hasHandicap = hasHandicap,
+                            maxSeriesCount = GetMaxSeriesCount(match),
                             participants = participantList
                         }
                     });
@@ -664,6 +692,64 @@ namespace HpskSite.Controllers
             catch (Exception ex)
             {
                 return Json(new { success = false, message = "Fel vid avslutning av match: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Update match settings (max series count)
+        /// POST /umbraco/surface/TrainingMatch/UpdateMatchSettings
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> UpdateMatchSettings([FromBody] UpdateMatchSettingsRequest request)
+        {
+            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            if (currentMember == null)
+            {
+                return Json(new { success = false, message = "Du måste vara inloggad" });
+            }
+
+            try
+            {
+                var member = _memberService.GetByEmail(currentMember.Email ?? string.Empty);
+                if (member == null)
+                {
+                    return Json(new { success = false, message = "Medlem hittades inte" });
+                }
+
+                using (var db = _databaseFactory.CreateDatabase())
+                {
+                    // Get match
+                    var match = db.SingleOrDefault<dynamic>(
+                        "SELECT * FROM TrainingMatches WHERE MatchCode = @0", request.MatchCode);
+
+                    if (match == null)
+                    {
+                        return Json(new { success = false, message = "Match hittades inte" });
+                    }
+
+                    // Check if user is creator or admin
+                    bool isCreator = (int)match.CreatedByMemberId == member.Id;
+                    bool isAdmin = await _authorizationService.IsCurrentUserAdminAsync();
+
+                    if (!isCreator && !isAdmin)
+                    {
+                        return Json(new { success = false, message = "Endast matchskaparen kan ändra inställningar" });
+                    }
+
+                    // Update max series count
+                    db.Execute(
+                        @"UPDATE TrainingMatches
+                          SET MaxSeriesCount = @0
+                          WHERE Id = @1",
+                        request.MaxSeriesCount, (int)match.Id);
+
+                    return Json(new { success = true, message = "Inställningar sparade" });
+                }
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = "Fel vid uppdatering av inställningar: " + ex.Message });
             }
         }
 
@@ -2362,6 +2448,12 @@ namespace HpskSite.Controllers
     public class CompleteMatchRequest
     {
         public string? MatchCode { get; set; }
+    }
+
+    public class UpdateMatchSettingsRequest
+    {
+        public string? MatchCode { get; set; }
+        public int? MaxSeriesCount { get; set; }
     }
 
     public class SaveMatchScoreRequest

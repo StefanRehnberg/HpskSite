@@ -19,17 +19,20 @@ public partial class ActiveMatchViewModel : BaseViewModel
     private readonly ISignalRService _signalRService;
     private readonly IAuthService _authService;
     private readonly ImageCompressionService _imageCompressionService;
+    private readonly IApiService _apiService;
 
     public ActiveMatchViewModel(
         IMatchService matchService,
         ISignalRService signalRService,
         IAuthService authService,
-        ImageCompressionService imageCompressionService)
+        ImageCompressionService imageCompressionService,
+        IApiService apiService)
     {
         _matchService = matchService;
         _signalRService = signalRService;
         _authService = authService;
         _imageCompressionService = imageCompressionService;
+        _apiService = apiService;
         Title = "Match";
 
         // Subscribe to SignalR events (using correct event names that match server)
@@ -259,6 +262,38 @@ public partial class ActiveMatchViewModel : BaseViewModel
     /// </summary>
     [ObservableProperty]
     private bool _isSpectatorsModalOpen;
+
+    /// <summary>
+    /// Whether the settings modal is open (host only)
+    /// </summary>
+    [ObservableProperty]
+    private bool _isSettingsModalOpen;
+
+    /// <summary>
+    /// Max series count input value for settings modal
+    /// </summary>
+    [ObservableProperty]
+    private string? _maxSeriesCountInput;
+
+    /// <summary>
+    /// Whether settings are being saved
+    /// </summary>
+    [ObservableProperty]
+    private bool _isSavingSettings;
+
+    /// <summary>
+    /// QR code URL for sharing the match
+    /// </summary>
+    public string QrCodeUrl => Match != null
+        ? $"{_apiService.BaseUrl}/umbraco/surface/TrainingMatch/GetJoinQrCode?matchCode={Match.MatchCode}"
+        : string.Empty;
+
+    /// <summary>
+    /// Share link for the match
+    /// </summary>
+    public string ShareLink => Match != null
+        ? $"{_apiService.BaseUrl}/traningsmatch/?join={Match.MatchCode}"
+        : string.Empty;
 
     /// <summary>
     /// Whether the photo prompt is visible after saving a series
@@ -500,6 +535,107 @@ public partial class ActiveMatchViewModel : BaseViewModel
     }
 
     /// <summary>
+    /// Open the settings modal (host only)
+    /// </summary>
+    [RelayCommand]
+    private void OpenSettingsModal()
+    {
+        if (!IsMatchHost)
+            return;
+
+        // Initialize the input with current value
+        MaxSeriesCountInput = Match?.MaxSeriesCount?.ToString() ?? "";
+        IsSettingsModalOpen = true;
+    }
+
+    /// <summary>
+    /// Close the settings modal
+    /// </summary>
+    [RelayCommand]
+    private void CloseSettingsModal()
+    {
+        IsSettingsModalOpen = false;
+    }
+
+    /// <summary>
+    /// Save match settings (max series count)
+    /// </summary>
+    [RelayCommand]
+    private async Task SaveMatchSettingsAsync()
+    {
+        if (IsSavingSettings || !IsMatchHost || Match == null)
+            return;
+
+        try
+        {
+            IsSavingSettings = true;
+            HasError = false;
+
+            // Parse the input
+            int? maxSeriesCount = null;
+            if (!string.IsNullOrWhiteSpace(MaxSeriesCountInput) && int.TryParse(MaxSeriesCountInput, out int parsed) && parsed > 0)
+            {
+                maxSeriesCount = parsed;
+            }
+
+            var result = await _matchService.UpdateMatchSettingsAsync(MatchCode, maxSeriesCount);
+
+            if (result.Success)
+            {
+                // Update local match data
+                if (Match != null)
+                {
+                    Match.MaxSeriesCount = maxSeriesCount;
+                }
+
+                // Close modal and reload data
+                IsSettingsModalOpen = false;
+                await LoadMatchDataAsync();
+            }
+            else
+            {
+                ErrorMessage = result.Message ?? "Kunde inte spara inställningar";
+                HasError = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = ex.Message;
+            HasError = true;
+        }
+        finally
+        {
+            IsSavingSettings = false;
+        }
+    }
+
+    /// <summary>
+    /// Copy match code to clipboard (for sharing)
+    /// </summary>
+    [RelayCommand]
+    private async Task CopyMatchCodeAsync()
+    {
+        if (Match == null)
+            return;
+
+        await Clipboard.Default.SetTextAsync(Match.MatchCode);
+        await Shell.Current.DisplayAlert("Kopierat", $"Matchkod {Match.MatchCode} kopierad till urklipp", "OK");
+    }
+
+    /// <summary>
+    /// Copy share link to clipboard
+    /// </summary>
+    [RelayCommand]
+    private async Task CopyShareLinkAsync()
+    {
+        if (Match == null)
+            return;
+
+        await Clipboard.Default.SetTextAsync(ShareLink);
+        await Shell.Current.DisplayAlert("Kopierat", "Länk kopierad till urklipp", "OK");
+    }
+
+    /// <summary>
     /// Open reaction modal for a cell with a score, or edit mode for own scores without photo
     /// </summary>
     [RelayCommand]
@@ -726,8 +862,21 @@ public partial class ActiveMatchViewModel : BaseViewModel
                 Participants.Clear();
                 foreach (var participant in Match.Participants)
                 {
-                    // Set equalized count before adding to collection
-                    participant.EqualizedSeriesCount = minSeriesCount > 0 ? minSeriesCount : null;
+                    // Calculate effective series limit for this participant
+                    // If MaxSeriesCount is set, use it as limit; otherwise use minimum among all participants
+                    var actualSeriesCount = participant.Scores?.Count ?? 0;
+                    int? effectiveLimit;
+                    if (Match.MaxSeriesCount.HasValue)
+                    {
+                        // Max is set - each participant limited to max or their actual, whichever is less
+                        effectiveLimit = Math.Min(Match.MaxSeriesCount.Value, actualSeriesCount);
+                    }
+                    else
+                    {
+                        // No max - use current minimum behavior
+                        effectiveLimit = minSeriesCount > 0 ? Math.Min(minSeriesCount, actualSeriesCount) : (int?)null;
+                    }
+                    participant.EqualizedSeriesCount = effectiveLimit > 0 ? effectiveLimit : null;
                     Participants.Add(participant);
                 }
 
@@ -788,8 +937,21 @@ public partial class ActiveMatchViewModel : BaseViewModel
                 Participants.Clear();
                 foreach (var participant in Match.Participants)
                 {
-                    // Set equalized count before adding to collection
-                    participant.EqualizedSeriesCount = minSeriesCount > 0 ? minSeriesCount : null;
+                    // Calculate effective series limit for this participant
+                    // If MaxSeriesCount is set, use it as limit; otherwise use minimum among all participants
+                    var actualSeriesCount = participant.Scores?.Count ?? 0;
+                    int? effectiveLimit;
+                    if (Match.MaxSeriesCount.HasValue)
+                    {
+                        // Max is set - each participant limited to max or their actual, whichever is less
+                        effectiveLimit = Math.Min(Match.MaxSeriesCount.Value, actualSeriesCount);
+                    }
+                    else
+                    {
+                        // No max - use current minimum behavior
+                        effectiveLimit = minSeriesCount > 0 ? Math.Min(minSeriesCount, actualSeriesCount) : (int?)null;
+                    }
+                    participant.EqualizedSeriesCount = effectiveLimit > 0 ? effectiveLimit : null;
                     Participants.Add(participant);
                 }
 
