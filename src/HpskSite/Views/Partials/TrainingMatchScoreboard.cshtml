@@ -627,7 +627,9 @@ function renderScoreboard(match) {
 
             const score = participant.scores?.find(s => s.seriesNumber === seriesNum);
             if (score) {
-                runningTotals[pIndex] += score.total;
+                // Cap each series at 50 (max possible score per series)
+                const cappedTotal = Math.min(score.total, 50);
+                runningTotals[pIndex] += cappedTotal;
 
                 // Check if this is the current user's score (editable)
                 // Never allow editing if spectator or match not started
@@ -648,7 +650,7 @@ function renderScoreboard(match) {
                     td.innerHTML = `
                         ${photoIndicator}
                         <div class="score-editable" onclick="editSeriesScore(${seriesNum}, ${JSON.stringify(score).replace(/"/g, '&quot;')})">
-                            <span class="score-value">${score.total}</span>${inlineReaction}
+                            <span class="score-value">${cappedTotal}</span>${inlineReaction}
                             <i class="bi bi-pencil edit-icon"></i>
                         </div>
                         ${score.xCount > 0 ? `<span class="x-count">${score.xCount}x</span>` : ''}
@@ -660,7 +662,7 @@ function renderScoreboard(match) {
                         ${photoIndicator}
                         <div class="score-clickable" onclick="handleScoreCellClick(event, ${participant.memberId}, ${seriesNum}, ${JSON.stringify(score).replace(/"/g, '&quot;')})"
                              data-member-id="${participant.memberId}" data-series="${seriesNum}">
-                            <span class="score-value">${score.total}</span>${inlineReaction}
+                            <span class="score-value">${cappedTotal}</span>${inlineReaction}
                         </div>
                         ${score.xCount > 0 ? `<span class="x-count">${score.xCount}x</span>` : ''}
                     `;
@@ -684,11 +686,11 @@ function renderScoreboard(match) {
                 const td = document.createElement('td');
                 td.className = 'summary-cell';
 
-                // Calculate total up to this point
+                // Calculate total up to this point (cap each series at 50)
                 let totalToHere = 0;
                 for (let s = 1; s <= seriesNum; s++) {
                     const score = participant.scores?.find(sc => sc.seriesNumber === s);
-                    if (score) totalToHere += score.total;
+                    if (score) totalToHere += Math.min(score.total, 50);
                 }
 
                 td.innerHTML = `<strong>${totalToHere}</strong> <small class="text-muted">(${seriesNum})</small>`;
@@ -731,7 +733,8 @@ function renderScoreboard(match) {
             .sort((a, b) => a.seriesNumber - b.seriesNumber)
             .slice(0, effectiveLimit);
 
-        const totalScore = effectiveScores.reduce((sum, s) => sum + s.total, 0);
+        // Cap each series at 50 (max possible score per series)
+        const totalScore = effectiveScores.reduce((sum, s) => sum + Math.min(s.total, 50), 0);
         const totalX = effectiveScores.reduce((sum, s) => sum + (s.xCount || 0), 0);
         const effectiveSeriesCount = effectiveScores.length;
 
@@ -744,12 +747,15 @@ function renderScoreboard(match) {
         if (match.hasHandicap && participant.handicapPerSeries !== null && participant.handicapPerSeries !== undefined) {
             // Use quarter-point handicap, then round final score to integer
             const hcpPerSeries = roundToQuarter(participant.handicapPerSeries);
-            const handicapTotal = hcpPerSeries * effectiveSeriesCount;
-            const maxPossible = 50 * effectiveSeriesCount;  // Max 50 points per series
-            let finalScore = totalScore + handicapTotal;
-            // Cap at maximum possible - you can never score more than 50 per series
-            finalScore = Math.min(Math.round(finalScore), maxPossible);
-            const hcpTotalDisplay = formatHandicap(handicapTotal);
+            // Apply handicap per series, cap at 50, then sum
+            // Example: 47 + 4 HCP = 51, but capped at 50
+            const finalScore = effectiveScores.reduce((sum, s) => {
+                const adjustedSeriesScore = Math.round(s.total + hcpPerSeries);
+                return sum + Math.min(adjustedSeriesScore, 50);
+            }, 0);
+            // Handicap displayed is the actual difference (may be less than hcpPerSeries * count due to caps)
+            const handicapActual = finalScore - totalScore;
+            const hcpTotalDisplay = formatHandicap(handicapActual);
 
             td.innerHTML = `
                 <div class="total-score handicap-final">${finalScore}</div>

@@ -2,6 +2,7 @@ using HpskSite.Services;
 using HpskSite.Shared.DTOs;
 using HpskSite.Shared.Models;
 using HpskSite.CompetitionTypes.Precision.Services;
+using HpskSite.Controllers; // For UpdateMatchSettingsRequest
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
@@ -442,6 +443,46 @@ namespace HpskSite.Controllers.Api
                 .SendAsync("MatchDeleted", code.ToUpper());
 
             return Ok(ApiResponse.Ok("Matchen har raderats"));
+        }
+
+        /// <summary>
+        /// Update match settings (max series count)
+        /// </summary>
+        [HttpPost("{code}/settings")]
+        public async Task<IActionResult> UpdateMatchSettings(string code, [FromBody] UpdateMatchSettingsRequest request)
+        {
+            var memberId = GetCurrentMemberId();
+            if (!memberId.HasValue)
+            {
+                return Unauthorized(ApiResponse.Error("Ej inloggad"));
+            }
+
+            using var scope = _scopeProvider.CreateScope();
+            var db = scope.Database;
+
+            // Find match
+            var match = await db.FirstOrDefaultAsync<TrainingMatchDbDto>(
+                "WHERE MatchCode = @0", code.ToUpper());
+
+            if (match == null)
+            {
+                return NotFound(ApiResponse.Error("Matchen hittades inte"));
+            }
+
+            // Only creator can update settings
+            if (match.CreatedByMemberId != memberId.Value)
+            {
+                return Forbid();
+            }
+
+            // Update MaxSeriesCount
+            await db.ExecuteAsync(
+                "UPDATE TrainingMatches SET MaxSeriesCount = @0 WHERE Id = @1",
+                request.MaxSeriesCount, match.Id);
+
+            scope.Complete();
+
+            return Ok(ApiResponse.Ok("Inställningar sparade"));
         }
 
         /// <summary>

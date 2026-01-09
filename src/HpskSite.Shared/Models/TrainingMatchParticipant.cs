@@ -93,22 +93,35 @@ namespace HpskSite.Shared.Models
                 : Scores;
 
         /// <summary>
-        /// Total raw score (using equalized series count if set)
+        /// Total raw score (using equalized series count if set).
+        /// Each series is capped at 50 (max possible score per series).
         /// </summary>
         [JsonPropertyName("totalScore")]
-        public int TotalScore => EffectiveScores.Sum(s => s.Total);
+        public int TotalScore => EffectiveScores.Sum(s => Math.Min(s.Total, 50));
 
         /// <summary>
-        /// Total handicap adjustment (using equalized series count if set)
-        /// </summary>
-        [JsonPropertyName("totalHandicap")]
-        public decimal TotalHandicap => (HandicapPerSeries ?? 0) * EffectiveSeriesCount;
-
-        /// <summary>
-        /// Final score including handicap (using equalized series count if set)
+        /// Final score including handicap (using equalized series count if set).
+        /// Handicap is applied per series, and each series (raw + handicap) is capped at 50.
+        /// Example: 47 + 4 HCP = 51, capped to 50.
         /// </summary>
         [JsonPropertyName("adjustedTotalScore")]
-        public int AdjustedTotalScore => (int)Math.Round(TotalScore + TotalHandicap);
+        public int AdjustedTotalScore
+        {
+            get
+            {
+                var hcp = HandicapPerSeries ?? 0;
+                // Apply handicap per series, cap at 50, then sum
+                return EffectiveScores.Sum(s => Math.Min((int)Math.Round(s.Total + hcp), 50));
+            }
+        }
+
+        /// <summary>
+        /// Total handicap adjustment actually applied (using equalized series count if set).
+        /// This is the difference between AdjustedTotalScore and TotalScore.
+        /// May be less than (HandicapPerSeries * SeriesCount) due to 50-point cap per series.
+        /// </summary>
+        [JsonPropertyName("totalHandicap")]
+        public decimal TotalHandicap => AdjustedTotalScore - TotalScore;
 
         /// <summary>
         /// Total X-count (using equalized series count if set)
