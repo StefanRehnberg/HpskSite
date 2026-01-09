@@ -658,6 +658,7 @@ namespace HpskSite.Controllers.Api
                     SeriesScores = seriesJson,
                     TotalScore = request.Total,
                     XCount = request.XCount,
+                    Notes = $"Träningsmatch: {match.MatchName}",
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow
                 };
