@@ -84,7 +84,8 @@ public partial class DashboardViewModel : BaseViewModel
 
     partial void OnSelectedYearChanged(int value)
     {
-        _ = LoadStatisticsAsync();
+        // Use Task.Run to avoid blocking the UI thread while still handling the async call properly
+        Task.Run(async () => await LoadStatisticsAsync());
     }
 
     partial void OnStatisticsChanged(DashboardStatistics? value)
@@ -137,20 +138,36 @@ public partial class DashboardViewModel : BaseViewModel
 
     private async Task LoadStatisticsAsync()
     {
-        var result = await _statsService.GetDashboardStatisticsAsync(SelectedYear);
-
-        if (result.Success && result.Data != null)
+        try
         {
-            // Ensure UI updates happen on main thread
-            MainThread.BeginInvokeOnMainThread(() =>
-            {
-                Statistics = result.Data;
+            var result = await _statsService.GetDashboardStatisticsAsync(SelectedYear);
 
-                RecentActivity.Clear();
-                foreach (var activity in result.Data.RecentActivity)
+            await MainThread.InvokeOnMainThreadAsync(() =>
+            {
+                if (result.Success && result.Data != null)
                 {
-                    RecentActivity.Add(activity);
+                    Statistics = result.Data;
+
+                    RecentActivity.Clear();
+                    foreach (var activity in result.Data.RecentActivity)
+                    {
+                        RecentActivity.Add(activity);
+                    }
                 }
+                else
+                {
+                    // Clear data if API returns no results
+                    Statistics = null;
+                    RecentActivity.Clear();
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            await MainThread.InvokeOnMainThreadAsync(() =>
+            {
+                ErrorMessage = $"Kunde inte ladda statistik: {ex.Message}";
+                HasError = true;
             });
         }
     }
