@@ -183,6 +183,40 @@
     align-items: center;
     gap: 10px;
 }
+
+/* Mobile-friendly member list styles */
+.member-action-btn {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0.5rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.member-email-mobile {
+    font-size: 0.85rem;
+    word-break: break-all;
+}
+
+/* Mobile adjustments */
+@@media (max-width: 767.98px) {
+    .member-action-btn {
+        min-width: 40px;
+        min-height: 40px;
+        padding: 0.4rem;
+    }
+
+    .club-members-directory .table td {
+        padding: 0.5rem 0.35rem;
+    }
+
+    /* Search input larger touch target */
+    .club-members-directory #memberSearch {
+        min-height: 48px;
+        font-size: 1rem;
+    }
+}
 </style>
 
 <script>
@@ -281,8 +315,8 @@ function displayMembers(members) {
                                 <thead>
                                     <tr>
                                         <th>Namn</th>
-                                        <th>E-post</th>
-                                        <th>Åtgärder</th>
+                                        <th class="d-none d-md-table-cell">E-post</th>
+                                        <th class="text-end">Åtgärder</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -294,16 +328,19 @@ function displayMembers(members) {
                     <td>
                         <div class="member-name-cell">
                             ${renderAvatar(prospect)}
-                            <strong>${escapeHtml(prospect.name)}</strong>
+                            <div>
+                                <strong>${escapeHtml(prospect.name)}</strong>
+                                ${prospect.email ? `<small class="text-muted d-block d-md-none member-email-mobile">${escapeHtml(prospect.email)}</small>` : ''}
+                            </div>
                         </div>
                     </td>
-                    <td>${escapeHtml(prospect.email || '-')}</td>
-                    <td>
-                        <button class="btn btn-sm btn-success me-1" onclick="approveMember(${prospect.id}, '${escapeHtml(prospect.name)}')">
-                            <i class="bi bi-check-circle me-1"></i>Godkänn
+                    <td class="d-none d-md-table-cell">${escapeHtml(prospect.email || '-')}</td>
+                    <td class="text-end text-nowrap">
+                        <button class="btn btn-sm btn-success member-action-btn me-1" onclick="approveMember(${prospect.id}, '${escapeHtml(prospect.name)}')" title="Godkänn">
+                            <i class="bi bi-check-circle"></i><span class="btn-text ms-1 d-none d-md-inline">Godkänn</span>
                         </button>
-                        <button class="btn btn-sm btn-danger" onclick="declineMember(${prospect.id}, '${escapeHtml(prospect.name)}')">
-                            <i class="bi bi-x-circle me-1"></i>Avslå
+                        <button class="btn btn-sm btn-danger member-action-btn" onclick="declineMember(${prospect.id}, '${escapeHtml(prospect.name)}')" title="Avslå">
+                            <i class="bi bi-x-circle"></i><span class="btn-text ms-1 d-none d-md-inline">Avslå</span>
                         </button>
                     </td>
                 </tr>
@@ -327,7 +364,7 @@ function displayMembers(members) {
                 <thead>
                     <tr>
                         <th>Namn</th>
-                        <th>E-post</th>
+                        <th class="d-none d-md-table-cell">E-post</th>
                         <th class="text-center" style="width: 50px;"></th>
                         ${isAdmin ? '<th class="text-end">Åtgärder</th>' : ''}
                     </tr>
@@ -347,20 +384,23 @@ function displayMembers(members) {
                 <td>
                     <div class="member-name-cell">
                         ${renderAvatar(member)}
-                        <strong>${escapeHtml(member.name)}</strong>
+                        <div>
+                            <strong>${escapeHtml(member.name)}</strong>
+                            ${member.email ? `<small class="text-muted d-block d-md-none member-email-mobile">${escapeHtml(member.email)}</small>` : ''}
+                        </div>
                     </div>
                 </td>
-                <td>${escapeHtml(member.email || '-')}</td>
+                <td class="d-none d-md-table-cell">${escapeHtml(member.email || '-')}</td>
                 <td class="text-center">
                     ${showDashboardBtn ? `
-                        <button class="btn btn-sm btn-outline-info" onclick="viewMemberDashboard(${member.id}, '${escapeHtml(member.name)}')" title="Visa dashboard">
+                        <button class="btn btn-sm btn-outline-info member-action-btn" onclick="viewMemberDashboard(${member.id}, '${escapeHtml(member.name)}')" title="Visa dashboard">
                             <i class="bi bi-speedometer2"></i>
                         </button>
                     ` : ''}
                 </td>
                 ${isAdmin ? `<td class="text-end">
-                    <button class="btn btn-sm btn-outline-primary" onclick="showMemberDetails(${member.id})">
-                        <i class="bi bi-eye me-1"></i>Visa detaljer
+                    <button class="btn btn-sm btn-outline-primary member-action-btn" onclick="showMemberDetails(${member.id})" title="Visa detaljer">
+                        <i class="bi bi-eye"></i><span class="btn-text ms-1 d-none d-md-inline">Visa detaljer</span>
                     </button>
                 </td>` : ''}
             </tr>

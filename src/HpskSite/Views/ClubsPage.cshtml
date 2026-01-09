@@ -16,7 +16,7 @@
             <div class="row mb-3">
                 <div class="col-md-4">
                     <label for="kretsFilter" class="form-label">Välj krets</label>
-                    <select class="form-select" id="kretsFilter" onchange="filterClubsByKrets()">
+                    <select class="form-select form-select-lg-mobile" id="kretsFilter" onchange="filterClubsByKrets()">
                         <option value="">Alla kretsar</option>
                     </select>
                 </div>
@@ -132,10 +132,10 @@ function displayClubsTable(clubs) {
                 <thead>
                     <tr>
                         <th>Klubbnamn</th>
-                        <th>Stad</th>
-                        <th>E-post</th>
-                        <th>Tel</th>
-                        <th style="width: 60px;"></th>
+                        <th class="d-none d-md-table-cell">Stad</th>
+                        <th class="d-none d-lg-table-cell">E-post</th>
+                        <th class="d-none d-lg-table-cell">Tel</th>
+                        <th style="width: 120px;"></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -160,14 +160,17 @@ function displayClubsTable(clubs) {
                 <td>
                     <div class="club-name-cell">
                         <strong class="d-block">${club.name}</strong>
-                        ${club.description ? `<small class="text-muted d-block mt-1">${club.description}</small>` : ''}
+                        ${club.description ? `<small class="text-muted d-block mt-1 club-description">${club.description}</small>` : ''}
+                        ${club.city ? `<small class="text-muted d-block d-md-none mt-1"><i class="bi bi-geo-alt"></i> ${club.city}</small>` : ''}
                     </div>
                 </td>
-                <td>${club.city || '-'}</td>
-                <td>${club.contactEmail ? `<a href="mailto:${club.contactEmail}">${club.contactEmail}</a>` : '-'}</td>
-                <td>${club.contactPhone || '-'}</td>
-                <td class="text-center">
-                    <a href="${navigationUrl}"${linkTarget} class="btn btn-sm btn-outline-primary" title="Öppna hemsida" data-bs-toggle="tooltip">
+                <td class="d-none d-md-table-cell">${club.city || '-'}</td>
+                <td class="d-none d-lg-table-cell">${club.contactEmail ? `<a href="mailto:${club.contactEmail}" class="club-email-link">${club.contactEmail}</a>` : '-'}</td>
+                <td class="d-none d-lg-table-cell">${club.contactPhone || '-'}</td>
+                <td class="text-end club-actions">
+                    ${club.contactEmail ? `<a href="mailto:${club.contactEmail}" class="btn btn-outline-secondary club-action-btn d-lg-none" title="E-post"><i class="bi bi-envelope"></i></a>` : ''}
+                    ${club.contactPhone ? `<a href="tel:${club.contactPhone}" class="btn btn-outline-secondary club-action-btn d-lg-none" title="Ring"><i class="bi bi-telephone"></i></a>` : ''}
+                    <a href="${navigationUrl}"${linkTarget} class="btn btn-outline-primary club-action-btn" title="Öppna hemsida" data-bs-toggle="tooltip">
                         <i class="bi bi-globe"></i>
                     </a>
                 </td>
@@ -222,5 +225,84 @@ function displayClubsTable(clubs) {
 .table td {
     vertical-align: middle;
     padding: 0.5rem 0.75rem;
+}
+
+/* Mobile-friendly club table styles */
+
+/* Action buttons - larger touch targets */
+.club-action-btn {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0.5rem;
+    margin: 2px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Action buttons container */
+.club-actions {
+    white-space: nowrap;
+}
+
+/* Email link truncation on medium screens */
+.club-email-link {
+    display: inline-block;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: middle;
+}
+
+/* Mobile adjustments */
+@@media (max-width: 767.98px) {
+    /* Hide description on very small screens to save space */
+    .club-description {
+        display: none !important;
+    }
+
+    /* Tighter padding on mobile */
+    .table td {
+        padding: 0.5rem 0.35rem;
+    }
+
+    /* Action buttons column */
+    .club-actions {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 4px;
+    }
+
+    /* Smaller action buttons on mobile but still touch-friendly */
+    .club-action-btn {
+        min-width: 40px;
+        min-height: 40px;
+        padding: 0.4rem;
+        font-size: 0.9rem;
+    }
+}
+
+/* Medium screens - show city, hide contact info */
+@@media (min-width: 768px) and (max-width: 991.98px) {
+    .club-email-link {
+        max-width: 150px;
+    }
+}
+
+/* Large screens - full email visible */
+@@media (min-width: 992px) {
+    .club-email-link {
+        max-width: none;
+    }
+}
+
+/* Larger select on mobile for better touch target */
+@@media (max-width: 767.98px) {
+    .form-select-lg-mobile {
+        min-height: 48px;
+        font-size: 1rem;
+    }
 }
 </style>

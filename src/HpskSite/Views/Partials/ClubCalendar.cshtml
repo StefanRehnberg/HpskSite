@@ -656,6 +656,18 @@ document.addEventListener('DOMContentLoaded', function() {
                 renderListView();
             }
         });
+
+        // Auto-switch to list view on narrow screens
+        let resizeTimeout;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimeout);
+            resizeTimeout = setTimeout(() => {
+                const isNarrow = window.innerWidth < 768;
+                if (isNarrow && currentView === 'calendar') {
+                    switchView('list');
+                }
+            }, 150);
+        });
     }
 });
 

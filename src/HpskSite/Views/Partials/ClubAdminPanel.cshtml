@@ -1284,6 +1284,30 @@ async function initEditMemberData() {
 document.addEventListener('DOMContentLoaded', function() {
     // Delay slightly to not block initial page render
     setTimeout(() => initEditMemberData(), 500);
+
+    // Set up precision collapse event listeners once (not per member)
+    const precisionCollapse = document.getElementById('editMemberPrecisionCollapse');
+    const collapseIcon = document.getElementById('editMemberPrecisionCollapseIcon');
+
+    if (precisionCollapse) {
+        // Load handicap when expanded (only if not already loaded for this member)
+        precisionCollapse.addEventListener('shown.bs.collapse', function() {
+            if (precisionCollapse.dataset.handicapLoaded !== 'true' && editMemberCurrentMemberId) {
+                precisionCollapse.dataset.handicapLoaded = 'true';
+                loadEditMemberHandicapInfo(editMemberCurrentMemberId);
+            }
+        });
+
+        // Update collapse icon
+        precisionCollapse.addEventListener('show.bs.collapse', () => {
+            collapseIcon.classList.remove('bi-chevron-right');
+            collapseIcon.classList.add('bi-chevron-down');
+        });
+        precisionCollapse.addEventListener('hide.bs.collapse', () => {
+            collapseIcon.classList.remove('bi-chevron-down');
+            collapseIcon.classList.add('bi-chevron-right');
+        });
+    }
 });
 
 // Show/hide loading overlay
@@ -1383,23 +1407,23 @@ function populateEditMemberForm(member) {
         if (radio) radio.checked = true;
     }
 
-    // Load handicap info when precision section is expanded
+    // Reset precision collapse section - close it and clear old data
     const precisionCollapse = document.getElementById('editMemberPrecisionCollapse');
-    precisionCollapse.addEventListener('shown.bs.collapse', function handler() {
-        loadEditMemberHandicapInfo(member.id);
-        precisionCollapse.removeEventListener('shown.bs.collapse', handler);
-    }, { once: true });
-
-    // Update collapse icon
+    const bsCollapse = bootstrap.Collapse.getInstance(precisionCollapse);
+    if (bsCollapse) {
+        bsCollapse.hide();
+    }
+    // Reset collapse icon
     const collapseIcon = document.getElementById('editMemberPrecisionCollapseIcon');
-    precisionCollapse.addEventListener('show.bs.collapse', () => {
-        collapseIcon.classList.remove('bi-chevron-right');
-        collapseIcon.classList.add('bi-chevron-down');
-    });
-    precisionCollapse.addEventListener('hide.bs.collapse', () => {
-        collapseIcon.classList.remove('bi-chevron-down');
-        collapseIcon.classList.add('bi-chevron-right');
-    });
+    collapseIcon.classList.remove('bi-chevron-down');
+    collapseIcon.classList.add('bi-chevron-right');
+
+    // Clear old handicap data
+    document.getElementById('editMemberHandicapInfoContainer').innerHTML =
+        '<div class="text-muted small">Expandera för att visa handicapinformation.</div>';
+
+    // Mark that handicap needs to be loaded for this member
+    precisionCollapse.dataset.handicapLoaded = 'false';
 }
 
 // Profile picture functions
