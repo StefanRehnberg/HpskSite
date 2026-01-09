@@ -1,12 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
-	
-	<TargetFrameworks>net9.0-windows10.0.19041.0</TargetFrameworks>
-  <!-- Comment out for local dev:
-  <TargetFrameworks>net9.0-android;net9.0-ios;net9.0-maccatalyst</TargetFrameworks>
-  <TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('windows'))">$(TargetFrameworks);net9.0-windows10.0.19041.0</TargetFrameworks>
-  -->
+		<!-- CI builds Android/iOS; local Windows builds only Windows for faster IntelliSense -->
+		<TargetFrameworks Condition="'$(GITHUB_ACTIONS)' == 'true'">net9.0-android;net9.0-ios</TargetFrameworks>
+		<TargetFrameworks Condition="'$(GITHUB_ACTIONS)' != 'true' AND $([MSBuild]::IsOSPlatform('windows'))">net9.0-windows10.0.19041.0</TargetFrameworks>
+		<TargetFrameworks Condition="'$(GITHUB_ACTIONS)' != 'true' AND !$([MSBuild]::IsOSPlatform('windows'))">net9.0-android;net9.0-ios</TargetFrameworks>
 
 		<!-- Disable heavy IntelliSense/analyzers to speed up VS -->
 		<RunAnalyzersDuringBuild>false</RunAnalyzersDuringBuild>
