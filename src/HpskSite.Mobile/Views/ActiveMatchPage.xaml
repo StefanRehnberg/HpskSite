@@ -832,152 +832,184 @@
             </VerticalStackLayout>
         </Border>
 
-        <!--  Settings Modal (Host only - Slide up from bottom)  -->
-        <Border Grid.Row="0" Padding="16,16,16,20"
-                BackgroundColor="#374151"
-                IsVisible="{Binding IsSettingsModalOpen}"
-                Stroke="Transparent" StrokeShape="RoundRectangle 20,20,0,0" VerticalOptions="End">
-            <Border.Shadow>
-                <Shadow Brush="Black" Opacity="0.2" Radius="12"
-                        Offset="0,-4" />
-            </Border.Shadow>
+        <!--  Settings Modal (Host only - Full screen overlay with bottom sheet)  -->
+        <Grid Grid.Row="0" BackgroundColor="#80000000"
+              IsVisible="{Binding IsSettingsModalOpen}">
+            <!--  Tap overlay to close  -->
+            <Grid.GestureRecognizers>
+                <TapGestureRecognizer Command="{Binding CloseSettingsModalCommand}" />
+            </Grid.GestureRecognizers>
 
-            <VerticalStackLayout Spacing="16">
+            <!--  Modal Content (Bottom Sheet)  -->
+            <Border Padding="16,16,16,20"
+                    BackgroundColor="#374151"
+                    Stroke="Transparent" StrokeShape="RoundRectangle 20,20,0,0"
+                    VerticalOptions="End"
+                    MaximumHeightRequest="600">
+                <Border.Shadow>
+                    <Shadow Brush="Black" Opacity="0.2" Radius="12"
+                            Offset="0,-4" />
+                </Border.Shadow>
+                <Border.GestureRecognizers>
+                    <!--  Prevent tap from closing when tapping inside modal  -->
+                    <TapGestureRecognizer />
+                </Border.GestureRecognizers>
 
-                <!--  Modal Header with Close Button  -->
-                <Grid ColumnDefinitions="*,Auto">
-                    <HorizontalStackLayout Spacing="8">
-                        <Label FontSize="18" Text="⚙️" VerticalOptions="Center" />
-                        <Label FontAttributes="Bold" FontSize="18"
-                               Text="Matchinställningar"
-                               TextColor="White" VerticalOptions="Center" />
-                    </HorizontalStackLayout>
-                    <Button Grid.Column="1" Padding="0" BackgroundColor="#4b5563"
-                            Command="{Binding CloseSettingsModalCommand}"
-                            CornerRadius="18" FontAttributes="Bold" FontSize="14"
-                            HeightRequest="36" Text="X" TextColor="White"
-                            WidthRequest="36" />
-                </Grid>
+                <ScrollView>
+                    <VerticalStackLayout Spacing="16">
 
-                <!--  Max Series Count Setting  -->
-                <VerticalStackLayout Spacing="6">
-                    <Label Text="Max antal serier" FontSize="14" FontAttributes="Bold" TextColor="White" />
-                    <Entry Placeholder="Lämna tomt för standard"
-                           Text="{Binding MaxSeriesCountInput}"
-                           Keyboard="Numeric"
-                           BackgroundColor="#4b5563"
-                           TextColor="White"
-                           PlaceholderColor="#9ca3af" />
-                    <Label Text="Begränsa totalsumman till detta antal serier. Lämna tomt för att använda minsta antal skjutna serier."
-                           FontSize="11" TextColor="#9ca3af" LineBreakMode="WordWrap" />
-                </VerticalStackLayout>
-
-                <!--  Share Section  -->
-                <VerticalStackLayout Spacing="12">
-                    <!--  QR Code  -->
-                    <Border Padding="16" BackgroundColor="White" Stroke="Transparent" StrokeShape="RoundRectangle 8"
-                            HorizontalOptions="Center">
-                        <Image Source="{Binding QrCodeUrl}"
-                               WidthRequest="160" HeightRequest="160"
-                               Aspect="AspectFit" />
-                    </Border>
-
-                    <!--  Match Code  -->
-                    <VerticalStackLayout HorizontalOptions="Center">
-                        <Label Text="Matchkod" FontSize="12" TextColor="#9ca3af" HorizontalOptions="Center" />
-                        <Label Text="{Binding Match.MatchCode}" FontSize="24" FontAttributes="Bold" TextColor="White"
-                               HorizontalOptions="Center" FontFamily="Consolas" />
-                    </VerticalStackLayout>
-
-                    <!--  Share Link  -->
-                    <Border Padding="12" BackgroundColor="#4b5563" Stroke="Transparent" StrokeShape="RoundRectangle 8">
-                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                            <Label Text="{Binding ShareLink}" FontSize="11" TextColor="#9ca3af"
-                                   VerticalOptions="Center" LineBreakMode="TailTruncation" />
-                            <Button Grid.Column="1" Text="Kopiera"
-                                    Command="{Binding CopyShareLinkCommand}"
-                                    BackgroundColor="{StaticResource Primary}"
-                                    TextColor="White" CornerRadius="8"
-                                    HeightRequest="36" Padding="12,0" FontSize="12" />
+                        <!--  Modal Header with Close Button  -->
+                        <Grid ColumnDefinitions="*,Auto">
+                            <HorizontalStackLayout Spacing="8">
+                                <Label FontSize="18" Text="⚙️" VerticalOptions="Center" />
+                                <Label FontAttributes="Bold" FontSize="18"
+                                       Text="Matchinställningar"
+                                       TextColor="White" VerticalOptions="Center" />
+                            </HorizontalStackLayout>
+                            <Button Grid.Column="1" Padding="0" BackgroundColor="#4b5563"
+                                    Command="{Binding CloseSettingsModalCommand}"
+                                    CornerRadius="18" FontAttributes="Bold" FontSize="14"
+                                    HeightRequest="36" Text="X" TextColor="White"
+                                    WidthRequest="36" />
                         </Grid>
-                    </Border>
-                </VerticalStackLayout>
 
-                <!--  Save Settings Button  -->
-                <Button Text="Spara inställningar"
-                        Command="{Binding SaveMatchSettingsCommand}"
-                        BackgroundColor="{StaticResource Primary}"
-                        TextColor="White" CornerRadius="8"
-                        HeightRequest="48" FontAttributes="Bold"
-                        IsEnabled="{Binding IsSavingSettings, Converter={StaticResource InverseBoolConverter}}" />
+                        <!--  Max Series Count Setting  -->
+                        <VerticalStackLayout Spacing="6">
+                            <Label Text="Max antal serier" FontSize="14" FontAttributes="Bold" TextColor="White" />
+                            <Entry Placeholder="Lämna tomt för standard"
+                                   Text="{Binding MaxSeriesCountInput}"
+                                   Keyboard="Numeric"
+                                   BackgroundColor="#4b5563"
+                                   TextColor="White"
+                                   PlaceholderColor="#9ca3af" />
+                            <Label Text="Begränsa totalsumman till detta antal serier. Lämna tomt för att använda minsta antal skjutna serier."
+                                   FontSize="11" TextColor="#9ca3af" LineBreakMode="WordWrap" />
+                        </VerticalStackLayout>
 
-                <!--  End Match Button  -->
-                <Button Text="Avsluta match"
-                        Clicked="OnCompleteMatchClicked"
-                        BackgroundColor="{StaticResource Danger}"
-                        TextColor="White" CornerRadius="8"
-                        HeightRequest="48" FontAttributes="Bold" />
+                        <!--  Share Section  -->
+                        <VerticalStackLayout Spacing="12">
+                            <!--  QR Code  -->
+                            <Border Padding="16" BackgroundColor="White" Stroke="Transparent" StrokeShape="RoundRectangle 8"
+                                    HorizontalOptions="Center">
+                                <Image Source="{Binding QrCodeUrl}"
+                                       WidthRequest="160" HeightRequest="160"
+                                       Aspect="AspectFit" />
+                            </Border>
 
-            </VerticalStackLayout>
-        </Border>
+                            <!--  Match Code  -->
+                            <VerticalStackLayout HorizontalOptions="Center">
+                                <Label Text="Matchkod" FontSize="12" TextColor="#9ca3af" HorizontalOptions="Center" />
+                                <Label Text="{Binding Match.MatchCode}" FontSize="24" FontAttributes="Bold" TextColor="White"
+                                       HorizontalOptions="Center" FontFamily="Consolas" />
+                            </VerticalStackLayout>
 
-        <!--  Share Modal (Non-host participants/spectators - Slide up from bottom)  -->
-        <Border Grid.Row="0" Padding="16,16,16,20"
-                BackgroundColor="#374151"
-                IsVisible="{Binding IsShareModalOpen}"
-                Stroke="Transparent" StrokeShape="RoundRectangle 20,20,0,0" VerticalOptions="End">
-            <Border.Shadow>
-                <Shadow Brush="Black" Opacity="0.2" Radius="12"
-                        Offset="0,-4" />
-            </Border.Shadow>
+                            <!--  Share Link  -->
+                            <Border Padding="12" BackgroundColor="#4b5563" Stroke="Transparent" StrokeShape="RoundRectangle 8">
+                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                    <Label Text="{Binding ShareLink}" FontSize="11" TextColor="#9ca3af"
+                                           VerticalOptions="Center" LineBreakMode="TailTruncation" />
+                                    <Button Grid.Column="1" Text="Kopiera"
+                                            Command="{Binding CopyShareLinkCommand}"
+                                            BackgroundColor="{StaticResource Primary}"
+                                            TextColor="White" CornerRadius="8"
+                                            HeightRequest="36" Padding="12,0" FontSize="12" />
+                                </Grid>
+                            </Border>
+                        </VerticalStackLayout>
 
-            <VerticalStackLayout Spacing="16">
-
-                <!--  Modal Header with Close Button  -->
-                <Grid ColumnDefinitions="*,Auto">
-                    <HorizontalStackLayout Spacing="8">
-                        <Label FontSize="18" Text="📤" VerticalOptions="Center" />
-                        <Label FontAttributes="Bold" FontSize="18"
-                               Text="Dela match"
-                               TextColor="White" VerticalOptions="Center" />
-                    </HorizontalStackLayout>
-                    <Button Grid.Column="1" Padding="0" BackgroundColor="#4b5563"
-                            Command="{Binding CloseShareModalCommand}"
-                            CornerRadius="18" FontAttributes="Bold" FontSize="14"
-                            HeightRequest="36" Text="X" TextColor="White"
-                            WidthRequest="36" />
-                </Grid>
-
-                <!--  QR Code  -->
-                <Border Padding="16" BackgroundColor="White" Stroke="Transparent" StrokeShape="RoundRectangle 8"
-                        HorizontalOptions="Center">
-                    <Image Source="{Binding QrCodeUrl}"
-                           WidthRequest="160" HeightRequest="160"
-                           Aspect="AspectFit" />
-                </Border>
-
-                <!--  Match Code  -->
-                <VerticalStackLayout HorizontalOptions="Center">
-                    <Label Text="Matchkod" FontSize="12" TextColor="#9ca3af" HorizontalOptions="Center" />
-                    <Label Text="{Binding Match.MatchCode}" FontSize="24" FontAttributes="Bold" TextColor="White"
-                           HorizontalOptions="Center" FontFamily="Consolas" />
-                </VerticalStackLayout>
-
-                <!--  Share Link  -->
-                <Border Padding="12" BackgroundColor="#4b5563" Stroke="Transparent" StrokeShape="RoundRectangle 8">
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                        <Label Text="{Binding ShareLink}" FontSize="11" TextColor="#9ca3af"
-                               VerticalOptions="Center" LineBreakMode="TailTruncation" />
-                        <Button Grid.Column="1" Text="Kopiera länk"
-                                Command="{Binding CopyShareLinkCommand}"
+                        <!--  Save Settings Button  -->
+                        <Button Text="Spara inställningar"
+                                Command="{Binding SaveMatchSettingsCommand}"
                                 BackgroundColor="{StaticResource Primary}"
                                 TextColor="White" CornerRadius="8"
-                                HeightRequest="40" Padding="16,0" FontSize="12" />
-                    </Grid>
-                </Border>
+                                HeightRequest="48" FontAttributes="Bold"
+                                IsEnabled="{Binding IsSavingSettings, Converter={StaticResource InverseBoolConverter}}" />
 
-            </VerticalStackLayout>
-        </Border>
+                        <!--  End Match Button  -->
+                        <Button Text="Avsluta match"
+                                Clicked="OnCompleteMatchClicked"
+                                BackgroundColor="{StaticResource Danger}"
+                                TextColor="White" CornerRadius="8"
+                                HeightRequest="48" FontAttributes="Bold" />
+
+                    </VerticalStackLayout>
+                </ScrollView>
+            </Border>
+        </Grid>
+
+        <!--  Share Modal (Non-host participants/spectators - Full screen overlay with bottom sheet)  -->
+        <Grid Grid.Row="0" BackgroundColor="#80000000"
+              IsVisible="{Binding IsShareModalOpen}">
+            <!--  Tap overlay to close  -->
+            <Grid.GestureRecognizers>
+                <TapGestureRecognizer Command="{Binding CloseShareModalCommand}" />
+            </Grid.GestureRecognizers>
+
+            <!--  Modal Content (Bottom Sheet)  -->
+            <Border Padding="16,16,16,20"
+                    BackgroundColor="#374151"
+                    Stroke="Transparent" StrokeShape="RoundRectangle 20,20,0,0"
+                    VerticalOptions="End"
+                    MaximumHeightRequest="500">
+                <Border.Shadow>
+                    <Shadow Brush="Black" Opacity="0.2" Radius="12"
+                            Offset="0,-4" />
+                </Border.Shadow>
+                <Border.GestureRecognizers>
+                    <!--  Prevent tap from closing when tapping inside modal  -->
+                    <TapGestureRecognizer />
+                </Border.GestureRecognizers>
+
+                <ScrollView>
+                    <VerticalStackLayout Spacing="16">
+
+                        <!--  Modal Header with Close Button  -->
+                        <Grid ColumnDefinitions="*,Auto">
+                            <HorizontalStackLayout Spacing="8">
+                                <Label FontSize="18" Text="📤" VerticalOptions="Center" />
+                                <Label FontAttributes="Bold" FontSize="18"
+                                       Text="Dela match"
+                                       TextColor="White" VerticalOptions="Center" />
+                            </HorizontalStackLayout>
+                            <Button Grid.Column="1" Padding="0" BackgroundColor="#4b5563"
+                                    Command="{Binding CloseShareModalCommand}"
+                                    CornerRadius="18" FontAttributes="Bold" FontSize="14"
+                                    HeightRequest="36" Text="X" TextColor="White"
+                                    WidthRequest="36" />
+                        </Grid>
+
+                        <!--  QR Code  -->
+                        <Border Padding="16" BackgroundColor="White" Stroke="Transparent" StrokeShape="RoundRectangle 8"
+                                HorizontalOptions="Center">
+                            <Image Source="{Binding QrCodeUrl}"
+                                   WidthRequest="160" HeightRequest="160"
+                                   Aspect="AspectFit" />
+                        </Border>
+
+                        <!--  Match Code  -->
+                        <VerticalStackLayout HorizontalOptions="Center">
+                            <Label Text="Matchkod" FontSize="12" TextColor="#9ca3af" HorizontalOptions="Center" />
+                            <Label Text="{Binding Match.MatchCode}" FontSize="24" FontAttributes="Bold" TextColor="White"
+                                   HorizontalOptions="Center" FontFamily="Consolas" />
+                        </VerticalStackLayout>
+
+                        <!--  Share Link  -->
+                        <Border Padding="12" BackgroundColor="#4b5563" Stroke="Transparent" StrokeShape="RoundRectangle 8">
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                <Label Text="{Binding ShareLink}" FontSize="11" TextColor="#9ca3af"
+                                       VerticalOptions="Center" LineBreakMode="TailTruncation" />
+                                <Button Grid.Column="1" Text="Kopiera länk"
+                                        Command="{Binding CopyShareLinkCommand}"
+                                        BackgroundColor="{StaticResource Primary}"
+                                        TextColor="White" CornerRadius="8"
+                                        HeightRequest="40" Padding="16,0" FontSize="12" />
+                            </Grid>
+                        </Border>
+
+                    </VerticalStackLayout>
+                </ScrollView>
+            </Border>
+        </Grid>
 
         <!--  Photo Viewer Modal (Full screen overlay)  -->
         <Grid Grid.Row="0" BackgroundColor="#CC000000"

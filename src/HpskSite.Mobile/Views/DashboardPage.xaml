@@ -8,7 +8,8 @@
              x:DataType="viewmodels:DashboardViewModel"
              BackgroundColor="{StaticResource OffBlack}">
 
-    <RefreshView Command="{Binding LoadDataCommand}" IsRefreshing="{Binding IsRefreshing}">
+    <Grid>
+        <RefreshView Command="{Binding LoadDataCommand}" IsRefreshing="{Binding IsRefreshing}">
         <ScrollView>
             <VerticalStackLayout Padding="16" Spacing="16">
 
@@ -127,11 +128,17 @@
                                 <Border Grid.Row="0" Grid.Column="1" Padding="16"
                                         BackgroundColor="{StaticResource Success}"
                                         Stroke="Transparent" StrokeShape="RoundRectangle 8">
+                                    <Border.GestureRecognizers>
+                                        <TapGestureRecognizer Command="{Binding ShowAveragesPopupCommand}" />
+                                    </Border.GestureRecognizers>
                                     <VerticalStackLayout>
                                         <Label FontAttributes="Bold" FontSize="36"
-                                               Text="{Binding Statistics.ThirtyDayAverage, StringFormat='{0:F1}'}"
+                                               Text="{Binding BestAverageWeaponClass.Average, StringFormat='{0:F1}', FallbackValue='0.0', TargetNullValue='0.0'}"
                                                TextColor="White" />
                                         <Label FontSize="12" Opacity="0.8" Text="30-dagars snitt"
+                                               TextColor="White" />
+                                        <Label FontSize="10" Opacity="0.7"
+                                               Text="{Binding BestAverageWeaponClass.WeaponClass, StringFormat='Klass {0}', FallbackValue='', TargetNullValue=''}"
                                                TextColor="White" />
                                     </VerticalStackLayout>
                                 </Border>
@@ -167,15 +174,25 @@
                             <Border Padding="16" BackgroundColor="#1B4332"
                                     Stroke="{StaticResource Success}"
                                     StrokeShape="RoundRectangle 8" StrokeThickness="2">
+                                <Border.GestureRecognizers>
+                                    <TapGestureRecognizer Command="{Binding ShowBestScoresPopupCommand}" />
+                                </Border.GestureRecognizers>
                                 <HorizontalStackLayout Spacing="12">
                                     <Label FontSize="20" Text="🏆" VerticalOptions="Center" />
-                                    <Label FontSize="14" Text="Basta resultat:"
-                                           TextColor="{StaticResource White}"
-                                           VerticalOptions="Center" />
-                                    <Label FontAttributes="Bold" FontSize="24"
-                                           Text="{Binding Statistics.BestMatchScore}"
-                                           TextColor="{StaticResource Success}"
-                                           VerticalOptions="Center" />
+                                    <VerticalStackLayout VerticalOptions="Center">
+                                        <HorizontalStackLayout Spacing="8">
+                                            <Label FontSize="14" Text="Basta resultat:"
+                                                   TextColor="{StaticResource White}"
+                                                   VerticalOptions="Center" />
+                                            <Label FontAttributes="Bold" FontSize="24"
+                                                   Text="{Binding BestScoreWeaponClass.BestScore, FallbackValue='0', TargetNullValue='0'}"
+                                                   TextColor="{StaticResource Success}"
+                                                   VerticalOptions="Center" />
+                                        </HorizontalStackLayout>
+                                        <Label FontSize="10" Opacity="0.7"
+                                               Text="{Binding BestScoreWeaponClass.WeaponClass, StringFormat='Klass {0}', FallbackValue='', TargetNullValue=''}"
+                                               TextColor="{StaticResource White}" />
+                                    </VerticalStackLayout>
                                 </HorizontalStackLayout>
                             </Border>
 
@@ -393,6 +410,143 @@
 
             </VerticalStackLayout>
         </ScrollView>
-    </RefreshView>
+        </RefreshView>
+
+        <!--  Averages Popup Modal  -->
+        <Grid BackgroundColor="#80000000"
+              IsVisible="{Binding IsAveragesPopupOpen}">
+            <Grid.GestureRecognizers>
+                <TapGestureRecognizer Command="{Binding CloseAveragesPopupCommand}" />
+            </Grid.GestureRecognizers>
+
+            <Border Margin="24" Padding="0"
+                    BackgroundColor="{StaticResource CardBackgroundDark}"
+                    MaximumHeightRequest="400"
+                    Stroke="{StaticResource Gray500}"
+                    StrokeShape="RoundRectangle 12"
+                    VerticalOptions="Center">
+                <Border.GestureRecognizers>
+                    <TapGestureRecognizer />
+                </Border.GestureRecognizers>
+                <VerticalStackLayout Spacing="0">
+                    <!--  Header  -->
+                    <Grid Padding="16" ColumnDefinitions="*,Auto"
+                          BackgroundColor="{StaticResource Gray600}">
+                        <Label FontAttributes="Bold" FontSize="16"
+                               Text="Snitt per vapenklass"
+                               TextColor="{StaticResource White}"
+                               VerticalOptions="Center" />
+                        <Label Grid.Column="1" FontSize="20"
+                               Text="✕"
+                               TextColor="{StaticResource Gray300}">
+                            <Label.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding CloseAveragesPopupCommand}" />
+                            </Label.GestureRecognizers>
+                        </Label>
+                    </Grid>
+                    <BoxView HeightRequest="1" Color="{StaticResource Gray600}" />
+
+                    <!--  Weapon Class List  -->
+                    <ScrollView MaximumHeightRequest="300">
+                        <VerticalStackLayout Padding="8" Spacing="8"
+                                             BindableLayout.ItemsSource="{Binding Statistics.WeaponClassStats}">
+                            <BindableLayout.ItemTemplate>
+                                <DataTemplate x:DataType="dtos:WeaponClassStat">
+                                    <Border Padding="12"
+                                            BackgroundColor="{StaticResource Gray700}"
+                                            Stroke="Transparent"
+                                            StrokeShape="RoundRectangle 8">
+                                        <Grid ColumnDefinitions="*,Auto">
+                                            <Label FontSize="14"
+                                                   Text="{Binding WeaponClass, StringFormat='Vapenklass {0}'}"
+                                                   TextColor="{StaticResource White}"
+                                                   VerticalOptions="Center" />
+                                            <Label Grid.Column="1" FontAttributes="Bold" FontSize="18"
+                                                   Text="{Binding Average, StringFormat='{0:F1}'}"
+                                                   TextColor="{StaticResource Success}"
+                                                   VerticalOptions="Center" />
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </BindableLayout.ItemTemplate>
+                            <BindableLayout.EmptyView>
+                                <Label Padding="16" HorizontalOptions="Center"
+                                       Text="Ingen data"
+                                       TextColor="{StaticResource Gray400}" />
+                            </BindableLayout.EmptyView>
+                        </VerticalStackLayout>
+                    </ScrollView>
+                </VerticalStackLayout>
+            </Border>
+        </Grid>
+
+        <!--  Best Scores Popup Modal  -->
+        <Grid BackgroundColor="#80000000"
+              IsVisible="{Binding IsBestScoresPopupOpen}">
+            <Grid.GestureRecognizers>
+                <TapGestureRecognizer Command="{Binding CloseBestScoresPopupCommand}" />
+            </Grid.GestureRecognizers>
+
+            <Border Margin="24" Padding="0"
+                    BackgroundColor="{StaticResource CardBackgroundDark}"
+                    MaximumHeightRequest="400"
+                    Stroke="{StaticResource Gray500}"
+                    StrokeShape="RoundRectangle 12"
+                    VerticalOptions="Center">
+                <Border.GestureRecognizers>
+                    <TapGestureRecognizer />
+                </Border.GestureRecognizers>
+                <VerticalStackLayout Spacing="0">
+                    <!--  Header  -->
+                    <Grid Padding="16" ColumnDefinitions="*,Auto"
+                          BackgroundColor="{StaticResource Gray600}">
+                        <Label FontAttributes="Bold" FontSize="16"
+                               Text="Basta resultat per klass"
+                               TextColor="{StaticResource White}"
+                               VerticalOptions="Center" />
+                        <Label Grid.Column="1" FontSize="20"
+                               Text="✕"
+                               TextColor="{StaticResource Gray300}">
+                            <Label.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding CloseBestScoresPopupCommand}" />
+                            </Label.GestureRecognizers>
+                        </Label>
+                    </Grid>
+                    <BoxView HeightRequest="1" Color="{StaticResource Gray600}" />
+
+                    <!--  Weapon Class List  -->
+                    <ScrollView MaximumHeightRequest="300">
+                        <VerticalStackLayout Padding="8" Spacing="8"
+                                             BindableLayout.ItemsSource="{Binding Statistics.WeaponClassStats}">
+                            <BindableLayout.ItemTemplate>
+                                <DataTemplate x:DataType="dtos:WeaponClassStat">
+                                    <Border Padding="12"
+                                            BackgroundColor="{StaticResource Gray700}"
+                                            Stroke="Transparent"
+                                            StrokeShape="RoundRectangle 8">
+                                        <Grid ColumnDefinitions="*,Auto">
+                                            <Label FontSize="14"
+                                                   Text="{Binding WeaponClass, StringFormat='Vapenklass {0}'}"
+                                                   TextColor="{StaticResource White}"
+                                                   VerticalOptions="Center" />
+                                            <Label Grid.Column="1" FontAttributes="Bold" FontSize="18"
+                                                   Text="{Binding BestScore}"
+                                                   TextColor="{StaticResource Success}"
+                                                   VerticalOptions="Center" />
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </BindableLayout.ItemTemplate>
+                            <BindableLayout.EmptyView>
+                                <Label Padding="16" HorizontalOptions="Center"
+                                       Text="Ingen data"
+                                       TextColor="{StaticResource Gray400}" />
+                            </BindableLayout.EmptyView>
+                        </VerticalStackLayout>
+                    </ScrollView>
+                </VerticalStackLayout>
+            </Border>
+        </Grid>
+    </Grid>
 
 </ContentPage>

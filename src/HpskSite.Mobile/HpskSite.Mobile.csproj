@@ -1,13 +1,19 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
-		<TargetFrameworks>net9.0-android;net9.0-ios;net9.0-maccatalyst</TargetFrameworks>
-		<TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('windows'))">$(TargetFrameworks);net9.0-windows10.0.19041.0</TargetFrameworks>
+	
+	<TargetFrameworks>net9.0-windows10.0.19041.0</TargetFrameworks>
+  <!-- Comment out for local dev:
+  <TargetFrameworks>net9.0-android;net9.0-ios;net9.0-maccatalyst</TargetFrameworks>
+  <TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('windows'))">$(TargetFrameworks);net9.0-windows10.0.19041.0</TargetFrameworks>
+  -->
 
 		<!-- Disable heavy IntelliSense/analyzers to speed up VS -->
 		<RunAnalyzersDuringBuild>false</RunAnalyzersDuringBuild>
 		<RunAnalyzersDuringLiveAnalysis>false</RunAnalyzersDuringLiveAnalysis>
 		<EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>
+		<EnableWindowsTargeting>true</EnableWindowsTargeting>
+		<IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
 
 		<!-- Prevent aggressive trimming that causes crashes -->
 		<RunAOTCompilation>false</RunAOTCompilation>
@@ -40,6 +46,8 @@
 		<!-- Versions -->
 		<ApplicationDisplayVersion>1.2</ApplicationDisplayVersion>
 		<ApplicationVersion>3</ApplicationVersion>
+		<PackageVersion>1.2.0</PackageVersion>
+		<Version>1.2.0</Version>
 
 		<!-- To develop, package, and publish an app to the Microsoft Store, see: https://aka.ms/MauiTemplateUnpackaged -->
 		<WindowsPackageType>None</WindowsPackageType>

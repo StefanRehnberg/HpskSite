@@ -60,9 +60,38 @@ public partial class DashboardViewModel : BaseViewModel
     [ObservableProperty]
     private bool _hasError;
 
+    [ObservableProperty]
+    private bool _isAveragesPopupOpen;
+
+    [ObservableProperty]
+    private bool _isBestScoresPopupOpen;
+
+    /// <summary>
+    /// Gets the weapon class with the highest average score
+    /// </summary>
+    public WeaponClassStat? BestAverageWeaponClass => Statistics?.WeaponClassStats
+        ?.Where(w => w.Average > 0)
+        .OrderByDescending(w => w.Average)
+        .FirstOrDefault();
+
+    /// <summary>
+    /// Gets the weapon class with the highest best score
+    /// </summary>
+    public WeaponClassStat? BestScoreWeaponClass => Statistics?.WeaponClassStats
+        ?.Where(w => w.BestScore > 0)
+        .OrderByDescending(w => w.BestScore)
+        .FirstOrDefault();
+
     partial void OnSelectedYearChanged(int value)
     {
         _ = LoadStatisticsAsync();
+    }
+
+    partial void OnStatisticsChanged(DashboardStatistics? value)
+    {
+        // Notify computed properties that depend on Statistics
+        OnPropertyChanged(nameof(BestAverageWeaponClass));
+        OnPropertyChanged(nameof(BestScoreWeaponClass));
     }
 
     [RelayCommand]
@@ -112,13 +141,17 @@ public partial class DashboardViewModel : BaseViewModel
 
         if (result.Success && result.Data != null)
         {
-            Statistics = result.Data;
-
-            RecentActivity.Clear();
-            foreach (var activity in result.Data.RecentActivity)
+            // Ensure UI updates happen on main thread
+            MainThread.BeginInvokeOnMainThread(() =>
             {
-                RecentActivity.Add(activity);
-            }
+                Statistics = result.Data;
+
+                RecentActivity.Clear();
+                foreach (var activity in result.Data.RecentActivity)
+                {
+                    RecentActivity.Add(activity);
+                }
+            });
         }
     }
 
@@ -167,5 +200,29 @@ public partial class DashboardViewModel : BaseViewModel
     private async Task NavigateToHistoryAsync()
     {
         await Shell.Current.GoToAsync("history");
+    }
+
+    [RelayCommand]
+    private void ShowAveragesPopup()
+    {
+        IsAveragesPopupOpen = true;
+    }
+
+    [RelayCommand]
+    private void CloseAveragesPopup()
+    {
+        IsAveragesPopupOpen = false;
+    }
+
+    [RelayCommand]
+    private void ShowBestScoresPopup()
+    {
+        IsBestScoresPopupOpen = true;
+    }
+
+    [RelayCommand]
+    private void CloseBestScoresPopup()
+    {
+        IsBestScoresPopupOpen = false;
     }
 }

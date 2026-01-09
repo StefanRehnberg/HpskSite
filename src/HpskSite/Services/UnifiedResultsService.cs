@@ -68,6 +68,7 @@ namespace HpskSite.Services
                 var db = scope.Database;
 
                 // Query from TrainingScores table - includes both training and competition entries
+                // TrainingMatchId determines if entry is from a training match
                 // IsCompetition column determines whether entry is shown as training or competition
                 var query = @"
                     SELECT
@@ -79,7 +80,8 @@ namespace HpskSite.Services
                         TotalScore,
                         XCount,
                         Notes,
-                        IsCompetition
+                        IsCompetition,
+                        TrainingMatchId
                     FROM TrainingScores
                     WHERE MemberId = @0
                     ORDER BY TrainingDate DESC";
@@ -141,23 +143,38 @@ namespace HpskSite.Services
 
                     double averageScore = seriesCount > 0 ? (double)score.TotalScore / seriesCount : 0;
 
-                    // Determine SourceType based on IsCompetition flag
+                    // Determine SourceType based on TrainingMatchId and IsCompetition flag
                     bool isCompetition = false;
+                    int? trainingMatchId = null;
                     try
                     {
                         isCompetition = score.IsCompetition ?? false;
+                        trainingMatchId = score.TrainingMatchId;
                     }
                     catch
                     {
-                        // IsCompetition column might not exist in older databases, default to false
+                        // Columns might not exist in older databases, use defaults
                         isCompetition = false;
+                        trainingMatchId = null;
                     }
+
+                    // Determine source type:
+                    // - TrainingMatchId != null → "TrainingMatch" (from mobile app training match)
+                    // - IsCompetition = true → "Competition" (manually entered competition result)
+                    // - Otherwise → "Training" (manually entered training result)
+                    string sourceType;
+                    if (trainingMatchId != null)
+                        sourceType = "TrainingMatch";
+                    else if (isCompetition)
+                        sourceType = "Competition";
+                    else
+                        sourceType = "Training";
 
                     results.Add(new UnifiedResultEntry
                     {
                         Id = score.Id,
                         Date = score.TrainingDate,
-                        SourceType = isCompetition ? "Competition" : "Training",  // Set based on IsCompetition flag
+                        SourceType = sourceType,
                         WeaponClass = score.WeaponClass?.ToString() ?? "",
                         TotalScore = score.TotalScore ?? 0,
                         XCount = score.XCount ?? 0,

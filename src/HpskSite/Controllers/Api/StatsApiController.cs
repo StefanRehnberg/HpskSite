@@ -90,8 +90,8 @@ namespace HpskSite.Controllers.Api
                 })
                 .ToList();
 
-            // Recent activity (last 10)
-            var recentActivity = allResults.Take(10).Select(r => new ActivityEntry
+            // Recent activity (last 10 for selected year)
+            var recentActivity = yearResults.Take(10).Select(r => new ActivityEntry
             {
                 Date = r.Date,
                 WeaponClass = r.WeaponClass,
