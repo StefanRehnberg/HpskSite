@@ -120,6 +120,8 @@ public partial class ActiveMatchViewModel : BaseViewModel
     public bool CanJoinFromSpectator => IsSpectator && CanJoin;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(QrCodeUrl))]
+    [NotifyPropertyChangedFor(nameof(ShareLink))]
     private TrainingMatch? _match;
 
     [ObservableProperty]
@@ -268,6 +270,12 @@ public partial class ActiveMatchViewModel : BaseViewModel
     /// </summary>
     [ObservableProperty]
     private bool _isSettingsModalOpen;
+
+    /// <summary>
+    /// Whether the share modal is open (for non-host participants/spectators)
+    /// </summary>
+    [ObservableProperty]
+    private bool _isShareModalOpen;
 
     /// <summary>
     /// Max series count input value for settings modal
@@ -555,6 +563,24 @@ public partial class ActiveMatchViewModel : BaseViewModel
     private void CloseSettingsModal()
     {
         IsSettingsModalOpen = false;
+    }
+
+    /// <summary>
+    /// Open the share modal (for non-host participants/spectators)
+    /// </summary>
+    [RelayCommand]
+    private void OpenShareModal()
+    {
+        IsShareModalOpen = true;
+    }
+
+    /// <summary>
+    /// Close the share modal
+    /// </summary>
+    [RelayCommand]
+    private void CloseShareModal()
+    {
+        IsShareModalOpen = false;
     }
 
     /// <summary>

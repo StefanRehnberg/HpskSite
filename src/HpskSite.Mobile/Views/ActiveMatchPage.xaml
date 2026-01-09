@@ -90,7 +90,7 @@
 
                             <!--  Share Button (participants and spectators only, not host)  -->
                             <Button Padding="10,0" BackgroundColor="White"
-                                    Command="{Binding CopyMatchCodeCommand}"
+                                    Command="{Binding OpenShareModalCommand}"
                                     CornerRadius="6" FontSize="11" HeightRequest="28"
                                     Text="Dela"
                                     TextColor="{StaticResource Primary}">
@@ -917,6 +917,64 @@
                         BackgroundColor="{StaticResource Danger}"
                         TextColor="White" CornerRadius="8"
                         HeightRequest="48" FontAttributes="Bold" />
+
+            </VerticalStackLayout>
+        </Border>
+
+        <!--  Share Modal (Non-host participants/spectators - Slide up from bottom)  -->
+        <Border Grid.Row="0" Padding="16,16,16,20"
+                BackgroundColor="#374151"
+                IsVisible="{Binding IsShareModalOpen}"
+                Stroke="Transparent" StrokeShape="RoundRectangle 20,20,0,0" VerticalOptions="End">
+            <Border.Shadow>
+                <Shadow Brush="Black" Opacity="0.2" Radius="12"
+                        Offset="0,-4" />
+            </Border.Shadow>
+
+            <VerticalStackLayout Spacing="16">
+
+                <!--  Modal Header with Close Button  -->
+                <Grid ColumnDefinitions="*,Auto">
+                    <HorizontalStackLayout Spacing="8">
+                        <Label FontSize="18" Text="📤" VerticalOptions="Center" />
+                        <Label FontAttributes="Bold" FontSize="18"
+                               Text="Dela match"
+                               TextColor="White" VerticalOptions="Center" />
+                    </HorizontalStackLayout>
+                    <Button Grid.Column="1" Padding="0" BackgroundColor="#4b5563"
+                            Command="{Binding CloseShareModalCommand}"
+                            CornerRadius="18" FontAttributes="Bold" FontSize="14"
+                            HeightRequest="36" Text="X" TextColor="White"
+                            WidthRequest="36" />
+                </Grid>
+
+                <!--  QR Code  -->
+                <Border Padding="16" BackgroundColor="White" Stroke="Transparent" StrokeShape="RoundRectangle 8"
+                        HorizontalOptions="Center">
+                    <Image Source="{Binding QrCodeUrl}"
+                           WidthRequest="160" HeightRequest="160"
+                           Aspect="AspectFit" />
+                </Border>
+
+                <!--  Match Code  -->
+                <VerticalStackLayout HorizontalOptions="Center">
+                    <Label Text="Matchkod" FontSize="12" TextColor="#9ca3af" HorizontalOptions="Center" />
+                    <Label Text="{Binding Match.MatchCode}" FontSize="24" FontAttributes="Bold" TextColor="White"
+                           HorizontalOptions="Center" FontFamily="Consolas" />
+                </VerticalStackLayout>
+
+                <!--  Share Link  -->
+                <Border Padding="12" BackgroundColor="#4b5563" Stroke="Transparent" StrokeShape="RoundRectangle 8">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                        <Label Text="{Binding ShareLink}" FontSize="11" TextColor="#9ca3af"
+                               VerticalOptions="Center" LineBreakMode="TailTruncation" />
+                        <Button Grid.Column="1" Text="Kopiera länk"
+                                Command="{Binding CopyShareLinkCommand}"
+                                BackgroundColor="{StaticResource Primary}"
+                                TextColor="White" CornerRadius="8"
+                                HeightRequest="40" Padding="16,0" FontSize="12" />
+                    </Grid>
+                </Border>
 
             </VerticalStackLayout>
         </Border>

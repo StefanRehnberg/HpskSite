@@ -312,7 +312,8 @@ public class HandicapFormatConverter : IValueConverter
 }
 
 /// <summary>
-/// Returns true if the participant has a non-null, non-zero handicap.
+/// Returns true if the participant has a handicap value (including 0).
+/// A HCP of 0 is still a valid handicap that should be displayed.
 /// </summary>
 public class HasHandicapConverter : IValueConverter
 {
@@ -321,9 +322,10 @@ public class HasHandicapConverter : IValueConverter
         if (value == null)
             return false;
 
-        if (value is decimal hcpVal)
+        // Show handicap badge for any value including 0
+        if (value is decimal)
         {
-            return hcpVal != 0;
+            return true;
         }
 
         return false;
