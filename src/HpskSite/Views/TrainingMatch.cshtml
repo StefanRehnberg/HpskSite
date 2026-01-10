@@ -235,6 +235,60 @@
         let isSpectator = false;
         let hubConnection = null;
 
+        // ===== Connection Status Banner Functions =====
+        function showConnectionBanner(message, type, clickable = false) {
+            let banner = document.getElementById('connectionBanner');
+            if (!banner) {
+                banner = document.createElement('div');
+                banner.id = 'connectionBanner';
+                banner.style.cssText = 'position:fixed;top:0;left:0;right:0;padding:12px;text-align:center;z-index:9999;font-weight:bold;';
+                document.body.prepend(banner);
+            }
+            banner.className = type === 'warning' ? 'bg-warning text-dark' : 'bg-danger text-white';
+            banner.textContent = message;
+            banner.style.display = 'block';
+
+            if (clickable) {
+                banner.style.cursor = 'pointer';
+                banner.onclick = () => {
+                    showConnectionBanner("Återansluter...", "warning");
+                    hubConnection.start()
+                        .then(() => {
+                            hideConnectionBanner();
+                            reconnectToMatchGroups();
+                        })
+                        .catch(err => {
+                            console.error("Manual reconnect failed:", err);
+                            showConnectionBanner("Kunde inte återansluta. Tryck för att försöka igen.", "danger", true);
+                        });
+                };
+            } else {
+                banner.style.cursor = 'default';
+                banner.onclick = null;
+            }
+        }
+
+        function hideConnectionBanner() {
+            const banner = document.getElementById('connectionBanner');
+            if (banner) {
+                banner.style.display = 'none';
+            }
+        }
+
+        function reconnectToMatchGroups() {
+            if (currentMatchCode) {
+                joinMatchSignalRGroup(currentMatchCode);
+                // Check if current user is the match creator (organizer)
+                if (currentMatch && currentMatch.createdByMemberId === currentMemberId) {
+                    joinOrganizerSignalRGroup(currentMatchCode);
+                }
+                // Refresh match data to get latest state
+                if (typeof loadMatchData === 'function') {
+                    loadMatchData(currentMatchCode, isSpectator);
+                }
+            }
+        }
+
         // Set member data on body for other scripts to access
         document.body.dataset.memberId = '@(memberId ?? 0)';
         document.body.dataset.memberName = '@Html.Raw(memberName.Replace("'", "\\'"))';
@@ -1266,6 +1320,23 @@
                 }
             });
 
+            // Connection state handlers for mobile disconnect recovery
+            hubConnection.onreconnecting((error) => {
+                console.log("SignalR reconnecting...", error);
+                showConnectionBanner("Återansluter...", "warning");
+            });
+
+            hubConnection.onreconnected((connectionId) => {
+                console.log("SignalR reconnected:", connectionId);
+                hideConnectionBanner();
+                reconnectToMatchGroups();
+            });
+
+            hubConnection.onclose((error) => {
+                console.log("SignalR connection closed:", error);
+                showConnectionBanner("Anslutningen bröts. Tryck för att återansluta.", "danger", true);
+            });
+
             // Start connection
             hubConnection.start()
                 .then(() => {
@@ -1306,6 +1377,27 @@
                 hubConnection.invoke("LeaveMatchGroup", matchCode);
             }
         }
+
+        // Handle page visibility changes (mobile screen on/off)
+        document.addEventListener('visibilitychange', function() {
+            if (document.visibilityState === 'visible') {
+                console.log("Page became visible, checking SignalR connection...");
+                if (hubConnection && hubConnection.state !== signalR.HubConnectionState.Connected) {
+                    console.log("SignalR not connected, attempting reconnect...");
+                    showConnectionBanner("Återansluter...", "warning");
+                    hubConnection.start()
+                        .then(() => {
+                            console.log("SignalR reconnected after visibility change");
+                            hideConnectionBanner();
+                            reconnectToMatchGroups();
+                        })
+                        .catch(err => {
+                            console.error("Failed to reconnect:", err);
+                            showConnectionBanner("Kunde inte återansluta. Tryck för att försöka igen.", "danger", true);
+                        });
+                }
+            }
+        });
 
         // ===== Ongoing Matches Tab =====
 
