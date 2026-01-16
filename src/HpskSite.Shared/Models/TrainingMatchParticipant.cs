@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using HpskSite.Shared.Services;
 
 namespace HpskSite.Shared.Models
 {
@@ -84,36 +85,21 @@ namespace HpskSite.Shared.Models
         public int EffectiveSeriesCount => EqualizedSeriesCount ?? Scores.Count;
 
         /// <summary>
-        /// Get the scores that should be included in totals (up to EqualizedSeriesCount).
-        /// </summary>
-        [JsonIgnore]
-        private IEnumerable<TrainingMatchScore> EffectiveScores =>
-            EqualizedSeriesCount.HasValue
-                ? Scores.OrderBy(s => s.SeriesNumber).Take(EqualizedSeriesCount.Value)
-                : Scores;
-
-        /// <summary>
         /// Total raw score (using equalized series count if set).
         /// Each series is capped at 50 (max possible score per series).
         /// </summary>
         [JsonPropertyName("totalScore")]
-        public int TotalScore => EffectiveScores.Sum(s => Math.Min(s.Total, 50));
+        public int TotalScore => ResultCalculator.CalculateRawTotal(Scores, EqualizedSeriesCount);
 
         /// <summary>
         /// Final score including handicap (using equalized series count if set).
         /// Handicap is applied per series, and each series (raw + handicap) is capped at 50.
+        /// Uses standard rounding (AwayFromZero) for consistency with JavaScript.
         /// Example: 47 + 4 HCP = 51, capped to 50.
         /// </summary>
         [JsonPropertyName("adjustedTotalScore")]
-        public int AdjustedTotalScore
-        {
-            get
-            {
-                var hcp = HandicapPerSeries ?? 0;
-                // Apply handicap per series, cap at 50, then sum
-                return EffectiveScores.Sum(s => Math.Min((int)Math.Round(s.Total + hcp), 50));
-            }
-        }
+        public int AdjustedTotalScore =>
+            ResultCalculator.CalculateAdjustedTotal(Scores, HandicapPerSeries ?? 0, EqualizedSeriesCount);
 
         /// <summary>
         /// Total handicap adjustment actually applied (using equalized series count if set).
@@ -127,7 +113,7 @@ namespace HpskSite.Shared.Models
         /// Total X-count (using equalized series count if set)
         /// </summary>
         [JsonPropertyName("totalXCount")]
-        public int TotalXCount => EffectiveScores.Sum(s => s.XCount);
+        public int TotalXCount => ResultCalculator.CalculateTotalXCount(Scores, EqualizedSeriesCount);
 
         /// <summary>
         /// Number of series entered (actual count, not equalized)
@@ -160,7 +146,7 @@ namespace HpskSite.Shared.Models
     /// Represents a single series score for a participant in a match
     /// This is a view model that combines data from TrainingScores table
     /// </summary>
-    public class TrainingMatchScore
+    public class TrainingMatchScore : ISeriesScore
     {
         /// <summary>
         /// TrainingScores table ID

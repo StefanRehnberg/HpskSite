@@ -126,19 +126,24 @@ namespace HpskSite.CompetitionTypes.Precision.Services
         /// <summary>
         /// Apply handicap to a single series raw score.
         /// The final score is capped at the maximum possible (50 per series).
+        /// Uses MidpointRounding.AwayFromZero to match JavaScript Math.round() behavior
+        /// and ensure consistent results across mobile app and web site.
         /// </summary>
         public decimal GetSeriesFinalScore(decimal rawSeriesScore, decimal handicapPerSeries)
         {
             // Use the quarter-point handicap value, then round final score to integer
             var finalScore = rawSeriesScore + handicapPerSeries;
+            // Round using standard rounding (away from zero) for consistency
+            finalScore = Math.Round(finalScore, 0, MidpointRounding.AwayFromZero);
             // Cap at maximum possible score - you can never score more than 50 per series
             finalScore = Math.Min(finalScore, MAX_SCORE_PER_SERIES);
-            return Math.Round(finalScore, 0);
+            return finalScore;
         }
 
         /// <summary>
         /// Calculate total final score for a match.
         /// Each series is capped at the maximum possible (50), then summed.
+        /// Uses MidpointRounding.AwayFromZero for consistency with JavaScript.
         /// </summary>
         public decimal GetMatchFinalScore(decimal rawTotal, decimal handicapPerSeries, int seriesCount)
         {
@@ -147,7 +152,7 @@ namespace HpskSite.CompetitionTypes.Precision.Services
             // Use the quarter-point handicap value, then round final score to integer
             var finalScore = rawTotal + (handicapPerSeries * seriesCount);
             finalScore = Math.Min(finalScore, maxPossibleTotal);
-            return Math.Round(finalScore, 0);
+            return Math.Round(finalScore, 0, MidpointRounding.AwayFromZero);
         }
 
         /// <summary>

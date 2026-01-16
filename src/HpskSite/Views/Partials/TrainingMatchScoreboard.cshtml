@@ -278,6 +278,11 @@
 </div>
 
 <script>
+// IMPORTANT: These calculation functions must match HpskSite.Shared.Services.ResultCalculator
+// to ensure mobile app and web site produce identical results.
+// JavaScript Math.round() uses standard rounding (away from zero), which matches
+// the C# ResultCalculator.StandardRounding (MidpointRounding.AwayFromZero).
+
 // Helper functions for quarter-point handicap display
 function roundToQuarter(value) {
     return Math.round(value * 4) / 4;
@@ -748,7 +753,8 @@ function renderScoreboard(match) {
             // Use quarter-point handicap, then round final score to integer
             const hcpPerSeries = roundToQuarter(participant.handicapPerSeries);
             // Apply handicap per series, cap at 50, then sum
-            // Example: 47 + 4 HCP = 51, but capped at 50
+            // MUST match ResultCalculator.CalculateAdjustedSeriesScore() in C#
+            // Order: (rawScore + handicap) -> round -> cap at 50 -> sum
             const finalScore = effectiveScores.reduce((sum, s) => {
                 const adjustedSeriesScore = Math.round(s.total + hcpPerSeries);
                 return sum + Math.min(adjustedSeriesScore, 50);

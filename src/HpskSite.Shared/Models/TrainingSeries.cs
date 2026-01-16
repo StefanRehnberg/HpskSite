@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using HpskSite.Shared.Services;
 
 namespace HpskSite.Shared.Models
 {
@@ -29,7 +30,7 @@ namespace HpskSite.Shared.Models
     /// <summary>
     /// Represents a single shooting series in a training session
     /// </summary>
-    public class TrainingSeries
+    public class TrainingSeries : ISeriesScore
     {
         /// <summary>
         /// Series number within the training session (1, 2, 3, etc.)
@@ -82,6 +83,7 @@ namespace HpskSite.Shared.Models
 
         /// <summary>
         /// Calculate total and X-count from shots array (only for ShotByShot method)
+        /// Uses centralized ResultCalculator for consistent behavior across platforms.
         /// </summary>
         public void CalculateScore()
         {
@@ -89,26 +91,9 @@ namespace HpskSite.Shared.Models
             if (Shots == null || Shots.Count == 0)
                 return;
 
-            Total = 0;
-            XCount = 0;
-
-            foreach (var shot in Shots)
-            {
-                if (string.IsNullOrWhiteSpace(shot))
-                    continue;
-
-                var shotValue = shot.Trim().ToUpper();
-
-                if (shotValue == "X")
-                {
-                    Total += 10;
-                    XCount++;
-                }
-                else if (int.TryParse(shotValue, out int value))
-                {
-                    Total += value;
-                }
-            }
+            var (total, xCount) = ResultCalculator.CalculateShotsTotal(Shots);
+            Total = total;
+            XCount = xCount;
         }
 
         /// <summary>

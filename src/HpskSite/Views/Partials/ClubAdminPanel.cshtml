@@ -1671,12 +1671,17 @@ async function recalculateEditMemberHandicap() {
     btn.disabled = true;
 
     try {
-        const formData = new FormData();
-        formData.append('MemberId', memberId);
+        const token = getAntiForgeryToken();
+        const payload = { MemberId: parseInt(memberId) };
 
         const response = await fetch('/umbraco/surface/Member/RecalculateHandicapForMember', {
             method: 'POST',
-            body: formData
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': token
+            },
+            credentials: 'include',
+            body: JSON.stringify(payload)
         });
         const result = await response.json();
 
