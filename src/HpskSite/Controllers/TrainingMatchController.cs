@@ -740,15 +740,16 @@ namespace HpskSite.Controllers
                         return Json(new { success = false, message = "Endast matchskaparen kan ändra inställningar" });
                     }
 
-                    // Update max series count
+                    // Update match settings
                     db.Execute(
                         @"UPDATE TrainingMatches
-                          SET MaxSeriesCount = @0
+                          SET MaxSeriesCount = @0,
+                              AllowGuests = COALESCE(@2, AllowGuests)
                           WHERE Id = @1",
-                        request.MaxSeriesCount, (int)match.Id);
+                        request.MaxSeriesCount, (int)match.Id, request.AllowGuests);
 
                     // Notify all viewers via SignalR
-                    await _hubContext.SendSettingsUpdated(request.MatchCode ?? "", request.MaxSeriesCount);
+                    await _hubContext.SendSettingsUpdated(request.MatchCode ?? "", request.MaxSeriesCount, request.AllowGuests);
 
                     return Json(new { success = true, message = "Inställningar sparade" });
                 }
@@ -2463,6 +2464,7 @@ namespace HpskSite.Controllers
     {
         public string? MatchCode { get; set; }
         public int? MaxSeriesCount { get; set; }
+        public bool? AllowGuests { get; set; }
     }
 
     public class SaveMatchScoreRequest

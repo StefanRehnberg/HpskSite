@@ -353,10 +353,11 @@ namespace HpskSite.Hubs
         public static async Task SendSettingsUpdated(
             this IHubContext<TrainingMatchHub> hubContext,
             string matchCode,
-            int? maxSeriesCount)
+            int? maxSeriesCount,
+            bool? allowGuests = null)
         {
             await hubContext.Clients.Group($"match_{matchCode.ToUpperInvariant()}")
-                .SendAsync("SettingsUpdated", new { maxSeriesCount });
+                .SendAsync("SettingsUpdated", new { maxSeriesCount, allowGuests });
         }
 
         /// <summary>

@@ -1,0 +1,218 @@
+@* Modal for adding a guest participant to a training match *@
+
+<!-- Add Guest Modal -->
+<div class="modal fade" id="addGuestModal" tabindex="-1" aria-labelledby="addGuestModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title" id="addGuestModalLabel">
+                    <i class="bi bi-person-plus me-2"></i>Lägg till gäst
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="addGuestForm">
+                    <div class="mb-3">
+                        <label for="guestDisplayName" class="form-label">Namn <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="guestDisplayName" placeholder="Förnamn Efternamn" required>
+                        <div class="form-text">Gästens visningsnamn i matchen</div>
+                    </div>
+
+                    <div class="mb-3 d-none" id="handicapClassContainer">
+                        <label for="guestHandicapClass" class="form-label">Handikappklass</label>
+                        <select class="form-select" id="guestHandicapClass">
+                            <option value="">-- Välj klass --</option>
+                            <option value="Klass 1 - Nybörjare">Klass 1 - Nybörjare</option>
+                            <option value="Klass 2 - Guldmärkesskytt">Klass 2 - Guldmärkesskytt</option>
+                            <option value="Klass 3 - Riksmästare">Klass 3 - Riksmästare</option>
+                        </select>
+                        <div class="form-text">Krävs för handikappberäkning</div>
+                    </div>
+
+                    <div class="alert alert-info mb-0">
+                        <i class="bi bi-info-circle me-2"></i>
+                        <small>Efter att gästen lagts till visas en QR-kod som gästen skannar med sin mobil för att komma åt matchen.</small>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-success" id="addGuestSubmitBtn" onclick="submitAddGuest()">
+                    <i class="bi bi-person-plus me-1"></i>Lägg till gäst
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Guest QR Code Modal -->
+<div class="modal fade" id="guestQrModal" tabindex="-1" aria-labelledby="guestQrModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title" id="guestQrModalLabel">
+                    <i class="bi bi-qr-code me-2"></i>Gäst tillagd
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body text-center">
+                <p class="mb-3">
+                    <strong id="guestQrName"></strong> har lagts till som gäst.
+                </p>
+
+                <div class="mb-3">
+                    <div id="guestQrCodeContainer" class="d-inline-block p-3 bg-white rounded border">
+                        <!-- QR code will be rendered here -->
+                    </div>
+                </div>
+
+                <p class="text-muted small mb-3">
+                    Låt gästen skanna QR-koden med sin mobils kamera för att komma åt matchen.
+                </p>
+
+                <div class="alert alert-warning mb-0">
+                    <i class="bi bi-clock me-2"></i>
+                    <small>Länken gäller i <strong>30 minuter</strong>.</small>
+                </div>
+            </div>
+            <div class="modal-footer justify-content-center">
+                <button type="button" class="btn btn-primary" data-bs-dismiss="modal">
+                    <i class="bi bi-check-lg me-1"></i>Klar
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Guest management functionality
+let currentMatchCode = null;
+let isHandicapMatch = false;
+
+function initAddGuestModal(matchCode, hasHandicap) {
+    currentMatchCode = matchCode;
+    isHandicapMatch = hasHandicap;
+
+    // Show/hide handicap class selector
+    const handicapContainer = document.getElementById('handicapClassContainer');
+    if (hasHandicap) {
+        handicapContainer.classList.remove('d-none');
+    } else {
+        handicapContainer.classList.add('d-none');
+    }
+}
+
+function showAddGuestModal() {
+    // Reset form
+    document.getElementById('addGuestForm').reset();
+
+    // Show modal
+    const modal = new bootstrap.Modal(document.getElementById('addGuestModal'));
+    modal.show();
+}
+
+async function submitAddGuest() {
+    const displayName = document.getElementById('guestDisplayName').value.trim();
+    const handicapClass = document.getElementById('guestHandicapClass').value;
+
+    if (!displayName) {
+        alert('Ange gästens namn');
+        return;
+    }
+
+    if (isHandicapMatch && !handicapClass) {
+        alert('Välj handikappklass för gästen');
+        return;
+    }
+
+    // Disable button while processing
+    const submitBtn = document.getElementById('addGuestSubmitBtn');
+    const originalText = submitBtn.innerHTML;
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Lägger till...';
+
+    try {
+        const response = await fetch(`/api/match/${currentMatchCode}/guest/add`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]')?.value || ''
+            },
+            body: JSON.stringify({
+                displayName: displayName,
+                handicapClass: handicapClass || null
+            })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            // Close add guest modal
+            const addModal = bootstrap.Modal.getInstance(document.getElementById('addGuestModal'));
+            addModal.hide();
+
+            // Show QR code modal
+            showGuestQrCode(result.data);
+
+            // Refresh match data to show new participant
+            if (typeof refreshMatchData === 'function') {
+                refreshMatchData();
+            }
+        } else {
+            alert(result.message || 'Kunde inte lägga till gästen');
+        }
+    } catch (error) {
+        console.error('Error adding guest:', error);
+        alert('Ett fel uppstod vid tillägg av gäst');
+    } finally {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = originalText;
+    }
+}
+
+function showGuestQrCode(guestData) {
+    // Set guest name
+    document.getElementById('guestQrName').textContent = guestData.displayName;
+
+    // Generate QR code using a simple library or API
+    const qrContainer = document.getElementById('guestQrCodeContainer');
+    const claimUrl = guestData.claimUrl;
+
+    // Use QR code API (or include a QR library)
+    qrContainer.innerHTML = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(claimUrl)}" alt="QR Code" style="width: 200px; height: 200px;">`;
+
+    // Show modal
+    const modal = new bootstrap.Modal(document.getElementById('guestQrModal'));
+    modal.show();
+}
+
+async function removeGuest(guestId) {
+    if (!confirm('Är du säker på att du vill ta bort denna gäst?')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/match/${currentMatchCode}/guest/${guestId}`, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]')?.value || ''
+            }
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            // Refresh match data
+            if (typeof refreshMatchData === 'function') {
+                refreshMatchData();
+            }
+        } else {
+            alert(result.message || 'Kunde inte ta bort gästen');
+        }
+    } catch (error) {
+        console.error('Error removing guest:', error);
+        alert('Ett fel uppstod vid borttagning av gäst');
+    }
+}
+</script>

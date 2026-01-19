@@ -20,9 +20,28 @@ namespace HpskSite.Shared.Models
         public int TrainingMatchId { get; set; }
 
         /// <summary>
-        /// Member ID of the participant
+        /// Member ID of the participant (null for guests)
         /// </summary>
-        public int MemberId { get; set; }
+        public int? MemberId { get; set; }
+
+        /// <summary>
+        /// Guest participant ID (null for registered members)
+        /// </summary>
+        [JsonPropertyName("guestParticipantId")]
+        public int? GuestParticipantId { get; set; }
+
+        /// <summary>
+        /// Whether this participant is a guest (not a registered member)
+        /// </summary>
+        [JsonPropertyName("isGuest")]
+        public bool IsGuest => GuestParticipantId.HasValue;
+
+        /// <summary>
+        /// Handicap class for guest participants (e.g., "Klass 1 - Nybörjare")
+        /// Only used for guests in handicap matches since they don't have historical data
+        /// </summary>
+        [JsonPropertyName("guestHandicapClass")]
+        public string? GuestHandicapClass { get; set; }
 
         /// <summary>
         /// Member's first name (for display)

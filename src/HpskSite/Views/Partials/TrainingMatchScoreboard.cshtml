@@ -156,6 +156,17 @@
                     </div>
                 </div>
 
+                <!-- Guest Management Section (if allowed) -->
+                <div class="mb-4" id="guestManagementSection" style="display: none;">
+                    <label class="form-label fw-bold">
+                        <i class="bi bi-person-plus me-1"></i>Gästhantering
+                    </label>
+                    <p class="text-muted small mb-2">Lägg till gäster som inte har konto för att delta i matchen.</p>
+                    <button type="button" class="btn btn-success w-100" onclick="showAddGuestModal()">
+                        <i class="bi bi-person-plus me-2"></i>Lägg till gäst
+                    </button>
+                </div>
+
                 <!-- End Match Button -->
                 <div class="border-top pt-3">
                     <button type="button" class="btn btn-danger w-100" onclick="completeMatch(); bootstrap.Modal.getInstance(document.getElementById('matchSettingsModal')).hide();">
@@ -588,10 +599,15 @@ function renderScoreboard(match) {
             `;
         }
 
+        // Build guest badge if participant is a guest
+        const guestBadge = participant.isGuest
+            ? '<span class="guest-badge" title="Gäst"><i class="bi bi-person-badge"></i></span>'
+            : '';
+
         th.innerHTML = `
             <div class="participant-header">
                 ${renderAvatar(participant)}
-                <div class="participant-name">${participant.firstName || 'Skytt'}</div>
+                <div class="participant-name">${participant.firstName || 'Skytt'}${guestBadge}</div>
                 ${handicapInfo}
             </div>
         `;
@@ -944,6 +960,16 @@ function showMatchSettingsModal() {
         matchLinkInput.value = window.location.origin + '/traningsmatch/?join=' + match.matchCode;
     }
 
+    // Show/hide guest management section (always show for organizers)
+    const guestSection = document.getElementById('guestManagementSection');
+    if (guestSection) {
+        guestSection.style.display = 'block';
+        // Initialize the add guest modal with current match data
+        if (typeof initAddGuestModal === 'function') {
+            initAddGuestModal(match.matchCode, match.hasHandicap || false);
+        }
+    }
+
     const modal = new bootstrap.Modal(document.getElementById('matchSettingsModal'));
     modal.show();
 }
@@ -1080,6 +1106,18 @@ function copyMatchLinkFromSettings() {
     overflow: hidden;
     text-overflow: ellipsis;
     max-width: 80px;
+}
+
+/* Guest Badge */
+.guest-badge {
+    font-size: 0.7rem;
+    color: #6c757d;
+    margin-left: 2px;
+    vertical-align: middle;
+}
+
+.guest-badge i {
+    font-size: 0.8rem;
 }
 
 /* Handicap Display in Participant Header */

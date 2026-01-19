@@ -221,6 +221,9 @@
 <!-- Score Entry Modal -->
 @await Html.PartialAsync("TrainingMatchScoreEntry")
 
+<!-- Add Guest Modal -->
+@await Html.PartialAsync("_AddGuestModal")
+
 <!-- SignalR Client Library -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.0/signalr.min.js"></script>
 
@@ -513,6 +516,11 @@
             if (currentMatchCode) {
                 loadMatch(currentMatchCode);
             }
+        }
+
+        // Alias for refreshMatch (used by guest modal)
+        function refreshMatchData() {
+            refreshMatch();
         }
 
         // UI State functions

@@ -236,11 +236,16 @@
                                                            TextColor="White" VerticalOptions="Center" />
                                                 </Border>
                                             </Grid>
-                                            <!--  Name  -->
-                                            <Label FontAttributes="Bold" FontSize="11" HorizontalOptions="Center"
-                                                   HorizontalTextAlignment="Center" LineBreakMode="TailTruncation" MaxLines="1"
-                                                   Text="{Binding FirstName}"
-                                                   TextColor="White" />
+                                            <!--  Name with Guest Badge  -->
+                                            <HorizontalStackLayout HorizontalOptions="Center" Spacing="2">
+                                                <Label FontAttributes="Bold" FontSize="11" HorizontalOptions="Center"
+                                                       HorizontalTextAlignment="Center" LineBreakMode="TailTruncation" MaxLines="1"
+                                                       Text="{Binding FirstName}"
+                                                       TextColor="White" />
+                                                <!--  Guest Badge  -->
+                                                <Label FontSize="10" Text="👤" IsVisible="{Binding IsGuest}"
+                                                       ToolTipProperties.Text="Gäst" VerticalOptions="Center" />
+                                            </HorizontalStackLayout>
                                             <!--  Handicap Badge (if applicable)  -->
                                             <Border Padding="6,2" BackgroundColor="#444444" HorizontalOptions="Center"
                                                     IsVisible="{Binding HandicapPerSeries, Converter={StaticResource HasHandicapConverter}}"
@@ -886,6 +891,20 @@
                                    FontSize="11" TextColor="#9ca3af" LineBreakMode="WordWrap" />
                         </VerticalStackLayout>
 
+                        <!--  Guest Management Section  -->
+                        <VerticalStackLayout Spacing="6">
+                            <Label Text="Gästhantering" FontSize="14" FontAttributes="Bold" TextColor="White" />
+                            <Label Text="Lägg till gäster som inte har konto för att delta i matchen."
+                                   FontSize="11" TextColor="#9ca3af" LineBreakMode="WordWrap" />
+                            <Button Text="👤 Lägg till gäst"
+                                    Command="{Binding OpenAddGuestModalCommand}"
+                                    BackgroundColor="{StaticResource Success}"
+                                    TextColor="White"
+                                    CornerRadius="8"
+                                    HeightRequest="44"
+                                    FontAttributes="Bold" />
+                        </VerticalStackLayout>
+
                         <!--  Share Section  -->
                         <VerticalStackLayout Spacing="12">
                             <!--  QR Code  -->
@@ -1178,6 +1197,191 @@
                                 Command="{Binding EditFromPhotoViewerCommand}" />
 
                     </VerticalStackLayout>
+
+                </VerticalStackLayout>
+            </Border>
+        </Grid>
+
+        <!--  Add Guest Modal (Host only - Full screen overlay with bottom sheet)  -->
+        <Grid Grid.Row="0" BackgroundColor="#80000000"
+              IsVisible="{Binding IsAddGuestModalOpen}">
+            <!--  Tap overlay to close  -->
+            <Grid.GestureRecognizers>
+                <TapGestureRecognizer Command="{Binding CloseAddGuestModalCommand}" />
+            </Grid.GestureRecognizers>
+
+            <!--  Modal Content (Bottom Sheet)  -->
+            <Border Padding="16,16,16,20"
+                    BackgroundColor="#374151"
+                    Stroke="Transparent" StrokeShape="RoundRectangle 20,20,0,0"
+                    VerticalOptions="End"
+                    MaximumHeightRequest="500">
+                <Border.Shadow>
+                    <Shadow Brush="Black" Opacity="0.2" Radius="12"
+                            Offset="0,-4" />
+                </Border.Shadow>
+                <Border.GestureRecognizers>
+                    <!--  Prevent tap from closing when tapping inside modal  -->
+                    <TapGestureRecognizer />
+                </Border.GestureRecognizers>
+
+                <VerticalStackLayout Spacing="16">
+
+                    <!--  Modal Header with Close Button  -->
+                    <Grid ColumnDefinitions="*,Auto">
+                        <HorizontalStackLayout Spacing="8">
+                            <Label FontSize="18" Text="👤" VerticalOptions="Center" />
+                            <Label FontAttributes="Bold" FontSize="18"
+                                   Text="Lägg till gäst"
+                                   TextColor="White" VerticalOptions="Center" />
+                        </HorizontalStackLayout>
+                        <Button Grid.Column="1" Padding="0" BackgroundColor="#4b5563"
+                                Command="{Binding CloseAddGuestModalCommand}"
+                                CornerRadius="18" FontAttributes="Bold" FontSize="14"
+                                HeightRequest="36" Text="X" TextColor="White"
+                                WidthRequest="36" />
+                    </Grid>
+
+                    <!--  Guest Name Input  -->
+                    <VerticalStackLayout Spacing="6">
+                        <Label Text="Namn *" FontSize="14" FontAttributes="Bold" TextColor="White" />
+                        <Entry Placeholder="Förnamn Efternamn"
+                               Text="{Binding GuestDisplayName}"
+                               BackgroundColor="#4b5563"
+                               TextColor="White"
+                               PlaceholderColor="#9ca3af" />
+                        <Label Text="Gästens visningsnamn i matchen"
+                               FontSize="11" TextColor="#9ca3af" />
+                    </VerticalStackLayout>
+
+                    <!--  Handicap Class (visible only for handicap matches)  -->
+                    <VerticalStackLayout Spacing="6" IsVisible="{Binding Match.IsHandicapEnabled}">
+                        <Label Text="Handikappklass" FontSize="14" FontAttributes="Bold" TextColor="White" />
+                        <Picker Title="Välj klass"
+                                SelectedItem="{Binding GuestHandicapClass}"
+                                BackgroundColor="#4b5563"
+                                TextColor="White"
+                                TitleColor="#9ca3af">
+                            <Picker.ItemsSource>
+                                <x:Array Type="{x:Type x:String}">
+                                    <x:String>Klass 1 - Nybörjare</x:String>
+                                    <x:String>Klass 2 - Guldmärkesskytt</x:String>
+                                    <x:String>Klass 3 - Riksmästare</x:String>
+                                </x:Array>
+                            </Picker.ItemsSource>
+                        </Picker>
+                        <Label Text="Krävs för handicapberäkning"
+                               FontSize="11" TextColor="#9ca3af" />
+                    </VerticalStackLayout>
+
+                    <!--  Info Message  -->
+                    <Border Padding="12" BackgroundColor="#1e3a5f" Stroke="Transparent" StrokeShape="RoundRectangle 8">
+                        <HorizontalStackLayout Spacing="8">
+                            <Label FontSize="16" Text="ℹ️" VerticalOptions="Center" />
+                            <Label FontSize="12" TextColor="#9ca3af" LineBreakMode="WordWrap"
+                                   Text="Efter att gästen lagts till visas en QR-kod som gästen skannar med sin mobil för att komma åt matchen." />
+                        </HorizontalStackLayout>
+                    </Border>
+
+                    <!--  Error Message  -->
+                    <Border Padding="8" BackgroundColor="#FEE2E2"
+                            IsVisible="{Binding HasGuestError}"
+                            Stroke="{StaticResource Danger}"
+                            StrokeShape="RoundRectangle 8">
+                        <HorizontalStackLayout Spacing="6">
+                            <Label FontAttributes="Bold" FontSize="14" Text="!"
+                                   TextColor="{StaticResource Danger}"
+                                   VerticalOptions="Center" />
+                            <Label FontSize="13" LineBreakMode="WordWrap"
+                                   Text="{Binding GuestErrorMessage}"
+                                   TextColor="{StaticResource Danger}"
+                                   VerticalOptions="Center" />
+                        </HorizontalStackLayout>
+                    </Border>
+
+                    <!--  Submit Button  -->
+                    <Button Text="Lägg till gäst"
+                            Command="{Binding SubmitAddGuestCommand}"
+                            BackgroundColor="{StaticResource Success}"
+                            TextColor="White" CornerRadius="8"
+                            HeightRequest="48" FontAttributes="Bold"
+                            IsEnabled="{Binding IsAddingGuest, Converter={StaticResource InverseBoolConverter}}" />
+
+                    <!--  Loading indicator  -->
+                    <ActivityIndicator IsRunning="{Binding IsAddingGuest}"
+                                       IsVisible="{Binding IsAddingGuest}"
+                                       HeightRequest="24" WidthRequest="24"
+                                       HorizontalOptions="Center"
+                                       Color="{StaticResource Primary}" />
+
+                </VerticalStackLayout>
+            </Border>
+        </Grid>
+
+        <!--  Guest QR Code Modal (Shows after guest is added)  -->
+        <Grid Grid.Row="0" BackgroundColor="#80000000"
+              IsVisible="{Binding IsGuestQrModalOpen}">
+            <!--  Tap overlay to close  -->
+            <Grid.GestureRecognizers>
+                <TapGestureRecognizer Command="{Binding CloseGuestQrModalCommand}" />
+            </Grid.GestureRecognizers>
+
+            <!--  Modal Content (Center)  -->
+            <Border Margin="24" Padding="20"
+                    BackgroundColor="#374151"
+                    Stroke="Transparent" StrokeShape="RoundRectangle 16"
+                    HorizontalOptions="Center" VerticalOptions="Center">
+                <Border.Shadow>
+                    <Shadow Brush="Black" Opacity="0.3" Radius="16"
+                            Offset="0,8" />
+                </Border.Shadow>
+                <Border.GestureRecognizers>
+                    <TapGestureRecognizer />
+                </Border.GestureRecognizers>
+
+                <VerticalStackLayout Spacing="16">
+
+                    <!--  Success Header  -->
+                    <HorizontalStackLayout HorizontalOptions="Center" Spacing="8">
+                        <Label FontSize="24" Text="✅" VerticalOptions="Center" />
+                        <Label FontAttributes="Bold" FontSize="18"
+                               Text="Gäst tillagd!"
+                               TextColor="White" VerticalOptions="Center" />
+                    </HorizontalStackLayout>
+
+                    <!--  Guest Name  -->
+                    <Label FontSize="16" HorizontalOptions="Center"
+                           Text="{Binding AddedGuestName, StringFormat='{0} har lagts till som gäst.'}"
+                           TextColor="White" HorizontalTextAlignment="Center" />
+
+                    <!--  QR Code  -->
+                    <Border Padding="16" BackgroundColor="White" Stroke="Transparent" StrokeShape="RoundRectangle 8"
+                            HorizontalOptions="Center">
+                        <Image Source="{Binding GuestClaimQrUrl}"
+                               WidthRequest="200" HeightRequest="200"
+                               Aspect="AspectFit" />
+                    </Border>
+
+                    <!--  Instructions  -->
+                    <Label FontSize="12" TextColor="#9ca3af" HorizontalOptions="Center"
+                           HorizontalTextAlignment="Center" LineBreakMode="WordWrap"
+                           Text="Låt gästen skanna QR-koden med sin mobilkamera för att komma åt matchen." />
+
+                    <!--  Warning about expiry  -->
+                    <Border Padding="10" BackgroundColor="#856404" Stroke="Transparent" StrokeShape="RoundRectangle 8">
+                        <HorizontalStackLayout Spacing="6" HorizontalOptions="Center">
+                            <Label FontSize="14" Text="⏰" VerticalOptions="Center" />
+                            <Label FontSize="12" TextColor="#fff3cd"
+                                   Text="Länken gäller i 30 minuter." />
+                        </HorizontalStackLayout>
+                    </Border>
+
+                    <!--  Close Button  -->
+                    <Button Text="Klar"
+                            Command="{Binding CloseGuestQrModalCommand}"
+                            BackgroundColor="{StaticResource Primary}"
+                            TextColor="White" CornerRadius="8"
+                            HeightRequest="44" FontAttributes="Bold" />
 
                 </VerticalStackLayout>
             </Border>

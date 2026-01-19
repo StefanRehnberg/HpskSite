@@ -138,6 +138,21 @@ public class MatchService : IMatchService
             $"api/match/{matchCode}/series/{seriesNumber}/reaction",
             new { TargetMemberId = targetMemberId, Emoji = emoji });
     }
+
+    public async Task<ApiResponse<AddGuestResponse>> AddGuestAsync(string matchCode, AddGuestRequest request)
+    {
+        return await _apiService.PostAsync<AddGuestResponse>($"api/match/{matchCode}/guest/add", request);
+    }
+
+    public async Task<ApiResponse> RemoveGuestAsync(string matchCode, int guestId)
+    {
+        return await _apiService.DeleteAsync($"api/match/{matchCode}/guest/{guestId}");
+    }
+
+    public async Task<ApiResponse> UpdateMatchSettingsWithGuestsAsync(string matchCode, int? maxSeriesCount, bool? allowGuests)
+    {
+        return await _apiService.PostAsync($"api/match/{matchCode}/settings", new { MaxSeriesCount = maxSeriesCount, AllowGuests = allowGuests });
+    }
 }
 
 /// <summary>
@@ -194,6 +209,9 @@ public interface IMatchService
     Task<ApiResponse<SetShooterClassResponse>> GetShooterClassAsync();
     Task<ApiResponse<UploadPhotoResponse>> UploadSeriesPhotoAsync(string matchCode, int seriesNumber, byte[] photoData);
     Task<ApiResponse<List<PhotoReaction>>> AddReactionAsync(string matchCode, int seriesNumber, int targetMemberId, string emoji);
+    Task<ApiResponse<AddGuestResponse>> AddGuestAsync(string matchCode, AddGuestRequest request);
+    Task<ApiResponse> RemoveGuestAsync(string matchCode, int guestId);
+    Task<ApiResponse> UpdateMatchSettingsWithGuestsAsync(string matchCode, int? maxSeriesCount, bool? allowGuests);
 }
 
 /// <summary>
@@ -257,6 +275,31 @@ public class MatchHistoryItem
 
     // For delete button visibility (set by ViewModel)
     public bool CanDelete { get; set; }
+}
+
+/// <summary>
+/// Request to add a guest participant to a training match
+/// </summary>
+public class AddGuestRequest
+{
+    public string DisplayName { get; set; } = string.Empty;
+    public string? HandicapClass { get; set; }
+    public string? Email { get; set; }
+    public int? ClubId { get; set; }
+}
+
+/// <summary>
+/// Response after adding a guest participant to a training match
+/// </summary>
+public class AddGuestResponse
+{
+    public int GuestId { get; set; }
+    public string DisplayName { get; set; } = string.Empty;
+    public string ClaimUrl { get; set; } = string.Empty;
+    public DateTime ClaimExpiresAt { get; set; }
+    public bool InviteSent { get; set; }
+    public int? PendingMemberId { get; set; }
+    public int ParticipantId { get; set; }
 }
 
 /// <summary>

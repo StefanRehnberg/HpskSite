@@ -1167,6 +1167,9 @@ namespace HpskSite.Controllers
                 _memberService.Save(member);
                 Console.WriteLine($"[CompleteInvitation] Member auto-approved: {email}");
 
+                // Migrate guest scores if this member was invited via match guest system (Path B)
+                await MigrateGuestScoresToMember(member);
+
                 // Sign in the member with persistent cookie (90-day remember me)
                 await _signInManager.SignInAsync(identityUser, isPersistent: true);
                 Console.WriteLine($"[CompleteInvitation] Member signed in successfully: {email}");
@@ -2548,6 +2551,86 @@ namespace HpskSite.Controllers
             }
 
             return result;
+        }
+
+        #endregion
+
+        #region Guest Score Migration
+
+        /// <summary>
+        /// Migrate guest scores to member account after invitation completion (Path B)
+        /// This handles the case where a guest was invited to a match via email and later
+        /// completed their registration. Their scores should transfer to their new member account.
+        /// </summary>
+        private async Task MigrateGuestScoresToMember(IMember member)
+        {
+            try
+            {
+                // Check if this member has a pending match code (set during Path B invitation)
+                var pendingMatchCode = member.GetValue<string>("pendingMatchCode");
+
+                if (string.IsNullOrEmpty(pendingMatchCode))
+                {
+                    // Not a Path B invitation - nothing to migrate
+                    return;
+                }
+
+                Console.WriteLine($"[GuestMigration] Found pending match code: {pendingMatchCode} for member {member.Id}");
+
+                using (var db = _databaseFactory.CreateDatabase())
+                {
+                    // Find GuestParticipant record with this member as PendingMemberId
+                    var guestParticipant = db.SingleOrDefault<dynamic>(
+                        "SELECT Id FROM TrainingMatchGuests WHERE PendingMemberId = @0",
+                        member.Id);
+
+                    if (guestParticipant == null)
+                    {
+                        Console.WriteLine($"[GuestMigration] No guest participant found for member {member.Id}");
+                        // Clear the property anyway
+                        member.SetValue("pendingMatchCode", string.Empty);
+                        _memberService.Save(member);
+                        return;
+                    }
+
+                    int guestParticipantId = (int)guestParticipant.Id;
+                    Console.WriteLine($"[GuestMigration] Found guest participant ID: {guestParticipantId}");
+
+                    // Update TrainingMatchParticipants - set MemberId and clear GuestParticipantId
+                    var participantsUpdated = db.Execute(
+                        @"UPDATE TrainingMatchParticipants
+                          SET MemberId = @0, GuestParticipantId = NULL
+                          WHERE GuestParticipantId = @1",
+                        member.Id, guestParticipantId);
+
+                    Console.WriteLine($"[GuestMigration] Updated {participantsUpdated} participant record(s)");
+
+                    // Update TrainingScores - set MemberId and clear GuestParticipantId
+                    var scoresUpdated = db.Execute(
+                        @"UPDATE TrainingScores
+                          SET MemberId = @0, GuestParticipantId = NULL
+                          WHERE GuestParticipantId = @1",
+                        member.Id, guestParticipantId);
+
+                    Console.WriteLine($"[GuestMigration] Updated {scoresUpdated} score record(s)");
+
+                    // Delete the GuestParticipant record (no longer needed)
+                    db.Execute("DELETE FROM TrainingMatchGuests WHERE Id = @0", guestParticipantId);
+                    Console.WriteLine($"[GuestMigration] Deleted guest participant record");
+                }
+
+                // Clear the pending match code property
+                member.SetValue("pendingMatchCode", string.Empty);
+                _memberService.Save(member);
+
+                Console.WriteLine($"[GuestMigration] Migration completed successfully for member {member.Id}");
+            }
+            catch (Exception ex)
+            {
+                // Log but don't fail the invitation completion
+                Console.WriteLine($"[GuestMigration] Error during score migration: {ex.Message}");
+                Console.WriteLine($"[GuestMigration] Stack trace: {ex.StackTrace}");
+            }
         }
 
         #endregion

@@ -636,6 +636,139 @@ public partial class ActiveMatchViewModel : BaseViewModel
         }
     }
 
+    #region Guest Management
+
+    [ObservableProperty]
+    private bool _isAddGuestModalOpen;
+
+    [ObservableProperty]
+    private bool _isGuestQrModalOpen;
+
+    [ObservableProperty]
+    private string _guestDisplayName = string.Empty;
+
+    [ObservableProperty]
+    private string? _guestHandicapClass;
+
+    [ObservableProperty]
+    private bool _isAddingGuest;
+
+    [ObservableProperty]
+    private bool _hasGuestError;
+
+    [ObservableProperty]
+    private string _guestErrorMessage = string.Empty;
+
+    [ObservableProperty]
+    private string _addedGuestName = string.Empty;
+
+    [ObservableProperty]
+    private string _guestClaimQrUrl = string.Empty;
+
+    /// <summary>
+    /// Open the add guest modal (host only)
+    /// </summary>
+    [RelayCommand]
+    private void OpenAddGuestModal()
+    {
+        if (!IsMatchHost)
+            return;
+
+        // Reset form
+        GuestDisplayName = string.Empty;
+        GuestHandicapClass = null;
+        HasGuestError = false;
+        GuestErrorMessage = string.Empty;
+        IsAddGuestModalOpen = true;
+    }
+
+    /// <summary>
+    /// Close the add guest modal
+    /// </summary>
+    [RelayCommand]
+    private void CloseAddGuestModal()
+    {
+        IsAddGuestModalOpen = false;
+    }
+
+    /// <summary>
+    /// Close the guest QR code modal
+    /// </summary>
+    [RelayCommand]
+    private void CloseGuestQrModal()
+    {
+        IsGuestQrModalOpen = false;
+        // Reload match to show the new guest
+        _ = LoadMatchDataAsync();
+    }
+
+    /// <summary>
+    /// Submit the add guest form
+    /// </summary>
+    [RelayCommand]
+    private async Task SubmitAddGuestAsync()
+    {
+        if (IsAddingGuest || !IsMatchHost || Match == null)
+            return;
+
+        // Validate
+        if (string.IsNullOrWhiteSpace(GuestDisplayName))
+        {
+            HasGuestError = true;
+            GuestErrorMessage = "Ange gästens namn";
+            return;
+        }
+
+        if (Match.IsHandicapEnabled && string.IsNullOrWhiteSpace(GuestHandicapClass))
+        {
+            HasGuestError = true;
+            GuestErrorMessage = "Välj handikappklass för gästen";
+            return;
+        }
+
+        try
+        {
+            IsAddingGuest = true;
+            HasGuestError = false;
+
+            var request = new Services.AddGuestRequest
+            {
+                DisplayName = GuestDisplayName.Trim(),
+                HandicapClass = GuestHandicapClass
+            };
+
+            var result = await _matchService.AddGuestAsync(MatchCode, request);
+
+            if (result.Success && result.Data != null)
+            {
+                // Close the add guest modal
+                IsAddGuestModalOpen = false;
+
+                // Show the QR code modal
+                AddedGuestName = result.Data.DisplayName;
+                // Generate QR code URL using external API
+                GuestClaimQrUrl = $"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={Uri.EscapeDataString(result.Data.ClaimUrl)}";
+                IsGuestQrModalOpen = true;
+            }
+            else
+            {
+                HasGuestError = true;
+                GuestErrorMessage = result.Message ?? "Kunde inte lägga till gästen";
+            }
+        }
+        catch (Exception ex)
+        {
+            HasGuestError = true;
+            GuestErrorMessage = ex.Message;
+        }
+        finally
+        {
+            IsAddingGuest = false;
+        }
+    }
+
+    #endregion
+
     /// <summary>
     /// Copy match code to clipboard (for sharing)
     /// </summary>
@@ -1789,8 +1922,8 @@ public partial class ActiveMatchViewModel : BaseViewModel
             var cell = new ScoreboardCell
             {
                 SeriesNumber = seriesIndex + 1, // 1-based
-                MemberId = participant.MemberId,
-                IsCurrentUserCell = currentUserId.HasValue && participant.MemberId == currentUserId.Value
+                MemberId = participant.MemberId ?? 0, // Use 0 for guests
+                IsCurrentUserCell = currentUserId.HasValue && participant.MemberId.HasValue && participant.MemberId.Value == currentUserId.Value
             };
 
             if (participant.Scores != null && seriesIndex < participant.Scores.Count)

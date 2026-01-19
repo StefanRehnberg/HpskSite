@@ -1,6 +1,8 @@
 using HpskSite.Services;
 using HpskSite.Shared.DTOs;
 using HpskSite.Shared.Models;
+using AddGuestRequest = HpskSite.Shared.DTOs.AddGuestRequest;
+using AddGuestResponse = HpskSite.Shared.DTOs.AddGuestResponse;
 using HpskSite.CompetitionTypes.Precision.Services;
 using HpskSite.Controllers; // For UpdateMatchSettingsRequest
 using Microsoft.AspNetCore.Authorization;
@@ -429,11 +431,23 @@ namespace HpskSite.Controllers.Api
             await db.ExecuteAsync(
                 "DELETE FROM TrainingScores WHERE TrainingMatchId = @0", match.Id);
 
-            // 3. Delete participants
+            // 3. Get guest participant IDs before deleting participants
+            var guestIds = await db.FetchAsync<int>(
+                "SELECT GuestParticipantId FROM TrainingMatchParticipants WHERE TrainingMatchId = @0 AND GuestParticipantId IS NOT NULL",
+                match.Id);
+
+            // 4. Delete participants
             await db.ExecuteAsync(
                 "DELETE FROM TrainingMatchParticipants WHERE TrainingMatchId = @0", match.Id);
 
-            // 4. Delete the match itself
+            // 5. Delete guest participant records
+            if (guestIds.Any())
+            {
+                await db.ExecuteAsync(
+                    $"DELETE FROM TrainingMatchGuests WHERE Id IN ({string.Join(",", guestIds)})");
+            }
+
+            // 6. Delete the match itself
             await db.DeleteAsync(match);
 
             scope.Complete();
@@ -475,16 +489,19 @@ namespace HpskSite.Controllers.Api
                 return Forbid();
             }
 
-            // Update MaxSeriesCount
+            // Update settings
             await db.ExecuteAsync(
-                "UPDATE TrainingMatches SET MaxSeriesCount = @0 WHERE Id = @1",
-                request.MaxSeriesCount, match.Id);
+                @"UPDATE TrainingMatches
+                  SET MaxSeriesCount = @0,
+                      AllowGuests = COALESCE(@2, AllowGuests)
+                  WHERE Id = @1",
+                request.MaxSeriesCount, match.Id, request.AllowGuests);
 
             scope.Complete();
 
             // Notify all participants via SignalR to reload match data
             await _hubContext.Clients.Group($"match_{code.ToUpper()}")
-                .SendAsync("SettingsUpdated", new { maxSeriesCount = request.MaxSeriesCount });
+                .SendAsync("SettingsUpdated", new { maxSeriesCount = request.MaxSeriesCount, allowGuests = request.AllowGuests });
 
             return Ok(ApiResponse.Ok("Inställningar sparade"));
         }
@@ -1155,14 +1172,32 @@ namespace HpskSite.Controllers.Api
                 // Enrich participant info for display
                 foreach (var p in participants)
                 {
-                    var member = _memberService.GetById(p.MemberId);
-                    item.Participants.Add(new MatchHistoryParticipant
+                    if (p.GuestParticipantId.HasValue)
                     {
-                        MemberId = p.MemberId,
-                        FirstName = member?.GetValue<string>("firstName") ?? "",
-                        LastName = member?.GetValue<string>("lastName") ?? "",
-                        ProfilePictureUrl = ToAbsoluteUrl(member?.GetValue<string>("profilePictureUrl"))
-                    });
+                        // Guest participant
+                        var guest = await db.FirstOrDefaultAsync<GuestParticipantDbDto>(
+                            "WHERE Id = @0", p.GuestParticipantId.Value);
+                        var nameParts = (guest?.DisplayName ?? "Gäst").Split(' ', 2);
+                        item.Participants.Add(new MatchHistoryParticipant
+                        {
+                            MemberId = 0, // Guests have no member ID
+                            FirstName = nameParts.Length > 0 ? nameParts[0] : "Gäst",
+                            LastName = nameParts.Length > 1 ? nameParts[1] : "",
+                            ProfilePictureUrl = null
+                        });
+                    }
+                    else if (p.MemberId.HasValue)
+                    {
+                        // Regular member participant
+                        var member = _memberService.GetById(p.MemberId.Value);
+                        item.Participants.Add(new MatchHistoryParticipant
+                        {
+                            MemberId = p.MemberId.Value,
+                            FirstName = member?.GetValue<string>("firstName") ?? "",
+                            LastName = member?.GetValue<string>("lastName") ?? "",
+                            ProfilePictureUrl = ToAbsoluteUrl(member?.GetValue<string>("profilePictureUrl"))
+                        });
+                    }
                 }
 
                 result.Add(item);
@@ -1493,6 +1528,218 @@ namespace HpskSite.Controllers.Api
         }
 
         /// <summary>
+        /// Add a guest participant to a match (organizer only)
+        /// Path A: Simple guest (display name only)
+        /// Path B: Invite & Join (admin/club admin only - creates pending member)
+        /// </summary>
+        [HttpPost("{code}/guest/add")]
+        public async Task<IActionResult> AddGuest(string code, [FromBody] AddGuestRequest request)
+        {
+            var memberId = GetCurrentMemberId();
+            if (!memberId.HasValue)
+            {
+                return Unauthorized(ApiResponse<AddGuestResponse>.Error("Ej inloggad"));
+            }
+
+            if (string.IsNullOrWhiteSpace(request.DisplayName))
+            {
+                return BadRequest(ApiResponse<AddGuestResponse>.Error("Namn krävs"));
+            }
+
+            using var scope = _scopeProvider.CreateScope();
+            var db = scope.Database;
+
+            // Find match
+            var match = await db.FirstOrDefaultAsync<TrainingMatchDbDto>(
+                "WHERE MatchCode = @0", code.ToUpper());
+
+            if (match == null)
+            {
+                return NotFound(ApiResponse<AddGuestResponse>.Error("Matchen hittades inte"));
+            }
+
+            // Only creator can add guests
+            if (match.CreatedByMemberId != memberId.Value)
+            {
+                return Forbid();
+            }
+
+            if (match.Status != "Active")
+            {
+                return BadRequest(ApiResponse<AddGuestResponse>.Error("Matchen är inte aktiv"));
+            }
+
+            // Check guest limit (max 10 guests per match)
+            var guestCount = await db.ExecuteScalarAsync<int>(
+                "SELECT COUNT(*) FROM TrainingMatchParticipants WHERE TrainingMatchId = @0 AND GuestParticipantId IS NOT NULL",
+                match.Id);
+
+            if (guestCount >= 10)
+            {
+                return BadRequest(ApiResponse<AddGuestResponse>.Error("Max 10 gäster per match"));
+            }
+
+            // Path B check: If email is provided, requires admin/club admin permissions
+            bool isPathB = !string.IsNullOrEmpty(request.Email);
+            int? pendingMemberId = null;
+            bool inviteSent = false;
+
+            if (isPathB)
+            {
+                if (!request.ClubId.HasValue)
+                {
+                    return BadRequest(ApiResponse<AddGuestResponse>.Error("Klubb krävs för inbjudan"));
+                }
+
+                // TODO: Check if user is admin or club admin
+                // For now, Path B is not fully implemented
+                return BadRequest(ApiResponse<AddGuestResponse>.Error("Inbjudningar med e-post är inte implementerat ännu"));
+            }
+
+            // Create guest participant
+            var claimToken = Guid.NewGuid();
+            var claimExpiresAt = DateTime.UtcNow.AddMinutes(30);
+
+            var guest = new GuestParticipantDbDto
+            {
+                DisplayName = request.DisplayName.Trim(),
+                ClaimToken = claimToken,
+                ClaimTokenExpiresAt = claimExpiresAt,
+                PendingMemberId = pendingMemberId,
+                CreatedByMemberId = memberId.Value,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            await db.InsertAsync(guest);
+
+            // Get next display order
+            var maxOrder = await db.ExecuteScalarAsync<int>(
+                "SELECT ISNULL(MAX(DisplayOrder), 0) FROM TrainingMatchParticipants WHERE TrainingMatchId = @0",
+                match.Id);
+
+            // Calculate handicap for guest in handicap matches
+            decimal? frozenHandicap = null;
+            bool? frozenIsProvisional = null;
+
+            if (match.HasHandicap && !string.IsNullOrEmpty(request.HandicapClass))
+            {
+                // Use manual handicap class for guest
+                // Map class to handicap value
+                frozenHandicap = request.HandicapClass switch
+                {
+                    "Klass 1 - Nybörjare" => 5m, // Example value - adjust based on actual handicap system
+                    "Klass 2 - Guldmärkesskytt" => 2m,
+                    "Klass 3 - Riksmästare" => 0m,
+                    _ => 0m
+                };
+                frozenIsProvisional = true; // Guests always have provisional handicap
+            }
+
+            // Add guest as participant
+            var participant = new TrainingMatchParticipantDbDto
+            {
+                TrainingMatchId = match.Id,
+                MemberId = null, // Guest has no member ID
+                GuestParticipantId = guest.Id,
+                GuestHandicapClass = request.HandicapClass,
+                JoinedDate = DateTime.UtcNow,
+                DisplayOrder = maxOrder + 1,
+                FrozenHandicapPerSeries = frozenHandicap,
+                FrozenIsProvisional = frozenIsProvisional
+            };
+
+            await db.InsertAsync(participant);
+
+            scope.Complete();
+
+            // Build claim URL
+            var siteUrl = _configuration["EmailSettings:SiteUrl"]?.TrimEnd('/') ?? $"{Request.Scheme}://{Request.Host}";
+            var claimUrl = $"{siteUrl}/match/{code.ToUpper()}/guest/{claimToken}";
+
+            // Notify via SignalR
+            await _hubContext.Clients.Group($"match_{code.ToUpper()}")
+                .SendAsync("GuestAdded", new
+                {
+                    guestId = guest.Id,
+                    displayName = guest.DisplayName,
+                    participantId = participant.Id
+                });
+
+            var response = new AddGuestResponse
+            {
+                GuestId = guest.Id,
+                DisplayName = guest.DisplayName,
+                ClaimUrl = claimUrl,
+                ClaimExpiresAt = claimExpiresAt,
+                InviteSent = inviteSent,
+                PendingMemberId = pendingMemberId,
+                ParticipantId = participant.Id
+            };
+
+            return Ok(ApiResponse<AddGuestResponse>.Ok(response));
+        }
+
+        /// <summary>
+        /// Remove a guest from a match (organizer only)
+        /// </summary>
+        [HttpDelete("{code}/guest/{guestId}")]
+        public async Task<IActionResult> RemoveGuest(string code, int guestId)
+        {
+            var memberId = GetCurrentMemberId();
+            if (!memberId.HasValue)
+            {
+                return Unauthorized(ApiResponse.Error("Ej inloggad"));
+            }
+
+            using var scope = _scopeProvider.CreateScope();
+            var db = scope.Database;
+
+            // Find match
+            var match = await db.FirstOrDefaultAsync<TrainingMatchDbDto>(
+                "WHERE MatchCode = @0", code.ToUpper());
+
+            if (match == null)
+            {
+                return NotFound(ApiResponse.Error("Matchen hittades inte"));
+            }
+
+            // Only creator can remove guests
+            if (match.CreatedByMemberId != memberId.Value)
+            {
+                return Forbid();
+            }
+
+            // Find guest participant
+            var participant = await db.FirstOrDefaultAsync<TrainingMatchParticipantDbDto>(
+                "WHERE TrainingMatchId = @0 AND GuestParticipantId = @1",
+                match.Id, guestId);
+
+            if (participant == null)
+            {
+                return NotFound(ApiResponse.Error("Gästen hittades inte"));
+            }
+
+            // Delete guest's scores
+            await db.ExecuteAsync(
+                "DELETE FROM TrainingScores WHERE TrainingMatchId = @0 AND GuestParticipantId = @1",
+                match.Id, guestId);
+
+            // Delete participant
+            await db.DeleteAsync(participant);
+
+            // Delete guest record
+            await db.ExecuteAsync("DELETE FROM TrainingMatchGuests WHERE Id = @0", guestId);
+
+            scope.Complete();
+
+            // Notify via SignalR
+            await _hubContext.Clients.Group($"match_{code.ToUpper()}")
+                .SendAsync("GuestRemoved", guestId);
+
+            return Ok(ApiResponse.Ok("Gästen har tagits bort"));
+        }
+
+        /// <summary>
         /// Get match by code with full details
         /// </summary>
         private async Task<TrainingMatch?> GetMatchByCode(string code)
@@ -1536,7 +1783,8 @@ namespace HpskSite.Controllers.Api
                 StartDate = match.StartDate,
                 IsHandicapEnabled = match.HasHandicap,
                 IsOpen = match.IsOpen,
-                MaxSeriesCount = match.MaxSeriesCount
+                MaxSeriesCount = match.MaxSeriesCount,
+                AllowGuests = match.AllowGuests
             };
 
             // Get creator name
@@ -1546,44 +1794,109 @@ namespace HpskSite.Controllers.Api
             // Enrich participants
             foreach (var p in participants)
             {
-                var member = _memberService.GetById(p.MemberId);
-                var participant = new TrainingMatchParticipant
-                {
-                    Id = p.Id,
-                    TrainingMatchId = p.TrainingMatchId,
-                    MemberId = p.MemberId,
-                    FirstName = member?.GetValue<string>("firstName"),
-                    LastName = member?.GetValue<string>("lastName"),
-                    ProfilePictureUrl = ToAbsoluteUrl(member?.GetValue<string>("profilePictureUrl")),
-                    JoinedDate = p.JoinedDate,
-                    DisplayOrder = p.DisplayOrder,
-                    HandicapPerSeries = p.FrozenHandicapPerSeries,
-                    IsProvisional = p.FrozenIsProvisional
-                };
+                TrainingMatchParticipant participant;
 
-                // Get scores for this participant
-                var scores = await db.FetchAsync<TrainingScoreDbDto>(
-                    "WHERE MemberId = @0 AND TrainingMatchId = @1",
-                    p.MemberId, match.Id);
-
-                foreach (var score in scores)
+                // Check if this is a guest participant
+                if (p.GuestParticipantId.HasValue)
                 {
-                    var series = JsonSerializer.Deserialize<List<TrainingSeries>>(score.SeriesScores ?? "[]");
-                    if (series != null)
+                    // Fetch guest info from database
+                    var guest = await db.FirstOrDefaultAsync<GuestParticipantDbDto>(
+                        "WHERE Id = @0", p.GuestParticipantId.Value);
+
+                    // Parse display name into first/last name (assume "First Last" format)
+                    var nameParts = (guest?.DisplayName ?? "Gäst").Split(' ', 2);
+                    var firstName = nameParts.Length > 0 ? nameParts[0] : "Gäst";
+                    var lastName = nameParts.Length > 1 ? nameParts[1] : "";
+
+                    participant = new TrainingMatchParticipant
                     {
-                        foreach (var s in series)
+                        Id = p.Id,
+                        TrainingMatchId = p.TrainingMatchId,
+                        MemberId = null,
+                        GuestParticipantId = p.GuestParticipantId,
+                        GuestHandicapClass = p.GuestHandicapClass,
+                        FirstName = firstName,
+                        LastName = lastName,
+                        ProfilePictureUrl = null, // Guests have no profile picture
+                        JoinedDate = p.JoinedDate,
+                        DisplayOrder = p.DisplayOrder,
+                        HandicapPerSeries = p.FrozenHandicapPerSeries,
+                        IsProvisional = p.FrozenIsProvisional
+                    };
+
+                    // Get scores for this guest participant
+                    var guestScores = await db.FetchAsync<TrainingScoreDbDto>(
+                        "WHERE GuestParticipantId = @0 AND TrainingMatchId = @1",
+                        p.GuestParticipantId, match.Id);
+
+                    foreach (var score in guestScores)
+                    {
+                        var series = JsonSerializer.Deserialize<List<TrainingSeries>>(score.SeriesScores ?? "[]");
+                        if (series != null)
                         {
-                            participant.Scores.Add(new TrainingMatchScore
+                            foreach (var s in series)
                             {
-                                Id = score.Id,
-                                SeriesNumber = s.SeriesNumber,
-                                Total = s.Total,
-                                XCount = s.XCount,
-                                Shots = s.Shots,
-                                EntryMethod = s.EntryMethod,
-                                TargetPhotoUrl = ToAbsoluteUrl(s.TargetPhotoUrl),
-                                Reactions = s.Reactions
-                            });
+                                participant.Scores.Add(new TrainingMatchScore
+                                {
+                                    Id = score.Id,
+                                    SeriesNumber = s.SeriesNumber,
+                                    Total = s.Total,
+                                    XCount = s.XCount,
+                                    Shots = s.Shots,
+                                    EntryMethod = s.EntryMethod,
+                                    TargetPhotoUrl = ToAbsoluteUrl(s.TargetPhotoUrl),
+                                    Reactions = s.Reactions
+                                });
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    // Regular member participant
+                    var member = p.MemberId.HasValue ? _memberService.GetById(p.MemberId.Value) : null;
+                    participant = new TrainingMatchParticipant
+                    {
+                        Id = p.Id,
+                        TrainingMatchId = p.TrainingMatchId,
+                        MemberId = p.MemberId,
+                        GuestParticipantId = null,
+                        FirstName = member?.GetValue<string>("firstName"),
+                        LastName = member?.GetValue<string>("lastName"),
+                        ProfilePictureUrl = ToAbsoluteUrl(member?.GetValue<string>("profilePictureUrl")),
+                        JoinedDate = p.JoinedDate,
+                        DisplayOrder = p.DisplayOrder,
+                        HandicapPerSeries = p.FrozenHandicapPerSeries,
+                        IsProvisional = p.FrozenIsProvisional
+                    };
+
+                    // Get scores for this member participant
+                    if (p.MemberId.HasValue)
+                    {
+                        var memberScores = await db.FetchAsync<TrainingScoreDbDto>(
+                            "WHERE MemberId = @0 AND TrainingMatchId = @1",
+                            p.MemberId.Value, match.Id);
+
+                        foreach (var score in memberScores)
+                        {
+                            var series = JsonSerializer.Deserialize<List<TrainingSeries>>(score.SeriesScores ?? "[]");
+                            if (series != null)
+                            {
+                                foreach (var s in series)
+                                {
+                                    participant.Scores.Add(new TrainingMatchScore
+                                    {
+                                        Id = score.Id,
+                                        SeriesNumber = s.SeriesNumber,
+                                        Total = s.Total,
+                                        XCount = s.XCount,
+                                        Shots = s.Shots,
+                                        EntryMethod = s.EntryMethod,
+                                        TargetPhotoUrl = ToAbsoluteUrl(s.TargetPhotoUrl),
+                                        Reactions = s.Reactions
+                                    });
+                                }
+                            }
                         }
                     }
                 }
@@ -1631,6 +1944,7 @@ namespace HpskSite.Controllers.Api
         public bool IsOpen { get; set; } = true;
         public bool HasHandicap { get; set; }
         public int? MaxSeriesCount { get; set; }
+        public bool AllowGuests { get; set; }
     }
 
     [TableName("TrainingMatchParticipants")]
@@ -1639,7 +1953,9 @@ namespace HpskSite.Controllers.Api
     {
         public int Id { get; set; }
         public int TrainingMatchId { get; set; }
-        public int MemberId { get; set; }
+        public int? MemberId { get; set; }
+        public int? GuestParticipantId { get; set; }
+        public string? GuestHandicapClass { get; set; }
         public DateTime JoinedDate { get; set; }
         public int DisplayOrder { get; set; }
         public decimal? FrozenHandicapPerSeries { get; set; }
@@ -1651,7 +1967,8 @@ namespace HpskSite.Controllers.Api
     public class TrainingScoreDbDto
     {
         public int Id { get; set; }
-        public int MemberId { get; set; }
+        public int? MemberId { get; set; }
+        public int? GuestParticipantId { get; set; }
         public int? TrainingMatchId { get; set; }
         public DateTime TrainingDate { get; set; }
         public string WeaponClass { get; set; } = string.Empty;
@@ -1662,6 +1979,21 @@ namespace HpskSite.Controllers.Api
         public string? Notes { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
+    }
+
+    [TableName("TrainingMatchGuests")]
+    [PrimaryKey("Id", AutoIncrement = true)]
+    public class GuestParticipantDbDto
+    {
+        public int Id { get; set; }
+        public string DisplayName { get; set; } = string.Empty;
+        public Guid? ClaimToken { get; set; }
+        public DateTime? ClaimTokenExpiresAt { get; set; }
+        public Guid? SessionToken { get; set; }
+        public DateTime? SessionExpiresAt { get; set; }
+        public int? PendingMemberId { get; set; }
+        public int CreatedByMemberId { get; set; }
+        public DateTime CreatedAt { get; set; }
     }
 
     // Request DTOs
