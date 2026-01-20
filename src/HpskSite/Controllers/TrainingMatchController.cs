@@ -271,9 +271,20 @@ namespace HpskSite.Controllers
         public async Task<IActionResult> GetMatch(string matchCode)
         {
             var currentMember = await _memberManager.GetCurrentMemberAsync();
+            GuestSessionInfo? guestSession = null;
+
+            // If not logged in as member, check for guest session
             if (currentMember == null)
             {
-                return Json(new { success = false, message = "Du måste vara inloggad" });
+                using (var db = _databaseFactory.CreateDatabase())
+                {
+                    guestSession = await GuestMatchController.ValidateGuestSession(matchCode ?? "", Request, db);
+                }
+
+                if (guestSession == null)
+                {
+                    return Json(new { success = false, message = "Du måste vara inloggad" });
+                }
             }
 
             try
@@ -307,17 +318,57 @@ namespace HpskSite.Controllers
                     var participantList = new List<object>();
                     foreach (var p in participants)
                     {
-                        var pMember = _memberService.GetById((int)p.MemberId);
-                        var firstName = pMember?.GetValue<string>("firstName") ?? "";
-                        var lastName = pMember?.GetValue<string>("lastName") ?? "";
-                        var profilePictureUrl = pMember?.GetValue<string>("profilePictureUrl") ?? "";
+                        string firstName, lastName, profilePictureUrl;
+                        int? memberId = p.MemberId != null ? (int?)p.MemberId : null;
+
+                        if (memberId.HasValue)
+                        {
+                            // Regular member
+                            var pMember = _memberService.GetById(memberId.Value);
+                            firstName = pMember?.GetValue<string>("firstName") ?? "";
+                            lastName = pMember?.GetValue<string>("lastName") ?? "";
+                            profilePictureUrl = pMember?.GetValue<string>("profilePictureUrl") ?? "";
+                        }
+                        else
+                        {
+                            // Guest participant - get name from GuestParticipantId
+                            firstName = "";
+                            lastName = "";
+                            profilePictureUrl = "";
+                            if (p.GuestParticipantId != null)
+                            {
+                                var guest = db.SingleOrDefault<dynamic>(
+                                    "SELECT DisplayName FROM TrainingMatchGuests WHERE Id = @0",
+                                    (int)p.GuestParticipantId);
+                                if (guest != null)
+                                {
+                                    var displayName = (string?)guest.DisplayName ?? "Gäst";
+                                    var nameParts = displayName.Split(' ', 2);
+                                    firstName = nameParts[0];
+                                    lastName = nameParts.Length > 1 ? nameParts[1] : "";
+                                }
+                            }
+                        }
 
                         // Get the single score row for this participant in this match
-                        var scoreRow = db.SingleOrDefault<dynamic>(
-                            @"SELECT ts.Id, ts.SeriesScores, ts.TotalScore, ts.XCount
-                              FROM TrainingScores ts
-                              WHERE ts.MemberId = @0 AND ts.TrainingMatchId = @1",
-                            (int)p.MemberId, (int)match.Id);
+                        // For guests, we use GuestParticipantId; for members, we use MemberId
+                        dynamic? scoreRow = null;
+                        if (memberId.HasValue)
+                        {
+                            scoreRow = db.SingleOrDefault<dynamic>(
+                                @"SELECT ts.Id, ts.SeriesScores, ts.TotalScore, ts.XCount
+                                  FROM TrainingScores ts
+                                  WHERE ts.MemberId = @0 AND ts.TrainingMatchId = @1",
+                                memberId.Value, (int)match.Id);
+                        }
+                        else if (p.GuestParticipantId != null)
+                        {
+                            scoreRow = db.SingleOrDefault<dynamic>(
+                                @"SELECT ts.Id, ts.SeriesScores, ts.TotalScore, ts.XCount
+                                  FROM TrainingScores ts
+                                  WHERE ts.GuestParticipantId = @0 AND ts.TrainingMatchId = @1",
+                                (int)p.GuestParticipantId, (int)match.Id);
+                        }
 
                         var scoreList = new List<object>();
                         if (scoreRow != null)
@@ -369,7 +420,9 @@ namespace HpskSite.Controllers
                         participantList.Add(new
                         {
                             id = (int)p.Id,
-                            memberId = (int)p.MemberId,
+                            memberId = memberId,
+                            guestParticipantId = p.GuestParticipantId != null ? (int?)p.GuestParticipantId : null,
+                            isGuest = !memberId.HasValue,
                             firstName = firstName,
                             lastName = lastName,
                             profilePictureUrl = profilePictureUrl,
@@ -390,12 +443,17 @@ namespace HpskSite.Controllers
                     var hasStarted = startDate == null || startDate <= DateTime.Now;
 
                     // Get current member ID so client can refresh its context
+                    // For guests, this will be null (they're not members)
                     var serverMemberId = await GetCurrentMemberIdAsync();
 
                     return Json(new
                     {
                         success = true,
                         currentMemberId = serverMemberId,
+                        // Include guest info for guest users
+                        isGuestSession = guestSession != null,
+                        guestId = guestSession?.GuestId,
+                        guestName = guestSession?.DisplayName,
                         match = new
                         {
                             id = (int)match.Id,
@@ -773,19 +831,37 @@ namespace HpskSite.Controllers
         public async Task<IActionResult> SaveScore([FromBody] SaveMatchScoreRequest request)
         {
             var currentMember = await _memberManager.GetCurrentMemberAsync();
-            if (currentMember == null)
-            {
-                return Json(new { success = false, message = "Du måste vara inloggad" });
-            }
+            GuestSessionInfo? guestSession = null;
+            int? memberId = null;
+            int? guestParticipantId = null;
 
-            try
+            // Check if logged in member or guest
+            if (currentMember != null)
             {
                 var member = _memberService.GetByEmail(currentMember.Email ?? string.Empty);
                 if (member == null)
                 {
                     return Json(new { success = false, message = "Medlem hittades inte" });
                 }
+                memberId = member.Id;
+            }
+            else
+            {
+                // Check for guest session
+                using (var guestDb = _databaseFactory.CreateDatabase())
+                {
+                    guestSession = await GuestMatchController.ValidateGuestSession(request.MatchCode ?? "", Request, guestDb);
+                }
 
+                if (guestSession == null)
+                {
+                    return Json(new { success = false, message = "Du måste vara inloggad" });
+                }
+                guestParticipantId = guestSession.GuestId;
+            }
+
+            try
+            {
                 using (var db = _databaseFactory.CreateDatabase())
                 {
                     // Get match
@@ -802,11 +878,22 @@ namespace HpskSite.Controllers
                         return Json(new { success = false, message = "Matchen är avslutad" });
                     }
 
-                    // Verify user is a participant
-                    var participant = db.SingleOrDefault<dynamic>(
-                        @"SELECT Id FROM TrainingMatchParticipants
-                          WHERE TrainingMatchId = @0 AND MemberId = @1",
-                        (int)match.Id, member.Id);
+                    // Verify user is a participant (member or guest)
+                    dynamic? participant = null;
+                    if (memberId.HasValue)
+                    {
+                        participant = db.SingleOrDefault<dynamic>(
+                            @"SELECT Id FROM TrainingMatchParticipants
+                              WHERE TrainingMatchId = @0 AND MemberId = @1",
+                            (int)match.Id, memberId.Value);
+                    }
+                    else if (guestParticipantId.HasValue)
+                    {
+                        participant = db.SingleOrDefault<dynamic>(
+                            @"SELECT Id FROM TrainingMatchParticipants
+                              WHERE TrainingMatchId = @0 AND GuestParticipantId = @1",
+                            (int)match.Id, guestParticipantId.Value);
+                    }
 
                     if (participant == null)
                     {
@@ -814,7 +901,8 @@ namespace HpskSite.Controllers
                     }
 
                     // Check if match has started (only creator can add scores before start time)
-                    bool isCreator = (int)match.CreatedByMemberId == member.Id;
+                    // Guests can never be creators, so they must wait for start time
+                    bool isCreator = memberId.HasValue && (int)match.CreatedByMemberId == memberId.Value;
                     if (!isCreator && match.StartDate != null && (DateTime)match.StartDate > DateTime.Now)
                     {
                         var startDateFormatted = ((DateTime)match.StartDate).ToString("yyyy-MM-dd HH:mm");
@@ -838,10 +926,21 @@ namespace HpskSite.Controllers
                     }
 
                     // Check if participant already has a TrainingScores row for this match
-                    var existingScore = db.SingleOrDefault<dynamic>(
-                        @"SELECT * FROM TrainingScores
-                          WHERE MemberId = @0 AND TrainingMatchId = @1",
-                        member.Id, (int)match.Id);
+                    dynamic? existingScore = null;
+                    if (memberId.HasValue)
+                    {
+                        existingScore = db.SingleOrDefault<dynamic>(
+                            @"SELECT * FROM TrainingScores
+                              WHERE MemberId = @0 AND TrainingMatchId = @1",
+                            memberId.Value, (int)match.Id);
+                    }
+                    else if (guestParticipantId.HasValue)
+                    {
+                        existingScore = db.SingleOrDefault<dynamic>(
+                            @"SELECT * FROM TrainingScores
+                              WHERE GuestParticipantId = @0 AND TrainingMatchId = @1",
+                            guestParticipantId.Value, (int)match.Id);
+                    }
 
                     if (existingScore != null)
                     {
@@ -869,7 +968,8 @@ namespace HpskSite.Controllers
                         // Notify other participants via SignalR
                         await _hubContext.SendScoreUpdated(request.MatchCode ?? "", new
                         {
-                            memberId = member.Id,
+                            memberId = memberId,
+                            guestId = guestParticipantId,
                             seriesNumber = newSeries.SeriesNumber,
                             total = newSeries.Total,
                             xCount = newSeries.XCount
@@ -894,25 +994,47 @@ namespace HpskSite.Controllers
                         newSeries.SeriesNumber = 1;
                         var seriesJson = JsonSerializer.Serialize(new List<TrainingSeries> { newSeries });
 
-                        db.Insert("TrainingScores", "Id", true, new
+                        // Insert with either MemberId or GuestParticipantId
+                        if (memberId.HasValue)
                         {
-                            MemberId = member.Id,
-                            TrainingDate = DateTime.Now,
-                            WeaponClass = (string)match.WeaponClass,
-                            IsCompetition = false,
-                            SeriesScores = seriesJson,
-                            TotalScore = newSeries.Total,
-                            XCount = newSeries.XCount,
-                            Notes = $"Träningsmatch: {match.MatchName}",
-                            CreatedAt = DateTime.Now,
-                            UpdatedAt = DateTime.Now,
-                            TrainingMatchId = (int)match.Id
-                        });
+                            db.Insert("TrainingScores", "Id", true, new
+                            {
+                                MemberId = memberId.Value,
+                                TrainingDate = DateTime.Now,
+                                WeaponClass = (string)match.WeaponClass,
+                                IsCompetition = false,
+                                SeriesScores = seriesJson,
+                                TotalScore = newSeries.Total,
+                                XCount = newSeries.XCount,
+                                Notes = $"Träningsmatch: {match.MatchName}",
+                                CreatedAt = DateTime.Now,
+                                UpdatedAt = DateTime.Now,
+                                TrainingMatchId = (int)match.Id
+                            });
+                        }
+                        else if (guestParticipantId.HasValue)
+                        {
+                            db.Insert("TrainingScores", "Id", true, new
+                            {
+                                GuestParticipantId = guestParticipantId.Value,
+                                TrainingDate = DateTime.Now,
+                                WeaponClass = (string)match.WeaponClass,
+                                IsCompetition = false,
+                                SeriesScores = seriesJson,
+                                TotalScore = newSeries.Total,
+                                XCount = newSeries.XCount,
+                                Notes = $"Träningsmatch: {match.MatchName}",
+                                CreatedAt = DateTime.Now,
+                                UpdatedAt = DateTime.Now,
+                                TrainingMatchId = (int)match.Id
+                            });
+                        }
 
                         // Notify other participants via SignalR
                         await _hubContext.SendScoreUpdated(request.MatchCode ?? "", new
                         {
-                            memberId = member.Id,
+                            memberId = memberId,
+                            guestId = guestParticipantId,
                             seriesNumber = newSeries.SeriesNumber,
                             total = newSeries.Total,
                             xCount = newSeries.XCount
@@ -948,19 +1070,37 @@ namespace HpskSite.Controllers
         public async Task<IActionResult> UpdateScore([FromBody] UpdateMatchScoreRequest request)
         {
             var currentMember = await _memberManager.GetCurrentMemberAsync();
-            if (currentMember == null)
-            {
-                return Json(new { success = false, message = "Du måste vara inloggad" });
-            }
+            GuestSessionInfo? guestSession = null;
+            int? memberId = null;
+            int? guestParticipantId = null;
 
-            try
+            // Check if logged in member or guest
+            if (currentMember != null)
             {
                 var member = _memberService.GetByEmail(currentMember.Email ?? string.Empty);
                 if (member == null)
                 {
                     return Json(new { success = false, message = "Medlem hittades inte" });
                 }
+                memberId = member.Id;
+            }
+            else
+            {
+                // Check for guest session
+                using (var guestDb = _databaseFactory.CreateDatabase())
+                {
+                    guestSession = await GuestMatchController.ValidateGuestSession(request.MatchCode ?? "", Request, guestDb);
+                }
 
+                if (guestSession == null)
+                {
+                    return Json(new { success = false, message = "Du måste vara inloggad" });
+                }
+                guestParticipantId = guestSession.GuestId;
+            }
+
+            try
+            {
                 using (var db = _databaseFactory.CreateDatabase())
                 {
                     // Get match
@@ -978,18 +1118,29 @@ namespace HpskSite.Controllers
                     }
 
                     // Check if match has started (only creator can edit scores before start time)
-                    bool isCreator = (int)match.CreatedByMemberId == member.Id;
+                    bool isCreator = memberId.HasValue && (int)match.CreatedByMemberId == memberId.Value;
                     if (!isCreator && match.StartDate != null && (DateTime)match.StartDate > DateTime.Now)
                     {
                         var startDateFormatted = ((DateTime)match.StartDate).ToString("yyyy-MM-dd HH:mm");
                         return Json(new { success = false, message = $"Matchen har inte startat ännu. Startar {startDateFormatted}" });
                     }
 
-                    // Get existing score row
-                    var existingScore = db.SingleOrDefault<dynamic>(
-                        @"SELECT * FROM TrainingScores
-                          WHERE MemberId = @0 AND TrainingMatchId = @1",
-                        member.Id, (int)match.Id);
+                    // Get existing score row (for member or guest)
+                    dynamic? existingScore = null;
+                    if (memberId.HasValue)
+                    {
+                        existingScore = db.SingleOrDefault<dynamic>(
+                            @"SELECT * FROM TrainingScores
+                              WHERE MemberId = @0 AND TrainingMatchId = @1",
+                            memberId.Value, (int)match.Id);
+                    }
+                    else if (guestParticipantId.HasValue)
+                    {
+                        existingScore = db.SingleOrDefault<dynamic>(
+                            @"SELECT * FROM TrainingScores
+                              WHERE GuestParticipantId = @0 AND TrainingMatchId = @1",
+                            guestParticipantId.Value, (int)match.Id);
+                    }
 
                     if (existingScore == null)
                     {
@@ -1042,7 +1193,8 @@ namespace HpskSite.Controllers
                     // Notify other participants via SignalR
                     await _hubContext.SendScoreUpdated(request.MatchCode ?? "", new
                     {
-                        memberId = member.Id,
+                        memberId = memberId,
+                        guestId = guestParticipantId,
                         seriesNumber = updatedSeries.SeriesNumber,
                         total = updatedSeries.Total,
                         xCount = updatedSeries.XCount
@@ -1077,19 +1229,37 @@ namespace HpskSite.Controllers
         public async Task<IActionResult> DeleteSeries([FromBody] DeleteMatchSeriesRequest request)
         {
             var currentMember = await _memberManager.GetCurrentMemberAsync();
-            if (currentMember == null)
-            {
-                return Json(new { success = false, message = "Du måste vara inloggad" });
-            }
+            GuestSessionInfo? guestSession = null;
+            int? memberId = null;
+            int? guestParticipantId = null;
 
-            try
+            // Check if logged in member or guest
+            if (currentMember != null)
             {
                 var member = _memberService.GetByEmail(currentMember.Email ?? string.Empty);
                 if (member == null)
                 {
                     return Json(new { success = false, message = "Medlem hittades inte" });
                 }
+                memberId = member.Id;
+            }
+            else
+            {
+                // Check for guest session
+                using (var guestDb = _databaseFactory.CreateDatabase())
+                {
+                    guestSession = await GuestMatchController.ValidateGuestSession(request.MatchCode ?? "", Request, guestDb);
+                }
 
+                if (guestSession == null)
+                {
+                    return Json(new { success = false, message = "Du måste vara inloggad" });
+                }
+                guestParticipantId = guestSession.GuestId;
+            }
+
+            try
+            {
                 using (var db = _databaseFactory.CreateDatabase())
                 {
                     // Get match
@@ -1106,11 +1276,22 @@ namespace HpskSite.Controllers
                         return Json(new { success = false, message = "Matchen är avslutad - kan inte ta bort resultat" });
                     }
 
-                    // Get existing score row
-                    var existingScore = db.SingleOrDefault<dynamic>(
-                        @"SELECT * FROM TrainingScores
-                          WHERE MemberId = @0 AND TrainingMatchId = @1",
-                        member.Id, (int)match.Id);
+                    // Get existing score row (for member or guest)
+                    dynamic? existingScore = null;
+                    if (memberId.HasValue)
+                    {
+                        existingScore = db.SingleOrDefault<dynamic>(
+                            @"SELECT * FROM TrainingScores
+                              WHERE MemberId = @0 AND TrainingMatchId = @1",
+                            memberId.Value, (int)match.Id);
+                    }
+                    else if (guestParticipantId.HasValue)
+                    {
+                        existingScore = db.SingleOrDefault<dynamic>(
+                            @"SELECT * FROM TrainingScores
+                              WHERE GuestParticipantId = @0 AND TrainingMatchId = @1",
+                            guestParticipantId.Value, (int)match.Id);
+                    }
 
                     if (existingScore == null)
                     {
@@ -1160,7 +1341,8 @@ namespace HpskSite.Controllers
                     // Notify other participants via SignalR
                     await _hubContext.SendScoreUpdated(request.MatchCode ?? "", new
                     {
-                        memberId = member.Id,
+                        memberId = memberId,
+                        guestId = guestParticipantId,
                         seriesNumber = request.SeriesNumber,
                         deleted = true
                     });
@@ -1384,25 +1566,48 @@ namespace HpskSite.Controllers
                     {
                         // Get participants for this match (limited to 5 for display)
                         var participants = db.Fetch<dynamic>(
-                            @"SELECT TOP 5 tmp.MemberId FROM TrainingMatchParticipants tmp
+                            @"SELECT TOP 5 tmp.MemberId, tmp.GuestParticipantId FROM TrainingMatchParticipants tmp
                               WHERE tmp.TrainingMatchId = @0
                               ORDER BY tmp.DisplayOrder", (int)m.Id);
 
                         var participantDetails = new List<object>();
                         foreach (var p in participants)
                         {
-                            var pMember = _memberService.GetById((int)p.MemberId);
-                            var firstName = pMember?.GetValue<string>("firstName") ?? "";
-                            var lastName = pMember?.GetValue<string>("lastName") ?? "";
-                            var profilePictureUrl = pMember?.GetValue<string>("profilePictureUrl") ?? "";
-
-                            participantDetails.Add(new
+                            if (p.MemberId != null)
                             {
-                                memberId = (int)p.MemberId,
-                                firstName = firstName,
-                                lastName = lastName,
-                                profilePictureUrl = profilePictureUrl
-                            });
+                                // Regular member
+                                var pMember = _memberService.GetById((int)p.MemberId);
+                                var firstName = pMember?.GetValue<string>("firstName") ?? "";
+                                var lastName = pMember?.GetValue<string>("lastName") ?? "";
+                                var profilePictureUrl = pMember?.GetValue<string>("profilePictureUrl") ?? "";
+
+                                participantDetails.Add(new
+                                {
+                                    memberId = (int)p.MemberId,
+                                    firstName = firstName,
+                                    lastName = lastName,
+                                    profilePictureUrl = profilePictureUrl,
+                                    isGuest = false
+                                });
+                            }
+                            else if (p.GuestParticipantId != null)
+                            {
+                                // Guest participant
+                                var guest = db.FirstOrDefault<dynamic>(
+                                    "SELECT DisplayName FROM TrainingMatchGuests WHERE Id = @0",
+                                    (int)p.GuestParticipantId);
+                                var displayName = guest?.DisplayName ?? "Gäst";
+                                var nameParts = displayName.Split(' ', 2);
+
+                                participantDetails.Add(new
+                                {
+                                    memberId = 0,
+                                    firstName = nameParts.Length > 0 ? nameParts[0] : "Gäst",
+                                    lastName = nameParts.Length > 1 ? nameParts[1] : "",
+                                    profilePictureUrl = "",
+                                    isGuest = true
+                                });
+                            }
                         }
 
                         // Check if current user is a participant
@@ -1429,6 +1634,9 @@ namespace HpskSite.Controllers
 
                             foreach (var score in allScoresWithSeries)
                             {
+                                // Skip entries with null MemberId (guest scores are handled separately)
+                                if (score.MemberId == null) continue;
+
                                 var seriesTotals = new List<int>();
                                 if (score.SeriesScores != null)
                                 {
@@ -1668,22 +1876,43 @@ namespace HpskSite.Controllers
 
                         // Get participants (limited to 5 for display)
                         var participants = db.Fetch<dynamic>(
-                            @"SELECT MemberId FROM TrainingMatchParticipants
-                              WHERE TrainingMatchId = @0
-                              ORDER BY DisplayOrder
+                            @"SELECT p.MemberId, p.GuestParticipantId, g.DisplayName as GuestDisplayName
+                              FROM TrainingMatchParticipants p
+                              LEFT JOIN TrainingMatchGuests g ON p.GuestParticipantId = g.Id
+                              WHERE p.TrainingMatchId = @0
+                              ORDER BY p.DisplayOrder
                               OFFSET 0 ROWS FETCH NEXT 5 ROWS ONLY", (int)m.Id);
 
                         var participantList = new List<object>();
                         foreach (var p in participants)
                         {
-                            var pMember = _memberService.GetById((int)p.MemberId);
-                            participantList.Add(new
+                            if (p.MemberId != null)
                             {
-                                memberId = (int)p.MemberId,
-                                firstName = pMember?.GetValue<string>("firstName") ?? "",
-                                lastName = pMember?.GetValue<string>("lastName") ?? "",
-                                profilePictureUrl = pMember?.GetValue<string>("profilePictureUrl") ?? ""
-                            });
+                                // Regular member
+                                var pMember = _memberService.GetById((int)p.MemberId);
+                                participantList.Add(new
+                                {
+                                    memberId = (int)p.MemberId,
+                                    firstName = pMember?.GetValue<string>("firstName") ?? "",
+                                    lastName = pMember?.GetValue<string>("lastName") ?? "",
+                                    profilePictureUrl = pMember?.GetValue<string>("profilePictureUrl") ?? "",
+                                    isGuest = false
+                                });
+                            }
+                            else if (p.GuestParticipantId != null)
+                            {
+                                // Guest participant
+                                var guestName = (string?)p.GuestDisplayName ?? "Gäst";
+                                var nameParts = guestName.Split(' ', 2);
+                                participantList.Add(new
+                                {
+                                    memberId = (int?)null,
+                                    firstName = nameParts.Length > 0 ? nameParts[0] : "",
+                                    lastName = nameParts.Length > 1 ? nameParts[1] : "",
+                                    profilePictureUrl = "",
+                                    isGuest = true
+                                });
+                            }
                         }
 
                         // Calculate if match has started
@@ -1755,22 +1984,43 @@ namespace HpskSite.Controllers
 
                         // Get participants (limited to 5 for display)
                         var participants = db.Fetch<dynamic>(
-                            @"SELECT MemberId FROM TrainingMatchParticipants
-                              WHERE TrainingMatchId = @0
-                              ORDER BY DisplayOrder
+                            @"SELECT p.MemberId, p.GuestParticipantId, g.DisplayName as GuestDisplayName
+                              FROM TrainingMatchParticipants p
+                              LEFT JOIN TrainingMatchGuests g ON p.GuestParticipantId = g.Id
+                              WHERE p.TrainingMatchId = @0
+                              ORDER BY p.DisplayOrder
                               OFFSET 0 ROWS FETCH NEXT 5 ROWS ONLY", (int)m.Id);
 
                         var participantList = new List<object>();
                         foreach (var p in participants)
                         {
-                            var pMember = _memberService.GetById((int)p.MemberId);
-                            participantList.Add(new
+                            if (p.MemberId != null)
                             {
-                                memberId = (int)p.MemberId,
-                                firstName = pMember?.GetValue<string>("firstName") ?? "",
-                                lastName = pMember?.GetValue<string>("lastName") ?? "",
-                                profilePictureUrl = pMember?.GetValue<string>("profilePictureUrl") ?? ""
-                            });
+                                // Regular member
+                                var pMember = _memberService.GetById((int)p.MemberId);
+                                participantList.Add(new
+                                {
+                                    memberId = (int)p.MemberId,
+                                    firstName = pMember?.GetValue<string>("firstName") ?? "",
+                                    lastName = pMember?.GetValue<string>("lastName") ?? "",
+                                    profilePictureUrl = pMember?.GetValue<string>("profilePictureUrl") ?? "",
+                                    isGuest = false
+                                });
+                            }
+                            else if (p.GuestParticipantId != null)
+                            {
+                                // Guest participant
+                                var guestName = (string?)p.GuestDisplayName ?? "Gäst";
+                                var nameParts = guestName.Split(' ', 2);
+                                participantList.Add(new
+                                {
+                                    memberId = (int?)null,
+                                    firstName = nameParts.Length > 0 ? nameParts[0] : "",
+                                    lastName = nameParts.Length > 1 ? nameParts[1] : "",
+                                    profilePictureUrl = "",
+                                    isGuest = true
+                                });
+                            }
                         }
 
                         var startDate = m.StartDate != null ? (DateTime?)m.StartDate : null;
@@ -2255,17 +2505,55 @@ namespace HpskSite.Controllers
                     var participantList = new List<object>();
                     foreach (var p in participants)
                     {
-                        var pMember = _memberService.GetById((int)p.MemberId);
-                        var firstName = pMember?.GetValue<string>("firstName") ?? "";
-                        var lastName = pMember?.GetValue<string>("lastName") ?? "";
-                        var profilePictureUrl = pMember?.GetValue<string>("profilePictureUrl") ?? "";
+                        string firstName, lastName, profilePictureUrl;
+                        int? memberId = p.MemberId != null ? (int?)p.MemberId : null;
+
+                        if (memberId.HasValue)
+                        {
+                            var pMember = _memberService.GetById(memberId.Value);
+                            firstName = pMember?.GetValue<string>("firstName") ?? "";
+                            lastName = pMember?.GetValue<string>("lastName") ?? "";
+                            profilePictureUrl = pMember?.GetValue<string>("profilePictureUrl") ?? "";
+                        }
+                        else
+                        {
+                            // Guest participant
+                            firstName = "";
+                            lastName = "";
+                            profilePictureUrl = "";
+                            if (p.GuestParticipantId != null)
+                            {
+                                var guest = db.SingleOrDefault<dynamic>(
+                                    "SELECT DisplayName FROM TrainingMatchGuests WHERE Id = @0",
+                                    (int)p.GuestParticipantId);
+                                if (guest != null)
+                                {
+                                    var displayName = (string?)guest.DisplayName ?? "Gäst";
+                                    var nameParts = displayName.Split(' ', 2);
+                                    firstName = nameParts[0];
+                                    lastName = nameParts.Length > 1 ? nameParts[1] : "";
+                                }
+                            }
+                        }
 
                         // Get scores for this participant
-                        var scoreRow = db.SingleOrDefault<dynamic>(
-                            @"SELECT ts.Id, ts.SeriesScores, ts.TotalScore, ts.XCount
-                              FROM TrainingScores ts
-                              WHERE ts.MemberId = @0 AND ts.TrainingMatchId = @1",
-                            (int)p.MemberId, (int)match.Id);
+                        dynamic? scoreRow = null;
+                        if (memberId.HasValue)
+                        {
+                            scoreRow = db.SingleOrDefault<dynamic>(
+                                @"SELECT ts.Id, ts.SeriesScores, ts.TotalScore, ts.XCount
+                                  FROM TrainingScores ts
+                                  WHERE ts.MemberId = @0 AND ts.TrainingMatchId = @1",
+                                memberId.Value, (int)match.Id);
+                        }
+                        else if (p.GuestParticipantId != null)
+                        {
+                            scoreRow = db.SingleOrDefault<dynamic>(
+                                @"SELECT ts.Id, ts.SeriesScores, ts.TotalScore, ts.XCount
+                                  FROM TrainingScores ts
+                                  WHERE ts.GuestParticipantId = @0 AND ts.TrainingMatchId = @1",
+                                (int)p.GuestParticipantId, (int)match.Id);
+                        }
 
                         var scoreList = new List<object>();
                         if (scoreRow != null)
@@ -2301,7 +2589,9 @@ namespace HpskSite.Controllers
                         participantList.Add(new
                         {
                             id = (int)p.Id,
-                            memberId = (int)p.MemberId,
+                            memberId = memberId,
+                            guestParticipantId = p.GuestParticipantId != null ? (int?)p.GuestParticipantId : null,
+                            isGuest = !memberId.HasValue,
                             firstName = firstName,
                             lastName = lastName,
                             profilePictureUrl = profilePictureUrl,
@@ -2363,6 +2653,48 @@ namespace HpskSite.Controllers
                 // Generate QR code
                 var gen = new QRCodeGenerator();
                 using var data = gen.CreateQrCode(joinUrl, QRCodeGenerator.ECCLevel.Q);
+                var qr = new QRCoder.QRCode(data);
+
+                using var img = qr.GetGraphic(
+                    pixelsPerModule: 10,
+                    darkColor: Color.Black,
+                    lightColor: Color.White,
+                    drawQuietZones: true
+                );
+
+                using var ms = new MemoryStream();
+                img.Save(ms, new PngEncoder());
+                var bytes = ms.ToArray();
+
+                return File(bytes, "image/png");
+            }
+            catch (Exception ex)
+            {
+                return BadRequest("Kunde inte generera QR-kod: " + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Generate QR code for guest claim URL
+        /// GET /umbraco/surface/TrainingMatch/GetGuestClaimQrCode?code={matchCode}&amp;token={claimToken}
+        /// </summary>
+        [HttpGet]
+        public IActionResult GetGuestClaimQrCode(string code, string token)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(code) || string.IsNullOrEmpty(token))
+                {
+                    return BadRequest("Match code and token required");
+                }
+
+                // Construct the guest claim URL server-side
+                var baseUrl = $"{Request.Scheme}://{Request.Host}";
+                var guestClaimUrl = $"{baseUrl}/match/{code.ToUpper()}/guest/{token}";
+
+                // Generate QR code
+                var gen = new QRCodeGenerator();
+                using var data = gen.CreateQrCode(guestClaimUrl, QRCodeGenerator.ECCLevel.Q);
                 var qr = new QRCoder.QRCode(data);
 
                 using var img = qr.GetGraphic(

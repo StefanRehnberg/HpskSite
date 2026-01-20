@@ -13,9 +13,15 @@ public partial class ActiveMatchPage : ContentPage
         BindingContext = viewModel;
     }
 
-    private void OnCompleteMatchClicked(object sender, EventArgs e)
+    private async void OnCompleteMatchClicked(object sender, EventArgs e)
     {
-        if (_viewModel.CompleteMatchCommand.CanExecute(null))
+        bool confirm = await DisplayAlert(
+            "Avsluta match",
+            "Är du säker på att du vill avsluta matchen? Detta kan inte ångras.",
+            "Ja, avsluta",
+            "Avbryt");
+
+        if (confirm && _viewModel.CompleteMatchCommand.CanExecute(null))
         {
             _viewModel.CompleteMatchCommand.Execute(null);
         }

@@ -86,11 +86,11 @@
 
 <script>
 // Guest management functionality
-let currentMatchCode = null;
+// Note: currentMatchCode is declared in TrainingMatch.cshtml (don't redeclare with 'let')
 let isHandicapMatch = false;
 
 function initAddGuestModal(matchCode, hasHandicap) {
-    currentMatchCode = matchCode;
+    currentMatchCode = matchCode; // Uses parent's variable
     isHandicapMatch = hasHandicap;
 
     // Show/hide handicap class selector
@@ -132,17 +132,29 @@ async function submitAddGuest() {
     submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Lägger till...';
 
     try {
-        const response = await fetch(`/api/match/${currentMatchCode}/guest/add`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]')?.value || ''
-            },
-            body: JSON.stringify({
-                displayName: displayName,
-                handicapClass: handicapClass || null
-            })
+        const url = `/api/match/${currentMatchCode}/guest/add`;
+        const body = JSON.stringify({
+            displayName: displayName,
+            handicapClass: handicapClass || null
         });
+        console.log('AddGuest request:', url, body);
+
+        const response = await fetch(url, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: body
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Add guest failed:', response.status, errorText);
+            // Show first 500 chars of response for debugging
+            alert(`Serverfel: ${response.status}\n\nSvar: ${errorText.substring(0, 500)}`);
+            return;
+        }
 
         const result = await response.json();
 
@@ -163,7 +175,7 @@ async function submitAddGuest() {
         }
     } catch (error) {
         console.error('Error adding guest:', error);
-        alert('Ett fel uppstod vid tillägg av gäst');
+        alert('Ett fel uppstod vid tillägg av gäst: ' + error.message);
     } finally {
         submitBtn.disabled = false;
         submitBtn.innerHTML = originalText;
@@ -194,11 +206,19 @@ async function removeGuest(guestId) {
     try {
         const response = await fetch(`/api/match/${currentMatchCode}/guest/${guestId}`, {
             method: 'DELETE',
+            credentials: 'same-origin',
             headers: {
                 'Content-Type': 'application/json',
                 'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]')?.value || ''
             }
         });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Remove guest failed:', response.status, errorText);
+            alert(`Serverfel: ${response.status}`);
+            return;
+        }
 
         const result = await response.json();
 
@@ -212,7 +232,7 @@ async function removeGuest(guestId) {
         }
     } catch (error) {
         console.error('Error removing guest:', error);
-        alert('Ett fel uppstod vid borttagning av gäst');
+        alert('Ett fel uppstod vid borttagning av gäst: ' + error.message);
     }
 }
 </script>

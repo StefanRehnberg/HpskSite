@@ -1,10 +1,13 @@
 @using Umbraco.Cms.Core.Security
 @using Umbraco.Cms.Core.Services
 @using HpskSite.Services
+@using HpskSite.Controllers
+@using Umbraco.Cms.Infrastructure.Scoping
 @inject IMemberManager MemberManager
 @inject IMemberService MemberService
 @inject IMemberGroupService MemberGroupService
 @inject ClubService ClubService
+@inject IScopeProvider ScopeProvider
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
     Layout = "Master.cshtml";
@@ -19,6 +22,25 @@
     string memberName = "";
     string profilePictureUrl = "";
     string clubName = "";
+
+    // Check for join code in URL
+    var joinCode = Context.Request.Query["join"].ToString();
+
+    // Check for guest session
+    GuestSessionInfo? guestSession = null;
+    bool isGuest = false;
+    if (!isLoggedIn && !string.IsNullOrEmpty(joinCode))
+    {
+        using var scope = ScopeProvider.CreateScope();
+        guestSession = await GuestMatchController.ValidateGuestSession(joinCode, Context.Request, scope.Database);
+        scope.Complete();
+
+        if (guestSession != null)
+        {
+            isGuest = true;
+            memberName = guestSession.DisplayName;
+        }
+    }
 
     if (isLoggedIn && currentMember != null)
     {
@@ -48,13 +70,10 @@
             }
         }
     }
-
-    // Check for join code in URL
-    var joinCode = Context.Request.Query["join"].ToString();
 }
 
 <div class="container py-4">
-    @if (!isLoggedIn)
+    @if (!isLoggedIn && !isGuest)
     {
         <!-- Not logged in message -->
         <div class="row justify-content-center">
@@ -77,7 +96,7 @@
     }
     else
     {
-        <!-- Main content for logged-in users -->
+        <!-- Main content for logged-in users and guests -->
         <!-- Navigation Tabs -->
         <ul class="nav nav-tabs mb-4" id="matchTabs" role="tablist">
             <li class="nav-item" role="presentation">
@@ -227,7 +246,7 @@
 <!-- SignalR Client Library -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.0/signalr.min.js"></script>
 
-@if (isLoggedIn)
+@if (isLoggedIn || isGuest)
 {
     <script>
         // Global state
@@ -237,6 +256,9 @@
         let isCurrentUserAdmin = @(isAdmin ? "true" : "false");
         let isSpectator = false;
         let hubConnection = null;
+        let isGuestUser = @(isGuest ? "true" : "false");
+        let guestParticipantId = @(guestSession?.GuestId ?? 0);
+        let guestMatchCode = '@(guestSession?.MatchCode ?? "")';
 
         // ===== Connection Status Banner Functions =====
         function showConnectionBanner(message, type, clickable = false) {
@@ -310,8 +332,19 @@
             const urlParams = new URLSearchParams(window.location.search);
             const joinCode = urlParams.get('join');
 
-            if (joinCode) {
-                // Try to join the match
+            // Handle guest users - they're already added as participants, just load the match
+            if (isGuestUser && guestMatchCode) {
+                // Clear URL parameter and load match directly
+                window.history.replaceState({}, '', window.location.pathname);
+                // Switch to "Aktuell match" tab
+                const currentTab = document.getElementById('current-tab');
+                if (currentTab) {
+                    const tab = new bootstrap.Tab(currentTab);
+                    tab.show();
+                }
+                loadMatch(guestMatchCode);
+            } else if (joinCode) {
+                // Try to join the match (for registered users)
                 joinMatchByCode(joinCode);
             } else {
                 // Check for active matches immediately
@@ -469,14 +502,22 @@
             currentMatchCode = matchCode;
             isSpectator = false; // Reset spectator mode when loading a match normally
 
-            fetch(`/umbraco/surface/TrainingMatch/GetMatch?matchCode=${matchCode}`)
+            fetch(`/umbraco/surface/TrainingMatch/GetMatch?matchCode=${matchCode}`, { credentials: 'same-origin' })
                 .then(response => response.json())
                 .then(result => {
                     hideLoading();
-
                     if (result.success) {
+                        // Handle guest sessions from server
+                        if (result.isGuestSession) {
+                            isGuestUser = true;
+                            guestParticipantId = result.guestId;
+                            guestMatchCode = matchCode;
+                            console.log('Guest session confirmed by server:', result.guestName, 'ID:', result.guestId);
+                        }
+
                         // Refresh member ID from server response to keep client in sync
                         // This MUST happen BEFORE the creator check below!
+                        // For guests, currentMemberId will be null
                         if (result.currentMemberId !== null && result.currentMemberId !== undefined) {
                             if (currentMemberId !== result.currentMemberId) {
                                 console.log(`Member ID refreshed: ${currentMemberId} -> ${result.currentMemberId}`);
@@ -492,9 +533,9 @@
                         // Join SignalR groups
                         joinMatchSignalRGroup(matchCode);
 
-                        // If user is the creator, join organizer group for join request notifications
+                        // If user is the creator (not a guest), join organizer group for join request notifications
                         const myMemberId = parseInt(document.body.dataset.memberId) || 0;
-                        if (result.match.createdByMemberId === myMemberId) {
+                        if (!isGuestUser && result.match.createdByMemberId === myMemberId) {
                             joinOrganizerSignalRGroup(matchCode);
                             loadPendingJoinRequests(matchCode);
                         }

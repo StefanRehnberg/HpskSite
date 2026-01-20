@@ -22,7 +22,7 @@ namespace HpskSite.Controllers.Api
     /// </summary>
     [Route("api/match")]
     [ApiController]
-    [Authorize(AuthenticationSchemes = "JwtBearer")]
+    [Authorize(AuthenticationSchemes = "JwtBearer,Identity.Application")]
     public class MatchApiController : ControllerBase
     {
         private readonly IScopeProvider _scopeProvider;
@@ -79,20 +79,43 @@ namespace HpskSite.Controllers.Api
                 return memberId;
             }
 
-            // Fallback to cookie-based authentication (website)
-            // Use synchronous check since we're in a private helper method
+            // Cookie auth is handled by GetCurrentMemberIdAsync
+            return null;
+        }
+
+        /// <summary>
+        /// Async version of GetCurrentMemberId for cookie-based authentication
+        /// </summary>
+        private async Task<int?> GetCurrentMemberIdAsync()
+        {
+            // First try JWT claims (mobile app)
             try
             {
-                var member = _memberManager.GetCurrentMemberAsync().GetAwaiter().GetResult();
+                var memberId = _jwtTokenService.GetMemberIdFromClaims(User);
+                if (memberId.HasValue)
+                {
+                    return memberId;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "GetCurrentMemberIdAsync: Error getting member ID from JWT claims");
+            }
+
+            // Fallback to cookie-based authentication (website)
+            try
+            {
+                var member = await _memberManager.GetCurrentMemberAsync();
                 if (member != null)
                 {
-                    var memberData = _memberService.GetByEmail(member.Email ?? "");
+                    // GetByUsername is the same lookup method - more explicit about what we're doing
+                    var memberData = _memberService.GetByUsername(member.UserName ?? member.Email ?? "");
                     return memberData?.Id;
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // Cookie auth not available, return null
+                _logger.LogWarning(ex, "GetCurrentMemberIdAsync: Error getting member from cookie auth");
             }
 
             return null;
@@ -129,7 +152,7 @@ namespace HpskSite.Controllers.Api
         [HttpPost]
         public async Task<IActionResult> CreateMatch([FromBody] CreateMatchRequest request)
         {
-            var memberId = GetCurrentMemberId();
+            var memberId = await GetCurrentMemberIdAsync();
             if (!memberId.HasValue)
             {
                 return Unauthorized(ApiResponse<TrainingMatch>.Error("Ej inloggad"));
@@ -252,7 +275,7 @@ namespace HpskSite.Controllers.Api
         [HttpPost("{code}/join")]
         public async Task<IActionResult> JoinMatch(string code)
         {
-            var memberId = GetCurrentMemberId();
+            var memberId = await GetCurrentMemberIdAsync();
             if (!memberId.HasValue)
             {
                 return Unauthorized(ApiResponse<TrainingMatch>.Error("Ej inloggad"));
@@ -354,7 +377,7 @@ namespace HpskSite.Controllers.Api
         [HttpPost("{code}/leave")]
         public async Task<IActionResult> LeaveMatch(string code)
         {
-            var memberId = GetCurrentMemberId();
+            var memberId = await GetCurrentMemberIdAsync();
             if (!memberId.HasValue)
             {
                 return Unauthorized(ApiResponse.Error("Ej inloggad"));
@@ -398,7 +421,7 @@ namespace HpskSite.Controllers.Api
         [HttpDelete("{code}")]
         public async Task<IActionResult> DeleteMatch(string code)
         {
-            var memberId = GetCurrentMemberId();
+            var memberId = await GetCurrentMemberIdAsync();
             if (!memberId.HasValue)
             {
                 return Unauthorized(ApiResponse.Error("Ej inloggad"));
@@ -465,7 +488,7 @@ namespace HpskSite.Controllers.Api
         [HttpPost("{code}/settings")]
         public async Task<IActionResult> UpdateMatchSettings(string code, [FromBody] UpdateMatchSettingsRequest request)
         {
-            var memberId = GetCurrentMemberId();
+            var memberId = await GetCurrentMemberIdAsync();
             if (!memberId.HasValue)
             {
                 return Unauthorized(ApiResponse.Error("Ej inloggad"));
@@ -512,7 +535,7 @@ namespace HpskSite.Controllers.Api
         [HttpPost("{code}/complete")]
         public async Task<IActionResult> CompleteMatch(string code)
         {
-            var memberId = GetCurrentMemberId();
+            var memberId = await GetCurrentMemberIdAsync();
             if (!memberId.HasValue)
             {
                 return Unauthorized(ApiResponse.Error("Ej inloggad"));
@@ -556,7 +579,7 @@ namespace HpskSite.Controllers.Api
         [HttpPost("{code}/score")]
         public async Task<IActionResult> SaveScore(string code, [FromBody] SaveScoreRequest request)
         {
-            var memberId = GetCurrentMemberId();
+            var memberId = await GetCurrentMemberIdAsync();
             if (!memberId.HasValue)
             {
                 return Unauthorized(ApiResponse<TrainingMatchScore>.Error("Ej inloggad"));
@@ -708,7 +731,7 @@ namespace HpskSite.Controllers.Api
         [RequestSizeLimit(10 * 1024 * 1024)] // 10MB limit for raw upload
         public async Task<IActionResult> UploadSeriesPhoto(string code, int seriesNumber, IFormFile photo)
         {
-            var memberId = GetCurrentMemberId();
+            var memberId = await GetCurrentMemberIdAsync();
             if (!memberId.HasValue)
             {
                 return Unauthorized(ApiResponse<UploadPhotoResponse>.Error("Ej inloggad"));
@@ -846,7 +869,7 @@ namespace HpskSite.Controllers.Api
         [Authorize(AuthenticationSchemes = "JwtBearer,Identity.Application")]
         public async Task<IActionResult> AddReaction(string code, int seriesNumber, [FromBody] AddReactionRequest request)
         {
-            var memberId = GetCurrentMemberId();
+            var memberId = await GetCurrentMemberIdAsync();
             if (!memberId.HasValue)
             {
                 return Unauthorized(ApiResponse<List<PhotoReaction>>.Error("Ej inloggad"));
@@ -977,7 +1000,7 @@ namespace HpskSite.Controllers.Api
         [HttpGet("ongoing")]
         public async Task<IActionResult> GetOngoingMatches()
         {
-            var memberId = GetCurrentMemberId();
+            var memberId = await GetCurrentMemberIdAsync();
             if (!memberId.HasValue)
             {
                 return Unauthorized(ApiResponse<List<TrainingMatch>>.Error("Ej inloggad"));
@@ -1012,7 +1035,7 @@ namespace HpskSite.Controllers.Api
             [FromQuery] string? searchName = null,
             [FromQuery] bool myMatchesOnly = false)
         {
-            var memberId = GetCurrentMemberId();
+            var memberId = await GetCurrentMemberIdAsync();
             if (!memberId.HasValue)
             {
                 return Unauthorized(ApiResponse<PagedResponse<MatchHistoryItem>>.Error("Ej inloggad"));
@@ -1234,7 +1257,7 @@ namespace HpskSite.Controllers.Api
         [HttpGet("{code}/spectator")]
         public async Task<IActionResult> ViewMatchAsSpectator(string code)
         {
-            var memberId = GetCurrentMemberId();
+            var memberId = await GetCurrentMemberIdAsync();
             if (!memberId.HasValue)
             {
                 return Unauthorized(ApiResponse<SpectatorMatchResponse>.Error("Ej inloggad"));
@@ -1266,7 +1289,7 @@ namespace HpskSite.Controllers.Api
         [HttpPost("{code}/request-join")]
         public async Task<IActionResult> RequestJoinMatch(string code)
         {
-            var memberId = GetCurrentMemberId();
+            var memberId = await GetCurrentMemberIdAsync();
             if (!memberId.HasValue)
             {
                 return Unauthorized(ApiResponse.Error("Ej inloggad"));
@@ -1353,7 +1376,7 @@ namespace HpskSite.Controllers.Api
         [HttpPost("respond-join")]
         public async Task<IActionResult> RespondToJoinRequest([FromBody] RespondJoinRequest request)
         {
-            var memberId = GetCurrentMemberId();
+            var memberId = await GetCurrentMemberIdAsync();
             if (!memberId.HasValue)
             {
                 return Unauthorized(ApiResponse.Error("Ej inloggad"));
@@ -1454,9 +1477,9 @@ namespace HpskSite.Controllers.Api
         /// Used when joining a handicap match and the user hasn't set their class yet
         /// </summary>
         [HttpPost("set-shooter-class")]
-        public IActionResult SetShooterClass([FromBody] SetShooterClassRequest request)
+        public async Task<IActionResult> SetShooterClass([FromBody] SetShooterClassRequest request)
         {
-            var memberId = GetCurrentMemberId();
+            var memberId = await GetCurrentMemberIdAsync();
             if (!memberId.HasValue)
             {
                 return Unauthorized(ApiResponse.Error("Ej inloggad"));
@@ -1504,9 +1527,9 @@ namespace HpskSite.Controllers.Api
         /// Get the current member's shooter class
         /// </summary>
         [HttpGet("shooter-class")]
-        public IActionResult GetShooterClass()
+        public async Task<IActionResult> GetShooterClass()
         {
-            var memberId = GetCurrentMemberId();
+            var memberId = await GetCurrentMemberIdAsync();
             if (!memberId.HasValue)
             {
                 return Unauthorized(ApiResponse.Error("Ej inloggad"));
@@ -1532,22 +1555,28 @@ namespace HpskSite.Controllers.Api
         /// Path A: Simple guest (display name only)
         /// Path B: Invite & Join (admin/club admin only - creates pending member)
         /// </summary>
+        [AllowAnonymous]
         [HttpPost("{code}/guest/add")]
-        public async Task<IActionResult> AddGuest(string code, [FromBody] AddGuestRequest request)
+        public async Task<IActionResult> AddGuest(string code, [FromBody] AddGuestRequest? request)
         {
-            var memberId = GetCurrentMemberId();
-            if (!memberId.HasValue)
+            try
             {
-                return Unauthorized(ApiResponse<AddGuestResponse>.Error("Ej inloggad"));
-            }
+                _logger.LogInformation("AddGuest called: code={Code}, request={Request}", code, request?.DisplayName ?? "NULL");
 
-            if (string.IsNullOrWhiteSpace(request.DisplayName))
-            {
-                return BadRequest(ApiResponse<AddGuestResponse>.Error("Namn krävs"));
-            }
+                var memberId = await GetCurrentMemberIdAsync();
+                _logger.LogInformation("AddGuest: memberId={MemberId}", memberId);
+                if (!memberId.HasValue)
+                {
+                    return Unauthorized(ApiResponse<AddGuestResponse>.Error("Ej inloggad"));
+                }
 
-            using var scope = _scopeProvider.CreateScope();
-            var db = scope.Database;
+                if (request == null || string.IsNullOrWhiteSpace(request.DisplayName))
+                {
+                    return BadRequest(ApiResponse<AddGuestResponse>.Error("Namn krävs"));
+                }
+
+                using var scope = _scopeProvider.CreateScope();
+                var db = scope.Database;
 
             // Find match
             var match = await db.FirstOrDefaultAsync<TrainingMatchDbDto>(
@@ -1656,6 +1685,8 @@ namespace HpskSite.Controllers.Api
             var siteUrl = _configuration["EmailSettings:SiteUrl"]?.TrimEnd('/') ?? $"{Request.Scheme}://{Request.Host}";
             var claimUrl = $"{siteUrl}/match/{code.ToUpper()}/guest/{claimToken}";
 
+            _logger.LogInformation("AddGuest: Generated claimUrl={ClaimUrl} for guest {GuestId}", claimUrl, guest.Id);
+
             // Notify via SignalR
             await _hubContext.Clients.Group($"match_{code.ToUpper()}")
                 .SendAsync("GuestAdded", new
@@ -1677,15 +1708,22 @@ namespace HpskSite.Controllers.Api
             };
 
             return Ok(ApiResponse<AddGuestResponse>.Ok(response));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error adding guest to match {MatchCode}", code);
+                return StatusCode(500, ApiResponse<AddGuestResponse>.Error($"Serverfel: {ex.Message}"));
+            }
         }
 
         /// <summary>
         /// Remove a guest from a match (organizer only)
         /// </summary>
+        [AllowAnonymous]
         [HttpDelete("{code}/guest/{guestId}")]
         public async Task<IActionResult> RemoveGuest(string code, int guestId)
         {
-            var memberId = GetCurrentMemberId();
+            var memberId = await GetCurrentMemberIdAsync();
             if (!memberId.HasValue)
             {
                 return Unauthorized(ApiResponse.Error("Ej inloggad"));
@@ -1737,6 +1775,84 @@ namespace HpskSite.Controllers.Api
                 .SendAsync("GuestRemoved", guestId);
 
             return Ok(ApiResponse.Ok("Gästen har tagits bort"));
+        }
+
+        /// <summary>
+        /// Regenerate QR code (claim token) for an existing guest
+        /// Used when the original QR code has expired or needs to be shown again
+        /// </summary>
+        [AllowAnonymous]
+        [HttpPost("{code}/guest/{guestId}/regenerate-qr")]
+        public async Task<IActionResult> RegenerateGuestQr(string code, int guestId)
+        {
+            var memberId = await GetCurrentMemberIdAsync();
+            if (!memberId.HasValue)
+            {
+                return Unauthorized(ApiResponse<RegenerateGuestQrResponse>.Error("Ej inloggad"));
+            }
+
+            using var scope = _scopeProvider.CreateScope();
+            var db = scope.Database;
+
+            // Find match
+            var match = await db.FirstOrDefaultAsync<TrainingMatchDbDto>(
+                "WHERE MatchCode = @0", code.ToUpper());
+
+            if (match == null)
+            {
+                return NotFound(ApiResponse<RegenerateGuestQrResponse>.Error("Matchen hittades inte"));
+            }
+
+            // Only creator can regenerate guest QR codes
+            if (match.CreatedByMemberId != memberId.Value)
+            {
+                return Forbid();
+            }
+
+            // Find guest
+            var guest = await db.FirstOrDefaultAsync<GuestParticipantDbDto>(
+                "WHERE Id = @0", guestId);
+
+            if (guest == null)
+            {
+                return NotFound(ApiResponse<RegenerateGuestQrResponse>.Error("Gästen hittades inte"));
+            }
+
+            // Verify guest belongs to this match
+            var participant = await db.FirstOrDefaultAsync<TrainingMatchParticipantDbDto>(
+                "WHERE TrainingMatchId = @0 AND GuestParticipantId = @1",
+                match.Id, guestId);
+
+            if (participant == null)
+            {
+                return BadRequest(ApiResponse<RegenerateGuestQrResponse>.Error("Gästen tillhör inte denna match"));
+            }
+
+            // Generate new claim token with 30-minute expiry
+            var newClaimToken = Guid.NewGuid();
+            var newExpiresAt = DateTime.UtcNow.AddMinutes(30);
+
+            guest.ClaimToken = newClaimToken;
+            guest.ClaimTokenExpiresAt = newExpiresAt;
+            await db.UpdateAsync(guest);
+
+            scope.Complete();
+
+            // Build claim URL
+            var siteUrl = _configuration["EmailSettings:SiteUrl"]?.TrimEnd('/') ?? $"{Request.Scheme}://{Request.Host}";
+            var claimUrl = $"{siteUrl}/match/{code.ToUpper()}/guest/{newClaimToken}";
+
+            _logger.LogInformation("RegenerateGuestQr: Generated claimUrl={ClaimUrl} for guest {GuestId}", claimUrl, guest.Id);
+
+            var response = new RegenerateGuestQrResponse
+            {
+                GuestId = guest.Id,
+                DisplayName = guest.DisplayName,
+                ClaimUrl = claimUrl,
+                ClaimExpiresAt = newExpiresAt
+            };
+
+            return Ok(ApiResponse<RegenerateGuestQrResponse>.Ok(response));
         }
 
         /// <summary>
@@ -2103,6 +2219,17 @@ namespace HpskSite.Controllers.Api
         public bool Success { get; set; }
         public string? Message { get; set; }
         public string? ShooterClass { get; set; }
+    }
+
+    /// <summary>
+    /// Response for regenerating a guest's QR code (claim token)
+    /// </summary>
+    public class RegenerateGuestQrResponse
+    {
+        public int GuestId { get; set; }
+        public string DisplayName { get; set; } = string.Empty;
+        public string ClaimUrl { get; set; } = string.Empty;
+        public DateTime ClaimExpiresAt { get; set; }
     }
 
     /// <summary>

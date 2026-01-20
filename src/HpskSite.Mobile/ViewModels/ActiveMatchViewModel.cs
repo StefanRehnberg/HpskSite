@@ -291,6 +291,12 @@ public partial class ActiveMatchViewModel : BaseViewModel
     private bool _isSavingSettings;
 
     /// <summary>
+    /// Whether the join QR code is visible in the settings modal
+    /// </summary>
+    [ObservableProperty]
+    private bool _isJoinQrVisible;
+
+    /// <summary>
     /// QR code URL for sharing the match
     /// </summary>
     public string QrCodeUrl => Match != null
@@ -554,6 +560,7 @@ public partial class ActiveMatchViewModel : BaseViewModel
 
         // Initialize the input with current value
         MaxSeriesCountInput = Match?.MaxSeriesCount?.ToString() ?? "";
+        IsJoinQrVisible = false; // Start with QR hidden
         IsSettingsModalOpen = true;
     }
 
@@ -564,6 +571,15 @@ public partial class ActiveMatchViewModel : BaseViewModel
     private void CloseSettingsModal()
     {
         IsSettingsModalOpen = false;
+    }
+
+    /// <summary>
+    /// Toggle the join QR code visibility in settings modal
+    /// </summary>
+    [RelayCommand]
+    private void ToggleJoinQr()
+    {
+        IsJoinQrVisible = !IsJoinQrVisible;
     }
 
     /// <summary>
@@ -666,6 +682,23 @@ public partial class ActiveMatchViewModel : BaseViewModel
     private string _guestClaimQrUrl = string.Empty;
 
     /// <summary>
+    /// Collection of guest participants in the match (filtered from Participants)
+    /// </summary>
+    [ObservableProperty]
+    private ObservableCollection<TrainingMatchParticipant> _guestParticipants = new();
+
+    /// <summary>
+    /// Whether there are any guest participants to show
+    /// </summary>
+    public bool HasGuestParticipants => GuestParticipants.Count > 0;
+
+    /// <summary>
+    /// Whether a guest operation is in progress
+    /// </summary>
+    [ObservableProperty]
+    private bool _isGuestOperationBusy;
+
+    /// <summary>
     /// Open the add guest modal (host only)
     /// </summary>
     [RelayCommand]
@@ -741,13 +774,21 @@ public partial class ActiveMatchViewModel : BaseViewModel
 
             if (result.Success && result.Data != null)
             {
-                // Close the add guest modal
+                // Close the add guest modal and settings modal
                 IsAddGuestModalOpen = false;
+                IsSettingsModalOpen = false;
 
                 // Show the QR code modal
                 AddedGuestName = result.Data.DisplayName;
-                // Generate QR code URL using external API
-                GuestClaimQrUrl = $"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={Uri.EscapeDataString(result.Data.ClaimUrl)}";
+                // Generate QR code URL using our server with separate code and token parameters
+                // ClaimUrl format: https://domain/match/{code}/guest/{token}
+                var claimUrl = result.Data.ClaimUrl;
+                var token = claimUrl.Split('/').Last(); // Extract token from URL
+                var cacheBuster = DateTime.UtcNow.Ticks;
+                System.Diagnostics.Debug.WriteLine($"AddGuest: ClaimUrl from API = '{claimUrl}'");
+                System.Diagnostics.Debug.WriteLine($"AddGuest: Extracted token = '{token}'");
+                GuestClaimQrUrl = $"{_apiService.BaseUrl}/umbraco/surface/TrainingMatch/GetGuestClaimQrCode?code={MatchCode}&token={token}&_={cacheBuster}";
+                System.Diagnostics.Debug.WriteLine($"AddGuest: GuestClaimQrUrl = '{GuestClaimQrUrl}'");
                 IsGuestQrModalOpen = true;
             }
             else
@@ -765,6 +806,111 @@ public partial class ActiveMatchViewModel : BaseViewModel
         {
             IsAddingGuest = false;
         }
+    }
+
+    /// <summary>
+    /// Show QR code for an existing guest (regenerates claim token if expired)
+    /// </summary>
+    [RelayCommand]
+    private async Task ShowGuestQrAsync(TrainingMatchParticipant guest)
+    {
+        if (IsGuestOperationBusy || !IsMatchHost || Match == null || guest == null || !guest.GuestParticipantId.HasValue)
+            return;
+
+        try
+        {
+            IsGuestOperationBusy = true;
+            HasGuestError = false;
+
+            var result = await _matchService.RegenerateGuestQrAsync(MatchCode, guest.GuestParticipantId.Value);
+
+            if (result.Success && result.Data != null)
+            {
+                // Close settings modal and show the QR code modal with regenerated token
+                IsSettingsModalOpen = false;
+                AddedGuestName = guest.DisplayName;
+                // Extract token from ClaimUrl (format: https://domain/match/{code}/guest/{token})
+                var token = result.Data.ClaimUrl.Split('/').Last();
+                var cacheBuster = DateTime.UtcNow.Ticks;
+                GuestClaimQrUrl = $"{_apiService.BaseUrl}/umbraco/surface/TrainingMatch/GetGuestClaimQrCode?code={MatchCode}&token={token}&_={cacheBuster}";
+                System.Diagnostics.Debug.WriteLine($"ShowGuestQr: GuestClaimQrUrl = '{GuestClaimQrUrl}'");
+                IsGuestQrModalOpen = true;
+            }
+            else
+            {
+                await Shell.Current.DisplayAlert("Fel", result.Message ?? "Kunde inte visa QR-koden", "OK");
+            }
+        }
+        catch (Exception ex)
+        {
+            await Shell.Current.DisplayAlert("Fel", ex.Message, "OK");
+        }
+        finally
+        {
+            IsGuestOperationBusy = false;
+        }
+    }
+
+    /// <summary>
+    /// Remove a guest from the match
+    /// </summary>
+    [RelayCommand]
+    private async Task RemoveGuestAsync(TrainingMatchParticipant guest)
+    {
+        if (IsGuestOperationBusy || !IsMatchHost || Match == null || guest == null || !guest.GuestParticipantId.HasValue)
+            return;
+
+        // Confirm deletion
+        var confirm = await Shell.Current.DisplayAlert(
+            "Ta bort gäst",
+            $"Är du säker på att du vill ta bort {guest.DisplayName} från matchen?",
+            "Ta bort",
+            "Avbryt");
+
+        if (!confirm)
+            return;
+
+        try
+        {
+            IsGuestOperationBusy = true;
+
+            var result = await _matchService.RemoveGuestAsync(MatchCode, guest.GuestParticipantId.Value);
+
+            if (result.Success)
+            {
+                // Remove from local collection
+                GuestParticipants.Remove(guest);
+                OnPropertyChanged(nameof(HasGuestParticipants));
+
+                // Reload match data to update all views
+                await LoadMatchDataAsync();
+            }
+            else
+            {
+                await Shell.Current.DisplayAlert("Fel", result.Message ?? "Kunde inte ta bort gästen", "OK");
+            }
+        }
+        catch (Exception ex)
+        {
+            await Shell.Current.DisplayAlert("Fel", ex.Message, "OK");
+        }
+        finally
+        {
+            IsGuestOperationBusy = false;
+        }
+    }
+
+    /// <summary>
+    /// Populate GuestParticipants from the Participants collection
+    /// </summary>
+    private void UpdateGuestParticipants()
+    {
+        GuestParticipants.Clear();
+        foreach (var participant in Participants.Where(p => p.IsGuest))
+        {
+            GuestParticipants.Add(participant);
+        }
+        OnPropertyChanged(nameof(HasGuestParticipants));
     }
 
     #endregion
@@ -1065,6 +1211,9 @@ public partial class ActiveMatchViewModel : BaseViewModel
                 // Update scoreboard rows for dynamic display
                 UpdateScoreboardRows();
 
+                // Update guest participants list (for settings modal)
+                UpdateGuestParticipants();
+
                 System.Diagnostics.Debug.WriteLine($"LoadMatchDataAsync (spectator): Loaded match {MatchCode}, CanJoin={CanJoin}");
             }
             else
@@ -1147,6 +1296,9 @@ public partial class ActiveMatchViewModel : BaseViewModel
 
                 // Update scoreboard rows for dynamic display
                 UpdateScoreboardRows();
+
+                // Update guest participants list (for settings modal)
+                UpdateGuestParticipants();
             }
             else
             {

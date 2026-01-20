@@ -149,6 +149,11 @@ public class MatchService : IMatchService
         return await _apiService.DeleteAsync($"api/match/{matchCode}/guest/{guestId}");
     }
 
+    public async Task<ApiResponse<RegenerateGuestQrResponse>> RegenerateGuestQrAsync(string matchCode, int guestId)
+    {
+        return await _apiService.PostAsync<RegenerateGuestQrResponse>($"api/match/{matchCode}/guest/{guestId}/regenerate-qr");
+    }
+
     public async Task<ApiResponse> UpdateMatchSettingsWithGuestsAsync(string matchCode, int? maxSeriesCount, bool? allowGuests)
     {
         return await _apiService.PostAsync($"api/match/{matchCode}/settings", new { MaxSeriesCount = maxSeriesCount, AllowGuests = allowGuests });
@@ -211,6 +216,7 @@ public interface IMatchService
     Task<ApiResponse<List<PhotoReaction>>> AddReactionAsync(string matchCode, int seriesNumber, int targetMemberId, string emoji);
     Task<ApiResponse<AddGuestResponse>> AddGuestAsync(string matchCode, AddGuestRequest request);
     Task<ApiResponse> RemoveGuestAsync(string matchCode, int guestId);
+    Task<ApiResponse<RegenerateGuestQrResponse>> RegenerateGuestQrAsync(string matchCode, int guestId);
     Task<ApiResponse> UpdateMatchSettingsWithGuestsAsync(string matchCode, int? maxSeriesCount, bool? allowGuests);
 }
 
@@ -300,6 +306,17 @@ public class AddGuestResponse
     public bool InviteSent { get; set; }
     public int? PendingMemberId { get; set; }
     public int ParticipantId { get; set; }
+}
+
+/// <summary>
+/// Response for regenerating a guest's QR code (claim token)
+/// </summary>
+public class RegenerateGuestQrResponse
+{
+    public int GuestId { get; set; }
+    public string DisplayName { get; set; } = string.Empty;
+    public string ClaimUrl { get; set; } = string.Empty;
+    public DateTime ClaimExpiresAt { get; set; }
 }
 
 /// <summary>

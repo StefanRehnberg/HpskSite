@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using NPoco;
 using Umbraco.Cms.Infrastructure.Scoping;
 
@@ -11,10 +12,12 @@ namespace HpskSite.Controllers
     public class GuestMatchController : Controller
     {
         private readonly IScopeProvider _scopeProvider;
+        private readonly ILogger<GuestMatchController> _logger;
 
-        public GuestMatchController(IScopeProvider scopeProvider)
+        public GuestMatchController(IScopeProvider scopeProvider, ILogger<GuestMatchController> logger)
         {
             _scopeProvider = scopeProvider;
+            _logger = logger;
         }
 
         /// <summary>
@@ -24,14 +27,18 @@ namespace HpskSite.Controllers
         [HttpGet("{code}/guest/{token}")]
         public async Task<IActionResult> ClaimGuestSpot(string code, string token)
         {
+            _logger.LogInformation("ClaimGuestSpot called with code={Code}, token={Token}", code, token);
+
             if (string.IsNullOrEmpty(code) || string.IsNullOrEmpty(token))
             {
+                _logger.LogWarning("ClaimGuestSpot: Empty code or token");
                 return RedirectToErrorPage("Ogiltig länk");
             }
 
             // Parse token
             if (!Guid.TryParse(token, out var claimToken))
             {
+                _logger.LogWarning("ClaimGuestSpot: Could not parse token as GUID: {Token}", token);
                 return RedirectToErrorPage("Ogiltig token");
             }
 
@@ -44,12 +51,14 @@ namespace HpskSite.Controllers
 
             if (match == null)
             {
+                _logger.LogWarning("ClaimGuestSpot: Match not found for code {Code}", code);
                 scope.Complete();
                 return RedirectToErrorPage("Matchen hittades inte");
             }
 
             if (match.Status != "Active")
             {
+                _logger.LogWarning("ClaimGuestSpot: Match {Code} is not active (status={Status})", code, match.Status);
                 scope.Complete();
                 return RedirectToErrorPage("Matchen är inte aktiv");
             }
@@ -60,9 +69,12 @@ namespace HpskSite.Controllers
 
             if (guest == null)
             {
+                _logger.LogWarning("ClaimGuestSpot: No guest found with ClaimToken {ClaimToken}", claimToken);
                 scope.Complete();
                 return RedirectToErrorPage("Ogiltig inbjudningstoken");
             }
+
+            _logger.LogInformation("ClaimGuestSpot: Found guest {GuestId} ({DisplayName})", guest.Id, guest.DisplayName);
 
             // Check if token has expired
             if (guest.ClaimTokenExpiresAt.HasValue && guest.ClaimTokenExpiresAt.Value < DateTime.UtcNow)
@@ -96,19 +108,20 @@ namespace HpskSite.Controllers
             scope.Complete();
 
             // Set session cookie
+            // Path must be "/" so the cookie is sent with API calls to /umbraco/surface/...
             var cookieOptions = new CookieOptions
             {
                 HttpOnly = true,
                 Secure = Request.IsHttps,
                 SameSite = SameSiteMode.Lax,
                 Expires = sessionExpiry,
-                Path = "/training/match" // Restrict to match pages
+                Path = "/"
             };
 
             Response.Cookies.Append($"guest_session_{code.ToUpper()}", sessionToken.ToString(), cookieOptions);
 
             // Redirect to match view
-            return Redirect($"/training/match?code={code.ToUpper()}");
+            return Redirect($"/traningsmatch/?join={code.ToUpper()}");
         }
 
         /// <summary>
@@ -174,7 +187,7 @@ namespace HpskSite.Controllers
         {
             // URL encode the message for the query string
             var encodedMessage = Uri.EscapeDataString(message);
-            return Redirect($"/training/match?error={encodedMessage}");
+            return Redirect($"/traningsmatch/?error={encodedMessage}");
         }
     }
 

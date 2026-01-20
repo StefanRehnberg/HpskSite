@@ -61,7 +61,7 @@
             </div>
             <div class="btn-group" id="matchActionButtons">
                 <!-- Settings button (creator only) -->
-                <button type="button" class="btn btn-light btn-sm" id="matchSettingsBtn" onclick="showMatchSettingsModal()" title="Inställningar" style="display:none;">
+                <button type="button" class="btn btn-light" id="matchSettingsBtn" onclick="showMatchSettingsModal()" title="Inställningar" style="display:none; font-size: 1.25rem; padding: 0.25rem 0.5rem;">
                     <i class="bi bi-gear-fill"></i>
                 </button>
                 <!-- Share and Leave buttons (non-creator participants) -->
@@ -123,8 +123,13 @@
                     <label for="maxSeriesCountInput" class="form-label fw-bold">
                         <i class="bi bi-list-ol me-1"></i>Max antal serier
                     </label>
-                    <input type="number" class="form-control" id="maxSeriesCountInput"
-                           min="1" max="20" placeholder="Lämna tomt för automatiskt">
+                    <div class="input-group">
+                        <input type="number" class="form-control" id="maxSeriesCountInput"
+                               min="1" max="20" placeholder="Lämna tomt för automatiskt">
+                        <button type="button" class="btn btn-primary" onclick="saveMatchSettings()">
+                            <i class="bi bi-check-lg me-1"></i>Spara
+                        </button>
+                    </div>
                     <div class="form-text">
                         Begränsa totalsumman till detta antal serier. Lämna tomt för att använda minsta antal skjutna serier.
                     </div>
@@ -133,26 +138,30 @@
                 <!-- Share Section -->
                 <div class="mb-4">
                     <label class="form-label fw-bold">
-                        <i class="bi bi-share me-1"></i>Dela match
+                        <i class="bi bi-share me-1"></i>Bjud in deltagare
                     </label>
+                    <p class="text-muted small mb-2">Registrerade användare kan ange matchkoden i appen för att gå med.</p>
 
-                    <!-- QR Code -->
-                    <div class="text-center mb-3">
-                        <img id="settingsQrCode" src="" alt="QR-kod" class="img-fluid" style="max-width: 180px; border-radius: 8px;">
+                    <!-- Match Code (inline) -->
+                    <div class="d-flex align-items-center justify-content-center gap-2 mb-3">
+                        <span class="text-muted">Matchkod:</span>
+                        <span class="fs-4 fw-bold font-monospace" id="settingsMatchCode"></span>
                     </div>
 
-                    <!-- Match Code -->
-                    <div class="text-center mb-3">
-                        <span class="text-muted small">Matchkod:</span>
-                        <div class="fs-3 fw-bold font-monospace" id="settingsMatchCode"></div>
-                    </div>
-
-                    <!-- Share Link -->
+                    <!-- Share Link with Copy and QR buttons -->
                     <div class="input-group input-group-sm">
                         <input type="text" class="form-control" id="settingsMatchLink" readonly>
                         <button class="btn btn-outline-primary" type="button" onclick="copyMatchLinkFromSettings()">
                             <i class="bi bi-clipboard"></i> Kopiera
                         </button>
+                        <button class="btn btn-outline-secondary" type="button" onclick="toggleSettingsQrCode()">
+                            <i class="bi bi-qr-code"></i> QR
+                        </button>
+                    </div>
+
+                    <!-- QR Code (collapsible) -->
+                    <div id="settingsQrCodeContainer" class="text-center mt-3" style="display: none;">
+                        <img id="settingsQrCode" src="" alt="QR-kod" class="img-fluid" style="max-width: 180px; border-radius: 8px;">
                     </div>
                 </div>
 
@@ -162,23 +171,17 @@
                         <i class="bi bi-person-plus me-1"></i>Gästhantering
                     </label>
                     <p class="text-muted small mb-2">Lägg till gäster som inte har konto för att delta i matchen.</p>
-                    <button type="button" class="btn btn-success w-100" onclick="showAddGuestModal()">
+                    <button type="button" class="btn w-100" style="background-color: #0891b2; border-color: #0891b2; color: white;" onclick="showAddGuestModal()">
                         <i class="bi bi-person-plus me-2"></i>Lägg till gäst
                     </button>
                 </div>
 
                 <!-- End Match Button -->
                 <div class="border-top pt-3">
-                    <button type="button" class="btn btn-danger w-100" onclick="completeMatch(); bootstrap.Modal.getInstance(document.getElementById('matchSettingsModal')).hide();">
+                    <button type="button" class="btn btn-danger w-100" onclick="confirmEndMatch()">
                         <i class="bi bi-stop-circle me-2"></i>Avsluta match
                     </button>
                 </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
-                <button type="button" class="btn btn-primary" onclick="saveMatchSettings()">
-                    <i class="bi bi-check-lg me-1"></i>Spara
-                </button>
             </div>
         </div>
     </div>
@@ -440,7 +443,13 @@ function renderScoreboard(match) {
 
     // Check if current user is actually in the participants list
     const myMemberIdCheck = parseInt(document.body.dataset.memberId) || 0;
-    const isActuallyParticipant = match.participants.some(p => p.memberId === myMemberIdCheck);
+    // For guests, check guestParticipantId instead of memberId
+    const isActuallyParticipant = match.participants.some(p => {
+        if (typeof isGuestUser !== 'undefined' && isGuestUser && typeof guestParticipantId !== 'undefined' && guestParticipantId > 0) {
+            return p.guestParticipantId === guestParticipantId;
+        }
+        return p.memberId === myMemberIdCheck;
+    });
 
     // Show/hide spectator banner - show if:
     // 1. Match is ACTIVE (not completed/history), AND
@@ -550,7 +559,13 @@ function renderScoreboard(match) {
     if (typeof isSpectator === 'undefined' || !isSpectator) {
         const myMemberId = parseInt(document.body.dataset.memberId) || 0;
         const isCreator = match.createdByMemberId === myMemberId;
-        const isParticipant = match.participants.some(p => p.memberId === myMemberId);
+        // For guests, check guestParticipantId instead of memberId
+        const isParticipant = match.participants.some(p => {
+            if (typeof isGuestUser !== 'undefined' && isGuestUser && typeof guestParticipantId !== 'undefined' && guestParticipantId > 0) {
+                return p.guestParticipantId === guestParticipantId;
+            }
+            return p.memberId === myMemberId;
+        });
 
         if (isCreator && match.status === 'Active') {
             // Creator sees settings button (cog) only
@@ -654,7 +669,11 @@ function renderScoreboard(match) {
 
                 // Check if this is the current user's score (editable)
                 // Never allow editing if spectator or match not started
-                const isMyScore = myMemberId && participant.memberId == myMemberId;
+                // For guests, check guestParticipantId instead of memberId
+                const isMyScore = (myMemberId && participant.memberId == myMemberId) ||
+                    (typeof isGuestUser !== 'undefined' && isGuestUser &&
+                     typeof guestParticipantId !== 'undefined' && guestParticipantId > 0 &&
+                     participant.guestParticipantId === guestParticipantId);
                 const isFirstParticipantFallback = !myMemberId && pIndex === 0;
                 const isSpectatorMode = typeof isSpectator !== 'undefined' && isSpectator;
                 const matchHasStarted = match.hasStarted !== false;
@@ -960,6 +979,12 @@ function showMatchSettingsModal() {
         matchLinkInput.value = window.location.origin + '/traningsmatch/?join=' + match.matchCode;
     }
 
+    // Reset QR code visibility (start hidden)
+    const qrContainer = document.getElementById('settingsQrCodeContainer');
+    if (qrContainer) {
+        qrContainer.style.display = 'none';
+    }
+
     // Show/hide guest management section (always show for organizers)
     const guestSection = document.getElementById('guestManagementSection');
     if (guestSection) {
@@ -972,6 +997,22 @@ function showMatchSettingsModal() {
 
     const modal = new bootstrap.Modal(document.getElementById('matchSettingsModal'));
     modal.show();
+}
+
+// Confirm and end match
+function confirmEndMatch() {
+    if (confirm('Är du säker på att du vill avsluta matchen? Detta kan inte ångras.')) {
+        completeMatch();
+        bootstrap.Modal.getInstance(document.getElementById('matchSettingsModal'))?.hide();
+    }
+}
+
+// Toggle QR code visibility in settings modal
+function toggleSettingsQrCode() {
+    const container = document.getElementById('settingsQrCodeContainer');
+    if (container) {
+        container.style.display = container.style.display === 'none' ? 'block' : 'none';
+    }
 }
 
 // Save match settings
