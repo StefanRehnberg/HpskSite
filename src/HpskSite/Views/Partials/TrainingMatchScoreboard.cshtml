@@ -176,6 +176,17 @@
                     </button>
                 </div>
 
+                <!-- Member Claim Section (for members who forgot password) -->
+                <div class="mb-4" id="memberClaimSection" style="display: none;">
+                    <label class="form-label fw-bold">
+                        <i class="bi bi-person-badge me-1"></i>Medlem utan inloggning
+                    </label>
+                    <p class="text-muted small mb-2">Lägg till en registrerad medlem som glömt sitt lösenord.</p>
+                    <button type="button" class="btn btn-primary w-100" onclick="showAddMemberModal()">
+                        <i class="bi bi-qr-code me-2"></i>Lägg till medlem utan inloggning
+                    </button>
+                </div>
+
                 <!-- End Match Button -->
                 <div class="border-top pt-3">
                     <button type="button" class="btn btn-danger w-100" onclick="confirmEndMatch()">
@@ -993,6 +1004,12 @@ function showMatchSettingsModal() {
         if (typeof initAddGuestModal === 'function') {
             initAddGuestModal(match.matchCode, match.hasHandicap || false);
         }
+    }
+
+    // Show member claim section (for members who forgot password)
+    const memberClaimSection = document.getElementById('memberClaimSection');
+    if (memberClaimSection) {
+        memberClaimSection.style.display = 'block';
     }
 
     const modal = new bootstrap.Modal(document.getElementById('matchSettingsModal'));

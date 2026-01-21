@@ -45,6 +45,98 @@
     </div>
 </div>
 
+<!-- Add Member (Forgot Password) Modal -->
+<div class="modal fade" id="addMemberModal" tabindex="-1" aria-labelledby="addMemberModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title" id="addMemberModalLabel">
+                    <i class="bi bi-person-badge me-2"></i>Lägg till medlem utan inloggning
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted mb-3">
+                    <small>Sök efter en registrerad medlem som glömt sitt lösenord och inte kan logga in.</small>
+                </p>
+                <div class="mb-3">
+                    <label for="memberSearchInput" class="form-label">Sök medlem <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="memberSearchInput" placeholder="Skriv namn..." autocomplete="off">
+                    <div class="form-text">Skriv minst 2 tecken för att söka</div>
+                </div>
+
+                <!-- Search Results -->
+                <div id="memberSearchResults" class="list-group mb-3" style="max-height: 200px; overflow-y: auto;">
+                    <!-- Results will be populated here -->
+                </div>
+
+                <!-- Selected Member Display -->
+                <div id="selectedMemberDisplay" class="d-none">
+                    <div class="alert alert-success mb-3">
+                        <i class="bi bi-check-circle me-2"></i>
+                        <strong>Vald medlem:</strong>
+                        <span id="selectedMemberName"></span>
+                        <span id="selectedMemberClub" class="text-muted ms-2"></span>
+                        <input type="hidden" id="selectedMemberId" />
+                        <button type="button" class="btn-close float-end" onclick="clearSelectedMember()"></button>
+                    </div>
+                </div>
+
+                <div class="alert alert-info mb-0">
+                    <i class="bi bi-info-circle me-2"></i>
+                    <small>Medlemmen skannar QR-koden för att gå med i matchen. Resultat kopplas till deras medlemskonto.</small>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="addMemberSubmitBtn" onclick="submitAddMember()" disabled>
+                    <i class="bi bi-qr-code me-1"></i>Skapa QR-kod
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Member QR Code Modal -->
+<div class="modal fade" id="memberQrModal" tabindex="-1" aria-labelledby="memberQrModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title" id="memberQrModalLabel">
+                    <i class="bi bi-qr-code me-2"></i>QR-kod för medlem
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body text-center">
+                <p class="mb-3">
+                    Visa QR-koden för <strong id="memberQrName"></strong>
+                    <span id="memberQrClub" class="text-muted"></span>
+                </p>
+
+                <div class="mb-3">
+                    <div id="memberQrCodeContainer" class="d-inline-block p-3 bg-white rounded border">
+                        <!-- QR code will be rendered here -->
+                    </div>
+                </div>
+
+                <p class="text-muted small mb-3">
+                    Medlemmen skannar QR-koden med sin mobils kamera. En bekräftelsesida visas innan de går med i matchen.
+                </p>
+
+                <div class="alert alert-warning mb-0">
+                    <i class="bi bi-clock me-2"></i>
+                    <small>Länken gäller i <strong>30 minuter</strong>.</small>
+                </div>
+            </div>
+            <div class="modal-footer justify-content-center">
+                <button type="button" class="btn btn-primary" data-bs-dismiss="modal">
+                    <i class="bi bi-check-lg me-1"></i>Klar
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Guest QR Code Modal -->
 <div class="modal fade" id="guestQrModal" tabindex="-1" aria-labelledby="guestQrModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
@@ -234,5 +326,186 @@ async function removeGuest(guestId) {
         console.error('Error removing guest:', error);
         alert('Ett fel uppstod vid borttagning av gäst: ' + error.message);
     }
+}
+
+// ========== Member Claim Functions (Forgot Password at Range) ==========
+
+let memberSearchTimeout = null;
+
+function showAddMemberModal() {
+    // Reset form
+    document.getElementById('memberSearchInput').value = '';
+    document.getElementById('memberSearchResults').innerHTML = '';
+    clearSelectedMember();
+
+    // Show modal
+    const modal = new bootstrap.Modal(document.getElementById('addMemberModal'));
+    modal.show();
+
+    // Focus search input
+    setTimeout(() => {
+        document.getElementById('memberSearchInput').focus();
+    }, 500);
+}
+
+// Set up search input listener
+document.addEventListener('DOMContentLoaded', function() {
+    const searchInput = document.getElementById('memberSearchInput');
+    if (searchInput) {
+        searchInput.addEventListener('input', function() {
+            clearTimeout(memberSearchTimeout);
+            const query = this.value.trim();
+
+            if (query.length < 2) {
+                document.getElementById('memberSearchResults').innerHTML = '';
+                return;
+            }
+
+            // Debounce search
+            memberSearchTimeout = setTimeout(() => searchMembers(query), 300);
+        });
+    }
+});
+
+async function searchMembers(query) {
+    const resultsContainer = document.getElementById('memberSearchResults');
+
+    try {
+        resultsContainer.innerHTML = '<div class="list-group-item text-center"><span class="spinner-border spinner-border-sm me-2"></span>Söker...</div>';
+
+        const response = await fetch(`/api/match/search-members?q=${encodeURIComponent(query)}`, {
+            method: 'GET',
+            credentials: 'same-origin',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+
+        if (!response.ok) {
+            throw new Error('Sökningen misslyckades');
+        }
+
+        const result = await response.json();
+
+        if (!result.success) {
+            resultsContainer.innerHTML = `<div class="list-group-item text-danger">${result.message}</div>`;
+            return;
+        }
+
+        if (!result.data || result.data.length === 0) {
+            resultsContainer.innerHTML = '<div class="list-group-item text-muted">Inga medlemmar hittades</div>';
+            return;
+        }
+
+        // Render results
+        resultsContainer.innerHTML = result.data.map(member => `
+            <button type="button" class="list-group-item list-group-item-action" onclick="selectMember(${member.id}, '${escapeHtml(member.displayName)}', '${escapeHtml(member.clubName || '')}')">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <strong>${escapeHtml(member.displayName)}</strong>
+                        ${member.clubName ? `<small class="text-muted ms-2">${escapeHtml(member.clubName)}</small>` : ''}
+                    </div>
+                    <i class="bi bi-chevron-right text-muted"></i>
+                </div>
+            </button>
+        `).join('');
+    } catch (error) {
+        console.error('Error searching members:', error);
+        resultsContainer.innerHTML = '<div class="list-group-item text-danger">Ett fel uppstod vid sökning</div>';
+    }
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function selectMember(memberId, displayName, clubName) {
+    document.getElementById('selectedMemberId').value = memberId;
+    document.getElementById('selectedMemberName').textContent = displayName;
+    document.getElementById('selectedMemberClub').textContent = clubName ? `(${clubName})` : '';
+    document.getElementById('selectedMemberDisplay').classList.remove('d-none');
+    document.getElementById('memberSearchResults').innerHTML = '';
+    document.getElementById('memberSearchInput').value = '';
+    document.getElementById('addMemberSubmitBtn').disabled = false;
+}
+
+function clearSelectedMember() {
+    document.getElementById('selectedMemberId').value = '';
+    document.getElementById('selectedMemberName').textContent = '';
+    document.getElementById('selectedMemberClub').textContent = '';
+    document.getElementById('selectedMemberDisplay').classList.add('d-none');
+    document.getElementById('addMemberSubmitBtn').disabled = true;
+}
+
+async function submitAddMember() {
+    const memberId = document.getElementById('selectedMemberId').value;
+
+    if (!memberId) {
+        alert('Välj en medlem först');
+        return;
+    }
+
+    // Disable button while processing
+    const submitBtn = document.getElementById('addMemberSubmitBtn');
+    const originalText = submitBtn.innerHTML;
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Skapar QR-kod...';
+
+    try {
+        const response = await fetch(`/api/match/${currentMatchCode}/member-claim`, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ memberId: parseInt(memberId) })
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Create member claim failed:', response.status, errorText);
+            alert(`Serverfel: ${response.status}`);
+            return;
+        }
+
+        const result = await response.json();
+
+        if (result.success) {
+            // Close add member modal
+            const addModal = bootstrap.Modal.getInstance(document.getElementById('addMemberModal'));
+            addModal.hide();
+
+            // Show QR code modal
+            showMemberQrCode(result.data);
+        } else {
+            alert(result.message || 'Kunde inte skapa QR-kod');
+        }
+    } catch (error) {
+        console.error('Error creating member claim:', error);
+        alert('Ett fel uppstod: ' + error.message);
+    } finally {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = originalText;
+    }
+}
+
+function showMemberQrCode(claimData) {
+    // Set member info
+    document.getElementById('memberQrName').textContent = claimData.displayName;
+    document.getElementById('memberQrClub').textContent = claimData.clubName ? `(${claimData.clubName})` : '';
+
+    // Generate QR code
+    const qrContainer = document.getElementById('memberQrCodeContainer');
+    const claimUrl = claimData.claimUrl;
+
+    // Use QR code API
+    qrContainer.innerHTML = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(claimUrl)}" alt="QR Code" style="width: 200px; height: 200px;">`;
+
+    // Show modal
+    const modal = new bootstrap.Modal(document.getElementById('memberQrModal'));
+    modal.show();
 }
 </script>

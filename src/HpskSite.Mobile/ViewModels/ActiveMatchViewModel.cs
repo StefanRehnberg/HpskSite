@@ -915,6 +915,196 @@ public partial class ActiveMatchViewModel : BaseViewModel
 
     #endregion
 
+    #region Member Claim (Forgot Password at Range)
+
+    [ObservableProperty]
+    private bool _isAddMemberModalOpen;
+
+    [ObservableProperty]
+    private bool _isMemberQrModalOpen;
+
+    [ObservableProperty]
+    private string _memberSearchText = string.Empty;
+
+    [ObservableProperty]
+    private bool _isSearchingMembers;
+
+    [ObservableProperty]
+    private ObservableCollection<MemberSearchResult> _memberSearchResults = new();
+
+    [ObservableProperty]
+    private MemberSearchResult? _selectedMember;
+
+    [ObservableProperty]
+    private bool _isCreatingMemberClaim;
+
+    [ObservableProperty]
+    private string _memberClaimQrUrl = string.Empty;
+
+    [ObservableProperty]
+    private string _addedMemberName = string.Empty;
+
+    [ObservableProperty]
+    private string? _addedMemberClub;
+
+    [ObservableProperty]
+    private bool _hasMemberClaimError;
+
+    [ObservableProperty]
+    private string _memberClaimErrorMessage = string.Empty;
+
+    public bool HasSelectedMember => SelectedMember != null;
+
+    /// <summary>
+    /// Open the add member modal
+    /// </summary>
+    [RelayCommand]
+    private void OpenAddMemberModal()
+    {
+        if (!IsMatchHost)
+            return;
+
+        // Reset form
+        MemberSearchText = string.Empty;
+        MemberSearchResults.Clear();
+        SelectedMember = null;
+        HasMemberClaimError = false;
+        MemberClaimErrorMessage = string.Empty;
+        IsAddMemberModalOpen = true;
+    }
+
+    /// <summary>
+    /// Close the add member modal
+    /// </summary>
+    [RelayCommand]
+    private void CloseAddMemberModal()
+    {
+        IsAddMemberModalOpen = false;
+    }
+
+    /// <summary>
+    /// Close the member QR code modal
+    /// </summary>
+    [RelayCommand]
+    private void CloseMemberQrModal()
+    {
+        IsMemberQrModalOpen = false;
+    }
+
+    /// <summary>
+    /// Search for members by name
+    /// </summary>
+    [RelayCommand]
+    private async Task SearchMembersAsync()
+    {
+        if (string.IsNullOrWhiteSpace(MemberSearchText) || MemberSearchText.Length < 2)
+        {
+            MemberSearchResults.Clear();
+            return;
+        }
+
+        if (IsSearchingMembers)
+            return;
+
+        try
+        {
+            IsSearchingMembers = true;
+            var result = await _matchService.SearchMembersAsync(MemberSearchText.Trim());
+
+            MemberSearchResults.Clear();
+            if (result.Success && result.Data != null)
+            {
+                foreach (var member in result.Data)
+                {
+                    MemberSearchResults.Add(member);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Error searching members: {ex.Message}");
+        }
+        finally
+        {
+            IsSearchingMembers = false;
+        }
+    }
+
+    /// <summary>
+    /// Select a member from search results
+    /// </summary>
+    [RelayCommand]
+    private void SelectMember(MemberSearchResult member)
+    {
+        SelectedMember = member;
+        MemberSearchResults.Clear();
+        MemberSearchText = string.Empty;
+        OnPropertyChanged(nameof(HasSelectedMember));
+    }
+
+    /// <summary>
+    /// Clear the selected member
+    /// </summary>
+    [RelayCommand]
+    private void ClearSelectedMember()
+    {
+        SelectedMember = null;
+        OnPropertyChanged(nameof(HasSelectedMember));
+    }
+
+    /// <summary>
+    /// Create a member claim QR code
+    /// </summary>
+    [RelayCommand]
+    private async Task CreateMemberClaimAsync()
+    {
+        if (IsCreatingMemberClaim || !IsMatchHost || Match == null || SelectedMember == null)
+            return;
+
+        try
+        {
+            IsCreatingMemberClaim = true;
+            HasMemberClaimError = false;
+
+            var result = await _matchService.CreateMemberClaimAsync(MatchCode, SelectedMember.Id);
+
+            if (result.Success && result.Data != null)
+            {
+                // Close the add member modal
+                IsAddMemberModalOpen = false;
+                IsSettingsModalOpen = false;
+
+                // Show the QR code modal
+                AddedMemberName = result.Data.DisplayName;
+                AddedMemberClub = result.Data.ClubName;
+
+                // Generate QR code URL using server
+                var apiService = _apiService as ApiService;
+                var baseUrl = apiService?.BaseUrl?.TrimEnd('/') ?? "";
+                // The claim URL is the full URL that users scan with their phone
+                MemberClaimQrUrl = $"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={Uri.EscapeDataString(result.Data.ClaimUrl)}";
+
+                IsMemberQrModalOpen = true;
+            }
+            else
+            {
+                HasMemberClaimError = true;
+                MemberClaimErrorMessage = result.Message ?? "Kunde inte skapa QR-kod";
+            }
+        }
+        catch (Exception ex)
+        {
+            HasMemberClaimError = true;
+            MemberClaimErrorMessage = $"Fel: {ex.Message}";
+        }
+        finally
+        {
+            IsCreatingMemberClaim = false;
+        }
+    }
+
+    #endregion
+
     /// <summary>
     /// Copy match code to clipboard (for sharing)
     /// </summary>

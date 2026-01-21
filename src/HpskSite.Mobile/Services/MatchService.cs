@@ -158,6 +158,16 @@ public class MatchService : IMatchService
     {
         return await _apiService.PostAsync($"api/match/{matchCode}/settings", new { MaxSeriesCount = maxSeriesCount, AllowGuests = allowGuests });
     }
+
+    public async Task<ApiResponse<List<MemberSearchResult>>> SearchMembersAsync(string searchTerm)
+    {
+        return await _apiService.GetAsync<List<MemberSearchResult>>($"api/match/search-members?q={Uri.EscapeDataString(searchTerm)}");
+    }
+
+    public async Task<ApiResponse<CreateMemberClaimResponse>> CreateMemberClaimAsync(string matchCode, int memberId, string? handicapClass = null)
+    {
+        return await _apiService.PostAsync<CreateMemberClaimResponse>($"api/match/{matchCode}/member-claim", new { MemberId = memberId, HandicapClass = handicapClass });
+    }
 }
 
 /// <summary>
@@ -218,6 +228,8 @@ public interface IMatchService
     Task<ApiResponse> RemoveGuestAsync(string matchCode, int guestId);
     Task<ApiResponse<RegenerateGuestQrResponse>> RegenerateGuestQrAsync(string matchCode, int guestId);
     Task<ApiResponse> UpdateMatchSettingsWithGuestsAsync(string matchCode, int? maxSeriesCount, bool? allowGuests);
+    Task<ApiResponse<List<MemberSearchResult>>> SearchMembersAsync(string searchTerm);
+    Task<ApiResponse<CreateMemberClaimResponse>> CreateMemberClaimAsync(string matchCode, int memberId, string? handicapClass = null);
 }
 
 /// <summary>
@@ -315,6 +327,30 @@ public class RegenerateGuestQrResponse
 {
     public int GuestId { get; set; }
     public string DisplayName { get; set; } = string.Empty;
+    public string ClaimUrl { get; set; } = string.Empty;
+    public DateTime ClaimExpiresAt { get; set; }
+}
+
+/// <summary>
+/// Search result for member search (organizers finding members who forgot password)
+/// </summary>
+public class MemberSearchResult
+{
+    public int Id { get; set; }
+    public string FirstName { get; set; } = string.Empty;
+    public string LastName { get; set; } = string.Empty;
+    public string DisplayName => $"{FirstName} {LastName}".Trim();
+    public string? ClubName { get; set; }
+}
+
+/// <summary>
+/// Response after creating a member claim QR code
+/// </summary>
+public class CreateMemberClaimResponse
+{
+    public int ClaimId { get; set; }
+    public string DisplayName { get; set; } = string.Empty;
+    public string? ClubName { get; set; }
     public string ClaimUrl { get; set; } = string.Empty;
     public DateTime ClaimExpiresAt { get; set; }
 }

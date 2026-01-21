@@ -749,12 +749,9 @@
         }
 
         // Complete/end match
+        // Note: Confirmation is handled by confirmEndMatch() in TrainingMatchScoreboard.cshtml
         function completeMatch() {
             if (!currentMatchCode) return;
-
-            if (!confirm('Är du säker på att du vill avsluta matchen? Detta kan inte ångras.')) {
-                return;
-            }
 
             const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value;
 

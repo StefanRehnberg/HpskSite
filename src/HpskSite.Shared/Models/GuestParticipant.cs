@@ -50,6 +50,13 @@ namespace HpskSite.Shared.Models
         public int? PendingMemberId { get; set; }
 
         /// <summary>
+        /// For member claim: links to an existing Umbraco member (for members who forgot their password)
+        /// When set, the claim creates a participant with MemberId instead of GuestParticipantId
+        /// </summary>
+        [JsonPropertyName("linkedMemberId")]
+        public int? LinkedMemberId { get; set; }
+
+        /// <summary>
         /// Member ID of who created/added this guest
         /// </summary>
         [JsonPropertyName("createdByMemberId")]

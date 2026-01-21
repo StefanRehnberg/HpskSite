@@ -37,6 +37,7 @@ namespace HpskSite.Controllers.Api
         private readonly ImageResizeService _imageResizeService;
         private readonly IWebHostEnvironment _webHostEnvironment;
         private readonly ILogger<MatchApiController> _logger;
+        private readonly Services.ClubService _clubService;
 
         public MatchApiController(
             IScopeProvider scopeProvider,
@@ -50,7 +51,8 @@ namespace HpskSite.Controllers.Api
             PushNotificationService pushNotificationService,
             ImageResizeService imageResizeService,
             IWebHostEnvironment webHostEnvironment,
-            ILogger<MatchApiController> logger)
+            ILogger<MatchApiController> logger,
+            Services.ClubService clubService)
         {
             _scopeProvider = scopeProvider;
             _memberService = memberService;
@@ -64,6 +66,7 @@ namespace HpskSite.Controllers.Api
             _imageResizeService = imageResizeService;
             _webHostEnvironment = webHostEnvironment;
             _logger = logger;
+            _clubService = clubService;
         }
 
         /// <summary>
@@ -1855,6 +1858,205 @@ namespace HpskSite.Controllers.Api
             return Ok(ApiResponse<RegenerateGuestQrResponse>.Ok(response));
         }
 
+        #region Member Claim (Forgot Password at Range)
+
+        /// <summary>
+        /// Search for members by name (for organizers to find members who forgot their password)
+        /// GET /api/match/search-members?q={searchTerm}
+        /// </summary>
+        [AllowAnonymous]
+        [HttpGet("search-members")]
+        public async Task<IActionResult> SearchMembers([FromQuery] string q)
+        {
+            var memberId = await GetCurrentMemberIdAsync();
+            if (!memberId.HasValue)
+            {
+                return Unauthorized(ApiResponse<List<Shared.DTOs.MemberSearchResult>>.Error("Ej inloggad"));
+            }
+
+            if (string.IsNullOrWhiteSpace(q) || q.Length < 2)
+            {
+                return BadRequest(ApiResponse<List<Shared.DTOs.MemberSearchResult>>.Error("Sökterm måste vara minst 2 tecken"));
+            }
+
+            try
+            {
+                var searchTerm = q.Trim().ToLower();
+                var results = new List<Shared.DTOs.MemberSearchResult>();
+
+                // Search members by name using IMemberService
+                var allMembers = _memberService.GetAllMembers();
+
+                foreach (var member in allMembers)
+                {
+                    var firstName = member.GetValue<string>("firstName") ?? "";
+                    var lastName = member.GetValue<string>("lastName") ?? "";
+                    var fullName = $"{firstName} {lastName}".ToLower();
+
+                    if (fullName.Contains(searchTerm) || firstName.ToLower().Contains(searchTerm) || lastName.ToLower().Contains(searchTerm))
+                    {
+                        // Get club name
+                        string? clubName = null;
+                        var clubId = member.GetValue<int>("primaryClubId");
+                        if (clubId > 0)
+                        {
+                            // Use ClubService if available, otherwise just set clubName from lookup
+                            clubName = GetClubNameById(clubId);
+                        }
+
+                        results.Add(new Shared.DTOs.MemberSearchResult
+                        {
+                            Id = member.Id,
+                            FirstName = firstName,
+                            LastName = lastName,
+                            ClubName = clubName
+                        });
+                    }
+
+                    // Limit to 20 results
+                    if (results.Count >= 20)
+                        break;
+                }
+
+                return Ok(ApiResponse<List<Shared.DTOs.MemberSearchResult>>.Ok(results));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error searching members with term '{SearchTerm}'", q);
+                return StatusCode(500, ApiResponse<List<Shared.DTOs.MemberSearchResult>>.Error($"Serverfel: {ex.Message}"));
+            }
+        }
+
+        /// <summary>
+        /// Helper method to get club name by ID
+        /// </summary>
+        private string? GetClubNameById(int clubId)
+        {
+            return _clubService.GetClubNameById(clubId);
+        }
+
+        /// <summary>
+        /// Create a member claim QR code (organizer only)
+        /// POST /api/match/{code}/member-claim
+        /// </summary>
+        [AllowAnonymous]
+        [HttpPost("{code}/member-claim")]
+        public async Task<IActionResult> CreateMemberClaim(string code, [FromBody] Shared.DTOs.CreateMemberClaimRequest? request)
+        {
+            try
+            {
+                _logger.LogInformation("CreateMemberClaim called: code={Code}, memberId={MemberId}", code, request?.MemberId);
+
+                var currentMemberId = await GetCurrentMemberIdAsync();
+                if (!currentMemberId.HasValue)
+                {
+                    return Unauthorized(ApiResponse<Shared.DTOs.CreateMemberClaimResponse>.Error("Ej inloggad"));
+                }
+
+                if (request == null || request.MemberId <= 0)
+                {
+                    return BadRequest(ApiResponse<Shared.DTOs.CreateMemberClaimResponse>.Error("Ogiltigt medlems-ID"));
+                }
+
+                using var scope = _scopeProvider.CreateScope();
+                var db = scope.Database;
+
+                // Find match
+                var match = await db.FirstOrDefaultAsync<TrainingMatchDbDto>(
+                    "WHERE MatchCode = @0", code.ToUpper());
+
+                if (match == null)
+                {
+                    return NotFound(ApiResponse<Shared.DTOs.CreateMemberClaimResponse>.Error("Matchen hittades inte"));
+                }
+
+                // Only creator can create member claims
+                if (match.CreatedByMemberId != currentMemberId.Value)
+                {
+                    return Forbid();
+                }
+
+                if (match.Status != "Active")
+                {
+                    return BadRequest(ApiResponse<Shared.DTOs.CreateMemberClaimResponse>.Error("Matchen är inte aktiv"));
+                }
+
+                // Verify the target member exists
+                var targetMember = _memberService.GetById(request.MemberId);
+                if (targetMember == null)
+                {
+                    return NotFound(ApiResponse<Shared.DTOs.CreateMemberClaimResponse>.Error("Medlemmen hittades inte"));
+                }
+
+                // Check if member is already in the match
+                var existingParticipant = await db.FirstOrDefaultAsync<TrainingMatchParticipantDbDto>(
+                    "WHERE TrainingMatchId = @0 AND MemberId = @1",
+                    match.Id, request.MemberId);
+
+                if (existingParticipant != null)
+                {
+                    return BadRequest(ApiResponse<Shared.DTOs.CreateMemberClaimResponse>.Error("Medlemmen är redan med i matchen"));
+                }
+
+                // Get member info
+                var firstName = targetMember.GetValue<string>("firstName") ?? "";
+                var lastName = targetMember.GetValue<string>("lastName") ?? "";
+                var displayName = $"{firstName} {lastName}".Trim();
+                if (string.IsNullOrEmpty(displayName))
+                    displayName = targetMember.Name ?? $"Medlem {request.MemberId}";
+
+                // Get club name
+                string? clubName = null;
+                var clubId = targetMember.GetValue<int>("primaryClubId");
+                if (clubId > 0)
+                {
+                    clubName = GetClubNameById(clubId);
+                }
+
+                // Create claim record
+                var claimToken = Guid.NewGuid();
+                var claimExpiresAt = DateTime.UtcNow.AddMinutes(30);
+
+                var claimRecord = new GuestParticipantDbDto
+                {
+                    DisplayName = displayName,
+                    ClaimToken = claimToken,
+                    ClaimTokenExpiresAt = claimExpiresAt,
+                    LinkedMemberId = request.MemberId,
+                    CreatedByMemberId = currentMemberId.Value,
+                    CreatedAt = DateTime.UtcNow
+                };
+
+                await db.InsertAsync(claimRecord);
+
+                scope.Complete();
+
+                // Build claim URL
+                var siteUrl = _configuration["EmailSettings:SiteUrl"]?.TrimEnd('/') ?? $"{Request.Scheme}://{Request.Host}";
+                var claimUrl = $"{siteUrl}/match/{code.ToUpper()}/member/{claimToken}";
+
+                _logger.LogInformation("CreateMemberClaim: Generated claimUrl={ClaimUrl} for member {MemberId}", claimUrl, request.MemberId);
+
+                var response = new Shared.DTOs.CreateMemberClaimResponse
+                {
+                    ClaimId = claimRecord.Id,
+                    DisplayName = displayName,
+                    ClubName = clubName,
+                    ClaimUrl = claimUrl,
+                    ClaimExpiresAt = claimExpiresAt
+                };
+
+                return Ok(ApiResponse<Shared.DTOs.CreateMemberClaimResponse>.Ok(response));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error creating member claim for match {MatchCode}", code);
+                return StatusCode(500, ApiResponse<Shared.DTOs.CreateMemberClaimResponse>.Error($"Serverfel: {ex.Message}"));
+            }
+        }
+
+        #endregion
+
         /// <summary>
         /// Get match by code with full details
         /// </summary>
@@ -2108,6 +2310,7 @@ namespace HpskSite.Controllers.Api
         public Guid? SessionToken { get; set; }
         public DateTime? SessionExpiresAt { get; set; }
         public int? PendingMemberId { get; set; }
+        public int? LinkedMemberId { get; set; }
         public int CreatedByMemberId { get; set; }
         public DateTime CreatedAt { get; set; }
     }

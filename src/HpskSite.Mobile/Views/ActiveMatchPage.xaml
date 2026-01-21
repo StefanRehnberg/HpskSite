@@ -999,6 +999,25 @@
                         <!--  Section Separator  -->
                         <BoxView HeightRequest="1" BackgroundColor="#4b5563" Margin="0,4" />
 
+                        <!--  Section 3b: Member Claim (Forgot Password at Range)  -->
+                        <VerticalStackLayout Spacing="10">
+                            <Label Text="Medlem utan inloggning" FontSize="14" FontAttributes="Bold" TextColor="White" />
+                            <Label Text="Lägg till registrerad medlem som glömt sitt lösenord."
+                                   FontSize="11" TextColor="#9ca3af" LineBreakMode="WordWrap" />
+
+                            <!--  Add Member Button  -->
+                            <Button Text="🔓 Lägg till medlem utan inloggning"
+                                    Command="{Binding OpenAddMemberModalCommand}"
+                                    BackgroundColor="{StaticResource Primary}"
+                                    TextColor="White"
+                                    CornerRadius="8"
+                                    HeightRequest="44"
+                                    FontSize="14" />
+                        </VerticalStackLayout>
+
+                        <!--  Section Separator  -->
+                        <BoxView HeightRequest="1" BackgroundColor="#4b5563" Margin="0,4" />
+
                         <!--  Section 4: End Match Button (Bottom)  -->
                         <Button Text="🛑 Avsluta match"
                                 Clicked="OnCompleteMatchClicked"
@@ -1435,6 +1454,246 @@
                     <!--  Close Button  -->
                     <Button Text="Klar"
                             Command="{Binding CloseGuestQrModalCommand}"
+                            BackgroundColor="{StaticResource Primary}"
+                            TextColor="White" CornerRadius="8"
+                            HeightRequest="44" FontAttributes="Bold" />
+
+                </VerticalStackLayout>
+            </Border>
+        </Grid>
+
+        <!--  Add Member Modal (Host only - For members who forgot password)  -->
+        <Grid Grid.Row="0" BackgroundColor="#80000000"
+              IsVisible="{Binding IsAddMemberModalOpen}">
+            <!--  Tap overlay to close  -->
+            <Grid.GestureRecognizers>
+                <TapGestureRecognizer Command="{Binding CloseAddMemberModalCommand}" />
+            </Grid.GestureRecognizers>
+
+            <!--  Modal Content (Bottom Sheet)  -->
+            <Border Padding="16,16,16,20"
+                    BackgroundColor="#374151"
+                    Stroke="Transparent" StrokeShape="RoundRectangle 20,20,0,0"
+                    VerticalOptions="End"
+                    MaximumHeightRequest="600">
+                <Border.Shadow>
+                    <Shadow Brush="Black" Opacity="0.2" Radius="12"
+                            Offset="0,-4" />
+                </Border.Shadow>
+                <Border.GestureRecognizers>
+                    <TapGestureRecognizer />
+                </Border.GestureRecognizers>
+
+                <VerticalStackLayout Spacing="16">
+
+                    <!--  Modal Header with Close Button  -->
+                    <Grid ColumnDefinitions="*,Auto">
+                        <HorizontalStackLayout Spacing="8">
+                            <Label FontSize="18" Text="🔓" VerticalOptions="Center" />
+                            <Label FontAttributes="Bold" FontSize="18"
+                                   Text="Lägg till medlem utan inloggning"
+                                   TextColor="White" VerticalOptions="Center" />
+                        </HorizontalStackLayout>
+                        <Button Grid.Column="1" Padding="0" BackgroundColor="#4b5563"
+                                Command="{Binding CloseAddMemberModalCommand}"
+                                CornerRadius="18" FontAttributes="Bold" FontSize="14"
+                                HeightRequest="36" Text="X" TextColor="White"
+                                WidthRequest="36" />
+                    </Grid>
+
+                    <!--  Description  -->
+                    <Label Text="Sök efter en registrerad medlem som glömt sitt lösenord."
+                           FontSize="12" TextColor="#9ca3af" LineBreakMode="WordWrap" />
+
+                    <!--  Search Input  -->
+                    <VerticalStackLayout Spacing="6">
+                        <Label Text="Sök medlem *" FontSize="14" FontAttributes="Bold" TextColor="White" />
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                            <Entry Placeholder="Skriv namn..."
+                                   Text="{Binding MemberSearchText}"
+                                   BackgroundColor="#4b5563"
+                                   TextColor="White"
+                                   PlaceholderColor="#9ca3af"
+                                   ReturnCommand="{Binding SearchMembersCommand}" />
+                            <Button Grid.Column="1" Text="Sök"
+                                    Command="{Binding SearchMembersCommand}"
+                                    BackgroundColor="{StaticResource Primary}"
+                                    TextColor="White" CornerRadius="6"
+                                    HeightRequest="44" Padding="12,0" FontSize="13"
+                                    IsEnabled="{Binding IsSearchingMembers, Converter={StaticResource InverseBoolConverter}}" />
+                        </Grid>
+                        <Label Text="Skriv minst 2 tecken för att söka"
+                               FontSize="11" TextColor="#9ca3af" />
+                    </VerticalStackLayout>
+
+                    <!--  Search Results  -->
+                    <CollectionView ItemsSource="{Binding MemberSearchResults}"
+                                    SelectionMode="None"
+                                    MaximumHeightRequest="150">
+                        <CollectionView.ItemTemplate>
+                            <DataTemplate x:DataType="services:MemberSearchResult">
+                                <Border Padding="10" BackgroundColor="#4b5563" Stroke="Transparent"
+                                        StrokeShape="RoundRectangle 8" Margin="0,2">
+                                    <Border.GestureRecognizers>
+                                        <TapGestureRecognizer Command="{Binding Source={RelativeSource AncestorType={x:Type viewmodels:ActiveMatchViewModel}}, Path=SelectMemberCommand}"
+                                                              CommandParameter="{Binding .}" />
+                                    </Border.GestureRecognizers>
+                                    <Grid ColumnDefinitions="*,Auto">
+                                        <VerticalStackLayout>
+                                            <Label Text="{Binding DisplayName}"
+                                                   FontSize="14" TextColor="White" />
+                                            <Label Text="{Binding ClubName}"
+                                                   FontSize="11" TextColor="#9ca3af"
+                                                   IsVisible="{Binding ClubName, Converter={StaticResource StringNotEmptyConverter}}" />
+                                        </VerticalStackLayout>
+                                        <Label Grid.Column="1" Text=">" TextColor="#9ca3af"
+                                               FontSize="16" VerticalOptions="Center" />
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </CollectionView.ItemTemplate>
+                    </CollectionView>
+
+                    <!--  Loading indicator for search  -->
+                    <ActivityIndicator IsRunning="{Binding IsSearchingMembers}"
+                                       IsVisible="{Binding IsSearchingMembers}"
+                                       HeightRequest="24" WidthRequest="24"
+                                       HorizontalOptions="Center"
+                                       Color="{StaticResource Primary}" />
+
+                    <!--  Selected Member Display  -->
+                    <Border Padding="12" BackgroundColor="#166534" Stroke="Transparent" StrokeShape="RoundRectangle 8"
+                            IsVisible="{Binding HasSelectedMember}">
+                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+                            <Label Text="✓" FontSize="18" TextColor="White" VerticalOptions="Center" />
+                            <VerticalStackLayout Grid.Column="1">
+                                <Label Text="Vald medlem:" FontSize="11" TextColor="#86efac" />
+                                <Label Text="{Binding SelectedMember.DisplayName}"
+                                       FontSize="14" FontAttributes="Bold" TextColor="White" />
+                                <Label Text="{Binding SelectedMember.ClubName}"
+                                       FontSize="11" TextColor="#86efac"
+                                       IsVisible="{Binding SelectedMember.ClubName, Converter={StaticResource StringNotEmptyConverter}}" />
+                            </VerticalStackLayout>
+                            <Button Grid.Column="2" Text="X"
+                                    Command="{Binding ClearSelectedMemberCommand}"
+                                    BackgroundColor="#4b5563"
+                                    TextColor="White" CornerRadius="12"
+                                    HeightRequest="28" WidthRequest="28" Padding="0" FontSize="12" />
+                        </Grid>
+                    </Border>
+
+                    <!--  Info Message  -->
+                    <Border Padding="12" BackgroundColor="#1e3a5f" Stroke="Transparent" StrokeShape="RoundRectangle 8">
+                        <HorizontalStackLayout Spacing="8">
+                            <Label FontSize="16" Text="ℹ️" VerticalOptions="Center" />
+                            <Label FontSize="12" TextColor="#9ca3af" LineBreakMode="WordWrap"
+                                   Text="Medlemmen skannar QR-koden för att gå med i matchen. Resultat kopplas till deras medlemskonto." />
+                        </HorizontalStackLayout>
+                    </Border>
+
+                    <!--  Error Message  -->
+                    <Border Padding="8" BackgroundColor="#FEE2E2"
+                            IsVisible="{Binding HasMemberClaimError}"
+                            Stroke="{StaticResource Danger}"
+                            StrokeShape="RoundRectangle 8">
+                        <HorizontalStackLayout Spacing="6">
+                            <Label FontAttributes="Bold" FontSize="14" Text="!"
+                                   TextColor="{StaticResource Danger}"
+                                   VerticalOptions="Center" />
+                            <Label FontSize="13" LineBreakMode="WordWrap"
+                                   Text="{Binding MemberClaimErrorMessage}"
+                                   TextColor="{StaticResource Danger}"
+                                   VerticalOptions="Center" />
+                        </HorizontalStackLayout>
+                    </Border>
+
+                    <!--  Submit Button  -->
+                    <Button Text="Skapa QR-kod"
+                            Command="{Binding CreateMemberClaimCommand}"
+                            BackgroundColor="{StaticResource Success}"
+                            TextColor="White" CornerRadius="8"
+                            HeightRequest="48" FontAttributes="Bold"
+                            IsEnabled="{Binding HasSelectedMember}" />
+
+                    <!--  Loading indicator  -->
+                    <ActivityIndicator IsRunning="{Binding IsCreatingMemberClaim}"
+                                       IsVisible="{Binding IsCreatingMemberClaim}"
+                                       HeightRequest="24" WidthRequest="24"
+                                       HorizontalOptions="Center"
+                                       Color="{StaticResource Primary}" />
+
+                </VerticalStackLayout>
+            </Border>
+        </Grid>
+
+        <!--  Member QR Code Modal (Shows after member claim is created)  -->
+        <Grid Grid.Row="0" BackgroundColor="#80000000"
+              IsVisible="{Binding IsMemberQrModalOpen}"
+              ZIndex="100">
+            <!--  Tap overlay to close  -->
+            <Grid.GestureRecognizers>
+                <TapGestureRecognizer Command="{Binding CloseMemberQrModalCommand}" />
+            </Grid.GestureRecognizers>
+
+            <!--  Modal Content (Center) - BLUE border to identify this is the MEMBER QR modal  -->
+            <Border Margin="24" Padding="20"
+                    BackgroundColor="#374151"
+                    Stroke="{StaticResource Primary}" StrokeThickness="4" StrokeShape="RoundRectangle 16"
+                    HorizontalOptions="Center" VerticalOptions="Center">
+                <Border.Shadow>
+                    <Shadow Brush="Black" Opacity="0.3" Radius="16"
+                            Offset="0,8" />
+                </Border.Shadow>
+                <Border.GestureRecognizers>
+                    <TapGestureRecognizer />
+                </Border.GestureRecognizers>
+
+                <VerticalStackLayout Spacing="16">
+
+                    <!--  Success Header  -->
+                    <HorizontalStackLayout HorizontalOptions="Center" Spacing="8">
+                        <Label FontSize="24" Text="✅" VerticalOptions="Center" />
+                        <Label FontAttributes="Bold" FontSize="18"
+                               Text="QR-kod skapad!"
+                               TextColor="White" VerticalOptions="Center" />
+                    </HorizontalStackLayout>
+
+                    <!--  Member Name and Club  -->
+                    <VerticalStackLayout HorizontalOptions="Center">
+                        <Label FontSize="16" HorizontalOptions="Center"
+                               Text="{Binding AddedMemberName}"
+                               TextColor="White" HorizontalTextAlignment="Center" FontAttributes="Bold" />
+                        <Label FontSize="13" HorizontalOptions="Center"
+                               Text="{Binding AddedMemberClub}"
+                               TextColor="#9ca3af" HorizontalTextAlignment="Center"
+                               IsVisible="{Binding AddedMemberClub, Converter={StaticResource StringNotEmptyConverter}}" />
+                    </VerticalStackLayout>
+
+                    <!--  QR Code  -->
+                    <Border Padding="16" BackgroundColor="White" Stroke="Transparent" StrokeShape="RoundRectangle 8"
+                            HorizontalOptions="Center">
+                        <Image Source="{Binding MemberClaimQrUrl}"
+                               WidthRequest="200" HeightRequest="200"
+                               Aspect="AspectFit" />
+                    </Border>
+
+                    <!--  Instructions  -->
+                    <Label FontSize="12" TextColor="#9ca3af" HorizontalOptions="Center"
+                           HorizontalTextAlignment="Center" LineBreakMode="WordWrap"
+                           Text="Medlemmen skannar QR-koden med sin mobilkamera. En bekräftelsesida visas innan de går med i matchen." />
+
+                    <!--  Warning about expiry  -->
+                    <Border Padding="10" BackgroundColor="#856404" Stroke="Transparent" StrokeShape="RoundRectangle 8">
+                        <HorizontalStackLayout Spacing="6" HorizontalOptions="Center">
+                            <Label FontSize="14" Text="⏰" VerticalOptions="Center" />
+                            <Label FontSize="12" TextColor="#fff3cd"
+                                   Text="Länken gäller i 30 minuter." />
+                        </HorizontalStackLayout>
+                    </Border>
+
+                    <!--  Close Button  -->
+                    <Button Text="Klar"
+                            Command="{Binding CloseMemberQrModalCommand}"
                             BackgroundColor="{StaticResource Primary}"
                             TextColor="White" CornerRadius="8"
                             HeightRequest="44" FontAttributes="Bold" />
