@@ -99,13 +99,11 @@
 	  <ProjectReference Include="..\HpskSite.Shared\HpskSite.Shared.csproj" />
 	</ItemGroup>
 
-	<!-- Android Release Signing -->
+	<!-- Android Release Signing - passwords provided via command line or environment variables -->
 	<PropertyGroup Condition="$(TargetFramework.Contains('-android')) and '$(Configuration)' == 'Release'">
 		<AndroidKeyStore>true</AndroidKeyStore>
-		<AndroidSigningKeyStore>hpsk-upload-key.keystore</AndroidSigningKeyStore>
+		<AndroidSigningKeyStore>Platforms/Android/hpsk-upload-key.keystore</AndroidSigningKeyStore>
 		<AndroidSigningKeyAlias>hpsk</AndroidSigningKeyAlias>
-		<AndroidSigningKeyPass>Hpsk2024!</AndroidSigningKeyPass>
-		<AndroidSigningStorePass>Hpsk2024!</AndroidSigningStorePass>
 	</PropertyGroup>
 
 </Project>
