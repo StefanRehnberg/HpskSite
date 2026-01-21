@@ -63,7 +63,8 @@ namespace HpskSite.Controllers.Api
             var yearResults = allResults.Where(r => r.Date.Year == selectedYear).ToList();
 
             // Calculate statistics
-            var trainingSessions = yearResults.Count(r => r.SourceType == "Training");
+            // TrainingMatch = from mobile app training matches, Training = manually entered training
+            var trainingSessions = yearResults.Count(r => r.SourceType == "Training" || r.SourceType == "TrainingMatch");
             var competitionSessions = yearResults.Count(r => r.SourceType == "Competition" || r.SourceType == "Official");
 
             // 30-day average
@@ -98,7 +99,7 @@ namespace HpskSite.Controllers.Api
                 Score = r.TotalScore,
                 XCount = r.XCount,
                 SeriesCount = r.SeriesCount,
-                IsCompetition = r.SourceType != "Training",
+                IsCompetition = r.SourceType == "Competition" || r.SourceType == "Official",
                 SourceType = r.SourceType
             }).ToList();
 
@@ -150,7 +151,7 @@ namespace HpskSite.Controllers.Api
                             BestScore = sg.Max(r => r.TotalScore),
                             XCount = sg.OrderByDescending(r => r.TotalScore).First().XCount,
                             AchievedDate = sg.OrderByDescending(r => r.TotalScore).First().Date,
-                            IsCompetition = sg.OrderByDescending(r => r.TotalScore).First().SourceType != "Training"
+                            IsCompetition = sg.OrderByDescending(r => r.TotalScore).First().SourceType == "Competition" || sg.OrderByDescending(r => r.TotalScore).First().SourceType == "Official"
                         })
                         .OrderBy(b => b.SeriesCount)
                         .ToList()

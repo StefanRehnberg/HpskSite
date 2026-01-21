@@ -159,14 +159,14 @@ namespace HpskSite.Services
                     }
 
                     // Determine source type:
+                    // - IsCompetition = true → "Competition" (competition result, even if from training match)
                     // - TrainingMatchId != null → "TrainingMatch" (from mobile app training match)
-                    // - IsCompetition = true → "Competition" (manually entered competition result)
                     // - Otherwise → "Training" (manually entered training result)
                     string sourceType;
-                    if (trainingMatchId != null)
-                        sourceType = "TrainingMatch";
-                    else if (isCompetition)
+                    if (isCompetition)
                         sourceType = "Competition";
+                    else if (trainingMatchId != null)
+                        sourceType = "TrainingMatch";
                     else
                         sourceType = "Training";
 

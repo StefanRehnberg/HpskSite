@@ -2283,7 +2283,8 @@ namespace HpskSite.Controllers
                 var allResults = allResultsUnfiltered.Where(r => r.Date.Year == selectedYear).ToList();
 
                 // Separate training and competition results
-                var trainingResults = allResults.Where(r => r.SourceType == "Training").ToList();
+                // TrainingMatch = from mobile app training matches, Training = manually entered training
+                var trainingResults = allResults.Where(r => r.SourceType == "Training" || r.SourceType == "TrainingMatch").ToList();
                 var competitionResults = allResults.Where(r => r.SourceType == "Competition" || r.SourceType == "Official").ToList();
 
                 var totalSessions = allResults.Count;
@@ -2321,7 +2322,7 @@ namespace HpskSite.Controllers
                         month = r.Date.Month,
                         day = r.Date.Day,
                         weaponClass = r.WeaponClass,
-                        isCompetition = r.SourceType != "Training",
+                        isCompetition = r.SourceType == "Competition" || r.SourceType == "Official",
                         averageScore = r.AverageScore,
                         totalScore = r.TotalScore,
                         seriesCount = r.SeriesCount,
@@ -2333,7 +2334,7 @@ namespace HpskSite.Controllers
 
                 // Generate weapon class distribution
                 var weaponClassData = allResults
-                    .GroupBy(r => new { r.WeaponClass, IsCompetition = r.SourceType != "Training" })
+                    .GroupBy(r => new { r.WeaponClass, IsCompetition = r.SourceType == "Competition" || r.SourceType == "Official" })
                     .Select(g => new
                     {
                         weaponClass = g.Key.WeaponClass,
@@ -2353,7 +2354,7 @@ namespace HpskSite.Controllers
                         var seriesCounts = r.WeaponClass == "L" ? lWeaponSeriesCounts : standardSeriesCounts;
                         return seriesCounts.Contains(r.SeriesCount);
                     })
-                    .GroupBy(r => new { r.WeaponClass, r.SeriesCount, IsCompetition = r.SourceType != "Training" })
+                    .GroupBy(r => new { r.WeaponClass, r.SeriesCount, IsCompetition = r.SourceType == "Competition" || r.SourceType == "Official" })
                     .Select(g => new
                     {
                         weaponClass = g.Key.WeaponClass,

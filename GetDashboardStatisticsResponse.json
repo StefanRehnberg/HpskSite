@@ -1,0 +1,1739 @@
+{
+	"success": true,
+	"data": {
+		"totalSessions": 111,
+		"totalTrainingSessions": 48,
+		"totalCompetitions": 63,
+		"overallAverage": 46.8,
+		"recentAverage": 46.3,
+		"recentAverageByClass": [
+			{
+				"weaponClass": "A",
+				"average": 46.2
+			},
+			{
+				"weaponClass": "C",
+				"average": 46.3
+			},
+			{
+				"weaponClass": "L",
+				"average": 46.2
+			}
+		],
+		"previousAverage": 46.9,
+		"monthlyData": [
+			{
+				"date": "2024-04-30T00:00:00",
+				"year": 2024,
+				"month": 4,
+				"day": 30,
+				"weaponClass": "A",
+				"isCompetition": true,
+				"averageScore": 46.5,
+				"totalScore": 279,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 43
+			},
+			{
+				"date": "2024-04-30T00:00:00",
+				"year": 2024,
+				"month": 4,
+				"day": 30,
+				"weaponClass": "C",
+				"isCompetition": true,
+				"averageScore": 45.8,
+				"totalScore": 275,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 44
+			},
+			{
+				"date": "2024-05-03T00:00:00",
+				"year": 2024,
+				"month": 5,
+				"day": 3,
+				"weaponClass": "A",
+				"isCompetition": true,
+				"averageScore": 46.3,
+				"totalScore": 278,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 45
+			},
+			{
+				"date": "2024-05-09T00:00:00",
+				"year": 2024,
+				"month": 5,
+				"day": 9,
+				"weaponClass": "C",
+				"isCompetition": true,
+				"averageScore": 43.8,
+				"totalScore": 263,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 46
+			},
+			{
+				"date": "2024-05-12T00:00:00",
+				"year": 2024,
+				"month": 5,
+				"day": 12,
+				"weaponClass": "A",
+				"isCompetition": true,
+				"averageScore": 45.8,
+				"totalScore": 458,
+				"seriesCount": 10,
+				"competitionName": null,
+				"id": 47
+			},
+			{
+				"date": "2024-05-12T00:00:00",
+				"year": 2024,
+				"month": 5,
+				"day": 12,
+				"weaponClass": "C",
+				"isCompetition": true,
+				"averageScore": 45.8,
+				"totalScore": 458,
+				"seriesCount": 10,
+				"competitionName": null,
+				"id": 48
+			},
+			{
+				"date": "2024-05-31T00:00:00",
+				"year": 2024,
+				"month": 5,
+				"day": 31,
+				"weaponClass": "C",
+				"isCompetition": true,
+				"averageScore": 47,
+				"totalScore": 282,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 54
+			},
+			{
+				"date": "2024-05-31T00:00:00",
+				"year": 2024,
+				"month": 5,
+				"day": 31,
+				"weaponClass": "A",
+				"isCompetition": true,
+				"averageScore": 45.7,
+				"totalScore": 274,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 49
+			},
+			{
+				"date": "2024-06-23T00:00:00",
+				"year": 2024,
+				"month": 6,
+				"day": 23,
+				"weaponClass": "A",
+				"isCompetition": true,
+				"averageScore": 46.2,
+				"totalScore": 277,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 51
+			},
+			{
+				"date": "2024-06-23T00:00:00",
+				"year": 2024,
+				"month": 6,
+				"day": 23,
+				"weaponClass": "B",
+				"isCompetition": true,
+				"averageScore": 47.2,
+				"totalScore": 283,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 52
+			},
+			{
+				"date": "2024-06-23T00:00:00",
+				"year": 2024,
+				"month": 6,
+				"day": 23,
+				"weaponClass": "C",
+				"isCompetition": true,
+				"averageScore": 47,
+				"totalScore": 282,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 53
+			},
+			{
+				"date": "2024-06-30T00:00:00",
+				"year": 2024,
+				"month": 6,
+				"day": 30,
+				"weaponClass": "A",
+				"isCompetition": true,
+				"averageScore": 47.3,
+				"totalScore": 284,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 55
+			},
+			{
+				"date": "2024-06-30T00:00:00",
+				"year": 2024,
+				"month": 6,
+				"day": 30,
+				"weaponClass": "C",
+				"isCompetition": true,
+				"averageScore": 46.2,
+				"totalScore": 277,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 56
+			},
+			{
+				"date": "2024-07-04T00:00:00",
+				"year": 2024,
+				"month": 7,
+				"day": 4,
+				"weaponClass": "B",
+				"isCompetition": true,
+				"averageScore": 46.3,
+				"totalScore": 324,
+				"seriesCount": 7,
+				"competitionName": null,
+				"id": 57
+			},
+			{
+				"date": "2024-07-05T00:00:00",
+				"year": 2024,
+				"month": 7,
+				"day": 5,
+				"weaponClass": "C",
+				"isCompetition": true,
+				"averageScore": 47,
+				"totalScore": 470,
+				"seriesCount": 10,
+				"competitionName": null,
+				"id": 58
+			},
+			{
+				"date": "2024-07-06T00:00:00",
+				"year": 2024,
+				"month": 7,
+				"day": 6,
+				"weaponClass": "C",
+				"isCompetition": true,
+				"averageScore": 47.2,
+				"totalScore": 472,
+				"seriesCount": 10,
+				"competitionName": null,
+				"id": 59
+			},
+			{
+				"date": "2024-07-07T00:00:00",
+				"year": 2024,
+				"month": 7,
+				"day": 7,
+				"weaponClass": "A",
+				"isCompetition": true,
+				"averageScore": 46.1,
+				"totalScore": 323,
+				"seriesCount": 7,
+				"competitionName": null,
+				"id": 60
+			},
+			{
+				"date": "2024-08-18T00:00:00",
+				"year": 2024,
+				"month": 8,
+				"day": 18,
+				"weaponClass": "A",
+				"isCompetition": true,
+				"averageScore": 44.8,
+				"totalScore": 448,
+				"seriesCount": 10,
+				"competitionName": null,
+				"id": 61
+			},
+			{
+				"date": "2024-08-31T00:00:00",
+				"year": 2024,
+				"month": 8,
+				"day": 31,
+				"weaponClass": "A",
+				"isCompetition": true,
+				"averageScore": 47,
+				"totalScore": 282,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 62
+			},
+			{
+				"date": "2024-08-31T00:00:00",
+				"year": 2024,
+				"month": 8,
+				"day": 31,
+				"weaponClass": "C",
+				"isCompetition": true,
+				"averageScore": 47.7,
+				"totalScore": 286,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 63
+			},
+			{
+				"date": "2024-09-01T00:00:00",
+				"year": 2024,
+				"month": 9,
+				"day": 1,
+				"weaponClass": "C",
+				"isCompetition": true,
+				"averageScore": 46.2,
+				"totalScore": 462,
+				"seriesCount": 10,
+				"competitionName": null,
+				"id": 64
+			},
+			{
+				"date": "2024-09-07T00:00:00",
+				"year": 2024,
+				"month": 9,
+				"day": 7,
+				"weaponClass": "C",
+				"isCompetition": true,
+				"averageScore": 46.3,
+				"totalScore": 463,
+				"seriesCount": 10,
+				"competitionName": null,
+				"id": 66
+			},
+			{
+				"date": "2024-09-08T00:00:00",
+				"year": 2024,
+				"month": 9,
+				"day": 8,
+				"weaponClass": "A",
+				"isCompetition": true,
+				"averageScore": 47.1,
+				"totalScore": 471,
+				"seriesCount": 10,
+				"competitionName": null,
+				"id": 67
+			},
+			{
+				"date": "2024-09-08T00:00:00",
+				"year": 2024,
+				"month": 9,
+				"day": 8,
+				"weaponClass": "B",
+				"isCompetition": true,
+				"averageScore": 46.8,
+				"totalScore": 468,
+				"seriesCount": 10,
+				"competitionName": null,
+				"id": 68
+			},
+			{
+				"date": "2024-09-29T00:00:00",
+				"year": 2024,
+				"month": 9,
+				"day": 29,
+				"weaponClass": "B",
+				"isCompetition": true,
+				"averageScore": 45.6,
+				"totalScore": 456,
+				"seriesCount": 10,
+				"competitionName": null,
+				"id": 65
+			},
+			{
+				"date": "2025-03-02T00:00:00",
+				"year": 2025,
+				"month": 3,
+				"day": 2,
+				"weaponClass": "C",
+				"isCompetition": false,
+				"averageScore": 45.2,
+				"totalScore": 271,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 69
+			},
+			{
+				"date": "2025-03-08T00:00:00",
+				"year": 2025,
+				"month": 3,
+				"day": 8,
+				"weaponClass": "C",
+				"isCompetition": false,
+				"averageScore": 45.3,
+				"totalScore": 272,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 70
+			},
+			{
+				"date": "2025-03-23T00:00:00",
+				"year": 2025,
+				"month": 3,
+				"day": 23,
+				"weaponClass": "C",
+				"isCompetition": false,
+				"averageScore": 48,
+				"totalScore": 480,
+				"seriesCount": 10,
+				"competitionName": null,
+				"id": 71
+			},
+			{
+				"date": "2025-04-15T00:00:00",
+				"year": 2025,
+				"month": 4,
+				"day": 15,
+				"weaponClass": "C",
+				"isCompetition": false,
+				"averageScore": 47.8,
+				"totalScore": 287,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 103
+			},
+			{
+				"date": "2025-04-17T00:00:00",
+				"year": 2025,
+				"month": 4,
+				"day": 17,
+				"weaponClass": "C",
+				"isCompetition": true,
+				"averageScore": 48.8,
+				"totalScore": 293,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 104
+			},
+			{
+				"date": "2025-04-26T00:00:00",
+				"year": 2025,
+				"month": 4,
+				"day": 26,
+				"weaponClass": "B",
+				"isCompetition": true,
+				"averageScore": 47,
+				"totalScore": 282,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 105
+			},
+			{
+				"date": "2025-04-26T00:00:00",
+				"year": 2025,
+				"month": 4,
+				"day": 26,
+				"weaponClass": "C",
+				"isCompetition": true,
+				"averageScore": 45.8,
+				"totalScore": 275,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 106
+			},
+			{
+				"date": "2025-04-29T00:00:00",
+				"year": 2025,
+				"month": 4,
+				"day": 29,
+				"weaponClass": "C",
+				"isCompetition": false,
+				"averageScore": 47,
+				"totalScore": 282,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 102
+			},
+			{
+				"date": "2025-05-01T00:00:00",
+				"year": 2025,
+				"month": 5,
+				"day": 1,
+				"weaponClass": "C",
+				"isCompetition": true,
+				"averageScore": 46.5,
+				"totalScore": 465,
+				"seriesCount": 10,
+				"competitionName": null,
+				"id": 107
+			},
+			{
+				"date": "2025-05-01T00:00:00",
+				"year": 2025,
+				"month": 5,
+				"day": 1,
+				"weaponClass": "A",
+				"isCompetition": true,
+				"averageScore": 46.2,
+				"totalScore": 462,
+				"seriesCount": 10,
+				"competitionName": null,
+				"id": 108
+			},
+			{
+				"date": "2025-05-03T00:00:00",
+				"year": 2025,
+				"month": 5,
+				"day": 3,
+				"weaponClass": "C",
+				"isCompetition": false,
+				"averageScore": 47.3,
+				"totalScore": 284,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 72
+			},
+			{
+				"date": "2025-05-11T00:00:00",
+				"year": 2025,
+				"month": 5,
+				"day": 11,
+				"weaponClass": "C",
+				"isCompetition": true,
+				"averageScore": 46.9,
+				"totalScore": 469,
+				"seriesCount": 10,
+				"competitionName": null,
+				"id": 109
+			},
+			{
+				"date": "2025-05-11T00:00:00",
+				"year": 2025,
+				"month": 5,
+				"day": 11,
+				"weaponClass": "A",
+				"isCompetition": true,
+				"averageScore": 46.8,
+				"totalScore": 468,
+				"seriesCount": 10,
+				"competitionName": null,
+				"id": 110
+			},
+			{
+				"date": "2025-05-13T00:00:00",
+				"year": 2025,
+				"month": 5,
+				"day": 13,
+				"weaponClass": "C",
+				"isCompetition": true,
+				"averageScore": 47.8,
+				"totalScore": 287,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 111
+			},
+			{
+				"date": "2025-05-15T00:00:00",
+				"year": 2025,
+				"month": 5,
+				"day": 15,
+				"weaponClass": "C",
+				"isCompetition": false,
+				"averageScore": 47,
+				"totalScore": 282,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 101
+			},
+			{
+				"date": "2025-05-20T00:00:00",
+				"year": 2025,
+				"month": 5,
+				"day": 20,
+				"weaponClass": "C",
+				"isCompetition": false,
+				"averageScore": 48.5,
+				"totalScore": 291,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 100
+			},
+			{
+				"date": "2025-05-22T00:00:00",
+				"year": 2025,
+				"month": 5,
+				"day": 22,
+				"weaponClass": "C",
+				"isCompetition": false,
+				"averageScore": 47,
+				"totalScore": 282,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 99
+			},
+			{
+				"date": "2025-05-24T00:00:00",
+				"year": 2025,
+				"month": 5,
+				"day": 24,
+				"weaponClass": "C",
+				"isCompetition": true,
+				"averageScore": 45.8,
+				"totalScore": 275,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 112
+			},
+			{
+				"date": "2025-05-24T00:00:00",
+				"year": 2025,
+				"month": 5,
+				"day": 24,
+				"weaponClass": "A",
+				"isCompetition": true,
+				"averageScore": 47,
+				"totalScore": 282,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 113
+			},
+			{
+				"date": "2025-05-25T00:00:00",
+				"year": 2025,
+				"month": 5,
+				"day": 25,
+				"weaponClass": "C",
+				"isCompetition": false,
+				"averageScore": 48.7,
+				"totalScore": 292,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 98
+			},
+			{
+				"date": "2025-05-29T00:00:00",
+				"year": 2025,
+				"month": 5,
+				"day": 29,
+				"weaponClass": "C",
+				"isCompetition": true,
+				"averageScore": 47.2,
+				"totalScore": 283,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 114
+			},
+			{
+				"date": "2025-05-29T00:00:00",
+				"year": 2025,
+				"month": 5,
+				"day": 29,
+				"weaponClass": "B",
+				"isCompetition": true,
+				"averageScore": 48,
+				"totalScore": 288,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 115
+			},
+			{
+				"date": "2025-05-29T00:00:00",
+				"year": 2025,
+				"month": 5,
+				"day": 29,
+				"weaponClass": "A",
+				"isCompetition": true,
+				"averageScore": 45.7,
+				"totalScore": 274,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 116
+			},
+			{
+				"date": "2025-06-01T00:00:00",
+				"year": 2025,
+				"month": 6,
+				"day": 1,
+				"weaponClass": "C",
+				"isCompetition": true,
+				"averageScore": 47.1,
+				"totalScore": 330,
+				"seriesCount": 7,
+				"competitionName": null,
+				"id": 117
+			},
+			{
+				"date": "2025-06-01T00:00:00",
+				"year": 2025,
+				"month": 6,
+				"day": 1,
+				"weaponClass": "B",
+				"isCompetition": true,
+				"averageScore": 47.1,
+				"totalScore": 330,
+				"seriesCount": 7,
+				"competitionName": null,
+				"id": 118
+			},
+			{
+				"date": "2025-06-01T00:00:00",
+				"year": 2025,
+				"month": 6,
+				"day": 1,
+				"weaponClass": "A",
+				"isCompetition": true,
+				"averageScore": 47.1,
+				"totalScore": 330,
+				"seriesCount": 7,
+				"competitionName": null,
+				"id": 119
+			},
+			{
+				"date": "2025-06-03T00:00:00",
+				"year": 2025,
+				"month": 6,
+				"day": 3,
+				"weaponClass": "C",
+				"isCompetition": false,
+				"averageScore": 47.2,
+				"totalScore": 283,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 97
+			},
+			{
+				"date": "2025-06-07T00:00:00",
+				"year": 2025,
+				"month": 6,
+				"day": 7,
+				"weaponClass": "C",
+				"isCompetition": true,
+				"averageScore": 47.3,
+				"totalScore": 284,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 120
+			},
+			{
+				"date": "2025-06-07T00:00:00",
+				"year": 2025,
+				"month": 6,
+				"day": 7,
+				"weaponClass": "A",
+				"isCompetition": true,
+				"averageScore": 46.7,
+				"totalScore": 280,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 121
+			},
+			{
+				"date": "2025-06-10T00:00:00",
+				"year": 2025,
+				"month": 6,
+				"day": 10,
+				"weaponClass": "C",
+				"isCompetition": false,
+				"averageScore": 48,
+				"totalScore": 288,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 96
+			},
+			{
+				"date": "2025-06-12T00:00:00",
+				"year": 2025,
+				"month": 6,
+				"day": 12,
+				"weaponClass": "C",
+				"isCompetition": false,
+				"averageScore": 47.3,
+				"totalScore": 331,
+				"seriesCount": 7,
+				"competitionName": null,
+				"id": 95
+			},
+			{
+				"date": "2025-06-14T00:00:00",
+				"year": 2025,
+				"month": 6,
+				"day": 14,
+				"weaponClass": "C",
+				"isCompetition": true,
+				"averageScore": 46.7,
+				"totalScore": 467,
+				"seriesCount": 10,
+				"competitionName": null,
+				"id": 122
+			},
+			{
+				"date": "2025-06-15T00:00:00",
+				"year": 2025,
+				"month": 6,
+				"day": 15,
+				"weaponClass": "C",
+				"isCompetition": false,
+				"averageScore": 47.3,
+				"totalScore": 331,
+				"seriesCount": 7,
+				"competitionName": null,
+				"id": 90
+			},
+			{
+				"date": "2025-06-17T00:00:00",
+				"year": 2025,
+				"month": 6,
+				"day": 17,
+				"weaponClass": "C",
+				"isCompetition": false,
+				"averageScore": 47.7,
+				"totalScore": 477,
+				"seriesCount": 10,
+				"competitionName": null,
+				"id": 94
+			},
+			{
+				"date": "2025-06-19T00:00:00",
+				"year": 2025,
+				"month": 6,
+				"day": 19,
+				"weaponClass": "C",
+				"isCompetition": false,
+				"averageScore": 48.2,
+				"totalScore": 482,
+				"seriesCount": 10,
+				"competitionName": null,
+				"id": 93
+			},
+			{
+				"date": "2025-06-28T00:00:00",
+				"year": 2025,
+				"month": 6,
+				"day": 28,
+				"weaponClass": "A",
+				"isCompetition": true,
+				"averageScore": 46.8,
+				"totalScore": 281,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 123
+			},
+			{
+				"date": "2025-06-28T00:00:00",
+				"year": 2025,
+				"month": 6,
+				"day": 28,
+				"weaponClass": "C",
+				"isCompetition": false,
+				"averageScore": 48.3,
+				"totalScore": 290,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 73
+			},
+			{
+				"date": "2025-07-03T00:00:00",
+				"year": 2025,
+				"month": 7,
+				"day": 3,
+				"weaponClass": "B",
+				"isCompetition": true,
+				"averageScore": 46.7,
+				"totalScore": 327,
+				"seriesCount": 7,
+				"competitionName": null,
+				"id": 125
+			},
+			{
+				"date": "2025-07-04T00:00:00",
+				"year": 2025,
+				"month": 7,
+				"day": 4,
+				"weaponClass": "C",
+				"isCompetition": true,
+				"averageScore": 45.7,
+				"totalScore": 320,
+				"seriesCount": 7,
+				"competitionName": null,
+				"id": 126
+			},
+			{
+				"date": "2025-07-05T00:00:00",
+				"year": 2025,
+				"month": 7,
+				"day": 5,
+				"weaponClass": "C",
+				"isCompetition": true,
+				"averageScore": 46.1,
+				"totalScore": 323,
+				"seriesCount": 7,
+				"competitionName": null,
+				"id": 127
+			},
+			{
+				"date": "2025-07-06T00:00:00",
+				"year": 2025,
+				"month": 7,
+				"day": 6,
+				"weaponClass": "A",
+				"isCompetition": true,
+				"averageScore": 45.3,
+				"totalScore": 317,
+				"seriesCount": 7,
+				"competitionName": null,
+				"id": 124
+			},
+			{
+				"date": "2025-07-08T00:00:00",
+				"year": 2025,
+				"month": 7,
+				"day": 8,
+				"weaponClass": "C",
+				"isCompetition": false,
+				"averageScore": 48.2,
+				"totalScore": 289,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 92
+			},
+			{
+				"date": "2025-07-10T00:00:00",
+				"year": 2025,
+				"month": 7,
+				"day": 10,
+				"weaponClass": "C",
+				"isCompetition": false,
+				"averageScore": 48,
+				"totalScore": 288,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 91
+			},
+			{
+				"date": "2025-07-12T00:00:00",
+				"year": 2025,
+				"month": 7,
+				"day": 12,
+				"weaponClass": "A",
+				"isCompetition": false,
+				"averageScore": 46.5,
+				"totalScore": 279,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 74
+			},
+			{
+				"date": "2025-07-17T00:00:00",
+				"year": 2025,
+				"month": 7,
+				"day": 17,
+				"weaponClass": "C",
+				"isCompetition": false,
+				"averageScore": 46.3,
+				"totalScore": 278,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 89
+			},
+			{
+				"date": "2025-07-19T00:00:00",
+				"year": 2025,
+				"month": 7,
+				"day": 19,
+				"weaponClass": "A",
+				"isCompetition": false,
+				"averageScore": 48.1,
+				"totalScore": 337,
+				"seriesCount": 7,
+				"competitionName": null,
+				"id": 75
+			},
+			{
+				"date": "2025-07-22T00:00:00",
+				"year": 2025,
+				"month": 7,
+				"day": 22,
+				"weaponClass": "C",
+				"isCompetition": false,
+				"averageScore": 47.3,
+				"totalScore": 473,
+				"seriesCount": 10,
+				"competitionName": null,
+				"id": 88
+			},
+			{
+				"date": "2025-07-24T00:00:00",
+				"year": 2025,
+				"month": 7,
+				"day": 24,
+				"weaponClass": "C",
+				"isCompetition": false,
+				"averageScore": 47,
+				"totalScore": 470,
+				"seriesCount": 10,
+				"competitionName": null,
+				"id": 86
+			},
+			{
+				"date": "2025-07-26T00:00:00",
+				"year": 2025,
+				"month": 7,
+				"day": 26,
+				"weaponClass": "A",
+				"isCompetition": false,
+				"averageScore": 47,
+				"totalScore": 470,
+				"seriesCount": 10,
+				"competitionName": null,
+				"id": 76
+			},
+			{
+				"date": "2025-07-29T00:00:00",
+				"year": 2025,
+				"month": 7,
+				"day": 29,
+				"weaponClass": "C",
+				"isCompetition": false,
+				"averageScore": 46.9,
+				"totalScore": 469,
+				"seriesCount": 10,
+				"competitionName": null,
+				"id": 87
+			},
+			{
+				"date": "2025-08-02T00:00:00",
+				"year": 2025,
+				"month": 8,
+				"day": 2,
+				"weaponClass": "A",
+				"isCompetition": true,
+				"averageScore": 45.9,
+				"totalScore": 459,
+				"seriesCount": 10,
+				"competitionName": null,
+				"id": 128
+			},
+			{
+				"date": "2025-08-17T00:00:00",
+				"year": 2025,
+				"month": 8,
+				"day": 17,
+				"weaponClass": "A",
+				"isCompetition": true,
+				"averageScore": 45.8,
+				"totalScore": 458,
+				"seriesCount": 10,
+				"competitionName": null,
+				"id": 130
+			},
+			{
+				"date": "2025-08-19T00:00:00",
+				"year": 2025,
+				"month": 8,
+				"day": 19,
+				"weaponClass": "C",
+				"isCompetition": false,
+				"averageScore": 47.2,
+				"totalScore": 283,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 84
+			},
+			{
+				"date": "2025-08-21T00:00:00",
+				"year": 2025,
+				"month": 8,
+				"day": 21,
+				"weaponClass": "C",
+				"isCompetition": false,
+				"averageScore": 47.5,
+				"totalScore": 285,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 85
+			},
+			{
+				"date": "2025-08-23T00:00:00",
+				"year": 2025,
+				"month": 8,
+				"day": 23,
+				"weaponClass": "A",
+				"isCompetition": true,
+				"averageScore": 46.3,
+				"totalScore": 278,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 131
+			},
+			{
+				"date": "2025-08-26T00:00:00",
+				"year": 2025,
+				"month": 8,
+				"day": 26,
+				"weaponClass": "A",
+				"isCompetition": false,
+				"averageScore": 46.2,
+				"totalScore": 277,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 78
+			},
+			{
+				"date": "2025-08-26T00:00:00",
+				"year": 2025,
+				"month": 8,
+				"day": 26,
+				"weaponClass": "C",
+				"isCompetition": false,
+				"averageScore": 46.8,
+				"totalScore": 468,
+				"seriesCount": 10,
+				"competitionName": null,
+				"id": 79
+			},
+			{
+				"date": "2025-08-26T00:00:00",
+				"year": 2025,
+				"month": 8,
+				"day": 26,
+				"weaponClass": "C",
+				"isCompetition": true,
+				"averageScore": 47.7,
+				"totalScore": 477,
+				"seriesCount": 10,
+				"competitionName": null,
+				"id": 132
+			},
+			{
+				"date": "2025-08-28T00:00:00",
+				"year": 2025,
+				"month": 8,
+				"day": 28,
+				"weaponClass": "C",
+				"isCompetition": false,
+				"averageScore": 47.3,
+				"totalScore": 331,
+				"seriesCount": 7,
+				"competitionName": null,
+				"id": 83
+			},
+			{
+				"date": "2025-08-31T00:00:00",
+				"year": 2025,
+				"month": 8,
+				"day": 31,
+				"weaponClass": "C",
+				"isCompetition": true,
+				"averageScore": 48.1,
+				"totalScore": 481,
+				"seriesCount": 10,
+				"competitionName": null,
+				"id": 133
+			},
+			{
+				"date": "2025-09-06T00:00:00",
+				"year": 2025,
+				"month": 9,
+				"day": 6,
+				"weaponClass": "A",
+				"isCompetition": true,
+				"averageScore": 45.9,
+				"totalScore": 459,
+				"seriesCount": 10,
+				"competitionName": null,
+				"id": 134
+			},
+			{
+				"date": "2025-09-06T00:00:00",
+				"year": 2025,
+				"month": 9,
+				"day": 6,
+				"weaponClass": "B",
+				"isCompetition": true,
+				"averageScore": 46,
+				"totalScore": 460,
+				"seriesCount": 10,
+				"competitionName": null,
+				"id": 135
+			},
+			{
+				"date": "2025-09-07T00:00:00",
+				"year": 2025,
+				"month": 9,
+				"day": 7,
+				"weaponClass": "C",
+				"isCompetition": true,
+				"averageScore": 47.5,
+				"totalScore": 475,
+				"seriesCount": 10,
+				"competitionName": null,
+				"id": 136
+			},
+			{
+				"date": "2025-09-23T00:00:00",
+				"year": 2025,
+				"month": 9,
+				"day": 23,
+				"weaponClass": "C",
+				"isCompetition": true,
+				"averageScore": 47.3,
+				"totalScore": 284,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 137
+			},
+			{
+				"date": "2025-09-27T00:00:00",
+				"year": 2025,
+				"month": 9,
+				"day": 27,
+				"weaponClass": "A",
+				"isCompetition": true,
+				"averageScore": 46,
+				"totalScore": 276,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 138
+			},
+			{
+				"date": "2025-09-28T00:00:00",
+				"year": 2025,
+				"month": 9,
+				"day": 28,
+				"weaponClass": "B",
+				"isCompetition": true,
+				"averageScore": 46.3,
+				"totalScore": 463,
+				"seriesCount": 10,
+				"competitionName": null,
+				"id": 139
+			},
+			{
+				"date": "2025-09-30T00:00:00",
+				"year": 2025,
+				"month": 9,
+				"day": 30,
+				"weaponClass": "C",
+				"isCompetition": false,
+				"averageScore": 47.7,
+				"totalScore": 286,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 82
+			},
+			{
+				"date": "2025-11-01T00:00:00",
+				"year": 2025,
+				"month": 11,
+				"day": 1,
+				"weaponClass": "C",
+				"isCompetition": false,
+				"averageScore": 46.3,
+				"totalScore": 278,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 80
+			},
+			{
+				"date": "2025-11-08T00:00:00",
+				"year": 2025,
+				"month": 11,
+				"day": 8,
+				"weaponClass": "C",
+				"isCompetition": false,
+				"averageScore": 47.8,
+				"totalScore": 478,
+				"seriesCount": 10,
+				"competitionName": null,
+				"id": 3
+			},
+			{
+				"date": "2025-11-08T00:00:00",
+				"year": 2025,
+				"month": 11,
+				"day": 8,
+				"weaponClass": "C",
+				"isCompetition": false,
+				"averageScore": 47.8,
+				"totalScore": 478,
+				"seriesCount": 10,
+				"competitionName": null,
+				"id": 81
+			},
+			{
+				"date": "2025-12-10T19:06:20.967",
+				"year": 2025,
+				"month": 12,
+				"day": 10,
+				"weaponClass": "L",
+				"isCompetition": true,
+				"averageScore": 46.5,
+				"totalScore": 279,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 18
+			},
+			{
+				"date": "2025-12-11T18:56:34.923",
+				"year": 2025,
+				"month": 12,
+				"day": 11,
+				"weaponClass": "L",
+				"isCompetition": true,
+				"averageScore": 46.3,
+				"totalScore": 278,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 20
+			},
+			{
+				"date": "2025-12-17T18:29:23.2",
+				"year": 2025,
+				"month": 12,
+				"day": 17,
+				"weaponClass": "L",
+				"isCompetition": true,
+				"averageScore": 47,
+				"totalScore": 282,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 36
+			},
+			{
+				"date": "2025-12-18T19:07:39.363",
+				"year": 2025,
+				"month": 12,
+				"day": 18,
+				"weaponClass": "C",
+				"isCompetition": true,
+				"averageScore": 46.9,
+				"totalScore": 328,
+				"seriesCount": 7,
+				"competitionName": null,
+				"id": 40
+			},
+			{
+				"date": "2025-12-20T11:05:19.45",
+				"year": 2025,
+				"month": 12,
+				"day": 20,
+				"weaponClass": "C",
+				"isCompetition": true,
+				"averageScore": 47.6,
+				"totalScore": 476,
+				"seriesCount": 10,
+				"competitionName": null,
+				"id": 140
+			},
+			{
+				"date": "2025-12-22T11:48:44.19",
+				"year": 2025,
+				"month": 12,
+				"day": 22,
+				"weaponClass": "L",
+				"isCompetition": true,
+				"averageScore": 46.5,
+				"totalScore": 186,
+				"seriesCount": 4,
+				"competitionName": "Luftpistol omgång 1",
+				"id": 2667
+			},
+			{
+				"date": "2025-12-22T11:59:18.153",
+				"year": 2025,
+				"month": 12,
+				"day": 22,
+				"weaponClass": "L",
+				"isCompetition": true,
+				"averageScore": 46.8,
+				"totalScore": 187,
+				"seriesCount": 4,
+				"competitionName": "Luftpistol omgång 2",
+				"id": 2668
+			},
+			{
+				"date": "2025-12-22T12:47:40.86",
+				"year": 2025,
+				"month": 12,
+				"day": 22,
+				"weaponClass": "L",
+				"isCompetition": true,
+				"averageScore": 46,
+				"totalScore": 184,
+				"seriesCount": 4,
+				"competitionName": "Luftpistol omgång 3",
+				"id": 2669
+			},
+			{
+				"date": "2025-12-27T10:44:20.01",
+				"year": 2025,
+				"month": 12,
+				"day": 27,
+				"weaponClass": "C",
+				"isCompetition": true,
+				"averageScore": 47.2,
+				"totalScore": 472,
+				"seriesCount": 10,
+				"competitionName": null,
+				"id": 145
+			},
+			{
+				"date": "2026-01-02T19:02:36.843",
+				"year": 2026,
+				"month": 1,
+				"day": 2,
+				"weaponClass": "C",
+				"isCompetition": true,
+				"averageScore": 45.6,
+				"totalScore": 319,
+				"seriesCount": 7,
+				"competitionName": null,
+				"id": 165
+			},
+			{
+				"date": "2026-01-07T17:32:48.973",
+				"year": 2026,
+				"month": 1,
+				"day": 7,
+				"weaponClass": "L",
+				"isCompetition": true,
+				"averageScore": 46.2,
+				"totalScore": 277,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 181
+			},
+			{
+				"date": "2026-01-10T10:36:27.477",
+				"year": 2026,
+				"month": 1,
+				"day": 10,
+				"weaponClass": "A",
+				"isCompetition": true,
+				"averageScore": 46.3,
+				"totalScore": 278,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 195
+			},
+			{
+				"date": "2026-01-15T17:41:48.673",
+				"year": 2026,
+				"month": 1,
+				"day": 15,
+				"weaponClass": "L",
+				"isCompetition": true,
+				"averageScore": 46.8,
+				"totalScore": 281,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 203
+			},
+			{
+				"date": "2026-01-16T17:09:32.81",
+				"year": 2026,
+				"month": 1,
+				"day": 16,
+				"weaponClass": "C",
+				"isCompetition": true,
+				"averageScore": 46.2,
+				"totalScore": 462,
+				"seriesCount": 10,
+				"competitionName": null,
+				"id": 207
+			},
+			{
+				"date": "2026-01-17T10:05:11.67",
+				"year": 2026,
+				"month": 1,
+				"day": 17,
+				"weaponClass": "A",
+				"isCompetition": true,
+				"averageScore": 46.2,
+				"totalScore": 277,
+				"seriesCount": 6,
+				"competitionName": null,
+				"id": 211
+			},
+			{
+				"date": "2026-01-18T13:14:44.053",
+				"year": 2026,
+				"month": 1,
+				"day": 18,
+				"weaponClass": "L",
+				"isCompetition": true,
+				"averageScore": 45.2,
+				"totalScore": 542,
+				"seriesCount": 12,
+				"competitionName": null,
+				"id": 213
+			}
+		],
+		"weaponClassData": [
+			{
+				"weaponClass": "A",
+				"isCompetition": true,
+				"averageScore": 46.272,
+				"sessionCount": 25
+			},
+			{
+				"weaponClass": "A",
+				"isCompetition": false,
+				"averageScore": 46.95,
+				"sessionCount": 4
+			},
+			{
+				"weaponClass": "B",
+				"isCompetition": true,
+				"averageScore": 46.7,
+				"sessionCount": 10
+			},
+			{
+				"weaponClass": "C",
+				"isCompetition": true,
+				"averageScore": 46.74375,
+				"sessionCount": 32
+			},
+			{
+				"weaponClass": "C",
+				"isCompetition": false,
+				"averageScore": 47.3516129032258,
+				"sessionCount": 31
+			},
+			{
+				"weaponClass": "L",
+				"isCompetition": true,
+				"averageScore": 46.36666666666667,
+				"sessionCount": 9
+			}
+		],
+		"availableYears": [
+			2026,
+			2025,
+			2024
+		],
+		"personalBests": [
+			{
+				"weaponClass": "A",
+				"bestAverage": 48.1
+			},
+			{
+				"weaponClass": "B",
+				"bestAverage": 48
+			},
+			{
+				"weaponClass": "C",
+				"bestAverage": 48.8
+			},
+			{
+				"weaponClass": "R",
+				"bestAverage": null
+			},
+			{
+				"weaponClass": "M",
+				"bestAverage": null
+			},
+			{
+				"weaponClass": "L",
+				"bestAverage": 47
+			}
+		],
+		"personalBestsBySeriesCount": [
+			{
+				"weaponClass": "A",
+				"seriesCount": 6,
+				"isCompetition": true,
+				"bestTotalScore": 284
+			},
+			{
+				"weaponClass": "A",
+				"seriesCount": 6,
+				"isCompetition": false,
+				"bestTotalScore": 279
+			},
+			{
+				"weaponClass": "A",
+				"seriesCount": 7,
+				"isCompetition": false,
+				"bestTotalScore": 337
+			},
+			{
+				"weaponClass": "A",
+				"seriesCount": 7,
+				"isCompetition": true,
+				"bestTotalScore": 330
+			},
+			{
+				"weaponClass": "A",
+				"seriesCount": 10,
+				"isCompetition": true,
+				"bestTotalScore": 471
+			},
+			{
+				"weaponClass": "A",
+				"seriesCount": 10,
+				"isCompetition": false,
+				"bestTotalScore": 470
+			},
+			{
+				"weaponClass": "B",
+				"seriesCount": 6,
+				"isCompetition": true,
+				"bestTotalScore": 288
+			},
+			{
+				"weaponClass": "B",
+				"seriesCount": 7,
+				"isCompetition": true,
+				"bestTotalScore": 330
+			},
+			{
+				"weaponClass": "B",
+				"seriesCount": 10,
+				"isCompetition": true,
+				"bestTotalScore": 468
+			},
+			{
+				"weaponClass": "C",
+				"seriesCount": 6,
+				"isCompetition": false,
+				"bestTotalScore": 292
+			},
+			{
+				"weaponClass": "C",
+				"seriesCount": 6,
+				"isCompetition": true,
+				"bestTotalScore": 293
+			},
+			{
+				"weaponClass": "C",
+				"seriesCount": 7,
+				"isCompetition": true,
+				"bestTotalScore": 330
+			},
+			{
+				"weaponClass": "C",
+				"seriesCount": 7,
+				"isCompetition": false,
+				"bestTotalScore": 331
+			},
+			{
+				"weaponClass": "C",
+				"seriesCount": 10,
+				"isCompetition": true,
+				"bestTotalScore": 481
+			},
+			{
+				"weaponClass": "C",
+				"seriesCount": 10,
+				"isCompetition": false,
+				"bestTotalScore": 482
+			},
+			{
+				"weaponClass": "L",
+				"seriesCount": 6,
+				"isCompetition": true,
+				"bestTotalScore": 282
+			},
+			{
+				"weaponClass": "L",
+				"seriesCount": 12,
+				"isCompetition": true,
+				"bestTotalScore": 542
+			}
+		],
+		"trainingStats": {
+			"totalSessions": 48,
+			"overallAverage": 47.1,
+			"recentAverage": 46.2,
+			"recentAverageByClass": [
+				{
+					"weaponClass": "A",
+					"average": 46.2
+				},
+				{
+					"weaponClass": "C",
+					"average": 46.3
+				},
+				{
+					"weaponClass": "L",
+					"average": 46.1
+				}
+			],
+			"personalBests": [
+				{
+					"weaponClass": "A",
+					"bestAverage": 48.1
+				},
+				{
+					"weaponClass": "B",
+					"bestAverage": null
+				},
+				{
+					"weaponClass": "C",
+					"bestAverage": 48.7
+				},
+				{
+					"weaponClass": "R",
+					"bestAverage": null
+				},
+				{
+					"weaponClass": "L",
+					"bestAverage": 47
+				}
+			]
+		},
+		"competitionStats": {
+			"totalSessions": 63,
+			"overallAverage": 46.6,
+			"recentAverage": 46.4,
+			"recentAverageByClass": [
+				{
+					"weaponClass": "L",
+					"average": 46.4
+				}
+			],
+			"personalBests": [
+				{
+					"weaponClass": "A",
+					"bestAverage": 47.3
+				},
+				{
+					"weaponClass": "B",
+					"bestAverage": 48
+				},
+				{
+					"weaponClass": "C",
+					"bestAverage": 48.8
+				},
+				{
+					"weaponClass": "R",
+					"bestAverage": null
+				},
+				{
+					"weaponClass": "L",
+					"bestAverage": 46.8
+				}
+			]
+		},
+		"medalStats": {
+			"silverCount": 0,
+			"bronzeCount": 0,
+			"totalPoints": 0
+		},
+		"medalStatsByYear": {
+			"2026": {
+				"silverCount": 0,
+				"bronzeCount": 0,
+				"totalPoints": 0
+			},
+			"2025": {
+				"silverCount": 20,
+				"bronzeCount": 12,
+				"totalPoints": 52
+			},
+			"2024": {
+				"silverCount": 15,
+				"bronzeCount": 9,
+				"totalPoints": 39
+			}
+		}
+	}
+}
