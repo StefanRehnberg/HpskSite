@@ -96,8 +96,8 @@ namespace HpskSite.Shared.Services
 
         /// <summary>
         /// Calculate adjusted total score with handicap applied.
-        /// Handicap is applied per series, and each adjusted series is capped at 50.
-        /// Uses standard rounding (AwayFromZero) for consistency with JavaScript.
+        /// Per spec: FinalScore = Sum(RawSeriesScores) + (HandicapPerSeries × SeriesCount)
+        /// The result is capped at (50 × seriesCount) and rounded to integer.
         /// </summary>
         /// <param name="seriesScores">List of series with Total property</param>
         /// <param name="handicapPerSeries">Handicap bonus per series</param>
@@ -106,8 +106,27 @@ namespace HpskSite.Shared.Services
         public static int CalculateAdjustedTotal<T>(IEnumerable<T> seriesScores, decimal handicapPerSeries, int? equalizedCount = null)
             where T : ISeriesScore
         {
-            var scores = GetEffectiveScores(seriesScores, equalizedCount);
-            return scores.Sum(s => CalculateAdjustedSeriesScore(s.Total, handicapPerSeries));
+            var scores = GetEffectiveScores(seriesScores, equalizedCount).ToList();
+            var rawTotal = scores.Sum(s => Math.Min(s.Total, MaxScorePerSeries));
+            var seriesCount = scores.Count;
+            return CalculateAdjustedMatchTotal(rawTotal, handicapPerSeries, seriesCount);
+        }
+
+        /// <summary>
+        /// Calculate final match score with handicap applied.
+        /// Per spec: FinalScore = RawTotal + (HandicapPerSeries × SeriesCount)
+        /// The result is capped at (50 × seriesCount) and rounded to integer.
+        /// </summary>
+        /// <param name="rawTotal">Raw total score across all series</param>
+        /// <param name="handicapPerSeries">Handicap bonus per series</param>
+        /// <param name="seriesCount">Number of series</param>
+        /// <returns>Adjusted total score</returns>
+        public static int CalculateAdjustedMatchTotal(int rawTotal, decimal handicapPerSeries, int seriesCount)
+        {
+            var handicapTotal = handicapPerSeries * seriesCount;
+            var maxPossible = MaxScorePerSeries * seriesCount;
+            var finalScore = rawTotal + handicapTotal;
+            return Math.Min((int)Math.Round(finalScore, StandardRounding), maxPossible);
         }
 
         /// <summary>

@@ -951,18 +951,15 @@
             const headerRow = document.getElementById('historyParticipantHeaderRow');
             headerRow.innerHTML = '';
 
-            // Find minimum series count for equalized scoring (like mobile app)
-            const participantsWithScores = match.participants.filter(p => p.scores && p.scores.length > 0);
-            const minSeriesCount = participantsWithScores.length > 0
-                ? Math.min(...participantsWithScores.map(p => p.scores.length))
-                : 0;
+            // Use maxSeriesCount from match settings for equalized scoring (default to 6)
+            const maxSeriesCount = match.maxSeriesCount || 6;
 
-            // Helper to get equalized scores (first N series, sorted by seriesNumber)
+            // Helper to get equalized scores (first N series limited by maxSeriesCount, sorted by seriesNumber)
             function getEqualizedScores(participant) {
                 if (!participant.scores || participant.scores.length === 0) return [];
                 return [...participant.scores]
                     .sort((a, b) => a.seriesNumber - b.seriesNumber)
-                    .slice(0, minSeriesCount);
+                    .slice(0, maxSeriesCount);
             }
 
             // Helper to calculate final score using equalized series (with handicap if applicable)
@@ -1028,13 +1025,15 @@
                 headerRow.appendChild(th);
             });
 
-            // Find max series count
+            // Find max series to display (limited by maxSeriesCount from match settings)
             let maxSeries = 0;
             match.participants.forEach(p => {
                 if (p.scores && p.scores.length > maxSeries) {
                     maxSeries = p.scores.length;
                 }
             });
+            // Limit to maxSeriesCount from match settings
+            maxSeries = Math.min(maxSeries, maxSeriesCount);
 
             // Build score rows
             const tbody = document.getElementById('historyScoreboardBody');

@@ -297,7 +297,7 @@ namespace HpskSite.Tests
         // ============ CalculateAdjustedTotal Tests ============
 
         [Fact]
-        public void CalculateAdjustedTotal_AppliesHandicapToEachSeries()
+        public void CalculateAdjustedTotal_AppliesHandicapToTotal()
         {
             var scores = new List<TestSeriesScore>
             {
@@ -306,13 +306,14 @@ namespace HpskSite.Tests
                 new TestSeriesScore { SeriesNumber = 3, Total = 45, XCount = 2 }
             };
 
-            // 45 + 2.5 = 47.5 -> rounds to 48 for each series
+            // Per spec: FinalScore = Sum(RawSeriesScores) + (HandicapPerSeries × SeriesCount)
+            // 135 + (2.5 × 3) = 135 + 7.5 = 142.5 -> rounds to 143
             var result = ResultCalculator.CalculateAdjustedTotal(scores, 2.5m);
-            Assert.Equal(144, result); // 48 * 3
+            Assert.Equal(143, result);
         }
 
         [Fact]
-        public void CalculateAdjustedTotal_CapsEachAdjustedSeriesAt50()
+        public void CalculateAdjustedTotal_CapsAtMaxPossible()
         {
             var scores = new List<TestSeriesScore>
             {
@@ -321,10 +322,8 @@ namespace HpskSite.Tests
                 new TestSeriesScore { SeriesNumber = 3, Total = 47, XCount = 2 }
             };
 
-            // With 3.0 handicap:
-            // 48 + 3 = 51 -> capped at 50
-            // 49 + 3 = 52 -> capped at 50
-            // 47 + 3 = 50 -> exactly 50
+            // Per spec: FinalScore = Sum(RawSeriesScores) + (HandicapPerSeries × SeriesCount)
+            // 144 + (3.0 × 3) = 144 + 9 = 153 -> capped at 150 (50 × 3)
             var result = ResultCalculator.CalculateAdjustedTotal(scores, 3.0m);
             Assert.Equal(150, result);
         }
@@ -355,9 +354,9 @@ namespace HpskSite.Tests
                 new TestSeriesScore { SeriesNumber = 3, Total = 45, XCount = 2 }
             };
 
-            // Only first 2 series: (45 + 2.5) * 2 = 47.5 * 2 -> 48 * 2 = 96
+            // Only first 2 series: 90 + (2.5 × 2) = 90 + 5 = 95
             var result = ResultCalculator.CalculateAdjustedTotal(scores, 2.5m, equalizedCount: 2);
-            Assert.Equal(96, result);
+            Assert.Equal(95, result);
         }
 
         // ============ RoundToInt Tests ============
@@ -421,24 +420,19 @@ namespace HpskSite.Tests
             // X count: 2+2+3+2+4+1+3+3+2+2 = 24
             Assert.Equal(24, xCount);
 
-            // Adjusted (each series + 1.75, rounded, capped):
-            // 47+1.75=48.75->49, 45+1.75=46.75->47, 48+1.75=49.75->50,
-            // 46+1.75=47.75->48, 49+1.75=50.75->51->50 (capped),
-            // 44+1.75=45.75->46, 47+1.75=48.75->49, 48+1.75=49.75->50,
-            // 45+1.75=46.75->47, 46+1.75=47.75->48
-            // = 49+47+50+48+50+46+49+50+47+48 = 484
-            Assert.Equal(484, adjustedTotal);
+            // Per spec: FinalScore = Sum(RawSeriesScores) + (HandicapPerSeries × SeriesCount)
+            // 465 + (1.75 × 10) = 465 + 17.5 = 482.5 -> rounds to 483
+            Assert.Equal(483, adjustedTotal);
 
             // Handicap actually applied
             var handicapApplied = adjustedTotal - rawTotal;
-            Assert.Equal(19, handicapApplied); // 484 - 465 = 19 (less than 1.75 * 10 = 17.5 rounded due to caps)
+            Assert.Equal(18, handicapApplied); // 483 - 465 = 18 (1.75 × 10 = 17.5 rounded to 18)
         }
 
         [Fact]
         public void Integration_ScenarioThatCausedOriginalBug()
         {
-            // This is the exact scenario that could cause 1-point difference
-            // with Banker's rounding vs standard rounding
+            // This test verifies standard rounding (AwayFromZero) is used for the final total
             var scores = new List<TestSeriesScore>
             {
                 new TestSeriesScore { SeriesNumber = 1, Total = 47, XCount = 2 },
@@ -447,22 +441,17 @@ namespace HpskSite.Tests
                 new TestSeriesScore { SeriesNumber = 4, Total = 47, XCount = 2 }
             };
 
-            decimal handicap = 1.5m; // This creates 48.5 for each series
+            decimal handicap = 1.5m;
 
-            // With standard rounding (AwayFromZero):
-            // 47 + 1.5 = 48.5 -> 49 for each series
-            // Total: 49 * 4 = 196
-
-            // With Banker's rounding (ToEven) - the OLD bug:
-            // 47 + 1.5 = 48.5 -> 48 for each series (rounds to even)
-            // Total: 48 * 4 = 192
-
-            // Difference: 4 points! (1 per series)
+            // Per spec: FinalScore = Sum(RawSeriesScores) + (HandicapPerSeries × SeriesCount)
+            // 188 + (1.5 × 4) = 188 + 6 = 194
+            // With Banker's rounding, 194.0 would still be 194, so no difference here
+            // But a 0.5 final total would round to 195 with AwayFromZero
 
             var result = ResultCalculator.CalculateAdjustedTotal(scores, handicap);
 
-            // Our implementation should use standard rounding
-            Assert.Equal(196, result);
+            // Standard rounding on total: 188 + 6 = 194
+            Assert.Equal(194, result);
         }
 
         // ============ Negative Handicap Tests ============
@@ -493,8 +482,7 @@ namespace HpskSite.Tests
             };
 
             // Negative handicap: skilled shooter gives points
-            // 48 - 2.0 = 46, 49 - 2.0 = 47, 47 - 2.0 = 45
-            // Total: 46 + 47 + 45 = 138
+            // Per spec: 144 + (-2.0 × 3) = 144 - 6 = 138
             var result = ResultCalculator.CalculateAdjustedTotal(scores, -2.0m);
             Assert.Equal(138, result);
         }
@@ -509,11 +497,9 @@ namespace HpskSite.Tests
             };
 
             // With extreme negative handicap, score could theoretically go negative
-            // 10 - 15 = -5 -> should round to -5 (but this is edge case)
-            // The system allows negative adjusted scores (rare in practice)
+            // Per spec: 15 + (-15.0 × 2) = 15 - 30 = -15
             var result = ResultCalculator.CalculateAdjustedTotal(scores, -15.0m);
 
-            // 10 - 15 = -5, 5 - 15 = -10, Total = -15
             Assert.Equal(-15, result);
         }
 
@@ -537,16 +523,12 @@ namespace HpskSite.Tests
             // Raw: 49 + 50 + 48 + 49 = 196
             Assert.Equal(196, rawTotal);
 
-            // Adjusted:
-            // 49 - 1.75 = 47.25 -> 47
-            // 50 - 1.75 = 48.25 -> 48
-            // 48 - 1.75 = 46.25 -> 46
-            // 49 - 1.75 = 47.25 -> 47
-            // Total: 47 + 48 + 46 + 47 = 188
-            Assert.Equal(188, adjustedTotal);
+            // Per spec: FinalScore = Sum(RawSeriesScores) + (HandicapPerSeries × SeriesCount)
+            // 196 + (-1.75 × 4) = 196 - 7 = 189
+            Assert.Equal(189, adjustedTotal);
 
             // Handicap applied is negative (points deducted)
-            Assert.Equal(-8, adjustedTotal - rawTotal);
+            Assert.Equal(-7, adjustedTotal - rawTotal);
         }
 
         // ============ Maximum Score Rules Tests ============
@@ -635,21 +617,21 @@ namespace HpskSite.Tests
         }
 
         [Fact]
-        public void MaxScoreRule_EachSeriesCappedIndependently()
+        public void MaxScoreRule_TotalCappedAtMaxPossible()
         {
-            // Mix of scores where some hit the cap and some don't
+            // Mix of scores to verify total is capped at (seriesCount × 50)
             var scores = new List<TestSeriesScore>
             {
-                new TestSeriesScore { SeriesNumber = 1, Total = 48, XCount = 3 }, // 48+3=51 -> 50
-                new TestSeriesScore { SeriesNumber = 2, Total = 40, XCount = 1 }, // 40+3=43 -> 43
-                new TestSeriesScore { SeriesNumber = 3, Total = 49, XCount = 4 }, // 49+3=52 -> 50
-                new TestSeriesScore { SeriesNumber = 4, Total = 35, XCount = 0 }  // 35+3=38 -> 38
+                new TestSeriesScore { SeriesNumber = 1, Total = 48, XCount = 3 },
+                new TestSeriesScore { SeriesNumber = 2, Total = 40, XCount = 1 },
+                new TestSeriesScore { SeriesNumber = 3, Total = 49, XCount = 4 },
+                new TestSeriesScore { SeriesNumber = 4, Total = 35, XCount = 0 }
             };
 
             var result = ResultCalculator.CalculateAdjustedTotal(scores, 3.0m);
 
-            // Expected: 50 + 43 + 50 + 38 = 181
-            Assert.Equal(181, result);
+            // Per spec: 172 + (3.0 × 4) = 172 + 12 = 184
+            Assert.Equal(184, result);
 
             // Verify it's less than max possible (4 × 50 = 200)
             Assert.True(result <= 200);
@@ -658,12 +640,12 @@ namespace HpskSite.Tests
         [Fact]
         public void MaxScoreRule_HandicapLostToCap_IsCalculatedCorrectly()
         {
-            // When handicap would push score above 50, some handicap is "lost"
+            // When handicap would push total above (seriesCount × 50), excess is "lost"
             var scores = new List<TestSeriesScore>
             {
-                new TestSeriesScore { SeriesNumber = 1, Total = 48, XCount = 3 }, // Would be 53, capped to 50, lost 3
-                new TestSeriesScore { SeriesNumber = 2, Total = 49, XCount = 4 }, // Would be 54, capped to 50, lost 4
-                new TestSeriesScore { SeriesNumber = 3, Total = 45, XCount = 2 }  // Would be 50, no loss
+                new TestSeriesScore { SeriesNumber = 1, Total = 48, XCount = 3 },
+                new TestSeriesScore { SeriesNumber = 2, Total = 49, XCount = 4 },
+                new TestSeriesScore { SeriesNumber = 3, Total = 45, XCount = 2 }
             };
 
             decimal handicap = 5.0m;
@@ -674,7 +656,7 @@ namespace HpskSite.Tests
             // Raw: 48 + 49 + 45 = 142
             Assert.Equal(142, rawTotal);
 
-            // Adjusted: 50 + 50 + 50 = 150 (all capped)
+            // Per spec: 142 + (5.0 × 3) = 142 + 15 = 157, but capped at 150
             Assert.Equal(150, adjustedTotal);
 
             // Theoretical handicap: 5 × 3 = 15
@@ -682,7 +664,7 @@ namespace HpskSite.Tests
             var actualHandicapApplied = adjustedTotal - rawTotal;
             Assert.Equal(8, actualHandicapApplied);
 
-            // Lost to cap: 15 - 8 = 7 (3 from series 1, 4 from series 2)
+            // Lost to cap: 15 - 8 = 7 (total would exceed max)
             var theoreticalHandicap = handicap * scores.Count;
             var lostToCap = theoreticalHandicap - actualHandicapApplied;
             Assert.Equal(7, lostToCap);

@@ -154,11 +154,6 @@ public class MatchService : IMatchService
         return await _apiService.PostAsync<RegenerateGuestQrResponse>($"api/match/{matchCode}/guest/{guestId}/regenerate-qr");
     }
 
-    public async Task<ApiResponse> UpdateMatchSettingsWithGuestsAsync(string matchCode, int? maxSeriesCount, bool? allowGuests)
-    {
-        return await _apiService.PostAsync($"api/match/{matchCode}/settings", new { MaxSeriesCount = maxSeriesCount, AllowGuests = allowGuests });
-    }
-
     public async Task<ApiResponse<List<MemberSearchResult>>> SearchMembersAsync(string searchTerm)
     {
         return await _apiService.GetAsync<List<MemberSearchResult>>($"api/match/search-members?q={Uri.EscapeDataString(searchTerm)}");
@@ -227,7 +222,6 @@ public interface IMatchService
     Task<ApiResponse<AddGuestResponse>> AddGuestAsync(string matchCode, AddGuestRequest request);
     Task<ApiResponse> RemoveGuestAsync(string matchCode, int guestId);
     Task<ApiResponse<RegenerateGuestQrResponse>> RegenerateGuestQrAsync(string matchCode, int guestId);
-    Task<ApiResponse> UpdateMatchSettingsWithGuestsAsync(string matchCode, int? maxSeriesCount, bool? allowGuests);
     Task<ApiResponse<List<MemberSearchResult>>> SearchMembersAsync(string searchTerm);
     Task<ApiResponse<CreateMemberClaimResponse>> CreateMemberClaimAsync(string matchCode, int memberId, string? handicapClass = null);
 }

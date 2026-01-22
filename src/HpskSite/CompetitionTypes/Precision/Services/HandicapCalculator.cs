@@ -1,4 +1,5 @@
 using HpskSite.Models;
+using HpskSite.Shared.Services;
 using Microsoft.Extensions.Options;
 
 namespace HpskSite.CompetitionTypes.Precision.Services
@@ -142,17 +143,12 @@ namespace HpskSite.CompetitionTypes.Precision.Services
 
         /// <summary>
         /// Calculate total final score for a match.
-        /// Each series is capped at the maximum possible (50), then summed.
-        /// Uses MidpointRounding.AwayFromZero for consistency with JavaScript.
+        /// Delegates to ResultCalculator for consistent calculation across server and mobile.
         /// </summary>
         public decimal GetMatchFinalScore(decimal rawTotal, decimal handicapPerSeries, int seriesCount)
         {
-            // Cap the total at max possible (50 × seriesCount)
-            var maxPossibleTotal = MAX_SCORE_PER_SERIES * seriesCount;
-            // Use the quarter-point handicap value, then round final score to integer
-            var finalScore = rawTotal + (handicapPerSeries * seriesCount);
-            finalScore = Math.Min(finalScore, maxPossibleTotal);
-            return Math.Round(finalScore, 0, MidpointRounding.AwayFromZero);
+            return ResultCalculator.CalculateAdjustedMatchTotal(
+                (int)rawTotal, handicapPerSeries, seriesCount);
         }
 
         /// <summary>

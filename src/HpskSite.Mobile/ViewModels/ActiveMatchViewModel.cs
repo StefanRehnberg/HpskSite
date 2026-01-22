@@ -372,11 +372,26 @@ public partial class ActiveMatchViewModel : BaseViewModel
     public bool CanCaptureNewPhoto => IsNotBusy && (!IsEditMode || string.IsNullOrEmpty(EditingSeriesPhotoUrl));
 
     /// <summary>
-    /// Maximum series count across all participants (for building the scoreboard rows)
+    /// Maximum series count for building the scoreboard rows.
+    /// Respects Match.MaxSeriesCount setting if set, otherwise shows all series (min 6).
     /// </summary>
-    public int MaxSeriesCount => Participants.Count > 0
-        ? Math.Max(6, Participants.Max(p => p.Scores?.Count ?? 0))
-        : 6;
+    public int MaxSeriesCount
+    {
+        get
+        {
+            int actualMaxSeries = Participants.Count > 0
+                ? Math.Max(6, Participants.Max(p => p.Scores?.Count ?? 0))
+                : 6;
+
+            // If match has MaxSeriesCount setting, limit display to that
+            if (Match?.MaxSeriesCount.HasValue == true)
+            {
+                return Math.Min(actualMaxSeries, Match.MaxSeriesCount.Value);
+            }
+
+            return actualMaxSeries;
+        }
+    }
 
     // Photo Viewer Modal Properties
     /// <summary>

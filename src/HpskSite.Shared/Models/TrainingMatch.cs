@@ -96,12 +96,6 @@ namespace HpskSite.Shared.Models
         public int? MaxSeriesCount { get; set; }
 
         /// <summary>
-        /// Whether guests (non-registered users) can be added to this match by the organizer
-        /// </summary>
-        [JsonPropertyName("allowGuests")]
-        public bool AllowGuests { get; set; }
-
-        /// <summary>
         /// List of participants in this match
         /// </summary>
         [JsonPropertyName("participants")]

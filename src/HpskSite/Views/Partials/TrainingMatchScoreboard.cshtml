@@ -796,18 +796,12 @@ function renderScoreboard(match) {
 
         // Check if handicap is enabled and participant has handicap data
         if (match.hasHandicap && participant.handicapPerSeries !== null && participant.handicapPerSeries !== undefined) {
-            // Use quarter-point handicap, then round final score to integer
+            // Per spec: FinalScore = Sum(RawSeriesScores) + (HandicapPerSeries × SeriesCount)
             const hcpPerSeries = roundToQuarter(participant.handicapPerSeries);
-            // Apply handicap per series, cap at 50, then sum
-            // MUST match ResultCalculator.CalculateAdjustedSeriesScore() in C#
-            // Order: (rawScore + handicap) -> round -> cap at 50 -> sum
-            const finalScore = effectiveScores.reduce((sum, s) => {
-                const adjustedSeriesScore = Math.round(s.total + hcpPerSeries);
-                return sum + Math.min(adjustedSeriesScore, 50);
-            }, 0);
-            // Handicap displayed is the actual difference (may be less than hcpPerSeries * count due to caps)
-            const handicapActual = finalScore - totalScore;
-            const hcpTotalDisplay = formatHandicap(handicapActual);
+            const handicapTotal = hcpPerSeries * effectiveSeriesCount;
+            const maxPossible = 50 * effectiveSeriesCount;
+            const finalScore = Math.min(Math.round(totalScore + handicapTotal), maxPossible);
+            const hcpTotalDisplay = formatHandicap(handicapTotal);
 
             td.innerHTML = `
                 <div class="total-score handicap-final">${finalScore}</div>

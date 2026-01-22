@@ -733,6 +733,10 @@ namespace HpskSite.Controllers
 
                     foreach (var participant in participants)
                     {
+                        // Skip guest participants (they don't have a MemberId)
+                        if (participant.MemberId == null)
+                            continue;
+
                         int participantMemberId = (int)participant.MemberId;
                         int seriesCount = participant.SeriesCount ?? 0;
                         decimal totalScore = participant.TotalScore != null ? Convert.ToDecimal(participant.TotalScore) : 0m;
@@ -801,13 +805,12 @@ namespace HpskSite.Controllers
                     // Update match settings
                     db.Execute(
                         @"UPDATE TrainingMatches
-                          SET MaxSeriesCount = @0,
-                              AllowGuests = COALESCE(@2, AllowGuests)
+                          SET MaxSeriesCount = @0
                           WHERE Id = @1",
-                        request.MaxSeriesCount, (int)match.Id, request.AllowGuests);
+                        request.MaxSeriesCount, (int)match.Id);
 
                     // Notify all viewers via SignalR
-                    await _hubContext.SendSettingsUpdated(request.MatchCode ?? "", request.MaxSeriesCount, request.AllowGuests);
+                    await _hubContext.SendSettingsUpdated(request.MatchCode ?? "", request.MaxSeriesCount);
 
                     return Json(new { success = true, message = "Inställningar sparade" });
                 }
@@ -1657,18 +1660,15 @@ namespace HpskSite.Controllers
                                 participantData.Add(((int)score.MemberId, seriesTotals.Count, seriesTotals));
                             }
 
-                            // Find minimum series count (only from participants with scores)
-                            var participantsWithScores = participantData.Where(p => p.SeriesCount > 0).ToList();
-                            int minSeriesCount = participantsWithScores.Any()
-                                ? participantsWithScores.Min(p => p.SeriesCount)
-                                : 0;
+                            // Get MaxSeriesCount from match settings (default to 6 if null)
+                            int maxSeriesCount = m.MaxSeriesCount != null ? (int)m.MaxSeriesCount : 6;
 
-                            // Calculate equalized scores and rank
+                            // Calculate equalized scores and rank (limited to maxSeriesCount)
                             var equalizedScores = participantData
                                 .Select(p => new {
                                     MemberId = p.MemberId,
-                                    EqualizedScore = p.SeriesTotals.Take(minSeriesCount).Sum(),
-                                    SeriesCount = p.SeriesCount
+                                    EqualizedScore = p.SeriesTotals.Take(maxSeriesCount).Sum(),
+                                    SeriesCount = Math.Min(p.SeriesCount, maxSeriesCount)
                                 })
                                 .OrderByDescending(p => p.EqualizedScore)
                                 .ToList();
@@ -1678,7 +1678,7 @@ namespace HpskSite.Controllers
                             if (userData != null)
                             {
                                 userTotalScore = userData.EqualizedScore;
-                                userSeriesCount = minSeriesCount; // Show the equalized series count
+                                userSeriesCount = userData.SeriesCount; // Show the series count used (limited by MaxSeriesCount)
                                 userRanking = equalizedScores.FindIndex(p => p.MemberId == member.Id) + 1;
                             }
                         }
@@ -2796,7 +2796,6 @@ namespace HpskSite.Controllers
     {
         public string? MatchCode { get; set; }
         public int? MaxSeriesCount { get; set; }
-        public bool? AllowGuests { get; set; }
     }
 
     public class SaveMatchScoreRequest

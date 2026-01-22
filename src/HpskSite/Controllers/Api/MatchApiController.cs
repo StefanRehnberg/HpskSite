@@ -518,16 +518,15 @@ namespace HpskSite.Controllers.Api
             // Update settings
             await db.ExecuteAsync(
                 @"UPDATE TrainingMatches
-                  SET MaxSeriesCount = @0,
-                      AllowGuests = COALESCE(@2, AllowGuests)
+                  SET MaxSeriesCount = @0
                   WHERE Id = @1",
-                request.MaxSeriesCount, match.Id, request.AllowGuests);
+                request.MaxSeriesCount, match.Id);
 
             scope.Complete();
 
             // Notify all participants via SignalR to reload match data
             await _hubContext.Clients.Group($"match_{code.ToUpper()}")
-                .SendAsync("SettingsUpdated", new { maxSeriesCount = request.MaxSeriesCount, allowGuests = request.AllowGuests });
+                .SendAsync("SettingsUpdated", new { maxSeriesCount = request.MaxSeriesCount });
 
             return Ok(ApiResponse.Ok("Inställningar sparade"));
         }
@@ -1162,36 +1161,45 @@ namespace HpskSite.Controllers.Api
                 // If user participated, get their score and ranking
                 if (item.IsParticipant)
                 {
-                    var userScore = await db.FirstOrDefaultAsync<TrainingScoreDbDto>(
-                        "WHERE TrainingMatchId = @0 AND MemberId = @1", match.Id, currentMemberId);
+                    // Get MaxSeriesCount from match settings (default to 6 if null)
+                    int maxSeries = match.MaxSeriesCount ?? 6;
 
-                    if (userScore != null)
+                    // Fetch all scores with series data for equalized calculation
+                    var allScoresWithSeries = await db.FetchAsync<TrainingScoreDbDto>(
+                        @"SELECT ts.* FROM TrainingScores ts
+                          INNER JOIN TrainingMatchParticipants tmp ON ts.MemberId = tmp.MemberId AND ts.TrainingMatchId = tmp.TrainingMatchId
+                          WHERE ts.TrainingMatchId = @0", match.Id);
+
+                    // Calculate equalized scores (limited to maxSeries)
+                    var equalizedScores = new List<(int MemberId, int EqualizedScore, int SeriesCount)>();
+                    foreach (var score in allScoresWithSeries)
                     {
-                        item.UserScore = userScore.TotalScore;
+                        // Skip guest entries (null MemberId)
+                        if (!score.MemberId.HasValue) continue;
 
-                        // Count series from SeriesScores JSON
                         try
                         {
-                            var series = JsonSerializer.Deserialize<List<TrainingSeries>>(userScore.SeriesScores ?? "[]");
-                            item.UserSeriesCount = series?.Count ?? 0;
+                            var series = JsonSerializer.Deserialize<List<TrainingSeries>>(score.SeriesScores ?? "[]");
+                            var limitedSeries = series?.Take(maxSeries).ToList() ?? new List<TrainingSeries>();
+                            int equalizedScore = limitedSeries.Sum(s => s.Total);
+                            equalizedScores.Add((score.MemberId.Value, equalizedScore, Math.Min(series?.Count ?? 0, maxSeries)));
                         }
                         catch
                         {
-                            item.UserSeriesCount = 0;
+                            equalizedScores.Add((score.MemberId.Value, score.TotalScore, 0));
                         }
                     }
 
-                    // Calculate ranking (position among all participants by total score)
-                    var allScores = await db.FetchAsync<TrainingScoreDbDto>(
-                        @"SELECT ts.* FROM TrainingScores ts
-                          INNER JOIN TrainingMatchParticipants tmp ON ts.MemberId = tmp.MemberId AND ts.TrainingMatchId = tmp.TrainingMatchId
-                          WHERE ts.TrainingMatchId = @0
-                          ORDER BY ts.TotalScore DESC", match.Id);
+                    // Sort by equalized score descending for ranking
+                    equalizedScores = equalizedScores.OrderByDescending(s => s.EqualizedScore).ToList();
 
-                    var userRank = allScores.FindIndex(s => s.MemberId == currentMemberId) + 1;
-                    if (userRank > 0)
+                    // Find user's data
+                    var userData = equalizedScores.FirstOrDefault(s => s.MemberId == currentMemberId);
+                    if (userData.MemberId == currentMemberId)
                     {
-                        item.UserRanking = userRank;
+                        item.UserScore = userData.EqualizedScore;
+                        item.UserSeriesCount = userData.SeriesCount;
+                        item.UserRanking = equalizedScores.FindIndex(s => s.MemberId == currentMemberId) + 1;
                     }
                 }
 
@@ -2101,8 +2109,7 @@ namespace HpskSite.Controllers.Api
                 StartDate = match.StartDate,
                 IsHandicapEnabled = match.HasHandicap,
                 IsOpen = match.IsOpen,
-                MaxSeriesCount = match.MaxSeriesCount,
-                AllowGuests = match.AllowGuests
+                MaxSeriesCount = match.MaxSeriesCount
             };
 
             // Get creator name
@@ -2262,7 +2269,6 @@ namespace HpskSite.Controllers.Api
         public bool IsOpen { get; set; } = true;
         public bool HasHandicap { get; set; }
         public int? MaxSeriesCount { get; set; }
-        public bool AllowGuests { get; set; }
     }
 
     [TableName("TrainingMatchParticipants")]
