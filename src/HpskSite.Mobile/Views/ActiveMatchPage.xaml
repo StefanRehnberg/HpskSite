@@ -13,40 +13,39 @@
              Shell.ForegroundColor="White"
              Shell.NavBarIsVisible="True">
 
-    <Grid>
+    <Grid RowDefinitions="Auto,*">
 
-        <!--  Main Scrollable Content  -->
-        <ScrollView Grid.Row="0" Margin="0,0,0,80">
-            <VerticalStackLayout Padding="12" Spacing="12">
+        <!--  Row 0: Header Elements  -->
+        <VerticalStackLayout Grid.Row="0" Padding="12,12,12,0" Spacing="12">
 
-                <!--  Spectator Mode Banner (only show for active/ongoing matches, not history)  -->
-                <Border Padding="10"
-                        BackgroundColor="#fff3cd"
-                        Stroke="Transparent" StrokeShape="RoundRectangle 8">
-                    <Border.Triggers>
-                        <!--  Show only when IsSpectator AND match is active  -->
-                        <MultiTrigger TargetType="Border">
-                            <MultiTrigger.Conditions>
-                                <BindingCondition Binding="{Binding IsSpectator}" Value="True" />
-                                <BindingCondition Binding="{Binding IsMatchActive}" Value="True" />
-                            </MultiTrigger.Conditions>
-                            <Setter Property="IsVisible" Value="True" />
-                        </MultiTrigger>
-                    </Border.Triggers>
-                    <Border.Style>
-                        <Style TargetType="Border">
-                            <Setter Property="IsVisible" Value="False" />
-                        </Style>
-                    </Border.Style>
-                    <HorizontalStackLayout HorizontalOptions="Center" Spacing="8">
-                        <Label FontSize="14" Text="👁️" VerticalOptions="Center" />
-                        <Label FontAttributes="Bold" FontSize="14"
-                               Text="Visningsläge - du kan se matchen men inte rapportera resultat"
-                               TextColor="#856404" VerticalOptions="Center" />
-                    </HorizontalStackLayout>
-                </Border>
+            <!--  Spectator Mode Banner (only show for active/ongoing matches, not history)  -->
+            <Border Padding="10"
+                    BackgroundColor="#fff3cd"
+                    Stroke="Transparent" StrokeShape="RoundRectangle 8">
+                <Border.Triggers>
+                    <!--  Show only when IsSpectator AND match is active  -->
+                    <MultiTrigger TargetType="Border">
+                        <MultiTrigger.Conditions>
+                            <BindingCondition Binding="{Binding IsSpectator}" Value="True" />
+                            <BindingCondition Binding="{Binding IsMatchActive}" Value="True" />
+                        </MultiTrigger.Conditions>
+                        <Setter Property="IsVisible" Value="True" />
+                    </MultiTrigger>
+                </Border.Triggers>
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="IsVisible" Value="False" />
+                    </Style>
+                </Border.Style>
+                <HorizontalStackLayout HorizontalOptions="Center" Spacing="8">
+                    <Label FontSize="14" Text="👁️" VerticalOptions="Center" />
+                    <Label FontAttributes="Bold" FontSize="14"
+                           Text="Visningsläge - du kan se matchen men inte rapportera resultat"
+                           TextColor="#856404" VerticalOptions="Center" />
+                </HorizontalStackLayout>
+            </Border>
 
-                <!--  Match Header Card  -->
+            <!--  Match Header Card  -->
                 <Border Padding="10,8"
                         BackgroundColor="{StaticResource Primary}"
                         Stroke="Transparent" StrokeShape="RoundRectangle 12">
@@ -73,6 +72,24 @@
 
                         <!--  Right: Buttons  -->
                         <HorizontalStackLayout Grid.Column="1" Spacing="6" VerticalOptions="Center">
+                            <!--  Add Series Button (participants only, active matches)  -->
+                            <Button Padding="10,0" BackgroundColor="{StaticResource Success}"
+                                    Command="{Binding OpenScoreEntryCommand}"
+                                    CornerRadius="8" FontAttributes="Bold" FontSize="13" HeightRequest="40"
+                                    Text="+ Serie" TextColor="White">
+                                <Button.Triggers>
+                                    <DataTrigger Binding="{Binding IsScoreEntryOpen}" TargetType="Button" Value="True">
+                                        <Setter Property="IsVisible" Value="False" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding IsSpectator}" TargetType="Button" Value="True">
+                                        <Setter Property="IsVisible" Value="False" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding IsMatchActive}" TargetType="Button" Value="False">
+                                        <Setter Property="IsVisible" Value="False" />
+                                    </DataTrigger>
+                                </Button.Triggers>
+                            </Button>
+
                             <!--  Settings Button (Host only) - cog icon  -->
                             <Button Padding="8,0" BackgroundColor="White"
                                     Command="{Binding OpenSettingsModalCommand}"
@@ -193,16 +210,18 @@
                     </HorizontalStackLayout>
                 </Border>
 
-                <!--  Scoreboard Card  -->
-                <Border Padding="0" BackgroundColor="#374151" Stroke="Transparent"
-                        StrokeShape="RoundRectangle 12">
-                    <Border.Shadow>
-                        <Shadow Brush="Black" Opacity="0.1" Radius="6"
-                                Offset="0,2" />
-                    </Border.Shadow>
+        </VerticalStackLayout>
 
-                    <!--  Scoreboard with horizontal scroll  -->
-                    <ScrollView Orientation="Horizontal">
+        <!--  Row 1: Scoreboard Card (fills remaining space)  -->
+        <Border Grid.Row="1" Margin="12" Padding="0" BackgroundColor="#374151" Stroke="Transparent"
+                StrokeShape="RoundRectangle 12">
+            <Border.Shadow>
+                <Shadow Brush="Black" Opacity="0.1" Radius="6"
+                        Offset="0,2" />
+            </Border.Shadow>
+
+            <!--  Scoreboard with horizontal scroll  -->
+            <ScrollView Orientation="Horizontal">
                         <VerticalStackLayout Spacing="0">
 
                             <!--  Participant Header Row  -->
@@ -418,38 +437,12 @@
                                 </HorizontalStackLayout>
                             </Border>
 
-                        </VerticalStackLayout>
-                    </ScrollView>
-                </Border>
-
-            </VerticalStackLayout>
-        </ScrollView>
-
-        <!--  Floating Add Score Button (only for participants, not spectators)  -->
-        <Button Grid.Row="0" Margin="16,0,16,16" VerticalOptions="End"
-                BackgroundColor="{StaticResource Success}"
-                Command="{Binding OpenScoreEntryCommand}"
-                CornerRadius="25" FontAttributes="Bold" FontSize="16"
-                HeightRequest="50"
-                Shadow="{Shadow Brush=Black,
-                                Offset='0,4',
-                                Radius=8,
-                                Opacity=0.2}"
-                Text="+ Lägg till serie" TextColor="White">
-            <Button.Triggers>
-                <!--  Hide when score entry is open  -->
-                <DataTrigger Binding="{Binding IsScoreEntryOpen}" TargetType="Button" Value="True">
-                    <Setter Property="IsVisible" Value="False" />
-                </DataTrigger>
-                <!--  Hide for spectators  -->
-                <DataTrigger Binding="{Binding IsSpectator}" TargetType="Button" Value="True">
-                    <Setter Property="IsVisible" Value="False" />
-                </DataTrigger>
-            </Button.Triggers>
-        </Button>
+                </VerticalStackLayout>
+            </ScrollView>
+        </Border>
 
         <!--  Join From Spectator Button (only for spectators who can join)  -->
-        <Button Grid.Row="0" Margin="16,0,16,16" VerticalOptions="End"
+        <Button Grid.RowSpan="2" Margin="16,0,16,16" VerticalOptions="End"
                 BackgroundColor="{StaticResource Primary}"
                 Command="{Binding JoinFromSpectatorCommand}"
                 CornerRadius="25" FontAttributes="Bold" FontSize="16"
@@ -462,7 +455,7 @@
                 Text="Gå med i matchen" TextColor="White" />
 
         <!--  Score Entry Panel (Slide up from bottom) - only for participants  -->
-        <Border Grid.Row="0" Padding="16,16,16,20"
+        <Border Grid.RowSpan="2" Padding="16,16,16,20"
                 BackgroundColor="#374151"
                 Stroke="Transparent" StrokeShape="RoundRectangle 20,20,0,0" VerticalOptions="End">
             <Border.Triggers>
@@ -705,8 +698,8 @@
                             TextColor="White" />
                 </Grid>
 
-                <!--  Action Buttons: C (clear), Spara (save only), Spara+📷 (save + photo)  -->
-                <Grid ColumnDefinitions="Auto,*,*" ColumnSpacing="8" IsVisible="{Binding IsUploadingPhoto, Converter={StaticResource InverseBoolConverter}}">
+                <!--  Action Buttons: C (clear), Spara+📷 (save + photo), Spara (save only)  -->
+                <Grid ColumnDefinitions="Auto,Auto,*" ColumnSpacing="8" IsVisible="{Binding IsUploadingPhoto, Converter={StaticResource InverseBoolConverter}}">
                     <!--  C = Clear current shot  -->
                     <Button Grid.Column="0"
                             BackgroundColor="{StaticResource Warning}"
@@ -714,22 +707,23 @@
                             CornerRadius="8" FontAttributes="Bold" FontSize="18"
                             HeightRequest="52" Text="C" TextColor="White"
                             WidthRequest="52" />
-                    <!--  Spara = Save score only  -->
+                    <!--  Spara+📷 = Save score and capture photo (disabled when editing series with existing photo)  -->
                     <Button Grid.Column="1"
                             BackgroundColor="#4b5563"
+                            Command="{Binding SaveScoreWithPhotoCommand}"
+                            CornerRadius="8" FontAttributes="Bold" FontSize="12"
+                            HeightRequest="52"
+                            IsEnabled="{Binding CanCaptureNewPhoto}"
+                            Text="📷" TextColor="White"
+                            WidthRequest="52" />
+                    <!--  Spara = Save score only (default action)  -->
+                    <Button Grid.Column="2"
+                            BackgroundColor="{StaticResource Primary}"
                             Command="{Binding SaveScoreOnlyCommand}"
                             CornerRadius="8" FontAttributes="Bold" FontSize="14"
                             HeightRequest="52"
                             IsEnabled="{Binding IsNotBusy}"
                             Text="Spara" TextColor="White" />
-                    <!--  Spara+📷 = Save score and capture photo (disabled when editing series with existing photo)  -->
-                    <Button Grid.Column="2"
-                            BackgroundColor="{StaticResource Primary}"
-                            Command="{Binding SaveScoreWithPhotoCommand}"
-                            CornerRadius="8" FontAttributes="Bold" FontSize="12"
-                            HeightRequest="52"
-                            IsEnabled="{Binding CanCaptureNewPhoto}"
-                            Text="Spara + 📷" TextColor="White" />
                 </Grid>
 
                 <!--  Upload progress indicator  -->
@@ -747,7 +741,7 @@
         </Border>
 
         <!--  Spectators Modal (Slide up from bottom)  -->
-        <Border Grid.Row="0" Padding="16,16,16,20"
+        <Border Grid.RowSpan="2" Padding="16,16,16,20"
                 BackgroundColor="#374151"
                 IsVisible="{Binding IsSpectatorsModalOpen}"
                 Stroke="Transparent" StrokeShape="RoundRectangle 20,20,0,0" VerticalOptions="End">
@@ -835,7 +829,7 @@
         </Border>
 
         <!--  Settings Modal (Host only - Full screen overlay with bottom sheet)  -->
-        <Grid Grid.Row="0" BackgroundColor="#80000000"
+        <Grid Grid.RowSpan="2" BackgroundColor="#80000000"
               IsVisible="{Binding IsSettingsModalOpen}">
             <!--  Tap overlay to close  -->
             <Grid.GestureRecognizers>
@@ -1028,7 +1022,7 @@
         </Grid>
 
         <!--  Share Modal (Non-host participants/spectators - Full screen overlay with bottom sheet)  -->
-        <Grid Grid.Row="0" BackgroundColor="#80000000"
+        <Grid Grid.RowSpan="2" BackgroundColor="#80000000"
               IsVisible="{Binding IsShareModalOpen}">
             <!--  Tap overlay to close  -->
             <Grid.GestureRecognizers>
@@ -1102,7 +1096,7 @@
         </Grid>
 
         <!--  Photo Viewer Modal (Full screen overlay)  -->
-        <Grid Grid.Row="0" BackgroundColor="#CC000000"
+        <Grid Grid.RowSpan="2" BackgroundColor="#CC000000"
               IsVisible="{Binding IsPhotoViewerOpen}">
             <Border Margin="16" Padding="0"
                     BackgroundColor="#374151"
@@ -1274,7 +1268,7 @@
         </Grid>
 
         <!--  Add Guest Modal (Host only - Full screen overlay with bottom sheet)  -->
-        <Grid Grid.Row="0" BackgroundColor="#80000000"
+        <Grid Grid.RowSpan="2" BackgroundColor="#80000000"
               IsVisible="{Binding IsAddGuestModalOpen}">
             <!--  Tap overlay to close  -->
             <Grid.GestureRecognizers>
@@ -1390,7 +1384,7 @@
         </Grid>
 
         <!--  Guest QR Code Modal (Shows after guest is added)  -->
-        <Grid Grid.Row="0" BackgroundColor="#80000000"
+        <Grid Grid.RowSpan="2" BackgroundColor="#80000000"
               IsVisible="{Binding IsGuestQrModalOpen}"
               ZIndex="100">
             <!--  Tap overlay to close  -->
@@ -1460,7 +1454,7 @@
         </Grid>
 
         <!--  Add Member Modal (Host only - For members who forgot password)  -->
-        <Grid Grid.Row="0" BackgroundColor="#80000000"
+        <Grid Grid.RowSpan="2" BackgroundColor="#80000000"
               IsVisible="{Binding IsAddMemberModalOpen}">
             <!--  Tap overlay to close  -->
             <Grid.GestureRecognizers>
@@ -1624,7 +1618,7 @@
         </Grid>
 
         <!--  Member QR Code Modal (Shows after member claim is created)  -->
-        <Grid Grid.Row="0" BackgroundColor="#80000000"
+        <Grid Grid.RowSpan="2" BackgroundColor="#80000000"
               IsVisible="{Binding IsMemberQrModalOpen}"
               ZIndex="100">
             <!--  Tap overlay to close  -->
@@ -1700,7 +1694,7 @@
         </Grid>
 
         <!--  Loading Indicator  -->
-        <ActivityIndicator Grid.Row="0" HorizontalOptions="Center"
+        <ActivityIndicator Grid.RowSpan="2" HorizontalOptions="Center"
                            IsRunning="{Binding IsBusy}"
                            IsVisible="{Binding IsBusy}"
                            VerticalOptions="Center"
