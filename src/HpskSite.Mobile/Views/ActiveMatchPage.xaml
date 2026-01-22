@@ -220,9 +220,10 @@
                         Offset="0,2" />
             </Border.Shadow>
 
-            <!--  Scoreboard with horizontal scroll  -->
-            <ScrollView Orientation="Horizontal">
-                        <VerticalStackLayout Spacing="0">
+            <!--  Scoreboard with both vertical and horizontal scroll  -->
+            <ScrollView Orientation="Vertical">
+                <ScrollView Orientation="Horizontal">
+                    <VerticalStackLayout Spacing="0">
 
                             <!--  Participant Header Row  -->
                             <Border Padding="0" BackgroundColor="#4b5563" StrokeThickness="0">
@@ -437,7 +438,8 @@
                                 </HorizontalStackLayout>
                             </Border>
 
-                </VerticalStackLayout>
+                    </VerticalStackLayout>
+                </ScrollView>
             </ScrollView>
         </Border>
 
