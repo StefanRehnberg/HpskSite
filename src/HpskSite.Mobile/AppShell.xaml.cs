@@ -13,5 +13,6 @@ public partial class AppShell : Shell
         Routing.RegisterRoute("joinMatch", typeof(JoinMatchPage));
         Routing.RegisterRoute("qrScanner", typeof(QrScannerPage));
         Routing.RegisterRoute("activeMatch", typeof(ActiveMatchPage));
+        Routing.RegisterRoute("diagnostics", typeof(DiagnosticsPage));
     }
 }

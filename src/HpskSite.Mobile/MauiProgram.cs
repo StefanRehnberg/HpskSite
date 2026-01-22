@@ -76,6 +76,7 @@ public static class MauiProgram
         builder.Services.AddTransient<ActiveMatchViewModel>();
         builder.Services.AddTransient<DashboardViewModel>();
         builder.Services.AddTransient<SettingsViewModel>();
+        builder.Services.AddTransient<DiagnosticsViewModel>();
 
         // Register Pages
         builder.Services.AddTransient<LoginPage>();
@@ -86,13 +87,14 @@ public static class MauiProgram
         builder.Services.AddTransient<ActiveMatchPage>();
         builder.Services.AddTransient<DashboardPage>();
         builder.Services.AddTransient<SettingsPage>();
+        builder.Services.AddTransient<DiagnosticsPage>();
+
+        // Always enable file logging for crash diagnostics (works in Release builds)
+        var logPath = Path.Combine(FileSystem.AppDataDirectory, "crash.log");
+        builder.Logging.AddFileLogger(logPath);
 
 #if DEBUG
         builder.Logging.AddDebug();
-
-        // Add file logging for debugging
-        var logPath = Path.Combine(FileSystem.AppDataDirectory, "app.log");
-        builder.Logging.AddFileLogger(logPath);
         System.Diagnostics.Debug.WriteLine($"Log file: {logPath}");
 #endif
 

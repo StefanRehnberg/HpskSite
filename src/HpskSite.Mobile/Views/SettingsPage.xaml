@@ -206,6 +206,19 @@
                                    VerticalOptions="Center"
                                    TextColor="{StaticResource Gray400}" />
                         </HorizontalStackLayout>
+
+                        <!-- Divider -->
+                        <BoxView HeightRequest="1"
+                                 Color="{StaticResource Gray600}"
+                                 Margin="0,8" />
+
+                        <!-- Diagnostics Button -->
+                        <Button Text="Diagnostik"
+                                Clicked="OnDiagnosticsClicked"
+                                BackgroundColor="{StaticResource Gray600}"
+                                TextColor="White"
+                                HeightRequest="44"
+                                CornerRadius="8" />
                     </VerticalStackLayout>
                 </VerticalStackLayout>
             </Border>

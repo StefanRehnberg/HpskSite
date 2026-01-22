@@ -9,4 +9,9 @@ public partial class SettingsPage : ContentPage
         InitializeComponent();
         BindingContext = viewModel;
     }
+
+    private async void OnDiagnosticsClicked(object sender, EventArgs e)
+    {
+        await Shell.Current.GoToAsync("diagnostics");
+    }
 }
