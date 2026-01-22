@@ -201,16 +201,16 @@
                                 Offset="0,2" />
                     </Border.Shadow>
 
-                    <!--  Scoreboard (full width, no horizontal scroll)  -->
-                    <VerticalStackLayout Spacing="0">
+                    <!--  Scoreboard with horizontal scroll  -->
+                    <ScrollView Orientation="Horizontal">
+                        <VerticalStackLayout Spacing="0">
 
-                        <!--  Participant Header Row  -->
-                        <Border Padding="0" BackgroundColor="#4b5563" StrokeThickness="0">
-                            <FlexLayout BindableLayout.ItemsSource="{Binding Participants}"
-                                        JustifyContent="SpaceEvenly" Wrap="NoWrap">
-                                <BindableLayout.ItemTemplate>
-                                    <DataTemplate x:DataType="models:TrainingMatchParticipant">
-                                        <VerticalStackLayout Padding="8,8" HorizontalOptions="FillAndExpand" MinimumWidthRequest="80">
+                            <!--  Participant Header Row  -->
+                            <Border Padding="0" BackgroundColor="#4b5563" StrokeThickness="0">
+                                <HorizontalStackLayout BindableLayout.ItemsSource="{Binding Participants}">
+                                    <BindableLayout.ItemTemplate>
+                                        <DataTemplate x:DataType="models:TrainingMatchParticipant">
+                                            <VerticalStackLayout Padding="8,8" WidthRequest="90">
                                             <!--  Avatar with Profile Picture or Initials Fallback  -->
                                             <Grid HeightRequest="48" HorizontalOptions="Center" WidthRequest="48">
                                                 <!--  Profile Picture (if available)  -->
@@ -260,29 +260,28 @@
                                                            TextColor="{StaticResource Warning}" />
                                                 </HorizontalStackLayout>
                                             </Border>
-                                        </VerticalStackLayout>
-                                    </DataTemplate>
-                                </BindableLayout.ItemTemplate>
-                            </FlexLayout>
-                        </Border>
+                                            </VerticalStackLayout>
+                                        </DataTemplate>
+                                    </BindableLayout.ItemTemplate>
+                                </HorizontalStackLayout>
+                            </Border>
 
-                        <!--  Divider  -->
-                        <BoxView HeightRequest="1" Color="#4b5563" />
+                            <!--  Divider  -->
+                            <BoxView HeightRequest="1" Color="#4b5563" />
 
-                        <!--  Dynamic Series Rows with Subtotals  -->
-                        <VerticalStackLayout BindableLayout.ItemsSource="{Binding ScoreboardRows}" Spacing="0">
-                            <BindableLayout.ItemTemplate>
-                                <DataTemplate x:DataType="localmodels:ScoreboardRow">
-                                    <VerticalStackLayout Spacing="0">
-                                        <!--  Score Row (visible for Score type rows)  -->
-                                        <FlexLayout BindableLayout.ItemsSource="{Binding Cells}"
-                                                    IsVisible="{Binding IsScoreRow}"
-                                                    JustifyContent="SpaceEvenly" Wrap="NoWrap">
-                                            <BindableLayout.ItemTemplate>
-                                                <DataTemplate x:DataType="localmodels:ScoreboardCell">
-                                                    <Border BackgroundColor="{Binding BackgroundColorHex}"
-                                                            HeightRequest="44" HorizontalOptions="FillAndExpand" MinimumWidthRequest="80"
-                                                            Stroke="#4b5563" StrokeThickness="0.5">
+                            <!--  Dynamic Series Rows with Subtotals  -->
+                            <VerticalStackLayout BindableLayout.ItemsSource="{Binding ScoreboardRows}" Spacing="0">
+                                <BindableLayout.ItemTemplate>
+                                    <DataTemplate x:DataType="localmodels:ScoreboardRow">
+                                        <VerticalStackLayout Spacing="0">
+                                            <!--  Score Row (visible for Score type rows)  -->
+                                            <HorizontalStackLayout BindableLayout.ItemsSource="{Binding Cells}"
+                                                        IsVisible="{Binding IsScoreRow}">
+                                                <BindableLayout.ItemTemplate>
+                                                    <DataTemplate x:DataType="localmodels:ScoreboardCell">
+                                                        <Border BackgroundColor="{Binding BackgroundColorHex}"
+                                                                HeightRequest="44" WidthRequest="90"
+                                                                Stroke="#4b5563" StrokeThickness="0.5">
                                                         <Border.GestureRecognizers>
                                                             <!--  Photo viewer for cells with photos  -->
                                                             <TapGestureRecognizer
@@ -314,21 +313,20 @@
                                                                    Text="📷"
                                                                    VerticalOptions="End" />
                                                         </Grid>
-                                                    </Border>
-                                                </DataTemplate>
-                                            </BindableLayout.ItemTemplate>
-                                        </FlexLayout>
+                                                        </Border>
+                                                    </DataTemplate>
+                                                </BindableLayout.ItemTemplate>
+                                            </HorizontalStackLayout>
 
-                                        <!--  Subtotal Row (visible for Subtotal type rows)  -->
-                                        <Border BackgroundColor="#1a365d"
-                                                IsVisible="{Binding IsSubtotalRow}"
-                                                StrokeThickness="0">
-                                            <FlexLayout BindableLayout.ItemsSource="{Binding Cells}"
-                                                        JustifyContent="SpaceEvenly" Wrap="NoWrap">
-                                                <BindableLayout.ItemTemplate>
-                                                    <DataTemplate x:DataType="localmodels:ScoreboardCell">
-                                                        <Border BackgroundColor="Transparent" HeightRequest="36" HorizontalOptions="FillAndExpand"
-                                                                MinimumWidthRequest="80" Stroke="#4b5563" StrokeThickness="0.5">
+                                            <!--  Subtotal Row (visible for Subtotal type rows)  -->
+                                            <Border BackgroundColor="#1a365d"
+                                                    IsVisible="{Binding IsSubtotalRow}"
+                                                    StrokeThickness="0">
+                                                <HorizontalStackLayout BindableLayout.ItemsSource="{Binding Cells}">
+                                                    <BindableLayout.ItemTemplate>
+                                                        <DataTemplate x:DataType="localmodels:ScoreboardCell">
+                                                            <Border BackgroundColor="Transparent" HeightRequest="36" WidthRequest="90"
+                                                                    Stroke="#4b5563" StrokeThickness="0.5">
                                                             <Grid Padding="4">
                                                                 <Label FontAttributes="Bold" FontSize="14" HorizontalOptions="Center"
                                                                        Text="{Binding ScoreText}"
@@ -338,24 +336,23 @@
                                                                        Text="{Binding XCountText}"
                                                                        TextColor="#9ACD32" VerticalOptions="Start" />
                                                             </Grid>
-                                                        </Border>
-                                                    </DataTemplate>
-                                                </BindableLayout.ItemTemplate>
-                                            </FlexLayout>
-                                        </Border>
-                                    </VerticalStackLayout>
-                                </DataTemplate>
-                            </BindableLayout.ItemTemplate>
-                        </VerticalStackLayout>
+                                                            </Border>
+                                                        </DataTemplate>
+                                                    </BindableLayout.ItemTemplate>
+                                                </HorizontalStackLayout>
+                                            </Border>
+                                        </VerticalStackLayout>
+                                    </DataTemplate>
+                                </BindableLayout.ItemTemplate>
+                            </VerticalStackLayout>
 
-                        <!--  Summary Row (Raw totals before handicap)  -->
-                        <Border BackgroundColor="#374151" StrokeThickness="0">
-                            <FlexLayout BindableLayout.ItemsSource="{Binding Participants}"
-                                        JustifyContent="SpaceEvenly" Wrap="NoWrap">
-                                <BindableLayout.ItemTemplate>
-                                    <DataTemplate x:DataType="models:TrainingMatchParticipant">
-                                        <Border BackgroundColor="Transparent" HeightRequest="36" HorizontalOptions="FillAndExpand"
-                                                MinimumWidthRequest="80" Stroke="#4b5563" StrokeThickness="0.5">
+                            <!--  Summary Row (Raw totals before handicap)  -->
+                            <Border BackgroundColor="#374151" StrokeThickness="0">
+                                <HorizontalStackLayout BindableLayout.ItemsSource="{Binding Participants}">
+                                    <BindableLayout.ItemTemplate>
+                                        <DataTemplate x:DataType="models:TrainingMatchParticipant">
+                                            <Border BackgroundColor="Transparent" HeightRequest="36" WidthRequest="90"
+                                                    Stroke="#4b5563" StrokeThickness="0.5">
                                             <HorizontalStackLayout HorizontalOptions="Center" Spacing="2" VerticalOptions="Center">
                                                 <Label FontAttributes="Bold" FontSize="14"
                                                        Text="{Binding TotalScore}"
@@ -364,19 +361,18 @@
                                                        Text="{Binding EffectiveSeriesCount, StringFormat='({0})'}"
                                                        TextColor="#9ca3af" />
                                             </HorizontalStackLayout>
-                                        </Border>
-                                    </DataTemplate>
-                                </BindableLayout.ItemTemplate>
-                            </FlexLayout>
-                        </Border>
+                                            </Border>
+                                        </DataTemplate>
+                                    </BindableLayout.ItemTemplate>
+                                </HorizontalStackLayout>
+                            </Border>
 
-                        <!--  Total Row  -->
-                        <Border BackgroundColor="#1565c0" StrokeThickness="0">
-                            <FlexLayout BindableLayout.ItemsSource="{Binding Participants}"
-                                        JustifyContent="SpaceEvenly" Wrap="NoWrap">
-                                <BindableLayout.ItemTemplate>
-                                    <DataTemplate x:DataType="models:TrainingMatchParticipant">
-                                        <VerticalStackLayout Padding="6,10" HorizontalOptions="FillAndExpand" MinimumWidthRequest="80">
+                            <!--  Total Row  -->
+                            <Border BackgroundColor="#1565c0" StrokeThickness="0">
+                                <HorizontalStackLayout BindableLayout.ItemsSource="{Binding Participants}">
+                                    <BindableLayout.ItemTemplate>
+                                        <DataTemplate x:DataType="models:TrainingMatchParticipant">
+                                            <VerticalStackLayout Padding="6,10" WidthRequest="90">
                                             <!--  Main Score (Adjusted if handicap, otherwise Raw)  -->
                                             <Label FontAttributes="Bold" FontSize="28" HorizontalOptions="Center"
                                                    Text="{Binding AdjustedTotalScore}">
@@ -416,13 +412,14 @@
                                                        Text="{Binding TotalXCount, StringFormat='{0}x'}"
                                                        TextColor="White" />
                                             </HorizontalStackLayout>
-                                        </VerticalStackLayout>
-                                    </DataTemplate>
-                                </BindableLayout.ItemTemplate>
-                            </FlexLayout>
-                        </Border>
+                                            </VerticalStackLayout>
+                                        </DataTemplate>
+                                    </BindableLayout.ItemTemplate>
+                                </HorizontalStackLayout>
+                            </Border>
 
-                    </VerticalStackLayout>
+                        </VerticalStackLayout>
+                    </ScrollView>
                 </Border>
 
             </VerticalStackLayout>
