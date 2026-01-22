@@ -53,7 +53,6 @@
             <ScrollView>
                 <Label Text="{Binding LogContent}"
                        FontSize="11"
-                       FontFamily="Consolas"
                        TextColor="{StaticResource Gray300}"
                        LineBreakMode="WordWrap" />
             </ScrollView>

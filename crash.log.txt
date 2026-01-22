@@ -1,0 +1,48 @@
+=== App Started: 2026-01-22 12:55:58 ===
+[2026-01-22 12:56:08] [Warning] [Microsoft.Maui.FontManager] Unable to load font 'Consolas' from assets.
+Java.Lang.RuntimeException: Font asset not found Consolas
+   at Java.Interop.JniEnvironment.StaticMethods.CallStaticObjectMethod(JniObjectReference , JniMethodInfo , JniArgumentValue* )
+   at Java.Interop.JniPeerMembers.JniStaticMethods.InvokeObjectMethod(String , JniArgumentValue* )
+   at Android.Graphics.Typeface.CreateFromAsset(AssetManager , String )
+   at Microsoft.Maui.FontManager.LoadTypefaceFromAsset(String fontfamily, Boolean warning)
+  --- End of managed Java.Lang.RuntimeException stack trace ---
+java.lang.RuntimeException: Font asset not found Consolas
+	at android.graphics.Typeface.createFromAsset(Typeface.java:1162)
+	at crc640ec207abc449b2ca.ShellContentFragment.n_onCreateView(Native Method)
+	at crc640ec207abc449b2ca.ShellContentFragment.onCreateView(ShellContentFragment.java:57)
+	at androidx.fragment.app.Fragment.performCreateView(Fragment.java:3119)
+	at androidx.fragment.app.FragmentStateManager.createView(FragmentStateManager.java:577)
+	at androidx.fragment.app.FragmentStateManager.moveToExpectedState(FragmentStateManager.java:286)
+	at androidx.fragment.app.FragmentManager.executeOpsTogether(FragmentManager.java:2214)
+	at androidx.fragment.app.FragmentManager.removeRedundantOperationsAndExecute(FragmentManager.java:2109)
+	at androidx.fragment.app.FragmentManager.execPendingActions(FragmentManager.java:2052)
+	at androidx.fragment.app.FragmentManager$5.run(FragmentManager.java:703)
+	at android.os.Handler.handleCallback(Handler.java:959)
+	at android.os.Handler.dispatchMessage(Handler.java:100)
+	at android.os.Looper.loopOnce(Looper.java:257)
+	at android.os.Looper.loop(Looper.java:342)
+	at android.app.ActivityThread.main(ActivityThread.java:9634)
+	at java.lang.reflect.Method.invoke(Native Method)
+	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:619)
+	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:929)
+
+  --- End of managed Java.Lang.RuntimeException stack trace ---
+java.lang.RuntimeException: Font asset not found Consolas
+	at android.graphics.Typeface.createFromAsset(Typeface.java:1162)
+	at crc640ec207abc449b2ca.ShellContentFragment.n_onCreateView(Native Method)
+	at crc640ec207abc449b2ca.ShellContentFragment.onCreateView(ShellContentFragment.java:57)
+	at androidx.fragment.app.Fragment.performCreateView(Fragment.java:3119)
+	at androidx.fragment.app.FragmentStateManager.createView(FragmentStateManager.java:577)
+	at androidx.fragment.app.FragmentStateManager.moveToExpectedState(FragmentStateManager.java:286)
+	at androidx.fragment.app.FragmentManager.executeOpsTogether(FragmentManager.java:2214)
+	at androidx.fragment.app.FragmentManager.removeRedundantOperationsAndExecute(FragmentManager.java:2109)
+	at androidx.fragment.app.FragmentManager.execPendingActions(FragmentManager.java:2052)
+	at androidx.fragment.app.FragmentManager$5.run(FragmentManager.java:703)
+	at android.os.Handler.handleCallback(Handler.java:959)
+	at android.os.Handler.dispatchMessage(Handler.java:100)
+	at android.os.Looper.loopOnce(Looper.java:257)
+	at android.os.Looper.loop(Looper.java:342)
+	at android.app.ActivityThread.main(ActivityThread.java:9634)
+	at java.lang.reflect.Method.invoke(Native Method)
+	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:619)
+	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:929)
