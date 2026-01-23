@@ -34,6 +34,9 @@
             <converters:ProfilePictureUrlConverter x:Key="ProfilePictureUrlConverter" />
             <converters:SourceTypeToIconConverter x:Key="SourceTypeToIconConverter" />
             <converters:ReactionSelectedConverter x:Key="ReactionSelectedConverter" />
+            <converters:RankingToColorConverter x:Key="RankingToColorConverter" />
+            <converters:RankingToTextConverter x:Key="RankingToTextConverter" />
+            <converters:RankingToVisibilityConverter x:Key="RankingToVisibilityConverter" />
         </ResourceDictionary>
     </Application.Resources>
 </Application>

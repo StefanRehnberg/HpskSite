@@ -6,6 +6,7 @@
              xmlns:localmodels="clr-namespace:HpskSite.Mobile.Models"
              xmlns:services="clr-namespace:HpskSite.Mobile.Services"
              xmlns:viewmodels="clr-namespace:HpskSite.Mobile.ViewModels"
+             x:Name="thisPage"
              Title="{Binding Title}"
              x:DataType="viewmodels:ActiveMatchViewModel"
              BackgroundColor="#1f2937"
@@ -393,20 +394,45 @@
                                     <BindableLayout.ItemTemplate>
                                         <DataTemplate x:DataType="models:TrainingMatchParticipant">
                                             <VerticalStackLayout Padding="6,10" WidthRequest="90">
-                                            <!--  Main Score (Adjusted if handicap, otherwise Raw)  -->
-                                            <Label FontAttributes="Bold" FontSize="28" HorizontalOptions="Center"
-                                                   Text="{Binding AdjustedTotalScore}">
-                                                <Label.Triggers>
-                                                    <DataTrigger Binding="{Binding HandicapPerSeries, Converter={StaticResource HasHandicapConverter}}"
-                                                                 TargetType="Label" Value="True">
-                                                        <Setter Property="TextColor" Value="#4FC3F7" />
-                                                    </DataTrigger>
-                                                    <DataTrigger Binding="{Binding HandicapPerSeries, Converter={StaticResource HasHandicapConverter}}"
-                                                                 TargetType="Label" Value="False">
-                                                        <Setter Property="TextColor" Value="White" />
-                                                    </DataTrigger>
-                                                </Label.Triggers>
-                                            </Label>
+                                            <!--  Main Score with Ranking Indicator  -->
+                                            <HorizontalStackLayout HorizontalOptions="Center" Spacing="4">
+                                                <!--  Main Score (Adjusted if handicap, otherwise Raw)  -->
+                                                <Label FontAttributes="Bold" FontSize="28"
+                                                       Text="{Binding AdjustedTotalScore}"
+                                                       VerticalOptions="Center">
+                                                    <Label.Triggers>
+                                                        <DataTrigger Binding="{Binding HandicapPerSeries, Converter={StaticResource HasHandicapConverter}}"
+                                                                     TargetType="Label" Value="True">
+                                                            <Setter Property="TextColor" Value="#4FC3F7" />
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding HandicapPerSeries, Converter={StaticResource HasHandicapConverter}}"
+                                                                     TargetType="Label" Value="False">
+                                                            <Setter Property="TextColor" Value="White" />
+                                                        </DataTrigger>
+                                                    </Label.Triggers>
+                                                </Label>
+                                                <!--  Ranking Indicator for Top 3  -->
+                                                <Label FontAttributes="Bold" FontSize="16" VerticalOptions="Center">
+                                                    <Label.Text>
+                                                        <MultiBinding Converter="{StaticResource RankingToTextConverter}">
+                                                            <Binding Path="." />
+                                                            <Binding Path="BindingContext.Rankings" Source="{x:Reference thisPage}" />
+                                                        </MultiBinding>
+                                                    </Label.Text>
+                                                    <Label.TextColor>
+                                                        <MultiBinding Converter="{StaticResource RankingToColorConverter}">
+                                                            <Binding Path="." />
+                                                            <Binding Path="BindingContext.Rankings" Source="{x:Reference thisPage}" />
+                                                        </MultiBinding>
+                                                    </Label.TextColor>
+                                                    <Label.IsVisible>
+                                                        <MultiBinding Converter="{StaticResource RankingToVisibilityConverter}">
+                                                            <Binding Path="." />
+                                                            <Binding Path="BindingContext.Rankings" Source="{x:Reference thisPage}" />
+                                                        </MultiBinding>
+                                                    </Label.IsVisible>
+                                                </Label>
+                                            </HorizontalStackLayout>
                                             <!--  Handicap Breakdown  -->
                                             <HorizontalStackLayout HorizontalOptions="Center"
                                                                    IsVisible="{Binding HandicapPerSeries, Converter={StaticResource HasHandicapConverter}}"
@@ -634,12 +660,12 @@
                       RowSpacing="6">
                     <!--  Row 1: X, 10, 9, 8  -->
                     <Button Grid.Row="0" Grid.Column="0"
-                            BackgroundColor="{StaticResource Success}"
+                            BackgroundColor="#4b5563"
                             Command="{Binding SetXCommand}"
                             CornerRadius="8" FontAttributes="Bold" FontSize="22"
                             HeightRequest="52" Text="X" TextColor="White" />
                     <Button Grid.Row="0" Grid.Column="1"
-                            BackgroundColor="{StaticResource Success}"
+                            BackgroundColor="#4b5563"
                             Command="{Binding SetScoreCommand}"
                             CommandParameter="10" CornerRadius="8" FontAttributes="Bold"
                             FontSize="18" HeightRequest="52" Text="10"

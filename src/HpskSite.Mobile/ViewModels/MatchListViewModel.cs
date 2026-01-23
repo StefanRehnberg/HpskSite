@@ -193,9 +193,13 @@ public partial class MatchListViewModel : BaseViewModel
                 }
             }
 
-            // Load initial history if on history tab
-            if (IsHistoryTabSelected && MatchHistory.Count == 0)
+            // Load/reload history if on history tab
+            if (IsHistoryTabSelected)
             {
+                // Clear and reload from page 1 to pick up newly completed matches
+                _historyPage = 1;
+                MatchHistory.Clear();
+                HasMoreHistory = true;
                 await LoadHistoryAsync();
             }
         }

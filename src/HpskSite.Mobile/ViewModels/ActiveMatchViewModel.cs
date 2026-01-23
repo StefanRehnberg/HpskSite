@@ -134,6 +134,12 @@ public partial class ActiveMatchViewModel : BaseViewModel
     [ObservableProperty]
     private ObservableCollection<MatchSpectator> _spectators = new();
 
+    /// <summary>
+    /// Current rankings for all participants (updated when scores change)
+    /// </summary>
+    [ObservableProperty]
+    private ObservableCollection<ParticipantRanking> _rankings = new();
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CurrentSeriesNumber))]
     private int _currentSeriesIndex;
@@ -489,6 +495,25 @@ public partial class ActiveMatchViewModel : BaseViewModel
         IsEditMode = false;
         EditingSeriesNumber = 0;
         EditingSeriesPhotoUrl = null;
+
+        // Clear all shot values for fresh entry
+        Shot1 = null;
+        Shot2 = null;
+        Shot3 = null;
+        Shot4 = null;
+        Shot5 = null;
+        CurrentShotIndex = 0;
+
+        // Reset CurrentSeriesIndex to next available series (after existing scores)
+        if (CurrentParticipant?.Scores != null)
+        {
+            CurrentSeriesIndex = CurrentParticipant.Scores.Count;
+        }
+        else
+        {
+            CurrentSeriesIndex = 0;
+        }
+
         IsScoreEntryOpen = true;
         HasError = false;
     }
@@ -550,6 +575,25 @@ public partial class ActiveMatchViewModel : BaseViewModel
         IsEditMode = false;
         EditingSeriesNumber = 0;
         EditingSeriesPhotoUrl = null;
+
+        // Clear shot values to prevent them appearing in next entry
+        Shot1 = null;
+        Shot2 = null;
+        Shot3 = null;
+        Shot4 = null;
+        Shot5 = null;
+        CurrentShotIndex = 0;
+
+        // Reset CurrentSeriesIndex to next available series (after existing scores)
+        // This prevents accidentally overwriting a series if edit was cancelled
+        if (CurrentParticipant?.Scores != null)
+        {
+            CurrentSeriesIndex = CurrentParticipant.Scores.Count;
+        }
+        else
+        {
+            CurrentSeriesIndex = 0;
+        }
     }
 
     [RelayCommand]
@@ -2228,10 +2272,14 @@ public partial class ActiveMatchViewModel : BaseViewModel
     /// <summary>
     /// Updates the scoreboard rows based on current participant scores.
     /// Adds subtotal rows after series 6, 7, 10, and 12.
+    /// Also updates participant rankings.
     /// </summary>
     public void UpdateScoreboardRows()
     {
         ScoreboardRows.Clear();
+
+        // Update rankings based on current scores
+        UpdateParticipantRankings();
 
         // Determine max series from participants (minimum 6)
         int maxSeries = MaxSeriesCount;
@@ -2358,5 +2406,41 @@ public partial class ActiveMatchViewModel : BaseViewModel
 
             row.Cells.Add(cell);
         }
+    }
+
+    /// <summary>
+    /// Updates participant rankings based on current adjusted total scores.
+    /// Rankings are sorted by AdjustedTotalScore descending.
+    /// </summary>
+    private void UpdateParticipantRankings()
+    {
+        var sortedParticipants = Participants
+            .OrderByDescending(p => p.AdjustedTotalScore)
+            .ToList();
+
+        // Create new collection to ensure bindings re-evaluate
+        var newRankings = new ObservableCollection<ParticipantRanking>();
+        for (int i = 0; i < sortedParticipants.Count; i++)
+        {
+            var p = sortedParticipants[i];
+            var participantId = p.MemberId ?? p.GuestParticipantId ?? 0;
+            newRankings.Add(new ParticipantRanking
+            {
+                ParticipantId = participantId,
+                Ranking = i + 1
+            });
+        }
+
+        // Replace the entire collection to trigger property change notification
+        Rankings = newRankings;
+    }
+
+    /// <summary>
+    /// Gets the ranking for a specific participant (by MemberId or GuestParticipantId)
+    /// </summary>
+    public ParticipantRanking? GetRankingForParticipant(int? memberId, int? guestParticipantId)
+    {
+        var participantId = memberId ?? guestParticipantId ?? 0;
+        return Rankings.FirstOrDefault(r => r.ParticipantId == participantId);
     }
 }

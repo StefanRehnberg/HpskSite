@@ -1626,19 +1626,41 @@ namespace HpskSite.Controllers
 
                         if (isParticipant)
                         {
-                            // Fetch all scores with series data for equalized calculation
+                            // Check if match has handicap enabled
+                            bool hasHandicap = m.HasHandicap != null && (bool)m.HasHandicap;
+
+                            // Fetch all participants with handicap data
+                            var allParticipants = db.Fetch<dynamic>(
+                                @"SELECT MemberId, GuestParticipantId, FrozenHandicapPerSeries
+                                  FROM TrainingMatchParticipants WHERE TrainingMatchId = @0", (int)m.Id);
+
+                            // Build handicap lookup (positive key for members, negative for guests)
+                            var handicapLookup = new Dictionary<int, decimal>();
+                            foreach (var p in allParticipants)
+                            {
+                                if (p.MemberId != null)
+                                    handicapLookup[(int)p.MemberId] = p.FrozenHandicapPerSeries ?? 0m;
+                                else if (p.GuestParticipantId != null)
+                                    handicapLookup[-(int)p.GuestParticipantId] = p.FrozenHandicapPerSeries ?? 0m;
+                            }
+
+                            // Fetch ALL scores for this match (both members and guests)
                             var allScoresWithSeries = db.Fetch<dynamic>(
-                                @"SELECT ts.MemberId, ts.TotalScore, ts.SeriesScores
+                                @"SELECT ts.MemberId, ts.GuestParticipantId, ts.TotalScore, ts.SeriesScores
                                   FROM TrainingScores ts
                                   WHERE ts.TrainingMatchId = @0", (int)m.Id);
 
-                            // Calculate series counts and find minimum
-                            var participantData = new List<(int MemberId, int SeriesCount, List<int> SeriesTotals)>();
+                            // Calculate series counts and totals for all participants
+                            // Use participantKey: positive for members, negative for guests
+                            var participantData = new List<(int ParticipantKey, int SeriesCount, List<int> SeriesTotals)>();
 
                             foreach (var score in allScoresWithSeries)
                             {
-                                // Skip entries with null MemberId (guest scores are handled separately)
-                                if (score.MemberId == null) continue;
+                                int participantKey = score.MemberId != null
+                                    ? (int)score.MemberId
+                                    : (score.GuestParticipantId != null ? -(int)score.GuestParticipantId : 0);
+
+                                if (participantKey == 0) continue;
 
                                 var seriesTotals = new List<int>();
                                 if (score.SeriesScores != null)
@@ -1657,29 +1679,56 @@ namespace HpskSite.Controllers
                                     }
                                     catch { }
                                 }
-                                participantData.Add(((int)score.MemberId, seriesTotals.Count, seriesTotals));
+                                participantData.Add((participantKey, seriesTotals.Count, seriesTotals));
                             }
 
-                            // Get MaxSeriesCount from match settings (default to 6 if null)
-                            int maxSeriesCount = m.MaxSeriesCount != null ? (int)m.MaxSeriesCount : 6;
+                            // Get the effective series limit - use maxSeriesCount if set, otherwise use minimum among participants
+                            int effectiveLimit;
+                            if (m.MaxSeriesCount != null && (int)m.MaxSeriesCount > 0)
+                            {
+                                effectiveLimit = (int)m.MaxSeriesCount;
+                            }
+                            else
+                            {
+                                // Use minimum series count among all participants (same as scoreboard)
+                                effectiveLimit = participantData.Any()
+                                    ? participantData.Min(p => p.SeriesCount)
+                                    : 0;
+                            }
 
-                            // Calculate equalized scores and rank (limited to maxSeriesCount)
+                            // Calculate equalized scores with handicap and rank (limited to effectiveLimit)
                             var equalizedScores = participantData
-                                .Select(p => new {
-                                    MemberId = p.MemberId,
-                                    EqualizedScore = p.SeriesTotals.Take(maxSeriesCount).Sum(),
-                                    SeriesCount = Math.Min(p.SeriesCount, maxSeriesCount)
+                                .Select(p => {
+                                    int rawScore = p.SeriesTotals.Take(effectiveLimit).Sum();
+                                    int effectiveSeriesCount = Math.Min(p.SeriesCount, effectiveLimit);
+
+                                    // Apply handicap if enabled
+                                    int adjustedScore = rawScore;
+                                    if (hasHandicap && handicapLookup.TryGetValue(p.ParticipantKey, out var hcp))
+                                    {
+                                        var roundedHcp = Math.Round(hcp * 4) / 4; // Round to quarter points
+                                        var handicapTotal = roundedHcp * effectiveSeriesCount;
+                                        var maxPossible = 50 * effectiveSeriesCount;
+                                        adjustedScore = Math.Min((int)Math.Round(rawScore + (double)handicapTotal), maxPossible);
+                                    }
+
+                                    return new {
+                                        ParticipantKey = p.ParticipantKey,
+                                        AdjustedScore = adjustedScore,
+                                        RawScore = rawScore,
+                                        SeriesCount = effectiveSeriesCount
+                                    };
                                 })
-                                .OrderByDescending(p => p.EqualizedScore)
+                                .OrderByDescending(p => p.AdjustedScore)
                                 .ToList();
 
-                            // Find user's data
-                            var userData = equalizedScores.FirstOrDefault(p => p.MemberId == member.Id);
+                            // Find user's data (current user is a member, so use positive key)
+                            var userData = equalizedScores.FirstOrDefault(p => p.ParticipantKey == member.Id);
                             if (userData != null)
                             {
-                                userTotalScore = userData.EqualizedScore;
-                                userSeriesCount = userData.SeriesCount; // Show the series count used (limited by MaxSeriesCount)
-                                userRanking = equalizedScores.FindIndex(p => p.MemberId == member.Id) + 1;
+                                userTotalScore = userData.AdjustedScore;
+                                userSeriesCount = userData.SeriesCount;
+                                userRanking = equalizedScores.FindIndex(p => p.ParticipantKey == member.Id) + 1;
                             }
                         }
 

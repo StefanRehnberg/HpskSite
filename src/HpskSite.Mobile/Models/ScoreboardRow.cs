@@ -168,3 +168,57 @@ public enum ScoreboardRowType
     /// </summary>
     Subtotal
 }
+
+/// <summary>
+/// Represents a participant's current ranking in an active match
+/// </summary>
+public class ParticipantRanking
+{
+    /// <summary>
+    /// Unique identifier for the participant (MemberId for members, GuestParticipantId for guests)
+    /// </summary>
+    public int ParticipantId { get; set; }
+
+    /// <summary>
+    /// Current ranking position (1 = first place, 2 = second, etc.)
+    /// </summary>
+    public int Ranking { get; set; }
+
+    /// <summary>
+    /// Whether this participant is in the top 3
+    /// </summary>
+    public bool IsTopThree => Ranking >= 1 && Ranking <= 3;
+
+    /// <summary>
+    /// Text to display next to score for top 3 ("#1", "#2", "#3")
+    /// </summary>
+    public string RankingText => Ranking switch
+    {
+        1 => "#1",
+        2 => "#2",
+        3 => "#3",
+        _ => ""
+    };
+
+    /// <summary>
+    /// Border color for top 3 columns (gold/silver/bronze)
+    /// </summary>
+    public Color BorderColor => Ranking switch
+    {
+        1 => Color.FromArgb("#FFD700"),  // Gold
+        2 => Color.FromArgb("#C0C0C0"),  // Silver
+        3 => Color.FromArgb("#CD7F32"),  // Bronze
+        _ => Colors.Transparent
+    };
+
+    /// <summary>
+    /// Text color for ranking indicator
+    /// </summary>
+    public Color TextColor => Ranking switch
+    {
+        1 => Color.FromArgb("#FFD700"),  // Gold
+        2 => Color.FromArgb("#C0C0C0"),  // Silver
+        3 => Color.FromArgb("#CD7F32"),  // Bronze
+        _ => Colors.White
+    };
+}

@@ -83,11 +83,16 @@
                         <i class="bi bi-keyboard"></i> Tangentbord: 0-9, X | Esc = rensa
                     </div>
                     <!-- Action buttons for shot-by-shot mode -->
-                    <div class="d-flex justify-content-end gap-2 mt-3">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
-                        <button type="button" class="btn btn-success" id="matchSaveScoreBtn" onclick="matchSaveScore()" disabled>
-                            <i class="bi bi-check-circle"></i> <span id="saveButtonText">Spara serie</span>
+                    <div class="d-flex justify-content-between mt-3">
+                        <button type="button" class="btn btn-outline-danger match-delete-btn" onclick="matchDeleteSeries()" style="display: none;">
+                            <i class="bi bi-trash"></i> Ta bort serien
                         </button>
+                        <div class="d-flex gap-2 ms-auto">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                            <button type="button" class="btn btn-success" id="matchSaveScoreBtn" onclick="matchSaveScore()" disabled>
+                                <i class="bi bi-check-circle"></i> <span id="saveButtonText">Spara serie</span>
+                            </button>
+                        </div>
                     </div>
                 </div>
 
@@ -108,18 +113,18 @@
                         </div>
                     </div>
                     <!-- Action buttons for serie-total mode -->
-                    <div class="d-flex justify-content-end gap-2 mt-3">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
-                        <button type="button" class="btn btn-success" id="matchSaveScoreBtnInline" onclick="matchSaveScore()" disabled>
-                            <i class="bi bi-check-circle"></i> <span class="inline-save-text">Spara serie</span>
+                    <div class="d-flex justify-content-between mt-3">
+                        <button type="button" class="btn btn-outline-danger match-delete-btn" onclick="matchDeleteSeries()" style="display: none;">
+                            <i class="bi bi-trash"></i> Ta bort serien
                         </button>
+                        <div class="d-flex gap-2 ms-auto">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                            <button type="button" class="btn btn-success" id="matchSaveScoreBtnInline" onclick="matchSaveScore()" disabled>
+                                <i class="bi bi-check-circle"></i> <span class="inline-save-text">Spara serie</span>
+                            </button>
+                        </div>
                     </div>
                 </div>
-            </div>
-            <div class="modal-footer" id="matchModalFooter" style="display: none;">
-                <button type="button" class="btn btn-outline-danger" id="matchDeleteSeriesBtn" onclick="matchDeleteSeries()">
-                    <i class="bi bi-trash"></i> Ta bort
-                </button>
             </div>
         </div>
     </div>
@@ -253,7 +258,7 @@ function setModalMode(isEdit) {
     const titleText = document.getElementById('modalTitleText');
     const saveButtonText = document.getElementById('saveButtonText');
     const inlineSaveText = document.querySelector('.inline-save-text');
-    const modalFooter = document.getElementById('matchModalFooter');
+    const deleteButtons = document.querySelectorAll('.match-delete-btn');
 
     if (isEdit) {
         header.classList.remove('bg-success');
@@ -261,14 +266,14 @@ function setModalMode(isEdit) {
         titleText.textContent = 'Redigera serie';
         saveButtonText.textContent = 'Spara ändringar';
         if (inlineSaveText) inlineSaveText.textContent = 'Spara ändringar';
-        modalFooter.style.display = 'flex';
+        deleteButtons.forEach(btn => btn.style.display = 'inline-block');
     } else {
         header.classList.remove('bg-warning');
         header.classList.add('bg-success');
         titleText.textContent = 'Serie';
         saveButtonText.textContent = 'Spara serie';
         if (inlineSaveText) inlineSaveText.textContent = 'Spara serie';
-        modalFooter.style.display = 'none';
+        deleteButtons.forEach(btn => btn.style.display = 'none');
     }
 }
 

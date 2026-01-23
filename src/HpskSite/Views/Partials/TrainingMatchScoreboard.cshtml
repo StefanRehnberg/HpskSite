@@ -425,6 +425,82 @@ function formatHandicap(value) {
     return sign + formatted;
 }
 
+// Calculate rankings for participants based on adjusted total scores
+function calculateParticipantRankings(match) {
+    const rankings = {};
+
+    // Calculate adjusted total for each participant
+    const participantsWithScores = match.participants.filter(p => p.scores && p.scores.length > 0);
+    const minSeriesCount = participantsWithScores.length > 0
+        ? Math.min(...participantsWithScores.map(p => p.scores.length))
+        : 0;
+
+    const participantScores = match.participants.map(p => {
+        const allScores = p.scores || [];
+        const actualSeriesCount = allScores.length;
+
+        // Determine effective limit (same logic as total row)
+        let effectiveLimit;
+        if (match.maxSeriesCount) {
+            effectiveLimit = Math.min(match.maxSeriesCount, actualSeriesCount);
+        } else {
+            effectiveLimit = Math.min(minSeriesCount, actualSeriesCount);
+        }
+
+        const effectiveScores = allScores
+            .sort((a, b) => a.seriesNumber - b.seriesNumber)
+            .slice(0, effectiveLimit);
+
+        // Calculate raw total (capped at 50 per series)
+        const rawTotal = effectiveScores.reduce((sum, s) => sum + Math.min(s.total, 50), 0);
+        const effectiveSeriesCount = effectiveScores.length;
+
+        // Calculate adjusted total with handicap
+        let adjustedTotal = rawTotal;
+        if (match.hasHandicap && p.handicapPerSeries !== null && p.handicapPerSeries !== undefined) {
+            const hcpPerSeries = roundToQuarter(p.handicapPerSeries);
+            const handicapTotal = hcpPerSeries * effectiveSeriesCount;
+            const maxPossible = 50 * effectiveSeriesCount;
+            adjustedTotal = Math.min(Math.round(rawTotal + handicapTotal), maxPossible);
+        }
+
+        return {
+            memberId: p.memberId,
+            guestParticipantId: p.guestParticipantId,
+            adjustedTotal: adjustedTotal
+        };
+    });
+
+    // Sort by adjusted total descending
+    participantScores.sort((a, b) => b.adjustedTotal - a.adjustedTotal);
+
+    // Assign rankings
+    participantScores.forEach((p, index) => {
+        const key = p.memberId || `guest_${p.guestParticipantId}`;
+        rankings[key] = index + 1;
+    });
+
+    return rankings;
+}
+
+// Get ranking color (gold/silver/bronze for top 3, gray for others)
+function getRankingColor(ranking) {
+    switch (ranking) {
+        case 1: return '#FFD700'; // Gold
+        case 2: return '#C0C0C0'; // Silver
+        case 3: return '#CD7F32'; // Bronze
+        default: return ranking > 0 ? '#9CA3AF' : null; // Gray for non-podium
+    }
+}
+
+// Get ranking text for all participants
+function getRankingText(ranking) {
+    if (ranking > 0) {
+        return `#${ranking}`;
+    }
+    return '';
+}
+
 // Render the scoreboard
 function renderScoreboard(match) {
     // Store match data for settings modal
@@ -602,6 +678,9 @@ function renderScoreboard(match) {
         if (settingsBtn) settingsBtn.style.display = 'none';
     }
 
+    // Calculate participant rankings for top 3 display
+    const rankings = calculateParticipantRankings(match);
+
     // Build participant header row
     const headerRow = document.getElementById('participantHeaderRow');
     headerRow.innerHTML = '';
@@ -695,12 +774,16 @@ function renderScoreboard(match) {
 
                 // Check if score has a target photo
                 const hasPhoto = score.targetPhotoUrl && score.targetPhotoUrl.length > 0;
-                const photoIndicator = hasPhoto ? '<i class="bi bi-camera-fill photo-indicator" title="Har målfoto"></i>' : '';
+                const shooterName = participant.firstName || 'Skytt';
+                const scoreJson = JSON.stringify(score).replace(/"/g, '&quot;');
+                const photoIndicator = hasPhoto
+                    ? `<i class="bi bi-camera-fill photo-indicator photo-clickable" title="Visa målfoto" onclick="event.stopPropagation(); showTargetPhotoModal(${seriesNum}, ${scoreJson}, '${shooterName}')"></i>`
+                    : '';
 
                 if (canEdit) {
                     td.innerHTML = `
                         ${photoIndicator}
-                        <div class="score-editable" onclick="editSeriesScore(${seriesNum}, ${JSON.stringify(score).replace(/"/g, '&quot;')})">
+                        <div class="score-editable" onclick="editSeriesScore(${seriesNum}, ${scoreJson})">
                             <span class="score-value">${cappedTotal}</span>${inlineReaction}
                             <i class="bi bi-pencil edit-icon"></i>
                         </div>
@@ -711,7 +794,7 @@ function renderScoreboard(match) {
                     // Non-editable score - can click for reactions or photo viewing
                     td.innerHTML = `
                         ${photoIndicator}
-                        <div class="score-clickable" onclick="handleScoreCellClick(event, ${participant.memberId}, ${seriesNum}, ${JSON.stringify(score).replace(/"/g, '&quot;')})"
+                        <div class="score-clickable" onclick="handleScoreCellClick(event, ${participant.memberId}, ${seriesNum}, ${scoreJson})"
                              data-member-id="${participant.memberId}" data-series="${seriesNum}">
                             <span class="score-value">${cappedTotal}</span>${inlineReaction}
                         </div>
@@ -766,6 +849,12 @@ function renderScoreboard(match) {
         const td = document.createElement('td');
         td.className = 'total-cell';
 
+        // Get ranking for this participant
+        const participantKey = participant.memberId || `guest_${participant.guestParticipantId}`;
+        const ranking = rankings[participantKey];
+        const rankingColor = getRankingColor(ranking);
+        const rankingText = getRankingText(ranking);
+
         // Determine effective series count for this participant
         const allScores = participant.scores || [];
         const actualSeriesCount = allScores.length;
@@ -794,6 +883,11 @@ function renderScoreboard(match) {
             ? `${effectiveSeriesCount}/${actualSeriesCount} serier`
             : `${effectiveSeriesCount} serier`;
 
+        // Build ranking indicator HTML for all participants
+        const rankingIndicator = rankingText
+            ? `<span class="ranking-indicator" style="color: ${rankingColor}; margin-left: 4px;">${rankingText}</span>`
+            : '';
+
         // Check if handicap is enabled and participant has handicap data
         if (match.hasHandicap && participant.handicapPerSeries !== null && participant.handicapPerSeries !== undefined) {
             // Per spec: FinalScore = Sum(RawSeriesScores) + (HandicapPerSeries × SeriesCount)
@@ -804,7 +898,7 @@ function renderScoreboard(match) {
             const hcpTotalDisplay = formatHandicap(handicapTotal);
 
             td.innerHTML = `
-                <div class="total-score handicap-final">${finalScore}</div>
+                <div class="total-score handicap-final">${finalScore}${rankingIndicator}</div>
                 <div class="total-handicap-breakdown">
                     <span class="raw-score">${totalScore}</span>
                     <span class="hcp-addition">${hcpTotalDisplay}</span>
@@ -813,7 +907,7 @@ function renderScoreboard(match) {
             `;
         } else {
             td.innerHTML = `
-                <div class="total-score">${totalScore}</div>
+                <div class="total-score">${totalScore}${rankingIndicator}</div>
                 <div class="total-details">${seriesDisplay}${totalX > 0 ? ` | ${totalX}x` : ''}</div>
             `;
         }
@@ -957,6 +1051,56 @@ function showSpectatorsModal() {
     }
 
     const modal = new bootstrap.Modal(document.getElementById('spectatorsModal'));
+    modal.show();
+}
+
+// Show target photo modal
+function showTargetPhotoModal(seriesNumber, score, shooterName) {
+    // Update modal content
+    document.getElementById('photoSeriesNumber').textContent = seriesNumber;
+    document.getElementById('photoScoreTotal').textContent = score.total || '-';
+    document.getElementById('photoShooterName').textContent = shooterName || 'Skytt';
+
+    const xCountContainer = document.getElementById('photoXCountContainer');
+    if (score.xCount > 0) {
+        document.getElementById('photoXCount').textContent = score.xCount + 'x';
+        xCountContainer.style.display = 'block';
+    } else {
+        xCountContainer.style.display = 'none';
+    }
+
+    // Handle photo loading
+    const loadingSpinner = document.getElementById('photoLoadingSpinner');
+    const photoImage = document.getElementById('targetPhotoImage');
+    const noPhotoMsg = document.getElementById('noPhotoMessage');
+
+    if (score.targetPhotoUrl) {
+        loadingSpinner.style.display = 'block';
+        photoImage.style.display = 'none';
+        noPhotoMsg.style.display = 'none';
+
+        photoImage.onload = () => {
+            loadingSpinner.style.display = 'none';
+            photoImage.style.display = 'block';
+        };
+        photoImage.onerror = () => {
+            loadingSpinner.style.display = 'none';
+            noPhotoMsg.style.display = 'block';
+        };
+        photoImage.src = score.targetPhotoUrl;
+    } else {
+        loadingSpinner.style.display = 'none';
+        photoImage.style.display = 'none';
+        noPhotoMsg.style.display = 'block';
+    }
+
+    // Store current score data for reactions
+    window.currentPhotoScore = score;
+    window.currentPhotoMemberId = score.memberId;
+    window.currentPhotoSeriesNumber = seriesNumber;
+
+    // Show modal
+    const modal = new bootstrap.Modal(document.getElementById('targetPhotoModal'));
     modal.show();
 }
 
@@ -1292,6 +1436,16 @@ function copyMatchLinkFromSettings() {
 .total-score {
     font-size: 1.5rem;
     font-weight: bold;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+}
+
+/* Ranking Indicator for Top 3 */
+.ranking-indicator {
+    font-size: 1rem;
+    font-weight: bold;
 }
 
 .total-details {
@@ -1527,6 +1681,17 @@ function copyMatchLinkFromSettings() {
     top: 50%;
     transform: translateY(-50%);
     opacity: 0.85;
+}
+
+.photo-indicator.photo-clickable {
+    cursor: pointer;
+    z-index: 10;
+}
+
+.photo-indicator.photo-clickable:hover {
+    opacity: 1;
+    color: #138496;
+    transform: translateY(-50%) scale(1.1);
 }
 
 /* Make score cells position relative for photo indicator */

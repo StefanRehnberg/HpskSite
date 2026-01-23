@@ -641,7 +641,7 @@
                                                            TextColor="{StaticResource Gray400}"
                                                            VerticalOptions="Center" />
                                                     <Label FontSize="13"
-                                                           IsVisible="{Binding Source={RelativeSource AncestorType={x:Type viewmodels:MatchListViewModel}}, Path=IsLandscape}"
+                                                           IsVisible="{Binding IsParticipant}"
                                                            Text="{Binding PlacementBadge}"
                                                            VerticalOptions="Center" />
                                                     <!--  Avatars (landscape only)  -->
