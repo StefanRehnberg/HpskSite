@@ -1699,17 +1699,24 @@ namespace HpskSite.Controllers
                             // Calculate equalized scores with handicap and rank (limited to effectiveLimit)
                             var equalizedScores = participantData
                                 .Select(p => {
-                                    int rawScore = p.SeriesTotals.Take(effectiveLimit).Sum();
-                                    int effectiveSeriesCount = Math.Min(p.SeriesCount, effectiveLimit);
+                                    var effectiveSeriesTotals = p.SeriesTotals.Take(effectiveLimit).ToList();
+                                    int rawScore = effectiveSeriesTotals.Sum();
+                                    int effectiveSeriesCount = effectiveSeriesTotals.Count;
 
-                                    // Apply handicap if enabled
+                                    // Apply handicap if enabled (per-series clamping at 0-50)
                                     int adjustedScore = rawScore;
                                     if (hasHandicap && handicapLookup.TryGetValue(p.ParticipantKey, out var hcp))
                                     {
                                         var roundedHcp = Math.Round(hcp * 4) / 4; // Round to quarter points
-                                        var handicapTotal = roundedHcp * effectiveSeriesCount;
-                                        var maxPossible = 50 * effectiveSeriesCount;
-                                        adjustedScore = Math.Min((int)Math.Round(rawScore + (double)handicapTotal), maxPossible);
+                                        // Apply handicap per series and clamp each between 0-50
+                                        adjustedScore = 0;
+                                        foreach (var seriesTotal in effectiveSeriesTotals)
+                                        {
+                                            var rawCapped = Math.Min(seriesTotal, 50);
+                                            var adjusted = rawCapped + roundedHcp;
+                                            var clamped = Math.Clamp((int)Math.Round(adjusted), 0, 50);
+                                            adjustedScore += clamped;
+                                        }
                                     }
 
                                     return new {
@@ -2545,6 +2552,9 @@ namespace HpskSite.Controllers
                         ? $"{creator.GetValue<string>("firstName")} {creator.GetValue<string>("lastName")}"
                         : "Okänd";
 
+                    // Check if match has handicap enabled
+                    bool hasHandicap = match.HasHandicap != null && (bool)match.HasHandicap;
+
                     // Get participants
                     var participants = db.Fetch<dynamic>(
                         @"SELECT * FROM TrainingMatchParticipants
@@ -2585,6 +2595,15 @@ namespace HpskSite.Controllers
                             }
                         }
 
+                        // Get frozen handicap values from participant record (if handicap enabled)
+                        decimal? frozenHandicap = null;
+                        bool? frozenIsProvisional = null;
+                        if (hasHandicap)
+                        {
+                            frozenHandicap = p.FrozenHandicapPerSeries != null ? (decimal?)p.FrozenHandicapPerSeries : null;
+                            frozenIsProvisional = p.FrozenIsProvisional != null ? (bool?)p.FrozenIsProvisional : null;
+                        }
+
                         // Get scores for this participant
                         dynamic? scoreRow = null;
                         if (memberId.HasValue)
@@ -2605,6 +2624,8 @@ namespace HpskSite.Controllers
                         }
 
                         var scoreList = new List<object>();
+                        int rawTotalScore = 0;
+                        int seriesCount = 0;
                         if (scoreRow != null)
                         {
                             var seriesJson = (string)scoreRow.SeriesScores;
@@ -2628,11 +2649,22 @@ namespace HpskSite.Controllers
                                                 targetPhotoUrl = s.TargetPhotoUrl,
                                                 reactions = s.Reactions
                                             });
+                                            rawTotalScore += s.Total;
                                         }
+                                        seriesCount = seriesList.Count;
                                     }
                                 }
                                 catch { }
                             }
+                        }
+
+                        // Calculate final score with handicap overlay (if handicap enabled)
+                        decimal? finalScore = null;
+                        decimal? handicapTotal = null;
+                        if (hasHandicap && frozenHandicap.HasValue)
+                        {
+                            handicapTotal = frozenHandicap.Value * seriesCount;
+                            finalScore = _handicapCalculator.GetMatchFinalScore(rawTotalScore, frozenHandicap.Value, seriesCount);
                         }
 
                         participantList.Add(new
@@ -2646,8 +2678,13 @@ namespace HpskSite.Controllers
                             profilePictureUrl = profilePictureUrl,
                             displayOrder = (int)p.DisplayOrder,
                             scores = scoreList,
-                            totalScore = scoreList.Sum(s => ((dynamic)s).total),
-                            seriesCount = scoreList.Count
+                            totalScore = rawTotalScore,
+                            seriesCount = seriesCount,
+                            // Handicap overlay fields (only meaningful when hasHandicap is true)
+                            handicapPerSeries = frozenHandicap,
+                            isProvisional = frozenIsProvisional,
+                            handicapTotal = handicapTotal,
+                            finalScore = finalScore
                         });
                     }
 
@@ -2670,6 +2707,8 @@ namespace HpskSite.Controllers
                             hasStarted = startDate == null || startDate <= DateTime.Now,
                             status = (string)match.Status,
                             completedDate = match.CompletedDate != null ? (DateTime?)match.CompletedDate : null,
+                            hasHandicap = hasHandicap,
+                            maxSeriesCount = GetMaxSeriesCount(match),
                             participants = participantList
                         }
                     });

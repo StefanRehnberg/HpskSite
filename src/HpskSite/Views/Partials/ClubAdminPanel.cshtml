@@ -1461,7 +1461,7 @@ async function uploadEditMemberProfilePicture(input) {
 
     const formData = new FormData();
     formData.append('memberId', memberId);
-    formData.append('file', file);
+    formData.append('profilePicture', file);
 
     try {
         const response = await fetch('/umbraco/surface/MemberAdmin/UploadMemberProfilePicture', {

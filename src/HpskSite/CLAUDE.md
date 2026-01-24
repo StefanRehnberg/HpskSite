@@ -300,6 +300,49 @@ Aggregates results from 3 sources:
 
 **See Also:** [Training Scoring System Documentation](Documentation/TRAINING_SCORING_SYSTEM.md) for complete implementation details
 
+## Training Match System
+
+### Overview
+Real-time multiplayer training matches where members compete together with optional handicap system. Uses SignalR for live updates.
+
+**Key Features:**
+- Real-time scoreboard with SignalR
+- Handicap system for fair competition across skill levels
+- Series-by-series score entry
+- Match history and leaderboards
+- Support for guests (non-registered participants)
+
+**Data Storage:** Database tables `TrainingMatches`, `TrainingMatchParticipants`, `TrainingMatchScores`
+**Controller:** `TrainingMatchController.cs`
+**UI:** `Views/Partials/TrainingMatchScoreboard.cshtml`
+
+### Handicap Calculation (Updated 2026-01-24)
+
+**Per-Series Capping Rule:**
+```
+For each series: AdjustedSeries = clamp(RawScore + HandicapPerSeries, 0, 50)
+FinalScore = Sum of all AdjustedSeries
+```
+
+**Key Points:**
+- Handicap applied per series, not to total
+- Each series clamped between 0-50
+- Positive handicap capped at 50 (can't exceed perfect score)
+- Negative handicap (elite shooters) clamped at 0
+- Uses standard rounding (away from zero)
+
+**Calculation Code:**
+- **C# Server:** `ResultCalculator.CalculateAdjustedTotal<T>()` in `HpskSite.Shared/Services/ResultCalculator.cs`
+- **JavaScript Client:** `calculateAdjustedTotalWithCap()` in `TrainingMatchScoreboard.cshtml`
+- **API Leaderboard:** Inline calculation in `TrainingMatchController.cs`
+
+**Example:**
+- Scores: 49, 46, 48 with handicap +3.0
+- Per-series: 49+3=52→50, 46+3=49, 48+3=51→50
+- Final: 50 + 49 + 50 = 149 (not 143 + 9 = 152)
+
+**See Also:** [Training Match Handicap System Documentation](Documentation/TRAINING_MATCH_HANDICAP_SYSTEM.md) for complete details
+
 ## Competition System
 
 ### Document Types

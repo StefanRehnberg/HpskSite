@@ -313,6 +313,29 @@ function roundToQuarter(value) {
     return Math.round(value * 4) / 4;
 }
 
+// Calculate adjusted total with per-series handicap clamping
+// Each series is adjusted and clamped between 0-50 individually, then summed
+function calculateAdjustedTotalWithCap(scores, handicapPerSeries) {
+    // Short-circuit for zero handicap
+    if (handicapPerSeries === 0) {
+        const rawTotal = scores.reduce((sum, s) => sum + Math.min(s.total, 50), 0);
+        return { total: rawTotal, effectiveHandicap: 0 };
+    }
+
+    let total = 0;
+    let effectiveHandicap = 0;
+    for (const s of scores) {
+        const rawCapped = Math.min(s.total, 50);
+        const adjusted = rawCapped + handicapPerSeries;
+        const rounded = Math.round(adjusted);
+        // Clamp between 0 and 50 (handles both positive and negative handicaps)
+        const clamped = Math.max(0, Math.min(rounded, 50));
+        total += clamped;
+        effectiveHandicap += (clamped - rawCapped);
+    }
+    return { total, effectiveHandicap };
+}
+
 // Build inline reaction HTML with responsive display
 function buildInlineReactionHtml(reactions) {
     if (!reactions || reactions.length === 0) {
@@ -455,13 +478,12 @@ function calculateParticipantRankings(match) {
         const rawTotal = effectiveScores.reduce((sum, s) => sum + Math.min(s.total, 50), 0);
         const effectiveSeriesCount = effectiveScores.length;
 
-        // Calculate adjusted total with handicap
+        // Calculate adjusted total with handicap (per-series capping)
         let adjustedTotal = rawTotal;
         if (match.hasHandicap && p.handicapPerSeries !== null && p.handicapPerSeries !== undefined) {
             const hcpPerSeries = roundToQuarter(p.handicapPerSeries);
-            const handicapTotal = hcpPerSeries * effectiveSeriesCount;
-            const maxPossible = 50 * effectiveSeriesCount;
-            adjustedTotal = Math.min(Math.round(rawTotal + handicapTotal), maxPossible);
+            const result = calculateAdjustedTotalWithCap(effectiveScores, hcpPerSeries);
+            adjustedTotal = result.total;
         }
 
         return {
@@ -890,12 +912,11 @@ function renderScoreboard(match) {
 
         // Check if handicap is enabled and participant has handicap data
         if (match.hasHandicap && participant.handicapPerSeries !== null && participant.handicapPerSeries !== undefined) {
-            // Per spec: FinalScore = Sum(RawSeriesScores) + (HandicapPerSeries × SeriesCount)
+            // Per-series handicap capping: each series adjusted and capped at 50
             const hcpPerSeries = roundToQuarter(participant.handicapPerSeries);
-            const handicapTotal = hcpPerSeries * effectiveSeriesCount;
-            const maxPossible = 50 * effectiveSeriesCount;
-            const finalScore = Math.min(Math.round(totalScore + handicapTotal), maxPossible);
-            const hcpTotalDisplay = formatHandicap(handicapTotal);
+            const result = calculateAdjustedTotalWithCap(effectiveScores, hcpPerSeries);
+            const finalScore = result.total;
+            const hcpTotalDisplay = formatHandicap(result.effectiveHandicap);
 
             td.innerHTML = `
                 <div class="total-score handicap-final">${finalScore}${rankingIndicator}</div>

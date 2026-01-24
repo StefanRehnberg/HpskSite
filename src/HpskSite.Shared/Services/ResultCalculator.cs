@@ -56,15 +56,16 @@ namespace HpskSite.Shared.Services
         /// <summary>
         /// Apply handicap to a single series score and cap at maximum.
         /// Uses standard rounding (AwayFromZero) for consistency with JavaScript.
+        /// Result is clamped between 0 and 50.
         /// </summary>
         /// <param name="rawScore">Raw series score (0-50)</param>
         /// <param name="handicapPerSeries">Handicap bonus per series</param>
-        /// <returns>Adjusted score (capped at 50)</returns>
+        /// <returns>Adjusted score (clamped between 0 and 50)</returns>
         public static int CalculateAdjustedSeriesScore(int rawScore, decimal handicapPerSeries)
         {
             var adjusted = rawScore + handicapPerSeries;
             var rounded = (int)Math.Round(adjusted, StandardRounding);
-            return Math.Min(rounded, MaxScorePerSeries);
+            return Math.Clamp(rounded, 0, MaxScorePerSeries);
         }
 
         /// <summary>
@@ -96,8 +97,8 @@ namespace HpskSite.Shared.Services
 
         /// <summary>
         /// Calculate adjusted total score with handicap applied.
-        /// Per spec: FinalScore = Sum(RawSeriesScores) + (HandicapPerSeries × SeriesCount)
-        /// The result is capped at (50 × seriesCount) and rounded to integer.
+        /// Per spec: For each series, apply handicap and clamp between 0-50, then sum all adjusted series.
+        /// This ensures high-scoring shooters don't lose handicap advantage to the 50-cap.
         /// </summary>
         /// <param name="seriesScores">List of series with Total property</param>
         /// <param name="handicapPerSeries">Handicap bonus per series</param>
@@ -107,15 +108,65 @@ namespace HpskSite.Shared.Services
             where T : ISeriesScore
         {
             var scores = GetEffectiveScores(seriesScores, equalizedCount).ToList();
-            var rawTotal = scores.Sum(s => Math.Min(s.Total, MaxScorePerSeries));
-            var seriesCount = scores.Count;
-            return CalculateAdjustedMatchTotal(rawTotal, handicapPerSeries, seriesCount);
+
+            // Short-circuit for zero handicap
+            if (handicapPerSeries == 0)
+            {
+                return scores.Sum(s => Math.Min(s.Total, MaxScorePerSeries));
+            }
+
+            // Apply handicap per series and clamp each between 0 and 50
+            int total = 0;
+            foreach (var s in scores)
+            {
+                var rawCapped = Math.Min(s.Total, MaxScorePerSeries);
+                var adjusted = rawCapped + handicapPerSeries;
+                var rounded = (int)Math.Round(adjusted, StandardRounding);
+                var clamped = Math.Clamp(rounded, 0, MaxScorePerSeries);
+                total += clamped;
+            }
+            return total;
+        }
+
+        /// <summary>
+        /// Calculate the effective handicap applied (may be less than theoretical due to clamping at 0-50 per series).
+        /// For example, if a shooter scores 49 with handicap 3, only 1 point is effectively applied (50-49).
+        /// With negative handicap, if shooter scores 5 with handicap -10, only -5 is effective (clamped at 0).
+        /// </summary>
+        /// <param name="seriesScores">List of series with Total property</param>
+        /// <param name="handicapPerSeries">Handicap bonus per series</param>
+        /// <param name="equalizedCount">Optional limit on number of series to include</param>
+        /// <returns>Total effective handicap applied (can be negative for negative handicaps)</returns>
+        public static decimal CalculateEffectiveHandicap<T>(IEnumerable<T> seriesScores, decimal handicapPerSeries, int? equalizedCount = null)
+            where T : ISeriesScore
+        {
+            // Short-circuit for zero handicap
+            if (handicapPerSeries == 0)
+            {
+                return 0;
+            }
+
+            var scores = GetEffectiveScores(seriesScores, equalizedCount).ToList();
+            decimal effectiveTotal = 0;
+            foreach (var s in scores)
+            {
+                var rawCapped = Math.Min(s.Total, MaxScorePerSeries);
+                var adjusted = rawCapped + handicapPerSeries;
+                var rounded = (int)Math.Round(adjusted, StandardRounding);
+                var clamped = Math.Clamp(rounded, 0, MaxScorePerSeries);
+                // Effective handicap for this series is what we actually added
+                effectiveTotal += (clamped - rawCapped);
+            }
+            return effectiveTotal;
         }
 
         /// <summary>
         /// Calculate final match score with handicap applied.
-        /// Per spec: FinalScore = RawTotal + (HandicapPerSeries × SeriesCount)
-        /// The result is capped at (50 × seriesCount) and rounded to integer.
+        /// DEPRECATED: This method doesn't respect per-series 50-cap correctly.
+        /// Use CalculateAdjustedTotal&lt;T&gt;() with individual series scores instead.
+        ///
+        /// This method assumes average distribution across series, which is not accurate
+        /// for high-scoring shooters. Kept for backward compatibility.
         /// </summary>
         /// <param name="rawTotal">Raw total score across all series</param>
         /// <param name="handicapPerSeries">Handicap bonus per series</param>
@@ -123,10 +174,23 @@ namespace HpskSite.Shared.Services
         /// <returns>Adjusted total score</returns>
         public static int CalculateAdjustedMatchTotal(int rawTotal, decimal handicapPerSeries, int seriesCount)
         {
-            var handicapTotal = handicapPerSeries * seriesCount;
-            var maxPossible = MaxScorePerSeries * seriesCount;
-            var finalScore = rawTotal + handicapTotal;
-            return Math.Min((int)Math.Round(finalScore, StandardRounding), maxPossible);
+            // With zero handicap, just return raw total
+            if (handicapPerSeries == 0)
+            {
+                return rawTotal;
+            }
+
+            // Fallback: assume average distribution across series (not perfectly accurate)
+            // This approximation applies per-series clamping to average scores
+            var avgRawPerSeries = seriesCount > 0 ? (decimal)rawTotal / seriesCount : 0;
+            int total = 0;
+            for (int i = 0; i < seriesCount; i++)
+            {
+                var adjusted = avgRawPerSeries + handicapPerSeries;
+                var clamped = Math.Clamp((int)Math.Round(adjusted, StandardRounding), 0, MaxScorePerSeries);
+                total += clamped;
+            }
+            return total;
         }
 
         /// <summary>

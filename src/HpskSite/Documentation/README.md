@@ -30,10 +30,13 @@ This folder contains all technical documentation for the HPSK Site project.
 - **FINALS_IMPLEMENTATION_STATUS.md** - Implementation status
 - **FINALS_TESTING_GUIDE.md** - Testing guide for finals
 
+### Training System
+- **TRAINING_SCORING_SYSTEM.md** - Training scoring system (personal training log)
+- **TRAINING_MATCH_HANDICAP_SYSTEM.md** - Training match handicap calculations
+
 ### System Architecture & Migrations
 - **CLUB_SYSTEM_MIGRATIONS.md** - Club system migration details (2025-10-30/31)
 - **LOGIN_REGISTRATION_SYSTEM.md** - Complete login/registration documentation
-- **TRAINING_SCORING_SYSTEM.md** - Training scoring system documentation
 - **AUTHORIZATION_SECURITY_AUDIT.md** - Security audit & fixes (2025-11-02)
 
 ### Technical Reference
@@ -72,8 +75,9 @@ This folder contains all technical documentation for the HPSK Site project.
 6. See **CLUB_SYSTEM_MIGRATIONS.md** for club lookup patterns
 7. See **LOGIN_REGISTRATION_SYSTEM.md** for authentication details
 8. See **TRAINING_SCORING_SYSTEM.md** for training log implementation
-9. See **AUTHORIZATION_SECURITY_AUDIT.md** for security patterns
-10. See **PAYMENT_INVOICE_SYSTEM.md** for payment/invoice implementation
+9. See **TRAINING_MATCH_HANDICAP_SYSTEM.md** for handicap calculation rules
+10. See **AUTHORIZATION_SECURITY_AUDIT.md** for security patterns
+11. See **PAYMENT_INVOICE_SYSTEM.md** for payment/invoice implementation
 
 ---
 
