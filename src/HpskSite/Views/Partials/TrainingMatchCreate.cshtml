@@ -2,6 +2,7 @@
     Training Match Create Partial
     Form for creating a new training match
 *@
+@using HpskSite.Shared.Constants
 
 <style>
 /* Subtle placeholder text */
@@ -107,9 +108,9 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
             </div>
             <div class="modal-body">
-                <p>Handicap gör det möjligt för skyttar på olika nivåer att tävla rättvist mot varandra.</p>
+                <p>@HandicapInfo.Introduction</p>
 
-                <h6 class="mt-3"><strong>Hur handicap beräknas:</strong></h6>
+                <h6 class="mt-3"><strong>@HandicapInfo.CalculationTitle</strong></h6>
                 <ul class="mb-3">
                     <li>Baseras på ditt genomsnittliga serieresultat</li>
                     <li>En skytt med snitt 48 har handicap 0</li>
@@ -117,14 +118,35 @@
                     <li>Högre snitt = negativt handicap (avdrag)</li>
                 </ul>
 
-                <h6><strong>Så räknas slutresultatet:</strong></h6>
+                <h6><strong>@HandicapInfo.StartingIndexTitle</strong></h6>
+                <ul class="mb-3">
+                    <li>Klass 1: 44 poäng (Nybörjare)</li>
+                    <li>Klass 2: 46 poäng (Guldmärkesskytt)</li>
+                    <li>Klass 3: 48 poäng (Riksmästare)</li>
+                </ul>
+
+                <h6><strong>@HandicapInfo.ProvisionalTitle</strong></h6>
+                <ul class="mb-3">
+                    <li>Handicap baseras på snitt från senaste 5 matcher</li>
+                    <li>Nya skyttar: startindex fyller i saknade resultat</li>
+                    <li>Visas med (P) tills 5 riktiga resultat finns</li>
+                </ul>
+
+                <h6><strong>@HandicapInfo.ProvisionalExampleTitle</strong></h6>
+                <ul class="mb-3">
+                    <li>0 matcher: (44+44+44+44+44)/5 = 44 → hcp +4</li>
+                    <li>1 match (40p): (40+44+44+44+44)/5 = 43.2 → hcp +4.8</li>
+                    <li>5 matcher: endast riktiga resultat används</li>
+                </ul>
+
+                <h6><strong>@HandicapInfo.ResultCalculationTitle</strong></h6>
                 <ul class="mb-3">
                     <li>Handicap läggs till på VARJE serie</li>
                     <li>Max 50 poäng per serie (tak)</li>
                     <li>Slutresultat = summan av alla justerade serier</li>
                 </ul>
 
-                <h6><strong>Exempel (handicap +3):</strong></h6>
+                <h6><strong>@HandicapInfo.ExampleTitle</strong></h6>
                 <p class="mb-1">Råpoäng: 47, 49, 46</p>
                 <ul class="mb-2">
                     <li>Serie 1: 47 + 3 = 50 ✓</li>
@@ -134,7 +156,7 @@
                 </ul>
 
                 <p class="text-muted small mb-0">
-                    <i class="bi bi-info-circle me-1"></i>Notera: Höga råpoäng kan "förlora" handicap till 50-taket.
+                    <i class="bi bi-info-circle me-1"></i>@HandicapInfo.Note
                 </p>
             </div>
             <div class="modal-footer">

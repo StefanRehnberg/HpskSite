@@ -16,16 +16,16 @@ namespace HpskSite.Models
         /// Maximum handicap bonus per series.
         /// Prevents excessive handicaps for very low-average shooters.
         /// Per specification: negative handicaps have no lower bound.
-        /// Default: 5.0
+        /// Default: 10.0
         /// </summary>
-        public decimal MaxHandicapPerSeries { get; set; } = 5.0m;
+        public decimal MaxHandicapPerSeries { get; set; } = 10.0m;
 
         /// <summary>
         /// Number of completed matches required before shooter is no longer provisional.
-        /// Until this threshold is met, a weighted convergence formula is used.
-        /// Default: 8
+        /// Until this threshold is met, the starting index fills in for missing results.
+        /// Default: 5
         /// </summary>
-        public int RequiredMatches { get; set; } = 8;
+        public int RequiredMatches { get; set; } = 5;
 
         /// <summary>
         /// Number of most recent matches to include in handicap calculation (rolling window).
@@ -35,15 +35,16 @@ namespace HpskSite.Models
         public int RollingWindowMatchCount { get; set; } = 10;
 
         /// <summary>
-        /// Provisional averages by shooter class (for new shooters with no history).
+        /// Starting index (expected average) by shooter class for new shooters.
+        /// Used to fill in missing results until RequiredMatches is reached.
         /// Keys should match the precisionShooterClass member property values.
         /// Shooter class MUST be set - there is no default fallback.
         /// </summary>
         public Dictionary<string, decimal> ProvisionalAverages { get; set; } = new()
         {
-            { "Klass 1 - Nybörjare", 40.0m },
-            { "Klass 2 - Guldmärkesskytt", 44.0m },
-            { "Klass 3 - Riksmästare", 47.0m }
+            { "Klass 1 - Nybörjare", 44.0m },
+            { "Klass 2 - Guldmärkesskytt", 46.0m },
+            { "Klass 3 - Riksmästare", 48.0m }
         };
     }
 }
