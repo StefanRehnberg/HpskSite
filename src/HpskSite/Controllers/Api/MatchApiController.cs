@@ -179,6 +179,12 @@ namespace HpskSite.Controllers.Api
             } while (await db.ExecuteScalarAsync<int>(
                 "SELECT COUNT(*) FROM TrainingMatches WHERE MatchCode = @0", matchCode) > 0);
 
+            // Validate team match requirements
+            if (request.IsTeamMatch && (!request.MaxShootersPerTeam.HasValue || request.MaxShootersPerTeam.Value <= 0))
+            {
+                return BadRequest(ApiResponse<TrainingMatch>.Error("Ange max antal skyttar per lag för lagmatcher"));
+            }
+
             // Create match
             var match = new TrainingMatchDbDto
             {
@@ -190,10 +196,54 @@ namespace HpskSite.Controllers.Api
                 StartDate = request.StartDate,
                 Status = "Active",
                 IsOpen = request.IsOpen,
-                HasHandicap = request.HasHandicap
+                HasHandicap = request.HasHandicap,
+                IsTeamMatch = request.IsTeamMatch,
+                MaxShootersPerTeam = request.IsTeamMatch ? request.MaxShootersPerTeam : null
             };
 
             await db.InsertAsync(match);
+
+            // Create teams for closed team matches
+            int? creatorTeamId = null;
+            if (request.IsTeamMatch && !request.IsOpen && request.Teams != null && request.Teams.Count > 0)
+            {
+                foreach (var team in request.Teams)
+                {
+                    var teamDto = new TrainingMatchTeamDbDto
+                    {
+                        TrainingMatchId = match.Id,
+                        TeamNumber = team.TeamNumber,
+                        TeamName = team.TeamName,
+                        ClubId = team.ClubId,
+                        DisplayOrder = team.TeamNumber - 1
+                    };
+                    await db.InsertAsync(teamDto);
+                }
+
+                // Get creator's club to auto-assign to a team
+                var creatorMember = _memberService.GetById(memberId.Value);
+                var creatorClubId = creatorMember?.GetValue<int>("primaryClubId") ?? 0;
+                if (creatorClubId > 0)
+                {
+                    var matchingTeam = await db.FirstOrDefaultAsync<TrainingMatchTeamDbDto>(
+                        "WHERE TrainingMatchId = @0 AND ClubId = @1", match.Id, creatorClubId);
+                    if (matchingTeam != null)
+                    {
+                        creatorTeamId = matchingTeam.Id;
+                    }
+                }
+
+                // If no matching club team, assign to first team
+                if (!creatorTeamId.HasValue)
+                {
+                    var firstTeam = await db.FirstOrDefaultAsync<TrainingMatchTeamDbDto>(
+                        "WHERE TrainingMatchId = @0 ORDER BY TeamNumber", match.Id);
+                    if (firstTeam != null)
+                    {
+                        creatorTeamId = firstTeam.Id;
+                    }
+                }
+            }
 
             // Calculate handicap for creator if match has handicap enabled
             decimal? frozenHandicap = null;
@@ -224,7 +274,8 @@ namespace HpskSite.Controllers.Api
                 JoinedDate = DateTime.UtcNow,
                 DisplayOrder = 1,
                 FrozenHandicapPerSeries = frozenHandicap,
-                FrozenIsProvisional = frozenIsProvisional
+                FrozenIsProvisional = frozenIsProvisional,
+                TeamId = creatorTeamId
             };
 
             await db.InsertAsync(participant);
@@ -276,7 +327,7 @@ namespace HpskSite.Controllers.Api
         /// Join a match
         /// </summary>
         [HttpPost("{code}/join")]
-        public async Task<IActionResult> JoinMatch(string code)
+        public async Task<IActionResult> JoinMatch(string code, [FromBody] JoinMatchRequest? request = null)
         {
             var memberId = await GetCurrentMemberIdAsync();
             if (!memberId.HasValue)
@@ -309,6 +360,64 @@ namespace HpskSite.Controllers.Api
             if (existing > 0)
             {
                 return BadRequest(ApiResponse<TrainingMatch>.Error("Du deltar redan i denna match"));
+            }
+
+            // Handle team match logic
+            int? teamId = null;
+            if (match.IsTeamMatch)
+            {
+                if (request?.TeamId == null)
+                {
+                    // Return available teams so the client can prompt for selection
+                    var teams = await db.FetchAsync<TrainingMatchTeamDbDto>(
+                        "WHERE TrainingMatchId = @0 ORDER BY TeamNumber", match.Id);
+
+                    var teamList = new List<object>();
+                    foreach (var team in teams)
+                    {
+                        var memberCount = await db.ExecuteScalarAsync<int>(
+                            "SELECT COUNT(*) FROM TrainingMatchParticipants WHERE TeamId = @0", team.Id);
+                        teamList.Add(new
+                        {
+                            id = team.Id,
+                            teamNumber = team.TeamNumber,
+                            teamName = team.TeamName,
+                            clubId = team.ClubId,
+                            memberCount = memberCount,
+                            maxShooters = match.MaxShootersPerTeam
+                        });
+                    }
+
+                    return BadRequest(new
+                    {
+                        success = false,
+                        requiresTeam = true,
+                        isOpen = match.IsOpen,
+                        teams = teamList,
+                        message = "Välj ett lag att gå med i"
+                    });
+                }
+
+                // Validate the selected team
+                var selectedTeam = await db.FirstOrDefaultAsync<TrainingMatchTeamDbDto>(
+                    "WHERE Id = @0 AND TrainingMatchId = @1", request.TeamId.Value, match.Id);
+
+                if (selectedTeam == null)
+                {
+                    return BadRequest(ApiResponse<TrainingMatch>.Error("Ogiltigt lag"));
+                }
+
+                // Check team capacity
+                var maxShooters = match.MaxShootersPerTeam ?? int.MaxValue;
+                var currentTeamCount = await db.ExecuteScalarAsync<int>(
+                    "SELECT COUNT(*) FROM TrainingMatchParticipants WHERE TeamId = @0", request.TeamId.Value);
+
+                if (currentTeamCount >= maxShooters)
+                {
+                    return BadRequest(ApiResponse<TrainingMatch>.Error("Laget är fullt"));
+                }
+
+                teamId = request.TeamId.Value;
             }
 
             // Get next display order
@@ -359,7 +468,8 @@ namespace HpskSite.Controllers.Api
                 JoinedDate = DateTime.UtcNow,
                 DisplayOrder = maxOrder + 1,
                 FrozenHandicapPerSeries = frozenHandicap,
-                FrozenIsProvisional = frozenIsProvisional
+                FrozenIsProvisional = frozenIsProvisional,
+                TeamId = teamId
             };
 
             await db.InsertAsync(participant);
@@ -416,6 +526,208 @@ namespace HpskSite.Controllers.Api
                 .SendAsync("ParticipantLeft", memberId.Value);
 
             return Ok(ApiResponse.Ok("Du har lämnat matchen"));
+        }
+
+        /// <summary>
+        /// Get teams for a match
+        /// </summary>
+        [HttpGet("{code}/teams")]
+        public async Task<IActionResult> GetTeams(string code)
+        {
+            using var scope = _scopeProvider.CreateScope();
+            var db = scope.Database;
+
+            var match = await db.FirstOrDefaultAsync<TrainingMatchDbDto>(
+                "WHERE MatchCode = @0", code.ToUpper());
+
+            if (match == null)
+            {
+                return NotFound(ApiResponse.Error("Matchen hittades inte"));
+            }
+
+            if (!match.IsTeamMatch)
+            {
+                return Ok(new { success = true, isTeamMatch = false, teams = new List<object>() });
+            }
+
+            var teams = await db.FetchAsync<TrainingMatchTeamDbDto>(
+                "WHERE TrainingMatchId = @0 ORDER BY TeamNumber", match.Id);
+
+            var teamList = new List<object>();
+            foreach (var team in teams)
+            {
+                var memberCount = await db.ExecuteScalarAsync<int>(
+                    "SELECT COUNT(*) FROM TrainingMatchParticipants WHERE TeamId = @0", team.Id);
+                teamList.Add(new
+                {
+                    id = team.Id,
+                    teamNumber = team.TeamNumber,
+                    teamName = team.TeamName,
+                    clubId = team.ClubId,
+                    clubName = team.ClubId.HasValue ? _clubService.GetClubNameById(team.ClubId.Value) : null,
+                    memberCount = memberCount,
+                    maxShooters = match.MaxShootersPerTeam
+                });
+            }
+
+            scope.Complete();
+
+            return Ok(new
+            {
+                success = true,
+                isTeamMatch = true,
+                isOpen = match.IsOpen,
+                teams = teamList
+            });
+        }
+
+        /// <summary>
+        /// Create a new team in an open team match
+        /// </summary>
+        [HttpPost("{code}/teams")]
+        public async Task<IActionResult> CreateTeam(string code, [FromBody] CreateTeamRequest request)
+        {
+            var memberId = await GetCurrentMemberIdAsync();
+            if (!memberId.HasValue)
+            {
+                return Unauthorized(ApiResponse.Error("Ej inloggad"));
+            }
+
+            if (string.IsNullOrWhiteSpace(request.TeamName))
+            {
+                return BadRequest(ApiResponse.Error("Lagnamn krävs"));
+            }
+
+            using var scope = _scopeProvider.CreateScope();
+            var db = scope.Database;
+
+            var match = await db.FirstOrDefaultAsync<TrainingMatchDbDto>(
+                "WHERE MatchCode = @0", code.ToUpper());
+
+            if (match == null)
+            {
+                return NotFound(ApiResponse.Error("Matchen hittades inte"));
+            }
+
+            if (match.Status != "Active")
+            {
+                return BadRequest(ApiResponse.Error("Matchen är inte aktiv"));
+            }
+
+            if (!match.IsTeamMatch)
+            {
+                return BadRequest(ApiResponse.Error("Detta är inte en lagmatch"));
+            }
+
+            // Check for duplicate team name
+            var existingTeam = await db.FirstOrDefaultAsync<TrainingMatchTeamDbDto>(
+                "WHERE TrainingMatchId = @0 AND TeamName = @1", match.Id, request.TeamName.Trim());
+
+            if (existingTeam != null)
+            {
+                return BadRequest(ApiResponse.Error("Ett lag med det namnet finns redan"));
+            }
+
+            // Get the next team number
+            var maxTeamNumber = await db.ExecuteScalarAsync<int>(
+                "SELECT ISNULL(MAX(TeamNumber), 0) FROM TrainingMatchTeams WHERE TrainingMatchId = @0", match.Id);
+
+            var newTeam = new TrainingMatchTeamDbDto
+            {
+                TrainingMatchId = match.Id,
+                TeamNumber = maxTeamNumber + 1,
+                TeamName = request.TeamName.Trim(),
+                ClubId = request.ClubId,
+                DisplayOrder = maxTeamNumber
+            };
+
+            await db.InsertAsync(newTeam);
+
+            scope.Complete();
+
+            // Notify via SignalR
+            await _hubContext.Clients.Group($"match_{code.ToUpper()}")
+                .SendAsync("MatchRefresh", code.ToUpper());
+
+            return Ok(new { success = true, teamId = newTeam.Id, message = "Lag skapat!" });
+        }
+
+        /// <summary>
+        /// Change team for current participant
+        /// </summary>
+        [HttpPost("{code}/change-team")]
+        public async Task<IActionResult> ChangeTeam(string code, [FromBody] ChangeTeamRequest request)
+        {
+            var memberId = await GetCurrentMemberIdAsync();
+            if (!memberId.HasValue)
+            {
+                return Unauthorized(ApiResponse.Error("Ej inloggad"));
+            }
+
+            using var scope = _scopeProvider.CreateScope();
+            var db = scope.Database;
+
+            var match = await db.FirstOrDefaultAsync<TrainingMatchDbDto>(
+                "WHERE MatchCode = @0", code.ToUpper());
+
+            if (match == null)
+            {
+                return NotFound(ApiResponse.Error("Matchen hittades inte"));
+            }
+
+            if (match.Status != "Active")
+            {
+                return BadRequest(ApiResponse.Error("Matchen är inte aktiv"));
+            }
+
+            if (!match.IsTeamMatch)
+            {
+                return BadRequest(ApiResponse.Error("Detta är inte en lagmatch"));
+            }
+
+            // Get participant
+            var participant = await db.FirstOrDefaultAsync<TrainingMatchParticipantDbDto>(
+                "WHERE TrainingMatchId = @0 AND MemberId = @1", match.Id, memberId.Value);
+
+            if (participant == null)
+            {
+                return BadRequest(ApiResponse.Error("Du är inte med i denna match"));
+            }
+
+            // Validate new team
+            if (request.NewTeamId.HasValue)
+            {
+                var newTeam = await db.FirstOrDefaultAsync<TrainingMatchTeamDbDto>(
+                    "WHERE Id = @0 AND TrainingMatchId = @1", request.NewTeamId.Value, match.Id);
+
+                if (newTeam == null)
+                {
+                    return BadRequest(ApiResponse.Error("Ogiltigt lag"));
+                }
+
+                // Check team capacity
+                var maxShooters = match.MaxShootersPerTeam ?? int.MaxValue;
+                var currentTeamCount = await db.ExecuteScalarAsync<int>(
+                    "SELECT COUNT(*) FROM TrainingMatchParticipants WHERE TeamId = @0", request.NewTeamId.Value);
+
+                if (currentTeamCount >= maxShooters)
+                {
+                    return BadRequest(ApiResponse.Error("Laget är fullt"));
+                }
+            }
+
+            // Update team
+            await db.ExecuteAsync(
+                "UPDATE TrainingMatchParticipants SET TeamId = @0 WHERE Id = @1",
+                request.NewTeamId, participant.Id);
+
+            scope.Complete();
+
+            // Notify via SignalR
+            await _hubContext.Clients.Group($"match_{code.ToUpper()}")
+                .SendAsync("MatchRefresh", code.ToUpper());
+
+            return Ok(ApiResponse.Ok("Lag ändrat!"));
         }
 
         /// <summary>
@@ -1732,6 +2044,33 @@ namespace HpskSite.Controllers.Api
                 frozenIsProvisional = true; // Guests always have provisional handicap
             }
 
+            // Validate team for team matches
+            int? teamId = request.TeamId;
+            if (match.IsTeamMatch && teamId.HasValue)
+            {
+                // Verify team belongs to this match
+                var team = await db.FirstOrDefaultAsync<TrainingMatchTeamDbDto>(
+                    "WHERE Id = @0 AND TrainingMatchId = @1", teamId.Value, match.Id);
+                if (team == null)
+                {
+                    scope.Complete();
+                    return BadRequest(ApiResponse<AddGuestResponse>.Error("Ogiltigt lag"));
+                }
+
+                // Check team capacity
+                if (match.MaxShootersPerTeam.HasValue)
+                {
+                    var teamMemberCount = await db.ExecuteScalarAsync<int>(
+                        "SELECT COUNT(*) FROM TrainingMatchParticipants WHERE TrainingMatchId = @0 AND TeamId = @1",
+                        match.Id, teamId.Value);
+                    if (teamMemberCount >= match.MaxShootersPerTeam.Value)
+                    {
+                        scope.Complete();
+                        return BadRequest(ApiResponse<AddGuestResponse>.Error("Laget är fullt"));
+                    }
+                }
+            }
+
             // Add guest as participant
             var participant = new TrainingMatchParticipantDbDto
             {
@@ -1742,7 +2081,8 @@ namespace HpskSite.Controllers.Api
                 JoinedDate = DateTime.UtcNow,
                 DisplayOrder = maxOrder + 1,
                 FrozenHandicapPerSeries = frozenHandicap,
-                FrozenIsProvisional = frozenIsProvisional
+                FrozenIsProvisional = frozenIsProvisional,
+                TeamId = teamId
             };
 
             await db.InsertAsync(participant);
@@ -2166,8 +2506,18 @@ namespace HpskSite.Controllers.Api
                 StartDate = match.StartDate,
                 IsHandicapEnabled = match.HasHandicap,
                 IsOpen = match.IsOpen,
-                MaxSeriesCount = match.MaxSeriesCount
+                MaxSeriesCount = match.MaxSeriesCount,
+                IsTeamMatch = match.IsTeamMatch,
+                MaxShootersPerTeam = match.MaxShootersPerTeam
             };
+
+            // Load teams if this is a team match
+            var teams = match.IsTeamMatch
+                ? await db.FetchAsync<TrainingMatchTeamDbDto>("WHERE TrainingMatchId = @0 ORDER BY DisplayOrder, TeamNumber", match.Id)
+                : new List<TrainingMatchTeamDbDto>();
+
+            // Build team lookup
+            var teamLookup = teams.ToDictionary(t => t.Id, t => t.TeamName);
 
             // Get creator name
             var creator = _memberService.GetById(match.CreatedByMemberId);
@@ -2203,7 +2553,9 @@ namespace HpskSite.Controllers.Api
                         JoinedDate = p.JoinedDate,
                         DisplayOrder = p.DisplayOrder,
                         HandicapPerSeries = p.FrozenHandicapPerSeries,
-                        IsProvisional = p.FrozenIsProvisional
+                        IsProvisional = p.FrozenIsProvisional,
+                        TeamId = p.TeamId,
+                        TeamName = p.TeamId.HasValue && teamLookup.TryGetValue(p.TeamId.Value, out var guestTeamName) ? guestTeamName : null
                     };
 
                     // Get scores for this guest participant
@@ -2249,7 +2601,9 @@ namespace HpskSite.Controllers.Api
                         JoinedDate = p.JoinedDate,
                         DisplayOrder = p.DisplayOrder,
                         HandicapPerSeries = p.FrozenHandicapPerSeries,
-                        IsProvisional = p.FrozenIsProvisional
+                        IsProvisional = p.FrozenIsProvisional,
+                        TeamId = p.TeamId,
+                        TeamName = p.TeamId.HasValue && teamLookup.TryGetValue(p.TeamId.Value, out var memberTeamName) ? memberTeamName : null
                     };
 
                     // Get scores for this member participant
@@ -2286,7 +2640,72 @@ namespace HpskSite.Controllers.Api
                 result.Participants.Add(participant);
             }
 
+            // Calculate team scores if this is a team match
+            if (match.IsTeamMatch && teams.Count > 0)
+            {
+                foreach (var team in teams)
+                {
+                    var teamParticipants = result.Participants.Where(p => p.TeamId == team.Id).ToList();
+                    var teamScore = teamParticipants.Sum(p => p.TotalScore);
+                    var adjustedTeamScore = teamParticipants.Sum(p => p.AdjustedTotalScore);
+                    var totalXCount = teamParticipants.Sum(p => p.TotalXCount);
+
+                    result.Teams.Add(new TrainingMatchTeam
+                    {
+                        Id = team.Id,
+                        TrainingMatchId = team.TrainingMatchId,
+                        TeamNumber = team.TeamNumber,
+                        TeamName = team.TeamName,
+                        ClubId = team.ClubId,
+                        ClubName = team.ClubId.HasValue ? _clubService.GetClubNameById(team.ClubId.Value) : null,
+                        DisplayOrder = team.DisplayOrder,
+                        ParticipantCount = teamParticipants.Count,
+                        TeamScore = teamScore,
+                        AdjustedTeamScore = adjustedTeamScore,
+                        TotalXCount = totalXCount
+                    });
+                }
+
+                // Calculate team ranks
+                var rankedTeams = result.Teams
+                    .OrderByDescending(t => t.AdjustedTeamScore)
+                    .ThenByDescending(t => t.TotalXCount)
+                    .ToList();
+
+                for (int i = 0; i < rankedTeams.Count; i++)
+                {
+                    rankedTeams[i].Rank = i + 1;
+                }
+            }
+
             return result;
+        }
+
+        /// <summary>
+        /// Get list of clubs for team affiliation during match creation
+        /// </summary>
+        [HttpGet("clubs")]
+        public IActionResult GetClubs()
+        {
+            try
+            {
+                var clubs = _clubService.GetAllClubs()
+                    .Where(c => c.IsActive)
+                    .Select(c => new ClubListItem
+                    {
+                        Id = c.Id,
+                        Name = c.Name ?? "Unknown"
+                    })
+                    .OrderBy(c => c.Name)
+                    .ToList();
+
+                return Ok(clubs);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error loading clubs for match creation");
+                return StatusCode(500, "Error loading clubs");
+            }
         }
 
         /// <summary>
@@ -2326,6 +2745,20 @@ namespace HpskSite.Controllers.Api
         public bool IsOpen { get; set; } = true;
         public bool HasHandicap { get; set; }
         public int? MaxSeriesCount { get; set; }
+        public bool IsTeamMatch { get; set; }
+        public int? MaxShootersPerTeam { get; set; }
+    }
+
+    [TableName("TrainingMatchTeams")]
+    [PrimaryKey("Id", AutoIncrement = true)]
+    public class TrainingMatchTeamDbDto
+    {
+        public int Id { get; set; }
+        public int TrainingMatchId { get; set; }
+        public int TeamNumber { get; set; }
+        public string TeamName { get; set; } = string.Empty;
+        public int? ClubId { get; set; }
+        public int DisplayOrder { get; set; }
     }
 
     [TableName("TrainingMatchParticipants")]
@@ -2341,6 +2774,7 @@ namespace HpskSite.Controllers.Api
         public int DisplayOrder { get; set; }
         public decimal? FrozenHandicapPerSeries { get; set; }
         public bool? FrozenIsProvisional { get; set; }
+        public int? TeamId { get; set; }
     }
 
     [TableName("TrainingScores")]
@@ -2386,6 +2820,25 @@ namespace HpskSite.Controllers.Api
         public DateTime? StartDate { get; set; }
         public bool IsOpen { get; set; } = true;
         public bool HasHandicap { get; set; }
+        public bool IsTeamMatch { get; set; }
+        public int? MaxShootersPerTeam { get; set; }
+        public List<HpskSite.Shared.Models.TeamDefinition>? Teams { get; set; }
+    }
+
+    public class JoinMatchRequest
+    {
+        public int? TeamId { get; set; }
+    }
+
+    public class CreateTeamRequest
+    {
+        public string? TeamName { get; set; }
+        public int? ClubId { get; set; }
+    }
+
+    public class ChangeTeamRequest
+    {
+        public int? NewTeamId { get; set; }
     }
 
     public class SaveScoreRequest
@@ -2504,5 +2957,14 @@ namespace HpskSite.Controllers.Api
     public class UploadPhotoResponse
     {
         public string PhotoUrl { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// Simple club item for pickers (team affiliation)
+    /// </summary>
+    public class ClubListItem
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = string.Empty;
     }
 }

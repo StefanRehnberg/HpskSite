@@ -396,18 +396,23 @@
         let pendingJoinMatchCode = null;
 
         // Join match by code
-        async function joinMatchByCode(code) {
-            console.log('joinMatchByCode called with code:', code);
+        async function joinMatchByCode(code, teamId = null) {
+            console.log('joinMatchByCode called with code:', code, 'teamId:', teamId);
             const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value;
 
             try {
+                const requestBody = { matchCode: code };
+                if (teamId !== null) {
+                    requestBody.teamId = teamId;
+                }
+
                 const response = await fetch('/umbraco/surface/TrainingMatch/JoinMatch', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                         'RequestVerificationToken': token || ''
                     },
-                    body: JSON.stringify({ matchCode: code })
+                    body: JSON.stringify(requestBody)
                 });
                 const result = await response.json();
 
@@ -423,6 +428,14 @@
                         tab.show();
                     }
                     loadMatch(code);
+                } else if (result.requiresTeam && result.teams) {
+                    // Team match - show team selection modal
+                    // Check if showTeamSelectionModal function exists (from TrainingMatchJoin.cshtml)
+                    if (typeof showTeamSelectionModal === 'function') {
+                        showTeamSelectionModal(code, result.teams, result.isOpen !== false);
+                    } else {
+                        alert('Välj ett lag att gå med i: ' + result.teams.map(t => t.teamName).join(', '));
+                    }
                 } else if (result.needsShooterClass) {
                     // User needs to set their shooter class before joining handicap match
                     pendingJoinMatchCode = code;
@@ -438,6 +451,11 @@
                 hideLoading();
                 showNoMatchState();
             }
+        }
+
+        // Wrapper function called from team selection modal
+        function joinMatchByCodeWithTeam(code, teamId) {
+            joinMatchByCode(code, teamId);
         }
 
         // Show shooter class selection modal
@@ -595,8 +613,24 @@
         // Store pending create match data for after shooter class is set
         let pendingCreateMatchData = null;
 
-        function createMatch(matchName, weaponClass, startDate, isOpen = true, hasHandicap = false) {
+        function createMatch(matchName, weaponClass, startDate, isOpen = true, hasHandicap = false, isTeamMatch = false, maxShootersPerTeam = null, teams = null) {
             const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value;
+
+            const requestBody = {
+                matchName: matchName,
+                weaponClass: weaponClass,
+                startDate: startDate,
+                isOpen: isOpen,
+                hasHandicap: hasHandicap,
+                isTeamMatch: isTeamMatch
+            };
+
+            if (isTeamMatch) {
+                requestBody.maxShootersPerTeam = maxShootersPerTeam;
+                if (teams) {
+                    requestBody.teams = teams;
+                }
+            }
 
             fetch('/umbraco/surface/TrainingMatch/CreateMatch', {
                 method: 'POST',
@@ -604,13 +638,7 @@
                     'Content-Type': 'application/json',
                     'RequestVerificationToken': token || ''
                 },
-                body: JSON.stringify({
-                    matchName: matchName,
-                    weaponClass: weaponClass,
-                    startDate: startDate,
-                    isOpen: isOpen,
-                    hasHandicap: hasHandicap
-                })
+                body: JSON.stringify(requestBody)
             })
             .then(response => response.json())
             .then(result => {
@@ -618,7 +646,7 @@
                     loadMatch(result.matchCode);
                 } else if (result.needsShooterClass) {
                     // User needs to set their shooter class before creating handicap match
-                    pendingCreateMatchData = { matchName, weaponClass, startDate, isOpen, hasHandicap };
+                    pendingCreateMatchData = { matchName, weaponClass, startDate, isOpen, hasHandicap, isTeamMatch, maxShootersPerTeam, teams };
                     showShooterClassModalForCreate();
                 } else {
                     alert(result.message || 'Kunde inte skapa matchen');
@@ -680,7 +708,10 @@
                                 pendingCreateMatchData.weaponClass,
                                 pendingCreateMatchData.startDate,
                                 pendingCreateMatchData.isOpen,
-                                pendingCreateMatchData.hasHandicap
+                                pendingCreateMatchData.hasHandicap,
+                                pendingCreateMatchData.isTeamMatch,
+                                pendingCreateMatchData.maxShootersPerTeam,
+                                pendingCreateMatchData.teams
                             );
                             pendingCreateMatchData = null;
                         }, 500);

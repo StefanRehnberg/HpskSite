@@ -308,13 +308,40 @@ Real-time multiplayer training matches where members compete together with optio
 **Key Features:**
 - Real-time scoreboard with SignalR
 - Handicap system for fair competition across skill levels
+- **Team-based competitions** (added 2026-01-24)
 - Series-by-series score entry
 - Match history and leaderboards
 - Support for guests (non-registered participants)
 
-**Data Storage:** Database tables `TrainingMatches`, `TrainingMatchParticipants`, `TrainingMatchScores`
+**Data Storage:** Database tables `TrainingMatches`, `TrainingMatchParticipants`, `TrainingMatchScores`, `TrainingMatchTeams`
 **Controller:** `TrainingMatchController.cs`
 **UI:** `Views/Partials/TrainingMatchScoreboard.cshtml`
+
+### Team Support (Added 2026-01-24)
+
+Team matches allow shooters to compete in teams with combined scores.
+
+**Database Schema:**
+- `TrainingMatchTeams` - Team definitions (Id, TeamName, ClubId, TeamNumber)
+- `TrainingMatches.IsTeamMatch` - Boolean flag
+- `TrainingMatches.MaxShootersPerTeam` - Team size limit
+- `TrainingMatchParticipants.TeamId` - Team assignment
+
+**Team Types:**
+- **Open Team Match**: Anyone can join; teams created dynamically
+- **Closed Team Match**: Pre-defined teams; requires join approval
+
+**Team Score Calculation:**
+```csharp
+TeamScore = participants
+    .Where(p => p.TeamId == teamId)
+    .Sum(p => p.AdjustedTotalScore);
+```
+
+**SignalR Events:**
+- `TeamScoreUpdated` - Broadcasts when team scores change
+
+**See Also:** [Training Match Team System Documentation](Documentation/TRAINING_MATCH_TEAM_SYSTEM.md) for complete details
 
 ### Handicap Calculation (Updated 2026-01-24)
 

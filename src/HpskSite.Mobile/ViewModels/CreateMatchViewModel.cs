@@ -20,7 +20,51 @@ public partial class CreateMatchViewModel : BaseViewModel
         // Initialize weapon classes
         WeaponClasses = new ObservableCollection<string> { "A", "B", "C", "R", "M", "L" };
         SelectedWeaponClass = "C";
+
+        // Initialize team options
+        MaxShootersOptions = new ObservableCollection<int> { 2, 3, 4, 5, 6, 8, 10 };
+        TeamCountOptions = new ObservableCollection<int> { 2, 3, 4 };
+
+        // Initialize club list with "No club" option
+        AvailableClubs = new ObservableCollection<ClubPickerItem>
+        {
+            new ClubPickerItem { Id = null, Name = "Ingen klubb" }
+        };
+
+        // Load clubs asynchronously
+        _ = LoadClubsAsync();
     }
+
+    private async Task LoadClubsAsync()
+    {
+        try
+        {
+            var result = await _matchService.GetClubsAsync();
+            if (result.Success && result.Data != null)
+            {
+                MainThread.BeginInvokeOnMainThread(() =>
+                {
+                    foreach (var club in result.Data.OrderBy(c => c.Name))
+                    {
+                        AvailableClubs.Add(new ClubPickerItem { Id = club.Id, Name = club.Name });
+                    }
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Failed to load clubs: {ex.Message}");
+        }
+    }
+
+    // Options for pickers
+    public ObservableCollection<int> MaxShootersOptions { get; }
+    public ObservableCollection<int> TeamCountOptions { get; }
+    public ObservableCollection<ClubPickerItem> AvailableClubs { get; }
+
+    // Computed properties for team name visibility
+    public bool ShowTeam3 => TeamCount >= 3;
+    public bool ShowTeam4 => TeamCount >= 4;
 
     [ObservableProperty]
     private string? _matchName;
@@ -42,6 +86,41 @@ public partial class CreateMatchViewModel : BaseViewModel
 
     [ObservableProperty]
     private bool _hasHandicap = true;
+
+    [ObservableProperty]
+    private bool _isTeamMatch;
+
+    [ObservableProperty]
+    private int _maxShootersPerTeam = 4;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowTeam3))]
+    [NotifyPropertyChangedFor(nameof(ShowTeam4))]
+    private int _teamCount = 2;
+
+    [ObservableProperty]
+    private string _team1Name = string.Empty;
+
+    [ObservableProperty]
+    private ClubPickerItem? _team1Club;
+
+    [ObservableProperty]
+    private string _team2Name = string.Empty;
+
+    [ObservableProperty]
+    private ClubPickerItem? _team2Club;
+
+    [ObservableProperty]
+    private string _team3Name = string.Empty;
+
+    [ObservableProperty]
+    private ClubPickerItem? _team3Club;
+
+    [ObservableProperty]
+    private string _team4Name = string.Empty;
+
+    [ObservableProperty]
+    private ClubPickerItem? _team4Club;
 
     [ObservableProperty]
     private string _errorMessage = string.Empty;
@@ -82,8 +161,32 @@ public partial class CreateMatchViewModel : BaseViewModel
                 WeaponClass = SelectedWeaponClass,
                 StartDate = combinedStartDate,
                 IsOpen = IsOpen,
-                HasHandicap = HasHandicap
+                HasHandicap = HasHandicap,
+                IsTeamMatch = IsTeamMatch,
+                MaxShootersPerTeam = IsTeamMatch ? MaxShootersPerTeam : null
             };
+
+            // Add team definitions for closed team matches
+            if (IsTeamMatch && !IsOpen)
+            {
+                request.Teams = new List<TeamDefinition>();
+                if (!string.IsNullOrWhiteSpace(Team1Name))
+                    request.Teams.Add(new TeamDefinition { TeamNumber = 1, TeamName = Team1Name.Trim(), ClubId = Team1Club?.Id });
+                if (!string.IsNullOrWhiteSpace(Team2Name))
+                    request.Teams.Add(new TeamDefinition { TeamNumber = 2, TeamName = Team2Name.Trim(), ClubId = Team2Club?.Id });
+                if (TeamCount >= 3 && !string.IsNullOrWhiteSpace(Team3Name))
+                    request.Teams.Add(new TeamDefinition { TeamNumber = 3, TeamName = Team3Name.Trim(), ClubId = Team3Club?.Id });
+                if (TeamCount >= 4 && !string.IsNullOrWhiteSpace(Team4Name))
+                    request.Teams.Add(new TeamDefinition { TeamNumber = 4, TeamName = Team4Name.Trim(), ClubId = Team4Club?.Id });
+
+                // Validate team names for closed matches
+                if (request.Teams.Count < TeamCount)
+                {
+                    ErrorMessage = "Ange namn för alla lag";
+                    HasError = true;
+                    return;
+                }
+            }
 
             var result = await _matchService.CreateMatchAsync(request);
 
@@ -114,4 +217,15 @@ public partial class CreateMatchViewModel : BaseViewModel
     {
         await Shell.Current.GoToAsync("..");
     }
+}
+
+/// <summary>
+/// Club item for picker display
+/// </summary>
+public class ClubPickerItem
+{
+    public int? Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+
+    public override string ToString() => Name;
 }

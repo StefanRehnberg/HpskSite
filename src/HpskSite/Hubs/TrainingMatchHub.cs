@@ -360,6 +360,18 @@ namespace HpskSite.Hubs
         }
 
         /// <summary>
+        /// Notify all match viewers that team scores were updated
+        /// </summary>
+        public static async Task SendTeamScoreUpdated(
+            this IHubContext<TrainingMatchHub> hubContext,
+            string matchCode,
+            object teamScores)
+        {
+            await hubContext.Clients.Group($"match_{matchCode.ToUpperInvariant()}")
+                .SendAsync("TeamScoreUpdated", teamScores);
+        }
+
+        /// <summary>
         /// Notify all match viewers that a match was deleted
         /// </summary>
         public static async Task SendMatchDeleted(

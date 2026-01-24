@@ -67,12 +67,89 @@
     </div>
 </div>
 
+<!-- Team Selection Modal -->
+<div class="modal fade" id="teamSelectionModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title"><i class="bi bi-people me-2"></i>Välj lag</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted mb-3">Detta är en lagmatch. Välj vilket lag du vill gå med i.</p>
+
+                <div id="teamSelectionList" class="list-group">
+                    <!-- Teams will be populated dynamically -->
+                </div>
+
+                <!-- Create new team option (for open matches) -->
+                <div id="createNewTeamOption" class="mt-3" style="display: none;">
+                    <hr>
+                    <button type="button" class="btn btn-outline-primary w-100" onclick="showCreateTeamForm()">
+                        <i class="bi bi-plus-circle me-1"></i>Skapa nytt lag
+                    </button>
+
+                    <div id="createTeamForm" style="display: none;" class="mt-3">
+                        <div class="row g-2 mb-2">
+                            <div class="col-7">
+                                <input type="text" class="form-control" id="newTeamName" placeholder="Lagnamn" maxlength="100">
+                            </div>
+                            <div class="col-5">
+                                <select class="form-select" id="newTeamClub">
+                                    <option value="">Ingen klubb</option>
+                                    <!-- Options populated dynamically -->
+                                </select>
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-primary w-100" onclick="createTeamAndJoin()">
+                            <i class="bi bi-check-lg me-1"></i>Skapa lag och gå med
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- html5-qrcode library -->
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 
 <script>
 let qrScannerModal = null;
 let html5QrCode = null;
+let availableClubs = [];
+
+// Load clubs for team creation
+async function loadClubsForJoin() {
+    try {
+        const response = await fetch('/umbraco/surface/ClubAdmin/GetClubsPublic');
+        const result = await response.json();
+        if (result.success && result.clubs) {
+            availableClubs = result.clubs.sort((a, b) => a.name.localeCompare(b.name, 'sv'));
+            populateClubDropdown();
+        }
+    } catch (error) {
+        console.error('Failed to load clubs:', error);
+    }
+}
+
+function populateClubDropdown() {
+    const select = document.getElementById('newTeamClub');
+    if (!select) return;
+
+    // Clear existing options except first
+    select.innerHTML = '<option value="">Ingen klubb</option>';
+
+    for (const club of availableClubs) {
+        const option = document.createElement('option');
+        option.value = club.id;
+        option.textContent = club.name;
+        select.appendChild(option);
+    }
+}
+
+// Load clubs on page load
+document.addEventListener('DOMContentLoaded', loadClubsForJoin);
 
 function validateJoinButton() {
     const matchCode = document.getElementById('joinMatchCode').value.trim();
@@ -197,13 +274,110 @@ function extractMatchCodeFromUrl(url) {
         return null;
     }
 }
+
+// Team selection modal handling
+let teamSelectionModal = null;
+let pendingMatchCode = null;
+let pendingTeams = [];
+
+function showTeamSelectionModal(matchCode, teams, isOpen) {
+    pendingMatchCode = matchCode;
+    pendingTeams = teams;
+
+    if (!teamSelectionModal) {
+        teamSelectionModal = new bootstrap.Modal(document.getElementById('teamSelectionModal'));
+    }
+
+    // Populate team list
+    const teamList = document.getElementById('teamSelectionList');
+    teamList.innerHTML = '';
+
+    teams.forEach(team => {
+        const isFull = team.maxShooters && team.memberCount >= team.maxShooters;
+        const teamItem = document.createElement('button');
+        teamItem.type = 'button';
+        teamItem.className = `list-group-item list-group-item-action d-flex justify-content-between align-items-center ${isFull ? 'disabled' : ''}`;
+        teamItem.disabled = isFull;
+        teamItem.onclick = () => joinWithTeam(team.id);
+
+        teamItem.innerHTML = `
+            <div>
+                <strong>${team.teamName}</strong>
+                ${team.clubName ? `<small class="text-muted d-block">${team.clubName}</small>` : ''}
+            </div>
+            <span class="badge ${isFull ? 'bg-secondary' : 'bg-primary'}">${team.memberCount}${team.maxShooters ? '/' + team.maxShooters : ''}</span>
+        `;
+
+        teamList.appendChild(teamItem);
+    });
+
+    // Show/hide create team option for open matches
+    document.getElementById('createNewTeamOption').style.display = isOpen ? 'block' : 'none';
+    document.getElementById('createTeamForm').style.display = 'none';
+
+    teamSelectionModal.show();
+}
+
+function showCreateTeamForm() {
+    document.getElementById('createTeamForm').style.display = 'block';
+    document.getElementById('newTeamName').focus();
+}
+
+async function joinWithTeam(teamId) {
+    if (teamSelectionModal) {
+        teamSelectionModal.hide();
+    }
+
+    // Call joinMatchByCode with teamId
+    joinMatchByCodeWithTeam(pendingMatchCode, teamId);
+}
+
+async function createTeamAndJoin() {
+    const teamName = document.getElementById('newTeamName').value.trim();
+    if (!teamName) {
+        alert('Ange ett lagnamn');
+        return;
+    }
+
+    const clubSelect = document.getElementById('newTeamClub');
+    const clubIdStr = clubSelect?.value;
+    const clubId = clubIdStr ? parseInt(clubIdStr, 10) : null;
+
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value;
+
+    try {
+        const response = await fetch('/umbraco/surface/TrainingMatch/CreateTeam', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': token || ''
+            },
+            body: JSON.stringify({
+                matchCode: pendingMatchCode,
+                teamName: teamName,
+                clubId: isNaN(clubId) ? null : clubId
+            })
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            // Now join with the new team
+            joinWithTeam(result.teamId);
+        } else {
+            alert(result.message || 'Kunde inte skapa laget');
+        }
+    } catch (error) {
+        console.error('Error creating team:', error);
+        alert('Något gick fel vid skapande av laget');
+    }
+}
 </script>
 
 <style>
 /* Lighter placeholder text */
 .light-placeholder::placeholder {
     opacity: 0.3;
-    color: #6c757d;
+    color: var(--bs-secondary-color);
 }
 
 #qrReader video {

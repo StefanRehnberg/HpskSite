@@ -128,6 +128,80 @@ namespace HpskSite.Services
 
             return clubInfo;
         }
+
+        /// <summary>
+        /// Gets all clubs.
+        /// PERFORMANCE: Results are cached for 5 minutes to avoid repeated database lookups.
+        /// </summary>
+        /// <returns>List of all clubs</returns>
+        public List<ClubInfo> GetAllClubs()
+        {
+            // Check cache first
+            var cacheKey = "all_clubs";
+            if (_cache.TryGetValue(cacheKey, out List<ClubInfo>? cachedClubs) && cachedClubs != null)
+            {
+                return cachedClubs;
+            }
+
+            var clubs = new List<ClubInfo>();
+
+            // Try published content first
+            if (_umbracoContextAccessor.TryGetUmbracoContext(out var umbracoContext))
+            {
+                var rootContent = umbracoContext.Content?.GetAtRoot().FirstOrDefault();
+                if (rootContent != null)
+                {
+                    var clubsHub = rootContent.Children?.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+                    if (clubsHub != null)
+                    {
+                        foreach (var clubNode in clubsHub.Children?.Where(c => c.ContentType.Alias == "club" && c.IsPublished()) ?? Enumerable.Empty<Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent>())
+                        {
+                            clubs.Add(new ClubInfo
+                            {
+                                Id = clubNode.Id,
+                                Name = clubNode.Value<string>("clubName") ?? clubNode.Name ?? "",
+                                Description = clubNode.Value<string>("description") ?? "",
+                                City = clubNode.Value<string>("city") ?? "",
+                                ContactEmail = clubNode.Value<string>("contactEmail") ?? "",
+                                IsActive = true
+                            });
+                        }
+                    }
+                }
+            }
+
+            // Fallback to IContentService if no results from published content
+            if (clubs.Count == 0)
+            {
+                var rootContent = _contentService.GetRootContent().FirstOrDefault();
+                if (rootContent != null)
+                {
+                    var children = _contentService.GetPagedChildren(rootContent.Id, 0, int.MaxValue, out _);
+                    var clubsHub = children.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+                    if (clubsHub != null)
+                    {
+                        var clubNodes = _contentService.GetPagedChildren(clubsHub.Id, 0, int.MaxValue, out _);
+                        foreach (var club in clubNodes.Where(c => c.ContentType.Alias == "club" && c.Published))
+                        {
+                            clubs.Add(new ClubInfo
+                            {
+                                Id = club.Id,
+                                Name = club.GetValue<string>("clubName") ?? club.Name ?? "",
+                                Description = club.GetValue<string>("description") ?? "",
+                                City = club.GetValue<string>("city") ?? "",
+                                ContactEmail = club.GetValue<string>("contactEmail") ?? "",
+                                IsActive = true
+                            });
+                        }
+                    }
+                }
+            }
+
+            // Store in cache
+            _cache.Set(cacheKey, clubs, _cacheExpiration);
+
+            return clubs;
+        }
     }
 
     /// <summary>
@@ -140,5 +214,6 @@ namespace HpskSite.Services
         public string Description { get; set; } = string.Empty;
         public string City { get; set; } = string.Empty;
         public string ContactEmail { get; set; } = string.Empty;
+        public bool IsActive { get; set; } = true;
     }
 }

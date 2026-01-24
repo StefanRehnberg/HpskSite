@@ -154,6 +154,14 @@
                     <span class="info-value">@Model.MatchCode</span>
                 </div>
 
+                @if (Model.IsTeamMatch && Model.Teams.Any())
+                {
+                    <div class="info-row">
+                        <span class="info-label">Lagmatch</span>
+                        <span class="info-value">Ja</span>
+                    </div>
+                }
+
                 <div class="warning-box mt-3">
                     <i class="bi bi-info-circle me-2"></i>
                     Genom att bekräfta godkänner du att gå med i matchen som <strong>@Model.MemberName</strong>.
@@ -162,6 +170,26 @@
 
                 <form method="post" action="/match/@Model.MatchCode/member/confirm">
                     <input type="hidden" name="claimToken" value="@Model.ClaimToken" />
+
+                    @if (Model.IsTeamMatch && Model.Teams.Any())
+                    {
+                        <div class="mb-3">
+                            <label class="info-label mb-2 d-block">Välj lag</label>
+                            <select name="teamId" class="form-select" required style="border-radius: 8px; padding: 0.75rem;">
+                                <option value="">-- Välj lag --</option>
+                                @foreach (var team in Model.Teams)
+                                {
+                                    var memberText = Model.MaxShootersPerTeam.HasValue
+                                        ? $"({team.MemberCount}/{Model.MaxShootersPerTeam})"
+                                        : $"({team.MemberCount})";
+                                    <option value="@team.Id" @(team.IsFull ? "disabled" : "")>
+                                        @team.TeamName @memberText @(team.IsFull ? "- Fullt" : "") @(team.ClubName != null ? $"- {team.ClubName}" : "")
+                                    </option>
+                                }
+                            </select>
+                        </div>
+                    }
+
                     <button type="submit" class="btn btn-confirm">
                         <i class="bi bi-check-lg me-2"></i>Bekräfta och gå med
                     </button>

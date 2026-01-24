@@ -96,6 +96,24 @@ namespace HpskSite.Shared.Models
         public int? MaxSeriesCount { get; set; }
 
         /// <summary>
+        /// Whether this is a team match
+        /// </summary>
+        [JsonPropertyName("isTeamMatch")]
+        public bool IsTeamMatch { get; set; }
+
+        /// <summary>
+        /// Maximum number of shooters per team (required for team matches)
+        /// </summary>
+        [JsonPropertyName("maxShootersPerTeam")]
+        public int? MaxShootersPerTeam { get; set; }
+
+        /// <summary>
+        /// List of teams in this match (only populated for team matches)
+        /// </summary>
+        [JsonPropertyName("teams")]
+        public List<TrainingMatchTeam> Teams { get; set; } = new List<TrainingMatchTeam>();
+
+        /// <summary>
         /// List of participants in this match
         /// </summary>
         [JsonPropertyName("participants")]

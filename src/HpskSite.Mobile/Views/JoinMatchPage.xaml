@@ -3,6 +3,7 @@
              xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:viewmodels="clr-namespace:HpskSite.Mobile.ViewModels"
+             xmlns:models="clr-namespace:HpskSite.Shared.Models;assembly=HpskSite.Shared"
              Title="{Binding Title}"
              x:DataType="viewmodels:JoinMatchViewModel"
              BackgroundColor="{StaticResource OffBlack}">
@@ -14,14 +15,21 @@
             <Border BackgroundColor="{StaticResource Primary}"
                     HeightRequest="80" HorizontalOptions="Center" Stroke="Transparent"
                     StrokeShape="RoundRectangle 40" WidthRequest="80">
-                <Label FontSize="40" HorizontalOptions="Center" Text="🔗"
-                       VerticalOptions="Center" />
+                <Grid>
+                    <Label FontSize="40" HorizontalOptions="Center" Text="🔗"
+                           VerticalOptions="Center"
+                           IsVisible="{Binding ShowTeamSelection, Converter={StaticResource InverseBoolConverter}}" />
+                    <Label FontSize="40" HorizontalOptions="Center" Text="👥"
+                           VerticalOptions="Center"
+                           IsVisible="{Binding ShowTeamSelection}" />
+                </Grid>
             </Border>
 
-            <!--  Join Match Card  -->
+            <!--  Join Match Card (hidden when team selection is shown)  -->
             <Border Padding="0"
                     BackgroundColor="{StaticResource CardBackgroundDark}"
-                    Stroke="Transparent" StrokeShape="RoundRectangle 12">
+                    Stroke="Transparent" StrokeShape="RoundRectangle 12"
+                    IsVisible="{Binding ShowTeamSelection, Converter={StaticResource InverseBoolConverter}}">
                 <Border.Shadow>
                     <Shadow Brush="Black" Opacity="0.15" Radius="12"
                             Offset="0,4" />
@@ -49,14 +57,14 @@
                     <VerticalStackLayout Padding="20" Spacing="16">
 
                         <!--  Error Message  -->
-                        <Border Padding="12" BackgroundColor="#FEE2E2"
+                        <Border Padding="12" BackgroundColor="{StaticResource DangerBackgroundDark}"
                                 IsVisible="{Binding HasError}"
-                                Stroke="{StaticResource Danger}"
+                                Stroke="{StaticResource DangerDark}"
                                 StrokeShape="RoundRectangle 8">
                             <HorizontalStackLayout Spacing="8">
                                 <Label FontSize="16" Text="⚠️" VerticalOptions="Center" />
                                 <Label Text="{Binding ErrorMessage}"
-                                       TextColor="{StaticResource Danger}"
+                                       TextColor="{StaticResource DangerDark}"
                                        VerticalOptions="Center" />
                             </HorizontalStackLayout>
                         </Border>
@@ -121,6 +129,183 @@
                                     CornerRadius="8" FontAttributes="Bold" HeightRequest="50"
                                     IsEnabled="{Binding IsNotBusy}"
                                     Text="➡️ Ga med" TextColor="White" />
+                        </Grid>
+
+                        <!--  Loading Indicator  -->
+                        <ActivityIndicator HorizontalOptions="Center"
+                                           IsRunning="{Binding IsBusy}"
+                                           IsVisible="{Binding IsBusy}"
+                                           Color="{StaticResource Primary}" />
+
+                    </VerticalStackLayout>
+                </VerticalStackLayout>
+            </Border>
+
+            <!--  Team Selection Card (shown when team selection is required)  -->
+            <Border Padding="0"
+                    BackgroundColor="{StaticResource CardBackgroundDark}"
+                    Stroke="Transparent" StrokeShape="RoundRectangle 12"
+                    IsVisible="{Binding ShowTeamSelection}">
+                <Border.Shadow>
+                    <Shadow Brush="Black" Opacity="0.15" Radius="12"
+                            Offset="0,4" />
+                </Border.Shadow>
+
+                <VerticalStackLayout Spacing="0">
+
+                    <!--  Card Header  -->
+                    <Border Padding="16"
+                            BackgroundColor="{StaticResource Gray600}"
+                            StrokeThickness="0">
+                        <VerticalStackLayout HorizontalOptions="Center" Spacing="4">
+                            <Label FontAttributes="Bold" FontSize="20" HorizontalOptions="Center"
+                                   Text="Välj lag"
+                                   TextColor="{StaticResource White}" />
+                            <Label FontSize="12" HorizontalOptions="Center"
+                                   Text="{Binding MatchCode, StringFormat='Match: {0}'}"
+                                   TextColor="{StaticResource Gray400}" />
+                        </VerticalStackLayout>
+                    </Border>
+
+                    <!--  Divider  -->
+                    <BoxView HeightRequest="1" Color="{StaticResource Gray600}" />
+
+                    <!--  Card Body  -->
+                    <VerticalStackLayout Padding="20" Spacing="16">
+
+                        <!--  Error Message  -->
+                        <Border Padding="12" BackgroundColor="{StaticResource DangerBackgroundDark}"
+                                IsVisible="{Binding HasError}"
+                                Stroke="{StaticResource DangerDark}"
+                                StrokeShape="RoundRectangle 8">
+                            <HorizontalStackLayout Spacing="8">
+                                <Label FontSize="16" Text="⚠️" VerticalOptions="Center" />
+                                <Label Text="{Binding ErrorMessage}"
+                                       TextColor="{StaticResource DangerDark}"
+                                       VerticalOptions="Center" />
+                            </HorizontalStackLayout>
+                        </Border>
+
+                        <!--  Available Teams List  -->
+                        <VerticalStackLayout Spacing="8"
+                                             IsVisible="{Binding IsCreatingNewTeam, Converter={StaticResource InverseBoolConverter}}">
+                            <Label Text="Tillgängliga lag"
+                                   FontSize="14"
+                                   FontAttributes="Bold"
+                                   TextColor="{StaticResource Gray200}" />
+
+                            <CollectionView ItemsSource="{Binding AvailableTeams}"
+                                            SelectionMode="Single"
+                                            SelectedItem="{Binding SelectedTeam}"
+                                            HeightRequest="200">
+                                <CollectionView.ItemTemplate>
+                                    <DataTemplate x:DataType="models:TrainingMatchTeam">
+                                        <Border Padding="12"
+                                                Margin="0,4"
+                                                BackgroundColor="{StaticResource Gray600}"
+                                                Stroke="{StaticResource Gray500}"
+                                                StrokeShape="RoundRectangle 8">
+                                            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+                                                <Label Grid.Column="0"
+                                                       Text="👥"
+                                                       FontSize="24"
+                                                       VerticalOptions="Center" />
+                                                <VerticalStackLayout Grid.Column="1" VerticalOptions="Center">
+                                                    <Label Text="{Binding TeamName}"
+                                                           FontSize="16"
+                                                           FontAttributes="Bold"
+                                                           TextColor="{StaticResource White}" />
+                                                    <Label Text="{Binding ClubName}"
+                                                           FontSize="12"
+                                                           TextColor="{StaticResource Gray400}"
+                                                           IsVisible="{Binding ClubName, Converter={StaticResource StringNotEmptyConverter}}" />
+                                                </VerticalStackLayout>
+                                                <Label Grid.Column="2"
+                                                       Text="{Binding ParticipantCount, StringFormat='{0} skyttar'}"
+                                                       FontSize="12"
+                                                       TextColor="{StaticResource Gray400}"
+                                                       VerticalOptions="Center" />
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </CollectionView.ItemTemplate>
+                                <CollectionView.EmptyView>
+                                    <Label Text="Inga lag skapade ännu"
+                                           FontSize="14"
+                                           TextColor="{StaticResource Gray400}"
+                                           HorizontalOptions="Center"
+                                           VerticalOptions="Center" />
+                                </CollectionView.EmptyView>
+                            </CollectionView>
+                        </VerticalStackLayout>
+
+                        <!--  Create New Team Section (for open matches)  -->
+                        <VerticalStackLayout Spacing="8" IsVisible="{Binding IsCreatingNewTeam}">
+                            <Label Text="Skapa nytt lag"
+                                   FontSize="14"
+                                   FontAttributes="Bold"
+                                   TextColor="{StaticResource Gray200}" />
+                            <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                                <Border Grid.Column="0"
+                                        StrokeShape="RoundRectangle 8"
+                                        Stroke="{StaticResource Gray500}"
+                                        BackgroundColor="{StaticResource Gray600}"
+                                        Padding="12,0"
+                                        HeightRequest="48">
+                                    <Entry Text="{Binding NewTeamName}"
+                                           Placeholder="Lagnamn"
+                                           VerticalOptions="Center" />
+                                </Border>
+                                <Border Grid.Column="1"
+                                        StrokeShape="RoundRectangle 8"
+                                        Stroke="{StaticResource Gray500}"
+                                        BackgroundColor="{StaticResource Gray600}"
+                                        Padding="12,0"
+                                        HeightRequest="48">
+                                    <Picker Title="Klubb"
+                                            ItemsSource="{Binding AvailableClubs}"
+                                            SelectedItem="{Binding SelectedNewTeamClub}"
+                                            VerticalOptions="Center" />
+                                </Border>
+                            </Grid>
+                        </VerticalStackLayout>
+
+                        <!--  Toggle Create New Team Button (only for open matches)  -->
+                        <Grid IsVisible="{Binding IsOpenTeamMatch}">
+                            <Button BackgroundColor="{StaticResource Gray600}"
+                                    Command="{Binding ToggleCreateNewTeamCommand}"
+                                    CornerRadius="8"
+                                    HeightRequest="44"
+                                    Text="+ Skapa nytt lag"
+                                    TextColor="{StaticResource Primary}"
+                                    IsVisible="{Binding IsCreatingNewTeam, Converter={StaticResource InverseBoolConverter}}" />
+                            <Button BackgroundColor="{StaticResource Gray600}"
+                                    Command="{Binding ToggleCreateNewTeamCommand}"
+                                    CornerRadius="8"
+                                    HeightRequest="44"
+                                    Text="Välj befintligt lag"
+                                    TextColor="{StaticResource Primary}"
+                                    IsVisible="{Binding IsCreatingNewTeam}" />
+                        </Grid>
+
+                        <!--  Divider  -->
+                        <BoxView Margin="0,8" HeightRequest="1"
+                                 Color="{StaticResource Gray600}" />
+
+                        <!--  Action Buttons  -->
+                        <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                            <Button Grid.Column="0"
+                                    BackgroundColor="{StaticResource Gray600}"
+                                    Command="{Binding CancelTeamSelectionCommand}"
+                                    CornerRadius="8" FontAttributes="Bold" HeightRequest="50"
+                                    Text="✕ Tillbaka"
+                                    TextColor="{StaticResource White}" />
+                            <Button Grid.Column="1"
+                                    BackgroundColor="{StaticResource Primary}"
+                                    Command="{Binding JoinWithTeamCommand}"
+                                    CornerRadius="8" FontAttributes="Bold" HeightRequest="50"
+                                    IsEnabled="{Binding IsNotBusy}"
+                                    Text="✓ Gå med" TextColor="White" />
                         </Grid>
 
                         <!--  Loading Indicator  -->

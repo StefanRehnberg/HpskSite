@@ -72,6 +72,18 @@ namespace HpskSite.Shared.Models
         public int DisplayOrder { get; set; }
 
         /// <summary>
+        /// Team ID (for team matches)
+        /// </summary>
+        [JsonPropertyName("teamId")]
+        public int? TeamId { get; set; }
+
+        /// <summary>
+        /// Team name (for display, populated from TrainingMatchTeams)
+        /// </summary>
+        [JsonPropertyName("teamName")]
+        public string? TeamName { get; set; }
+
+        /// <summary>
         /// Frozen handicap per series (set when joining match)
         /// </summary>
         [JsonPropertyName("handicapPerSeries")]

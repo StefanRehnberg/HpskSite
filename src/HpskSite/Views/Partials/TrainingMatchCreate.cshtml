@@ -88,6 +88,55 @@
                         </div>
                     </div>
 
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="createIsTeamMatch" onchange="toggleTeamSettings()">
+                            <label class="form-check-label" for="createIsTeamMatch">
+                                <i class="bi bi-people me-1"></i>Lagmatch
+                            </label>
+                            <div class="form-text">
+                                Tävla i lag. Lagets totalpoäng beräknas som summan av alla lagmedlemmars justerade poäng.
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Team settings (shown when Lagmatch is checked) -->
+                    <div id="teamSettings" style="display: none;">
+                        <div class="card bg-body-tertiary mb-3">
+                            <div class="card-body">
+                                <h6 class="card-title"><i class="bi bi-gear me-1"></i>Laginställningar</h6>
+
+                                <div class="mb-3">
+                                    <label for="maxShootersPerTeam" class="form-label">Antal skyttar per lag <span class="text-danger">*</span></label>
+                                    <input type="number" class="form-control" id="maxShootersPerTeam" min="1" max="20" value="4">
+                                    <div class="form-text">Begränsa antal deltagare i varje lag.</div>
+                                </div>
+
+                                <!-- Team definitions for closed matches -->
+                                <div id="closedTeamSettings">
+                                    <label class="form-label">Antal lag</label>
+                                    <select class="form-select mb-3" id="teamCount" onchange="updateTeamInputs()">
+                                        <option value="2">2 lag</option>
+                                        <option value="3">3 lag</option>
+                                        <option value="4">4 lag</option>
+                                    </select>
+
+                                    <div id="teamDefinitions">
+                                        <!-- Team inputs will be generated dynamically -->
+                                    </div>
+                                </div>
+
+                                <!-- Info for open matches -->
+                                <div id="openTeamInfo" style="display: none;">
+                                    <div class="alert alert-info mb-0">
+                                        <i class="bi bi-info-circle me-1"></i>
+                                        För öppna matcher kan deltagare skapa egna lag när de går med.
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <button type="submit" class="btn btn-success w-100">
                         <i class="bi bi-play-fill me-1"></i> Starta match
                     </button>
@@ -167,8 +216,11 @@
 </div>
 
 <script>
+// Store loaded clubs for team affiliation
+let availableClubs = [];
+
 // Initialize Flatpickr for start date
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', async function() {
     flatpickr('#createStartDate', {
         locale: 'sv',
         enableTime: true,
@@ -179,7 +231,105 @@ document.addEventListener('DOMContentLoaded', function() {
         defaultMinute: 0,
         placeholder: 'Välj datum och tid...'
     });
+
+    // Load clubs for team affiliation
+    await loadClubs();
+
+    // Initialize team inputs
+    updateTeamInputs();
+
+    // Listen for isOpen changes to toggle team settings
+    document.getElementById('createIsOpen').addEventListener('change', updateTeamVisibility);
 });
+
+async function loadClubs() {
+    try {
+        const response = await fetch('/umbraco/surface/ClubAdmin/GetClubsPublic');
+        const result = await response.json();
+        if (result.success && result.clubs) {
+            availableClubs = result.clubs.sort((a, b) => a.name.localeCompare(b.name, 'sv'));
+        }
+    } catch (error) {
+        console.error('Failed to load clubs:', error);
+    }
+}
+
+function toggleTeamSettings() {
+    const isTeamMatch = document.getElementById('createIsTeamMatch').checked;
+    document.getElementById('teamSettings').style.display = isTeamMatch ? 'block' : 'none';
+    if (isTeamMatch) {
+        updateTeamVisibility();
+    }
+}
+
+function updateTeamVisibility() {
+    const isOpen = document.getElementById('createIsOpen').checked;
+    document.getElementById('closedTeamSettings').style.display = isOpen ? 'none' : 'block';
+    document.getElementById('openTeamInfo').style.display = isOpen ? 'block' : 'none';
+}
+
+function updateTeamInputs() {
+    const teamCount = parseInt(document.getElementById('teamCount').value);
+    const container = document.getElementById('teamDefinitions');
+    container.innerHTML = '';
+
+    // Build club options HTML
+    let clubOptionsHtml = '<option value="">Ingen klubb</option>';
+    for (const club of availableClubs) {
+        clubOptionsHtml += `<option value="${club.id}">${club.name}</option>`;
+    }
+
+    for (let i = 1; i <= teamCount; i++) {
+        const teamDiv = document.createElement('div');
+        teamDiv.className = 'mb-3';
+        teamDiv.innerHTML = `
+            <label class="form-label small text-body-secondary mb-1">Lag ${i}</label>
+            <div class="row g-2">
+                <div class="col-7">
+                    <input type="text" class="form-control team-name-input" id="teamName${i}"
+                           placeholder="Lagnamn" required>
+                </div>
+                <div class="col-5">
+                    <select class="form-select team-club-select" id="teamClub${i}">
+                        ${clubOptionsHtml}
+                    </select>
+                </div>
+            </div>
+        `;
+        container.appendChild(teamDiv);
+    }
+}
+
+function getTeamDefinitions() {
+    const isOpen = document.getElementById('createIsOpen').checked;
+    if (isOpen) {
+        return null; // No pre-defined teams for open matches
+    }
+
+    const teamCount = parseInt(document.getElementById('teamCount').value);
+    const teams = [];
+
+    for (let i = 1; i <= teamCount; i++) {
+        const nameInput = document.getElementById(`teamName${i}`);
+        const clubSelect = document.getElementById(`teamClub${i}`);
+        const teamName = nameInput?.value?.trim();
+        if (!teamName) {
+            return null; // Invalid - all teams need names
+        }
+
+        // Get club ID (parse as int, or null if empty/invalid)
+        const clubIdStr = clubSelect?.value;
+        const clubId = clubIdStr ? parseInt(clubIdStr, 10) : null;
+
+        teams.push({
+            teamNumber: i,
+            teamName: teamName,
+            clubId: isNaN(clubId) ? null : clubId
+        });
+    }
+
+    return teams;
+}
 
 function handleCreateMatch(e) {
     e.preventDefault();
@@ -189,6 +339,7 @@ function handleCreateMatch(e) {
     const startDateStr = document.getElementById('createStartDate').value.trim();
     const isOpen = document.getElementById('createIsOpen').checked;
     const hasHandicap = document.getElementById('createHasHandicap').checked;
+    const isTeamMatch = document.getElementById('createIsTeamMatch').checked;
 
     // Convert date string to ISO format for .NET
     let startDate = null;
@@ -200,6 +351,27 @@ function handleCreateMatch(e) {
         }
     }
 
-    createMatch(matchName || null, weaponClass, startDate, isOpen, hasHandicap);
+    // Validate team match settings
+    let maxShootersPerTeam = null;
+    let teams = null;
+
+    if (isTeamMatch) {
+        maxShootersPerTeam = parseInt(document.getElementById('maxShootersPerTeam').value);
+        if (!maxShootersPerTeam || maxShootersPerTeam <= 0) {
+            alert('Ange max antal skyttar per lag');
+            return;
+        }
+
+        // Get team definitions for closed matches
+        if (!isOpen) {
+            teams = getTeamDefinitions();
+            if (!teams) {
+                alert('Ange namn för alla lag');
+                return;
+            }
+        }
+    }
+
+    createMatch(matchName || null, weaponClass, startDate, isOpen, hasHandicap, isTeamMatch, maxShootersPerTeam, teams);
 }
 </script>

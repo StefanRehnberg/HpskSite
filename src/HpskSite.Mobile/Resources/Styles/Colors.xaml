@@ -18,12 +18,16 @@
     <!-- Semantic Colors -->
     <Color x:Key="Success">#198754</Color>
     <Color x:Key="SuccessDark">#75b798</Color>
+    <Color x:Key="SuccessBackgroundDark">#1a3d2a</Color>
     <Color x:Key="Warning">#fd7e14</Color>
     <Color x:Key="WarningDark">#ffa64d</Color>
+    <Color x:Key="WarningBackgroundDark">#4d3319</Color>
     <Color x:Key="Danger">#dc3545</Color>
     <Color x:Key="DangerDark">#e35d6a</Color>
+    <Color x:Key="DangerBackgroundDark">#4d1f24</Color>
     <Color x:Key="Info">#0dcaf0</Color>
     <Color x:Key="InfoDark">#6edff6</Color>
+    <Color x:Key="InfoBackgroundDark">#1a3d4d</Color>
 
     <!-- Text Colors -->
     <Color x:Key="TextDark">#212529</Color>

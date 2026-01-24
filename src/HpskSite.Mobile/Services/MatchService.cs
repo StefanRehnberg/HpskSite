@@ -37,9 +37,10 @@ public class MatchService : IMatchService
         return await _apiService.GetAsync<List<TrainingMatch>>("api/match/ongoing");
     }
 
-    public async Task<ApiResponse<TrainingMatch>> JoinMatchAsync(string matchCode)
+    public async Task<ApiResponse<TrainingMatch>> JoinMatchAsync(string matchCode, int? teamId = null)
     {
-        return await _apiService.PostAsync<TrainingMatch>($"api/match/{matchCode}/join");
+        var request = teamId.HasValue ? new JoinMatchRequest { TeamId = teamId } : null;
+        return await _apiService.PostAsync<TrainingMatch>($"api/match/{matchCode}/join", request);
     }
 
     public async Task<ApiResponse> LeaveMatchAsync(string matchCode)
@@ -163,6 +164,25 @@ public class MatchService : IMatchService
     {
         return await _apiService.PostAsync<CreateMemberClaimResponse>($"api/match/{matchCode}/member-claim", new { MemberId = memberId, HandicapClass = handicapClass });
     }
+
+    public async Task<ApiResponse<TrainingMatchTeam>> CreateTeamAsync(string matchCode, string teamName, int? clubId = null)
+    {
+        return await _apiService.PostAsync<TrainingMatchTeam>($"api/match/{matchCode}/team", new { TeamName = teamName, ClubId = clubId });
+    }
+
+    public async Task<ApiResponse<List<ClubListItem>>> GetClubsAsync()
+    {
+        return await _apiService.GetAsync<List<ClubListItem>>("api/match/clubs");
+    }
+}
+
+/// <summary>
+/// Simple club item for pickers (team affiliation)
+/// </summary>
+public class ClubListItem
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = string.Empty;
 }
 
 /// <summary>
@@ -180,6 +200,21 @@ public class CreateMatchRequest
     public DateTime? StartDate { get; set; }
     public bool IsOpen { get; set; } = true;
     public bool HasHandicap { get; set; }
+    public bool IsTeamMatch { get; set; }
+    public int? MaxShootersPerTeam { get; set; }
+    public List<TeamDefinition>? Teams { get; set; }
+}
+
+public class TeamDefinition
+{
+    public int TeamNumber { get; set; }
+    public string TeamName { get; set; } = string.Empty;
+    public int? ClubId { get; set; }
+}
+
+public class JoinMatchRequest
+{
+    public int? TeamId { get; set; }
 }
 
 public class SaveScoreRequest
@@ -197,7 +232,7 @@ public interface IMatchService
     Task<ApiResponse<TrainingMatch>> GetMatchAsync(string matchCode);
     Task<ApiResponse<List<TrainingMatch>>> GetActiveMatchesAsync();
     Task<ApiResponse<List<TrainingMatch>>> GetMyMatchesAsync();
-    Task<ApiResponse<TrainingMatch>> JoinMatchAsync(string matchCode);
+    Task<ApiResponse<TrainingMatch>> JoinMatchAsync(string matchCode, int? teamId = null);
     Task<ApiResponse> LeaveMatchAsync(string matchCode);
     Task<ApiResponse> CompleteMatchAsync(string matchCode);
     Task<ApiResponse> UpdateMatchSettingsAsync(string matchCode, int? maxSeriesCount);
@@ -224,6 +259,8 @@ public interface IMatchService
     Task<ApiResponse<RegenerateGuestQrResponse>> RegenerateGuestQrAsync(string matchCode, int guestId);
     Task<ApiResponse<List<MemberSearchResult>>> SearchMembersAsync(string searchTerm);
     Task<ApiResponse<CreateMemberClaimResponse>> CreateMemberClaimAsync(string matchCode, int memberId, string? handicapClass = null);
+    Task<ApiResponse<TrainingMatchTeam>> CreateTeamAsync(string matchCode, string teamName, int? clubId = null);
+    Task<ApiResponse<List<ClubListItem>>> GetClubsAsync();
 }
 
 /// <summary>
@@ -298,6 +335,7 @@ public class AddGuestRequest
     public string? HandicapClass { get; set; }
     public string? Email { get; set; }
     public int? ClubId { get; set; }
+    public int? TeamId { get; set; }
 }
 
 /// <summary>

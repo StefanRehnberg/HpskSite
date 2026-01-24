@@ -1,186 +1,154 @@
 <?xml version="1.0" encoding="utf-8" ?>
-<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+<ContentPage x:Class="HpskSite.Mobile.Views.CreateMatchPage"
+             xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:sys="clr-namespace:System;assembly=mscorlib"
              xmlns:viewmodels="clr-namespace:HpskSite.Mobile.ViewModels"
-             x:Class="HpskSite.Mobile.Views.CreateMatchPage"
-             x:DataType="viewmodels:CreateMatchViewModel"
              Title="{Binding Title}"
+             x:DataType="viewmodels:CreateMatchViewModel"
              BackgroundColor="{StaticResource OffBlack}">
 
     <ScrollView>
         <VerticalStackLayout Padding="16" Spacing="16">
 
-            <!-- Main Form Card -->
-            <Border StrokeShape="RoundRectangle 12"
-                    Stroke="Transparent"
+            <!--  Main Form Card  -->
+            <Border Padding="0"
                     BackgroundColor="{StaticResource CardBackgroundDark}"
-                    Padding="0">
+                    Stroke="Transparent" StrokeShape="RoundRectangle 12">
                 <Border.Shadow>
-                    <Shadow Brush="Black" Offset="0,2" Radius="8" Opacity="0.1"/>
+                    <Shadow Brush="Black" Opacity="0.1" Radius="8"
+                            Offset="0,2" />
                 </Border.Shadow>
 
                 <VerticalStackLayout Spacing="0">
 
-                    <!-- Card Header -->
-                    <Border BackgroundColor="{StaticResource Gray600}"
-                            StrokeThickness="0"
-                            Padding="16">
-                        <HorizontalStackLayout Spacing="8" HorizontalOptions="Center">
-                            <Label Text="➕"
-                                   FontSize="18"
+                    <!--  Card Header  -->
+                    <Border Padding="16"
+                            BackgroundColor="{StaticResource Gray600}"
+                            StrokeThickness="0">
+                        <HorizontalStackLayout HorizontalOptions="Center" Spacing="8">
+                            <Label FontSize="18" Text="➕" VerticalOptions="Center" />
+                            <Label FontAttributes="Bold" FontSize="18" Text="Skapa ny match"
+                                   TextColor="{StaticResource White}"
                                    VerticalOptions="Center" />
-                            <Label Text="Skapa ny match"
-                                   FontSize="18"
-                                   FontAttributes="Bold"
-                                   VerticalOptions="Center"
-                                   TextColor="{StaticResource White}" />
                         </HorizontalStackLayout>
                     </Border>
 
-                    <!-- Divider -->
-                    <BoxView HeightRequest="1"
-                             Color="{StaticResource Gray600}" />
+                    <!--  Divider  -->
+                    <BoxView HeightRequest="1" Color="{StaticResource Gray600}" />
 
-                    <!-- Card Body -->
+                    <!--  Card Body  -->
                     <VerticalStackLayout Padding="20" Spacing="16">
 
-                        <!-- Error Message -->
-                        <Border BackgroundColor="#FEE2E2"
-                                Stroke="{StaticResource Danger}"
-                                StrokeShape="RoundRectangle 8"
-                                Padding="12"
-                                IsVisible="{Binding HasError}">
+                        <!--  Error Message  -->
+                        <Border Padding="12"
+                                BackgroundColor="{StaticResource DangerBackgroundDark}"
+                                IsVisible="{Binding HasError}"
+                                Stroke="{StaticResource DangerDark}"
+                                StrokeShape="RoundRectangle 8">
                             <HorizontalStackLayout Spacing="8">
-                                <Label Text="⚠️"
-                                       FontSize="16"
-                                       VerticalOptions="Center" />
+                                <Label FontSize="16" Text="⚠️" VerticalOptions="Center" />
                                 <Label Text="{Binding ErrorMessage}"
-                                       TextColor="{StaticResource Danger}"
+                                       TextColor="{StaticResource DangerDark}"
                                        VerticalOptions="Center" />
                             </HorizontalStackLayout>
                         </Border>
 
-                        <!-- Match Name Field -->
+                        <!--  Match Name Field  -->
                         <VerticalStackLayout Spacing="6">
                             <HorizontalStackLayout Spacing="6">
-                                <Label Text="🏷️"
-                                       FontSize="14"
+                                <Label FontSize="14" Text="🏷️" VerticalOptions="Center" />
+                                <Label FontAttributes="Bold" FontSize="14" Text="Matchnamn"
+                                       TextColor="{StaticResource Gray200}"
                                        VerticalOptions="Center" />
-                                <Label Text="Matchnamn"
-                                       FontSize="14"
-                                       FontAttributes="Bold"
-                                       VerticalOptions="Center"
-                                       TextColor="{StaticResource Gray200}" />
-                                <Label Text="(valfritt)"
-                                       FontSize="12"
-                                       VerticalOptions="Center"
-                                       TextColor="{StaticResource Gray400}" />
+                                <Label FontSize="12" Text="(valfritt)"
+                                       TextColor="{StaticResource Gray400}"
+                                       VerticalOptions="Center" />
                             </HorizontalStackLayout>
-                            <Border StrokeShape="RoundRectangle 8"
-                                    Stroke="{StaticResource Gray500}"
+                            <Border Padding="12,0"
                                     BackgroundColor="{StaticResource Gray600}"
-                                    Padding="12,0"
-                                    HeightRequest="48">
-                                <Entry Text="{Binding MatchName}"
-                                       Placeholder="T.ex. Klubbmatch juni"
+                                    HeightRequest="48"
+                                    Stroke="{StaticResource Gray500}"
+                                    StrokeShape="RoundRectangle 8">
+                                <Entry Placeholder="T.ex. Klubbmatch juni"
+                                       Text="{Binding MatchName}"
                                        VerticalOptions="Center" />
                             </Border>
                         </VerticalStackLayout>
 
-                        <!-- Weapon Class Field -->
+                        <!--  Weapon Class Field  -->
                         <VerticalStackLayout Spacing="6">
                             <HorizontalStackLayout Spacing="6">
-                                <Label Text="🎯"
-                                       FontSize="14"
+                                <Label FontSize="14" Text="🎯" VerticalOptions="Center" />
+                                <Label FontAttributes="Bold" FontSize="14" Text="Vapenklass"
+                                       TextColor="{StaticResource Gray200}"
                                        VerticalOptions="Center" />
-                                <Label Text="Vapenklass"
-                                       FontSize="14"
-                                       FontAttributes="Bold"
-                                       VerticalOptions="Center"
-                                       TextColor="{StaticResource Gray200}" />
-                                <Label Text="*"
-                                       FontSize="14"
+                                <Label FontSize="14" Text="*"
                                        TextColor="{StaticResource Danger}" />
                             </HorizontalStackLayout>
-                            <Border StrokeShape="RoundRectangle 8"
-                                    Stroke="{StaticResource Gray500}"
+                            <Border Padding="12,0"
                                     BackgroundColor="{StaticResource Gray600}"
-                                    Padding="12,0"
-                                    HeightRequest="48">
-                                <Picker ItemsSource="{Binding WeaponClasses}"
+                                    HeightRequest="48"
+                                    Stroke="{StaticResource Gray500}"
+                                    StrokeShape="RoundRectangle 8">
+                                <Picker Title="Välj vapenklass"
+                                        ItemsSource="{Binding WeaponClasses}"
                                         SelectedItem="{Binding SelectedWeaponClass}"
-                                        Title="Välj vapenklass"
                                         VerticalOptions="Center" />
                             </Border>
                         </VerticalStackLayout>
 
-                        <!-- Start Date/Time Field -->
+                        <!--  Start Date/Time Field  -->
                         <VerticalStackLayout Spacing="6">
                             <HorizontalStackLayout Spacing="6">
-                                <Label Text="📅"
-                                       FontSize="14"
+                                <Label FontSize="14" Text="📅" VerticalOptions="Center" />
+                                <Label FontAttributes="Bold" FontSize="14" Text="Starttid"
+                                       TextColor="{StaticResource Gray200}"
                                        VerticalOptions="Center" />
-                                <Label Text="Starttid"
-                                       FontSize="14"
-                                       FontAttributes="Bold"
-                                       VerticalOptions="Center"
-                                       TextColor="{StaticResource Gray200}" />
-                                <Label Text="(valfritt)"
-                                       FontSize="12"
-                                       VerticalOptions="Center"
-                                       TextColor="{StaticResource Gray400}" />
+                                <Label FontSize="12" Text="(valfritt)"
+                                       TextColor="{StaticResource Gray400}"
+                                       VerticalOptions="Center" />
                             </HorizontalStackLayout>
                             <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
-                                <Border Grid.Column="0"
-                                        StrokeShape="RoundRectangle 8"
-                                        Stroke="{StaticResource Gray500}"
+                                <Border Grid.Column="0" Padding="12,0"
                                         BackgroundColor="{StaticResource Gray600}"
-                                        Padding="12,0"
-                                        HeightRequest="48">
+                                        HeightRequest="48"
+                                        Stroke="{StaticResource Gray500}"
+                                        StrokeShape="RoundRectangle 8">
                                     <DatePicker Date="{Binding StartDate}"
-                                                MinimumDate="{x:Static sys:DateTime.Today}"
                                                 Format="yyyy-MM-dd"
+                                                MinimumDate="{x:Static sys:DateTime.Today}"
                                                 VerticalOptions="Center" />
                                 </Border>
-                                <Border Grid.Column="1"
-                                        StrokeShape="RoundRectangle 8"
-                                        Stroke="{StaticResource Gray500}"
+                                <Border Grid.Column="1" Padding="12,0"
                                         BackgroundColor="{StaticResource Gray600}"
-                                        Padding="12,0"
-                                        HeightRequest="48">
-                                    <TimePicker Time="{Binding StartTime}"
-                                                Format="HH:mm"
+                                        HeightRequest="48"
+                                        Stroke="{StaticResource Gray500}"
+                                        StrokeShape="RoundRectangle 8">
+                                    <TimePicker Format="HH:mm"
+                                                Time="{Binding StartTime}"
                                                 VerticalOptions="Center" />
                                 </Border>
                             </Grid>
-                            <Label Text="Deltagare kan inte registrera poäng förrän matchen startat"
-                                   FontSize="11"
+                            <Label FontSize="11" Text="Deltagare kan inte registrera poäng förrän matchen startat"
                                    TextColor="{StaticResource Gray400}" />
                         </VerticalStackLayout>
 
-                        <!-- Divider -->
-                        <BoxView HeightRequest="1"
-                                 Color="{StaticResource Gray600}"
-                                 Margin="0,8" />
+                        <!--  Divider  -->
+                        <BoxView Margin="0,8" HeightRequest="1"
+                                 Color="{StaticResource Gray600}" />
 
-                        <!-- Open Match Toggle -->
-                        <Border StrokeShape="RoundRectangle 8"
-                                Stroke="Transparent"
+                        <!--  Open Match Toggle  -->
+                        <Border Padding="16"
                                 BackgroundColor="{StaticResource Gray600}"
-                                Padding="16">
+                                Stroke="Transparent" StrokeShape="RoundRectangle 8">
                             <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
-                                <Label Grid.Column="0"
-                                       Text="🔓"
-                                       FontSize="24"
+                                <Label Grid.Column="0" FontSize="24" Text="🔓"
                                        VerticalOptions="Center" />
                                 <VerticalStackLayout Grid.Column="1" VerticalOptions="Center">
-                                    <Label Text="Öppen match"
-                                           FontSize="14"
-                                           FontAttributes="Bold"
+                                    <Label FontAttributes="Bold" FontSize="14" Text="Öppen match"
                                            TextColor="{StaticResource White}" />
-                                    <Label Text="Alla kan ansluta direkt"
-                                           FontSize="12"
+                                    <Label FontSize="12" Text="Alla kan ansluta direkt"
                                            TextColor="{StaticResource Gray400}" />
                                 </VerticalStackLayout>
                                 <Switch Grid.Column="2"
@@ -190,32 +158,24 @@
                             </Grid>
                         </Border>
 
-                        <!-- Handicap Toggle -->
-                        <Border StrokeShape="RoundRectangle 8"
-                                Stroke="Transparent"
+                        <!--  Handicap Toggle  -->
+                        <Border Padding="16"
                                 BackgroundColor="{StaticResource Gray600}"
-                                Padding="16">
+                                Stroke="Transparent" StrokeShape="RoundRectangle 8">
                             <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="12">
-                                <Label Grid.Column="0"
-                                       Text="⚖️"
-                                       FontSize="24"
+                                <Label Grid.Column="0" FontSize="24" Text="⚖️"
                                        VerticalOptions="Center" />
                                 <VerticalStackLayout Grid.Column="1" VerticalOptions="Center">
                                     <HorizontalStackLayout Spacing="6">
-                                        <Label Text="Handicap"
-                                               FontSize="14"
-                                               FontAttributes="Bold"
+                                        <Label FontAttributes="Bold" FontSize="14" Text="Handicap"
                                                TextColor="{StaticResource White}" />
-                                        <Label Text="ℹ️"
-                                               FontSize="14"
-                                               VerticalOptions="Center">
+                                        <Label FontSize="14" Text="ℹ️" VerticalOptions="Center">
                                             <Label.GestureRecognizers>
                                                 <TapGestureRecognizer Tapped="OnHandicapInfoTapped" />
                                             </Label.GestureRecognizers>
                                         </Label>
                                     </HorizontalStackLayout>
-                                    <Label Text="Anvand handicap for rattvisare tavling"
-                                           FontSize="12"
+                                    <Label FontSize="12" Text="Anvand handicap for rattvisare tavling"
                                            TextColor="{StaticResource Gray400}" />
                                 </VerticalStackLayout>
                                 <Switch Grid.Column="2"
@@ -225,36 +185,208 @@
                             </Grid>
                         </Border>
 
+                        <!--  Team Match Toggle  -->
+                        <Border Padding="16"
+                                BackgroundColor="{StaticResource Gray600}"
+                                Stroke="Transparent" StrokeShape="RoundRectangle 8">
+                            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+                                <Label Grid.Column="0" FontSize="24" Text="👥"
+                                       VerticalOptions="Center" />
+                                <VerticalStackLayout Grid.Column="1" VerticalOptions="Center">
+                                    <Label FontAttributes="Bold" FontSize="14" Text="Lagmatch"
+                                           TextColor="{StaticResource White}" />
+                                    <Label FontSize="12" Text="Skyttar tävlar i lag"
+                                           TextColor="{StaticResource Gray400}" />
+                                </VerticalStackLayout>
+                                <Switch Grid.Column="2"
+                                        IsToggled="{Binding IsTeamMatch}"
+                                        OnColor="{StaticResource Primary}"
+                                        VerticalOptions="Center" />
+                            </Grid>
+                        </Border>
+
+                        <!--  Team Settings (visible when IsTeamMatch is true)  -->
+                        <VerticalStackLayout IsVisible="{Binding IsTeamMatch}" Spacing="12">
+
+                            <!--  Max Shooters Per Team  -->
+                            <VerticalStackLayout Spacing="6">
+                                <HorizontalStackLayout Spacing="6">
+                                    <Label FontSize="14" Text="🎯" VerticalOptions="Center" />
+                                    <Label FontAttributes="Bold" FontSize="14" Text="Antal skyttar per lag"
+                                           TextColor="{StaticResource Gray200}"
+                                           VerticalOptions="Center" />
+                                    <Label FontSize="14" Text="*"
+                                           TextColor="{StaticResource Danger}" />
+                                </HorizontalStackLayout>
+                                <Border Padding="12,0"
+                                        BackgroundColor="{StaticResource Gray600}"
+                                        HeightRequest="48"
+                                        Stroke="{StaticResource Gray500}"
+                                        StrokeShape="RoundRectangle 8">
+                                    <Picker Title="Välj antal"
+                                            ItemsSource="{Binding MaxShootersOptions}"
+                                            SelectedItem="{Binding MaxShootersPerTeam}"
+                                            VerticalOptions="Center" />
+                                </Border>
+                            </VerticalStackLayout>
+
+                            <!--  Team Count (only for closed matches)  -->
+                            <VerticalStackLayout IsVisible="{Binding IsOpen, Converter={StaticResource InverseBoolConverter}}" Spacing="6">
+                                <HorizontalStackLayout Spacing="6">
+                                    <Label FontSize="14" Text="👥" VerticalOptions="Center" />
+                                    <Label FontAttributes="Bold" FontSize="14" Text="Antal lag"
+                                           TextColor="{StaticResource Gray200}"
+                                           VerticalOptions="Center" />
+                                </HorizontalStackLayout>
+                                <Border Padding="12,0"
+                                        BackgroundColor="{StaticResource Gray600}"
+                                        HeightRequest="48"
+                                        Stroke="{StaticResource Gray500}"
+                                        StrokeShape="RoundRectangle 8">
+                                    <Picker Title="Välj antal lag"
+                                            ItemsSource="{Binding TeamCountOptions}"
+                                            SelectedItem="{Binding TeamCount}"
+                                            VerticalOptions="Center" />
+                                </Border>
+                            </VerticalStackLayout>
+
+                            <!--  Team Names and Club Affiliation (only for closed matches)  -->
+                            <VerticalStackLayout IsVisible="{Binding IsOpen, Converter={StaticResource InverseBoolConverter}}" Spacing="8">
+                                <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                                    <Label Grid.Column="0" FontAttributes="Bold" FontSize="14" Text="Lagnamn"
+                                           TextColor="{StaticResource Gray200}" />
+                                    <Label Grid.Column="1" FontAttributes="Bold" FontSize="14" Text="Klubb"
+                                           TextColor="{StaticResource Gray200}" />
+                                </Grid>
+
+                                <!--  Team 1  -->
+                                <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                                    <Border Grid.Column="0" Padding="12,0"
+                                            BackgroundColor="{StaticResource Gray600}"
+                                            HeightRequest="48"
+                                            Stroke="{StaticResource Gray500}"
+                                            StrokeShape="RoundRectangle 8">
+                                        <Entry Placeholder="Lag 1"
+                                               Text="{Binding Team1Name}"
+                                               VerticalOptions="Center" />
+                                    </Border>
+                                    <Border Grid.Column="1" Padding="12,0"
+                                            BackgroundColor="{StaticResource Gray600}"
+                                            HeightRequest="48"
+                                            Stroke="{StaticResource Gray500}"
+                                            StrokeShape="RoundRectangle 8">
+                                        <Picker Title="Klubb"
+                                                ItemsSource="{Binding AvailableClubs}"
+                                                SelectedItem="{Binding Team1Club}"
+                                                VerticalOptions="Center" />
+                                    </Border>
+                                </Grid>
+
+                                <!--  Team 2  -->
+                                <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                                    <Border Grid.Column="0" Padding="12,0"
+                                            BackgroundColor="{StaticResource Gray600}"
+                                            HeightRequest="48"
+                                            Stroke="{StaticResource Gray500}"
+                                            StrokeShape="RoundRectangle 8">
+                                        <Entry Placeholder="Lag 2"
+                                               Text="{Binding Team2Name}"
+                                               VerticalOptions="Center" />
+                                    </Border>
+                                    <Border Grid.Column="1" Padding="12,0"
+                                            BackgroundColor="{StaticResource Gray600}"
+                                            HeightRequest="48"
+                                            Stroke="{StaticResource Gray500}"
+                                            StrokeShape="RoundRectangle 8">
+                                        <Picker Title="Klubb"
+                                                ItemsSource="{Binding AvailableClubs}"
+                                                SelectedItem="{Binding Team2Club}"
+                                                VerticalOptions="Center" />
+                                    </Border>
+                                </Grid>
+
+                                <!--  Team 3 (visible when TeamCount >= 3)  -->
+                                <Grid ColumnDefinitions="*,*" ColumnSpacing="8"
+                                      IsVisible="{Binding ShowTeam3}">
+                                    <Border Grid.Column="0" Padding="12,0"
+                                            BackgroundColor="{StaticResource Gray600}"
+                                            HeightRequest="48"
+                                            Stroke="{StaticResource Gray500}"
+                                            StrokeShape="RoundRectangle 8">
+                                        <Entry Placeholder="Lag 3"
+                                               Text="{Binding Team3Name}"
+                                               VerticalOptions="Center" />
+                                    </Border>
+                                    <Border Grid.Column="1" Padding="12,0"
+                                            BackgroundColor="{StaticResource Gray600}"
+                                            HeightRequest="48"
+                                            Stroke="{StaticResource Gray500}"
+                                            StrokeShape="RoundRectangle 8">
+                                        <Picker Title="Klubb"
+                                                ItemsSource="{Binding AvailableClubs}"
+                                                SelectedItem="{Binding Team3Club}"
+                                                VerticalOptions="Center" />
+                                    </Border>
+                                </Grid>
+
+                                <!--  Team 4 (visible when TeamCount >= 4)  -->
+                                <Grid ColumnDefinitions="*,*" ColumnSpacing="8"
+                                      IsVisible="{Binding ShowTeam4}">
+                                    <Border Grid.Column="0" Padding="12,0"
+                                            BackgroundColor="{StaticResource Gray600}"
+                                            HeightRequest="48"
+                                            Stroke="{StaticResource Gray500}"
+                                            StrokeShape="RoundRectangle 8">
+                                        <Entry Placeholder="Lag 4"
+                                               Text="{Binding Team4Name}"
+                                               VerticalOptions="Center" />
+                                    </Border>
+                                    <Border Grid.Column="1" Padding="12,0"
+                                            BackgroundColor="{StaticResource Gray600}"
+                                            HeightRequest="48"
+                                            Stroke="{StaticResource Gray500}"
+                                            StrokeShape="RoundRectangle 8">
+                                        <Picker Title="Klubb"
+                                                ItemsSource="{Binding AvailableClubs}"
+                                                SelectedItem="{Binding Team4Club}"
+                                                VerticalOptions="Center" />
+                                    </Border>
+                                </Grid>
+                            </VerticalStackLayout>
+
+                            <!--  Info text for open team matches  -->
+                            <Label FontSize="11"
+                                   IsVisible="{Binding IsOpen}"
+                                   Text="Vid öppna lagmatcher skapar deltagare lag när de går med"
+                                   TextColor="{StaticResource Gray400}" />
+
+                        </VerticalStackLayout>
+
                     </VerticalStackLayout>
                 </VerticalStackLayout>
             </Border>
 
-            <!-- Action Buttons -->
+            <!--  Action Buttons  -->
             <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
                 <Button Grid.Column="0"
-                        Text="✕ Avbryt"
-                        Command="{Binding CancelCommand}"
                         BackgroundColor="{StaticResource Gray600}"
-                        TextColor="{StaticResource White}"
-                        FontAttributes="Bold"
-                        HeightRequest="50"
-                        CornerRadius="8" />
+                        Command="{Binding CancelCommand}"
+                        CornerRadius="8" FontAttributes="Bold" HeightRequest="50"
+                        Text="✕ Avbryt"
+                        TextColor="{StaticResource White}" />
                 <Button Grid.Column="1"
-                        Text="✓ Skapa"
-                        Command="{Binding CreateMatchCommand}"
                         BackgroundColor="{StaticResource Primary}"
-                        TextColor="White"
-                        FontAttributes="Bold"
-                        HeightRequest="50"
-                        CornerRadius="8"
-                        IsEnabled="{Binding IsNotBusy}" />
+                        Command="{Binding CreateMatchCommand}"
+                        CornerRadius="8" FontAttributes="Bold" HeightRequest="50"
+                        IsEnabled="{Binding IsNotBusy}"
+                        Text="✓ Skapa" TextColor="White" />
             </Grid>
 
-            <!-- Loading Indicator -->
-            <ActivityIndicator IsRunning="{Binding IsBusy}"
+            <!--  Loading Indicator  -->
+            <ActivityIndicator HorizontalOptions="Center"
+                               IsRunning="{Binding IsBusy}"
                                IsVisible="{Binding IsBusy}"
-                               Color="{StaticResource Primary}"
-                               HorizontalOptions="Center" />
+                               Color="{StaticResource Primary}" />
 
         </VerticalStackLayout>
     </ScrollView>

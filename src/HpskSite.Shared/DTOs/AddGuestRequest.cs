@@ -33,5 +33,12 @@ namespace HpskSite.Shared.DTOs
         /// </summary>
         [JsonPropertyName("clubId")]
         public int? ClubId { get; set; }
+
+        /// <summary>
+        /// Team ID for team matches (optional)
+        /// If the match is a team match, this assigns the guest to a specific team
+        /// </summary>
+        [JsonPropertyName("teamId")]
+        public int? TeamId { get; set; }
     }
 }

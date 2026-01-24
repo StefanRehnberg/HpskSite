@@ -46,6 +46,7 @@ public partial class ActiveMatchViewModel : BaseViewModel
         _signalRService.JoinRequestBlocked += OnJoinRequestBlocked;
         _signalRService.ReactionUpdated += OnReactionUpdated;
         _signalRService.SettingsUpdated += OnSettingsUpdated;
+        _signalRService.TeamScoreUpdated += OnTeamScoreUpdated;
     }
 
     private string _matchCode = string.Empty;
@@ -139,6 +140,30 @@ public partial class ActiveMatchViewModel : BaseViewModel
     /// </summary>
     [ObservableProperty]
     private ObservableCollection<ParticipantRanking> _rankings = new();
+
+    /// <summary>
+    /// Teams in the match (for team matches)
+    /// </summary>
+    [ObservableProperty]
+    private ObservableCollection<TrainingMatchTeam> _teams = new();
+
+    /// <summary>
+    /// Whether this is a team match
+    /// </summary>
+    [ObservableProperty]
+    private bool _isTeamMatch;
+
+    /// <summary>
+    /// Whether team scores view is enabled (vs individual view)
+    /// </summary>
+    [ObservableProperty]
+    private bool _showTeamScores;
+
+    /// <summary>
+    /// Team rankings (sorted by adjusted team score)
+    /// </summary>
+    [ObservableProperty]
+    private ObservableCollection<TrainingMatchTeam> _teamRankings = new();
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CurrentSeriesNumber))]
@@ -1457,13 +1482,25 @@ public partial class ActiveMatchViewModel : BaseViewModel
                     System.Diagnostics.Debug.WriteLine($"LoadMatchDataAsync (spectator): Registered as spectator for match {MatchCode}");
                 }
 
+                // Update team data if this is a team match
+                IsTeamMatch = Match.IsTeamMatch;
+                Teams.Clear();
+                if (Match.Teams != null)
+                {
+                    foreach (var team in Match.Teams)
+                    {
+                        Teams.Add(team);
+                    }
+                }
+                UpdateTeamRankings();
+
                 // Update scoreboard rows for dynamic display
                 UpdateScoreboardRows();
 
                 // Update guest participants list (for settings modal)
                 UpdateGuestParticipants();
 
-                System.Diagnostics.Debug.WriteLine($"LoadMatchDataAsync (spectator): Loaded match {MatchCode}, CanJoin={CanJoin}");
+                System.Diagnostics.Debug.WriteLine($"LoadMatchDataAsync (spectator): Loaded match {MatchCode}, CanJoin={CanJoin}, IsTeamMatch={IsTeamMatch}");
             }
             else
             {
@@ -1542,6 +1579,18 @@ public partial class ActiveMatchViewModel : BaseViewModel
                     await _signalRService.JoinOrganizerGroupAsync(MatchCode);
                     System.Diagnostics.Debug.WriteLine($"LoadMatchDataAsync: Joined organizer group for match {MatchCode}");
                 }
+
+                // Update team data if this is a team match
+                IsTeamMatch = Match.IsTeamMatch;
+                Teams.Clear();
+                if (Match.Teams != null)
+                {
+                    foreach (var team in Match.Teams)
+                    {
+                        Teams.Add(team);
+                    }
+                }
+                UpdateTeamRankings();
 
                 // Update scoreboard rows for dynamic display
                 UpdateScoreboardRows();
@@ -2239,6 +2288,55 @@ public partial class ActiveMatchViewModel : BaseViewModel
             // Reload match data to get updated settings and recalculate totals
             await LoadMatchDataAsync();
         });
+    }
+
+    private void OnTeamScoreUpdated(object? sender, object teamScores)
+    {
+        MainThread.BeginInvokeOnMainThread(async () =>
+        {
+            System.Diagnostics.Debug.WriteLine("SignalR: TeamScoreUpdated");
+
+            // Reload match data to get updated team scores
+            await LoadMatchDataAsync();
+        });
+    }
+
+    /// <summary>
+    /// Toggle between individual and team score views
+    /// </summary>
+    [RelayCommand]
+    private void ToggleTeamScoresView()
+    {
+        ShowTeamScores = !ShowTeamScores;
+    }
+
+    /// <summary>
+    /// Updates team rankings based on current team scores
+    /// </summary>
+    private void UpdateTeamRankings()
+    {
+        if (!IsTeamMatch || Teams == null || Teams.Count == 0)
+        {
+            TeamRankings.Clear();
+            return;
+        }
+
+        var sortedTeams = Teams
+            .OrderByDescending(t => t.AdjustedTeamScore)
+            .ThenByDescending(t => t.TotalXCount)
+            .ToList();
+
+        // Assign ranks
+        for (int i = 0; i < sortedTeams.Count; i++)
+        {
+            sortedTeams[i].Rank = i + 1;
+        }
+
+        TeamRankings.Clear();
+        foreach (var team in sortedTeams)
+        {
+            TeamRankings.Add(team);
+        }
     }
 
     private async Task RespondToJoinRequestAsync(int requestId, string action)

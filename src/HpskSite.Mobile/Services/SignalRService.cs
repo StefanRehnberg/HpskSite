@@ -40,6 +40,7 @@ public class SignalRService : ISignalRService, IAsyncDisposable
     public event EventHandler<string>? JoinRequestBlocked;   // matchCode
     public event EventHandler<ReactionUpdate>? ReactionUpdated;
     public event EventHandler<SettingsUpdate>? SettingsUpdated;
+    public event EventHandler<object>? TeamScoreUpdated;
     public event EventHandler? Disconnected;
     public event EventHandler? Reconnected;
 
@@ -329,6 +330,13 @@ public class SignalRService : ISignalRService, IAsyncDisposable
 
             SettingsUpdated?.Invoke(this, update);
         });
+
+        // Server sends: TeamScoreUpdated with team scores data
+        _hubConnection.On<JsonElement>("TeamScoreUpdated", jsonElement =>
+        {
+            System.Diagnostics.Debug.WriteLine($"SignalR TeamScoreUpdated: {jsonElement.GetRawText()}");
+            TeamScoreUpdated?.Invoke(this, jsonElement);
+        });
     }
 
     private Task OnConnectionClosed(Exception? exception)
@@ -430,6 +438,7 @@ public interface ISignalRService
     event EventHandler<string>? JoinRequestBlocked;
     event EventHandler<ReactionUpdate>? ReactionUpdated;
     event EventHandler<SettingsUpdate>? SettingsUpdated;
+    event EventHandler<object>? TeamScoreUpdated;
     event EventHandler? Disconnected;
     event EventHandler? Reconnected;
 

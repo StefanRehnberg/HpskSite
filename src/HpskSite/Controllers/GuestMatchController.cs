@@ -228,6 +228,31 @@ namespace HpskSite.Controllers
                 });
             }
 
+            // Load teams for team matches
+            var teams = new List<MemberClaimTeamOption>();
+            if (match.IsTeamMatch)
+            {
+                var teamList = await db.FetchAsync<TrainingMatchTeamDto>(
+                    @"SELECT t.Id, t.TeamName, t.ClubId, t.TeamNumber,
+                             (SELECT COUNT(*) FROM TrainingMatchParticipants WHERE TeamId = t.Id) AS MemberCount
+                      FROM TrainingMatchTeams t
+                      WHERE t.TrainingMatchId = @0
+                      ORDER BY t.TeamNumber", match.Id);
+
+                foreach (var team in teamList)
+                {
+                    var isFull = match.MaxShootersPerTeam.HasValue && team.MemberCount >= match.MaxShootersPerTeam;
+                    teams.Add(new MemberClaimTeamOption
+                    {
+                        Id = team.Id,
+                        TeamName = team.TeamName,
+                        ClubName = team.ClubId.HasValue ? _clubService.GetClubNameById(team.ClubId.Value) : null,
+                        MemberCount = team.MemberCount,
+                        IsFull = isFull
+                    });
+                }
+            }
+
             scope.Complete();
 
             // Look up member details for confirmation display
@@ -252,7 +277,11 @@ namespace HpskSite.Controllers
                 MemberName = claimRecord.DisplayName,
                 MemberEmail = memberEmail,
                 ClubName = clubName,
-                IsValid = true
+                IsValid = true,
+                IsTeamMatch = match.IsTeamMatch,
+                IsOpen = match.IsOpen,
+                Teams = teams,
+                MaxShootersPerTeam = match.MaxShootersPerTeam
             });
         }
 
@@ -261,7 +290,7 @@ namespace HpskSite.Controllers
         /// POST /match/{code}/member/confirm
         /// </summary>
         [HttpPost("{code}/member/confirm")]
-        public async Task<IActionResult> ConfirmMemberClaim(string code, [FromForm] string claimToken)
+        public async Task<IActionResult> ConfirmMemberClaim(string code, [FromForm] string claimToken, [FromForm] int? teamId = null)
         {
             _logger.LogInformation("ConfirmMemberClaim called with code={Code}, claimToken={ClaimToken}", code, claimToken);
 
@@ -343,6 +372,33 @@ namespace HpskSite.Controllers
                 "SELECT ISNULL(MAX(DisplayOrder), 0) FROM TrainingMatchParticipants WHERE TrainingMatchId = @0",
                 match.Id);
 
+            // Validate team for team matches
+            if (match.IsTeamMatch && teamId.HasValue)
+            {
+                // Verify team belongs to this match
+                var teamExists = await db.ExecuteScalarAsync<int>(
+                    "SELECT COUNT(*) FROM TrainingMatchTeams WHERE Id = @0 AND TrainingMatchId = @1",
+                    teamId.Value, match.Id);
+                if (teamExists == 0)
+                {
+                    scope.Complete();
+                    return RedirectToErrorPage("Ogiltigt lag");
+                }
+
+                // Check team capacity
+                if (match.MaxShootersPerTeam.HasValue)
+                {
+                    var teamMemberCount = await db.ExecuteScalarAsync<int>(
+                        "SELECT COUNT(*) FROM TrainingMatchParticipants WHERE TrainingMatchId = @0 AND TeamId = @1",
+                        match.Id, teamId.Value);
+                    if (teamMemberCount >= match.MaxShootersPerTeam.Value)
+                    {
+                        scope.Complete();
+                        return RedirectToErrorPage("Laget är fullt");
+                    }
+                }
+            }
+
             // Create participant with MemberId (not GuestParticipantId)
             var participant = new MemberParticipantEntryDbDto
             {
@@ -350,7 +406,8 @@ namespace HpskSite.Controllers
                 MemberId = claimRecord.LinkedMemberId!.Value,
                 GuestParticipantId = null, // This is a member claim, not a guest
                 JoinedDate = DateTime.UtcNow,
-                DisplayOrder = maxOrder + 1
+                DisplayOrder = maxOrder + 1,
+                TeamId = teamId
             };
 
             await db.InsertAsync(participant);
@@ -474,6 +531,9 @@ namespace HpskSite.Controllers
         public int Id { get; set; }
         public string MatchCode { get; set; } = string.Empty;
         public string Status { get; set; } = "Active";
+        public bool IsTeamMatch { get; set; }
+        public bool IsOpen { get; set; }
+        public int? MaxShootersPerTeam { get; set; }
     }
 
     [TableName("TrainingMatchGuests")]
@@ -508,6 +568,20 @@ namespace HpskSite.Controllers
         public int? GuestParticipantId { get; set; }
         public DateTime JoinedDate { get; set; }
         public int DisplayOrder { get; set; }
+        public int? TeamId { get; set; }
+    }
+
+    /// <summary>
+    /// DTO for querying teams with member count
+    /// </summary>
+    internal class TrainingMatchTeamDto
+    {
+        public int Id { get; set; }
+        public int TrainingMatchId { get; set; }
+        public int TeamNumber { get; set; }
+        public string TeamName { get; set; } = string.Empty;
+        public int? ClubId { get; set; }
+        public int MemberCount { get; set; }
     }
 
     /// <summary>
@@ -522,5 +596,20 @@ namespace HpskSite.Controllers
         public string? ClubName { get; set; }
         public bool IsValid { get; set; }
         public string? ErrorMessage { get; set; }
+
+        // Team match support
+        public bool IsTeamMatch { get; set; }
+        public bool IsOpen { get; set; }
+        public List<MemberClaimTeamOption> Teams { get; set; } = new();
+        public int? MaxShootersPerTeam { get; set; }
+    }
+
+    public class MemberClaimTeamOption
+    {
+        public int Id { get; set; }
+        public string TeamName { get; set; } = string.Empty;
+        public string? ClubName { get; set; }
+        public int MemberCount { get; set; }
+        public bool IsFull { get; set; }
     }
 }
