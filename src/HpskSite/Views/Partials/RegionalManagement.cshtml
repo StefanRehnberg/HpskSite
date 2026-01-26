@@ -1,0 +1,165 @@
+@{
+    // This partial handles regional management UI (Kretshantering)
+}
+
+<div id="regionalManagement">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h4>Kretshantering</h4>
+    </div>
+
+    <p class="text-muted mb-3">
+        Hantera de 26 kretssidorna och tilldela kretsadministratörer. Kretsadministratörer kan hantera alla klubbar inom sin krets.
+    </p>
+
+    <div id="regionsList">
+        <div class="text-center py-4">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">Laddar...</span>
+            </div>
+            <p class="mt-2">Laddar kretsar...</p>
+        </div>
+    </div>
+</div>
+
+<!-- Include modals -->
+@await Html.PartialAsync("RegionalEditModal")
+@await Html.PartialAsync("RegionalAdminModal")
+
+<!-- Regions Table Template -->
+<script id="regionsTableTemplate" type="text/template">
+    <div class="table-responsive">
+        <table class="table table-striped table-hover">
+            <thead class="table-light">
+                <tr>
+                    <th style="width: 40%">Krets</th>
+                    <th style="width: 25%">Kontaktperson</th>
+                    <th style="width: 15%" class="text-center">Klubbar</th>
+                    <th style="width: 20%" class="text-end">Åtgärder</th>
+                </tr>
+            </thead>
+            <tbody id="regionsTableBody">
+            </tbody>
+        </table>
+    </div>
+</script>
+
+<!-- Region Row Template -->
+<script id="regionRowTemplate" type="text/template">
+    <tr>
+        <td>
+            <strong>{regionName}</strong>
+            <br><small class="text-muted">{regionCode}</small>
+        </td>
+        <td>
+            {contactDisplay}
+        </td>
+        <td class="text-center">
+            <span class="badge bg-secondary">{clubCount}</span>
+        </td>
+        <td class="text-end">
+            <button class="btn btn-sm btn-warning me-1" onclick="showEditRegionModal('{regionCode}')" title="Redigera krets">
+                <i class="bi bi-pencil"></i>
+            </button>
+            <button class="btn btn-sm btn-secondary" onclick="showRegionalAdminsModal('{regionCode}', '{regionNameEscaped}')" title="Hantera administratörer">
+                <i class="bi bi-person-gear"></i>
+            </button>
+        </td>
+    </tr>
+</script>
+
+<script>
+// Lazy load regional management data
+let regionalManagementLoaded = false;
+
+document.addEventListener('DOMContentLoaded', function() {
+    const regionsTab = document.getElementById('regions-tab');
+
+    // Load when tab is clicked for the first time
+    if (regionsTab) {
+        regionsTab.addEventListener('shown.bs.tab', function() {
+            if (!regionalManagementLoaded) {
+                loadRegionsList();
+                regionalManagementLoaded = true;
+            }
+        });
+    }
+});
+
+function loadRegionsList() {
+    const container = document.getElementById('regionsList');
+
+    // Show loading state
+    container.innerHTML = `
+        <div class="text-center py-4">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">Laddar...</span>
+            </div>
+            <p class="mt-2">Laddar kretsar...</p>
+        </div>
+    `;
+
+    fetch('/umbraco/surface/ClubAdmin/GetRegions')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                displayRegions(data.data);
+            } else {
+                container.innerHTML =
+                    '<div class="alert alert-danger">Fel: ' + data.message + '</div>';
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            container.innerHTML =
+                '<div class="alert alert-danger">Nätverksfel: ' + error.message + '</div>';
+        });
+}
+
+function displayRegions(regions) {
+    const tableTemplate = document.getElementById('regionsTableTemplate').innerHTML;
+    const rowTemplate = document.getElementById('regionRowTemplate').innerHTML;
+
+    document.getElementById('regionsList').innerHTML = tableTemplate;
+
+    const tbody = document.getElementById('regionsTableBody');
+    tbody.innerHTML = '';
+
+    if (regions.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="4" class="text-center text-muted py-4">
+                    <p>Inga kretsar hittades.</p>
+                    <p class="small">Kretsar skapas automatiskt vid migrering av regional struktur.</p>
+                </td>
+            </tr>
+        `;
+        return;
+    }
+
+    regions.forEach(region => {
+        // Build contact display
+        let contactDisplay = '';
+        if (region.contactPerson && region.contactEmail) {
+            contactDisplay = `${region.contactPerson}<br><small class="text-muted">${region.contactEmail}</small>`;
+        } else if (region.contactPerson) {
+            contactDisplay = region.contactPerson;
+        } else if (region.contactEmail) {
+            contactDisplay = `<small class="text-muted">${region.contactEmail}</small>`;
+        } else {
+            contactDisplay = '<span class="text-muted">-</span>';
+        }
+
+        // Escape region name for use in JavaScript function call
+        const regionNameEscaped = (region.regionName || '').replace(/'/g, "\\'").replace(/"/g, '\\"');
+
+        const row = rowTemplate
+            .replace(/{regionCode}/g, region.regionCode || '')
+            .replace(/{regionName}/g, region.regionName || '')
+            .replace(/{regionNameEscaped}/g, regionNameEscaped)
+            .replace(/{contactDisplay}/g, contactDisplay)
+            .replace(/{clubCount}/g, region.clubCount || 0);
+
+        tbody.innerHTML += row;
+    });
+}
+</script>

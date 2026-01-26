@@ -1,0 +1,239 @@
+@* Modal for managing regional administrators *@
+
+<div class="modal fade" id="regionalAdminsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="regionalAdminsModalTitle">Kretsadministratörer</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6>Nuvarande administratörer</h6>
+                        <div id="currentRegionalAdmins">
+                            <div class="text-center">
+                                <div class="spinner-border spinner-border-sm" role="status"></div>
+                                Laddar...
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <h6>Tilldela ny administratör</h6>
+                        <div class="mb-3">
+                            <label for="availableRegionalMembersSelect" class="form-label">Välj medlem</label>
+                            <select class="form-select" id="availableRegionalMembersSelect">
+                                <option value="">Laddar tillgängliga medlemmar...</option>
+                            </select>
+                        </div>
+                        <button type="button" class="btn btn-primary" id="assignRegionalAdminBtn" onclick="assignSelectedRegionalAdmin()" disabled>
+                            <i class="bi bi-person-plus me-1"></i>Tilldela som administratör
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let currentRegionForAdmins = null;
+
+function showRegionalAdminsModal(regionCode, regionName) {
+    currentRegionForAdmins = regionCode;
+    document.getElementById('regionalAdminsModalTitle').textContent = `Kretsadministratörer - ${regionName}`;
+
+    // Load current admins
+    loadRegionalAdmins(regionCode);
+
+    // Load available members for dropdown
+    loadAvailableMembersForRegion(regionCode);
+
+    new bootstrap.Modal(document.getElementById('regionalAdminsModal')).show();
+}
+
+async function loadRegionalAdmins(regionCode) {
+    const container = document.getElementById('currentRegionalAdmins');
+    container.innerHTML = '<div class="text-center"><div class="spinner-border spinner-border-sm" role="status"></div> Laddar...</div>';
+
+    try {
+        const response = await fetch(`/umbraco/surface/ClubAdmin/GetRegionalAdmins?regionCode=${encodeURIComponent(regionCode)}`);
+        const data = await response.json();
+
+        if (data.success) {
+            displayRegionalAdmins(data.admins);
+        } else {
+            container.innerHTML = `<div class="alert alert-warning">${data.message}</div>`;
+        }
+    } catch (error) {
+        console.error('Error loading regional admins:', error);
+        container.innerHTML = '<div class="alert alert-danger">Fel vid laddning av administratörer</div>';
+    }
+}
+
+function displayRegionalAdmins(admins) {
+    const container = document.getElementById('currentRegionalAdmins');
+
+    if (admins.length === 0) {
+        container.innerHTML = '<p class="text-muted">Inga administratörer tilldelade</p>';
+        return;
+    }
+
+    let html = '<div class="list-group">';
+    admins.forEach(admin => {
+        html += `
+            <div class="list-group-item d-flex justify-content-between align-items-center">
+                <div>
+                    <strong>${admin.name || 'Okänd'}</strong>
+                    <br><small class="text-muted">${admin.email}</small>
+                </div>
+                <button class="btn btn-sm btn-outline-danger" onclick="removeRegionalAdmin(${admin.id}, '${escapeHtml(admin.name)}')">
+                    Ta bort
+                </button>
+            </div>
+        `;
+    });
+    html += '</div>';
+
+    container.innerHTML = html;
+}
+
+async function loadAvailableMembersForRegion(regionCode) {
+    const select = document.getElementById('availableRegionalMembersSelect');
+    const assignBtn = document.getElementById('assignRegionalAdminBtn');
+
+    select.innerHTML = '<option value="">Laddar tillgängliga medlemmar...</option>';
+    assignBtn.disabled = true;
+
+    try {
+        const response = await fetch(`/umbraco/surface/ClubAdmin/GetAvailableMembersForRegionalAdmin?regionCode=${encodeURIComponent(regionCode)}`);
+        const data = await response.json();
+
+        if (data.success) {
+            populateRegionalMemberDropdown(data.members);
+        } else {
+            select.innerHTML = '<option value="">Fel vid laddning av medlemmar</option>';
+        }
+    } catch (error) {
+        console.error('Error loading available members:', error);
+        select.innerHTML = '<option value="">Fel vid laddning av medlemmar</option>';
+    }
+}
+
+function populateRegionalMemberDropdown(members) {
+    const select = document.getElementById('availableRegionalMembersSelect');
+    const assignBtn = document.getElementById('assignRegionalAdminBtn');
+
+    if (!members || members.length === 0) {
+        select.innerHTML = '<option value="">Inga tillgängliga medlemmar</option>';
+        assignBtn.disabled = true;
+        return;
+    }
+
+    let options = '<option value="">Välj en medlem att tilldela...</option>';
+    members.forEach(member => {
+        options += `<option value="${member.id}" data-name="${escapeHtml(member.name)}">${member.name} (${member.email})</option>`;
+    });
+
+    select.innerHTML = options;
+
+    // Enable assign button when selection changes
+    select.onchange = function() {
+        assignBtn.disabled = !this.value;
+    };
+}
+
+function assignSelectedRegionalAdmin() {
+    const select = document.getElementById('availableRegionalMembersSelect');
+    const selectedOption = select.options[select.selectedIndex];
+
+    if (!selectedOption.value) {
+        alert('Välj en medlem att tilldela som administratör.');
+        return;
+    }
+
+    const memberId = selectedOption.value;
+    const memberName = selectedOption.getAttribute('data-name');
+
+    assignRegionalAdmin(memberId, memberName);
+}
+
+async function assignRegionalAdmin(memberId, memberName) {
+    if (!currentRegionForAdmins) return;
+
+    try {
+        const formData = new FormData();
+        const token = document.querySelector('input[name="__RequestVerificationToken"]').value;
+        formData.append('__RequestVerificationToken', token);
+        formData.append('memberId', memberId);
+        formData.append('regionCode', currentRegionForAdmins);
+
+        const response = await fetch('/umbraco/surface/ClubAdmin/AssignRegionalAdmin', {
+            method: 'POST',
+            body: formData
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            // Refresh the admin list
+            loadRegionalAdmins(currentRegionForAdmins);
+            // Refresh available members dropdown (removes the newly assigned admin)
+            loadAvailableMembersForRegion(currentRegionForAdmins);
+            // Show success message
+            alert(`${memberName} har tilldelats som kretsadministratör!`);
+        } else {
+            alert('Fel: ' + data.message);
+        }
+    } catch (error) {
+        console.error('Error assigning regional admin:', error);
+        alert('Fel vid tilldelning av kretsadministratör');
+    }
+}
+
+async function removeRegionalAdmin(memberId, memberName) {
+    if (!confirm(`Ta bort ${memberName} som kretsadministratör?`)) return;
+
+    if (!currentRegionForAdmins) return;
+
+    try {
+        const formData = new FormData();
+        const token = document.querySelector('input[name="__RequestVerificationToken"]').value;
+        formData.append('__RequestVerificationToken', token);
+        formData.append('memberId', memberId);
+        formData.append('regionCode', currentRegionForAdmins);
+
+        const response = await fetch('/umbraco/surface/ClubAdmin/RemoveRegionalAdmin', {
+            method: 'POST',
+            body: formData
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            // Refresh the admin list
+            loadRegionalAdmins(currentRegionForAdmins);
+            // Refresh available members dropdown (adds the removed admin back)
+            loadAvailableMembersForRegion(currentRegionForAdmins);
+            // Show success message
+            alert(`${memberName} har tagits bort som kretsadministratör.`);
+        } else {
+            alert('Fel: ' + data.message);
+        }
+    } catch (error) {
+        console.error('Error removing regional admin:', error);
+        alert('Fel vid borttagning av kretsadministratör');
+    }
+}
+
+// Helper function to escape HTML to prevent XSS
+function escapeHtml(str) {
+    if (!str) return '';
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+</script>

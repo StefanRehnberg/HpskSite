@@ -1,0 +1,157 @@
+@* Modal for editing regional page properties *@
+
+<div class="modal fade" id="regionalEditModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="regionalEditModalTitle">Redigera Krets</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="regionalEditForm">
+                    <input type="hidden" id="editRegionCode" name="regionCode">
+
+                    <h6>Grundinformation</h6>
+                    <hr class="mt-1 mb-3">
+
+                    <div class="row">
+                        <div class="col-md-8">
+                            <div class="mb-3">
+                                <label for="editRegionName" class="form-label">Kretsnamn *</label>
+                                <input type="text" class="form-control" id="editRegionName" name="regionName" required>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label for="displayRegionCode" class="form-label">Kretskod</label>
+                                <input type="text" class="form-control" id="displayRegionCode" readonly disabled>
+                                <div class="form-text">Kretskoden kan inte ändras</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <h6 class="mt-3">Kontaktinformation</h6>
+                    <hr class="mt-1 mb-3">
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="editRegionContactPerson" class="form-label">Kontaktperson</label>
+                                <input type="text" class="form-control" id="editRegionContactPerson" name="contactPerson">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="editRegionContactEmail" class="form-label">E-post</label>
+                                <input type="email" class="form-control" id="editRegionContactEmail" name="contactEmail">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="editRegionContactPhone" class="form-label">Telefon</label>
+                                <input type="tel" class="form-control" id="editRegionContactPhone" name="contactPhone">
+                            </div>
+                        </div>
+                    </div>
+
+                    <h6 class="mt-3">Välkomsttext</h6>
+                    <hr class="mt-1 mb-3">
+
+                    <div class="mb-3">
+                        <label for="editRegionWelcomeTitle" class="form-label">Titel</label>
+                        <input type="text" class="form-control" id="editRegionWelcomeTitle" name="welcomeTitle" placeholder="T.ex. Välkommen till Halland">
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="editRegionWelcomeText" class="form-label">Text</label>
+                        <textarea class="form-control" id="editRegionWelcomeText" name="welcomeText" rows="5" placeholder="Välkomsttext som visas på kretssidan..."></textarea>
+                        <div class="form-text">HTML-formatering stöds (t.ex. &lt;p&gt;, &lt;strong&gt;, &lt;a&gt;)</div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" onclick="saveRegion()">
+                    <i class="bi bi-check-lg me-1"></i>Spara ändringar
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function showEditRegionModal(regionCode) {
+    // Show loading state
+    document.getElementById('regionalEditModalTitle').textContent = 'Laddar...';
+    document.getElementById('regionalEditForm').reset();
+
+    const modal = new bootstrap.Modal(document.getElementById('regionalEditModal'));
+    modal.show();
+
+    // Load region data
+    fetch(`/umbraco/surface/ClubAdmin/GetRegion?regionCode=${encodeURIComponent(regionCode)}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                const region = data.data;
+
+                document.getElementById('regionalEditModalTitle').textContent = `Redigera Krets - ${region.regionName}`;
+                document.getElementById('editRegionCode').value = region.regionCode;
+                document.getElementById('displayRegionCode').value = region.regionCode;
+                document.getElementById('editRegionName').value = region.regionName;
+                document.getElementById('editRegionContactPerson').value = region.contactPerson;
+                document.getElementById('editRegionContactEmail').value = region.contactEmail;
+                document.getElementById('editRegionContactPhone').value = region.contactPhone;
+                document.getElementById('editRegionWelcomeTitle').value = region.welcomeTitle;
+                document.getElementById('editRegionWelcomeText').value = region.welcomeText;
+            } else {
+                alert('Fel vid laddning av krets: ' + data.message);
+                modal.hide();
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Fel vid laddning av krets');
+            modal.hide();
+        });
+}
+
+function saveRegion() {
+    const formData = new FormData();
+
+    // Add anti-forgery token
+    const token = document.querySelector('input[name="__RequestVerificationToken"]');
+    if (token) {
+        formData.append('__RequestVerificationToken', token.value);
+    }
+
+    formData.append('regionCode', document.getElementById('editRegionCode').value);
+    formData.append('regionName', document.getElementById('editRegionName').value);
+    formData.append('contactPerson', document.getElementById('editRegionContactPerson').value);
+    formData.append('contactEmail', document.getElementById('editRegionContactEmail').value);
+    formData.append('contactPhone', document.getElementById('editRegionContactPhone').value);
+    formData.append('welcomeTitle', document.getElementById('editRegionWelcomeTitle').value);
+    formData.append('welcomeText', document.getElementById('editRegionWelcomeText').value);
+
+    fetch('/umbraco/surface/ClubAdmin/SaveRegion', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            bootstrap.Modal.getInstance(document.getElementById('regionalEditModal')).hide();
+            loadRegionsList(); // Refresh the table
+        } else {
+            alert('Fel: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Fel vid sparande av krets: ' + error.message);
+    });
+}
+</script>

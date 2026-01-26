@@ -1,6 +1,7 @@
 @using Umbraco.Cms.Core.Security
 @using Umbraco.Cms.Web.Website.Controllers
 @using Umbraco.Cms.Core.Services
+@using System.Globalization
 @inject IMemberManager MemberManager
 @inject IMemberService MemberService
 @inject HpskSite.Services.AdminAuthorizationService AuthService
@@ -195,6 +196,22 @@
             color: var(--navbar-text-hover);
         }
 
+        /* Regional dropdown styling - scrollable for 26 regions */
+        .dropdown-menu-regions {
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+
+        .dropdown-menu-regions .dropdown-item {
+            padding: 0.5rem 1rem;
+            font-size: 0.9rem;
+        }
+
+        .dropdown-menu-regions .dropdown-item.active {
+            background-color: var(--bs-primary);
+            color: white;
+        }
+
         /* Auth buttons styling */
         .btn-auth {
             font-size: 0.9rem;
@@ -293,7 +310,6 @@
         <nav class="navbar navbar-expand-lg navbar-dark navbar-custom">
             <div class="container">
                 <a class="navbar-brand" href="@Model.Root().Url()">
-                    <img src="~/images/HPSK_Logo.png" alt="HPSK Logo" class="logo">
                     <div>
                         <div class="site-title">@(Model.Root().Value<string>("siteTitle") ?? "Hallands Pistolskytteförbund")</div>
                         <div class="site-subtitle">@(Model.Root().Value<string>("siteSubtitle") ?? "Välkommen till HPSK - Kom till skjutbanan och träffa kompisar")</div>
@@ -410,25 +426,58 @@
                         
                         @{
                             var contactPage = Model.Root().Children.FirstOrDefault(x => x.Name == "Contact");
-                            var clubsPage = Model.Root().Children.FirstOrDefault(x => x.Name == "Clubs");
-                            bool isContactOrClubsActive = (contactPage != null && contactPage.IsAncestorOrSelf(Model)) || 
-                                                         (clubsPage != null && clubsPage.IsAncestorOrSelf(Model));
+                            var clubsPage = Model.Root().Children.FirstOrDefault(x => x.ContentType.Alias == "clubsPage");
+                            var regionalPages = Model.Root().Children.Where(x => x.ContentType.Alias == "regionalPage").ToList();
+                            bool isContactOrClubsActive = (contactPage != null && contactPage.IsAncestorOrSelf(Model)) ||
+                                                         (clubsPage != null && clubsPage.IsAncestorOrSelf(Model)) ||
+                                                         regionalPages.Any(r => r.IsAncestorOrSelf(Model));
                         }
-                        <li class="nav-item dropdown">
-                            <a class="nav-link dropdown-toggle @(isContactOrClubsActive ? "active" : "")" href="#" role="button" data-bs-toggle="dropdown">
-                                Kontakt
-                            </a>
-                            <ul class="dropdown-menu">
-                                @if (clubsPage != null)
-                                {
-                                    <li><a class="dropdown-item" href="@clubsPage.Url()">Klubbar</a></li>
-                                }
-                                @if (contactPage != null)
-                                {
-                                    <li><a class="dropdown-item" href="@contactPage.Url()">HPSK</a></li>
-                                }
-                            </ul>
-                        </li>
+                        @if (regionalPages.Any())
+                        {
+                            <!-- Regional Navigation Dropdown (when regional structure exists) -->
+                            <li class="nav-item dropdown">
+                                <a class="nav-link dropdown-toggle @(isContactOrClubsActive ? "active" : "")" href="#" role="button" data-bs-toggle="dropdown">
+                                    Kretsar
+                                </a>
+                                <ul class="dropdown-menu dropdown-menu-regions">
+                                    @if (clubsPage != null)
+                                    {
+                                        <li><a class="dropdown-item" href="@clubsPage.Url()"><i class="bi bi-list-ul me-2"></i>Alla klubbar</a></li>
+                                        <li><hr class="dropdown-divider"></li>
+                                    }
+                                    @foreach (var region in regionalPages.OrderBy(r => r.Value<string>("regionName") ?? r.Name, StringComparer.Create(new CultureInfo("sv-SE"), false)))
+                                    {
+                                        var regionName = region.Value<string>("regionName") ?? region.Name;
+                                        var isCurrentRegion = region.IsAncestorOrSelf(Model);
+                                        <li><a class="dropdown-item @(isCurrentRegion ? "active" : "")" href="@region.Url()">@regionName</a></li>
+                                    }
+                                    @if (contactPage != null)
+                                    {
+                                        <li><hr class="dropdown-divider"></li>
+                                        <li><a class="dropdown-item" href="@contactPage.Url()"><i class="bi bi-envelope me-2"></i>Kontakta oss</a></li>
+                                    }
+                                </ul>
+                            </li>
+                        }
+                        else
+                        {
+                            <!-- Original Contact Dropdown (when no regional structure) -->
+                            <li class="nav-item dropdown">
+                                <a class="nav-link dropdown-toggle @(isContactOrClubsActive ? "active" : "")" href="#" role="button" data-bs-toggle="dropdown">
+                                    Kontakt
+                                </a>
+                                <ul class="dropdown-menu">
+                                    @if (clubsPage != null)
+                                    {
+                                        <li><a class="dropdown-item" href="@clubsPage.Url()">Klubbar</a></li>
+                                    }
+                                    @if (contactPage != null)
+                                    {
+                                        <li><a class="dropdown-item" href="@contactPage.Url()">HPSK</a></li>
+                                    }
+                                </ul>
+                            </li>
+                        }
                     </ul>
 
                     <!-- Bug Report Button -->

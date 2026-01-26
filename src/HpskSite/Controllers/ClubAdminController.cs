@@ -1283,18 +1283,31 @@ namespace HpskSite.Controllers
                 if (UmbracoContext.Content == null)
                     return clubs;
 
-                // Get the clubs hub page (clubsPage)
                 var root = UmbracoContext.Content.GetAtRoot().FirstOrDefault();
                 if (root == null)
                     return clubs;
 
-                // Find clubsPage - it should be a direct child of root
-                var clubsHub = root.Children().FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
-                if (clubsHub == null)
-                    return clubs;
+                var clubNodes = new List<Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent>();
 
-                // Get all club nodes (children of clubsPage)
-                var clubNodes = clubsHub.Children().Where(c => c.ContentType.Alias == "club").ToList();
+                // NEW STRUCTURE: Find clubs under regional pages (Home → RegionalPage → clubsPage → clubs)
+                var regionalPages = root.Children().Where(c => c.ContentType.Alias == "regionalPage").ToList();
+                foreach (var regionalPage in regionalPages)
+                {
+                    var regionalClubsPage = regionalPage.Children().FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+                    if (regionalClubsPage != null)
+                    {
+                        var regionalClubs = regionalClubsPage.Children().Where(c => c.ContentType.Alias == "club");
+                        clubNodes.AddRange(regionalClubs);
+                    }
+                }
+
+                // BACKWARDS COMPATIBILITY: Also check for clubs under root-level clubsPage
+                var rootClubsHub = root.Children().FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+                if (rootClubsHub != null)
+                {
+                    var rootClubs = rootClubsHub.Children().Where(c => c.ContentType.Alias == "club");
+                    clubNodes.AddRange(rootClubs);
+                }
 
                 // Convert club nodes to ClubViewModels (NO member counting - too slow with 500+ clubs)
                 foreach (var clubNode in clubNodes)
@@ -1391,6 +1404,748 @@ namespace HpskSite.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error fixing club name properties");
+                return Json(new { success = false, message = "Error: " + ex.Message });
+            }
+        }
+
+        #endregion
+
+        #region Regional Management
+
+        /// <summary>
+        /// Gets all regions with basic info for the admin table
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetRegions()
+        {
+            if (!await _authService.IsCurrentUserAdminAsync())
+            {
+                return Json(new { success = false, message = "Access denied" });
+            }
+
+            try
+            {
+                var regions = new List<object>();
+
+                if (UmbracoContext.Content == null)
+                {
+                    return Json(new { success = false, message = "Content context not available" });
+                }
+
+                var root = UmbracoContext.Content.GetAtRoot().FirstOrDefault();
+                if (root == null)
+                {
+                    return Json(new { success = false, message = "Root content not found" });
+                }
+
+                // Find all regional pages
+                var regionalPages = root.Children()
+                    .Where(c => c.ContentType.Alias == "regionalPage")
+                    .ToList();
+
+                foreach (var regionalPage in regionalPages)
+                {
+                    var regionCode = regionalPage.Value<string>("regionCode") ?? "";
+                    var regionName = regionalPage.Value<string>("regionName") ?? regionalPage.Name ?? "";
+                    var contactPerson = regionalPage.Value<string>("contactPerson") ?? "";
+                    var contactEmail = regionalPage.Value<string>("contactEmail") ?? "";
+
+                    // Count clubs in this region
+                    var clubsPage = regionalPage.Children().FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+                    var clubCount = clubsPage?.Children().Count(c => c.ContentType.Alias == "club") ?? 0;
+
+                    regions.Add(new
+                    {
+                        regionCode = regionCode,
+                        regionName = regionName,
+                        contactPerson = contactPerson,
+                        contactEmail = contactEmail,
+                        clubCount = clubCount,
+                        pageId = regionalPage.Id
+                    });
+                }
+
+                // Sort by Swedish alphabetical order
+                var sortedRegions = regions
+                    .Cast<dynamic>()
+                    .OrderBy(r => (string)r.regionName, StringComparer.Create(new System.Globalization.CultureInfo("sv-SE"), false))
+                    .ToList();
+
+                return Json(new { success = true, data = sortedRegions });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error loading regions");
+                return Json(new { success = false, message = "Error loading regions: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Gets full regional page data for editing
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetRegion(string regionCode)
+        {
+            if (!await _authService.IsCurrentUserAdminAsync())
+            {
+                return Json(new { success = false, message = "Access denied" });
+            }
+
+            try
+            {
+                if (string.IsNullOrEmpty(regionCode))
+                {
+                    return Json(new { success = false, message = "Region code is required" });
+                }
+
+                if (UmbracoContext.Content == null)
+                {
+                    return Json(new { success = false, message = "Content context not available" });
+                }
+
+                var root = UmbracoContext.Content.GetAtRoot().FirstOrDefault();
+                if (root == null)
+                {
+                    return Json(new { success = false, message = "Root content not found" });
+                }
+
+                // Find the regional page
+                var regionalPage = root.Children()
+                    .FirstOrDefault(c => c.ContentType.Alias == "regionalPage" &&
+                                        (c.Value<string>("regionCode") ?? "").Equals(regionCode, StringComparison.OrdinalIgnoreCase));
+
+                if (regionalPage == null)
+                {
+                    return Json(new { success = false, message = "Region not found" });
+                }
+
+                var regionData = new
+                {
+                    regionCode = regionalPage.Value<string>("regionCode") ?? "",
+                    regionName = regionalPage.Value<string>("regionName") ?? regionalPage.Name ?? "",
+                    welcomeTitle = regionalPage.Value<string>("welcomeTitle") ?? "",
+                    welcomeText = regionalPage.Value<string>("welcomeText") ?? "",
+                    contactPerson = regionalPage.Value<string>("contactPerson") ?? "",
+                    contactEmail = regionalPage.Value<string>("contactEmail") ?? "",
+                    contactPhone = regionalPage.Value<string>("contactPhone") ?? "",
+                    pageId = regionalPage.Id
+                };
+
+                return Json(new { success = true, data = regionData });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error loading region {RegionCode}", regionCode);
+                return Json(new { success = false, message = "Error loading region: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Saves regional page changes
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveRegion(
+            string regionCode,
+            string regionName,
+            string welcomeTitle,
+            string welcomeText,
+            string contactPerson,
+            string contactEmail,
+            string contactPhone)
+        {
+            if (!await _authService.IsCurrentUserAdminAsync())
+            {
+                return Json(new { success = false, message = "Access denied" });
+            }
+
+            try
+            {
+                if (string.IsNullOrEmpty(regionCode))
+                {
+                    return Json(new { success = false, message = "Region code is required" });
+                }
+
+                // Find the regional page using content service
+                var rootContent = _contentService.GetRootContent().FirstOrDefault();
+                if (rootContent == null)
+                {
+                    return Json(new { success = false, message = "Root content not found" });
+                }
+
+                var rootChildren = _contentService.GetPagedChildren(rootContent.Id, 0, int.MaxValue, out _);
+                var regionalPage = rootChildren.FirstOrDefault(c =>
+                    c.ContentType.Alias == "regionalPage" &&
+                    (c.GetValue<string>("regionCode") ?? "").Equals(regionCode, StringComparison.OrdinalIgnoreCase));
+
+                if (regionalPage == null)
+                {
+                    return Json(new { success = false, message = "Region not found" });
+                }
+
+                // Update the regional page properties
+                regionalPage.SetValue("regionName", regionName ?? "");
+                regionalPage.SetValue("welcomeTitle", welcomeTitle ?? "");
+                regionalPage.SetValue("welcomeText", welcomeText ?? "");
+                regionalPage.SetValue("contactPerson", contactPerson ?? "");
+                regionalPage.SetValue("contactEmail", contactEmail ?? "");
+                regionalPage.SetValue("contactPhone", contactPhone ?? "");
+
+                _contentService.Save(regionalPage);
+                _contentService.Publish(regionalPage, Array.Empty<string>());
+
+                _logger.LogInformation("Updated regional page {RegionCode}", regionCode);
+
+                return Json(new { success = true, message = "Region updated successfully" });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error saving region {RegionCode}", regionCode);
+                return Json(new { success = false, message = "Error saving region: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Gets current regional admins for a specific region
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetRegionalAdmins(string regionCode)
+        {
+            if (!await _authService.IsCurrentUserAdminAsync())
+            {
+                return Json(new { success = false, message = "Access denied" });
+            }
+
+            try
+            {
+                if (string.IsNullOrEmpty(regionCode))
+                {
+                    return Json(new { success = false, message = "Region code is required" });
+                }
+
+                var groupName = $"RegionalAdmin_{regionCode}";
+                var allMembers = _memberService.GetAll(0, int.MaxValue, out var totalRecords);
+
+                var regionalAdmins = allMembers
+                    .Where(m => m.ContentType.Alias != ClubMemberTypeAlias)
+                    .Where(m => _memberService.GetAllRoles(m.Id).Contains(groupName))
+                    .Select(m => new
+                    {
+                        id = m.Id,
+                        name = $"{m.GetValue("firstName")} {m.GetValue("lastName")}".Trim(),
+                        email = m.Email
+                    })
+                    .ToList();
+
+                return Json(new { success = true, admins = regionalAdmins });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error loading regional admins for {RegionCode}", regionCode);
+                return Json(new { success = false, message = "Error loading regional admins: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Gets available members for regional admin assignment (excluding existing regional admins)
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetAvailableMembersForRegionalAdmin(string regionCode)
+        {
+            if (!await _authService.IsCurrentUserAdminAsync())
+            {
+                return Json(new { success = false, message = "Access denied" });
+            }
+
+            try
+            {
+                if (string.IsNullOrEmpty(regionCode))
+                {
+                    return Json(new { success = false, message = "Region code is required" });
+                }
+
+                var groupName = $"RegionalAdmin_{regionCode}";
+                var allMembers = _memberService.GetAll(0, int.MaxValue, out var totalRecords);
+
+                var availableMembers = allMembers
+                    .Where(m => m.ContentType.Alias != ClubMemberTypeAlias)
+                    .Where(m => !_memberService.GetAllRoles(m.Id).Contains(groupName))
+                    .Where(m => m.IsApproved)
+                    .Select(m => new
+                    {
+                        id = m.Id,
+                        name = $"{m.GetValue("firstName")} {m.GetValue("lastName")}".Trim(),
+                        email = m.Email
+                    })
+                    .OrderBy(m => m.name)
+                    .ToList();
+
+                return Json(new { success = true, members = availableMembers });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error loading available members for regional admin {RegionCode}", regionCode);
+                return Json(new { success = false, message = "Error loading available members: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Assigns regional admin role to a member
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> AssignRegionalAdmin(int memberId, string regionCode)
+        {
+            if (!await _authService.IsCurrentUserAdminAsync())
+            {
+                return Json(new { success = false, message = "Access denied" });
+            }
+
+            try
+            {
+                if (string.IsNullOrEmpty(regionCode))
+                {
+                    return Json(new { success = false, message = "Region code is required" });
+                }
+
+                var member = _memberService.GetById(memberId);
+                if (member == null)
+                {
+                    return Json(new { success = false, message = "Member not found" });
+                }
+
+                // Ensure regional admin group exists
+                await _authService.EnsureRegionalAdminGroup(regionCode);
+
+                // Assign regional admin role
+                var groupName = $"RegionalAdmin_{regionCode}";
+                _memberService.AssignRole(member.Id, groupName);
+
+                var memberName = $"{member.GetValue("firstName")} {member.GetValue("lastName")}".Trim();
+                _logger.LogInformation("Assigned {MemberName} as regional admin for {RegionCode}", memberName, regionCode);
+
+                return Json(new { success = true, message = $"Member assigned as regional admin for {regionCode}" });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error assigning regional admin for {RegionCode}", regionCode);
+                return Json(new { success = false, message = "Error assigning regional admin: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Removes regional admin role from a member
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> RemoveRegionalAdmin(int memberId, string regionCode)
+        {
+            if (!await _authService.IsCurrentUserAdminAsync())
+            {
+                return Json(new { success = false, message = "Access denied" });
+            }
+
+            try
+            {
+                if (string.IsNullOrEmpty(regionCode))
+                {
+                    return Json(new { success = false, message = "Region code is required" });
+                }
+
+                var member = _memberService.GetById(memberId);
+                if (member == null)
+                {
+                    return Json(new { success = false, message = "Member not found" });
+                }
+
+                var groupName = $"RegionalAdmin_{regionCode}";
+                var currentRoles = _memberService.GetAllRoles(member.Id);
+
+                if (currentRoles.Contains(groupName))
+                {
+                    _memberService.DissociateRole(member.Id, groupName);
+
+                    var memberName = $"{member.GetValue("firstName")} {member.GetValue("lastName")}".Trim();
+                    _logger.LogInformation("Removed {MemberName} as regional admin for {RegionCode}", memberName, regionCode);
+
+                    return Json(new { success = true, message = "Regional admin role removed" });
+                }
+
+                return Json(new { success = true, message = "Member was not a regional admin" });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error removing regional admin for {RegionCode}", regionCode);
+                return Json(new { success = false, message = "Error removing regional admin: " + ex.Message });
+            }
+        }
+
+        #endregion
+
+        #region Regional Structure Migration
+
+        /// <summary>
+        /// MIGRATION ENDPOINT: Creates regional structure and moves clubs
+        /// Creates 26 regional pages under Home, each with a clubsPage child
+        /// Moves existing clubs to their regional clubsPage based on regionalFederation property
+        /// Creates RegionalAdmin_{regionCode} member groups for each region
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> MigrateClubsToRegionalStructure(bool dryRun = true)
+        {
+            if (!await _authService.IsCurrentUserAdminAsync())
+            {
+                return Json(new { success = false, message = "Access denied. Only site administrators can run this migration." });
+            }
+
+            try
+            {
+                var results = new List<string>();
+                var errors = new List<string>();
+
+                // Get root content node
+                var rootContent = _contentService.GetRootContent().FirstOrDefault();
+                if (rootContent == null)
+                {
+                    return Json(new { success = false, message = "Root content not found" });
+                }
+
+                _logger.LogInformation("Starting regional structure migration (DryRun: {DryRun})", dryRun);
+                results.Add($"Migration started (DryRun: {dryRun})");
+
+                // Get existing clubsPage at root level
+                var rootChildren = _contentService.GetPagedChildren(rootContent.Id, 0, int.MaxValue, out _);
+                var existingClubsPage = rootChildren.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+
+                List<Umbraco.Cms.Core.Models.IContent> existingClubs = new();
+                if (existingClubsPage != null)
+                {
+                    existingClubs = _contentService.GetPagedChildren(existingClubsPage.Id, 0, int.MaxValue, out _)
+                        .Where(c => c.ContentType.Alias == "club")
+                        .ToList();
+                    results.Add($"Found {existingClubs.Count} existing clubs to migrate");
+                }
+                else
+                {
+                    results.Add("No existing clubsPage found at root level - will create regional structure from scratch");
+                }
+
+                // Get all regional federations from enum
+                var regionalFederations = Enum.GetValues(typeof(HpskSite.Models.Federations.RegionalFederations))
+                    .Cast<HpskSite.Models.Federations.RegionalFederations>()
+                    .ToList();
+
+                results.Add($"Creating structure for {regionalFederations.Count} regions");
+
+                var createdRegions = new List<string>();
+                var movedClubs = new Dictionary<string, List<string>>();
+
+                foreach (var federation in regionalFederations)
+                {
+                    var regionCode = federation.ToString();
+                    var regionDescription = federation.GetDescription();
+
+                    try
+                    {
+                        if (!dryRun)
+                        {
+                            // 1. Create regional page - use regionCode as node name for clean URLs
+                            var regionalPage = _contentService.Create(
+                                regionCode, // Node name (e.g., "Halland" for URL /halland/)
+                                rootContent.Id,
+                                "regionalPage"
+                            );
+
+                            regionalPage.SetValue("regionCode", regionCode);
+                            regionalPage.SetValue("regionName", regionDescription);
+                            regionalPage.SetValue("welcomeTitle", $"Välkommen till {regionDescription}");
+                            regionalPage.SetValue("welcomeText", $"<p>Vi hälsar dig välkommen till {regionDescription}. Här hittar du information om våra klubbar och aktiviteter.</p>");
+
+                            _contentService.Save(regionalPage);
+                            _contentService.Publish(regionalPage, Array.Empty<string>());
+
+                            // 2. Create clubsPage under regional page
+                            var clubsPage = _contentService.Create(
+                                "Klubbar",
+                                regionalPage.Id,
+                                "clubsPage"
+                            );
+
+                            clubsPage.SetValue("regionCode", regionCode);
+                            _contentService.Save(clubsPage);
+                            _contentService.Publish(clubsPage, Array.Empty<string>());
+
+                            // 3. Create RegionalAdmin group
+                            await _authService.EnsureRegionalAdminGroup(regionCode);
+
+                            // 4. Move clubs that belong to this region
+                            var clubsForRegion = existingClubs.Where(c =>
+                            {
+                                var clubRegion = c.GetValue<string>("regionalFederation") ?? "";
+                                return clubRegion.Equals(regionCode, StringComparison.OrdinalIgnoreCase);
+                            }).ToList();
+
+                            movedClubs[regionCode] = new List<string>();
+
+                            foreach (var club in clubsForRegion)
+                            {
+                                var clubName = club.GetValue<string>("clubName") ?? club.Name ?? "";
+                                _contentService.Move(club, clubsPage.Id);
+                                movedClubs[regionCode].Add(clubName);
+                            }
+
+                            createdRegions.Add(regionCode);
+                            results.Add($"Created {regionCode}: {regionDescription} with {clubsForRegion.Count} clubs");
+                        }
+                        else
+                        {
+                            // Dry run - just count and log
+                            var clubsForRegion = existingClubs.Where(c =>
+                            {
+                                var clubRegion = c.GetValue<string>("regionalFederation") ?? "";
+                                return clubRegion.Equals(regionCode, StringComparison.OrdinalIgnoreCase);
+                            }).ToList();
+
+                            movedClubs[regionCode] = clubsForRegion.Select(c => c.GetValue<string>("clubName") ?? c.Name ?? "").ToList();
+                            results.Add($"[DryRun] Would create {regionCode}: {regionDescription} with {clubsForRegion.Count} clubs");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        errors.Add($"Error processing region {regionCode}: {ex.Message}");
+                        _logger.LogError(ex, "Error creating regional structure for {RegionCode}", regionCode);
+                    }
+                }
+
+                // Count clubs without a region
+                var clubsWithoutRegion = existingClubs.Where(c =>
+                {
+                    var clubRegion = c.GetValue<string>("regionalFederation") ?? "";
+                    return string.IsNullOrEmpty(clubRegion);
+                }).ToList();
+
+                if (clubsWithoutRegion.Any())
+                {
+                    var clubNames = clubsWithoutRegion.Select(c => c.GetValue<string>("clubName") ?? c.Name ?? "").ToList();
+                    results.Add($"WARNING: {clubsWithoutRegion.Count} clubs have no regionalFederation set: {string.Join(", ", clubNames.Take(10))}{(clubNames.Count > 10 ? "..." : "")}");
+                }
+
+                if (!dryRun && existingClubsPage != null && existingClubs.All(c =>
+                {
+                    var clubRegion = c.GetValue<string>("regionalFederation") ?? "";
+                    return !string.IsNullOrEmpty(clubRegion);
+                }))
+                {
+                    // All clubs have been moved - unpublish the old clubsPage
+                    _contentService.Unpublish(existingClubsPage);
+                    results.Add("Unpublished old root-level clubsPage (all clubs have been moved)");
+                }
+
+                _logger.LogInformation("Regional structure migration completed. Created {RegionCount} regions, processed {ClubCount} clubs",
+                    createdRegions.Count, existingClubs.Count);
+
+                return Json(new
+                {
+                    success = true,
+                    dryRun = dryRun,
+                    message = dryRun
+                        ? $"Dry run completed. Would create {regionalFederations.Count} regions and move {existingClubs.Count} clubs."
+                        : $"Migration completed. Created {createdRegions.Count} regions and moved clubs.",
+                    results = results,
+                    errors = errors,
+                    clubsByRegion = movedClubs,
+                    clubsWithoutRegion = clubsWithoutRegion.Select(c => new
+                    {
+                        id = c.Id,
+                        name = c.GetValue<string>("clubName") ?? c.Name ?? ""
+                    }).ToList()
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during regional structure migration");
+                return Json(new { success = false, message = "Migration failed: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Fix regional page names - renames pages from description to enum code for clean URLs
+        /// Example: "Hallands Pistolskyttekrets" -> "Halland" (URL: /halland/)
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> FixRegionalPageNames()
+        {
+            if (!await _authService.IsCurrentUserAdminAsync())
+            {
+                return Json(new { success = false, message = "Access denied" });
+            }
+
+            try
+            {
+                var results = new List<string>();
+
+                // Get root content node
+                var rootContent = _contentService.GetRootContent().FirstOrDefault();
+                if (rootContent == null)
+                {
+                    return Json(new { success = false, message = "Root content not found" });
+                }
+
+                // Get existing regional pages
+                var rootChildren = _contentService.GetPagedChildren(rootContent.Id, 0, int.MaxValue, out _);
+                var existingRegionalPages = rootChildren.Where(c => c.ContentType.Alias == "regionalPage").ToList();
+
+                if (!existingRegionalPages.Any())
+                {
+                    return Json(new { success = false, message = "No regional pages found to fix" });
+                }
+
+                // Build lookup from description to code
+                var descriptionToCode = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var federation in Enum.GetValues(typeof(HpskSite.Models.Federations.RegionalFederations))
+                    .Cast<HpskSite.Models.Federations.RegionalFederations>())
+                {
+                    var code = federation.ToString();
+                    var description = federation.GetDescription();
+                    descriptionToCode[description] = code;
+                    // Also add the code itself in case it's already partially fixed
+                    descriptionToCode[code] = code;
+                }
+
+                int fixedCount = 0;
+                foreach (var page in existingRegionalPages)
+                {
+                    var currentName = page.Name ?? "";
+                    var regionCode = page.GetValue<string>("regionCode") ?? "";
+
+                    // Determine what the name should be
+                    string correctName = regionCode;
+                    if (string.IsNullOrEmpty(correctName) && descriptionToCode.ContainsKey(currentName))
+                    {
+                        correctName = descriptionToCode[currentName];
+                    }
+
+                    if (string.IsNullOrEmpty(correctName))
+                    {
+                        results.Add($"SKIP: Could not determine correct name for '{currentName}'");
+                        continue;
+                    }
+
+                    if (currentName.Equals(correctName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        results.Add($"OK: '{currentName}' already has correct name");
+                        continue;
+                    }
+
+                    // Rename the page
+                    page.Name = correctName;
+                    _contentService.Save(page);
+                    _contentService.Publish(page, Array.Empty<string>());
+
+                    results.Add($"FIXED: '{currentName}' -> '{correctName}'");
+                    fixedCount++;
+                }
+
+                _logger.LogInformation("Fixed {FixedCount} regional page names", fixedCount);
+
+                return Json(new
+                {
+                    success = true,
+                    message = $"Fixed {fixedCount} regional page names",
+                    fixedCount = fixedCount,
+                    totalPages = existingRegionalPages.Count,
+                    results = results
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error fixing regional page names");
+                return Json(new { success = false, message = "Error: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Preview migration - shows what would be created/moved without making changes
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> PreviewRegionalMigration()
+        {
+            if (!await _authService.IsCurrentUserAdminAsync())
+            {
+                return Json(new { success = false, message = "Access denied" });
+            }
+
+            try
+            {
+                // Get root content node
+                var rootContent = _contentService.GetRootContent().FirstOrDefault();
+                if (rootContent == null)
+                {
+                    return Json(new { success = false, message = "Root content not found" });
+                }
+
+                // Get existing clubsPage at root level
+                var rootChildren = _contentService.GetPagedChildren(rootContent.Id, 0, int.MaxValue, out _);
+                var existingClubsPage = rootChildren.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+
+                List<Umbraco.Cms.Core.Models.IContent> existingClubs = new();
+                if (existingClubsPage != null)
+                {
+                    existingClubs = _contentService.GetPagedChildren(existingClubsPage.Id, 0, int.MaxValue, out _)
+                        .Where(c => c.ContentType.Alias == "club")
+                        .ToList();
+                }
+
+                // Check if regional structure already exists
+                var existingRegionalPages = rootChildren.Where(c => c.ContentType.Alias == "regionalPage").ToList();
+
+                // Group clubs by region - use object list for JSON serialization
+                var clubsByRegion = existingClubs
+                    .GroupBy(c => c.GetValue<string>("regionalFederation") ?? "")
+                    .ToDictionary(
+                        g => g.Key,
+                        g => g.Select(c => (object)new
+                        {
+                            id = c.Id,
+                            name = c.GetValue<string>("clubName") ?? c.Name ?? ""
+                        }).ToList()
+                    );
+
+                // Get all regional federations from enum
+                var regionalFederations = Enum.GetValues(typeof(HpskSite.Models.Federations.RegionalFederations))
+                    .Cast<HpskSite.Models.Federations.RegionalFederations>()
+                    .Select(f => new
+                    {
+                        code = f.ToString(),
+                        name = f.GetDescription(),
+                        clubCount = clubsByRegion.ContainsKey(f.ToString()) ? clubsByRegion[f.ToString()].Count : 0
+                    })
+                    .OrderBy(r => r.name)
+                    .ToList();
+
+                // Get clubs without region
+                var clubsWithoutRegion = clubsByRegion.ContainsKey("")
+                    ? clubsByRegion[""]
+                    : new List<object>();
+
+                return Json(new
+                {
+                    success = true,
+                    existingClubsPageExists = existingClubsPage != null,
+                    existingClubsCount = existingClubs.Count,
+                    existingRegionalPagesCount = existingRegionalPages.Count,
+                    existingRegionalPages = existingRegionalPages.Select(r => r.Name).ToList(),
+                    regionalFederations = regionalFederations,
+                    clubsByRegion = clubsByRegion,
+                    clubsWithoutRegion = clubsWithoutRegion,
+                    canMigrate = existingRegionalPages.Count == 0 // Only migrate if no regional pages exist yet
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error previewing regional migration");
                 return Json(new { success = false, message = "Error: " + ex.Message });
             }
         }
