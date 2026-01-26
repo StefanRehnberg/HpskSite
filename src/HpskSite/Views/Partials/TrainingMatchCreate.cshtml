@@ -216,8 +216,10 @@
 </div>
 
 <script>
-// Store loaded clubs for team affiliation
-let availableClubs = [];
+// Store loaded clubs for team affiliation (check if already declared by another partial)
+if (typeof availableClubs === 'undefined') {
+    var availableClubs = [];
+}
 
 // Initialize Flatpickr for start date
 document.addEventListener('DOMContentLoaded', async function() {
@@ -287,7 +289,7 @@ function updateTeamInputs() {
             <div class="row g-2">
                 <div class="col-7">
                     <input type="text" class="form-control team-name-input" id="teamName${i}"
-                           placeholder="Lagnamn" required>
+                           placeholder="Lagnamn">
                 </div>
                 <div class="col-5">
                     <select class="form-select team-club-select" id="teamClub${i}">
@@ -333,6 +335,7 @@ function getTeamDefinitions() {
 
 function handleCreateMatch(e) {
     e.preventDefault();
+    console.log('handleCreateMatch called');
 
     const matchName = document.getElementById('createMatchName').value.trim();
     const weaponClass = document.getElementById('createWeaponClass').value;

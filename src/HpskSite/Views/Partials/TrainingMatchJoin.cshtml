@@ -115,9 +115,12 @@
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 
 <script>
-let qrScannerModal = null;
-let html5QrCode = null;
-let availableClubs = [];
+var qrScannerModal = null;
+var html5QrCode = null;
+// Use existing availableClubs if already declared by another partial
+if (typeof availableClubs === 'undefined') {
+    var availableClubs = [];
+}
 
 // Load clubs for team creation
 async function loadClubsForJoin() {

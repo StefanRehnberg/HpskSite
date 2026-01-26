@@ -614,7 +614,9 @@
         let pendingCreateMatchData = null;
 
         function createMatch(matchName, weaponClass, startDate, isOpen = true, hasHandicap = false, isTeamMatch = false, maxShootersPerTeam = null, teams = null) {
+            console.log('createMatch called:', { matchName, weaponClass, startDate, isOpen, hasHandicap, isTeamMatch, maxShootersPerTeam, teams });
             const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value;
+            console.log('Token:', token ? 'present' : 'MISSING');
 
             const requestBody = {
                 matchName: matchName,
@@ -632,6 +634,7 @@
                 }
             }
 
+            console.log('Sending request to CreateMatch...');
             fetch('/umbraco/surface/TrainingMatch/CreateMatch', {
                 method: 'POST',
                 headers: {
@@ -640,8 +643,12 @@
                 },
                 body: JSON.stringify(requestBody)
             })
-            .then(response => response.json())
+            .then(response => {
+                console.log('Response status:', response.status);
+                return response.json();
+            })
             .then(result => {
+                console.log('CreateMatch result:', result);
                 if (result.success) {
                     loadMatch(result.matchCode);
                 } else if (result.needsShooterClass) {
@@ -1056,15 +1063,15 @@
                 headerRow.appendChild(th);
             });
 
-            // Find max series to display (limited by maxSeriesCount from match settings)
+            // Find max series to display (show ALL series in history view)
             let maxSeries = 0;
             match.participants.forEach(p => {
                 if (p.scores && p.scores.length > maxSeries) {
                     maxSeries = p.scores.length;
                 }
             });
-            // Limit to maxSeriesCount from match settings
-            maxSeries = Math.min(maxSeries, maxSeriesCount);
+            // Note: Don't limit maxSeries here - show all series in history view
+            // The maxSeriesCount is only used for equalized ranking calculation above
 
             // Build score rows
             const tbody = document.getElementById('historyScoreboardBody');

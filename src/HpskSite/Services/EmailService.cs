@@ -231,6 +231,124 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// Send confirmation email to admin when an invitation is sent to a member
+        /// Notifies both the sending admin and the general admin email
+        /// </summary>
+        public async Task SendInvitationConfirmationAsync(
+            string recipientEmail,
+            string senderName,
+            string memberName,
+            string memberEmail,
+            string clubName,
+            bool wasSuccessful,
+            string? failureReason = null)
+        {
+            var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm");
+
+            string subject;
+            string statusColor;
+            string statusIcon;
+            string statusText;
+            string additionalInfo;
+
+            if (wasSuccessful)
+            {
+                subject = $"Inbjudan skickad till {memberName}";
+                statusColor = "#28a745";
+                statusIcon = "&#10003;";
+                statusText = "Inbjudan skickad";
+                additionalInfo = @"
+                    <div style='background-color: #d4edda; border-left: 4px solid #28a745; padding: 15px; margin: 20px 0;'>
+                        <p style='margin: 0; color: #155724;'><strong>Inbjudan skickad!</strong></p>
+                        <p style='margin: 10px 0 0 0; color: #155724;'>
+                            Medlemmen har f&aring;tt ett e-postmeddelande med en l&auml;nk f&ouml;r att s&auml;tta sitt l&ouml;senord.
+                            L&auml;nken &auml;r giltig i 7 dagar.
+                        </p>
+                    </div>";
+            }
+            else
+            {
+                subject = $"Inbjudan till {memberName} misslyckades";
+                statusColor = "#dc3545";
+                statusIcon = "&#10007;";
+                statusText = "Inbjudan misslyckades";
+                var escapedReason = System.Net.WebUtility.HtmlEncode(failureReason ?? "Ok&auml;nt fel");
+                additionalInfo = $@"
+                    <div style='background-color: #f8d7da; border-left: 4px solid #dc3545; padding: 15px; margin: 20px 0;'>
+                        <p style='margin: 0; color: #721c24;'><strong>Inbjudan kunde inte skickas</strong></p>
+                        <p style='margin: 10px 0 0 0; color: #721c24;'>
+                            <strong>Orsak:</strong> {escapedReason}
+                        </p>
+                        <p style='margin: 10px 0 0 0; color: #721c24;'>
+                            F&ouml;rs&ouml;k igen eller kontakta webbansvarig om problemet kvarst&aring;r.
+                        </p>
+                    </div>";
+            }
+
+            var body = $@"
+<html>
+<head>
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ background-color: {statusColor}; color: white; padding: 20px; text-align: center; border-radius: 5px 5px 0 0; }}
+        .content {{ background-color: #f8f9fa; padding: 30px; border: 1px solid #dee2e6; }}
+        .info-box {{ background-color: white; padding: 20px; border-left: 4px solid #0d6efd; margin: 20px 0; }}
+        .info-item {{ margin: 10px 0; }}
+        .info-label {{ font-weight: bold; color: #495057; }}
+        .info-value {{ color: #212529; }}
+        .footer {{ margin-top: 20px; padding: 15px; background-color: #e9ecef; border-radius: 0 0 5px 5px; font-size: 12px; color: #6c757d; text-align: center; }}
+    </style>
+</head>
+<body>
+    <div class='container'>
+        <div class='header'>
+            <h2>{statusIcon} {statusText}</h2>
+        </div>
+        <div class='content'>
+            <p>Hej,</p>
+
+            <p>Detta &auml;r en bekr&auml;ftelse p&aring; att en inbjudan har {(wasSuccessful ? "skickats" : "f&ouml;rs&ouml;kt skickas")} till en medlem.</p>
+
+            <div class='info-box'>
+                <h4 style='margin-top: 0; color: #0d6efd;'>Medlemsinformation</h4>
+                <div class='info-item'>
+                    <span class='info-label'>Namn:</span>
+                    <span class='info-value'>{System.Net.WebUtility.HtmlEncode(memberName)}</span>
+                </div>
+                <div class='info-item'>
+                    <span class='info-label'>E-post:</span>
+                    <span class='info-value'>{System.Net.WebUtility.HtmlEncode(memberEmail)}</span>
+                </div>
+                <div class='info-item'>
+                    <span class='info-label'>Klubb:</span>
+                    <span class='info-value'>{System.Net.WebUtility.HtmlEncode(clubName)}</span>
+                </div>
+                <div class='info-item'>
+                    <span class='info-label'>Skickad av:</span>
+                    <span class='info-value'>{System.Net.WebUtility.HtmlEncode(senderName)}</span>
+                </div>
+                <div class='info-item'>
+                    <span class='info-label'>Tidpunkt:</span>
+                    <span class='info-value'>{timestamp}</span>
+                </div>
+            </div>
+
+            {additionalInfo}
+
+            <p>Med v&auml;nliga h&auml;lsningar,<br/>HPSK Team</p>
+        </div>
+        <div class='footer'>
+            <p>Detta &auml;r ett automatiskt meddelande fr&aring;n HPSK-webbplatsen.</p>
+        </div>
+    </div>
+</body>
+</html>";
+
+            await SendEmailAsync(recipientEmail, subject, body);
+        }
+
+        /// <summary>
         /// Send email notification about missing club request
         /// </summary>
         public async Task SendMissingClubRequestAsync(string clubName, string clubLocation, string contactPerson,

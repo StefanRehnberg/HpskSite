@@ -10,6 +10,8 @@ using Umbraco.Extensions;
 using HpskSite.Models.ViewModels;
 using HpskSite.Services;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.Configuration;
+using Umbraco.Cms.Core.Security;
 
 namespace HpskSite.Controllers
 {
@@ -25,6 +27,8 @@ namespace HpskSite.Controllers
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
         private readonly EmailService _emailService;
         private readonly IWebHostEnvironment _webHostEnvironment;
+        private readonly IMemberManager _memberManager;
+        private readonly string _adminEmail;
 
         private const string ClubMemberTypeAlias = "hpskClub";
 
@@ -39,7 +43,9 @@ namespace HpskSite.Controllers
             IMemberGroupService memberGroupService,
             AdminAuthorizationService authService,
             EmailService emailService,
-            IWebHostEnvironment webHostEnvironment)
+            IWebHostEnvironment webHostEnvironment,
+            IMemberManager memberManager,
+            IConfiguration configuration)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _memberService = memberService;
@@ -48,6 +54,8 @@ namespace HpskSite.Controllers
             _umbracoContextAccessor = umbracoContextAccessor;
             _emailService = emailService;
             _webHostEnvironment = webHostEnvironment;
+            _memberManager = memberManager;
+            _adminEmail = configuration["Email:AdminEmail"] ?? "";
         }
 
         /// <summary>
@@ -626,6 +634,7 @@ namespace HpskSite.Controllers
         /// <summary>
         /// Sends invitation email to a member to set their password
         /// Accessible by site admins or club admins for their club's members
+        /// Sends confirmation emails to the admin who sent the invitation and the general admin email
         /// </summary>
         [HttpPost]
         public async Task<IActionResult> SendInvitation(int memberId)
@@ -640,6 +649,34 @@ namespace HpskSite.Controllers
             {
                 Console.WriteLine($"[SendInvitation] Access denied for memberId: {memberId}");
                 return Json(new { success = false, message = "Access denied - you do not have permission to send invitation to this member" });
+            }
+
+            // Get current admin info early for confirmation emails
+            string? adminEmail = null;
+            string senderName = "Admin";
+            try
+            {
+                var currentMember = await _memberManager.GetCurrentMemberAsync();
+                if (currentMember != null)
+                {
+                    adminEmail = currentMember.Email;
+                    var currentMemberData = _memberService.GetByEmail(currentMember.Email);
+                    if (currentMemberData != null)
+                    {
+                        var firstName = currentMemberData.GetValue<string>("firstName") ?? "";
+                        var lastName = currentMemberData.GetValue<string>("lastName") ?? "";
+                        senderName = $"{firstName} {lastName}".Trim();
+                        if (string.IsNullOrEmpty(senderName))
+                        {
+                            senderName = currentMemberData.Name ?? "Admin";
+                        }
+                    }
+                }
+                Console.WriteLine($"[SendInvitation] Admin sending invitation: {senderName} ({adminEmail})");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[SendInvitation] Could not get current admin info: {ex.Message}");
             }
 
             try
@@ -661,34 +698,38 @@ namespace HpskSite.Controllers
                 _memberService.Save(member);
                 Console.WriteLine($"[SendInvitation] Invitation token generated and saved for: {memberId}");
 
-                // Send invitation email
-                try
+                // Get member name and club name for emails
+                var memberName = member.Name;
+                if (string.IsNullOrEmpty(memberName))
                 {
-                    var memberName = member.Name;
-                    if (string.IsNullOrEmpty(memberName))
-                    {
-                        var firstName = member.GetValue<string>("firstName") ?? "";
-                        var lastName = member.GetValue<string>("lastName") ?? "";
-                        memberName = $"{firstName} {lastName}".Trim();
-                        Console.WriteLine($"[SendInvitation] Using fallback name: '{memberName}'");
-                    }
+                    var firstName = member.GetValue<string>("firstName") ?? "";
+                    var lastName = member.GetValue<string>("lastName") ?? "";
+                    memberName = $"{firstName} {lastName}".Trim();
+                    Console.WriteLine($"[SendInvitation] Using fallback name: '{memberName}'");
+                }
 
-                    // Get primary club name
-                    string clubName = "HPSK";
-                    var primaryClubIdStr = member.GetValue("primaryClubId")?.ToString();
-                    if (!string.IsNullOrEmpty(primaryClubIdStr) && int.TryParse(primaryClubIdStr, out int primaryClubId))
+                // Get primary club name
+                string clubName = "HPSK";
+                var primaryClubIdStr = member.GetValue("primaryClubId")?.ToString();
+                if (!string.IsNullOrEmpty(primaryClubIdStr) && int.TryParse(primaryClubIdStr, out int primaryClubId))
+                {
+                    if (UmbracoContext?.Content != null)
                     {
-                        if (UmbracoContext?.Content != null)
+                        var clubNode = UmbracoContext.Content.GetById(primaryClubId);
+                        if (clubNode != null && clubNode.ContentType.Alias == "club")
                         {
-                            var clubNode = UmbracoContext.Content.GetById(primaryClubId);
-                            if (clubNode != null && clubNode.ContentType.Alias == "club")
-                            {
-                                clubName = clubNode.Value<string>("clubName") ?? clubNode.Name ?? "HPSK";
-                                Console.WriteLine($"[SendInvitation] Using club name: '{clubName}'");
-                            }
+                            clubName = clubNode.Value<string>("clubName") ?? clubNode.Name ?? "HPSK";
+                            Console.WriteLine($"[SendInvitation] Using club name: '{clubName}'");
                         }
                     }
+                }
 
+                // Send invitation email to member
+                bool invitationSuccess = false;
+                string? failureReason = null;
+
+                try
+                {
                     Console.WriteLine($"[SendInvitation] Sending invitation email to: {member.Email}");
                     await _emailService.SendMemberInvitationAsync(
                         member.Email,
@@ -696,17 +737,74 @@ namespace HpskSite.Controllers
                         invitationToken,
                         clubName
                     );
+                    invitationSuccess = true;
                     Console.WriteLine($"[SendInvitation] Invitation email sent successfully to: {member.Email}");
                 }
                 catch (Exception emailEx)
                 {
+                    invitationSuccess = false;
+                    failureReason = emailEx.Message;
                     Console.WriteLine($"[SendInvitation] Failed to send invitation email to {member.Email}: {emailEx.Message}");
                     Console.WriteLine($"[SendInvitation] Email exception stack trace: {emailEx.StackTrace}");
-                    return Json(new { success = false, message = "Failed to send invitation email: " + emailEx.Message });
                 }
 
-                Console.WriteLine($"[SendInvitation] Invitation sent successfully for: {memberId}");
-                return Json(new { success = true, message = "Invitation sent successfully" });
+                // Send confirmation email to the admin who sent the invitation
+                if (!string.IsNullOrEmpty(adminEmail))
+                {
+                    try
+                    {
+                        Console.WriteLine($"[SendInvitation] Sending confirmation email to admin: {adminEmail}");
+                        await _emailService.SendInvitationConfirmationAsync(
+                            adminEmail,
+                            senderName,
+                            memberName,
+                            member.Email,
+                            clubName,
+                            invitationSuccess,
+                            failureReason
+                        );
+                        Console.WriteLine($"[SendInvitation] Confirmation email sent to admin: {adminEmail}");
+                    }
+                    catch (Exception confirmEx)
+                    {
+                        Console.WriteLine($"[SendInvitation] Failed to send confirmation to admin {adminEmail}: {confirmEx.Message}");
+                    }
+                }
+
+                // Send confirmation email to general admin email (if different from sender)
+                if (!string.IsNullOrEmpty(_adminEmail) && !string.Equals(_adminEmail, adminEmail, StringComparison.OrdinalIgnoreCase))
+                {
+                    try
+                    {
+                        Console.WriteLine($"[SendInvitation] Sending confirmation email to general admin: {_adminEmail}");
+                        await _emailService.SendInvitationConfirmationAsync(
+                            _adminEmail,
+                            senderName,
+                            memberName,
+                            member.Email,
+                            clubName,
+                            invitationSuccess,
+                            failureReason
+                        );
+                        Console.WriteLine($"[SendInvitation] Confirmation email sent to general admin: {_adminEmail}");
+                    }
+                    catch (Exception confirmEx)
+                    {
+                        Console.WriteLine($"[SendInvitation] Failed to send confirmation to general admin {_adminEmail}: {confirmEx.Message}");
+                    }
+                }
+
+                // Return appropriate response based on invitation success
+                if (invitationSuccess)
+                {
+                    Console.WriteLine($"[SendInvitation] Invitation sent successfully for: {memberId}");
+                    return Json(new { success = true, message = "Invitation sent successfully" });
+                }
+                else
+                {
+                    Console.WriteLine($"[SendInvitation] Invitation failed for: {memberId}");
+                    return Json(new { success = false, message = "Failed to send invitation email: " + failureReason });
+                }
             }
             catch (Exception ex)
             {
