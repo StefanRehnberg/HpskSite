@@ -612,9 +612,12 @@
 </div>
 
 <script>
-// Club context - needed for competition wizard integration
-const clubId = @clubId;
-window.currentClubId = clubId;
+// Club context - clubId is declared by parent page (Club.cshtml) as const clubId
+// We only set window.currentClubId if it wasn't already set by the parent
+// DO NOT declare clubId here - it would conflict with parent's const declaration
+if (typeof window.currentClubId === 'undefined') {
+    window.currentClubId = @clubId;
+}
 
 // Global variables to store loaded data
 let allEvents = [];

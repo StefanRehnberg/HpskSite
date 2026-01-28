@@ -252,22 +252,53 @@ namespace HpskSite.Controllers
                         parentLookup.TryGetValue(comp.ParentId, out var parent);
                         var isInSeries = parent != null && parent.ContentType.Alias == "competitionSeries";
 
+                        // Get competition properties
+                        var isActive = comp.GetValue<bool>("isActive");
+                        var compDate = comp.GetValue<DateTime?>("competitionDate");
+
+                        // Calculate status: Draft, Scheduled, Active, Completed
+                        string status;
+                        if (!isActive)
+                        {
+                            status = "Draft";
+                        }
+                        else if (compDate.HasValue)
+                        {
+                            if (compDate.Value.Date > today)
+                            {
+                                status = "Scheduled";
+                            }
+                            else if (compDate.Value.Date >= today.AddDays(-7))
+                            {
+                                status = "Active";
+                            }
+                            else
+                            {
+                                status = "Completed";
+                            }
+                        }
+                        else
+                        {
+                            status = "Scheduled"; // Active but no date
+                        }
+
                         return new
                         {
                             id = comp.Id,
                             name = comp.Name,
                             description = comp.GetValue<string>("description") ?? "",
                             type = comp.GetValue<string>("competitionType") ?? "Unknown",
-                            startDate = comp.GetValue<DateTime?>("competitionDate"), // Use competitionDate property
+                            startDate = compDate,
                             registrationOpenDate = comp.GetValue<DateTime?>("registrationOpenDate"),
                             registrationCloseDate = comp.GetValue<DateTime?>("registrationCloseDate"),
-                            isActive = comp.GetValue<bool>("isActive"),
+                            isActive = isActive,
                             isClubOnly = comp.GetValue<bool>("isClubOnly"),
                             isExternal = comp.GetValue<bool>("isExternal"),
                             clubId = comp.GetValue<int?>("clubId") ?? 0,
                             registrationCount = registrationCounts.TryGetValue(comp.Id, out var count) ? count : 0,
                             seriesId = isInSeries ? parent!.Id : (int?)null,
-                            seriesName = isInSeries ? parent!.Name : null
+                            seriesName = isInSeries ? parent!.Name : null,
+                            status = status
                         };
                     })
                     .OrderByDescending(c => c.startDate ?? DateTime.MinValue)

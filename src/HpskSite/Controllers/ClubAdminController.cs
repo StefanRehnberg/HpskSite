@@ -1462,6 +1462,7 @@ namespace HpskSite.Controllers
 
         /// <summary>
         /// MIGRATION ENDPOINT: Fix all clubs to have clubName property set
+        /// Supports both regional structure and legacy root-level clubsPage
         /// </summary>
         [HttpGet]
         public IActionResult FixClubNameProperties()
@@ -1475,16 +1476,35 @@ namespace HpskSite.Controllers
                 }
 
                 var rootChildren = _contentService.GetPagedChildren(rootContent.Id, 0, int.MaxValue, out _);
-                var clubsHub = rootChildren.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+                var allClubs = new List<Umbraco.Cms.Core.Models.IContent>();
 
-                if (clubsHub == null)
+                // NEW STRUCTURE: Find clubs under regional pages (Home → RegionalPage → clubsPage → clubs)
+                var regionalPages = rootChildren.Where(c => c.ContentType.Alias == "regionalPage").ToList();
+                foreach (var regionalPage in regionalPages)
                 {
-                    return Json(new { success = false, message = "clubsPage not found" });
+                    var regionalChildren = _contentService.GetPagedChildren(regionalPage.Id, 0, int.MaxValue, out _);
+                    var regionalClubsPage = regionalChildren.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+                    if (regionalClubsPage != null)
+                    {
+                        var regionalClubs = _contentService.GetPagedChildren(regionalClubsPage.Id, 0, int.MaxValue, out _)
+                            .Where(c => c.ContentType.Alias == "club");
+                        allClubs.AddRange(regionalClubs);
+                    }
                 }
 
-                var allClubs = _contentService.GetPagedChildren(clubsHub.Id, 0, int.MaxValue, out _)
-                    .Where(c => c.ContentType.Alias == "club")
-                    .ToList();
+                // BACKWARDS COMPATIBILITY: Also check for clubs under root-level clubsPage
+                var rootClubsHub = rootChildren.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+                if (rootClubsHub != null)
+                {
+                    var rootClubs = _contentService.GetPagedChildren(rootClubsHub.Id, 0, int.MaxValue, out _)
+                        .Where(c => c.ContentType.Alias == "club");
+                    allClubs.AddRange(rootClubs);
+                }
+
+                if (!allClubs.Any())
+                {
+                    return Json(new { success = false, message = "No clubs found in either regional or root-level structure" });
+                }
 
                 int fixedCount = 0;
                 foreach (var club in allClubs)
