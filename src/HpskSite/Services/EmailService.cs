@@ -34,8 +34,8 @@ namespace HpskSite.Services
             _useSsl = bool.Parse(_configuration["Email:UseSsl"] ?? "true");
             _username = _configuration["Email:Username"] ?? "";
             _password = _configuration["Email:Password"] ?? "";
-            _fromAddress = _configuration["Email:FromAddress"] ?? "noreply@hpsk.se";
-            _fromName = _configuration["Email:FromName"] ?? "HPSK Site";
+            _fromAddress = _configuration["Email:FromAddress"] ?? "noreply@pistol.nu";
+            _fromName = _configuration["Email:FromName"] ?? "Pistol.nu";
             _adminEmail = _configuration["Email:AdminEmail"] ?? "";
         }
 
@@ -71,11 +71,11 @@ namespace HpskSite.Services
         /// </summary>
         public async Task SendRegistrationConfirmationToUserAsync(string memberEmail, string memberName, string clubName)
         {
-            var subject = "Välkommen till HPSK - Registrering mottagen";
+            var subject = "Välkommen till Pistol.nu - Registrering mottagen";
             var body = $@"
 <html>
 <body>
-    <h2>Välkommen till HPSK, {memberName}!</h2>
+    <h2>Välkommen till Pistol.nu, {memberName}!</h2>
     <p>Tack för din registrering. Din ansökan har tagits emot och väntar nu på godkännande.</p>
     <p><strong>Nästa steg:</strong></p>
     <ul>
@@ -84,7 +84,7 @@ namespace HpskSite.Services
         <li>Efter godkännande kan du logga in och använda alla funktioner på sidan</li>
     </ul>
     <p>Om du har frågor, kontakta din klubbadministratör eller webbansvarig.</p>
-    <p>Med vänliga hälsningar,<br/>HPSK Team</p>
+    <p>Med vänliga hälsningar,<br/>Pistol.nu</p>
 </body>
 </html>";
 
@@ -97,10 +97,10 @@ namespace HpskSite.Services
         /// </summary>
         public async Task SendApprovalNotificationAsync(string memberEmail, string memberName, string autoLoginToken)
         {
-            var subject = "Ditt HPSK-konto har godkänts!";
+            var subject = "Ditt Pistol.nu-konto har godkänts!";
 
             // Build auto-login URL with token and URL-encoded email
-            var siteUrl = _configuration["SiteUrl"] ?? "https://hpsktest.se";
+            var siteUrl = _configuration["SiteUrl"] ?? "https://pistol.nu";
             var encodedEmail = Uri.EscapeDataString(memberEmail);
             var autoLoginUrl = $"{siteUrl}/umbraco/surface/Member/AutoLogin?token={autoLoginToken}&email={encodedEmail}";
 
@@ -125,7 +125,7 @@ namespace HpskSite.Services
 </head>
 <body>
     <h2>Grattis {memberName}!</h2>
-    <p>Ditt medlemskap på HPSK har godkänts av en klubbadministratör!</p>
+    <p>Ditt medlemskap på Pistol.nu har godkänts av en klubbadministratör!</p>
 
     <p><strong>Klicka på knappen nedan för att logga in direkt:</strong></p>
     <p style=""text-align: center; margin: 30px 0;"">
@@ -144,7 +144,7 @@ namespace HpskSite.Services
         <li>Se och delta i klubbaktiviteter</li>
     </ul>
 
-    <p>Med vänliga hälsningar,<br/>HPSK Team</p>
+    <p>Med vänliga hälsningar,<br/>Pistol.nu</p>
 </body>
 </html>";
 
@@ -156,15 +156,15 @@ namespace HpskSite.Services
         /// </summary>
         public async Task SendRejectionNotificationAsync(string memberEmail, string memberName, string? reason = null)
         {
-            var subject = "Angående din HPSK-registrering";
+            var subject = "Angående din Pistol.nu-registrering";
             var body = $@"
 <html>
 <body>
     <h2>Hej {memberName},</h2>
-    <p>Tyvärr kunde vi inte godkänna din registrering på HPSK i nuläget.</p>
+    <p>Tyvärr kunde vi inte godkänna din registrering på Pistol.nu i nuläget.</p>
     {(string.IsNullOrEmpty(reason) ? "" : $"<p><strong>Anledning:</strong> {reason}</p>")}
     <p>Om du har frågor om detta, kontakta din klubbadministratör eller webbansvarig.</p>
-    <p>Med vänliga hälsningar,<br/>HPSK Team</p>
+    <p>Med vänliga hälsningar,<br/>Pistol.nu</p>
 </body>
 </html>";
 
@@ -175,12 +175,12 @@ namespace HpskSite.Services
         /// Send invitation email to member to set their password
         /// Includes invitation token for password setup
         /// </summary>
-        public async Task SendMemberInvitationAsync(string memberEmail, string memberName, string invitationToken, string clubName = "HPSK")
+        public async Task SendMemberInvitationAsync(string memberEmail, string memberName, string invitationToken, string clubName = "din klubb")
         {
-            var subject = "Du har blivit inbjuden till HPSK!";
+            var subject = "Du har blivit inbjuden till Pistol.nu!";
 
             // Build invitation URL with token and URL-encoded email
-            var siteUrl = _configuration["SiteUrl"] ?? "https://hpsktest.se";
+            var siteUrl = _configuration["SiteUrl"] ?? "https://pistol.nu";
             var encodedEmail = Uri.EscapeDataString(memberEmail);
             var invitationUrl = $"{siteUrl}/umbraco/surface/Member/AcceptInvitation?token={invitationToken}&email={encodedEmail}";
 
@@ -205,7 +205,7 @@ namespace HpskSite.Services
 </head>
 <body>
     <h2>Välkommen {memberName}!</h2>
-    <p>Du har blivit inbjuden att bli medlem på sidan för {clubName} på sajten Hallands Pistolskytteförbund.</p>
+    <p>Du har blivit inbjuden att bli medlem på sidan för {clubName} på sajten pistol.nu.</p>
 
     <p><strong>För att aktivera ditt konto behöver du sätta ett lösenord:</strong></p>
     <p style=""text-align: center; margin: 30px 0;"">
@@ -223,7 +223,7 @@ namespace HpskSite.Services
         <li>Se och delta i klubbaktiviteter</li>
     </ul>
 
-    <p>Med vänliga hälsningar,<br/>HPSK Team</p>
+    <p>Med vänliga hälsningar,<br/>Pistol.nu</p>
 </body>
 </html>";
 
@@ -336,10 +336,10 @@ namespace HpskSite.Services
 
             {additionalInfo}
 
-            <p>Med v&auml;nliga h&auml;lsningar,<br/>HPSK Team</p>
+            <p>Med v&auml;nliga h&auml;lsningar,<br/>Pistol.nu</p>
         </div>
         <div class='footer'>
-            <p>Detta &auml;r ett automatiskt meddelande fr&aring;n HPSK-webbplatsen.</p>
+            <p>Detta &auml;r ett automatiskt meddelande fr&aring;n Pistol.nu.</p>
         </div>
     </div>
 </body>
@@ -461,7 +461,7 @@ namespace HpskSite.Services
                 <body>
                     <div class='container'>
                         <div class='header'>
-                            <h2>🐛 Felrapport från HPSK-webbplatsen</h2>
+                            <h2>🐛 Felrapport från Pistol.nu</h2>
                         </div>
                         <div class='content'>
                             <div class='field'>
@@ -523,7 +523,7 @@ namespace HpskSite.Services
             body += @"
                         </div>
                         <div class='footer'>
-                            <p>Detta är en automatisk felrapport från HPSK-webbplatsen.</p>
+                            <p>Detta är en automatisk felrapport från Pistol.nu.</p>
                             <p>Svara på detta mail för att kontakta rapportören direkt.</p>
                         </div>
                     </div>
@@ -538,7 +538,7 @@ namespace HpskSite.Services
         /// </summary>
         public async Task SendPasswordResetEmailAsync(string memberEmail, string memberName, string resetToken)
         {
-            var siteUrl = _configuration["Email:SiteUrl"] ?? "https://hpsktest.se";
+            var siteUrl = _configuration["Email:SiteUrl"] ?? "https://pistol.nu";
 
             // URL encode the token and email
             var encodedToken = System.Web.HttpUtility.UrlEncode(resetToken);
@@ -547,7 +547,7 @@ namespace HpskSite.Services
             // Build reset link
             var resetLink = $"{siteUrl}/password-reset?token={encodedToken}&email={encodedEmail}";
 
-            var subject = "Återställ ditt lösenord - HPSK";
+            var subject = "Återställ ditt lösenord - Pistol.nu";
             var body = $@"
 <html>
 <head>
@@ -571,7 +571,7 @@ namespace HpskSite.Services
         <div class='content'>
             <p>Hej {memberName}!</p>
 
-            <p>Vi har mottagit en begäran om att återställa lösenordet för ditt HPSK-konto.</p>
+            <p>Vi har mottagit en begäran om att återställa lösenordet för ditt Pistol.nu-konto.</p>
 
             <p>Klicka på knappen nedan för att skapa ett nytt lösenord:</p>
 
@@ -600,10 +600,10 @@ namespace HpskSite.Services
 
             <p>Om du har frågor, kontakta din klubbadministratör eller webbansvarig.</p>
 
-            <p>Med vänliga hälsningar,<br/>HPSK Team</p>
+            <p>Med vänliga hälsningar,<br/>Pistol.nu</p>
         </div>
         <div class='footer'>
-            <p>Detta är ett automatiskt meddelande från HPSK-webbplatsen.</p>
+            <p>Detta är ett automatiskt meddelande från Pistol.nu.</p>
             <p>Svara inte på detta e-postmeddelande.</p>
         </div>
     </div>
@@ -619,7 +619,7 @@ namespace HpskSite.Services
         private string GenerateSwishRedirectUrl(string swishNumber, decimal amount, string message)
         {
             // Get site URL from configuration (same as password reset)
-            var siteUrl = _configuration["Email:SiteUrl"] ?? _configuration["SiteUrl"] ?? "https://hpsktest.se";
+            var siteUrl = _configuration["Email:SiteUrl"] ?? _configuration["SiteUrl"] ?? "https://pistol.nu";
 
             // URL encode the message parameter
             var encodedMessage = Uri.EscapeDataString(message);
@@ -653,7 +653,7 @@ namespace HpskSite.Services
             // Generate Swish redirect URL for mobile users (Gmail-compatible)
             var swishRedirectUrl = GenerateSwishRedirectUrl(swishNumber, amount, invoiceMessage);
 
-            var subject = $"Swish-betalning för {competitionName} - HPSK";
+            var subject = $"Swish-betalning för {competitionName} - Pistol.nu";
             var body = $@"
 <html>
 <head>
@@ -750,10 +750,10 @@ namespace HpskSite.Services
 
             <p>Om du har frågor, kontakta din klubbadministratör.</p>
 
-            <p>Med vänliga hälsningar,<br/>HPSK Team</p>
+            <p>Med vänliga hälsningar,<br/>Pistol.nu</p>
         </div>
         <div class='footer'>
-            <p>Detta är ett automatiskt meddelande från HPSK-webbplatsen.</p>
+            <p>Detta är ett automatiskt meddelande från Pistol.nu.</p>
             <p>Spara detta e-postmeddelande tills betalningen är bekräftad.</p>
         </div>
     </div>
@@ -815,7 +815,7 @@ namespace HpskSite.Services
 <html>
 <body style='font-family: Arial, sans-serif;'>
     <h2>Ny förfrågan om Android-app testaccess</h2>
-    <p>En medlem har begärt att bli tillagd som testare för HPSK Träningsmatch Android-appen.</p>
+    <p>En medlem har begärt att bli tillagd som testare för Pistol.nu Träningsmatch Android-appen.</p>
     <table style='border-collapse: collapse; margin: 20px 0;'>
         <tr>
             <td style='padding: 8px; font-weight: bold;'>Namn:</td>
@@ -830,13 +830,13 @@ namespace HpskSite.Services
     <p>För att lägga till användaren som testare:</p>
     <ol>
         <li>Gå till <a href='https://play.google.com/console'>Google Play Console</a></li>
-        <li>Välj HPSK Träningsmatch-appen</li>
+        <li>Välj Pistol.nu Träningsmatch-appen</li>
         <li>Gå till Release → Testing → Internal testing (eller Closed testing)</li>
         <li>Lägg till e-postadressen <strong>{memberEmail}</strong> i testarlistan</li>
         <li>Skicka ett bekräftelsemail till användaren med länk till testversionen</li>
     </ol>
     <hr style='margin: 20px 0;'>
-    <p style='color: #666; font-size: 12px;'>Detta meddelande skickades automatiskt från HPSK webbplatsen.</p>
+    <p style='color: #666; font-size: 12px;'>Detta meddelande skickades automatiskt från Pistol.nu.</p>
 </body>
 </html>";
 

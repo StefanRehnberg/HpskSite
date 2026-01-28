@@ -5,7 +5,7 @@
 @{
 	Layout = "Master.cshtml";
     var pageTitle = Model.Value<string>("pageTitle") ?? "Skyttetrappan - Träningsprogram";
-    var pageSubtitle = Model.Value<string>("pageSubtitle") ?? "HPSK:s progressiva träningsprogram för pistolskytte";
+    var pageSubtitle = Model.Value<string>("pageSubtitle") ?? "Progressivt träningsprogram för pistolskytte";
     ViewBag.Title = pageTitle;
 
     var currentMember = await MemberManager.GetCurrentMemberAsync();

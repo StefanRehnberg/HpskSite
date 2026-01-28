@@ -130,7 +130,7 @@ namespace HpskSite.Services
         }
 
         /// <summary>
-        /// Gets all clubs.
+        /// Gets all clubs from all locations (legacy clubsPage and regional pages).
         /// PERFORMANCE: Results are cached for 5 minutes to avoid repeated database lookups.
         /// </summary>
         /// <returns>List of all clubs</returns>
@@ -151,8 +151,29 @@ namespace HpskSite.Services
                 var rootContent = umbracoContext.Content?.GetAtRoot().FirstOrDefault();
                 if (rootContent != null)
                 {
-                    var clubsHub = rootContent.Children?.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
-                    if (clubsHub != null)
+                    // Collect all clubsPage nodes from multiple locations
+                    var clubsHubs = new List<Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent>();
+
+                    // Check for direct clubsPage under root (legacy structure)
+                    var directClubsHub = rootContent.Children?.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+                    if (directClubsHub != null)
+                    {
+                        clubsHubs.Add(directClubsHub);
+                    }
+
+                    // Check for clubsPage under regional pages
+                    var regionalPages = rootContent.Children?.Where(c => c.ContentType.Alias == "regionalPage") ?? Enumerable.Empty<Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent>();
+                    foreach (var region in regionalPages)
+                    {
+                        var regionClubsHub = region.Children?.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+                        if (regionClubsHub != null)
+                        {
+                            clubsHubs.Add(regionClubsHub);
+                        }
+                    }
+
+                    // Get all clubs from all hubs
+                    foreach (var clubsHub in clubsHubs)
                     {
                         foreach (var clubNode in clubsHub.Children?.Where(c => c.ContentType.Alias == "club" && c.IsPublished()) ?? Enumerable.Empty<Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent>())
                         {
@@ -177,10 +198,33 @@ namespace HpskSite.Services
                 if (rootContent != null)
                 {
                     var children = _contentService.GetPagedChildren(rootContent.Id, 0, int.MaxValue, out _);
-                    var clubsHub = children.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
-                    if (clubsHub != null)
+
+                    // Collect all clubsPage nodes
+                    var clubsHubIds = new List<int>();
+
+                    // Direct clubsPage
+                    var directClubsHub = children.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+                    if (directClubsHub != null)
                     {
-                        var clubNodes = _contentService.GetPagedChildren(clubsHub.Id, 0, int.MaxValue, out _);
+                        clubsHubIds.Add(directClubsHub.Id);
+                    }
+
+                    // Regional pages
+                    var regionalPages = children.Where(c => c.ContentType.Alias == "regionalPage");
+                    foreach (var region in regionalPages)
+                    {
+                        var regionChildren = _contentService.GetPagedChildren(region.Id, 0, int.MaxValue, out _);
+                        var regionClubsHub = regionChildren.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+                        if (regionClubsHub != null)
+                        {
+                            clubsHubIds.Add(regionClubsHub.Id);
+                        }
+                    }
+
+                    // Get clubs from all hubs
+                    foreach (var hubId in clubsHubIds)
+                    {
+                        var clubNodes = _contentService.GetPagedChildren(hubId, 0, int.MaxValue, out _);
                         foreach (var club in clubNodes.Where(c => c.ContentType.Alias == "club" && c.Published))
                         {
                             clubs.Add(new ClubInfo

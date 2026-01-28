@@ -27,7 +27,7 @@
             Gavleborg,
 
             [Description("Göteborg och Bohusläns Pistol.Krets")]
-            GoteborgOchBohuslan,
+            Goteborg,
 
             [Description("Hallands Pistolskyttekrets")]
             Halland,

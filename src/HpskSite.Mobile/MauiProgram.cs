@@ -38,7 +38,7 @@ public static class MauiProgram
             var apiService = new ApiService(secureStorage);
             // Configure base URL - change this for production
 // Always use production URL (10.0.2.2 only works in emulator, not real devices)
-            apiService.BaseUrl = "https://hpsktest.se";
+            apiService.BaseUrl = "https://pistol.nu";
             return apiService;
         });
 
@@ -61,7 +61,7 @@ public static class MauiProgram
             var secureStorage = sp.GetRequiredService<ISecureStorageService>();
             var signalRService = new SignalRService(secureStorage);
 // Always use production URL
-            signalRService.BaseUrl = "https://hpsktest.se";
+            signalRService.BaseUrl = "https://pistol.nu";
             return signalRService;
         });
         builder.Services.AddSingleton<IMatchService, MatchService>();

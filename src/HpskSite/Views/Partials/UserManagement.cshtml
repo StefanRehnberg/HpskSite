@@ -36,6 +36,51 @@
         </div>
     </div>
 
+    <!-- Filter Bar -->
+    <div class="card mb-3">
+        <div class="card-body py-2">
+            <div class="row g-2 align-items-end">
+                <!-- Region dropdown -->
+                <div class="col-md-2">
+                    <label class="form-label small mb-1">Krets</label>
+                    <select id="filterRegion" class="form-select form-select-sm">
+                        <option value="">Alla kretsar</option>
+                    </select>
+                </div>
+                <!-- Club dropdown (filtered by region) -->
+                <div class="col-md-3">
+                    <label class="form-label small mb-1">Klubb</label>
+                    <select id="filterClub" class="form-select form-select-sm">
+                        <option value="">Alla klubbar</option>
+                    </select>
+                </div>
+                <!-- Role dropdown -->
+                <div class="col-md-2">
+                    <label class="form-label small mb-1">Roll</label>
+                    <select id="filterRole" class="form-select form-select-sm">
+                        <option value="">Alla roller</option>
+                        <option value="Administrators">Administratörer</option>
+                        <option value="ClubAdmin">Klubbadministratörer</option>
+                        <option value="RegionalAdmin">Kretsadministratörer</option>
+                        <option value="Users">Vanliga användare</option>
+                    </select>
+                </div>
+                <!-- Search box -->
+                <div class="col-md-3">
+                    <label class="form-label small mb-1">Sök</label>
+                    <input type="text" id="filterSearch" class="form-control form-control-sm"
+                           placeholder="Namn eller e-post...">
+                </div>
+                <!-- Export button -->
+                <div class="col-md-2">
+                    <button class="btn btn-outline-secondary btn-sm w-100" onclick="exportMembers()">
+                        <i class="bi bi-download me-1"></i>Exportera
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Loading State -->
     <div class="spinner-border text-primary d-none" id="usersLoadingSpinner" role="status">
         <span class="visually-hidden">Laddar...</span>
@@ -72,6 +117,17 @@
                 </tr>
             </tbody>
         </table>
+    </div>
+
+    <!-- Pagination -->
+    <div class="d-flex justify-content-between align-items-center mt-3 d-none" id="paginationContainer">
+        <div class="text-muted small" id="paginationInfo">
+            Visar 0 av 0 användare
+        </div>
+        <nav aria-label="Användarlista navigation">
+            <ul class="pagination pagination-sm mb-0" id="paginationNav">
+            </ul>
+        </nav>
     </div>
 </div>
 
@@ -354,6 +410,12 @@ let allUsers = [];
 let currentSortField = 'lastActiveSortValue';  // Default sort by last active
 let currentSortDirection = 'desc';  // Newest first
 
+// Pagination and filtering state
+let currentPage = 1;
+let currentFilters = { search: '', region: '', clubId: '', role: '' };
+let debounceTimer = null;
+let paginationData = null;
+
 // Lazy load user management data
 let userManagementLoaded = false;
 
@@ -367,6 +429,8 @@ document.addEventListener('DOMContentLoaded', function() {
     if (usersTab) {
         usersTab.addEventListener('shown.bs.tab', function() {
             if (!userManagementLoaded) {
+                loadRegions();
+                loadClubsForRegion('');  // Load all clubs for filter dropdown
                 loadUsers();
                 loadMemberGroups();
                 loadClubsForDropdown();
@@ -403,9 +467,59 @@ document.addEventListener('DOMContentLoaded', function() {
                 currentSortField = sortField;
                 currentSortDirection = 'desc';
             }
-            sortAndDisplayUsers();
+            currentPage = 1;
+            updateSortIndicators();
+            loadUsers();
         });
     });
+
+    // Set initial sort indicator
+    updateSortIndicators();
+
+    // Search input with debounce
+    const searchInput = document.getElementById('filterSearch');
+    if (searchInput) {
+        searchInput.addEventListener('input', function(e) {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+                currentFilters.search = e.target.value;
+                currentPage = 1;
+                loadUsers();
+            }, 300);
+        });
+    }
+
+    // Region filter change
+    const regionSelect = document.getElementById('filterRegion');
+    if (regionSelect) {
+        regionSelect.addEventListener('change', function(e) {
+            currentFilters.region = e.target.value;
+            currentFilters.clubId = '';
+            currentPage = 1;
+            loadClubsForRegion(e.target.value);
+            loadUsers();
+        });
+    }
+
+    // Club filter change
+    const clubSelect = document.getElementById('filterClub');
+    if (clubSelect) {
+        clubSelect.addEventListener('change', function(e) {
+            currentFilters.clubId = e.target.value;
+            currentPage = 1;
+            loadUsers();
+        });
+    }
+
+    // Role filter change
+    const roleSelect = document.getElementById('filterRole');
+    if (roleSelect) {
+        roleSelect.addEventListener('change', function(e) {
+            currentFilters.role = e.target.value;
+            currentPage = 1;
+            loadUsers();
+        });
+    }
 
     // Initialize Flatpickr date picker
     flatpickr('#memberSince', {
@@ -413,6 +527,84 @@ document.addEventListener('DOMContentLoaded', function() {
         dateFormat: 'Y-m-d'
     });
 });
+
+function updateSortIndicators() {
+    // Remove all sort classes
+    document.querySelectorAll('.sortable').forEach(header => {
+        header.classList.remove('sort-asc', 'sort-desc');
+    });
+
+    // Add sort class to current column
+    const currentHeader = document.querySelector(`.sortable[data-sort="${currentSortField}"]`);
+    if (currentHeader) {
+        currentHeader.classList.add(currentSortDirection === 'asc' ? 'sort-asc' : 'sort-desc');
+    }
+}
+
+function loadRegions() {
+    fetch('/umbraco/surface/MemberAdmin/GetRegionsForUserManagement')
+        .then(response => response.json())
+        .then(data => {
+            const regionSelect = document.getElementById('filterRegion');
+            if (data.success && data.regions) {
+                regionSelect.innerHTML = '<option value="">Alla kretsar</option>';
+                data.regions.forEach(region => {
+                    const option = document.createElement('option');
+                    option.value = region.id;
+                    option.textContent = region.name;
+                    regionSelect.appendChild(option);
+                });
+            }
+        })
+        .catch(error => console.error('Error loading regions:', error));
+}
+
+function loadClubsForRegion(region) {
+    const clubSelect = document.getElementById('filterClub');
+    clubSelect.innerHTML = '<option value="">Alla klubbar</option>';
+
+    if (!region) {
+        // If no region selected, load all clubs
+        fetch('/umbraco/surface/MemberAdmin/GetClubsForRegion?region=')
+            .then(response => response.json())
+            .then(data => {
+                if (data.success && data.clubs) {
+                    data.clubs.forEach(club => {
+                        const option = document.createElement('option');
+                        option.value = club.id;
+                        option.textContent = club.name;
+                        clubSelect.appendChild(option);
+                    });
+                }
+            })
+            .catch(error => console.error('Error loading clubs:', error));
+        return;
+    }
+
+    fetch(`/umbraco/surface/MemberAdmin/GetClubsForRegion?region=${encodeURIComponent(region)}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.clubs) {
+                data.clubs.forEach(club => {
+                    const option = document.createElement('option');
+                    option.value = club.id;
+                    option.textContent = club.name;
+                    clubSelect.appendChild(option);
+                });
+            }
+        })
+        .catch(error => console.error('Error loading clubs for region:', error));
+}
+
+function exportMembers() {
+    const params = new URLSearchParams();
+    if (currentFilters.search) params.append('search', currentFilters.search);
+    if (currentFilters.region) params.append('region', currentFilters.region);
+    if (currentFilters.clubId) params.append('clubId', currentFilters.clubId);
+    if (currentFilters.role) params.append('role', currentFilters.role);
+
+    window.location.href = `/umbraco/surface/MemberAdmin/ExportMembers?${params.toString()}`;
+}
 
 function loadClubsForDropdown() {
     fetch('/umbraco/surface/ClubAdmin/GetClubs')
@@ -432,12 +624,25 @@ function loadUsers() {
     const errorAlert = document.getElementById('usersErrorAlert');
     const errorMessage = document.getElementById('usersErrorMessage');
     const noUsersAlert = document.getElementById('noUsersAlert');
+    const paginationContainer = document.getElementById('paginationContainer');
 
     spinner?.classList.remove('d-none');
     errorAlert?.classList.add('d-none');
     noUsersAlert?.classList.add('d-none');
 
-    fetch('/umbraco/surface/MemberAdmin/GetMembers')
+    // Build query parameters
+    const params = new URLSearchParams({
+        page: currentPage,
+        pageSize: 50,
+        sortBy: currentSortField,
+        sortDesc: currentSortDirection === 'desc'
+    });
+    if (currentFilters.search) params.append('search', currentFilters.search);
+    if (currentFilters.region) params.append('region', currentFilters.region);
+    if (currentFilters.clubId) params.append('clubId', currentFilters.clubId);
+    if (currentFilters.role) params.append('role', currentFilters.role);
+
+    fetch(`/umbraco/surface/MemberAdmin/GetMembers?${params.toString()}`)
         .then(response => response.json())
         .then(data => {
             spinner?.classList.add('d-none');
@@ -446,19 +651,23 @@ function loadUsers() {
                 errorMessage.textContent = data.message || 'Kunde inte ladda användare';
                 errorAlert.classList.remove('d-none');
                 tbody.innerHTML = '<tr class="text-muted"><td colspan="7" class="text-center py-4">Fel vid laddning av användare</td></tr>';
+                paginationContainer.classList.add('d-none');
                 return;
             }
 
-            allUsers = data.data || [];
+            paginationData = data.data;
+            allUsers = data.data.items || [];
 
             if (allUsers.length === 0) {
                 tableContainer.classList.add('d-none');
                 noUsersAlert.classList.remove('d-none');
+                paginationContainer.classList.add('d-none');
                 tbody.innerHTML = '';
             } else {
                 tableContainer.classList.remove('d-none');
                 noUsersAlert.classList.add('d-none');
-                sortAndDisplayUsers();  // Sort by last active (default) before displaying
+                displayUsers();
+                displayPagination();
             }
         })
         .catch(error => {
@@ -466,6 +675,7 @@ function loadUsers() {
             spinner?.classList.add('d-none');
             errorMessage.textContent = error.message || 'Nätverksfel';
             errorAlert.classList.remove('d-none');
+            paginationContainer.classList.add('d-none');
         });
 }
 
@@ -543,40 +753,84 @@ function displayUsers() {
     }).join('');
 }
 
-function sortAndDisplayUsers() {
-    // Sort allUsers array based on current sort field and direction
-    allUsers.sort((a, b) => {
-        let aValue, bValue;
+function displayPagination() {
+    const paginationContainer = document.getElementById('paginationContainer');
+    const paginationInfo = document.getElementById('paginationInfo');
+    const paginationNav = document.getElementById('paginationNav');
 
-        if (currentSortField === 'lastActiveSortValue') {
-            aValue = a.lastActiveSortValue || 0;
-            bValue = b.lastActiveSortValue || 0;
-        } else if (currentSortField === 'lastMobileActiveSortValue') {
-            aValue = a.lastMobileActiveSortValue || 0;
-            bValue = b.lastMobileActiveSortValue || 0;
-        } else {
-            aValue = a[currentSortField];
-            bValue = b[currentSortField];
+    if (!paginationData || paginationData.totalCount === 0) {
+        paginationContainer.classList.add('d-none');
+        return;
+    }
+
+    paginationContainer.classList.remove('d-none');
+
+    // Update info text
+    const startItem = ((paginationData.page - 1) * paginationData.pageSize) + 1;
+    const endItem = Math.min(paginationData.page * paginationData.pageSize, paginationData.totalCount);
+    paginationInfo.textContent = `Visar ${startItem}-${endItem} av ${paginationData.totalCount} användare`;
+
+    // Build pagination buttons
+    let paginationHtml = '';
+
+    // Previous button
+    paginationHtml += `
+        <li class="page-item ${!paginationData.hasPreviousPage ? 'disabled' : ''}">
+            <a class="page-link" href="#" onclick="goToPage(${paginationData.page - 1}); return false;">&laquo;</a>
+        </li>
+    `;
+
+    // Page numbers with ellipsis
+    const totalPages = paginationData.totalPages;
+    const currentPageNum = paginationData.page;
+    const maxVisiblePages = 5;
+
+    let startPage = Math.max(1, currentPageNum - Math.floor(maxVisiblePages / 2));
+    let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
+
+    if (endPage - startPage < maxVisiblePages - 1) {
+        startPage = Math.max(1, endPage - maxVisiblePages + 1);
+    }
+
+    // First page + ellipsis
+    if (startPage > 1) {
+        paginationHtml += `<li class="page-item"><a class="page-link" href="#" onclick="goToPage(1); return false;">1</a></li>`;
+        if (startPage > 2) {
+            paginationHtml += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
         }
+    }
 
-        // Handle numeric comparison
-        if (typeof aValue === 'number' && typeof bValue === 'number') {
-            return currentSortDirection === 'asc' ? aValue - bValue : bValue - aValue;
+    // Page numbers
+    for (let i = startPage; i <= endPage; i++) {
+        paginationHtml += `
+            <li class="page-item ${i === currentPageNum ? 'active' : ''}">
+                <a class="page-link" href="#" onclick="goToPage(${i}); return false;">${i}</a>
+            </li>
+        `;
+    }
+
+    // Ellipsis + last page
+    if (endPage < totalPages) {
+        if (endPage < totalPages - 1) {
+            paginationHtml += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
         }
+        paginationHtml += `<li class="page-item"><a class="page-link" href="#" onclick="goToPage(${totalPages}); return false;">${totalPages}</a></li>`;
+    }
 
-        // Handle string comparison
-        const aStr = String(aValue || '').toLowerCase();
-        const bStr = String(bValue || '').toLowerCase();
+    // Next button
+    paginationHtml += `
+        <li class="page-item ${!paginationData.hasNextPage ? 'disabled' : ''}">
+            <a class="page-link" href="#" onclick="goToPage(${paginationData.page + 1}); return false;">&raquo;</a>
+        </li>
+    `;
 
-        if (currentSortDirection === 'asc') {
-            return aStr.localeCompare(bStr);
-        } else {
-            return bStr.localeCompare(aStr);
-        }
-    });
+    paginationNav.innerHTML = paginationHtml;
+}
 
-    // Re-display the sorted users
-    displayUsers();
+function goToPage(page) {
+    if (page < 1 || (paginationData && page > paginationData.totalPages)) return;
+    currentPage = page;
+    loadUsers();
 }
 
 function escapeHtml(text) {
@@ -1620,5 +1874,29 @@ function recalculateAdminHandicap() {
     justify-content: center;
     z-index: 10;
     border-radius: 0.375rem;
+}
+
+/* Sortable column styling */
+.sortable {
+    cursor: pointer;
+    user-select: none;
+}
+
+.sortable:hover {
+    background-color: var(--bs-tertiary-bg);
+}
+
+.sortable.sort-asc i::before {
+    content: "\F128" !important; /* bi-arrow-up */
+}
+
+.sortable.sort-desc i::before {
+    content: "\F127" !important; /* bi-arrow-down */
+}
+
+/* Filter bar subtle placeholder */
+#filterSearch::placeholder {
+    color: var(--bs-secondary-color);
+    opacity: 0.5;
 }
 </style>

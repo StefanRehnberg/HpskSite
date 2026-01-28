@@ -25,7 +25,7 @@
                            VerticalOptions="Center" />
                 </Border>
 
-                <Label Text="HPSK"
+                <Label Text="Pistol.nu"
                        FontSize="36"
                        FontAttributes="Bold"
                        HorizontalOptions="Center"

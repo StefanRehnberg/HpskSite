@@ -1,12 +1,34 @@
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@using System.Globalization
 @{
     Layout = "Master.cshtml";
+
+    // Swedish culture for proper alphabetical sorting (Å, Ä, Ö at the end)
+    var swedishCulture = new CultureInfo("sv-SE");
+
+    // Get all regional pages (children of home with regionalPage document type)
+    var regionalPages = Model.Children
+        .Where(c => c.ContentType.Alias == "regionalPage")
+        .OrderBy(r => r.Value<string>("regionName") ?? r.Name, swedishCulture.CompareInfo.GetStringComparer(CompareOptions.None))
+        .ToList();
+
+    // Count total clubs across all regions
+    var totalClubs = 0;
+    foreach (var region in regionalPages)
+    {
+        var clubsPage = region.Children.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+        if (clubsPage != null)
+        {
+            totalClubs += clubsPage.Children.Count(c => c.ContentType.Alias == "club");
+        }
+    }
 }
 
+<!-- Hero Section -->
 <div class="row">
     <div class="col-12">
         <div class="jumbotron bg-primary text-white p-5 rounded mb-4">
-            <h1 class="display-4">@(Model.Value<string>("welcomeTitle") ?? "Welcome to HPSK")</h1>
+            <h1 class="display-4">@(Model.Value<string>("welcomeTitle") ?? "Svenska Pistolskyttekretsar")</h1>
             @{
                 var welcomeText = Model.Value<string>("welcomeText");
             }
@@ -14,6 +36,104 @@
             {
                 <p class="lead">@Html.Raw(welcomeText)</p>
             }
+            else
+            {
+                <p class="lead">Hitta din krets och upptäck skytteföreningar i din region.</p>
+            }
         </div>
     </div>
 </div>
+
+<!-- Quick Stats -->
+@if (regionalPages.Any())
+{
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card text-center h-100">
+                <div class="card-body">
+                    <h2 class="display-4 text-primary">@regionalPages.Count</h2>
+                    <p class="text-muted mb-0">Pistolskyttekretsar</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card text-center h-100">
+                <div class="card-body">
+                    <h2 class="display-4 text-primary">@totalClubs</h2>
+                    <p class="text-muted mb-0">Skytteföreningar</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Region Selection Header -->
+    <div class="row mb-3">
+        <div class="col-12">
+            <h2 class="h4">Välj din krets</h2>
+            <p class="text-muted">Klicka på din krets för att se klubbar och kontaktinformation.</p>
+        </div>
+    </div>
+
+    <!-- Regional Cards Grid -->
+    <div class="row row-cols-2 row-cols-md-3 row-cols-lg-4 g-3 mb-4">
+        @foreach (var region in regionalPages)
+        {
+            var regionName = region.Value<string>("regionName") ?? region.Name;
+            var clubsPage = region.Children.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+            var clubCount = clubsPage?.Children.Count(c => c.ContentType.Alias == "club") ?? 0;
+
+            <div class="col">
+                <a href="@region.Url()" class="text-decoration-none">
+                    <div class="card h-100 region-card">
+                        <div class="card-body text-center">
+                            <h5 class="card-title mb-1">@regionName</h5>
+                            <small class="text-muted">@clubCount klubbar</small>
+                        </div>
+                    </div>
+                </a>
+            </div>
+        }
+    </div>
+}
+else
+{
+    <!-- Fallback if no regional pages exist yet -->
+    <div class="row">
+        <div class="col-12">
+            <div class="alert alert-info">
+                <p class="mb-0">Regionala sidor kommer snart.</p>
+            </div>
+        </div>
+    </div>
+}
+
+<style>
+.region-card {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    cursor: pointer;
+}
+
+.region-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.region-card .card-title {
+    color: var(--bs-body-color);
+}
+
+.region-card:hover .card-title {
+    color: var(--bs-primary);
+}
+
+/* Ensure consistent card height on mobile */
+@@media (max-width: 575.98px) {
+    .region-card .card-body {
+        padding: 0.75rem;
+    }
+
+    .region-card .card-title {
+        font-size: 0.9rem;
+    }
+}
+</style>

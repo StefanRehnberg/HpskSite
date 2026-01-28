@@ -180,14 +180,14 @@
                             <Label Text="&#x1F3AF;"
                                    FontSize="24"
                                    VerticalOptions="Center" />
-                            <Label Text="HPSK Mobile"
+                            <Label Text="Pistol.nu Träningsmatch"
                                    FontSize="16"
                                    FontAttributes="Bold"
                                    VerticalOptions="Center"
                                    TextColor="{StaticResource White}" />
                         </HorizontalStackLayout>
 
-                        <Label Text="Traningsmatch-app for HPSK-medlemmar"
+                        <Label Text="Träningsmatch för pistolskyttar"
                                FontSize="13"
                                TextColor="{StaticResource Gray300}" />
 

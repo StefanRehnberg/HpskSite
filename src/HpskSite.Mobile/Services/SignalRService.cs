@@ -12,7 +12,7 @@ public class SignalRService : ISignalRService, IAsyncDisposable
 {
     private readonly ISecureStorageService _secureStorage;
     private HubConnection? _hubConnection;
-    private string _baseUrl = "https://localhost:5001";
+    private string _baseUrl = "https://pistol.nu";
 
     public SignalRService(ISecureStorageService secureStorage)
     {

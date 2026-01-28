@@ -109,7 +109,7 @@ Write-Host ""
 Write-Host "Location: C:\temp\publish\" -ForegroundColor White
 Write-Host ""
 Write-Host "Next Steps:" -ForegroundColor Yellow
-Write-Host "  1. Open FileZilla and connect to Simply.com (hpsktest.se)" -ForegroundColor White
+Write-Host "  1. Open FileZilla and connect to Simply.com (pistol.nu)" -ForegroundColor White
 Write-Host "  2. Upload app_offline.htm FIRST to public_html/" -ForegroundColor White
 Write-Host "     (This shows maintenance page to users)" -ForegroundColor Gray
 Write-Host "  3. Upload ALL other files from C:\temp\publish\ to public_html/" -ForegroundColor White

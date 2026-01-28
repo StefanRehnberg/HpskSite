@@ -7,11 +7,13 @@ using Umbraco.Cms.Core.Web;
 using Umbraco.Cms.Infrastructure.Persistence;
 using Umbraco.Cms.Web.Website.Controllers;
 using Umbraco.Extensions;
+using HpskSite.Models;
 using HpskSite.Models.ViewModels;
 using HpskSite.Services;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
 using Umbraco.Cms.Core.Security;
+using System.Text;
 
 namespace HpskSite.Controllers
 {
@@ -59,10 +61,18 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
-        /// Gets all members with their club information
+        /// Gets members with pagination, search, and filtering
         /// </summary>
         [HttpGet]
-        public async Task<IActionResult> GetMembers()
+        public async Task<IActionResult> GetMembers(
+            int page = 1,
+            int pageSize = 50,
+            string? search = null,
+            string? region = null,
+            int? clubId = null,
+            string? role = null,
+            string sortBy = "lastActiveSortValue",
+            bool sortDesc = true)
         {
             if (!await _authService.IsCurrentUserAdminAsync())
             {
@@ -71,66 +81,458 @@ namespace HpskSite.Controllers
 
             try
             {
-                // Get current valid clubs for validation
+                // Get current valid clubs for validation and filtering
                 var validClubs = GetClubsFromStorage().Where(c => c.IsActive).ToList();
-                var validClubNames = validClubs.Select(c => c.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                // Build lookup for club regions
+                var clubRegionLookup = validClubs.ToDictionary(c => c.Id ?? 0, c => c.RegionalFederation);
+
+                // Get clubs in the selected region if region filter is active
+                var clubsInRegion = new HashSet<int>();
+                if (!string.IsNullOrEmpty(region))
+                {
+                    clubsInRegion = validClubs
+                        .Where(c => c.RegionalFederation == region)
+                        .Select(c => c.Id ?? 0)
+                        .Where(id => id > 0)
+                        .ToHashSet();
+                }
 
                 var allMembers = _memberService.GetAll(0, int.MaxValue, out var totalRecords);
-                var regularMembers = allMembers.Where(m => m.ContentType.Alias != ClubMemberTypeAlias);
-                var members = allMembers.Where(m => m.ContentType.Alias != ClubMemberTypeAlias)
-                    .Select(m => {
-                        var primaryClubId = m.GetValue("primaryClubId")?.ToString();
-                        var primaryClubName = "No Club";
-                        var hasInvalidClubReference = false;
 
-                        if (!string.IsNullOrEmpty(primaryClubId) && int.TryParse(primaryClubId, out var clubId))
+                // Filter out club member types
+                var regularMembers = allMembers.Where(m => m.ContentType.Alias != ClubMemberTypeAlias);
+
+                // Apply search filter
+                if (!string.IsNullOrWhiteSpace(search))
+                {
+                    var searchLower = search.ToLowerInvariant();
+                    regularMembers = regularMembers.Where(m =>
+                        (m.GetValue("firstName")?.ToString()?.ToLowerInvariant().Contains(searchLower) ?? false) ||
+                        (m.GetValue("lastName")?.ToString()?.ToLowerInvariant().Contains(searchLower) ?? false) ||
+                        (m.Email?.ToLowerInvariant().Contains(searchLower) ?? false)
+                    );
+                }
+
+                // Apply region filter
+                if (!string.IsNullOrEmpty(region) && clubsInRegion.Any())
+                {
+                    regularMembers = regularMembers.Where(m =>
+                    {
+                        var memberClubIdStr = m.GetValue("primaryClubId")?.ToString();
+                        if (int.TryParse(memberClubIdStr, out var memberClubId))
                         {
-                            var club = validClubs.FirstOrDefault(c => c.Id == clubId);
-                            if (club != null)
-                            {
-                                primaryClubName = club.Name;
-                            }
-                            else
-                            {
-                                primaryClubName = $"⚠️ Invalid Club (ID: {clubId})";
-                                hasInvalidClubReference = true;
-                            }
+                            return clubsInRegion.Contains(memberClubId);
+                        }
+                        return false;
+                    });
+                }
+
+                // Apply club filter
+                if (clubId.HasValue)
+                {
+                    regularMembers = regularMembers.Where(m =>
+                    {
+                        var memberClubIdStr = m.GetValue("primaryClubId")?.ToString();
+                        if (int.TryParse(memberClubIdStr, out var memberClubId))
+                        {
+                            return memberClubId == clubId.Value;
+                        }
+                        return false;
+                    });
+                }
+
+                // Apply role filter
+                if (!string.IsNullOrEmpty(role))
+                {
+                    regularMembers = regularMembers.Where(m =>
+                    {
+                        var memberRoles = _memberService.GetAllRoles(m.Id);
+
+                        // Handle special cases for ClubAdmin and RegionalAdmin which have suffixes like ClubAdmin_1234
+                        if (role.Equals("ClubAdmin", StringComparison.OrdinalIgnoreCase))
+                        {
+                            return memberRoles.Any(r => r.StartsWith("ClubAdmin_", StringComparison.OrdinalIgnoreCase));
+                        }
+                        if (role.Equals("RegionalAdmin", StringComparison.OrdinalIgnoreCase))
+                        {
+                            return memberRoles.Any(r => r.StartsWith("RegionalAdmin_", StringComparison.OrdinalIgnoreCase));
                         }
 
-                        var lastActive = m.GetValue<DateTime?>("lastActiveDate");
-                        var lastMobileActive = m.GetValue<DateTime?>("lastMobileActiveDate");
+                        return memberRoles.Contains(role, StringComparer.OrdinalIgnoreCase);
+                    });
+                }
 
-                        return new
+                // Transform to view models
+                var memberList = regularMembers.Select(m => {
+                    var primaryClubIdStr = m.GetValue("primaryClubId")?.ToString();
+                    var primaryClubName = "No Club";
+                    var hasInvalidClubReference = false;
+                    int? memberPrimaryClubId = null;
+                    var memberRegion = "";
+
+                    if (!string.IsNullOrEmpty(primaryClubIdStr) && int.TryParse(primaryClubIdStr, out var parsedClubId))
+                    {
+                        memberPrimaryClubId = parsedClubId;
+                        var club = validClubs.FirstOrDefault(c => c.Id == parsedClubId);
+                        if (club != null)
                         {
-                            Id = m.Id,
-                            Name = m.Name,
-                            Email = m.Email,
-                            FirstName = m.GetValue("firstName")?.ToString() ?? "",
-                            LastName = m.GetValue("lastName")?.ToString() ?? "",
-                            ProfilePictureUrl = m.GetValue<string>("profilePictureUrl") ?? "",
-                            PrimaryClubName = primaryClubName,
-                            PrimaryClubId = primaryClubId,
-                            IsApproved = m.IsApproved,
-                            // Filter out ClubAdmin_* groups from display
-                            Groups = _memberService.GetAllRoles(m.Id)
-                                .Where(g => !g.StartsWith("ClubAdmin_", StringComparison.OrdinalIgnoreCase))
-                                .ToArray(),
-                            HasInvalidClubReference = hasInvalidClubReference,
-                            LastActive = lastActive,
-                            LastActiveDisplay = FormatLastActive(lastActive),
-                            LastActiveSortValue = lastActive?.Ticks ?? 0,  // For sorting
-                            LastMobileActive = lastMobileActive,
-                            LastMobileActiveDisplay = FormatLastActive(lastMobileActive),
-                            LastMobileActiveSortValue = lastMobileActive?.Ticks ?? 0
-                        };
-                    }).ToList();
+                            primaryClubName = club.Name;
+                            memberRegion = club.RegionalFederation;
+                        }
+                        else
+                        {
+                            primaryClubName = $"⚠️ Invalid Club (ID: {parsedClubId})";
+                            hasInvalidClubReference = true;
+                        }
+                    }
 
-                return Json(new { success = true, data = members });
+                    var lastActive = m.GetValue<DateTime?>("lastActiveDate");
+                    var lastMobileActive = m.GetValue<DateTime?>("lastMobileActiveDate");
+                    var phoneNumber = m.GetValue("phoneNumber")?.ToString() ?? "";
+                    var memberRoles = _memberService.GetAllRoles(m.Id)
+                        .Where(g => !g.StartsWith("ClubAdmin_", StringComparison.OrdinalIgnoreCase))
+                        .ToArray();
+
+                    return new MemberListItem
+                    {
+                        Id = m.Id,
+                        Name = m.Name ?? "",
+                        Email = m.Email ?? "",
+                        FirstName = m.GetValue("firstName")?.ToString() ?? "",
+                        LastName = m.GetValue("lastName")?.ToString() ?? "",
+                        ProfilePictureUrl = m.GetValue<string>("profilePictureUrl") ?? "",
+                        PrimaryClubName = primaryClubName,
+                        PrimaryClubId = memberPrimaryClubId,
+                        Region = memberRegion,
+                        PhoneNumber = phoneNumber,
+                        IsApproved = m.IsApproved,
+                        Groups = memberRoles,
+                        HasInvalidClubReference = hasInvalidClubReference,
+                        LastActive = lastActive,
+                        LastActiveDisplay = FormatLastActive(lastActive),
+                        LastActiveSortValue = lastActive?.Ticks ?? 0,
+                        LastMobileActive = lastMobileActive,
+                        LastMobileActiveDisplay = FormatLastActive(lastMobileActive),
+                        LastMobileActiveSortValue = lastMobileActive?.Ticks ?? 0
+                    };
+                }).ToList();
+
+                // Apply sorting
+                memberList = sortBy switch
+                {
+                    "name" => sortDesc
+                        ? memberList.OrderByDescending(m => m.FirstName).ThenByDescending(m => m.LastName).ToList()
+                        : memberList.OrderBy(m => m.FirstName).ThenBy(m => m.LastName).ToList(),
+                    "primaryClubName" => sortDesc
+                        ? memberList.OrderByDescending(m => m.PrimaryClubName).ToList()
+                        : memberList.OrderBy(m => m.PrimaryClubName).ToList(),
+                    "lastMobileActiveSortValue" => sortDesc
+                        ? memberList.OrderByDescending(m => m.LastMobileActiveSortValue).ToList()
+                        : memberList.OrderBy(m => m.LastMobileActiveSortValue).ToList(),
+                    _ => sortDesc
+                        ? memberList.OrderByDescending(m => m.LastActiveSortValue).ToList()
+                        : memberList.OrderBy(m => m.LastActiveSortValue).ToList()
+                };
+
+                // Pagination
+                var totalCount = memberList.Count;
+                var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
+                var pagedMembers = memberList
+                    .Skip((page - 1) * pageSize)
+                    .Take(pageSize)
+                    .ToList();
+
+                return Json(new
+                {
+                    success = true,
+                    data = new
+                    {
+                        items = pagedMembers,
+                        page = page,
+                        pageSize = pageSize,
+                        totalCount = totalCount,
+                        totalPages = totalPages,
+                        hasNextPage = page < totalPages,
+                        hasPreviousPage = page > 1
+                    }
+                });
             }
             catch (Exception ex)
             {
                 return Json(new { success = false, message = "Error loading members: " + ex.Message });
             }
+        }
+
+        /// <summary>
+        /// Export members to CSV with current filters
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> ExportMembers(
+            string? search = null,
+            string? region = null,
+            int? clubId = null,
+            string? role = null)
+        {
+            if (!await _authService.IsCurrentUserAdminAsync())
+            {
+                return Json(new { success = false, message = "Access denied" });
+            }
+
+            try
+            {
+                // Get current valid clubs for filtering
+                var validClubs = GetClubsFromStorage().Where(c => c.IsActive).ToList();
+
+                // Get clubs in the selected region if region filter is active
+                var clubsInRegion = new HashSet<int>();
+                if (!string.IsNullOrEmpty(region))
+                {
+                    clubsInRegion = validClubs
+                        .Where(c => c.RegionalFederation == region)
+                        .Select(c => c.Id ?? 0)
+                        .Where(id => id > 0)
+                        .ToHashSet();
+                }
+
+                var allMembers = _memberService.GetAll(0, int.MaxValue, out var totalRecords);
+                var regularMembers = allMembers.Where(m => m.ContentType.Alias != ClubMemberTypeAlias);
+
+                // Apply search filter
+                if (!string.IsNullOrWhiteSpace(search))
+                {
+                    var searchLower = search.ToLowerInvariant();
+                    regularMembers = regularMembers.Where(m =>
+                        (m.GetValue("firstName")?.ToString()?.ToLowerInvariant().Contains(searchLower) ?? false) ||
+                        (m.GetValue("lastName")?.ToString()?.ToLowerInvariant().Contains(searchLower) ?? false) ||
+                        (m.Email?.ToLowerInvariant().Contains(searchLower) ?? false)
+                    );
+                }
+
+                // Apply region filter
+                if (!string.IsNullOrEmpty(region) && clubsInRegion.Any())
+                {
+                    regularMembers = regularMembers.Where(m =>
+                    {
+                        var memberClubIdStr = m.GetValue("primaryClubId")?.ToString();
+                        if (int.TryParse(memberClubIdStr, out var memberClubId))
+                        {
+                            return clubsInRegion.Contains(memberClubId);
+                        }
+                        return false;
+                    });
+                }
+
+                // Apply club filter
+                if (clubId.HasValue)
+                {
+                    regularMembers = regularMembers.Where(m =>
+                    {
+                        var memberClubIdStr = m.GetValue("primaryClubId")?.ToString();
+                        if (int.TryParse(memberClubIdStr, out var memberClubId))
+                        {
+                            return memberClubId == clubId.Value;
+                        }
+                        return false;
+                    });
+                }
+
+                // Apply role filter
+                if (!string.IsNullOrEmpty(role))
+                {
+                    regularMembers = regularMembers.Where(m =>
+                    {
+                        var memberRoles = _memberService.GetAllRoles(m.Id);
+
+                        // Handle special cases for ClubAdmin and RegionalAdmin which have suffixes like ClubAdmin_1234
+                        if (role.Equals("ClubAdmin", StringComparison.OrdinalIgnoreCase))
+                        {
+                            return memberRoles.Any(r => r.StartsWith("ClubAdmin_", StringComparison.OrdinalIgnoreCase));
+                        }
+                        if (role.Equals("RegionalAdmin", StringComparison.OrdinalIgnoreCase))
+                        {
+                            return memberRoles.Any(r => r.StartsWith("RegionalAdmin_", StringComparison.OrdinalIgnoreCase));
+                        }
+
+                        return memberRoles.Contains(role, StringComparer.OrdinalIgnoreCase);
+                    });
+                }
+
+                // Build CSV
+                var csv = new StringBuilder();
+                csv.AppendLine("Namn,E-post,Telefon,Klubb,Krets,Grupper,Status,Senast aktiv (webb),Senast aktiv (app)");
+
+                foreach (var m in regularMembers)
+                {
+                    var primaryClubIdStr = m.GetValue("primaryClubId")?.ToString();
+                    var primaryClubName = "";
+                    var memberRegion = "";
+
+                    if (!string.IsNullOrEmpty(primaryClubIdStr) && int.TryParse(primaryClubIdStr, out var parsedClubId))
+                    {
+                        var club = validClubs.FirstOrDefault(c => c.Id == parsedClubId);
+                        if (club != null)
+                        {
+                            primaryClubName = club.Name;
+                            memberRegion = GetRegionDescription(club.RegionalFederation);
+                        }
+                    }
+
+                    var firstName = m.GetValue("firstName")?.ToString() ?? "";
+                    var lastName = m.GetValue("lastName")?.ToString() ?? "";
+                    var phoneNumber = m.GetValue("phoneNumber")?.ToString() ?? "";
+                    var memberRoles = _memberService.GetAllRoles(m.Id)
+                        .Where(g => !g.StartsWith("ClubAdmin_", StringComparison.OrdinalIgnoreCase));
+                    var lastActive = m.GetValue<DateTime?>("lastActiveDate");
+                    var lastMobileActive = m.GetValue<DateTime?>("lastMobileActiveDate");
+
+                    csv.AppendLine(string.Join(",",
+                        EscapeCsvField($"{firstName} {lastName}"),
+                        EscapeCsvField(m.Email ?? ""),
+                        EscapeCsvField(phoneNumber),
+                        EscapeCsvField(primaryClubName),
+                        EscapeCsvField(memberRegion),
+                        EscapeCsvField(string.Join("; ", memberRoles)),
+                        m.IsApproved ? "Godkänd" : "Väntande",
+                        lastActive?.ToString("yyyy-MM-dd HH:mm") ?? "",
+                        lastMobileActive?.ToString("yyyy-MM-dd HH:mm") ?? ""
+                    ));
+                }
+
+                var bytes = Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(csv.ToString())).ToArray();
+                var fileName = $"medlemmar_{DateTime.Now:yyyy-MM-dd}.csv";
+                return File(bytes, "text/csv; charset=utf-8", fileName);
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = "Error exporting members: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Gets regions that have members (for user management filter)
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetRegionsForUserManagement()
+        {
+            if (!await _authService.IsCurrentUserAdminAsync())
+            {
+                return Json(new { success = false, message = "Access denied" });
+            }
+
+            try
+            {
+                var clubs = GetClubsFromStorage();
+                var swedishComparer = StringComparer.Create(new System.Globalization.CultureInfo("sv-SE"), false);
+
+                // Get distinct regions that have active clubs
+                var regionsWithClubs = clubs
+                    .Where(c => c.IsActive && !string.IsNullOrEmpty(c.RegionalFederation))
+                    .Select(c => c.RegionalFederation)
+                    .Distinct()
+                    .ToList();
+
+                // Get the descriptions for each region and sort in Swedish
+                var regions = regionsWithClubs
+                    .Select(r => {
+                        if (Enum.TryParse<Federations.RegionalFederations>(r, out var federation))
+                        {
+                            return new {
+                                id = r,
+                                name = federation.GetDescription()
+                            };
+                        }
+                        return new { id = r, name = r };
+                    })
+                    .OrderBy(r => r.name, swedishComparer)
+                    .ToList();
+
+                return Json(new { success = true, regions = regions });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = "Error loading regions: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Gets clubs for a specific region (for cascading dropdown in user management)
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetClubsForRegion(string region)
+        {
+            if (!await _authService.IsCurrentUserAdminAsync())
+            {
+                return Json(new { success = false, message = "Access denied" });
+            }
+
+            try
+            {
+                var clubs = GetClubsFromStorage()
+                    .Where(c => c.IsActive);
+
+                if (!string.IsNullOrEmpty(region))
+                {
+                    clubs = clubs.Where(c => c.RegionalFederation == region);
+                }
+
+                var clubList = clubs
+                    .OrderBy(c => c.Name, StringComparer.Create(new System.Globalization.CultureInfo("sv-SE"), false))
+                    .Select(c => new { id = c.Id, name = c.Name })
+                    .ToList();
+
+                return Json(new { success = true, clubs = clubList });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = "Error loading clubs: " + ex.Message });
+            }
+        }
+
+        private string EscapeCsvField(string field)
+        {
+            if (string.IsNullOrEmpty(field)) return "";
+            if (field.Contains(',') || field.Contains('"') || field.Contains('\n'))
+            {
+                return $"\"{field.Replace("\"", "\"\"")}\"";
+            }
+            return field;
+        }
+
+        private string GetRegionDescription(string regionCode)
+        {
+            if (string.IsNullOrEmpty(regionCode)) return "";
+            if (Enum.TryParse<Federations.RegionalFederations>(regionCode, out var federation))
+            {
+                return federation.GetDescription();
+            }
+            return regionCode;
+        }
+
+        /// <summary>
+        /// Internal class for member list items
+        /// </summary>
+        private class MemberListItem
+        {
+            public int Id { get; set; }
+            public string Name { get; set; } = "";
+            public string Email { get; set; } = "";
+            public string FirstName { get; set; } = "";
+            public string LastName { get; set; } = "";
+            public string ProfilePictureUrl { get; set; } = "";
+            public string PrimaryClubName { get; set; } = "";
+            public int? PrimaryClubId { get; set; }
+            public string Region { get; set; } = "";
+            public string PhoneNumber { get; set; } = "";
+            public bool IsApproved { get; set; }
+            public string[] Groups { get; set; } = Array.Empty<string>();
+            public bool HasInvalidClubReference { get; set; }
+            public DateTime? LastActive { get; set; }
+            public string LastActiveDisplay { get; set; } = "";
+            public long LastActiveSortValue { get; set; }
+            public DateTime? LastMobileActive { get; set; }
+            public string LastMobileActiveDisplay { get; set; } = "";
+            public long LastMobileActiveSortValue { get; set; }
         }
 
         /// <summary>
@@ -709,7 +1111,7 @@ namespace HpskSite.Controllers
                 }
 
                 // Get primary club name
-                string clubName = "HPSK";
+                string clubName = "din klubb";
                 var primaryClubIdStr = member.GetValue("primaryClubId")?.ToString();
                 if (!string.IsNullOrEmpty(primaryClubIdStr) && int.TryParse(primaryClubIdStr, out int primaryClubId))
                 {
@@ -718,7 +1120,7 @@ namespace HpskSite.Controllers
                         var clubNode = UmbracoContext.Content.GetById(primaryClubId);
                         if (clubNode != null && clubNode.ContentType.Alias == "club")
                         {
-                            clubName = clubNode.Value<string>("clubName") ?? clubNode.Name ?? "HPSK";
+                            clubName = clubNode.Value<string>("clubName") ?? clubNode.Name ?? "din klubb";
                             Console.WriteLine($"[SendInvitation] Using club name: '{clubName}'");
                         }
                     }
@@ -919,31 +1321,51 @@ namespace HpskSite.Controllers
 
                 if (_umbracoContextAccessor.TryGetUmbracoContext(out var umbracoContext) && umbracoContext.Content != null)
                 {
-                    // Get the clubs hub page (clubsPage)
                     var root = umbracoContext.Content.GetAtRoot().FirstOrDefault();
                     if (root == null) return clubs;
 
-                    // Find clubsPage - it should be a direct child of root
-                    var clubsHub = root.Children().FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
-                    if (clubsHub == null) return clubs;
+                    // Collect all clubsPage nodes from multiple locations:
+                    // 1. Direct child of root (legacy structure)
+                    // 2. Under regional pages (new structure)
+                    var clubsHubs = new List<Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent>();
 
-                    // Get all club nodes (children of clubsPage)
-                    var clubNodes = clubsHub.Children().Where(c => c.ContentType.Alias == "club").ToList();
-
-                    // Convert club nodes to ClubViewModels
-                    foreach (var clubNode in clubNodes)
+                    // Check for direct clubsPage under root (legacy)
+                    var directClubsHub = root.Children().FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+                    if (directClubsHub != null)
                     {
-                        var clubId = clubNode.Id;
-                        var clubName = clubNode.Value<string>("clubName") ?? clubNode.Name ?? "";
+                        clubsHubs.Add(directClubsHub);
+                    }
 
-                        var club = new ClubViewModel
+                    // Check for clubsPage under regional pages
+                    var regionalPages = root.Children().Where(c => c.ContentType.Alias == "regionalPage");
+                    foreach (var region in regionalPages)
+                    {
+                        var regionClubsHub = region.Children().FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+                        if (regionClubsHub != null)
                         {
-                            Id = clubId,
-                            Name = clubName,
-                            IsActive = clubNode.IsPublished()
-                        };
+                            clubsHubs.Add(regionClubsHub);
+                        }
+                    }
 
-                        clubs.Add(club);
+                    // Get all club nodes from all clubsPage hubs
+                    foreach (var clubsHub in clubsHubs)
+                    {
+                        var clubNodes = clubsHub.Children().Where(c => c.ContentType.Alias == "club").ToList();
+
+                        foreach (var clubNode in clubNodes)
+                        {
+                            var clubId = clubNode.Id;
+                            var clubName = clubNode.Value<string>("clubName") ?? clubNode.Name ?? "";
+
+                            var club = new ClubViewModel
+                            {
+                                Id = clubId,
+                                Name = clubName,
+                                IsActive = clubNode.IsPublished()
+                            };
+
+                            clubs.Add(club);
+                        }
                     }
                 }
 

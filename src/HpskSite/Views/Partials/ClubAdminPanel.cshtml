@@ -612,6 +612,10 @@
 </div>
 
 <script>
+// Club context - needed for competition wizard integration
+const clubId = @clubId;
+window.currentClubId = clubId;
+
 // Global variables to store loaded data
 let allEvents = [];
 let aboutClubEditor = null; // CKEditor instance for About Club field

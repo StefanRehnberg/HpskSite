@@ -80,7 +80,7 @@ public partial class QrScannerPage : ContentPage
             return null;
 
         // If it's a URL, try to extract the code from query parameters
-        // QR codes contain URLs like: https://hpsktest.se/traningsmatch/?join=ABC123
+        // QR codes contain URLs like: https://pistol.nu/traningsmatch/?join=ABC123
         if (scannedValue.StartsWith("http://") || scannedValue.StartsWith("https://"))
         {
             try

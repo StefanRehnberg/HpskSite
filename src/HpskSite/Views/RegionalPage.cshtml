@@ -1,0 +1,253 @@
+@using Umbraco.Cms.Web.Common.PublishedModels;
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+
+    // Get region properties
+    var regionCode = Model.Value<string>("regionCode") ?? "";
+    var regionName = Model.Value<string>("regionName") ?? Model.Name;
+    var welcomeTitle = Model.Value<string>("welcomeTitle") ?? $"Välkommen till {regionName}";
+    var welcomeText = Model.Value<string>("welcomeText");
+    var aboutRegion = Model.Value<string>("aboutRegion");
+    var contactPerson = Model.Value<string>("contactPerson");
+    var contactEmail = Model.Value<string>("contactEmail");
+    var contactPhone = Model.Value<string>("contactPhone");
+    var bannerImage = Model.Value<Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent>("bannerImage");
+    var logo = Model.Value<Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent>("logo");
+
+    // Find the clubsPage child
+    var clubsPage = Model.Children.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+    var clubsUrl = clubsPage?.Url() ?? $"{Model.Url()}klubbar";
+
+    // Count clubs in this region
+    var clubCount = 0;
+    if (clubsPage != null)
+    {
+        clubCount = clubsPage.Children.Count(c => c.ContentType.Alias == "club");
+    }
+
+    ViewBag.Title = regionName;
+}
+
+<!-- Hero Banner Section -->
+<div class="row mb-4">
+    <div class="col-12">
+        @if (bannerImage != null)
+        {
+            <div class="position-relative rounded overflow-hidden" style="height: 300px;">
+                <img src="@bannerImage.Url()" alt="@regionName" class="w-100 h-100" style="object-fit: cover;">
+                <div class="position-absolute top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center"
+                     style="background: linear-gradient(135deg, rgba(0,123,255,0.6) 0%, rgba(0,86,179,0.65) 100%);">
+                    <div class="text-center text-white p-4">
+                        @if (logo != null)
+                        {
+                            <img src="@logo.Url()" alt="@regionName Logo" class="mb-3" style="max-height: 80px; max-width: 200px;">
+                        }
+                        <h1 class="display-4 fw-bold">@welcomeTitle</h1>
+                        @if (!string.IsNullOrEmpty(welcomeText))
+                        {
+                            <div class="lead mt-3">@Html.Raw(welcomeText)</div>
+                        }
+                    </div>
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="jumbotron bg-primary text-white p-5 rounded">
+                <div class="d-flex align-items-center justify-content-center flex-column">
+                    @if (logo != null)
+                    {
+                        <img src="@logo.Url()" alt="@regionName Logo" class="mb-3" style="max-height: 80px; max-width: 200px;">
+                    }
+                    <h1 class="display-4 fw-bold text-center">@welcomeTitle</h1>
+                    @if (!string.IsNullOrEmpty(welcomeText))
+                    {
+                        <div class="lead mt-3 text-center">@Html.Raw(welcomeText)</div>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+<div class="row">
+    <!-- Main Content Column -->
+    <div class="col-lg-8">
+        <!-- Quick Stats Card -->
+        @{
+            var rootPageForStats = Model.Root();
+            var competitionsHub = rootPageForStats?.Children.FirstOrDefault(x => x.ContentType.Alias == "competitionsHub");
+            var upcomingCompetitionsCount = 0;
+
+            // Get club IDs for this region
+            var regionClubIds = new HashSet<int>();
+            if (clubsPage != null)
+            {
+                foreach (var club in clubsPage.Children.Where(c => c.ContentType.Alias == "club"))
+                {
+                    regionClubIds.Add(club.Id);
+                }
+            }
+
+            // Count upcoming competitions for clubs in this region
+            if (competitionsHub != null && regionClubIds.Any())
+            {
+                upcomingCompetitionsCount = competitionsHub.Descendants()
+                    .Where(c => c.ContentType.Alias == "competition")
+                    .Where(c => c.Value<DateTime>("competitionDate") >= DateTime.Today)
+                    .Count(c => regionClubIds.Contains(c.Value<int>("clubId")));
+            }
+        }
+        <div class="card mb-4">
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-md-4 mb-3 mb-md-0">
+                        <div class="d-flex flex-column align-items-center">
+                            <i class="bi bi-building fs-1 text-primary mb-2"></i>
+                            <h3 class="mb-0">@clubCount</h3>
+                            <small class="text-muted">Klubbar</small>
+                        </div>
+                    </div>
+                    <div class="col-md-4 mb-3 mb-md-0">
+                        <div class="d-flex flex-column align-items-center">
+                            <i class="bi bi-geo-alt fs-1 text-primary mb-2"></i>
+                            <h3 class="mb-0">@regionName</h3>
+                            <small class="text-muted">Krets</small>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="d-flex flex-column align-items-center">
+                            <i class="bi bi-trophy fs-1 text-primary mb-2"></i>
+                            <h3 class="mb-0">@upcomingCompetitionsCount</h3>
+                            <small class="text-muted">Kommande tävlingar</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- About Region Section -->
+        @if (!string.IsNullOrEmpty(aboutRegion))
+        {
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Om @regionName</h5>
+                </div>
+                <div class="card-body">
+                    @Html.Raw(aboutRegion)
+                </div>
+            </div>
+        }
+
+    </div>
+
+    <!-- Sidebar Column -->
+    <div class="col-lg-4">
+        <!-- Contact Card -->
+        @if (!string.IsNullOrEmpty(contactPerson) || !string.IsNullOrEmpty(contactEmail) || !string.IsNullOrEmpty(contactPhone))
+        {
+            <div class="card mb-4">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0"><i class="bi bi-person-lines-fill me-2"></i>Kontakt</h5>
+                </div>
+                <div class="card-body">
+                    @if (!string.IsNullOrEmpty(contactPerson))
+                    {
+                        <div class="d-flex align-items-center mb-3">
+                            <i class="bi bi-person fs-4 text-primary me-3"></i>
+                            <div>
+                                <small class="text-muted d-block">Kontaktperson</small>
+                                <span>@contactPerson</span>
+                            </div>
+                        </div>
+                    }
+                    @if (!string.IsNullOrEmpty(contactEmail))
+                    {
+                        <div class="d-flex align-items-center mb-3">
+                            <i class="bi bi-envelope fs-4 text-primary me-3"></i>
+                            <div>
+                                <small class="text-muted d-block">E-post</small>
+                                <a href="mailto:@contactEmail">@contactEmail</a>
+                            </div>
+                        </div>
+                    }
+                    @if (!string.IsNullOrEmpty(contactPhone))
+                    {
+                        <div class="d-flex align-items-center">
+                            <i class="bi bi-telephone fs-4 text-primary me-3"></i>
+                            <div>
+                                <small class="text-muted d-block">Telefon</small>
+                                <a href="tel:@contactPhone">@contactPhone</a>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+
+        <!-- Quick Links Card -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-link-45deg me-2"></i>Snabblänkar</h5>
+            </div>
+            <div class="list-group list-group-flush">
+                <a href="@clubsUrl" class="list-group-item list-group-item-action d-flex align-items-center">
+                    <i class="bi bi-building me-3 text-primary"></i>
+                    <div>
+                        <strong>Klubbar</strong>
+                        <small class="d-block text-muted">Hitta en klubb i @regionName</small>
+                    </div>
+                </a>
+                @{
+                    var rootPage = Model.Root();
+                    var competitionsPage = rootPage?.Children.FirstOrDefault(x => x.ContentType.Alias == "competitionsHub");
+                    var trainingPage = rootPage?.Children.FirstOrDefault(x => x.Url().Contains("training-page"));
+                }
+                @if (competitionsPage != null)
+                {
+                    <a href="@competitionsPage.Url()" class="list-group-item list-group-item-action d-flex align-items-center">
+                        <i class="bi bi-trophy me-3 text-primary"></i>
+                        <div>
+                            <strong>Tävlingar</strong>
+                            <small class="d-block text-muted">Se kommande tävlingar</small>
+                        </div>
+                    </a>
+                }
+                @if (trainingPage != null)
+                {
+                    <a href="@trainingPage.Url()" class="list-group-item list-group-item-action d-flex align-items-center">
+                        <i class="bi bi-mortarboard me-3 text-primary"></i>
+                        <div>
+                            <strong>Träning</strong>
+                            <small class="d-block text-muted">Skyttetrappan och mer</small>
+                        </div>
+                    </a>
+                }
+                @{
+                    var recordsPage = Model.Children.FirstOrDefault(c => c.ContentType.Alias == "recordsPage");
+                    var recordsUrl = recordsPage?.Url() ?? $"{Model.Url()}kretsrekord";
+                }
+                <a href="@recordsUrl" class="list-group-item list-group-item-action d-flex align-items-center">
+                    <i class="bi bi-award me-3 text-primary"></i>
+                    <div>
+                        <strong>Kretsrekord</strong>
+                        <small class="d-block text-muted">Rekord i @regionName</small>
+                    </div>
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.jumbotron {
+    background: linear-gradient(135deg, var(--bs-primary) 0%, #0056b3 100%);
+}
+
+@@media (max-width: 991.98px) {
+    .display-4 {
+        font-size: 2rem;
+    }
+}
+</style>

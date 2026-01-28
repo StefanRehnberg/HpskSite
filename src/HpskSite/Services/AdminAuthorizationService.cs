@@ -49,6 +49,7 @@ namespace HpskSite.Services
         /// <summary>
         /// Checks if the current user is a club admin for a specific club
         /// Site administrators have access to all clubs
+        /// Regional administrators have access to all clubs in their region
         /// </summary>
         public async Task<bool> IsClubAdminForClub(int clubId)
         {
@@ -61,10 +62,124 @@ namespace HpskSite.Services
             var currentMemberData = _memberService.GetByEmail(currentMember.Email ?? string.Empty);
             if (currentMemberData == null) return false;
 
+            var memberRoles = _memberService.GetAllRoles(currentMemberData.Id);
+
             // Check if user is admin for this specific club
             var clubAdminGroup = $"ClubAdmin_{clubId}";
+            if (memberRoles.Contains(clubAdminGroup)) return true;
+
+            // Check if user is regional admin for the club's region
+            var clubRegion = GetClubRegionCode(clubId);
+            if (!string.IsNullOrEmpty(clubRegion))
+            {
+                var regionalAdminGroup = $"RegionalAdmin_{clubRegion}";
+                if (memberRoles.Contains(regionalAdminGroup)) return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Checks if the current user is a regional admin for a specific region
+        /// Site administrators have access to all regions
+        /// </summary>
+        public async Task<bool> IsRegionalAdminForRegion(string regionCode)
+        {
+            if (string.IsNullOrEmpty(regionCode)) return false;
+
+            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            if (currentMember == null) return false;
+
+            // Full admins can manage any region
+            if (await IsCurrentUserAdminAsync()) return true;
+
+            var currentMemberData = _memberService.GetByEmail(currentMember.Email ?? string.Empty);
+            if (currentMemberData == null) return false;
+
+            var regionalAdminGroup = $"RegionalAdmin_{regionCode}";
             var memberRoles = _memberService.GetAllRoles(currentMemberData.Id);
-            return memberRoles.Contains(clubAdminGroup);
+            return memberRoles.Contains(regionalAdminGroup);
+        }
+
+        /// <summary>
+        /// Gets list of region codes that the current user can administer
+        /// Returns all regions for site administrators
+        /// </summary>
+        public async Task<List<string>> GetManagedRegions()
+        {
+            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            if (currentMember == null) return new List<string>();
+
+            // Full admins can manage all regions
+            if (await IsCurrentUserAdminAsync())
+            {
+                return Enum.GetNames(typeof(HpskSite.Models.Federations.RegionalFederations)).ToList();
+            }
+
+            var currentMemberData = _memberService.GetByEmail(currentMember.Email ?? string.Empty);
+            if (currentMemberData == null) return new List<string>();
+
+            // Extract region codes from RegionalAdmin groups
+            var memberRoles = _memberService.GetAllRoles(currentMemberData.Id);
+            var regionCodes = new List<string>();
+
+            foreach (var role in memberRoles.Where(r => r.StartsWith("RegionalAdmin_")))
+            {
+                var regionCode = role.Replace("RegionalAdmin_", "");
+                regionCodes.Add(regionCode);
+            }
+
+            return regionCodes;
+        }
+
+        /// <summary>
+        /// Ensures that a regional admin group exists for a specific region
+        /// Creates the group if it doesn't exist
+        /// </summary>
+        public async Task<bool> EnsureRegionalAdminGroup(string regionCode)
+        {
+            try
+            {
+                var groupName = $"RegionalAdmin_{regionCode}";
+                var existingGroup = await _memberGroupService.GetByNameAsync(groupName);
+
+                if (existingGroup == null)
+                {
+                    var newGroup = new MemberGroup();
+                    newGroup.Name = groupName;
+                    await _memberGroupService.CreateAsync(newGroup);
+                    return true;
+                }
+
+                return true;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Gets the regional federation code for a club
+        /// </summary>
+        private string GetClubRegionCode(int clubId)
+        {
+            try
+            {
+                if (_umbracoContextAccessor.TryGetUmbracoContext(out var umbracoContext) && umbracoContext.Content != null)
+                {
+                    var clubNode = umbracoContext.Content.GetById(clubId);
+                    if (clubNode != null && clubNode.ContentType.Alias == "club")
+                    {
+                        return clubNode.Value<string>("regionalFederation") ?? "";
+                    }
+                }
+                return "";
+            }
+            catch
+            {
+                return "";
+            }
         }
 
         /// <summary>
@@ -106,16 +221,19 @@ namespace HpskSite.Services
         /// <summary>
         /// Gets list of club IDs that the current user can administer
         /// Returns all clubs for site administrators
+        /// Returns clubs in managed regions for regional administrators
         /// </summary>
         public async Task<List<int>> GetManagedClubIds()
         {
             var currentMember = await _memberManager.GetCurrentMemberAsync();
             if (currentMember == null) return new List<int>();
 
+            var allClubs = GetClubsFromContent();
+
             // Full admins can manage all clubs
             if (await IsCurrentUserAdminAsync())
             {
-                return GetClubsFromContent()
+                return allClubs
                     .Where(c => c.Id.HasValue && c.Id.Value > 0)
                     .Select(c => c.Id!.Value)
                     .ToList();
@@ -124,16 +242,91 @@ namespace HpskSite.Services
             var currentMemberData = _memberService.GetByEmail(currentMember.Email ?? string.Empty);
             if (currentMemberData == null) return new List<int>();
 
-            // Extract club IDs from ClubAdmin groups
             var memberRoles = _memberService.GetAllRoles(currentMemberData.Id);
-            var clubIds = new List<int>();
+            var clubIds = new HashSet<int>();
 
+            // Extract club IDs from ClubAdmin groups
             foreach (var role in memberRoles.Where(r => r.StartsWith("ClubAdmin_")))
             {
                 if (int.TryParse(role.Replace("ClubAdmin_", ""), out int clubId))
                 {
                     clubIds.Add(clubId);
                 }
+            }
+
+            // Extract clubs from RegionalAdmin groups
+            var managedRegions = memberRoles
+                .Where(r => r.StartsWith("RegionalAdmin_"))
+                .Select(r => r.Replace("RegionalAdmin_", ""))
+                .ToList();
+
+            if (managedRegions.Any())
+            {
+                // Get all clubs in the managed regions
+                var clubsInManagedRegions = GetClubsInRegions(managedRegions);
+                foreach (var clubId in clubsInManagedRegions)
+                {
+                    clubIds.Add(clubId);
+                }
+            }
+
+            return clubIds.ToList();
+        }
+
+        /// <summary>
+        /// Gets list of club IDs in the specified regions
+        /// </summary>
+        private List<int> GetClubsInRegions(List<string> regionCodes)
+        {
+            var clubIds = new List<int>();
+
+            try
+            {
+                if (_umbracoContextAccessor.TryGetUmbracoContext(out var umbracoContext) && umbracoContext.Content != null)
+                {
+                    var root = umbracoContext.Content.GetAtRoot().FirstOrDefault();
+                    if (root == null) return clubIds;
+
+                    // Find all regional pages
+                    var regionalPages = root.Children.Where(c => c.ContentType.Alias == "regionalPage").ToList();
+
+                    foreach (var regionalPage in regionalPages)
+                    {
+                        var regionCode = regionalPage.Value<string>("regionCode") ?? "";
+                        if (regionCodes.Contains(regionCode))
+                        {
+                            // Find clubsPage under this region
+                            var clubsPage = regionalPage.Children.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+                            if (clubsPage != null)
+                            {
+                                var clubs = clubsPage.Children.Where(c => c.ContentType.Alias == "club");
+                                foreach (var club in clubs)
+                                {
+                                    clubIds.Add(club.Id);
+                                }
+                            }
+                        }
+                    }
+
+                    // Also check for clubs directly under root clubsPage (old structure) with matching regionCode
+                    var rootClubsPage = root.Children.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+                    if (rootClubsPage != null)
+                    {
+                        var clubs = rootClubsPage.Children.Where(c => c.ContentType.Alias == "club");
+                        foreach (var club in clubs)
+                        {
+                            var clubRegion = club.Value<string>("regionalFederation") ?? "";
+                            if (regionCodes.Contains(clubRegion))
+                            {
+                                clubIds.Add(club.Id);
+                            }
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // Ignore errors
             }
 
             return clubIds;
@@ -314,6 +507,7 @@ namespace HpskSite.Services
 
         /// <summary>
         /// Helper method to retrieve clubs from Umbraco content tree
+        /// Supports both new regional structure and legacy root-level clubsPage
         /// </summary>
         private List<ClubViewModel> GetClubsFromContent()
         {
@@ -323,16 +517,30 @@ namespace HpskSite.Services
 
                 if (_umbracoContextAccessor.TryGetUmbracoContext(out var umbracoContext) && umbracoContext.Content != null)
                 {
-                    // Get the clubs hub page (clubsPage)
                     var root = umbracoContext.Content.GetAtRoot().FirstOrDefault();
                     if (root == null) return clubs;
 
-                    // Find clubsPage - it should be a direct child of root
-                    var clubsHub = root.Children.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
-                    if (clubsHub == null) return clubs;
+                    var clubNodes = new List<Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent>();
 
-                    // Get all club nodes (children of clubsPage)
-                    var clubNodes = clubsHub.Children.Where(c => c.ContentType.Alias == "club").ToList();
+                    // NEW STRUCTURE: Find clubs under regional pages (Home → RegionalPage → clubsPage → clubs)
+                    var regionalPages = root.Children.Where(c => c.ContentType.Alias == "regionalPage").ToList();
+                    foreach (var regionalPage in regionalPages)
+                    {
+                        var regionalClubsPage = regionalPage.Children.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+                        if (regionalClubsPage != null)
+                        {
+                            var regionalClubs = regionalClubsPage.Children.Where(c => c.ContentType.Alias == "club");
+                            clubNodes.AddRange(regionalClubs);
+                        }
+                    }
+
+                    // BACKWARDS COMPATIBILITY: Also check for clubs under root-level clubsPage
+                    var rootClubsHub = root.Children.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+                    if (rootClubsHub != null)
+                    {
+                        var rootClubs = rootClubsHub.Children.Where(c => c.ContentType.Alias == "club");
+                        clubNodes.AddRange(rootClubs);
+                    }
 
                     // Convert club nodes to ClubViewModels
                     foreach (var clubNode in clubNodes)

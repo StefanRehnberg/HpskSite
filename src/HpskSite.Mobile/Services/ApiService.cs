@@ -44,7 +44,7 @@ public class ApiService : IApiService
         };
     }
 
-    public string BaseUrl { get; set; } = "https://localhost:5001";
+    public string BaseUrl { get; set; } = "https://pistol.nu";
 
     public async Task<ApiResponse<T>> GetAsync<T>(string endpoint)
     {

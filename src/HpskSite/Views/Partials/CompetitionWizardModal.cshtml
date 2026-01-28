@@ -726,13 +726,14 @@ function loadClubsForWizard() {
                     select.appendChild(option);
                 });
 
-                // Context-aware: Pre-fill if on club page
+                // Context-aware: Pre-fill and lock club if on club page
                 if (wizardContext.isClubPage && wizardContext.clubId) {
                     select.value = wizardContext.clubId;
-                    // Don't disable - keep it enabled so form submits the value
+                    // Disable dropdown to prevent changes - club admins can only create for their club
+                    select.disabled = true;
                     document.getElementById('wizard_clubHelpText').textContent = 'Tävlingen skapas för denna klubb';
 
-                    // Auto-check "isClubOnly" checkbox if on club page
+                    // Pre-check "isClubOnly" but keep it editable so club can invite other clubs
                     document.getElementById('wizard_isClubOnly').checked = true;
                 }
             }

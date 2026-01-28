@@ -50,9 +50,17 @@
     </div>
 
     <div class="mb-3">
+        <label for="regionSelect" class="form-label">Krets <span class="text-danger">*</span></label>
+        <select id="regionSelect" class="form-select" required>
+            <option value="">Välj en krets...</option>
+        </select>
+        <div class="invalid-feedback">Välj en krets först</div>
+    </div>
+
+    <div class="mb-3">
         <label for="primaryClubId" class="form-label">Huvudklubb <span class="text-danger">*</span></label>
-        <select id="primaryClubId" name="primaryClubId" class="form-select" required>
-            <option value="">Välj en klubb...</option>
+        <select id="primaryClubId" name="primaryClubId" class="form-select" required disabled>
+            <option value="">Välj en krets först...</option>
         </select>
         <div class="form-text">
             <i class="bi bi-question-circle me-1"></i>
@@ -80,8 +88,21 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    // Load clubs for dropdown
-    loadClubs();
+    // Load regions for dropdown
+    loadRegions();
+
+    // Handle region selection to load clubs
+    document.getElementById('regionSelect').addEventListener('change', function() {
+        const region = this.value;
+        if (region) {
+            loadClubsForRegion(region);
+        } else {
+            // Reset club dropdown
+            const clubSelect = document.getElementById('primaryClubId');
+            clubSelect.innerHTML = '<option value="">Välj en krets först...</option>';
+            clubSelect.disabled = true;
+        }
+    });
 
     // Handle form submission
     document.getElementById('registrationForm').addEventListener('submit', function(e) {
@@ -89,26 +110,58 @@ document.addEventListener('DOMContentLoaded', function() {
         submitRegistration();
     });
 
-    async function loadClubs() {
+    async function loadRegions() {
         try {
-            const response = await fetch('/umbraco/surface/ClubAdmin/GetClubsForRegistration');
+            const response = await fetch('/umbraco/surface/ClubAdmin/GetRegionsForRegistration');
             const data = await response.json();
 
-            const clubSelect = document.getElementById('primaryClubId');
-            if (data.success && data.clubs) {
+            const regionSelect = document.getElementById('regionSelect');
+            if (data.success && data.regions) {
                 // Clear existing options except the first one
+                regionSelect.innerHTML = '<option value="">Välj en krets...</option>';
+
+                // Add regions to dropdown (already sorted in Swedish by server)
+                data.regions.forEach(region => {
+                    const option = document.createElement('option');
+                    option.value = region.id;
+                    option.textContent = region.name;
+                    regionSelect.appendChild(option);
+                });
+            }
+        } catch (error) {
+            console.error('Error loading regions:', error);
+        }
+    }
+
+    async function loadClubsForRegion(region) {
+        const clubSelect = document.getElementById('primaryClubId');
+
+        // Show loading state
+        clubSelect.innerHTML = '<option value="">Laddar klubbar...</option>';
+        clubSelect.disabled = true;
+
+        try {
+            const response = await fetch(`/umbraco/surface/ClubAdmin/GetClubsForRegion?region=${encodeURIComponent(region)}`);
+            const data = await response.json();
+
+            if (data.success && data.clubs) {
+                // Clear and populate with clubs (already sorted in Swedish by server)
                 clubSelect.innerHTML = '<option value="">Välj en klubb...</option>';
 
-                // Add clubs to dropdown
                 data.clubs.forEach(club => {
                     const option = document.createElement('option');
                     option.value = club.id;
                     option.textContent = club.name;
                     clubSelect.appendChild(option);
                 });
+
+                clubSelect.disabled = false;
+            } else {
+                clubSelect.innerHTML = '<option value="">Inga klubbar hittades</option>';
             }
         } catch (error) {
             console.error('Error loading clubs:', error);
+            clubSelect.innerHTML = '<option value="">Fel vid laddning av klubbar</option>';
         }
     }
 

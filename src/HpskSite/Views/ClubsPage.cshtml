@@ -1,26 +1,65 @@
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
     Layout = "Master.cshtml";
-    ViewBag.Title = "Klubbar";
+
+    // Detect regional context
+    var pageRegionCode = Model.Value<string>("regionCode") ?? "";
+    var parentRegionCode = "";
+    var regionName = "";
+    var isInRegionalContext = false;
+
+    // Check if parent is a regional page
+    if (Model.Parent != null && Model.Parent.ContentType.Alias == "regionalPage")
+    {
+        parentRegionCode = Model.Parent.Value<string>("regionCode") ?? "";
+        regionName = Model.Parent.Value<string>("regionName") ?? Model.Parent.Name;
+        isInRegionalContext = true;
+    }
+
+    // Use page's own regionCode if set, otherwise use parent's
+    var activeRegionCode = !string.IsNullOrEmpty(pageRegionCode) ? pageRegionCode : parentRegionCode;
+
+    ViewBag.Title = isInRegionalContext ? $"Klubbar i {regionName}" : "Klubbar";
 }
 
 <div class="container-fluid">
     <!-- Clubs Directory -->
     <div class="card">
         <div class="card-header">
-            <h5 class="mb-0">Klubbkatalog</h5>
-            <p class="mb-0 small text-muted">Hitta och kontakta skytteföreningar</p>
+            @if (isInRegionalContext)
+            {
+                <h5 class="mb-0">Klubbar i @regionName</h5>
+                <p class="mb-0 small text-muted">Hitta och kontakta skytteföreningar i din krets</p>
+            }
+            else
+            {
+                <h5 class="mb-0">Klubbkatalog</h5>
+                <p class="mb-0 small text-muted">Hitta och kontakta skytteföreningar</p>
+            }
         </div>
         <div class="card-body">
             <!-- Filter Section -->
-            <div class="row mb-3">
-                <div class="col-md-4">
-                    <label for="kretsFilter" class="form-label">Välj krets</label>
-                    <select class="form-select form-select-lg-mobile" id="kretsFilter" onchange="filterClubsByKrets()">
-                        <option value="">Alla kretsar</option>
-                    </select>
+            @if (!isInRegionalContext)
+            {
+                <div class="row mb-3">
+                    <div class="col-md-4">
+                        <label for="kretsFilter" class="form-label">Välj krets</label>
+                        <select class="form-select form-select-lg-mobile" id="kretsFilter" onchange="filterClubsByKrets()">
+                            <option value="">Alla kretsar</option>
+                        </select>
+                    </div>
                 </div>
-            </div>
+            }
+            else
+            {
+                <!-- Hidden input to store region code for JavaScript -->
+                <input type="hidden" id="kretsFilter" value="@activeRegionCode" />
+                <div class="mb-3">
+                    <a href="@Model.Root().Url()clubs" class="btn btn-outline-secondary btn-sm">
+                        <i class="bi bi-arrow-left me-1"></i> Visa alla klubbar i hela Sverige
+                    </a>
+                </div>
+            }
 
             <div id="clubsTableContainer">
                 <div class="text-center">
@@ -38,13 +77,17 @@
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
 
 <script>
+// Regional context from server
+const isInRegionalContext = @(isInRegionalContext ? "true" : "false");
+const presetRegionCode = '@activeRegionCode';
+
 // Regional Federations data (from Models/Federations.cs)
 const regionalFederations = [
     { value: 'Blekinge', description: 'Blekinge Pistolskyttekrets' },
     { value: 'Dalarna', description: 'Dalarnas Pistolskyttekrets' },
     { value: 'Gotland', description: 'Gotlands Pistolskyttekrets' },
     { value: 'Gavleborg', description: 'Gävleborgs Pistolskyttekrets' },
-    { value: 'GoteborgOchBohuslan', description: 'Göteborg och Bohusläns Pistol.Krets' },
+    { value: 'Goteborg', description: 'Göteborg och Bohusläns Pistol.Krets' },
     { value: 'Halland', description: 'Hallands Pistolskyttekrets' },
     { value: 'Jamtland', description: 'Jämtlands Läns Pistolskyttekrets' },
     { value: 'Jonkoping', description: 'Jönköpings Läns Pistolskyttekrets' },
@@ -70,9 +113,16 @@ const regionalFederations = [
 
 function populateKretsFilter() {
     const select = document.getElementById('kretsFilter');
+
+    // If in regional context, filter is a hidden input - don't populate dropdown
+    if (isInRegionalContext) {
+        return;
+    }
+
     select.innerHTML = '<option value="">Alla kretsar</option>';
     regionalFederations.forEach(f => {
-        const selected = f.value === 'Halland' ? 'selected' : '';
+        // Default to Halland if not in regional context and no preset
+        const selected = (presetRegionCode ? f.value === presetRegionCode : f.value === 'Halland') ? 'selected' : '';
         select.innerHTML += `<option value="${f.value}" ${selected}>${f.description}</option>`;
     });
 }
@@ -152,7 +202,10 @@ function displayClubsTable(clubs) {
             linkTarget = ' target="_blank" rel="noopener noreferrer"';
         } else {
             // No external website - navigate to internal club page
-            navigationUrl = `/clubs/${club.urlSegment || club.name.toLowerCase().replace(/\\s+/g, '-')}`;
+            // Use current page URL as base for regional context
+            const currentPageUrl = '@Model.Url()'.replace(/\/$/, '');
+            const clubSlug = club.urlSegment || club.name.toLowerCase().replace(/\s+/g, '-');
+            navigationUrl = `${currentPageUrl}/${clubSlug}`;
         }
 
         tableHtml += `

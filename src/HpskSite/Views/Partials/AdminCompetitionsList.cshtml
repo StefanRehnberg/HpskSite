@@ -34,7 +34,7 @@
                 </div>
                 <div class="col-md-3">
                     <label for="typeFilter" class="form-label">Tävlingstyp</label>
-                    <select class="form-select" id="typeFilter" onchange="applyClientFilters()">
+                    <select class="form-select" id="typeFilter" onchange="onTypeFilterChange()">
                         <option value="">Alla typer</option>
                     </select>
                 </div>
@@ -129,11 +129,13 @@
 let competitionsListLoaded = false;
 let allCompetitions = [];
 let filteredCompetitions = [];
+let availableTypes = []; // Cache types for dropdown
 
 // Server-side filter state (defaults: current year, hide completed)
 let serverFilters = {
     year: new Date().getFullYear(),
-    includeCompleted: false
+    includeCompleted: false,
+    type: ''
 };
 
 // Populate year filter dropdown (2024 to current year + 1)
@@ -157,6 +159,11 @@ function onYearFilterChange() {
 
 function onShowCompletedChange() {
     serverFilters.includeCompleted = document.getElementById('showCompleted').checked;
+    loadCompetitionsList();
+}
+
+function onTypeFilterChange() {
+    serverFilters.type = document.getElementById('typeFilter').value;
     loadCompetitionsList();
 }
 
@@ -205,6 +212,9 @@ function loadCompetitionsList() {
         url += `year=${serverFilters.year}&`;
     }
     url += `includeCompleted=${serverFilters.includeCompleted}`;
+    if (serverFilters.type) {
+        url += `&type=${encodeURIComponent(serverFilters.type)}`;
+    }
 
     fetch(url, {
         method: 'GET',
@@ -226,16 +236,20 @@ function loadCompetitionsList() {
             }
 
             allCompetitions = data.data || [];
+            filteredCompetitions = allCompetitions; // No client-side filter needed
 
-            if (allCompetitions.length === 0) {
+            if (allCompetitions.length === 0 && !serverFilters.type) {
                 tableContainer.classList.add('d-none');
                 noCompetitionsAlert.classList.remove('d-none');
                 tbody.innerHTML = '';
             } else {
                 tableContainer.classList.remove('d-none');
                 noCompetitionsAlert.classList.add('d-none');
-                populateTypeFilter();
-                applyClientFilters();
+                // Only populate types on first load (when no type filter is set)
+                if (!serverFilters.type && availableTypes.length === 0) {
+                    populateTypeFilter();
+                }
+                renderCompetitions();
             }
         })
         .catch(error => {
@@ -246,25 +260,13 @@ function loadCompetitionsList() {
 }
 
 function populateTypeFilter() {
-    // Populate type filter from loaded data
+    // Populate type filter from loaded data and cache it
     const typeFilter = document.getElementById('typeFilter');
-    const types = [...new Set(allCompetitions.map(c => c.type).filter(t => t))].sort();
+    availableTypes = [...new Set(allCompetitions.map(c => c.type).filter(t => t))].sort();
 
+    const currentValue = serverFilters.type || '';
     typeFilter.innerHTML = '<option value="">Alla typer</option>' +
-        types.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
-}
-
-function applyClientFilters() {
-    // Client-side type filter only (year and status are server-side)
-    const typeFilter = document.getElementById('typeFilter').value;
-
-    filteredCompetitions = allCompetitions.filter(comp => {
-        // Type filter (client-side)
-        if (typeFilter && comp.type !== typeFilter) return false;
-        return true;
-    });
-
-    renderCompetitions();
+        availableTypes.map(t => `<option value="${escapeHtml(t)}" ${t === currentValue ? 'selected' : ''}>${escapeHtml(t)}</option>`).join('');
 }
 
 function clearFilters() {
@@ -272,6 +274,7 @@ function clearFilters() {
     const currentYear = new Date().getFullYear();
     document.getElementById('yearFilter').value = currentYear.toString();
     document.getElementById('typeFilter').value = '';
+    serverFilters.type = '';
     document.getElementById('showCompleted').checked = false;
 
     // Update server filters and reload

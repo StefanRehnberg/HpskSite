@@ -36,7 +36,7 @@
 		<Nullable>enable</Nullable>
 
 		<!-- Display name -->
-		<ApplicationTitle>HPSK Träningsmatch</ApplicationTitle>
+		<ApplicationTitle>Pistol.nu Träningsmatch</ApplicationTitle>
 
 		<!-- App Identifier -->
 		<ApplicationId>se.hpsk.traningsmatch</ApplicationId>

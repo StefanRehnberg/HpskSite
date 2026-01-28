@@ -261,55 +261,65 @@ namespace HpskSite.Controllers
                         {
                             _logger.LogInformation("Found root content node: {RootId}", rootContent.Id);
 
-                            // Find clubsPage node
+                            // Collect all clubs from all locations (legacy + regional)
+                            var allClubs = new List<Umbraco.Cms.Core.Models.IContent>();
                             var rootChildren = _contentService.GetPagedChildren(rootContent.Id, 0, int.MaxValue, out _);
-                            var clubsHub = rootChildren.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
 
-                            if (clubsHub != null)
+                            // Check direct clubsPage under root (legacy structure)
+                            var directClubsHub = rootChildren.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+                            if (directClubsHub != null)
                             {
-                                _logger.LogInformation("Found clubsPage hub: {HubId}", clubsHub.Id);
+                                _logger.LogInformation("Found direct clubsPage hub: {HubId}", directClubsHub.Id);
+                                var directClubs = _contentService.GetPagedChildren(directClubsHub.Id, 0, int.MaxValue, out _)
+                                    .Where(c => c.ContentType.Alias == "club");
+                                allClubs.AddRange(directClubs);
+                            }
 
-                                // Get all club nodes under clubsPage
-                                var allClubs = _contentService.GetPagedChildren(clubsHub.Id, 0, int.MaxValue, out _)
-                                    .Where(c => c.ContentType.Alias == "club")
-                                    .ToList(); // Materialize to get count
-
-                                _logger.LogInformation("Found {ClubCount} total clubs to check against", allClubs.Count);
-
-                                foreach (var existingClub in allClubs)
+                            // Check clubsPage under regional pages
+                            var regionalPages = rootChildren.Where(c => c.ContentType.Alias == "regionalPage");
+                            foreach (var region in regionalPages)
+                            {
+                                var regionChildren = _contentService.GetPagedChildren(region.Id, 0, int.MaxValue, out _);
+                                var regionClubsHub = regionChildren.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+                                if (regionClubsHub != null)
                                 {
-                                    var existingName = existingClub.GetValue<string>("clubName") ?? existingClub.Name ?? "";
+                                    var regionClubs = _contentService.GetPagedChildren(regionClubsHub.Id, 0, int.MaxValue, out _)
+                                        .Where(c => c.ContentType.Alias == "club");
+                                    allClubs.AddRange(regionClubs);
+                                }
+                            }
 
-                                    _logger.LogInformation("Checking club - ID: {ExistingId}, Name: '{ExistingName}'",
-                                        existingClub.Id, existingName);
+                            _logger.LogInformation("Found {ClubCount} total clubs to check against", allClubs.Count);
 
-                                    if (existingClub.Id == id.Value)
-                                    {
-                                        _logger.LogInformation("  → Skipping (this is the club being edited)");
-                                        continue; // Skip the club being edited
-                                    }
+                            foreach (var existingClub in allClubs)
+                            {
+                                var existingName = existingClub.GetValue<string>("clubName") ?? existingClub.Name ?? "";
 
-                                    _logger.LogInformation("  → Comparing names: '{ExistingName}' vs '{NewName}' (case-insensitive)",
-                                        existingName, name);
+                                _logger.LogInformation("Checking club - ID: {ExistingId}, Name: '{ExistingName}'",
+                                    existingClub.Id, existingName);
 
-                                    if (existingName.Equals(name, StringComparison.OrdinalIgnoreCase))
-                                    {
-                                        _logger.LogWarning("  → DUPLICATE FOUND! Existing club ID {ExistingId} has same name",
-                                            existingClub.Id);
-                                        return Json(new { success = false, message = "A club with this name already exists" });
-                                    }
-                                    else
-                                    {
-                                        _logger.LogInformation("  → Names do not match, continuing");
-                                    }
+                                if (existingClub.Id == id.Value)
+                                {
+                                    _logger.LogInformation("  → Skipping (this is the club being edited)");
+                                    continue; // Skip the club being edited
                                 }
 
-                                _logger.LogInformation("No duplicate names found, proceeding with save");
+                                _logger.LogInformation("  → Comparing names: '{ExistingName}' vs '{NewName}' (case-insensitive)",
+                                    existingName, name);
+
+                                if (existingName.Equals(name, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    _logger.LogWarning("  → DUPLICATE FOUND! Existing club ID {ExistingId} has same name",
+                                        existingClub.Id);
+                                    return Json(new { success = false, message = "A club with this name already exists" });
+                                }
+                                else
+                                {
+                                    _logger.LogInformation("  → Names do not match, continuing");
+                                }
                             }
-                            else
-                            {
-                                _logger.LogWarning("clubsPage hub not found!");
-                            }
+
+                            _logger.LogInformation("No duplicate names found, proceeding with save");
                         }
                         else
                         {
@@ -929,6 +939,77 @@ namespace HpskSite.Controllers
         #region Public Endpoints
 
         /// <summary>
+        /// Public endpoint to get regions (kretsar) for registration dropdown
+        /// Returns only regions that have active clubs, sorted in Swedish alphabetical order
+        /// </summary>
+        [HttpGet]
+        public IActionResult GetRegionsForRegistration()
+        {
+            try
+            {
+                var clubs = GetClubsFromStorage();
+                var swedishComparer = StringComparer.Create(new System.Globalization.CultureInfo("sv-SE"), false);
+
+                // Get distinct regions that have active clubs
+                var regionsWithClubs = clubs
+                    .Where(c => c.IsActive && !string.IsNullOrEmpty(c.RegionalFederation))
+                    .Select(c => c.RegionalFederation)
+                    .Distinct()
+                    .ToList();
+
+                // Get the descriptions for each region and sort in Swedish
+                var regions = regionsWithClubs
+                    .Select(r => {
+                        if (Enum.TryParse<Federations.RegionalFederations>(r, out var federation))
+                        {
+                            return new {
+                                id = r,
+                                name = federation.GetDescription()
+                            };
+                        }
+                        return new { id = r, name = r };
+                    })
+                    .OrderBy(r => r.name, swedishComparer)
+                    .ToList();
+
+                return Json(new { success = true, regions = regions });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = "Error loading regions: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Public endpoint to get active clubs for a specific region (krets)
+        /// Sorted in Swedish alphabetical order
+        /// </summary>
+        [HttpGet]
+        public IActionResult GetClubsForRegion(string region)
+        {
+            try
+            {
+                var clubs = GetClubsFromStorage();
+                var swedishComparer = StringComparer.Create(new System.Globalization.CultureInfo("sv-SE"), false);
+
+                var activeClubs = clubs
+                    .Where(c => c.IsActive && c.RegionalFederation == region)
+                    .Select(c => new {
+                        id = c.Id,
+                        name = c.Name
+                    })
+                    .OrderBy(c => c.name, swedishComparer)
+                    .ToList();
+
+                return Json(new { success = true, clubs = activeClubs });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = "Error loading clubs: " + ex.Message });
+            }
+        }
+
+        /// <summary>
         /// Public endpoint to get active clubs for registration dropdown
         /// </summary>
         [HttpGet]
@@ -1053,17 +1134,37 @@ namespace HpskSite.Controllers
                 }
 
                 var rootChildren = _contentService.GetPagedChildren(rootContent.Id, 0, int.MaxValue, out _);
-                var clubsHub = rootChildren.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
 
-                if (clubsHub == null)
+                // Collect all clubs from all locations (legacy + regional)
+                var allClubs = new List<Umbraco.Cms.Core.Models.IContent>();
+
+                // Check direct clubsPage under root (legacy structure)
+                var directClubsHub = rootChildren.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+                if (directClubsHub != null)
                 {
-                    return Json(new { success = false, message = "clubsPage not found" });
+                    var directClubs = _contentService.GetPagedChildren(directClubsHub.Id, 0, int.MaxValue, out _)
+                        .Where(c => c.ContentType.Alias == "club");
+                    allClubs.AddRange(directClubs);
                 }
 
-                // Get all club nodes directly from database
-                var allClubs = _contentService.GetPagedChildren(clubsHub.Id, 0, int.MaxValue, out _)
-                    .Where(c => c.ContentType.Alias == "club")
-                    .ToList();
+                // Check clubsPage under regional pages
+                var regionalPages = rootChildren.Where(c => c.ContentType.Alias == "regionalPage");
+                foreach (var region in regionalPages)
+                {
+                    var regionChildren = _contentService.GetPagedChildren(region.Id, 0, int.MaxValue, out _);
+                    var regionClubsHub = regionChildren.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+                    if (regionClubsHub != null)
+                    {
+                        var regionClubs = _contentService.GetPagedChildren(regionClubsHub.Id, 0, int.MaxValue, out _)
+                            .Where(c => c.ContentType.Alias == "club");
+                        allClubs.AddRange(regionClubs);
+                    }
+                }
+
+                if (allClubs.Count == 0)
+                {
+                    return Json(new { success = false, message = "No clubs found in any clubsPage" });
+                }
 
                 _logger.LogInformation("Found {ClubCount} clubs to resync", allClubs.Count);
 

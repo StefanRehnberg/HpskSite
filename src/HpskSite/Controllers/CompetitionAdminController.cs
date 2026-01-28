@@ -140,10 +140,10 @@ namespace HpskSite.Controllers
 
         /// <summary>
         /// Get all competitions with basic info for the admin list (OPTIMIZED)
-        /// Supports server-side filtering by year and completed status
+        /// Supports server-side filtering by year, completed status, and type
         /// </summary>
         [HttpGet]
-        public async Task<IActionResult> GetCompetitionsList(int? year = null, bool includeCompleted = false)
+        public async Task<IActionResult> GetCompetitionsList(int? year = null, bool includeCompleted = false, string? type = null)
         {
             // Check if user is site admin OR club admin for any club
             bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
@@ -160,11 +160,12 @@ namespace HpskSite.Controllers
                 var today = DateTime.Today;
                 var filterYear = year ?? today.Year; // Default to current year
 
-                // Check cache for site admins only (club admins see filtered data)
+                // Check cache (include type in cache key)
                 string? cacheKey = null;
+                var cacheKeyType = type ?? "all";
                 if (isSiteAdmin)
                 {
-                    cacheKey = string.Format(CompetitionsListCacheKey, filterYear, includeCompleted);
+                    cacheKey = string.Format(CompetitionsListCacheKey, filterYear, includeCompleted) + $"_{cacheKeyType}";
                     var cachedResult = _appCaches.RuntimeCache.Get(cacheKey);
                     if (cachedResult != null)
                     {
@@ -172,23 +173,35 @@ namespace HpskSite.Controllers
                     }
                 }
 
-                // OPTIMIZED: Get all competitions by searching roots (much faster than recursive)
+                // OPTIMIZED: Use GetPagedDescendants for single database query instead of tree traversal
                 var allCompetitions = new List<Umbraco.Cms.Core.Models.IContent>();
-                var allRegistrations = new List<Umbraco.Cms.Core.Models.IContent>();
+                var registrationCounts = new Dictionary<int, int>();
 
                 var rootContent = _contentService.GetRootContent();
                 foreach (var root in rootContent)
                 {
-                    // Use non-recursive descendant fetching with content type filter
-                    var descendants = GetFlatDescendants(root);
-                    allCompetitions.AddRange(descendants.Where(c => c.ContentType.Alias == "competition"));
-                    allRegistrations.AddRange(descendants.Where(c => c.ContentType.Alias == "competitionRegistration"));
-                }
+                    // Single query to get all descendants (much faster than node-by-node traversal)
+                    var descendants = _contentService.GetPagedDescendants(root.Id, 0, int.MaxValue, out _);
 
-                // Pre-calculate all registration counts in one pass
-                var registrationCounts = allRegistrations
-                    .GroupBy(r => r.GetValue<int>("competitionId"))
-                    .ToDictionary(g => g.Key, g => g.Count());
+                    // Filter by content type in memory (still faster than multiple DB calls)
+                    foreach (var item in descendants)
+                    {
+                        if (item.ContentType.Alias == "competition")
+                        {
+                            allCompetitions.Add(item);
+                        }
+                        else if (item.ContentType.Alias == "competitionRegistration")
+                        {
+                            // Count registrations directly without storing full objects
+                            var compId = item.GetValue<int>("competitionId");
+                            if (compId > 0)
+                            {
+                                registrationCounts.TryGetValue(compId, out var count);
+                                registrationCounts[compId] = count + 1;
+                            }
+                        }
+                    }
+                }
 
                 // Apply server-side filters
                 var filteredCompetitions = allCompetitions
@@ -206,6 +219,14 @@ namespace HpskSite.Controllers
                         {
                             var isCompleted = compDate.Value.Date < today;
                             if (isCompleted) return false;
+                        }
+
+                        // Type filter (server-side)
+                        if (!string.IsNullOrEmpty(type))
+                        {
+                            var compType = comp.GetValue<string>("competitionType") ?? "";
+                            if (!compType.Equals(type, StringComparison.OrdinalIgnoreCase))
+                                return false;
                         }
 
                         return true;
