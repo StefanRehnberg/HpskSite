@@ -181,6 +181,7 @@ function displayClubsTable(clubs) {
             <table class="table table-hover align-middle">
                 <thead>
                     <tr>
+                        <th style="width: 50px;"></th>
                         <th>Klubbnamn</th>
                         <th class="d-none d-md-table-cell">Stad</th>
                         <th class="d-none d-lg-table-cell">E-post</th>
@@ -210,6 +211,12 @@ function displayClubsTable(clubs) {
 
         tableHtml += `
             <tr>
+                <td class="club-logo-cell">
+                    ${club.logoUrl
+                        ? `<img src="${club.logoUrl}" alt="" class="club-list-logo">`
+                        : `<div class="club-logo-placeholder-small"><i class="bi bi-shield"></i></div>`
+                    }
+                </td>
                 <td>
                     <div class="club-name-cell">
                         <strong class="d-block">${club.name}</strong>
@@ -248,6 +255,31 @@ function displayClubsTable(clubs) {
 </script>
 
 <style>
+.club-logo-cell {
+    width: 50px;
+    padding: 0.25rem !important;
+    vertical-align: middle;
+}
+
+.club-list-logo {
+    width: 40px;
+    height: 40px;
+    object-fit: contain;
+    border-radius: 4px;
+}
+
+.club-logo-placeholder-small {
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bs-tertiary-bg);
+    border-radius: 4px;
+    color: var(--bs-secondary-color);
+    font-size: 1.2rem;
+}
+
 .club-name-cell {
     min-height: 25px;
     display: flex;

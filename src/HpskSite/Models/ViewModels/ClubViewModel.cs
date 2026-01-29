@@ -18,6 +18,7 @@ namespace HpskSite.Models.ViewModels
         public int AdminCount { get; set; } = 0;
         public int? ClubId { get; set; }  // SPSF federation ID
         public string RegionalFederation { get; set; } = "";  // Enum value as string
+        public string LogoUrl { get; set; } = "";  // URL to club logo image
     }
 
     public class ClubMemberViewModel

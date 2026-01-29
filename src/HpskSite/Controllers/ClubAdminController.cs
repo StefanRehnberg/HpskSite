@@ -1065,7 +1065,8 @@ namespace HpskSite.Controllers
                         urlSegment = c.UrlSegment,
                         isActive = c.IsActive,
                         clubId = c.ClubId,
-                        regionalFederation = c.RegionalFederation
+                        regionalFederation = c.RegionalFederation,
+                        logoUrl = c.LogoUrl
                     })
                     .OrderBy(c => c.name)
                     .ToList();
@@ -1416,6 +1417,10 @@ namespace HpskSite.Controllers
                     var clubId = clubNode.Id;
                     var clubName = clubNode.Value<string>("clubName") ?? clubNode.Name ?? "";
 
+                    // Get logo URL if logo exists
+                    var logo = clubNode.Value<Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent>("logo");
+                    var logoUrl = logo?.Url() ?? "";
+
                     var club = new ClubViewModel
                     {
                         Id = clubId,
@@ -1433,7 +1438,8 @@ namespace HpskSite.Controllers
                         MemberCount = 0,  // Not calculated for performance - load on demand
                         AdminCount = 0,   // Not calculated for performance - load on demand
                         ClubId = clubNode.Value<int?>("clubId"),
-                        RegionalFederation = clubNode.Value<string>("regionalFederation") ?? ""
+                        RegionalFederation = clubNode.Value<string>("regionalFederation") ?? "",
+                        LogoUrl = logoUrl
                     };
 
                     clubs.Add(club);
@@ -2268,6 +2274,107 @@ namespace HpskSite.Controllers
             {
                 _logger.LogError(ex, "Error previewing regional migration");
                 return Json(new { success = false, message = "Error: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// MIGRATION ENDPOINT: Move clubUrl content to aboutClub
+        /// For clubs that have data in clubUrl but empty aboutClub
+        /// </summary>
+        [HttpPost]
+        public async Task<IActionResult> MigrateClubUrlToAboutClub(bool dryRun = true)
+        {
+            if (!await _authService.IsCurrentUserAdminAsync())
+            {
+                return Json(new { success = false, message = "Access denied" });
+            }
+
+            try
+            {
+                var results = new List<string>();
+                var migratedClubs = new List<object>();
+
+                // Get all clubs from both root clubsPage and regional clubsPages
+                var allClubs = new List<Umbraco.Cms.Core.Models.IContent>();
+
+                var rootContent = _contentService.GetRootContent().FirstOrDefault();
+                if (rootContent == null)
+                {
+                    return Json(new { success = false, message = "Root content not found" });
+                }
+
+                var rootChildren = _contentService.GetPagedChildren(rootContent.Id, 0, int.MaxValue, out _);
+
+                // Get clubs from root-level clubsPage
+                var rootClubsPage = rootChildren.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+                if (rootClubsPage != null)
+                {
+                    var clubs = _contentService.GetPagedChildren(rootClubsPage.Id, 0, int.MaxValue, out _)
+                        .Where(c => c.ContentType.Alias == "club");
+                    allClubs.AddRange(clubs);
+                }
+
+                // Get clubs from regional clubsPages
+                var regionalPages = rootChildren.Where(c => c.ContentType.Alias == "regionalPage");
+                foreach (var regionalPage in regionalPages)
+                {
+                    var regionChildren = _contentService.GetPagedChildren(regionalPage.Id, 0, int.MaxValue, out _);
+                    var regionalClubsPage = regionChildren.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+                    if (regionalClubsPage != null)
+                    {
+                        var clubs = _contentService.GetPagedChildren(regionalClubsPage.Id, 0, int.MaxValue, out _)
+                            .Where(c => c.ContentType.Alias == "club");
+                        allClubs.AddRange(clubs);
+                    }
+                }
+
+                results.Add($"Found {allClubs.Count} total clubs");
+
+                foreach (var club in allClubs)
+                {
+                    var clubName = club.GetValue<string>("clubName") ?? club.Name ?? "Unknown";
+                    var clubUrl = club.GetValue<string>("clubUrl") ?? "";
+                    var aboutClub = club.GetValue<string>("aboutClub") ?? "";
+
+                    // Only migrate if clubUrl has content
+                    if (!string.IsNullOrWhiteSpace(clubUrl))
+                    {
+                        migratedClubs.Add(new
+                        {
+                            id = club.Id,
+                            name = clubName,
+                            clubUrl = clubUrl,
+                            existingAboutClub = aboutClub
+                        });
+
+                        if (!dryRun)
+                        {
+                            // Move clubUrl content to aboutClub
+                            club.SetValue("aboutClub", clubUrl);
+                            club.SetValue("clubUrl", ""); // Clear the old field
+                            _contentService.Save(club);
+                            _contentService.Publish(club, Array.Empty<string>());
+                        }
+
+                        results.Add($"{(dryRun ? "[DryRun] Would migrate" : "Migrated")} {clubName}: '{clubUrl}'");
+                    }
+                }
+
+                return Json(new
+                {
+                    success = true,
+                    dryRun = dryRun,
+                    message = $"{(dryRun ? "Would migrate" : "Migrated")} {migratedClubs.Count} clubs",
+                    totalClubs = allClubs.Count,
+                    migratedCount = migratedClubs.Count,
+                    results = results,
+                    migratedClubs = migratedClubs
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during clubUrl to aboutClub migration");
+                return Json(new { success = false, message = "Migration failed: " + ex.Message });
             }
         }
 

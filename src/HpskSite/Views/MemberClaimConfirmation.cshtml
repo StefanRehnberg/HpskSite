@@ -182,9 +182,15 @@
                                     var memberText = Model.MaxShootersPerTeam.HasValue
                                         ? $"({team.MemberCount}/{Model.MaxShootersPerTeam})"
                                         : $"({team.MemberCount})";
-                                    <option value="@team.Id" @(team.IsFull ? "disabled" : "")>
-                                        @team.TeamName @memberText @(team.IsFull ? "- Fullt" : "") @(team.ClubName != null ? $"- {team.ClubName}" : "")
-                                    </option>
+                                    var optionText = $"{team.TeamName} {memberText}{(team.IsFull ? " - Fullt" : "")}{(team.ClubName != null ? $" - {team.ClubName}" : "")}";
+                                    if (team.IsFull)
+                                    {
+                                        <option value="@team.Id" disabled>@optionText</option>
+                                    }
+                                    else
+                                    {
+                                        <option value="@team.Id">@optionText</option>
+                                    }
                                 }
                             </select>
                         </div>
