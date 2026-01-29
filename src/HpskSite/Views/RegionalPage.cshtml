@@ -1,4 +1,5 @@
 @using Umbraco.Cms.Web.Common.PublishedModels;
+@using System.Globalization;
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
     Layout = "Master.cshtml";
@@ -24,6 +25,24 @@
     if (clubsPage != null)
     {
         clubCount = clubsPage.Children.Count(c => c.ContentType.Alias == "club");
+    }
+
+    // Get featured items - handle both single item and collection (competitions and series)
+    var featuredItemsRaw = Model.Value("featuredItems");
+    var featuredItems = new List<Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent>();
+
+    if (featuredItemsRaw is IEnumerable<Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent> multipleItems)
+    {
+        featuredItems = multipleItems
+            .Where(c => c.ContentType.Alias == "competition" || c.ContentType.Alias == "competitionSeries")
+            .ToList();
+    }
+    else if (featuredItemsRaw is Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent singleItem)
+    {
+        if (singleItem.ContentType.Alias == "competition" || singleItem.ContentType.Alias == "competitionSeries")
+        {
+            featuredItems.Add(singleItem);
+        }
     }
 
     ViewBag.Title = regionName;
@@ -144,6 +163,132 @@
 
     <!-- Sidebar Column -->
     <div class="col-lg-4">
+        <!-- Featured Items (Competitions and Series) -->
+        @if (featuredItems.Any())
+        {
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-star-fill me-2 text-warning"></i>Utvalda Tävlingar</h5>
+                </div>
+                <div class="list-group list-group-flush">
+                    @foreach (var item in featuredItems)
+                    {
+                        var isSeries = item.ContentType.Alias == "competitionSeries";
+
+                        if (isSeries)
+                        {
+                            // Series display
+                            var seriesName = item.Value<string>("seriesName") ?? item.Name;
+                            var seriesDescription = item.Value<string>("shortDescription") ?? "";
+                            var competitionCount = item.Children.Count(c => c.ContentType.Alias == "competition");
+
+                            <a href="@item.Url()" class="list-group-item list-group-item-action">
+                                <div class="d-flex justify-content-between align-items-start">
+                                    <div>
+                                        <strong class="d-block">@seriesName</strong>
+                                        @if (!string.IsNullOrEmpty(seriesDescription))
+                                        {
+                                            <small class="text-muted d-block">@seriesDescription</small>
+                                        }
+                                        <small class="text-muted">
+                                            <i class="bi bi-collection me-1"></i>@competitionCount tävlingar
+                                        </small>
+                                    </div>
+                                    <span class="badge bg-purple" style="background-color: #6f42c1;">Serie</span>
+                                </div>
+                            </a>
+                        }
+                        else
+                        {
+                            // Competition display
+                            var compName = item.Value<string>("competitionName") ?? item.Name;
+                            var compDate = item.Value<DateTime>("competitionDate");
+                            var compEndDate = item.Value<DateTime?>("competitionEndDate");
+                            var venue = item.Value<string>("venue") ?? "";
+                            var isActive = item.Value<bool>("isActive");
+                            var registrationOpenDate = item.Value<DateTime>("registrationOpenDate");
+                            var registrationCloseDate = item.Value<DateTime>("registrationCloseDate");
+
+                            // Determine status
+                            var now = DateTime.Now;
+                            string statusText;
+                            string statusBadgeClass;
+
+                            if (!isActive)
+                            {
+                                statusText = "Inaktiv";
+                                statusBadgeClass = "bg-secondary";
+                            }
+                            else if (now < registrationOpenDate)
+                            {
+                                statusText = "Anmälan öppnar snart";
+                                statusBadgeClass = "bg-info";
+                            }
+                            else if (now >= registrationOpenDate && now <= registrationCloseDate)
+                            {
+                                statusText = "Anmälan öppen";
+                                statusBadgeClass = "bg-success";
+                            }
+                            else if (now > registrationCloseDate && now.Date < compDate.Date)
+                            {
+                                statusText = "Anmälan stängd";
+                                statusBadgeClass = "bg-warning text-dark";
+                            }
+                            else if (now.Date == compDate.Date)
+                            {
+                                statusText = "Pågår idag";
+                                statusBadgeClass = "bg-primary";
+                            }
+                            else if (now.Date > compDate.Date)
+                            {
+                                statusText = "Avslutad";
+                                statusBadgeClass = "bg-secondary";
+                            }
+                            else
+                            {
+                                statusText = "Kommande";
+                                statusBadgeClass = "bg-info";
+                            }
+
+                            // Check if multi-day
+                            var hasValidEndDate = compEndDate.HasValue &&
+                                                  compEndDate.Value > DateTime.MinValue &&
+                                                  compEndDate.Value.Year > 1900 &&
+                                                  compEndDate.Value.Date > compDate.Date;
+
+                            <a href="@item.Url()" class="list-group-item list-group-item-action">
+                                <div class="d-flex justify-content-between align-items-start">
+                                    <div>
+                                        <strong class="d-block">@compName</strong>
+                                        <small class="text-muted">
+                                            <i class="bi bi-calendar3 me-1"></i>
+                                            @if (hasValidEndDate)
+                                            {
+                                                @compDate.ToString("d MMM", CultureInfo.GetCultureInfo("sv-SE"))
+                                                <text> - </text>
+                                                @compEndDate!.Value.ToString("d MMM", CultureInfo.GetCultureInfo("sv-SE"))
+                                            }
+                                            else
+                                            {
+                                                @compDate.ToString("d MMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))
+                                            }
+                                        </small>
+                                        @if (!string.IsNullOrEmpty(venue))
+                                        {
+                                            <small class="text-muted d-block">
+                                                <i class="bi bi-geo-alt me-1"></i>@venue
+                                            </small>
+                                        }
+                                    </div>
+                                    <span class="badge @statusBadgeClass">@statusText</span>
+                                </div>
+                            </a>
+                        }
+                    }
+                </div>
+            </div>
+        }
+
         <!-- Contact Card -->
         @if (!string.IsNullOrEmpty(contactPerson) || !string.IsNullOrEmpty(contactEmail) || !string.IsNullOrEmpty(contactPhone))
         {
