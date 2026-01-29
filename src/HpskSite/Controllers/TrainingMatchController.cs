@@ -1949,6 +1949,7 @@ namespace HpskSite.Controllers
         /// Get match history with pagination and filters
         /// GET /umbraco/surface/TrainingMatch/GetMatchHistory
         /// Shows ALL completed matches by default, with optional filters
+        /// OPTIMIZED: Uses batch queries to avoid N+1 performance issues
         /// </summary>
         [HttpGet]
         public async Task<IActionResult> GetMatchHistory(
@@ -2030,7 +2031,7 @@ namespace HpskSite.Controllers
                     // Calculate offset
                     var offset = (page - 1) * pageSize;
 
-                    // Get paginated matches
+                    // Get paginated matches with participant count in single query
                     var matchesSql = $@"SELECT tm.*,
                                  (SELECT COUNT(*) FROM TrainingMatchParticipants WHERE TrainingMatchId = tm.Id) as ParticipantCount
                           FROM TrainingMatches tm
@@ -2040,44 +2041,138 @@ namespace HpskSite.Controllers
 
                     var matches = db.Fetch<dynamic>(matchesSql, parameters.ToArray());
 
+                    if (!matches.Any())
+                    {
+                        return Json(new
+                        {
+                            success = true,
+                            matches = new List<object>(),
+                            totalCount = totalCount,
+                            page = page,
+                            pageSize = pageSize,
+                            hasMore = false
+                        });
+                    }
+
+                    // Get all match IDs for batch queries
+                    var matchIds = matches.Select(m => (int)m.Id).ToList();
+                    var matchIdsString = string.Join(",", matchIds);
+
+                    // BATCH QUERY 1: Get all participants for all matches (top 5 per match for display)
+                    var allParticipants = db.Fetch<dynamic>($@"
+                        SELECT tmp.TrainingMatchId, tmp.MemberId, tmp.GuestParticipantId, tmp.DisplayOrder,
+                               tmp.FrozenHandicapPerSeries
+                        FROM TrainingMatchParticipants tmp
+                        WHERE tmp.TrainingMatchId IN ({matchIdsString})
+                        ORDER BY tmp.TrainingMatchId, tmp.DisplayOrder");
+
+                    // BATCH QUERY 2: Get all guest names
+                    var guestIds = allParticipants
+                        .Where(p => p.GuestParticipantId != null)
+                        .Select(p => (int)p.GuestParticipantId)
+                        .Distinct()
+                        .ToList();
+
+                    var guestNames = new Dictionary<int, string>();
+                    if (guestIds.Any())
+                    {
+                        var guestIdsString = string.Join(",", guestIds);
+                        var guests = db.Fetch<dynamic>($"SELECT Id, DisplayName FROM TrainingMatchGuests WHERE Id IN ({guestIdsString})");
+                        foreach (var g in guests)
+                        {
+                            guestNames[(int)g.Id] = (string?)g.DisplayName ?? "Gäst";
+                        }
+                    }
+
+                    // BATCH QUERY 3: Get all member IDs we need to look up
+                    var memberIds = allParticipants
+                        .Where(p => p.MemberId != null)
+                        .Select(p => (int)p.MemberId)
+                        .Distinct()
+                        .ToList();
+
+                    // Batch fetch member data from Umbraco (much faster than individual GetById calls)
+                    var memberCache = new Dictionary<int, (string FirstName, string LastName, string ProfilePictureUrl)>();
+                    if (memberIds.Any())
+                    {
+                        var members = _memberService.GetAllMembers()
+                            .Where(m => memberIds.Contains(m.Id))
+                            .ToList();
+                        foreach (var m in members)
+                        {
+                            memberCache[m.Id] = (
+                                m.GetValue<string>("firstName") ?? "",
+                                m.GetValue<string>("lastName") ?? "",
+                                m.GetValue<string>("profilePictureUrl") ?? ""
+                            );
+                        }
+                    }
+
+                    // BATCH QUERY 4: Get user's participation status for all matches
+                    var userParticipation = new HashSet<int>();
+                    var userParticipationResults = db.Fetch<dynamic>($@"
+                        SELECT TrainingMatchId FROM TrainingMatchParticipants
+                        WHERE TrainingMatchId IN ({matchIdsString}) AND MemberId = @0", member.Id);
+                    foreach (var p in userParticipationResults)
+                    {
+                        userParticipation.Add((int)p.TrainingMatchId);
+                    }
+
+                    // BATCH QUERY 5: Get all scores for matches where user is participant
+                    var userMatchIds = userParticipation.ToList();
+                    var allScores = new Dictionary<int, List<dynamic>>();
+                    if (userMatchIds.Any())
+                    {
+                        var userMatchIdsString = string.Join(",", userMatchIds);
+                        var scores = db.Fetch<dynamic>($@"
+                            SELECT ts.TrainingMatchId, ts.MemberId, ts.GuestParticipantId, ts.TotalScore, ts.SeriesScores
+                            FROM TrainingScores ts
+                            WHERE ts.TrainingMatchId IN ({userMatchIdsString})");
+
+                        foreach (var s in scores)
+                        {
+                            var matchId = (int)s.TrainingMatchId;
+                            if (!allScores.ContainsKey(matchId))
+                                allScores[matchId] = new List<dynamic>();
+                            allScores[matchId].Add(s);
+                        }
+                    }
+
+                    // Group participants by match for easy lookup
+                    var participantsByMatch = allParticipants
+                        .GroupBy(p => (int)p.TrainingMatchId)
+                        .ToDictionary(g => g.Key, g => g.ToList());
+
+                    // Build the result list
                     var matchList = new List<object>();
                     foreach (var m in matches)
                     {
-                        // Get participants for this match (limited to 5 for display)
-                        var participants = db.Fetch<dynamic>(
-                            @"SELECT TOP 5 tmp.MemberId, tmp.GuestParticipantId FROM TrainingMatchParticipants tmp
-                              WHERE tmp.TrainingMatchId = @0
-                              ORDER BY tmp.DisplayOrder", (int)m.Id);
+                        var matchId = (int)m.Id;
 
+                        // Get participants for this match (limit to 5 for display)
+                        var matchParticipants = participantsByMatch.GetValueOrDefault(matchId, new List<dynamic>());
                         var participantDetails = new List<object>();
-                        foreach (var p in participants)
+
+                        foreach (var p in matchParticipants.Take(5))
                         {
                             if (p.MemberId != null)
                             {
-                                // Regular member
-                                var pMember = _memberService.GetById((int)p.MemberId);
-                                var firstName = pMember?.GetValue<string>("firstName") ?? "";
-                                var lastName = pMember?.GetValue<string>("lastName") ?? "";
-                                var profilePictureUrl = pMember?.GetValue<string>("profilePictureUrl") ?? "";
-
+                                var memberId = (int)p.MemberId;
+                                var memberData = memberCache.GetValueOrDefault(memberId, ("", "", ""));
                                 participantDetails.Add(new
                                 {
-                                    memberId = (int)p.MemberId,
-                                    firstName = firstName,
-                                    lastName = lastName,
-                                    profilePictureUrl = profilePictureUrl,
+                                    memberId = memberId,
+                                    firstName = memberData.Item1,
+                                    lastName = memberData.Item2,
+                                    profilePictureUrl = memberData.Item3,
                                     isGuest = false
                                 });
                             }
                             else if (p.GuestParticipantId != null)
                             {
-                                // Guest participant
-                                var guest = db.FirstOrDefault<dynamic>(
-                                    "SELECT DisplayName FROM TrainingMatchGuests WHERE Id = @0",
-                                    (int)p.GuestParticipantId);
-                                var displayName = guest?.DisplayName ?? "Gäst";
+                                var guestId = (int)p.GuestParticipantId;
+                                var displayName = guestNames.GetValueOrDefault(guestId, "Gäst");
                                 var nameParts = displayName.Split(' ', 2);
-
                                 participantDetails.Add(new
                                 {
                                     memberId = 0,
@@ -2089,30 +2184,18 @@ namespace HpskSite.Controllers
                             }
                         }
 
-                        // Check if current user is a participant
-                        var isParticipant = db.ExecuteScalar<int>(
-                            @"SELECT COUNT(*) FROM TrainingMatchParticipants
-                              WHERE TrainingMatchId = @0 AND MemberId = @1",
-                            (int)m.Id, member.Id) > 0;
-
-                        // Get user's score and ranking only if participant
+                        var isParticipant = userParticipation.Contains(matchId);
                         int? userTotalScore = null;
                         int? userRanking = null;
                         int? userSeriesCount = null;
 
-                        if (isParticipant)
+                        if (isParticipant && allScores.ContainsKey(matchId))
                         {
-                            // Check if match has handicap enabled
                             bool hasHandicap = m.HasHandicap != null && (bool)m.HasHandicap;
 
-                            // Fetch all participants with handicap data
-                            var allParticipants = db.Fetch<dynamic>(
-                                @"SELECT MemberId, GuestParticipantId, FrozenHandicapPerSeries
-                                  FROM TrainingMatchParticipants WHERE TrainingMatchId = @0", (int)m.Id);
-
-                            // Build handicap lookup (positive key for members, negative for guests)
+                            // Build handicap lookup from cached participants
                             var handicapLookup = new Dictionary<int, decimal>();
-                            foreach (var p in allParticipants)
+                            foreach (var p in matchParticipants)
                             {
                                 if (p.MemberId != null)
                                     handicapLookup[(int)p.MemberId] = p.FrozenHandicapPerSeries ?? 0m;
@@ -2120,17 +2203,9 @@ namespace HpskSite.Controllers
                                     handicapLookup[-(int)p.GuestParticipantId] = p.FrozenHandicapPerSeries ?? 0m;
                             }
 
-                            // Fetch ALL scores for this match (both members and guests)
-                            var allScoresWithSeries = db.Fetch<dynamic>(
-                                @"SELECT ts.MemberId, ts.GuestParticipantId, ts.TotalScore, ts.SeriesScores
-                                  FROM TrainingScores ts
-                                  WHERE ts.TrainingMatchId = @0", (int)m.Id);
-
-                            // Calculate series counts and totals for all participants
-                            // Use participantKey: positive for members, negative for guests
+                            // Calculate series counts and totals
                             var participantData = new List<(int ParticipantKey, int SeriesCount, List<int> SeriesTotals)>();
-
-                            foreach (var score in allScoresWithSeries)
+                            foreach (var score in allScores[matchId])
                             {
                                 int participantKey = score.MemberId != null
                                     ? (int)score.MemberId
@@ -2158,7 +2233,7 @@ namespace HpskSite.Controllers
                                 participantData.Add((participantKey, seriesTotals.Count, seriesTotals));
                             }
 
-                            // Get the effective series limit - use maxSeriesCount if set, otherwise use minimum among participants
+                            // Calculate effective limit
                             int effectiveLimit;
                             if (m.MaxSeriesCount != null && (int)m.MaxSeriesCount > 0)
                             {
@@ -2166,25 +2241,22 @@ namespace HpskSite.Controllers
                             }
                             else
                             {
-                                // Use minimum series count among all participants (same as scoreboard)
                                 effectiveLimit = participantData.Any()
                                     ? participantData.Min(p => p.SeriesCount)
                                     : 0;
                             }
 
-                            // Calculate equalized scores with handicap and rank (limited to effectiveLimit)
+                            // Calculate equalized scores
                             var equalizedScores = participantData
                                 .Select(p => {
                                     var effectiveSeriesTotals = p.SeriesTotals.Take(effectiveLimit).ToList();
                                     int rawScore = effectiveSeriesTotals.Sum();
                                     int effectiveSeriesCount = effectiveSeriesTotals.Count;
 
-                                    // Apply handicap if enabled (per-series clamping at 0-50)
                                     int adjustedScore = rawScore;
                                     if (hasHandicap && handicapLookup.TryGetValue(p.ParticipantKey, out var hcp))
                                     {
-                                        var roundedHcp = Math.Round(hcp * 4) / 4; // Round to quarter points
-                                        // Apply handicap per series and clamp each between 0-50
+                                        var roundedHcp = Math.Round(hcp * 4) / 4;
                                         adjustedScore = 0;
                                         foreach (var seriesTotal in effectiveSeriesTotals)
                                         {
@@ -2198,14 +2270,12 @@ namespace HpskSite.Controllers
                                     return new {
                                         ParticipantKey = p.ParticipantKey,
                                         AdjustedScore = adjustedScore,
-                                        RawScore = rawScore,
                                         SeriesCount = effectiveSeriesCount
                                     };
                                 })
                                 .OrderByDescending(p => p.AdjustedScore)
                                 .ToList();
 
-                            // Find user's data (current user is a member, so use positive key)
                             var userData = equalizedScores.FirstOrDefault(p => p.ParticipantKey == member.Id);
                             if (userData != null)
                             {
@@ -2217,7 +2287,7 @@ namespace HpskSite.Controllers
 
                         matchList.Add(new
                         {
-                            id = (int)m.Id,
+                            id = matchId,
                             matchCode = (string)m.MatchCode,
                             matchName = (string?)m.MatchName,
                             weaponClass = (string)m.WeaponClass,

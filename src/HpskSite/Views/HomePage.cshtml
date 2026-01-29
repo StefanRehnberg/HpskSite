@@ -6,6 +6,13 @@
     // Swedish culture for proper alphabetical sorting (Å, Ä, Ö at the end)
     var swedishCulture = new CultureInfo("sv-SE");
 
+    // Get page properties
+    var welcomeTitle = Model.Value<string>("welcomeTitle") ?? "Svenska Pistolskyttekretsar";
+    var welcomeText = Model.Value<string>("welcomeText");
+    var aboutText = Model.Value<string>("aboutText");
+    var bannerImage = Model.Value<Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent>("bannerImage");
+    var logo = Model.Value<Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent>("logo");
+
     // Get all regional pages (children of home with regionalPage document type)
     var regionalPages = Model.Children
         .Where(c => c.ContentType.Alias == "regionalPage")
@@ -22,92 +29,227 @@
             totalClubs += clubsPage.Children.Count(c => c.ContentType.Alias == "club");
         }
     }
+
+    // Count upcoming competitions
+    var competitionsHub = Model.Children.FirstOrDefault(x => x.ContentType.Alias == "competitionsHub");
+    var upcomingCompetitionsCount = 0;
+    if (competitionsHub != null)
+    {
+        upcomingCompetitionsCount = competitionsHub.Descendants()
+            .Where(c => c.ContentType.Alias == "competition")
+            .Count(c => c.Value<DateTime>("competitionDate") >= DateTime.Today);
+    }
+
+    ViewBag.Title = welcomeTitle;
 }
 
-<!-- Hero Section -->
-<div class="row">
+<!-- Hero Banner Section -->
+<div class="row mb-4">
     <div class="col-12">
-        <div class="jumbotron bg-primary text-white p-5 rounded mb-4">
-            <h1 class="display-4">@(Model.Value<string>("welcomeTitle") ?? "Svenska Pistolskyttekretsar")</h1>
-            @{
-                var welcomeText = Model.Value<string>("welcomeText");
-            }
-            @if (!string.IsNullOrEmpty(welcomeText))
-            {
-                <p class="lead">@Html.Raw(welcomeText)</p>
-            }
-            else
-            {
-                <p class="lead">Hitta din krets och upptäck skytteföreningar i din region.</p>
-            }
+        @if (bannerImage != null)
+        {
+            <div class="position-relative rounded overflow-hidden" style="height: 300px;">
+                <img src="@bannerImage.Url()" alt="@welcomeTitle" class="w-100 h-100" style="object-fit: cover;">
+                <div class="position-absolute top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center"
+                     style="background: linear-gradient(135deg, rgba(0,123,255,0.6) 0%, rgba(0,86,179,0.65) 100%);">
+                    <div class="text-center text-white p-4">
+                        @if (logo != null)
+                        {
+                            <img src="@logo.Url()" alt="Logo" class="mb-3" style="max-height: 80px; max-width: 200px;">
+                        }
+                        <h1 class="display-4 fw-bold">@welcomeTitle</h1>
+                        @if (!string.IsNullOrEmpty(welcomeText))
+                        {
+                            <div class="lead mt-3">@Html.Raw(welcomeText)</div>
+                        }
+                        else
+                        {
+                            <p class="lead mt-3">Hitta din krets och upptäck skytteföreningar i din region.</p>
+                        }
+                    </div>
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="jumbotron bg-primary text-white p-5 rounded">
+                <div class="d-flex align-items-center justify-content-center flex-column">
+                    @if (logo != null)
+                    {
+                        <img src="@logo.Url()" alt="Logo" class="mb-3" style="max-height: 80px; max-width: 200px;">
+                    }
+                    <h1 class="display-4 fw-bold text-center">@welcomeTitle</h1>
+                    @if (!string.IsNullOrEmpty(welcomeText))
+                    {
+                        <div class="lead mt-3 text-center">@Html.Raw(welcomeText)</div>
+                    }
+                    else
+                    {
+                        <p class="lead mt-3 text-center">Hitta din krets och upptäck skytteföreningar i din region.</p>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+<div class="row">
+    <!-- Main Content Column -->
+    <div class="col-lg-8">
+        <!-- Quick Stats Card -->
+        <div class="card mb-4">
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-md-4 mb-3 mb-md-0">
+                        <div class="d-flex flex-column align-items-center">
+                            <i class="bi bi-geo-alt fs-1 text-primary mb-2"></i>
+                            <h3 class="mb-0">@regionalPages.Count</h3>
+                            <small class="text-muted">Kretsar</small>
+                        </div>
+                    </div>
+                    <div class="col-md-4 mb-3 mb-md-0">
+                        <div class="d-flex flex-column align-items-center">
+                            <i class="bi bi-building fs-1 text-primary mb-2"></i>
+                            <h3 class="mb-0">@totalClubs</h3>
+                            <small class="text-muted">Klubbar</small>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="d-flex flex-column align-items-center">
+                            <i class="bi bi-trophy fs-1 text-primary mb-2"></i>
+                            <h3 class="mb-0">@upcomingCompetitionsCount</h3>
+                            <small class="text-muted">Kommande tävlingar</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- About Section -->
+        @if (!string.IsNullOrEmpty(aboutText))
+        {
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Om oss</h5>
+                </div>
+                <div class="card-body">
+                    @Html.Raw(aboutText)
+                </div>
+            </div>
+        }
+
+        <!-- Region Selection -->
+        @if (regionalPages.Any())
+        {
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-map me-2"></i>Välj din krets</h5>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted mb-3">Klicka på din krets för att se klubbar och kontaktinformation.</p>
+                    <div class="row row-cols-2 row-cols-md-3 g-3">
+                        @foreach (var region in regionalPages)
+                        {
+                            var regionName = region.Value<string>("regionName") ?? region.Name;
+                            var clubsPage = region.Children.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+                            var clubCount = clubsPage?.Children.Count(c => c.ContentType.Alias == "club") ?? 0;
+
+                            <div class="col">
+                                <a href="@region.Url()" class="text-decoration-none">
+                                    <div class="card h-100 region-card">
+                                        <div class="card-body text-center py-3">
+                                            <h6 class="card-title mb-1">@regionName</h6>
+                                            <small class="text-muted">@clubCount klubbar</small>
+                                        </div>
+                                    </div>
+                                </a>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="alert alert-info">
+                <p class="mb-0">Regionala sidor kommer snart.</p>
+            </div>
+        }
+    </div>
+
+    <!-- Sidebar Column -->
+    <div class="col-lg-4">
+        <!-- Quick Links Card -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-link-45deg me-2"></i>Snabblänkar</h5>
+            </div>
+            <div class="list-group list-group-flush">
+                @{
+                    var competitionsPage = Model.Children.FirstOrDefault(x => x.ContentType.Alias == "competitionsHub");
+                    var trainingMatchPage = Model.Children.FirstOrDefault(x => x.Name?.ToLower().Contains("träningsmatch") == true || x.UrlSegment?.Contains("traningsmatch") == true);
+                    var trainingPage = Model.Children.FirstOrDefault(x => x.ContentType.Alias == "trainingStairs" || x.Name?.ToLower().Contains("skyttetrappa") == true);
+                }
+                @if (competitionsPage != null)
+                {
+                    <a href="@competitionsPage.Url()" class="list-group-item list-group-item-action d-flex align-items-center">
+                        <i class="bi bi-trophy me-3 text-primary"></i>
+                        <div>
+                            <strong>Tävlingar</strong>
+                            <small class="d-block text-muted">Se kommande tävlingar</small>
+                        </div>
+                    </a>
+                }
+                @if (trainingMatchPage != null)
+                {
+                    <a href="@trainingMatchPage.Url()" class="list-group-item list-group-item-action d-flex align-items-center">
+                        <i class="bi bi-bullseye me-3 text-primary"></i>
+                        <div>
+                            <strong>Träningsmatch</strong>
+                            <small class="d-block text-muted">Delta i live-matcher</small>
+                        </div>
+                    </a>
+                }
+                @if (trainingPage != null)
+                {
+                    <a href="@trainingPage.Url()" class="list-group-item list-group-item-action d-flex align-items-center">
+                        <i class="bi bi-mortarboard me-3 text-primary"></i>
+                        <div>
+                            <strong>Skyttetrappan</strong>
+                            <small class="d-block text-muted">Träningsprogram för alla nivåer</small>
+                        </div>
+                    </a>
+                }
+                <a href="/login-register" class="list-group-item list-group-item-action d-flex align-items-center">
+                    <i class="bi bi-person-plus me-3 text-primary"></i>
+                    <div>
+                        <strong>Bli medlem</strong>
+                        <small class="d-block text-muted">Registrera dig eller logga in</small>
+                    </div>
+                </a>
+            </div>
+        </div>
+
+        <!-- News/Updates Card (placeholder for future content) -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-megaphone me-2"></i>Aktuellt</h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted mb-0">
+                    <i class="bi bi-info-circle me-2"></i>
+                    Välj din krets i listan för att se lokala nyheter och händelser.
+                </p>
+            </div>
         </div>
     </div>
 </div>
 
-<!-- Quick Stats -->
-@if (regionalPages.Any())
-{
-    <div class="row mb-4">
-        <div class="col-md-6">
-            <div class="card text-center h-100">
-                <div class="card-body">
-                    <h2 class="display-4 text-primary">@regionalPages.Count</h2>
-                    <p class="text-muted mb-0">Pistolskyttekretsar</p>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-6">
-            <div class="card text-center h-100">
-                <div class="card-body">
-                    <h2 class="display-4 text-primary">@totalClubs</h2>
-                    <p class="text-muted mb-0">Skytteföreningar</p>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Region Selection Header -->
-    <div class="row mb-3">
-        <div class="col-12">
-            <h2 class="h4">Välj din krets</h2>
-            <p class="text-muted">Klicka på din krets för att se klubbar och kontaktinformation.</p>
-        </div>
-    </div>
-
-    <!-- Regional Cards Grid -->
-    <div class="row row-cols-2 row-cols-md-3 row-cols-lg-4 g-3 mb-4">
-        @foreach (var region in regionalPages)
-        {
-            var regionName = region.Value<string>("regionName") ?? region.Name;
-            var clubsPage = region.Children.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
-            var clubCount = clubsPage?.Children.Count(c => c.ContentType.Alias == "club") ?? 0;
-
-            <div class="col">
-                <a href="@region.Url()" class="text-decoration-none">
-                    <div class="card h-100 region-card">
-                        <div class="card-body text-center">
-                            <h5 class="card-title mb-1">@regionName</h5>
-                            <small class="text-muted">@clubCount klubbar</small>
-                        </div>
-                    </div>
-                </a>
-            </div>
-        }
-    </div>
-}
-else
-{
-    <!-- Fallback if no regional pages exist yet -->
-    <div class="row">
-        <div class="col-12">
-            <div class="alert alert-info">
-                <p class="mb-0">Regionala sidor kommer snart.</p>
-            </div>
-        </div>
-    </div>
-}
-
 <style>
+.jumbotron {
+    background: linear-gradient(135deg, var(--bs-primary) 0%, #0056b3 100%);
+}
+
 .region-card {
     transition: transform 0.2s ease, box-shadow 0.2s ease;
     cursor: pointer;
@@ -120,20 +262,27 @@ else
 
 .region-card .card-title {
     color: var(--bs-body-color);
+    font-size: 0.95rem;
 }
 
 .region-card:hover .card-title {
     color: var(--bs-primary);
 }
 
-/* Ensure consistent card height on mobile */
+/* Responsive adjustments */
+@@media (max-width: 991.98px) {
+    .display-4 {
+        font-size: 2rem;
+    }
+}
+
 @@media (max-width: 575.98px) {
     .region-card .card-body {
-        padding: 0.75rem;
+        padding: 0.5rem;
     }
 
     .region-card .card-title {
-        font-size: 0.9rem;
+        font-size: 0.85rem;
     }
 }
 </style>
