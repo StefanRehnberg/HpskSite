@@ -1,5 +1,607 @@
-﻿@using Umbraco.Cms.Web.Common.PublishedModels;
+@using Umbraco.Cms.Web.Common.PublishedModels;
+@using System.Globalization;
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
-	Layout = null;
+    Layout = "Master.cshtml";
+
+    // Event properties from Umbraco content
+    var eventName = Model.Value<string>("eventName") ?? Model.Name;
+    var description = Model.Value<string>("description") ?? "";
+    var eventDate = Model.Value<DateTime>("eventDate");
+    var eventEndDate = Model.Value<DateTime?>("eventEndDate");
+    var eventType = Model.Value<string>("eventType") ?? "Träning";
+    var venue = Model.Value<string>("venue") ?? "";
+    var contactPerson = Model.Value<string>("contactPerson") ?? "";
+    var contactEmail = Model.Value<string>("contactEmail") ?? "";
+    var contactPhone = Model.Value<string>("contactPhone") ?? "";
+    var isActive = Model.Value<bool>("isActive");
+
+    // New landing page properties
+    var eventImage = Model.Value<IPublishedContent>("eventImage");
+    var registrationRequired = Model.Value<bool>("registrationRequired");
+    var feeAmount = Model.Value<string>("feeAmount") ?? "";
+    var equipmentRequired = Model.Value<string>("equipmentRequired") ?? "";
+    var targetAudience = Model.Value<string>("targetAudience") ?? "";
+
+    // Event type display helpers
+    string GetEventTypeColor(string type) => type switch
+    {
+        "Tävling" => "#0d6efd",
+        "Träning" => "#198754",
+        "Städning" => "#d63384",
+        "Möte" => "#fd7e14",
+        "Socialt" => "#0dcaf0",
+        "Annat" => "#6c757d",
+        _ => "#6c757d"
+    };
+
+    string GetEventTypeIcon(string type) => type switch
+    {
+        "Tävling" => "bi-trophy",
+        "Träning" => "bi-bullseye",
+        "Städning" => "bi-bucket",
+        "Möte" => "bi-megaphone",
+        "Socialt" => "bi-people",
+        "Annat" => "bi-calendar-event",
+        _ => "bi-calendar-event"
+    };
+
+    string GetEventTypeEmoji(string type) => type switch
+    {
+        "Tävling" => "🏆",
+        "Träning" => "🎯",
+        "Städning" => "🧹",
+        "Möte" => "📢",
+        "Socialt" => "🎉",
+        "Annat" => "📌",
+        _ => "📌"
+    };
+
+    var eventTypeColor = GetEventTypeColor(eventType);
+    var eventTypeIcon = GetEventTypeIcon(eventType);
+    var eventTypeEmoji = GetEventTypeEmoji(eventType);
+
+    // Date calculations
+    var hasValidEndDate = eventEndDate.HasValue &&
+                          eventEndDate.Value > DateTime.MinValue &&
+                          eventEndDate.Value.Year > 1900 &&
+                          eventEndDate.Value.Date >= eventDate.Date;
+    var isMultiDay = hasValidEndDate && eventEndDate!.Value.Date != eventDate.Date;
+    var durationDays = isMultiDay ? (eventEndDate!.Value.Date - eventDate.Date).Days + 1 : 1;
+
+    // Status calculations
+    var isUpcoming = eventDate.Date >= DateTime.Now.Date;
+    var isOngoing = !isUpcoming && (hasValidEndDate && eventEndDate!.Value.Date >= DateTime.Now.Date || !hasValidEndDate && eventDate.Date == DateTime.Now.Date);
+    var isPast = !isUpcoming && !isOngoing;
+
+    string statusDisplay = (isActive, isUpcoming, isOngoing, isPast) switch
+    {
+        (false, _, _, _) => "Inaktiv",
+        (_, true, _, _) => "Kommande",
+        (_, _, true, _) => "Pågår",
+        (_, _, _, true) => "Avslutad",
+        _ => "Okänd status"
+    };
+
+    string statusColor = (isActive, isUpcoming, isOngoing, isPast) switch
+    {
+        (false, _, _, _) => "#757575",
+        (_, true, _, _) => "#2196F3",
+        (_, _, true, _) => "#FF5722",
+        (_, _, _, true) => "#9E9E9E",
+        _ => "#9E9E9E"
+    };
+
+    // Parent club access
+    var clubNode = Model.Parent;
+    var clubName = clubNode?.Value<string>("clubName") ?? clubNode?.Name ?? "";
+    var clubLogo = clubNode?.Value<IPublishedContent>("logo");
+    var clubBannerImage = clubNode?.Value<IPublishedContent>("bannerImage");
+    var clubUrl = clubNode?.Url() ?? "/";
+
+    // Breadcrumb path
+    var clubsPage = clubNode?.Parent;
+    var regionPage = clubsPage?.Parent?.ContentType.Alias == "regionalPage"
+        ? clubsPage?.Parent : null;
+
+    // Hero image (event image or fall back to club banner)
+    var heroImage = eventImage ?? clubBannerImage;
+
+    // Short description for meta (strip HTML and truncate)
+    var shortDescription = System.Text.RegularExpressions.Regex.Replace(description, "<[^>]*>", "");
+    if (shortDescription.Length > 160)
+    {
+        shortDescription = shortDescription.Substring(0, 157) + "...";
+    }
+
+    ViewBag.Title = $"{eventName} - {clubName}";
+
+    // Determine darker color for gradient
+    var colorDark = eventTypeColor switch
+    {
+        "#0d6efd" => "#0056b3",  // Blue darker
+        "#198754" => "#0d5c36",  // Green darker
+        "#d63384" => "#a02468",  // Pink darker
+        "#fd7e14" => "#c85a00",  // Orange darker
+        "#0dcaf0" => "#0a9bb8",  // Cyan darker
+        "#6c757d" => "#495057",  // Gray darker
+        _ => "#495057"
+    };
+
+    // Convert hex colors to RGB for gradient
+    int HexToInt(string hex) => int.Parse(hex, NumberStyles.HexNumber);
+    var colorR = HexToInt(eventTypeColor.Substring(1, 2));
+    var colorG = HexToInt(eventTypeColor.Substring(3, 2));
+    var colorB = HexToInt(eventTypeColor.Substring(5, 2));
+    var colorDarkR = HexToInt(colorDark.Substring(1, 2));
+    var colorDarkG = HexToInt(colorDark.Substring(3, 2));
+    var colorDarkB = HexToInt(colorDark.Substring(5, 2));
 }
+
+<div class="container mt-4">
+    <!-- Breadcrumb -->
+    <div class="row">
+        <div class="col-12">
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a href="@Model.Root().Url()">Hem</a></li>
+                    @if (regionPage != null)
+                    {
+                        <li class="breadcrumb-item"><a href="@regionPage.Url()">@regionPage.Name</a></li>
+                    }
+                    @if (clubsPage != null && clubsPage.ContentType.Alias == "clubsPage")
+                    {
+                        <li class="breadcrumb-item"><a href="@clubsPage.Url()">Klubbar</a></li>
+                    }
+                    @if (clubNode != null)
+                    {
+                        <li class="breadcrumb-item"><a href="@clubUrl">@clubName</a></li>
+                    }
+                    <li class="breadcrumb-item active" aria-current="page">@eventName</li>
+                </ol>
+            </nav>
+        </div>
+    </div>
+
+    <!-- Hero Banner -->
+    <div class="row mb-4">
+        <div class="col-12">
+            @if (heroImage != null)
+            {
+                <div class="position-relative rounded overflow-hidden event-hero">
+                    <img src="@heroImage.Url()" alt="@eventName" class="w-100 h-100" style="object-fit: cover;">
+                    <div class="position-absolute top-0 start-0 w-100 h-100 d-flex align-items-end"
+                         style="background: linear-gradient(135deg, rgba(@colorR, @colorG, @colorB, 0.7) 0%, rgba(@colorDarkR, @colorDarkG, @colorDarkB, 0.85) 100%);">
+                        <div class="container pb-4 pt-5">
+                            <div class="d-flex justify-content-between align-items-end flex-wrap">
+                                <div>
+                                    <!-- Event Type Badge -->
+                                    <span class="badge bg-light text-dark mb-2">
+                                        <i class="bi @eventTypeIcon me-1"></i>@eventType
+                                    </span>
+                                    <!-- Event Name -->
+                                    <h1 class="display-5 fw-bold text-white mb-2">@eventName</h1>
+                                    <!-- Date & Venue Subtitle -->
+                                    <p class="lead text-white-50 mb-0">
+                                        <i class="bi bi-calendar3 me-2"></i>
+                                        @if (isMultiDay)
+                                        {
+                                            @eventDate.ToString("d MMMM", CultureInfo.GetCultureInfo("sv-SE"))
+                                            <text> - </text>
+                                            @eventEndDate!.Value.ToString("d MMMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))
+                                            <span class="ms-2">(@durationDays dagar)</span>
+                                        }
+                                        else
+                                        {
+                                            @eventDate.ToString("dddd, d MMMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))
+                                            @if (eventDate.TimeOfDay != TimeSpan.Zero)
+                                            {
+                                                <text> kl. @eventDate.ToString("HH:mm")</text>
+                                            }
+                                        }
+                                        @if (!string.IsNullOrEmpty(venue))
+                                        {
+                                            <span class="ms-3"><i class="bi bi-geo-alt me-1"></i>@venue</span>
+                                        }
+                                    </p>
+                                </div>
+                                <!-- Club Logo -->
+                                @if (clubLogo != null)
+                                {
+                                    <div class="d-none d-md-block">
+                                        <img src="@clubLogo.Url()" alt="@clubName" class="rounded bg-white p-2" style="max-height: 80px; max-width: 120px;">
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <!-- No image fallback - solid gradient banner -->
+                <div class="rounded p-4 p-md-5 event-hero-fallback"
+                     style="background: linear-gradient(135deg, @eventTypeColor 0%, @colorDark 100%);">
+                    <div class="d-flex justify-content-between align-items-end flex-wrap">
+                        <div>
+                            <!-- Event Type Badge -->
+                            <span class="badge bg-light text-dark mb-2">
+                                <i class="bi @eventTypeIcon me-1"></i>@eventType
+                            </span>
+                            <!-- Event Name -->
+                            <h1 class="display-5 fw-bold text-white mb-2">@eventName</h1>
+                            <!-- Date & Venue Subtitle -->
+                            <p class="lead text-white-50 mb-0">
+                                <i class="bi bi-calendar3 me-2"></i>
+                                @if (isMultiDay)
+                                {
+                                    @eventDate.ToString("d MMMM", CultureInfo.GetCultureInfo("sv-SE"))
+                                    <text> - </text>
+                                    @eventEndDate!.Value.ToString("d MMMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))
+                                    <span class="ms-2">(@durationDays dagar)</span>
+                                }
+                                else
+                                {
+                                    @eventDate.ToString("dddd, d MMMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))
+                                    @if (eventDate.TimeOfDay != TimeSpan.Zero)
+                                    {
+                                        <text> kl. @eventDate.ToString("HH:mm")</text>
+                                    }
+                                }
+                                @if (!string.IsNullOrEmpty(venue))
+                                {
+                                    <span class="ms-3"><i class="bi bi-geo-alt me-1"></i>@venue</span>
+                                }
+                            </p>
+                        </div>
+                        <!-- Club Logo -->
+                        @if (clubLogo != null)
+                        {
+                            <div class="d-none d-md-block">
+                                <img src="@clubLogo.Url()" alt="@clubName" class="rounded bg-white p-2" style="max-height: 80px; max-width: 120px;">
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+
+    <!-- Main Content Area -->
+    <div class="row">
+        <!-- Main Content Column -->
+        <div class="col-lg-8">
+            <!-- Status Badge (if not upcoming) -->
+            @if (statusDisplay != "Kommande")
+            {
+                <div class="mb-3">
+                    <span class="badge fs-6" style="background-color: @statusColor;">
+                        @statusDisplay
+                    </span>
+                </div>
+            }
+
+            <!-- Details Card -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Detaljer</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <!-- Date/Time -->
+                        <div class="col-md-6 mb-3">
+                            <div class="d-flex align-items-start">
+                                <i class="bi bi-calendar-event fs-4 me-3" style="color: @eventTypeColor;"></i>
+                                <div>
+                                    <small class="text-secondary d-block">Datum & Tid</small>
+                                    @if (isMultiDay)
+                                    {
+                                        <strong>@eventDate.ToString("d MMMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))</strong>
+                                        <text> - </text>
+                                        <strong>@eventEndDate!.Value.ToString("d MMMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))</strong>
+                                        <br><small class="text-secondary">(@durationDays dagar)</small>
+                                    }
+                                    else
+                                    {
+                                        <strong>@eventDate.ToString("dddd, d MMMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))</strong>
+                                        @if (eventDate.TimeOfDay != TimeSpan.Zero)
+                                        {
+                                            <br><span>Kl. @eventDate.ToString("HH:mm")</span>
+                                        }
+                                    }
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Venue -->
+                        @if (!string.IsNullOrEmpty(venue))
+                        {
+                            <div class="col-md-6 mb-3">
+                                <div class="d-flex align-items-start">
+                                    <i class="bi bi-geo-alt fs-4 me-3" style="color: @eventTypeColor;"></i>
+                                    <div>
+                                        <small class="text-secondary d-block">Plats</small>
+                                        <strong>@venue</strong>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+
+                        <!-- Fee -->
+                        @if (!string.IsNullOrEmpty(feeAmount))
+                        {
+                            <div class="col-md-6 mb-3">
+                                <div class="d-flex align-items-start">
+                                    <i class="bi bi-wallet2 fs-4 me-3" style="color: @eventTypeColor;"></i>
+                                    <div>
+                                        <small class="text-secondary d-block">Kostnad</small>
+                                        <strong>@feeAmount</strong>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+
+                        <!-- Registration Required -->
+                        @if (registrationRequired)
+                        {
+                            <div class="col-md-6 mb-3">
+                                <div class="d-flex align-items-start">
+                                    <i class="bi bi-person-plus fs-4 me-3" style="color: @eventTypeColor;"></i>
+                                    <div>
+                                        <small class="text-secondary d-block">Anmälan</small>
+                                        <strong>Krävs</strong>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+
+                        <!-- Target Audience -->
+                        @if (!string.IsNullOrEmpty(targetAudience))
+                        {
+                            <div class="col-md-6 mb-3">
+                                <div class="d-flex align-items-start">
+                                    <i class="bi bi-people fs-4 me-3" style="color: @eventTypeColor;"></i>
+                                    <div>
+                                        <small class="text-secondary d-block">Målgrupp</small>
+                                        <strong>@targetAudience</strong>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+
+                    <!-- Equipment Required (prominent for Träning/Städning) -->
+                    @if (!string.IsNullOrEmpty(equipmentRequired))
+                    {
+                        <hr>
+                        <div class="d-flex align-items-start">
+                            <i class="bi bi-bag-check fs-4 me-3" style="color: @eventTypeColor;"></i>
+                            <div>
+                                <small class="text-secondary d-block">Utrustning att ta med</small>
+                                <div class="mt-1">@Html.Raw(equipmentRequired.Replace("\n", "<br>"))</div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <!-- Description Card -->
+            @if (!string.IsNullOrEmpty(description))
+            {
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-text-paragraph me-2"></i>Beskrivning</h5>
+                    </div>
+                    <div class="card-body">
+                        @Html.Raw(description)
+                    </div>
+                </div>
+            }
+        </div>
+
+        <!-- Sidebar Column -->
+        <div class="col-lg-4">
+            <!-- Action Card -->
+            <div class="card mb-4">
+                <div class="card-header" style="background-color: @eventTypeColor; color: white;">
+                    <h5 class="mb-0"><i class="bi @eventTypeIcon me-2"></i>@eventTypeEmoji @eventType</h5>
+                </div>
+                <div class="card-body">
+                    <!-- Add to Calendar Button -->
+                    <div class="d-grid gap-2 mb-3">
+                        <button type="button" class="btn btn-outline-primary" onclick="addToCalendar()">
+                            <i class="bi bi-calendar-plus me-2"></i>Lägg till i kalender
+                        </button>
+                    </div>
+
+                    <!-- Share Button -->
+                    <div class="d-grid gap-2">
+                        <button type="button" class="btn btn-outline-secondary" onclick="shareEvent()">
+                            <i class="bi bi-share me-2"></i>Dela händelse
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Contact Card -->
+            @if (!string.IsNullOrEmpty(contactPerson) || !string.IsNullOrEmpty(contactEmail) || !string.IsNullOrEmpty(contactPhone))
+            {
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-person-lines-fill me-2"></i>Kontakt</h5>
+                    </div>
+                    <div class="card-body">
+                        @if (!string.IsNullOrEmpty(contactPerson))
+                        {
+                            <div class="d-flex align-items-center mb-3">
+                                <i class="bi bi-person fs-4 me-3" style="color: @eventTypeColor;"></i>
+                                <div>
+                                    <small class="text-secondary d-block">Kontaktperson</small>
+                                    <span>@contactPerson</span>
+                                </div>
+                            </div>
+                        }
+                        @if (!string.IsNullOrEmpty(contactEmail))
+                        {
+                            <div class="d-flex align-items-center mb-3">
+                                <i class="bi bi-envelope fs-4 me-3" style="color: @eventTypeColor;"></i>
+                                <div>
+                                    <small class="text-secondary d-block">E-post</small>
+                                    <a href="mailto:@contactEmail">@contactEmail</a>
+                                </div>
+                            </div>
+                        }
+                        @if (!string.IsNullOrEmpty(contactPhone))
+                        {
+                            <div class="d-flex align-items-center">
+                                <i class="bi bi-telephone fs-4 me-3" style="color: @eventTypeColor;"></i>
+                                <div>
+                                    <small class="text-secondary d-block">Telefon</small>
+                                    <a href="tel:@contactPhone">@contactPhone</a>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+
+            <!-- Club Card -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-building me-2"></i>Arrangerande klubb</h5>
+                </div>
+                <div class="card-body">
+                    <div class="d-flex align-items-center mb-3">
+                        @if (clubLogo != null)
+                        {
+                            <img src="@clubLogo.Url()" alt="@clubName" class="rounded me-3" style="max-height: 50px; max-width: 70px;">
+                        }
+                        <div>
+                            <strong>@clubName</strong>
+                        </div>
+                    </div>
+                    <a href="@clubUrl" class="btn btn-outline-secondary btn-sm w-100">
+                        <i class="bi bi-arrow-left me-1"></i>Tillbaka till klubben
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+/* Hero banner styling */
+.event-hero {
+    height: 300px;
+}
+
+.event-hero-fallback {
+    min-height: 200px;
+}
+
+/* Mobile responsiveness */
+@@media (max-width: 767.98px) {
+    .event-hero {
+        height: 220px;
+    }
+
+    .event-hero .display-5 {
+        font-size: 1.5rem;
+    }
+
+    .event-hero .lead {
+        font-size: 0.9rem;
+    }
+
+    .event-hero-fallback .display-5 {
+        font-size: 1.5rem;
+    }
+}
+
+/* Touch-friendly button sizes */
+.card-body .btn {
+    min-height: 44px;
+}
+
+/* Custom badge for pink (Städning) */
+.badge.bg-pink {
+    background-color: #d63384 !important;
+}
+
+/* Card icon colors - using CSS variable fallback for dark mode support */
+.card-body i {
+    opacity: 0.9;
+}
+</style>
+
+<script>
+// Event data for calendar/share functionality
+const eventData = {
+    name: '@Html.Raw(eventName.Replace("'", "\\'"))',
+    description: '@Html.Raw(shortDescription.Replace("'", "\\'").Replace("\n", " ").Replace("\r", ""))',
+    venue: '@Html.Raw(venue.Replace("'", "\\'"))',
+    startDate: new Date('@eventDate.ToString("yyyy-MM-ddTHH:mm:ss")'),
+    @if (isMultiDay && eventEndDate.HasValue)
+    {
+        <text>endDate: new Date('@eventEndDate.Value.ToString("yyyy-MM-ddTHH:mm:ss")'),</text>
+    }
+    else
+    {
+        <text>endDate: new Date('@eventDate.AddHours(2).ToString("yyyy-MM-ddTHH:mm:ss")'),</text>
+    }
+    url: window.location.href,
+    clubName: '@Html.Raw(clubName.Replace("'", "\\'"))'
+};
+
+function addToCalendar() {
+    // Create ICS file content
+    const formatDate = (date) => {
+        return date.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+    };
+
+    const icsContent = `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Pistol.nu//Club Events//SV
+BEGIN:VEVENT
+UID:${Date.now()}@@pistol.nu
+DTSTAMP:${formatDate(new Date())}
+DTSTART:${formatDate(eventData.startDate)}
+DTEND:${formatDate(eventData.endDate)}
+SUMMARY:${eventData.name}
+DESCRIPTION:${eventData.description}\\n\\nArrangör: ${eventData.clubName}\\n${eventData.url}
+LOCATION:${eventData.venue}
+URL:${eventData.url}
+END:VEVENT
+END:VCALENDAR`;
+
+    // Download ICS file
+    const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `${eventData.name.replace(/[^a-zA-Z0-9åäöÅÄÖ ]/g, '')}.ics`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
+function shareEvent() {
+    const shareData = {
+        title: `${eventData.name} - ${eventData.clubName}`,
+        text: eventData.description,
+        url: eventData.url
+    };
+
+    if (navigator.share) {
+        // Native share API (mobile)
+        navigator.share(shareData).catch(console.error);
+    } else {
+        // Fallback: copy to clipboard
+        navigator.clipboard.writeText(eventData.url).then(() => {
+            alert('Länk kopierad till urklipp!');
+        }).catch(() => {
+            // Final fallback: show URL in prompt
+            prompt('Kopiera länken:', eventData.url);
+        });
+    }
+}
+</script>

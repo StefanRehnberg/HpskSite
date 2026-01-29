@@ -230,7 +230,8 @@ namespace HpskSite.Controllers
                                 type = eventType,
                                 description = evt.Value<string>("description") ?? "",
                                 venue = evt.Value<string>("venue") ?? "",
-                                contactPerson = evt.Value<string>("contactPerson") ?? ""
+                                contactPerson = evt.Value<string>("contactPerson") ?? "",
+                                url = evt.Url()
                             });
                         }
                     }
@@ -490,7 +491,8 @@ namespace HpskSite.Controllers
                             venue = evt.Value<string>("venue") ?? "",
                             contactPerson = evt.Value<string>("contactPerson") ?? "",
                             contactEmail = evt.Value<string>("contactEmail") ?? "",
-                            isActive = evt.Value<bool>("isActive")
+                            isActive = evt.Value<bool>("isActive"),
+                            url = evt.Url()
                         });
                     }
                 }

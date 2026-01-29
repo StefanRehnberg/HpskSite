@@ -27,6 +27,13 @@ namespace HpskSite.Models
         public string ContactPhone => this.Value<string>("contactPhone") ?? "";
         public bool IsActive => this.Value<bool>("isActive", fallback: Fallback.ToDefaultValue, defaultValue: true);
 
+        // New properties for landing page
+        public IPublishedContent? EventImage => this.Value<IPublishedContent>("eventImage");
+        public bool RegistrationRequired => this.Value<bool>("registrationRequired", fallback: Fallback.ToDefaultValue, defaultValue: false);
+        public string FeeAmount => this.Value<string>("feeAmount") ?? "";
+        public string EquipmentRequired => this.Value<string>("equipmentRequired") ?? "";
+        public string TargetAudience => this.Value<string>("targetAudience") ?? "";
+
         // Club reference - which club created this event
         public int ClubId => this.Value<int>("clubId", fallback: Fallback.ToDefaultValue, defaultValue: 0);
 
@@ -45,6 +52,62 @@ namespace HpskSite.Models
                 "Socialt" => "🎉 Socialt",
                 "Annat" => "📌 Annat",
                 _ => EventType
+            };
+        }
+
+        public string GetEventTypeColor()
+        {
+            return EventType switch
+            {
+                "Tävling" => "#0d6efd",  // Blue
+                "Träning" => "#198754",  // Green
+                "Städning" => "#d63384", // Pink
+                "Möte" => "#fd7e14",     // Orange
+                "Socialt" => "#0dcaf0",  // Cyan
+                "Annat" => "#6c757d",    // Gray
+                _ => "#6c757d"
+            };
+        }
+
+        public string GetEventTypeIcon()
+        {
+            return EventType switch
+            {
+                "Tävling" => "bi-trophy",
+                "Träning" => "bi-bullseye",
+                "Städning" => "bi-bucket",
+                "Möte" => "bi-megaphone",
+                "Socialt" => "bi-people",
+                "Annat" => "bi-calendar-event",
+                _ => "bi-calendar-event"
+            };
+        }
+
+        public string GetEventTypeEmoji()
+        {
+            return EventType switch
+            {
+                "Tävling" => "🏆",
+                "Träning" => "🎯",
+                "Städning" => "🧹",
+                "Möte" => "📢",
+                "Socialt" => "🎉",
+                "Annat" => "📌",
+                _ => "📌"
+            };
+        }
+
+        public string GetBootstrapBadgeClass()
+        {
+            return EventType switch
+            {
+                "Tävling" => "primary",
+                "Träning" => "success",
+                "Städning" => "pink",   // Custom CSS class needed
+                "Möte" => "warning",
+                "Socialt" => "info",
+                "Annat" => "secondary",
+                _ => "secondary"
             };
         }
 
