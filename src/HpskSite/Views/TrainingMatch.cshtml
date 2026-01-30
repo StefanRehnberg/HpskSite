@@ -97,98 +97,198 @@
     else
     {
         <!-- Main content for logged-in users and guests -->
-        <!-- Navigation Tabs -->
-        <ul class="nav nav-tabs mb-4" id="matchTabs" role="tablist">
-            <li class="nav-item" role="presentation">
-                <button class="nav-link active" id="current-tab" data-bs-toggle="tab" data-bs-target="#currentTabContent"
-                        type="button" role="tab" aria-controls="currentTabContent" aria-selected="true">
-                    <i class="bi bi-bullseye me-1"></i>Aktuell match
-                </button>
-            </li>
-            <li class="nav-item" role="presentation">
-                <button class="nav-link" id="ongoing-tab" data-bs-toggle="tab" data-bs-target="#ongoingTabContent"
-                        type="button" role="tab" aria-controls="ongoingTabContent" aria-selected="false"
-                        onclick="loadOngoingMatchesIfNeeded()">
-                    <i class="bi bi-play-circle me-1"></i>Pågående
-                    <span class="badge bg-primary ms-1" id="ongoingMatchCount" style="display: none;">0</span>
-                </button>
-            </li>
-            <li class="nav-item" role="presentation">
-                <button class="nav-link" id="upcoming-tab" data-bs-toggle="tab" data-bs-target="#upcomingTabContent"
-                        type="button" role="tab" aria-controls="upcomingTabContent" aria-selected="false"
-                        onclick="loadUpcomingMatchesIfNeeded()">
-                    <i class="bi bi-calendar-event me-1"></i>Kommande
-                    <span class="badge bg-info ms-1" id="upcomingMatchCount" style="display: none;">0</span>
-                </button>
-            </li>
-            <li class="nav-item" role="presentation">
-                <button class="nav-link" id="history-tab" data-bs-toggle="tab" data-bs-target="#historyTabContent"
-                        type="button" role="tab" aria-controls="historyTabContent" aria-selected="false"
-                        onclick="loadMatchHistoryIfNeeded()">
-                    <i class="bi bi-clock-history me-1"></i>Historik
-                </button>
-            </li>
-        </ul>
 
-        <!-- Tab Content -->
-        <div class="tab-content" id="matchTabsContent">
-            <!-- Current Match Tab -->
-            <div class="tab-pane fade show active" id="currentTabContent" role="tabpanel" aria-labelledby="current-tab">
-                <div id="matchContainer">
-                    <!-- Loading state -->
-                    <div id="loadingState" class="text-center py-5">
-                        <div class="spinner-border text-primary" role="status">
-                            <span class="visually-hidden">Laddar...</span>
-                        </div>
-                        <p class="mt-3">Laddar...</p>
-                    </div>
+        <!-- Page Header -->
+        <div class="mb-4">
+            <h1 class="h3 mb-1">Träningsmatcher</h1>
+            <p class="text-muted mb-0">Delta i live-matcher med andra skyttar</p>
+        </div>
 
-                    <!-- No match state - Create/Join -->
-                    <div id="noMatchState" style="display: none;">
-                        @await Html.PartialAsync("TrainingMatchCreate")
-                        @await Html.PartialAsync("TrainingMatchJoin")
-                    </div>
-
-                    <!-- Active match state - Scoreboard -->
-                    <div id="activeMatchState" style="display: none;">
-                        @await Html.PartialAsync("TrainingMatchScoreboard")
-                    </div>
+        <!-- Active Match Card - Always at top on mobile, in sidebar on desktop -->
+        <!-- Mobile wrapper - only visible on small screens -->
+        <div class="d-lg-none" id="activeMatchWrapperMobile">
+            <div class="card border-warning mb-3" id="activeMatchCardMobile" style="display: none;">
+                <div class="card-header bg-warning text-dark">
+                    <h6 class="mb-0"><i class="bi bi-circle-fill text-danger me-2" style="font-size: 0.5rem;"></i>Din aktiva match</h6>
                 </div>
-            </div>
-
-            <!-- Ongoing Matches Tab -->
-            <div class="tab-pane fade" id="ongoingTabContent" role="tabpanel" aria-labelledby="ongoing-tab">
-                @await Html.PartialAsync("TrainingMatchOngoing")
-            </div>
-
-            <!-- Upcoming Matches Tab -->
-            <div class="tab-pane fade" id="upcomingTabContent" role="tabpanel" aria-labelledby="upcoming-tab">
-                @await Html.PartialAsync("TrainingMatchUpcoming")
-            </div>
-
-            <!-- History Tab -->
-            <div class="tab-pane fade" id="historyTabContent" role="tabpanel" aria-labelledby="history-tab">
-                @await Html.PartialAsync("TrainingMatchHistory")
+                <div class="card-body">
+                    <h6 class="mb-2" id="activeMatchNameMobile">-</h6>
+                    <div class="d-flex align-items-center mb-2">
+                        <span class="badge bg-info text-dark me-2" id="activeMatchWeaponBadgeMobile">-</span>
+                        <small class="text-muted" id="activeMatchParticipantsMobile">- deltagare</small>
+                    </div>
+                    <p class="mb-3 small text-muted" id="activeMatchScoreMobile">Din poäng: -</p>
+                    <button class="btn btn-warning w-100" onclick="goToActiveMatch()">
+                        <i class="bi bi-arrow-right-circle me-1"></i>Gå till matchen
+                    </button>
+                </div>
             </div>
         </div>
 
-        <!-- Android App Install Section -->
-        <div id="android-app" class="card mt-4 border-success">
-            <div class="card-body text-center py-4">
-                <div class="mb-3">
-                    <i class="bi bi-phone text-success" style="font-size: 2.5rem;"></i>
+        <div class="row">
+            <!-- Sidebar - After tabs on mobile (order-2), before on desktop (order-lg-1 with col position) -->
+            <div class="col-lg-4 order-2 order-lg-2 mb-4 mb-lg-0" id="sidebarColumn">
+                <!-- Active Match Card - Desktop only (mobile version is above the row) -->
+                <!-- Desktop wrapper - only visible on large screens -->
+                <div class="d-none d-lg-block" id="activeMatchWrapperDesktop">
+                    <div class="card border-warning mb-3" id="activeMatchCardDesktop" style="display: none;">
+                        <div class="card-header bg-warning text-dark">
+                            <h6 class="mb-0"><i class="bi bi-circle-fill text-danger me-2" style="font-size: 0.5rem;"></i>Din aktiva match</h6>
+                        </div>
+                        <div class="card-body">
+                            <h6 class="mb-2" id="activeMatchNameDesktop">-</h6>
+                            <div class="d-flex align-items-center mb-2">
+                                <span class="badge bg-info text-dark me-2" id="activeMatchWeaponBadgeDesktop">-</span>
+                                <small class="text-muted" id="activeMatchParticipantsDesktop">- deltagare</small>
+                            </div>
+                            <p class="mb-3 small text-muted" id="activeMatchScoreDesktop">Din poäng: -</p>
+                            <button class="btn btn-warning w-100" onclick="goToActiveMatch()">
+                                <i class="bi bi-arrow-right-circle me-1"></i>Gå till matchen
+                            </button>
+                        </div>
+                    </div>
                 </div>
-                <h5 class="card-title">Träningsmatch finns som app!</h5>
-                <p class="card-text text-muted mb-3">
-                    Ladda ner Android-appen för att enkelt rapportera resultat direkt från skjutbanan.
-                </p>
-                <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#androidAppModal">
-                    <i class="bi bi-android2 me-2"></i>Hämta Android-appen
-                </button>
+
+                <!-- Actions Card -->
+                <div class="card border-success mb-3" id="actionsCard">
+                    <div class="card-header bg-success text-white">
+                        <h6 class="mb-0"><i class="bi bi-bullseye me-2"></i>Kom igång</h6>
+                    </div>
+                    <div class="card-body">
+                        <div class="d-grid gap-2">
+                            <button class="btn btn-success btn-action" onclick="openCreateMatchModal()">
+                                <i class="bi bi-flag me-2"></i>Skapa ny match
+                            </button>
+                            <button class="btn btn-outline-primary btn-action" onclick="openJoinMatchModal()">
+                                <i class="bi bi-people me-2"></i>Gå med i match
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Help Card (Collapsible) -->
+                <div class="card" id="helpCard">
+                    <div class="card-header bg-body-tertiary" style="cursor: pointer;" data-bs-toggle="collapse" data-bs-target="#helpCardBody">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <h6 class="mb-0"><i class="bi bi-question-circle me-2"></i>Hur fungerar det?</h6>
+                            <i class="bi bi-chevron-down help-collapse-icon"></i>
+                        </div>
+                    </div>
+                    <div id="helpCardBody" class="collapse">
+                        <div class="card-body">
+                            <ul class="small mb-3 ps-3">
+                                <li>Skapa en match och dela koden med andra</li>
+                                <li>Gå med via kod eller QR-skanner</li>
+                                <li>Ange poäng serie för serie i realtid</li>
+                                <li>Se live-resultat och jämför med andra</li>
+                            </ul>
+                            <a href="#" class="small" data-bs-toggle="modal" data-bs-target="#handicapInfoModal">
+                                <i class="bi bi-info-circle me-1"></i>Läs mer om handicap
+                            </a>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Android App Card (Desktop only) -->
+                <div class="card mt-3 border-success d-none d-lg-block" id="android-app-desktop">
+                    <div class="card-body text-center py-3">
+                        <i class="bi bi-phone text-success" style="font-size: 1.5rem;"></i>
+                        <p class="small mb-2 mt-2">Finns som Android-app!</p>
+                        <button type="button" class="btn btn-sm btn-outline-success" data-bs-toggle="modal" data-bs-target="#androidAppModal">
+                            <i class="bi bi-android2 me-1"></i>Hämta appen
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Main Content - First on mobile (order-1), first on desktop (order-lg-1) -->
+            <div class="col-lg-8 order-1 order-lg-1">
+                <!-- Loading state (for initial load) -->
+                <div id="loadingState" class="text-center py-5">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Laddar...</span>
+                    </div>
+                    <p class="mt-3">Laddar...</p>
+                </div>
+
+                <!-- Main View (tabs + content) -->
+                <div id="mainView" style="display: none;">
+                    <!-- Navigation Tabs -->
+                    <ul class="nav nav-tabs mb-4" id="matchTabs" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" id="ongoing-tab" data-bs-toggle="tab" data-bs-target="#ongoingTabContent"
+                                    type="button" role="tab" aria-controls="ongoingTabContent" aria-selected="true"
+                                    onclick="loadOngoingMatchesIfNeeded()">
+                                <i class="bi bi-play-circle me-1"></i><span class="d-none d-sm-inline">Pågående</span><span class="d-sm-none">Live</span>
+                                <span class="badge bg-success rounded-pill ms-1" id="ongoingMatchCount" style="display: none;">0</span>
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="upcoming-tab" data-bs-toggle="tab" data-bs-target="#upcomingTabContent"
+                                    type="button" role="tab" aria-controls="upcomingTabContent" aria-selected="false"
+                                    onclick="loadUpcomingMatchesIfNeeded()">
+                                <i class="bi bi-calendar-event me-1"></i><span class="d-none d-sm-inline">Kommande</span><span class="d-sm-none">Planerat</span>
+                                <span class="badge bg-info ms-1" id="upcomingMatchCount" style="display: none;">0</span>
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="history-tab" data-bs-toggle="tab" data-bs-target="#historyTabContent"
+                                    type="button" role="tab" aria-controls="historyTabContent" aria-selected="false"
+                                    onclick="loadMatchHistoryIfNeeded()">
+                                <i class="bi bi-clock-history me-1"></i><span class="d-none d-sm-inline">Historik</span><span class="d-sm-none">Hist.</span>
+                            </button>
+                        </li>
+                    </ul>
+
+                    <!-- Tab Content -->
+                    <div class="tab-content" id="matchTabsContent">
+                        <!-- Ongoing Matches Tab -->
+                        <div class="tab-pane fade show active" id="ongoingTabContent" role="tabpanel" aria-labelledby="ongoing-tab">
+                            @await Html.PartialAsync("TrainingMatchOngoing")
+                        </div>
+
+                        <!-- Upcoming Matches Tab -->
+                        <div class="tab-pane fade" id="upcomingTabContent" role="tabpanel" aria-labelledby="upcoming-tab">
+                            @await Html.PartialAsync("TrainingMatchUpcoming")
+                        </div>
+
+                        <!-- History Tab -->
+                        <div class="tab-pane fade" id="historyTabContent" role="tabpanel" aria-labelledby="history-tab">
+                            @await Html.PartialAsync("TrainingMatchHistory")
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Scoreboard View (shown when viewing a match) -->
+                <div id="scoreboardView" style="display: none;">
+                    @await Html.PartialAsync("TrainingMatchScoreboard")
+                </div>
+            </div>
+        </div>
+
+        <!-- Android App Install Section (Mobile) -->
+        <div id="android-app" class="card mt-4 border-success d-lg-none">
+            <div class="card-body text-center py-3">
+                <div class="d-flex align-items-center justify-content-center gap-3">
+                    <i class="bi bi-phone text-success" style="font-size: 1.5rem;"></i>
+                    <div class="text-start">
+                        <p class="mb-0 small fw-medium">Träningsmatch finns som app!</p>
+                        <button type="button" class="btn btn-sm btn-outline-success mt-1" data-bs-toggle="modal" data-bs-target="#androidAppModal">
+                            <i class="bi bi-android2 me-1"></i>Hämta Android-appen
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
     }
 </div>
+
+<!-- Create and Join Modals -->
+@if (isLoggedIn || isGuest)
+{
+    @await Html.PartialAsync("TrainingMatchCreate")
+    @await Html.PartialAsync("TrainingMatchJoin")
+}
 
 <!-- Android App Modal -->
 @if (isLoggedIn)
@@ -336,12 +436,6 @@
             if (isGuestUser && guestMatchCode) {
                 // Clear URL parameter and load match directly
                 window.history.replaceState({}, '', window.location.pathname);
-                // Switch to "Aktuell match" tab
-                const currentTab = document.getElementById('current-tab');
-                if (currentTab) {
-                    const tab = new bootstrap.Tab(currentTab);
-                    tab.show();
-                }
                 loadMatch(guestMatchCode);
             } else if (joinCode) {
                 // Try to join the match (for registered users)
@@ -373,22 +467,44 @@
                         }
 
                         if (result.matches && result.matches.length > 0) {
-                            // Show most recent active match
+                            // User has active match - show main view with active match card
                             const latestMatch = result.matches[0];
-                            loadMatch(latestMatch.matchCode);
+                            currentMatchCode = latestMatch.matchCode;
+
+                            // Show main view (tabs) but also update active match card
+                            showMainView();
+
+                            // Load ongoing matches as default tab
+                            loadOngoingMatches();
+
+                            // Update active match card in sidebar
+                            fetch(`/umbraco/surface/TrainingMatch/GetMatch?matchCode=${latestMatch.matchCode}`)
+                                .then(response => response.json())
+                                .then(matchResult => {
+                                    if (matchResult.success) {
+                                        currentMatch = matchResult.match;
+                                        updateActiveMatchCard(matchResult.match);
+                                    }
+                                });
                         } else {
-                            // No active matches - show create/join
-                            showNoMatchState();
+                            // No active matches - show main view with tabs
+                            showMainView();
+                            // Load ongoing matches as default tab
+                            loadOngoingMatches();
+                            updateActiveMatchCard(null);
                         }
                     } else {
-                        // No active matches - show create/join
-                        showNoMatchState();
+                        // Error or no active matches - show main view
+                        showMainView();
+                        loadOngoingMatches();
+                        updateActiveMatchCard(null);
                     }
                 })
                 .catch(error => {
                     console.error('Error checking active matches:', error);
                     hideLoading();
-                    showNoMatchState();
+                    showMainView();
+                    loadOngoingMatches();
                 });
         }
 
@@ -421,12 +537,7 @@
                     await unregisterAsSpectator(code);
                     // Clear URL parameter and load match
                     window.history.replaceState({}, '', window.location.pathname);
-                    // Switch to "Aktuell match" tab
-                    const currentTab = document.getElementById('current-tab');
-                    if (currentTab) {
-                        const tab = new bootstrap.Tab(currentTab);
-                        tab.show();
-                    }
+                    // Load the match (will switch to scoreboard view)
                     loadMatch(code);
                 } else if (result.requiresTeam && result.teams) {
                     // Team match - show team selection modal
@@ -545,8 +656,11 @@
                         }
 
                         currentMatch = result.match;
-                        showActiveMatchState();
+                        showScoreboardView();
                         renderScoreboard(result.match);
+
+                        // Note: We don't update active match card here since sidebar is hidden
+                        // It will be updated when user goes back to main view
 
                         // Join SignalR groups
                         joinMatchSignalRGroup(matchCode);
@@ -559,14 +673,16 @@
                         }
                     } else {
                         alert(result.message || 'Kunde inte ladda matchen');
-                        showNoMatchState();
+                        showMainView();
+                        loadOngoingMatches();
                     }
                 })
                 .catch(error => {
                     console.error('Error loading match:', error);
                     hideLoading();
                     alert('Något gick fel vid laddning av matchen');
-                    showNoMatchState();
+                    showMainView();
+                    loadOngoingMatches();
                 });
         }
 
@@ -585,8 +701,8 @@
         // UI State functions
         function showLoading() {
             document.getElementById('loadingState').style.display = 'block';
-            document.getElementById('noMatchState').style.display = 'none';
-            document.getElementById('activeMatchState').style.display = 'none';
+            document.getElementById('mainView').style.display = 'none';
+            document.getElementById('scoreboardView').style.display = 'none';
             // Hide the floating add score button
             const addScoreBtn = document.getElementById('addScoreBtn');
             if (addScoreBtn) addScoreBtn.style.display = 'none';
@@ -596,17 +712,118 @@
             document.getElementById('loadingState').style.display = 'none';
         }
 
-        function showNoMatchState() {
-            document.getElementById('noMatchState').style.display = 'block';
-            document.getElementById('activeMatchState').style.display = 'none';
+        function showMainView() {
+            document.getElementById('mainView').style.display = 'block';
+            document.getElementById('scoreboardView').style.display = 'none';
+            // Show sidebar and restore column widths
+            showSidebar();
             // Hide the floating add score button
             const addScoreBtn = document.getElementById('addScoreBtn');
             if (addScoreBtn) addScoreBtn.style.display = 'none';
         }
 
+        function showScoreboardView() {
+            document.getElementById('mainView').style.display = 'none';
+            document.getElementById('scoreboardView').style.display = 'block';
+            // Hide sidebar and expand scoreboard to full width
+            hideSidebar();
+        }
+
+        // Show/hide entire sidebar column based on view state
+        function showSidebar() {
+            const sidebarColumn = document.getElementById('sidebarColumn');
+            const mobileActiveWrapper = document.getElementById('activeMatchWrapperMobile');
+            const mainColumn = document.getElementById('scoreboardView').parentElement;
+
+            if (sidebarColumn) {
+                sidebarColumn.style.display = '';
+            }
+            // Show mobile active match wrapper (the card inside is controlled by updateActiveMatchCard)
+            if (mobileActiveWrapper) {
+                mobileActiveWrapper.classList.remove('scoreboard-hidden');
+            }
+            // Restore column class
+            if (mainColumn) {
+                mainColumn.classList.remove('col-12');
+                mainColumn.classList.add('col-lg-8');
+            }
+        }
+
+        function hideSidebar() {
+            const sidebarColumn = document.getElementById('sidebarColumn');
+            const mobileActiveWrapper = document.getElementById('activeMatchWrapperMobile');
+            const mainColumn = document.getElementById('scoreboardView').parentElement;
+
+            if (sidebarColumn) {
+                sidebarColumn.style.display = 'none';
+            }
+            // Hide mobile active match wrapper when viewing scoreboard
+            if (mobileActiveWrapper) {
+                mobileActiveWrapper.classList.add('scoreboard-hidden');
+            }
+            // Expand main column to full width
+            if (mainColumn) {
+                mainColumn.classList.remove('col-lg-8');
+                mainColumn.classList.add('col-12');
+            }
+        }
+
+        // Legacy aliases for compatibility
+        function showNoMatchState() {
+            showMainView();
+        }
+
         function showActiveMatchState() {
-            document.getElementById('noMatchState').style.display = 'none';
-            document.getElementById('activeMatchState').style.display = 'block';
+            showScoreboardView();
+        }
+
+        // Update active match card (both mobile and desktop versions)
+        function updateActiveMatchCard(match) {
+            const mobileCard = document.getElementById('activeMatchCardMobile');
+            const desktopCard = document.getElementById('activeMatchCardDesktop');
+
+            if (!match) {
+                if (mobileCard) mobileCard.style.display = 'none';
+                if (desktopCard) desktopCard.style.display = 'none';
+                return;
+            }
+
+            // Calculate user's score
+            const myParticipant = match.participants?.find(p => p.memberId === currentMemberId);
+            let scoreText = 'Inga registrerade serier ännu';
+            if (myParticipant && myParticipant.scores?.length > 0) {
+                const totalScore = myParticipant.scores.reduce((sum, s) => sum + s.total, 0);
+                scoreText = `Din poäng: ${totalScore} (${myParticipant.scores.length} serier)`;
+            }
+
+            const matchName = match.matchName || match.matchCode;
+            const weaponBadge = 'Klass ' + match.weaponClass;
+            const participantCount = (match.participants?.length || 0) + ' deltagare';
+
+            // Update mobile card
+            if (mobileCard) {
+                mobileCard.style.display = 'block';
+                document.getElementById('activeMatchNameMobile').textContent = matchName;
+                document.getElementById('activeMatchWeaponBadgeMobile').textContent = weaponBadge;
+                document.getElementById('activeMatchParticipantsMobile').textContent = participantCount;
+                document.getElementById('activeMatchScoreMobile').textContent = scoreText;
+            }
+
+            // Update desktop card
+            if (desktopCard) {
+                desktopCard.style.display = 'block';
+                document.getElementById('activeMatchNameDesktop').textContent = matchName;
+                document.getElementById('activeMatchWeaponBadgeDesktop').textContent = weaponBadge;
+                document.getElementById('activeMatchParticipantsDesktop').textContent = participantCount;
+                document.getElementById('activeMatchScoreDesktop').textContent = scoreText;
+            }
+        }
+
+        // Go to active match from sidebar card
+        function goToActiveMatch() {
+            if (currentMatchCode) {
+                loadMatch(currentMatchCode);
+            }
         }
 
         // Create new match
@@ -758,8 +975,10 @@
                 if (result.success) {
                     currentMatchCode = null;
                     currentMatch = null;
-                    // Reload the tab to check for active matches
-                    checkActiveMatches();
+                    // Hide active match card and show main view
+                    updateActiveMatchCard(null);
+                    showMainView();
+                    loadOngoingMatches();
                 } else {
                     alert(result.message || 'Kunde inte lämna matchen');
                 }
@@ -782,8 +1001,31 @@
             currentMatch = null;
             isSpectator = false;
 
-            // Reload the tab to check for active matches
-            checkActiveMatches();
+            // Show main view with tabs
+            showMainView();
+            loadOngoingMatches();
+        }
+
+        // Go back to main view from scoreboard (without leaving match)
+        function backToMainView() {
+            showMainView();
+
+            // Only show active match card if user is a PARTICIPANT (not spectator)
+            if (currentMatch && currentMatchCode && !isSpectator) {
+                // Check if user is actually a participant in this match
+                const isParticipant = currentMatch.participants?.some(p => p.memberId === currentMemberId);
+                if (isParticipant) {
+                    updateActiveMatchCard(currentMatch);
+                } else {
+                    updateActiveMatchCard(null);
+                }
+            } else {
+                updateActiveMatchCard(null);
+            }
+
+            // Refresh ongoing matches
+            ongoingMatchesLoaded = false;
+            loadOngoingMatches();
         }
 
         // Complete/end match
@@ -804,13 +1046,15 @@
             .then(response => response.json())
             .then(result => {
                 if (result.success) {
-                    alert('Matchen har avslutats!');
+                    showToast('Matchen har avslutats!', 'success');
                     currentMatchCode = null;
                     currentMatch = null;
+                    // Hide active match card
+                    updateActiveMatchCard(null);
                     // Refresh ongoing matches list and badge immediately
                     ongoingMatchesLoaded = false;
                     loadOngoingMatches();
-                    showNoMatchState();
+                    showMainView();
                 } else {
                     alert(result.message || 'Kunde inte avsluta matchen');
                 }
@@ -1092,7 +1336,7 @@
                         // Build photo indicator
                         const hasPhoto = score.targetPhotoUrl && score.targetPhotoUrl.length > 0;
                         const photoIndicator = hasPhoto
-                            ? '<i class="bi bi-camera-fill photo-indicator" style="position:absolute;left:4px;top:4px;font-size:0.7rem;color:#60a5fa;"></i>'
+                            ? '<i class="bi bi-camera-fill photo-indicator" style="position:absolute;left:4px;top:4px;font-size:0.7rem;color:var(--bs-info);"></i>'
                             : '';
 
                         // Build reaction display
@@ -1312,12 +1556,8 @@
                 showToast('Din förfrågan har accepterats!', 'success');
                 // Unregister as spectator first (wait for it to complete)
                 await unregisterAsSpectator(matchCode);
-                // Load the match
+                // Load the match (will switch to scoreboard view)
                 loadMatch(matchCode);
-                // Switch to current tab
-                const currentTab = document.getElementById('current-tab');
-                const bsTab = new bootstrap.Tab(currentTab);
-                bsTab.show();
             });
 
             hubConnection.on("JoinRequestBlocked", (matchCode) => {
@@ -1554,85 +1794,84 @@
             container.style.display = 'block';
             if (empty) empty.style.display = 'none';
 
-            container.innerHTML = matches.map(m => {
-                const avatars = m.participants.slice(0, 5).map((p, i) => {
+            container.innerHTML = '<div class="list-group">' + matches.map(m => {
+                // Compact avatars (max 3, smaller size)
+                const avatars = m.participants.slice(0, 3).map((p, i) => {
                     if (p.profilePictureUrl) {
                         return `<img src="${p.profilePictureUrl}" alt="${p.firstName}"
-                                    class="rounded-circle border border-2 border-white"
-                                    style="width: 35px; height: 35px; margin-left: ${i > 0 ? '-10px' : '0'}; z-index: ${5-i}; object-fit: cover;"
+                                    class="match-avatar"
+                                    style="margin-left: ${i > 0 ? '-8px' : '0'}; z-index: ${3-i};"
                                     title="${p.firstName} ${p.lastName}">`;
                     } else {
                         const initials = (p.firstName?.[0] || '') + (p.lastName?.[0] || '');
-                        return `<span class="rounded-circle bg-primary text-white d-inline-flex align-items-center justify-content-center border border-2 border-white"
-                                    style="width: 35px; height: 35px; margin-left: ${i > 0 ? '-10px' : '0'}; z-index: ${5-i}; font-size: 0.8rem;"
+                        return `<span class="match-avatar match-avatar-initials"
+                                    style="margin-left: ${i > 0 ? '-8px' : '0'}; z-index: ${3-i};"
                                     title="${p.firstName} ${p.lastName}">${initials}</span>`;
                     }
                 }).join('');
 
-                const moreCount = m.participantCount > 5 ? `<span class="badge bg-secondary ms-1">+${m.participantCount - 5}</span>` : '';
-
-                const startTimeInfo = !m.hasStarted && m.startDate
-                    ? `<span class="badge bg-warning text-dark"><i class="bi bi-clock me-1"></i>Startar ${new Date(m.startDate).toLocaleString('sv-SE', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>`
-                    : `<small class="text-muted">${new Date(m.createdDate).toLocaleString('sv-SE', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</small>`;
-
                 const isMyMatch = m.createdByMemberId === currentMemberId;
                 const canManage = isMyMatch || isCurrentUserAdmin;
-                const isOpen = m.isOpen !== false; // Default to true if not set
+                const isOpen = m.isOpen !== false;
 
-                // Join button or lock icon based on isOpen
-                let joinOrLock = '';
-                if (!isMyMatch) {
-                    if (isOpen) {
-                        joinOrLock = `<button class="btn btn-sm btn-primary" onclick="event.stopPropagation(); joinMatchByCode('${m.matchCode}')">
-                            <i class="bi bi-person-plus me-1"></i>Gå med
-                        </button>`;
-                    } else {
-                        joinOrLock = `<span class="text-muted" title="Privat match - endast via länk eller QR-kod">
-                            <i class="bi bi-lock-fill"></i>
-                        </span>`;
-                    }
+                // Weapon class as compact colored dot/badge
+                const weaponColors = { A: 'info', B: 'purple', C: 'success', R: 'warning', P: 'danger', M: 'dark', L: 'secondary' };
+                const weaponColor = weaponColors[m.weaponClass] || 'secondary';
+
+                // Status indicators
+                const lockIcon = !isOpen ? '<i class="bi bi-lock-fill text-secondary me-1" title="Privat match"></i>' : '';
+                const myMatchDot = isMyMatch ? '<span class="badge bg-success-subtle text-success-emphasis badge-sm">Din</span>' : '';
+
+                // Time display (compact)
+                const timeStr = new Date(m.createdDate).toLocaleString('sv-SE', { hour: '2-digit', minute: '2-digit' });
+
+                // Action buttons
+                const viewBtn = `<button class="btn btn-sm btn-outline-secondary match-action-btn" onclick="event.stopPropagation(); viewMatchAsSpectator('${m.matchCode}')" title="Visa match">
+                    <i class="bi bi-eye"></i>
+                </button>`;
+
+                let joinBtn = '';
+                if (!isMyMatch && isOpen) {
+                    joinBtn = `<button class="btn btn-sm btn-primary match-action-btn" onclick="event.stopPropagation(); joinMatchByCode('${m.matchCode}')" title="Gå med i match">
+                        <i class="bi bi-person-plus"></i>
+                    </button>`;
                 }
 
-                // Stop button for creator or admin
                 const stopBtn = canManage
-                    ? `<button class="btn btn-sm btn-outline-danger" onclick="stopMatchFromList('${m.matchCode}', '${(m.matchName || m.matchCode).replace(/'/g, "\\'")}')" title="Avsluta match">
+                    ? `<button class="btn btn-sm btn-outline-danger match-action-btn" onclick="event.stopPropagation(); stopMatchFromList('${m.matchCode}', '${(m.matchName || m.matchCode).replace(/'/g, "\\'")}')" title="Avsluta match">
                            <i class="bi bi-stop-circle"></i>
                        </button>`
                     : '';
 
                 return `
-                    <div class="col-12">
-                        <div class="card h-100 shadow-sm hover-card">
-                            <div class="card-body">
-                                <div class="d-flex justify-content-between align-items-start mb-2">
-                                    <div>
-                                        <h6 class="mb-1">${m.matchName || m.matchCode}</h6>
-                                        <span class="badge bg-info text-dark me-2">
-                                            <i class="bi bi-bullseye me-1"></i>Klass ${m.weaponClass}
-                                        </span>
-                                        ${startTimeInfo}
-                                    </div>
-                                    <div class="d-flex align-items-center gap-2">
-                                        ${!isOpen ? '<span class="badge bg-secondary"><i class="bi bi-lock-fill"></i></span>' : ''}
-                                        ${isMyMatch ? '<span class="badge bg-success">Din match</span>' : ''}
-                                        ${stopBtn}
-                                    </div>
+                    <div class="list-group-item list-group-item-action match-list-item" onclick="viewMatchAsSpectator('${m.matchCode}')">
+                        <div class="d-flex align-items-center gap-2">
+                            <!-- Weapon class indicator -->
+                            <span class="weapon-dot bg-${weaponColor}" title="Klass ${m.weaponClass}">${m.weaponClass}</span>
+
+                            <!-- Match info -->
+                            <div class="flex-grow-1 min-width-0">
+                                <div class="d-flex align-items-center gap-1">
+                                    ${lockIcon}
+                                    <span class="match-name text-truncate">${m.matchName || m.matchCode}</span>
+                                    ${myMatchDot}
                                 </div>
-                                <div class="d-flex align-items-center mb-3">
-                                    ${avatars}${moreCount}
-                                    <span class="text-muted ms-2">${m.participantCount} deltagare</span>
+                                <div class="match-meta">
+                                    <span class="d-inline-flex align-items-center">${avatars}</span>
+                                    <span class="text-body-secondary">${m.participantCount}</span>
+                                    <span class="text-body-tertiary mx-1">·</span>
+                                    <span class="text-body-tertiary">${timeStr}</span>
                                 </div>
-                                <div class="d-flex gap-2">
-                                    <button class="btn btn-sm btn-outline-primary" onclick="viewMatchAsSpectator('${m.matchCode}')">
-                                        <i class="bi bi-eye me-1"></i>Visa
-                                    </button>
-                                    ${joinOrLock}
-                                </div>
+                            </div>
+
+                            <!-- Actions -->
+                            <div class="d-flex gap-1 match-actions" onclick="event.stopPropagation();">
+                                ${viewBtn}${joinBtn}${stopBtn}
                             </div>
                         </div>
                     </div>
                 `;
-            }).join('');
+            }).join('') + '</div>';
         }
 
         // ===== Upcoming Matches Tab =====
@@ -1707,88 +1946,87 @@
             container.style.display = 'block';
             if (empty) empty.style.display = 'none';
 
-            container.innerHTML = matches.map(m => {
-                const avatars = m.participants.slice(0, 5).map((p, i) => {
+            container.innerHTML = '<div class="list-group">' + matches.map(m => {
+                // Compact avatars (max 3)
+                const avatars = m.participants.slice(0, 3).map((p, i) => {
                     if (p.profilePictureUrl) {
                         return `<img src="${p.profilePictureUrl}" alt="${p.firstName}"
-                                    class="rounded-circle border border-2 border-white"
-                                    style="width: 35px; height: 35px; margin-left: ${i > 0 ? '-10px' : '0'}; z-index: ${5-i}; object-fit: cover;"
+                                    class="match-avatar"
+                                    style="margin-left: ${i > 0 ? '-8px' : '0'}; z-index: ${3-i};"
                                     title="${p.firstName} ${p.lastName}">`;
                     } else {
                         const initials = (p.firstName?.[0] || '') + (p.lastName?.[0] || '');
-                        return `<span class="rounded-circle bg-info text-white d-inline-flex align-items-center justify-content-center border border-2 border-white"
-                                    style="width: 35px; height: 35px; margin-left: ${i > 0 ? '-10px' : '0'}; z-index: ${5-i}; font-size: 0.8rem;"
+                        return `<span class="match-avatar match-avatar-initials"
+                                    style="margin-left: ${i > 0 ? '-8px' : '0'}; z-index: ${3-i};"
                                     title="${p.firstName} ${p.lastName}">${initials}</span>`;
                     }
                 }).join('');
 
-                const moreCount = m.participantCount > 5 ? `<span class="badge bg-secondary ms-1">+${m.participantCount - 5}</span>` : '';
-
-                // Format start date nicely
-                const startDateStr = m.startDate
-                    ? new Date(m.startDate).toLocaleString('sv-SE', { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-                    : '';
-
                 const isMyMatch = m.createdByMemberId === currentMemberId;
                 const canManage = isMyMatch || isCurrentUserAdmin;
-                const isOpen = m.isOpen !== false; // Default to true if not set
+                const isOpen = m.isOpen !== false;
 
-                // Join button or lock icon based on isOpen
-                let joinOrLock = '';
-                if (!isMyMatch) {
-                    if (isOpen) {
-                        joinOrLock = `<button class="btn btn-sm btn-primary" onclick="event.stopPropagation(); joinMatchByCode('${m.matchCode}')">
-                            <i class="bi bi-person-plus me-1"></i>Gå med
-                        </button>`;
-                    } else {
-                        joinOrLock = `<span class="text-muted" title="Privat match - endast via länk eller QR-kod">
-                            <i class="bi bi-lock-fill"></i>
-                        </span>`;
-                    }
+                // Weapon class indicator
+                const weaponColors = { A: 'info', B: 'purple', C: 'success', R: 'warning', P: 'danger', M: 'dark', L: 'secondary' };
+                const weaponColor = weaponColors[m.weaponClass] || 'secondary';
+
+                // Status indicators
+                const lockIcon = !isOpen ? '<i class="bi bi-lock-fill text-secondary me-1" title="Privat match"></i>' : '';
+                const myMatchDot = isMyMatch ? '<span class="badge bg-success-subtle text-success-emphasis badge-sm">Din</span>' : '';
+
+                // Format start date (compact with date)
+                const startDate = m.startDate ? new Date(m.startDate) : null;
+                const dateStr = startDate ? startDate.toLocaleString('sv-SE', { month: 'short', day: 'numeric' }) : '';
+                const timeStr = startDate ? startDate.toLocaleString('sv-SE', { hour: '2-digit', minute: '2-digit' }) : '';
+
+                // Action buttons
+                const viewBtn = `<button class="btn btn-sm btn-outline-secondary match-action-btn" onclick="event.stopPropagation(); viewMatchAsSpectator('${m.matchCode}')" title="Visa match">
+                    <i class="bi bi-eye"></i>
+                </button>`;
+
+                let joinBtn = '';
+                if (!isMyMatch && isOpen) {
+                    joinBtn = `<button class="btn btn-sm btn-primary match-action-btn" onclick="event.stopPropagation(); joinMatchByCode('${m.matchCode}')" title="Gå med i match">
+                        <i class="bi bi-person-plus"></i>
+                    </button>`;
                 }
 
-                // Delete button for creator or admin
                 const deleteBtn = canManage
-                    ? `<button class="btn btn-sm btn-outline-danger" onclick="deleteMatchFromList('${m.matchCode}', '${(m.matchName || m.matchCode).replace(/'/g, "\\'")}')" title="Radera match">
+                    ? `<button class="btn btn-sm btn-outline-danger match-action-btn" onclick="event.stopPropagation(); deleteMatchFromList('${m.matchCode}', '${(m.matchName || m.matchCode).replace(/'/g, "\\'")}')" title="Radera match">
                            <i class="bi bi-trash"></i>
                        </button>`
                     : '';
 
                 return `
-                    <div class="col-12">
-                        <div class="card h-100 shadow-sm upcoming-match-card">
-                            <div class="card-body">
-                                <div class="d-flex justify-content-between align-items-start mb-2">
-                                    <div>
-                                        <h6 class="mb-1">${m.matchName || m.matchCode}</h6>
-                                        <span class="badge bg-info text-dark me-2">
-                                            <i class="bi bi-bullseye me-1"></i>Klass ${m.weaponClass}
-                                        </span>
-                                        <span class="scheduled-time">
-                                            <i class="bi bi-calendar-event me-1"></i>${startDateStr}
-                                        </span>
-                                    </div>
-                                    <div class="d-flex align-items-center gap-2">
-                                        ${!isOpen ? '<span class="badge bg-secondary"><i class="bi bi-lock-fill"></i></span>' : ''}
-                                        ${isMyMatch ? '<span class="badge bg-success">Din match</span>' : ''}
-                                        ${deleteBtn}
-                                    </div>
+                    <div class="list-group-item list-group-item-action match-list-item" onclick="viewMatchAsSpectator('${m.matchCode}')">
+                        <div class="d-flex align-items-center gap-2">
+                            <!-- Weapon class indicator -->
+                            <span class="weapon-dot bg-${weaponColor}" title="Klass ${m.weaponClass}">${m.weaponClass}</span>
+
+                            <!-- Match info -->
+                            <div class="flex-grow-1 min-width-0">
+                                <div class="d-flex align-items-center gap-1">
+                                    ${lockIcon}
+                                    <span class="match-name text-truncate">${m.matchName || m.matchCode}</span>
+                                    ${myMatchDot}
                                 </div>
-                                <div class="d-flex align-items-center mb-3">
-                                    ${avatars}${moreCount}
-                                    <span class="text-muted ms-2">${m.participantCount} deltagare</span>
+                                <div class="match-meta">
+                                    <span class="d-inline-flex align-items-center">${avatars}</span>
+                                    <span class="text-body-secondary">${m.participantCount}</span>
+                                    <span class="text-body-tertiary mx-1">·</span>
+                                    <i class="bi bi-calendar-event text-warning-emphasis"></i>
+                                    <span class="text-warning-emphasis">${dateStr} ${timeStr}</span>
                                 </div>
-                                <div class="d-flex gap-2">
-                                    <button class="btn btn-sm btn-outline-primary" onclick="viewMatchAsSpectator('${m.matchCode}')">
-                                        <i class="bi bi-eye me-1"></i>Visa
-                                    </button>
-                                    ${joinOrLock}
-                                </div>
+                            </div>
+
+                            <!-- Actions -->
+                            <div class="d-flex gap-1 match-actions" onclick="event.stopPropagation();">
+                                ${viewBtn}${joinBtn}${deleteBtn}
                             </div>
                         </div>
                     </div>
                 `;
-            }).join('');
+            }).join('') + '</div>';
         }
 
         // ===== Auto-close Stale Matches =====
@@ -1868,12 +2106,8 @@
                         // Only set as spectator if NOT a participant
                         isSpectator = !isParticipant && result.isSpectator;
 
-                        // Switch to current tab
-                        const currentTab = document.getElementById('current-tab');
-                        const bsTab = new bootstrap.Tab(currentTab);
-                        bsTab.show();
-
-                        showActiveMatchState();
+                        // Show scoreboard view
+                        showScoreboardView();
                         renderScoreboard(result.match);
 
                         // Join SignalR group for real-time updates
@@ -2596,6 +2830,50 @@
 </div>
 
 <style>
+    /* Action buttons touch targets */
+    .btn-action {
+        min-height: 44px;
+        min-width: 44px;
+    }
+
+    /* Hide elements when viewing scoreboard */
+    .scoreboard-hidden {
+        display: none !important;
+    }
+
+    /* Help card collapse icon animation */
+    .help-collapse-icon {
+        transition: transform 0.2s ease;
+    }
+    [aria-expanded="true"] .help-collapse-icon {
+        transform: rotate(180deg);
+    }
+
+    /* Active match card pulse animation */
+    #activeMatchCardMobile .bi-circle-fill,
+    #activeMatchCardDesktop .bi-circle-fill {
+        animation: pulse 2s ease-in-out infinite;
+    }
+    @@keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+    }
+
+    /* Sidebar column responsive ordering */
+    @@media (max-width: 991.98px) {
+        #sidebarColumn {
+            order: 1;
+        }
+        #sidebarColumn .card {
+            margin-bottom: 1rem;
+        }
+        /* On mobile, action buttons should be more prominent */
+        #actionsCard .btn-action {
+            padding: 0.75rem 1rem;
+            font-size: 1rem;
+        }
+    }
+
     /* Shooter class selection styling */
     .shooter-class-option {
         border: 1px solid var(--bs-border-color);
@@ -2611,7 +2889,7 @@
         }
 
         .shooter-class-option:has(input:checked) {
-            background-color: rgba(25, 135, 84, 0.1);
+            background-color: color-mix(in srgb, var(--bs-success) 15%, transparent);
             border-color: var(--bs-success);
         }
 

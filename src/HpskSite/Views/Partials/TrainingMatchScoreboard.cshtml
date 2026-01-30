@@ -38,20 +38,26 @@
 <!-- Match Header -->
 <div class="card mb-3">
     <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center flex-wrap gap-2">
-        <div>
-            <h5 class="mb-0" id="matchTitle">
-                <i class="bi bi-people-fill me-2"></i><span id="matchNameDisplay">Match</span>
-            </h5>
-            <small>
-                <span id="matchWeaponClass">Klass C</span> |
-                Kod: <strong id="matchCodeDisplay">------</strong>
-                <span id="handicapBadge" class="badge bg-warning text-dark ms-2" style="display: none;" title="Handicapsystem aktiverat">
-                    <i class="bi bi-balance-scale me-1"></i>HCP
-                </span>
-                <span id="teamMatchBadge" class="badge bg-info text-white ms-2" style="display: none;" title="Lagmatch">
-                    <i class="bi bi-people me-1"></i>LAG
-                </span>
-            </small>
+        <div class="d-flex align-items-center gap-2">
+            <!-- Back button to return to main view -->
+            <button type="button" class="btn btn-light btn-sm" id="backToMainBtn" onclick="backToMainView()" title="Tillbaka till matchlistan">
+                <i class="bi bi-arrow-left"></i>
+            </button>
+            <div>
+                <h5 class="mb-0" id="matchTitle">
+                    <i class="bi bi-people-fill me-2"></i><span id="matchNameDisplay">Match</span>
+                </h5>
+                <small>
+                    <span id="matchWeaponClass">Klass C</span> |
+                    Kod: <strong id="matchCodeDisplay">------</strong>
+                    <span id="handicapBadge" class="badge bg-warning text-dark ms-2" style="display: none;" title="Handicapsystem aktiverat">
+                        <i class="bi bi-balance-scale me-1"></i>HCP
+                    </span>
+                    <span id="teamMatchBadge" class="badge bg-info text-white ms-2" style="display: none;" title="Lagmatch">
+                        <i class="bi bi-people me-1"></i>LAG
+                    </span>
+                </small>
+            </div>
         </div>
         <div class="d-flex align-items-center gap-2">
             <!-- Spectators Display -->

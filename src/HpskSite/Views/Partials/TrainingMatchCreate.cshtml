@@ -1,33 +1,25 @@
 @*
-    Training Match Create Partial
-    Form for creating a new training match
+    Training Match Create Modal
+    Modal for creating a new training match
 *@
 @using HpskSite.Shared.Constants
-
-<style>
-/* Subtle placeholder text */
-#createMatchForm input::placeholder {
-    color: var(--bs-secondary-color);
-    opacity: 0.5;
-}
-#createMatchForm .form-text {
-    opacity: 0.7;
-    font-size: 0.8rem;
-}
-</style>
 
 <!-- Flatpickr Date/Time Picker -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
 <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
 
-<div class="row justify-content-center mb-4">
-    <div class="col-md-6">
-        <div class="card border-success">
-            <div class="card-header bg-success text-white">
-                <h5 class="mb-0"><i class="bi bi-plus-circle me-2"></i>Skapa ny match</h5>
+<!-- Create Match Modal -->
+<div class="modal fade" id="createMatchModal" tabindex="-1" aria-labelledby="createMatchModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title" id="createMatchModalLabel">
+                    <i class="bi bi-flag me-2"></i>Skapa ny match
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Stäng"></button>
             </div>
-            <div class="card-body">
+            <div class="modal-body">
                 <form id="createMatchForm" onsubmit="handleCreateMatch(event)">
                     <div class="mb-3">
                         <label for="createMatchName" class="form-label">Matchnamn (valfritt)</label>
@@ -83,7 +75,6 @@
                             </button>
                             <div class="form-text">
                                 Använd handicapsystem för rättvis tävling mellan olika skyttenivåer.
-                                Handicap beräknas per skytt och läggs till poängen.
                             </div>
                         </div>
                     </div>
@@ -136,11 +127,13 @@
                             </div>
                         </div>
                     </div>
-
-                    <button type="submit" class="btn btn-success w-100">
-                        <i class="bi bi-play-fill me-1"></i> Starta match
-                    </button>
                 </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="submit" form="createMatchForm" class="btn btn-success">
+                    <i class="bi bi-play-fill me-1"></i>Starta match
+                </button>
             </div>
         </div>
     </div>
@@ -148,7 +141,7 @@
 
 <!-- Handicap Info Modal -->
 <div class="modal fade" id="handicapInfoModal" tabindex="-1" aria-labelledby="handicapInfoModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title" id="handicapInfoModalLabel">
@@ -215,34 +208,74 @@
     </div>
 </div>
 
+<style>
+/* Subtle placeholder text */
+#createMatchForm input::placeholder {
+    color: var(--bs-secondary-color);
+    opacity: 0.5;
+}
+#createMatchForm .form-text {
+    opacity: 0.7;
+    font-size: 0.8rem;
+}
+</style>
+
 <script>
 // Store loaded clubs for team affiliation (check if already declared by another partial)
 if (typeof availableClubs === 'undefined') {
     var availableClubs = [];
 }
+var createMatchModalInstance = null;
 
-// Initialize Flatpickr for start date
-document.addEventListener('DOMContentLoaded', async function() {
-    flatpickr('#createStartDate', {
-        locale: 'sv',
-        enableTime: true,
-        time_24hr: true,
-        dateFormat: 'Y-m-d H:i',
-        minDate: 'today',
-        defaultHour: new Date().getHours() + 1,
-        defaultMinute: 0,
-        placeholder: 'Välj datum och tid...'
-    });
+// Initialize Flatpickr and load clubs when modal is shown
+document.addEventListener('DOMContentLoaded', function() {
+    const createMatchModal = document.getElementById('createMatchModal');
+    if (createMatchModal) {
+        createMatchModal.addEventListener('shown.bs.modal', async function() {
+            // Initialize Flatpickr for start date
+            if (!document.getElementById('createStartDate')._flatpickr) {
+                flatpickr('#createStartDate', {
+                    locale: 'sv',
+                    enableTime: true,
+                    time_24hr: true,
+                    dateFormat: 'Y-m-d H:i',
+                    minDate: 'today',
+                    defaultHour: new Date().getHours() + 1,
+                    defaultMinute: 0,
+                    placeholder: 'Välj datum och tid...'
+                });
+            }
 
-    // Load clubs for team affiliation
-    await loadClubs();
+            // Load clubs for team affiliation
+            if (availableClubs.length === 0) {
+                await loadClubs();
+            }
 
-    // Initialize team inputs
-    updateTeamInputs();
+            // Initialize team inputs
+            updateTeamInputs();
+        });
+    }
 
     // Listen for isOpen changes to toggle team settings
-    document.getElementById('createIsOpen').addEventListener('change', updateTeamVisibility);
+    const isOpenCheckbox = document.getElementById('createIsOpen');
+    if (isOpenCheckbox) {
+        isOpenCheckbox.addEventListener('change', updateTeamVisibility);
+    }
 });
+
+// Open create match modal
+function openCreateMatchModal() {
+    if (!createMatchModalInstance) {
+        createMatchModalInstance = new bootstrap.Modal(document.getElementById('createMatchModal'));
+    }
+    // Reset form
+    document.getElementById('createMatchForm').reset();
+    document.getElementById('createIsOpen').checked = true;
+    document.getElementById('createHasHandicap').checked = true;
+    document.getElementById('createIsTeamMatch').checked = false;
+    document.getElementById('teamSettings').style.display = 'none';
+    createMatchModalInstance.show();
+}
 
 async function loadClubs() {
     try {
@@ -373,6 +406,11 @@ function handleCreateMatch(e) {
                 return;
             }
         }
+    }
+
+    // Close modal before creating match
+    if (createMatchModalInstance) {
+        createMatchModalInstance.hide();
     }
 
     createMatch(matchName || null, weaponClass, startDate, isOpen, hasHandicap, isTeamMatch, maxShootersPerTeam, teams);

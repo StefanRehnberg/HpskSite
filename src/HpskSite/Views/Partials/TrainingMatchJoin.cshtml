@@ -1,15 +1,19 @@
 @*
-    Training Match Join Partial
-    Form for joining an existing training match
+    Training Match Join Modal
+    Modal for joining an existing training match
 *@
 
-<div class="row justify-content-center">
-    <div class="col-md-6">
-        <div class="card border-primary">
-            <div class="card-header bg-primary text-white">
-                <h5 class="mb-0"><i class="bi bi-box-arrow-in-right me-2"></i>Gå med i match</h5>
+<!-- Join Match Modal -->
+<div class="modal fade" id="joinMatchModal" tabindex="-1" aria-labelledby="joinMatchModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title" id="joinMatchModalLabel">
+                    <i class="bi bi-box-arrow-in-right me-2"></i>Gå med i match
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Stäng"></button>
             </div>
-            <div class="card-body">
+            <div class="modal-body">
                 <p class="text-muted mb-3">Ange matchkoden som du fått från den som skapade matchen.</p>
 
                 <form id="joinMatchForm" onsubmit="handleJoinMatch(event)">
@@ -34,6 +38,17 @@
                         </div>
                     </div>
                 </form>
+
+                <!-- Divider -->
+                <hr class="my-4">
+
+                <!-- Quick access to open matches -->
+                <div class="text-center">
+                    <p class="text-muted small mb-2">Eller välj från pågående öppna matcher</p>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal" onclick="switchToOngoingTab()">
+                        <i class="bi bi-list-ul me-1"></i>Visa pågående matcher
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -117,9 +132,31 @@
 <script>
 var qrScannerModal = null;
 var html5QrCode = null;
+var joinMatchModalInstance = null;
 // Use existing availableClubs if already declared by another partial
 if (typeof availableClubs === 'undefined') {
     var availableClubs = [];
+}
+
+// Open join match modal
+function openJoinMatchModal() {
+    if (!joinMatchModalInstance) {
+        joinMatchModalInstance = new bootstrap.Modal(document.getElementById('joinMatchModal'));
+    }
+    // Reset form
+    document.getElementById('joinMatchCode').value = '';
+    document.getElementById('joinMatchBtn').disabled = true;
+    joinMatchModalInstance.show();
+}
+
+// Switch to ongoing tab after closing modal
+function switchToOngoingTab() {
+    const ongoingTab = document.getElementById('ongoing-tab');
+    if (ongoingTab) {
+        const bsTab = new bootstrap.Tab(ongoingTab);
+        bsTab.show();
+        loadOngoingMatchesIfNeeded();
+    }
 }
 
 // Load clubs for team creation
@@ -172,10 +209,20 @@ function handleJoinMatch(e) {
         return;
     }
 
+    // Close modal before joining
+    if (joinMatchModalInstance) {
+        joinMatchModalInstance.hide();
+    }
+
     joinMatchByCode(matchCode);
 }
 
 function openQrScanner() {
+    // Close the join modal first
+    if (joinMatchModalInstance) {
+        joinMatchModalInstance.hide();
+    }
+
     if (!qrScannerModal) {
         qrScannerModal = new bootstrap.Modal(document.getElementById('qrScannerModal'));
 
