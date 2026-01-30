@@ -88,6 +88,20 @@
     ViewBag.bannerImage = bannerImage;
     ViewBag.isClubMember = isClubMember;
     ViewBag.isClubAdmin = isClubAdmin;
+
+    // OpenGraph meta tags - use logo for social sharing preview
+    // Fallback chain: club logo → region logo → site default
+    var regionPage = Model?.Parent?.Parent; // club → clubsPage → regionalPage
+    if (regionPage?.ContentType.Alias != "regionalPage")
+    {
+        regionPage = null;
+    }
+    var regionLogo = regionPage?.Value<IPublishedContent>("logo");
+    var siteDefaultLogo = "/images/HPSK_Logo.png";
+
+    ViewBag.OgTitle = clubName;
+    ViewBag.OgDescription = !string.IsNullOrEmpty(description) ? description : $"Välkommen till {clubName}";
+    ViewBag.OgImage = logo?.Url() ?? regionLogo?.Url() ?? siteDefaultLogo;
 }
 
 <!-- JavaScript global variables - MUST come before partials that use them -->

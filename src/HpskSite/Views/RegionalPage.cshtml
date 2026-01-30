@@ -46,6 +46,14 @@
     }
 
     ViewBag.Title = regionName;
+
+    // OpenGraph meta tags - use logo for social sharing preview
+    // Fallback chain: region logo → site default
+    var siteDefaultLogo = "/images/HPSK_Logo.png";
+
+    ViewBag.OgTitle = regionName;
+    ViewBag.OgDescription = !string.IsNullOrEmpty(welcomeText) ? welcomeText : $"Välkommen till {regionName}";
+    ViewBag.OgImage = logo?.Url() ?? siteDefaultLogo;
 }
 
 <!-- Hero Banner Section -->

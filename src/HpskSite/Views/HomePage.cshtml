@@ -59,6 +59,14 @@
     }
 
     ViewBag.Title = welcomeTitle;
+
+    // OpenGraph meta tags - use logo for social sharing preview
+    // Fallback: home logo → site default
+    var siteDefaultLogo = "/images/HPSK_Logo.png";
+
+    ViewBag.OgTitle = welcomeTitle;
+    ViewBag.OgDescription = !string.IsNullOrEmpty(welcomeText) ? welcomeText : "Svenska Pistolskyttekretsar - Hitta din krets och upptäck skytteföreningar i din region.";
+    ViewBag.OgImage = logo?.Url() ?? siteDefaultLogo;
 }
 
 <!-- Hero Banner Section -->

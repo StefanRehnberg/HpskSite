@@ -47,8 +47,19 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>@(Model.Value<string>("pageTitle") ?? Model.Name) - Pistol.nu</title>
-    <meta name="description" content="@(Model.Value<string>("metaDescription") ?? "")" />
+    <title>@(ViewBag.Title ?? Model.Value<string>("pageTitle") ?? Model.Name) - Pistol.nu</title>
+    <meta name="description" content="@(ViewBag.MetaDescription ?? Model.Value<string>("metaDescription") ?? "")" />
+
+    <!-- OpenGraph Meta Tags for Social Sharing -->
+    <meta property="og:title" content="@(ViewBag.OgTitle ?? ViewBag.Title ?? Model.Name) - Pistol.nu" />
+    <meta property="og:description" content="@(ViewBag.OgDescription ?? ViewBag.MetaDescription ?? Model.Value<string>("metaDescription") ?? "")" />
+    @if (ViewBag.OgImage != null)
+    {
+        <meta property="og:image" content="@ViewBag.OgImage" />
+    }
+    <meta property="og:type" content="@(ViewBag.OgType ?? "website")" />
+    <meta property="og:url" content="@Context.Request.Scheme://@Context.Request.Host@Model.Url()" />
+    <meta name="twitter:card" content="summary_large_image" />
 
     <!-- Favicon -->
     <link rel="icon" type="image/png" href="~/images/HPSK_Logo.png">
