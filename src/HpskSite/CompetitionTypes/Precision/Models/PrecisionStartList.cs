@@ -66,8 +66,16 @@ namespace HpskSite.CompetitionTypes.Precision.Models
         // Get team count from configuration
         public int TeamCount => Configuration?.Teams?.Count ?? 0;
 
-        // Get total shooters from configuration
+        // Get total starts from configuration (a shooter may appear in multiple teams for multiple classes)
         public int TotalShooters => Configuration?.Teams?.Sum(t => t.Shooters?.Count ?? 0) ?? 0;
+
+        // Get unique shooter count (distinct members)
+        public int UniqueShooters => Configuration?.Teams?
+            .SelectMany(t => t.Shooters ?? Enumerable.Empty<StartListShooter>())
+            .Select(s => s.MemberId)
+            .Where(id => id > 0)
+            .Distinct()
+            .Count() ?? 0;
 
         // Display helpers
         public string GetTeamFormatDisplay()

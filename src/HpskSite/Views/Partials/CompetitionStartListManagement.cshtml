@@ -11,13 +11,13 @@
 
 <!-- Start List Editor Mobile Responsive Styles -->
 <style>
-    /* Team card styles */
+    /* Team card styles - dark mode compatible */
     .team-card .card-header {
-        background-color: #f8f9fa;
+        background-color: var(--bs-tertiary-bg);
     }
 
     .shooter-row:hover {
-        background-color: #f8f9fa;
+        background-color: var(--bs-tertiary-bg);
     }
 
     .shooter-row:last-child {
@@ -26,6 +26,18 @@
 
     .min-width-0 {
         min-width: 0;
+    }
+
+    /* Dark mode compatible toolbar */
+    #editorToolbar {
+        background-color: var(--bs-tertiary-bg) !important;
+    }
+
+    /* Time badge - dark mode compatible */
+    .team-time-badge {
+        background-color: var(--bs-tertiary-bg) !important;
+        color: var(--bs-body-color) !important;
+        border: 1px solid var(--bs-border-color) !important;
     }
 
     /* Mobile optimizations */
@@ -177,9 +189,10 @@
                     <button class="btn btn-outline-warning btn-sm" id="btnUnpublishStartList" onclick="unpublishStartList()" style="display: none;">
                         <i class="bi bi-arrow-counterclockwise me-1"></i>Avpublicera
                     </button>
-                    <!-- Shooter Count -->
+                    <!-- Shooter and Start Counts -->
                     <span class="text-muted">
                         <small><i class="bi bi-people me-1"></i><span id="startListShooterCount">0</span> skyttar</small>
+                        <small class="ms-2"><i class="bi bi-flag me-1"></i><span id="startListStartCount">0</span> starter</small>
                     </span>
                 </div>
             </div>
@@ -214,7 +227,7 @@
             </div>
 
             <!-- Start List Display (iframe) -->
-            <iframe id="startListIframe" src="" style="width: 100%; height: 800px; border: 1px solid #dee2e6; border-radius: 0.375rem; display: none;"></iframe>
+            <iframe id="startListIframe" src="" class="border rounded" style="width: 100%; height: 800px; display: none;"></iframe>
         </div>
     </div>
 
@@ -306,8 +319,18 @@
                         <option value="En vapengrupp per Skjutlag">En vapengrupp per skjutlag</option>
                     </select>
                 </div>
+                <!-- Weapon Class Order (shown only for "En vapengrupp per Skjutlag") -->
+                <div class="mb-3" id="classOrderGroup" style="display: none;">
+                    <label for="classStartOrder" class="form-label">Vapengruppernas startordning</label>
+                    <select class="form-select" id="classStartOrder">
+                        <option value="">Laddar vapengrupper...</option>
+                    </select>
+                    <div class="form-text">
+                        Välj i vilken ordning vapengrupperna ska starta.
+                    </div>
+                </div>
                 <div class="mb-3">
-                    <label for="maxShootersPerTeam" class="form-label">Antal skyttar per lag:</label>
+                    <label for="maxShootersPerTeam" class="form-label">Max antal skyttar per skjutlag:</label>
                     <input type="number" class="form-control" id="maxShootersPerTeam" value="30" min="1" max="50">
                 </div>
                 <div class="mb-3">
@@ -537,12 +560,12 @@
         <div class="modal-content">
             <div class="modal-header bg-primary text-white">
                 <h5 class="modal-title" id="createTeamModalLabel">
-                    <i class="bi bi-plus-circle me-2"></i>Skapa Nytt Lag
+                    <i class="bi bi-plus-circle me-2"></i>Skapa Nytt Skjutlag
                 </h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-                <p class="text-muted">Skapa ett tomt lag med manuellt angivna tider. Du kan sedan lägga till skyttar.</p>
+                <p class="text-muted">Skapa ett tomt skjutlag med manuellt angivna tider. Du kan sedan lägga till skyttar.</p>
 
                 <div class="mb-3">
                     <label for="newTeamStartTime" class="form-label">Starttid:</label>
@@ -618,8 +641,82 @@ function openGenerateStartListModal() {
         defaultMinute: 0
     });
 
+    // Add event listener for team format change
+    const teamFormatSelect = document.getElementById('teamFormat');
+    teamFormatSelect.removeEventListener('change', handleTeamFormatChange); // Prevent duplicate listeners
+    teamFormatSelect.addEventListener('change', handleTeamFormatChange);
+
+    // Check initial state
+    handleTeamFormatChange();
+
     var modal = new bootstrap.Modal(document.getElementById('generateStartListModal'));
     modal.show();
+}
+
+// Handle team format change to show/hide class order dropdown
+function handleTeamFormatChange() {
+    const teamFormat = document.getElementById('teamFormat').value;
+    const classOrderGroup = document.getElementById('classOrderGroup');
+
+    if (teamFormat === 'En vapengrupp per Skjutlag') {
+        classOrderGroup.style.display = 'block';
+        loadWeaponClassOptions();
+    } else {
+        classOrderGroup.style.display = 'none';
+    }
+}
+
+// Generate all permutations of an array
+function getPermutations(arr) {
+    if (arr.length <= 1) return [arr];
+    const result = [];
+    for (let i = 0; i < arr.length; i++) {
+        const rest = [...arr.slice(0, i), ...arr.slice(i + 1)];
+        const restPerms = getPermutations(rest);
+        for (const perm of restPerms) {
+            result.push([arr[i], ...perm]);
+        }
+    }
+    return result;
+}
+
+// Load weapon class options and populate dropdown with permutations
+function loadWeaponClassOptions() {
+    const competitionId = $('.competition-startlist-management').data('competition-id');
+    const select = document.getElementById('classStartOrder');
+
+    // Show loading state
+    select.innerHTML = '<option value="">Laddar vapengrupper...</option>';
+    select.disabled = true;
+
+    fetch(`/umbraco/surface/PrecisionStartList/GetRegisteredWeaponClasses?competitionId=${competitionId}`)
+        .then(response => response.json())
+        .then(data => {
+            const success = data.success || data.Success;
+            const classes = data.classes || data.Classes;
+
+            if (success && classes && classes.length > 0) {
+                const permutations = getPermutations(classes);
+
+                select.innerHTML = '';
+
+                permutations.forEach((perm, index) => {
+                    const option = document.createElement('option');
+                    option.value = perm.join(',');
+                    option.textContent = perm.join(', ');
+                    if (index === 0) option.selected = true;
+                    select.appendChild(option);
+                });
+
+                select.disabled = false;
+            } else {
+                select.innerHTML = '<option value="">Inga vapengrupper hittades</option>';
+            }
+        })
+        .catch(error => {
+            console.error('Error loading weapon classes:', error);
+            select.innerHTML = '<option value="">Fel vid laddning</option>';
+        });
 }
 
 function generateNewStartList() {
@@ -653,12 +750,19 @@ function generateNewStartList() {
         return;
     }
 
+    // Get class start order if applicable
+    const classStartOrderSelect = document.getElementById('classStartOrder');
+    const classStartOrder = (document.getElementById('teamFormat').value === 'En vapengrupp per Skjutlag' && classStartOrderSelect.value)
+        ? classStartOrderSelect.value
+        : '';
+
     const settings = {
         competitionId: parseInt(competitionId),
         teamFormat: document.getElementById('teamFormat').value,
         maxShootersPerTeam: parseInt(document.getElementById('maxShootersPerTeam').value),
         firstStartTime: document.getElementById('firstStartTime').value,
         startInterval: parseInt(document.getElementById('startInterval').value),
+        classStartOrder: classStartOrder,
         notes: 'Genererad via Competition Management'
     };
 
@@ -674,11 +778,16 @@ function generateNewStartList() {
     }
 
     // Show confirmation
-    const confirmMessage = `Generera startlista med följande inställningar?\n\n` +
+    let confirmMessage = `Generera startlista med följande inställningar?\n\n` +
         `• Format: ${settings.teamFormat}\n` +
         `• Antal skyttar per lag: ${settings.maxShootersPerTeam}\n` +
         `• Första starttid: ${settings.firstStartTime}\n` +
         `• Startintervall: ${settings.startInterval} minuter`;
+
+    // Add class order to confirmation if applicable
+    if (settings.classStartOrder) {
+        confirmMessage += `\n• Vapengruppernas ordning: ${settings.classStartOrder.replace(/,/g, ', ')}`;
+    }
 
     if (!confirm(confirmMessage)) {
         return;
@@ -697,6 +806,7 @@ function generateNewStartList() {
     formData.append('MaxShootersPerTeam', settings.maxShootersPerTeam);
     formData.append('FirstStartTime', settings.firstStartTime);
     formData.append('StartInterval', settings.startInterval);
+    formData.append('ClassStartOrder', settings.classStartOrder);
     formData.append('Notes', settings.notes);
 
     // Add anti-forgery token
@@ -773,48 +883,67 @@ function generateNewStartList() {
 }
 
 function loadStartLists() {
-    const competitionId = $('.competition-startlist-management').data('competition-id');
-    if (!competitionId) {
-        showStartListsError('Inget tävlings-ID hittades.');
-        return;
+    try {
+        console.log('loadStartLists() called');
+
+        const competitionId = $('.competition-startlist-management').data('competition-id');
+        console.log('Competition ID:', competitionId);
+
+        if (!competitionId) {
+            showStartListsError('Inget tävlings-ID hittades.');
+            return;
+        }
+
+        // Show loading state (with null checks)
+        const loadingEl = document.getElementById('startListsLoading');
+        const errorEl = document.getElementById('startListsError');
+        const officialEl = document.getElementById('officialStartListSection');
+        const noListEl = document.getElementById('noStartListYet');
+
+        if (loadingEl) loadingEl.style.display = 'block';
+        if (errorEl) errorEl.classList.add('d-none');
+        if (officialEl) officialEl.style.display = 'none';
+        if (noListEl) noListEl.style.display = 'none';
+
+        // Fetch THE ONE start list for this competition
+        console.log('Fetching start list for competition:', competitionId);
+        fetch(`/umbraco/surface/PrecisionStartList/GetOfficialStartList?competitionId=${competitionId}`)
+            .then(response => {
+                console.log('GetOfficialStartList response status:', response.status);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                console.log('GetOfficialStartList response data:', data);
+                if (loadingEl) loadingEl.style.display = 'none';
+
+                const success = data.success || data.Success;
+                const startList = data.startList || data.StartList;
+
+                if (success && startList) {
+                    console.log('Displaying THE ONE start list');
+                    displayOfficialStartList(startList);
+                } else {
+                    console.log('No start list found');
+                    // Reset UI to default state (no list exists)
+                    hasPublishedStartList = false;
+                    updatePublishedStartListUI(false);
+                    if (noListEl) noListEl.style.display = 'block';
+                }
+            })
+            .catch(error => {
+                console.error('Error loading start list:', error);
+                if (loadingEl) loadingEl.style.display = 'none';
+                showStartListsError('Ett fel uppstod när startlistan skulle laddas: ' + error.message);
+            });
+    } catch (e) {
+        console.error('Synchronous error in loadStartLists:', e);
+        const loadingEl = document.getElementById('startListsLoading');
+        if (loadingEl) loadingEl.style.display = 'none';
+        showStartListsError('Ett oväntat fel uppstod: ' + e.message);
     }
-
-    // Show loading state
-    document.getElementById('startListsLoading').style.display = 'block';
-    document.getElementById('startListsError').classList.add('d-none');
-    document.getElementById('officialStartListSection').style.display = 'none';
-    document.getElementById('noStartListYet').style.display = 'none';
-
-    // Fetch THE ONE start list for this competition
-    console.log('Loading start list for competition:', competitionId);
-    fetch(`/umbraco/surface/PrecisionStartList/GetOfficialStartList?competitionId=${competitionId}`)
-        .then(response => {
-            console.log('GetOfficialStartList response status:', response.status);
-            return response.json();
-        })
-        .then(data => {
-            console.log('GetOfficialStartList response data:', data);
-            document.getElementById('startListsLoading').style.display = 'none';
-
-            const success = data.success || data.Success;
-            const startList = data.startList || data.StartList;
-
-            if (success && startList) {
-                console.log('Displaying THE ONE start list');
-                displayOfficialStartList(startList);
-            } else {
-                console.log('No start list found');
-                // Reset UI to default state (no list exists)
-                hasPublishedStartList = false;
-                updatePublishedStartListUI(false);
-                document.getElementById('noStartListYet').style.display = 'block';
-            }
-        })
-        .catch(error => {
-            console.error('Error loading start list:', error);
-            document.getElementById('startListsLoading').style.display = 'none';
-            showStartListsError('Ett fel uppstod när startlistan skulle laddas.');
-        });
 }
 
 function showStartListsError(message) {
@@ -833,7 +962,8 @@ function displayOfficialStartList(startList) {
     const id = startList.Id || startList.id || 0;
     const teamFormat = startList.TeamFormatDisplay || startList.teamFormatDisplay || 'N/A';
     const teamCount = startList.TeamCount || startList.teamCount || 0;
-    const totalShooters = startList.TotalShooters || startList.totalShooters || 0;
+    const totalStarts = startList.TotalShooters || startList.totalShooters || 0;
+    const uniqueShooters = startList.UniqueShooters || startList.uniqueShooters || 0;
     const generatedDate = startList.GeneratedDate || startList.generatedDate;
 
     // Store globally for use in other functions
@@ -842,7 +972,8 @@ function displayOfficialStartList(startList) {
     window.hasPublishedStartList = isOfficial;
 
     // Update UI elements
-    document.getElementById('startListShooterCount').textContent = totalShooters;
+    document.getElementById('startListShooterCount').textContent = uniqueShooters;
+    document.getElementById('startListStartCount').textContent = totalStarts;
     document.getElementById('startListFormat').textContent = teamFormat;
     document.getElementById('startListTeamCount').textContent = teamCount;
     document.getElementById('startListGeneratedDate').textContent = formatDate(generatedDate);
@@ -1260,15 +1391,27 @@ function generateFinalsStartList() {
 let currentStartListConfig = null;
 let editorModal = null;
 
+// Track if changes were made in the editor
+let editorHasChanges = false;
+
 // Open the start list editor modal
 function openStartListEditor(startListId) {
     console.log('Opening editor for start list:', startListId);
     window.currentStartListId = startListId;
+    editorHasChanges = false;  // Reset change tracking
 
     // Get or create modal instance
     const modalElement = document.getElementById('startListEditorModal');
     if (!editorModal) {
         editorModal = new bootstrap.Modal(modalElement);
+
+        // Add event listener to refresh start list display when modal is closed
+        modalElement.addEventListener('hidden.bs.modal', function () {
+            if (editorHasChanges) {
+                console.log('Editor closed with changes - refreshing start list display');
+                refreshStartListDisplay();
+            }
+        });
     }
 
     // Reset modal state
@@ -1283,9 +1426,25 @@ function openStartListEditor(startListId) {
     loadStartListForEditing(startListId);
 }
 
+// Refresh the start list iframe display
+function refreshStartListDisplay() {
+    const iframe = document.getElementById('startListIframe');
+    if (iframe && iframe.src) {
+        // Add cache-busting parameter to force reload
+        const url = new URL(iframe.src, window.location.origin);
+        url.searchParams.set('_refresh', new Date().getTime());
+        iframe.src = url.toString();
+        console.log('Refreshed iframe with URL:', iframe.src);
+    }
+}
+
 // Load start list data from API
 function loadStartListForEditing(startListId) {
-    fetch(`/umbraco/surface/PrecisionStartList/GetStartListForEditing?startListId=${startListId}`)
+    // Add cache-busting parameter to ensure fresh data after edits
+    const cacheBuster = new Date().getTime();
+    fetch(`/umbraco/surface/PrecisionStartList/GetStartListForEditing?startListId=${startListId}&_=${cacheBuster}`, {
+        cache: 'no-store'  // Prevent browser caching
+    })
         .then(response => response.json())
         .then(data => {
             if (data.success) {
@@ -1373,7 +1532,7 @@ function createTeamCard(team, index, isOfficial) {
                                         <i class="bi bi-three-dots-vertical"></i>
                                     </button>
                                     <ul class="dropdown-menu dropdown-menu-end">
-                                        <li><a class="dropdown-item" href="#" onclick="openEditWeaponClassModal(${shooter.memberId}, '${shooter.name.replace(/'/g, "\\'")}', '${shooter.weaponClass}'); return false;">
+                                        <li><a class="dropdown-item" href="#" onclick="openEditWeaponClassModal(${shooter.memberId}, '${shooter.name.replace(/'/g, "\\'")}', '${shooter.weaponClass}', ${team.teamNumber}); return false;">
                                             <i class="bi bi-pencil me-2"></i>Ändra vapenklass
                                         </a></li>
                                         <li><a class="dropdown-item" href="#" onclick="openMoveShooterModal(${shooter.memberId}, '${shooter.name.replace(/'/g, "\\'")}', ${team.teamNumber}); return false;">
@@ -1405,7 +1564,7 @@ function createTeamCard(team, index, isOfficial) {
                         <span class="badge bg-secondary ms-2">${shooterCount} skyttar</span>
                     </div>
                     <div class="d-flex align-items-center gap-2">
-                        <span class="badge bg-light text-dark border">${team.startTime} - ${team.endTime}</span>
+                        <span class="badge team-time-badge">${team.startTime} - ${team.endTime}</span>
                         <button class="btn btn-sm btn-outline-primary py-0 px-1"
                                 onclick="openEditTeamTimesModal(${window.currentStartListId}, ${team.teamNumber}, '${team.startTime}', '${team.endTime}')"
                                 title="Redigera tider">
@@ -1548,6 +1707,7 @@ function confirmMoveShooters() {
     .then(data => {
         if (data.success) {
             showAlert('success', data.message || 'Skyttarna har flyttats.');
+            editorHasChanges = true;  // Mark that changes were made
             moveShootersModal.hide();
             clearAllSelections();
             loadStartListForEditing(window.currentStartListId);
@@ -1564,9 +1724,13 @@ function confirmMoveShooters() {
 // Edit weapon class modal
 let editWeaponClassModal = null;
 let currentEditMemberId = null;
+let currentEditTeamNumber = null;  // Track which team the shooter is in
+let currentEditOldWeaponClass = null;  // Track original weapon class for registration update
 
-function openEditWeaponClassModal(memberId, name, currentClass) {
+function openEditWeaponClassModal(memberId, name, currentClass, teamNumber) {
     currentEditMemberId = memberId;
+    currentEditTeamNumber = teamNumber;  // Store the team number
+    currentEditOldWeaponClass = currentClass;  // Store the original class
     document.getElementById('editWeaponShooterName').textContent = name;
     document.getElementById('editWeaponClassSelect').value = currentClass;
 
@@ -1580,6 +1744,12 @@ function confirmUpdateWeaponClass() {
     const newClass = document.getElementById('editWeaponClassSelect').value;
     if (!newClass || !currentEditMemberId) {
         showAlert('warning', 'Välj en vapenklass.');
+        return;
+    }
+
+    // Don't make API call if class hasn't changed
+    if (newClass === currentEditOldWeaponClass) {
+        editWeaponClassModal.hide();
         return;
     }
 
@@ -1598,6 +1768,8 @@ function confirmUpdateWeaponClass() {
         body: JSON.stringify({
             startListId: window.currentStartListId,
             memberId: currentEditMemberId,
+            teamNumber: currentEditTeamNumber,  // Include team number to identify correct entry
+            oldWeaponClass: currentEditOldWeaponClass,  // Include old class for registration update
             newWeaponClass: newClass
         })
     })
@@ -1605,6 +1777,7 @@ function confirmUpdateWeaponClass() {
     .then(data => {
         if (data.success) {
             showAlert('success', data.message || 'Vapenklassen har uppdaterats.');
+            editorHasChanges = true;  // Mark that changes were made
             editWeaponClassModal.hide();
             loadStartListForEditing(window.currentStartListId);
         } else {
@@ -1644,6 +1817,7 @@ function deleteTeam(teamNumber) {
     .then(data => {
         if (data.success) {
             showAlert('success', data.message || 'Laget har tagits bort.');
+            editorHasChanges = true;  // Mark that changes were made
             loadStartListForEditing(window.currentStartListId);
         } else {
             showAlert('danger', data.message || 'Kunde inte ta bort laget.');
@@ -1702,6 +1876,7 @@ function removeShooterFromTeam(startListId, memberId, shooterName) {
     .then(data => {
         if (data.success) {
             showAlert('success', data.message || 'Skyttan har tagits bort.');
+            editorHasChanges = true;  // Mark that changes were made
             // Reload editor
             loadStartListForEditing(startListId);
         } else {
@@ -1725,7 +1900,7 @@ let selectedMemberClub = '';
 let addShooterModal = null;
 let createTeamModal = null;
 let editTeamTimesModal = null;
-let currentEditTeamNumber = null;
+// Note: currentEditTeamNumber is declared earlier in the file
 
 // Open add shooter modal
 function openAddShooterModal() {
@@ -1913,6 +2088,7 @@ function confirmAddShooter() {
     .then(data => {
         if (data.success) {
             showAlert('success', data.message || 'Skyttan har lagts till.');
+            editorHasChanges = true;  // Mark that changes were made
             addShooterModal.hide();
             loadStartListForEditing(window.currentStartListId);
         } else {
@@ -1986,6 +2162,7 @@ function confirmCreateTeam() {
     .then(data => {
         if (data.success) {
             showAlert('success', data.message || 'Nytt lag har skapats.');
+            editorHasChanges = true;  // Mark that changes were made
             createTeamModal.hide();
             loadStartListForEditing(window.currentStartListId);
         } else {
@@ -2063,6 +2240,7 @@ function confirmUpdateTeamTimes() {
     .then(data => {
         if (data.success) {
             showAlert('success', data.message || 'Lagets tider har uppdaterats.');
+            editorHasChanges = true;  // Mark that changes were made
             editTeamTimesModal.hide();
             loadStartListForEditing(window.currentStartListId);
         } else {
@@ -2085,31 +2263,59 @@ function showEditorError(message) {
 
 // Load start lists when tab is shown
 $(document).ready(function() {
-    // Initialize Flatpickr time picker
-    flatpickr('#firstStartTime', {
-        locale: 'sv',
-        enableTime: true,
-        noCalendar: true,
-        dateFormat: 'H:i',
-        time_24hr: true,
-        defaultHour: 9,
-        defaultMinute: 0
-    });
+    console.log('CompetitionStartListManagement: Document ready');
 
-    // Use both tab and pill events, and also check on document ready
-    // Support both admin page (#comp-startlists) and standalone page (#startlists)
-    $('button[data-bs-target="#comp-startlists"], button[data-bs-target="#startlists"]').on('shown.bs.tab shown.bs.pill click', function () {
-        console.log('Start Lists tab activated');
-        loadStartLists();
-        checkFinalsEligibility();
-    });
+    try {
+        // Initialize Flatpickr time picker
+        if (typeof flatpickr !== 'undefined') {
+            flatpickr('#firstStartTime', {
+                locale: 'sv',
+                enableTime: true,
+                noCalendar: true,
+                dateFormat: 'H:i',
+                time_24hr: true,
+                defaultHour: 9,
+                defaultMinute: 0
+            });
+        }
 
-    // Also trigger load on document ready if this tab is active
-    if ($('#comp-startlists').hasClass('active') || $('#comp-startlists').hasClass('show') ||
-        $('#startlists').hasClass('active') || $('#startlists').hasClass('show')) {
-        console.log('Start Lists tab is active on page load');
-        loadStartLists();
-        checkFinalsEligibility();
+        // Use both tab and pill events, and also check on document ready
+        // Support both admin page (#comp-startlists) and standalone page (#startlists)
+        $('button[data-bs-target="#comp-startlists"], button[data-bs-target="#startlists"]').on('shown.bs.tab shown.bs.pill click', function () {
+            console.log('Start Lists tab activated via jQuery event');
+            loadStartLists();
+            checkFinalsEligibility();
+        });
+
+        // Also trigger load on document ready if this tab is active
+        if ($('#comp-startlists').hasClass('active') || $('#comp-startlists').hasClass('show') ||
+            $('#startlists').hasClass('active') || $('#startlists').hasClass('show')) {
+            console.log('Start Lists tab is active on page load');
+            loadStartLists();
+            checkFinalsEligibility();
+        }
+    } catch (e) {
+        console.error('Error in CompetitionStartListManagement initialization:', e);
+        // Try to hide loading indicator if there's an error
+        const loadingEl = document.getElementById('startListsLoading');
+        if (loadingEl) loadingEl.style.display = 'none';
+        showStartListsError('Fel vid initialisering av startlistor.');
     }
+});
+
+// Fallback: Also listen for pure JavaScript events in case jQuery fails
+document.addEventListener('DOMContentLoaded', function() {
+    // Add click listeners to tab buttons as fallback
+    const tabButtons = document.querySelectorAll('button[data-bs-target="#comp-startlists"], button[data-bs-target="#startlists"]');
+    tabButtons.forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            console.log('Start Lists tab clicked (vanilla JS fallback)');
+            // Small delay to let Bootstrap show the tab
+            setTimeout(function() {
+                loadStartLists();
+                checkFinalsEligibility();
+            }, 100);
+        });
+    });
 });
 </script>

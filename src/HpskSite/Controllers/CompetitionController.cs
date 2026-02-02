@@ -885,10 +885,10 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Access denied" });
                 }
 
-                // Get all clubs from content tree (Document Types under clubsPage)
-                var allContent = _contentService.GetRootContent().SelectMany(GetAllDescendants);
-                var clubs = allContent
-                    .Where(c => c.ContentType.Alias == "club" && c.Published)
+                // PERFORMANCE FIX: Use ClubService which has caching, instead of full tree traversal
+                var allClubs = _clubService.GetAllClubs();
+                var clubs = allClubs
+                    .Where(c => c.IsActive)
                     .Select(club => new
                     {
                         id = club.Id,
@@ -943,38 +943,43 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Access denied" });
                 }
 
-                // Get all regular members (not clubs) that belong to this club
-                var allMembers = _memberService.GetAll(0, int.MaxValue, out var totalRecords);
-                var clubMembers = allMembers
-                    .Where(m => m.ContentType.Alias != "hpskClub" && m.IsApproved)
-                    .Where(m =>
-                    {
-                        var primaryClubId = m.GetValue<string>("primaryClubId");
-                        var memberClubIds = m.GetValue<string>("memberClubIds");
-
-                        // Check primary club
-                        if (!string.IsNullOrEmpty(primaryClubId) && int.TryParse(primaryClubId, out int primary))
+                // PERFORMANCE FIX: Cache club members for 2 minutes to avoid repeated full member scans
+                var cacheKey = $"club_members_{clubId}";
+                var clubMembers = AppCaches.RuntimeCache.GetCacheItem(cacheKey, () =>
+                {
+                    // Get all regular members (not clubs) that belong to this club
+                    var allMembers = _memberService.GetAll(0, int.MaxValue, out var totalRecords);
+                    return allMembers
+                        .Where(m => m.ContentType.Alias != "hpskClub" && m.IsApproved)
+                        .Where(m =>
                         {
-                            if (primary == clubId) return true;
-                        }
+                            var primaryClubId = m.GetValue<string>("primaryClubId");
+                            var memberClubIds = m.GetValue<string>("memberClubIds");
 
-                        // Check additional clubs
-                        if (!string.IsNullOrEmpty(memberClubIds))
+                            // Check primary club
+                            if (!string.IsNullOrEmpty(primaryClubId) && int.TryParse(primaryClubId, out int primary))
+                            {
+                                if (primary == clubId) return true;
+                            }
+
+                            // Check additional clubs
+                            if (!string.IsNullOrEmpty(memberClubIds))
+                            {
+                                var additionalClubIds = memberClubIds.Split(',').Select(id => id.Trim());
+                                if (additionalClubIds.Contains(clubId.ToString())) return true;
+                            }
+
+                            return false;
+                        })
+                        .Select(member => new
                         {
-                            var additionalClubIds = memberClubIds.Split(',').Select(id => id.Trim());
-                            if (additionalClubIds.Contains(clubId.ToString())) return true;
-                        }
-
-                        return false;
-                    })
-                    .Select(member => new
-                    {
-                        id = member.Id,
-                        name = member.Name,
-                        email = member.Email
-                    })
-                    .OrderBy(m => m.name)
-                    .ToList();
+                            id = member.Id,
+                            name = member.Name,
+                            email = member.Email
+                        })
+                        .OrderBy(m => m.name)
+                        .ToList();
+                }, TimeSpan.FromMinutes(2));
 
                 return Json(new { success = true, members = clubMembers });
             }
@@ -1031,13 +1036,12 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Access denied" });
                 }
 
-                // Get club name
+                // Get club name - use ClubService (clubs are Document Types, not Members!)
                 var primaryClubIdStr = targetMember.GetValue<string>("primaryClubId");
                 string clubName = "Unknown Club";
                 if (!string.IsNullOrEmpty(primaryClubIdStr) && int.TryParse(primaryClubIdStr, out int primaryClubId))
                 {
-                    var club = _memberService.GetById(primaryClubId);
-                    clubName = club?.Name ?? $"Club {primaryClubId}";
+                    clubName = _clubService.GetClubNameById(primaryClubId) ?? $"Club {primaryClubId}";
                 }
 
                 return Json(new
@@ -1102,42 +1106,122 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Access denied - insufficient permissions" });
                 }
 
-                // Get all registrations for this competition
-                var allContent = _contentService.GetRootContent().SelectMany(GetAllDescendants);
-                var registrations = allContent
-                    .Where(content => content.ContentType.Alias == "competitionRegistration")
-                    .Where(content =>
+                // PERFORMANCE FIX: Direct query to competition children instead of full tree traversal
+                var competitionChildren = _contentService.GetPagedChildren(competitionId.Value, 0, 100, out _);
+                var registrationsHub = competitionChildren
+                    .FirstOrDefault(c => c.ContentType.Alias == "competitionRegistrationsHub");
+
+                // Get registrations directly from the hub (single query)
+                var registrationContents = registrationsHub != null
+                    ? _contentService.GetPagedChildren(registrationsHub.Id, 0, 1000, out _)
+                        .Where(c => c.ContentType.Alias == "competitionRegistration")
+                        .ToList()
+                    : new List<Umbraco.Cms.Core.Models.IContent>();
+
+                // PERFORMANCE FIX: Batch load payment status - pre-load all invoices once
+                var invoicesHub = competitionChildren
+                    .FirstOrDefault(c => c.ContentType.Alias == "registrationInvoicesHub");
+
+                var paymentStatusMap = new Dictionary<int, string>();
+                if (invoicesHub != null)
+                {
+                    var allInvoices = _contentService.GetPagedChildren(invoicesHub.Id, 0, 1000, out _)
+                        .Where(x => x.ContentType.Alias == "registrationInvoice")
+                        .Where(x => x.GetValue<string>("paymentStatus") != "Cancelled")
+                        .OrderByDescending(x => x.Id)
+                        .ToList();
+
+                    foreach (var invoice in allInvoices)
                     {
-                        var parentId = content.ParentId;
-                        while (parentId > 0)
+                        // Check new property first (registrationId - single integer)
+                        var invoiceRegistrationId = invoice.GetValue<int>("registrationId");
+                        if (invoiceRegistrationId > 0 && !paymentStatusMap.ContainsKey(invoiceRegistrationId))
                         {
-                            if (parentId == competitionId.Value)
-                                return true;
-                            var parent = _contentService.GetById(parentId);
-                            parentId = parent?.ParentId ?? -1;
+                            paymentStatusMap[invoiceRegistrationId] = CleanPaymentStatus(invoice.GetValue<string>("paymentStatus") ?? "Unknown");
                         }
-                        return false;
-                    })
+
+                        // Also check relatedRegistrationIds for backward compatibility
+                        var relatedIdsJson = invoice.GetValue<string>("relatedRegistrationIds") ?? "";
+                        if (!string.IsNullOrEmpty(relatedIdsJson))
+                        {
+                            var registrationIds = ParseRegistrationIds(relatedIdsJson);
+                            foreach (var regId in registrationIds)
+                            {
+                                if (!paymentStatusMap.ContainsKey(regId))
+                                {
+                                    paymentStatusMap[regId] = CleanPaymentStatus(invoice.GetValue<string>("paymentStatus") ?? "Unknown");
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // PERFORMANCE FIX: Batch load club names - collect all unique club IDs first
+                var clubIdsToLoad = new HashSet<int>();
+                var memberIdsNeedingClubLookup = new List<(Umbraco.Cms.Core.Models.IContent content, int memberId)>();
+
+                foreach (var content in registrationContents)
+                {
+                    var clubId = content.GetValue<int>("clubId");
+                    if (clubId > 0)
+                    {
+                        clubIdsToLoad.Add(clubId);
+                    }
+                    else
+                    {
+                        var memberClubStr = content.GetValue<string>("memberClub");
+                        if (!string.IsNullOrWhiteSpace(memberClubStr) && int.TryParse(memberClubStr, out var legacyClubId))
+                        {
+                            clubIdsToLoad.Add(legacyClubId);
+                        }
+                        else if (string.IsNullOrWhiteSpace(memberClubStr))
+                        {
+                            var memberId = content.GetValue<int>("memberId");
+                            if (memberId > 0)
+                            {
+                                memberIdsNeedingClubLookup.Add((content, memberId));
+                            }
+                        }
+                    }
+                }
+
+                // Load member primary clubs for registrations that need it
+                foreach (var (content, memberId) in memberIdsNeedingClubLookup)
+                {
+                    var member = _memberService.GetById(memberId);
+                    var primaryClubIdStr = member?.GetValue<string>("primaryClubId");
+                    if (!string.IsNullOrEmpty(primaryClubIdStr) && int.TryParse(primaryClubIdStr, out var primaryClubId))
+                    {
+                        clubIdsToLoad.Add(primaryClubId);
+                    }
+                }
+
+                // Batch load all club names (ClubService already has caching, but this groups the calls)
+                var clubNameMap = clubIdsToLoad.ToDictionary(
+                    id => id,
+                    id => _clubService.GetClubNameById(id) ?? $"Club {id}"
+                );
+
+                // Now build the registrations list with pre-loaded data
+                var registrations = registrationContents
                     .Select(content =>
                     {
                         var memberId = content.GetValue<int>("memberId");
 
-                        // Get club ID and resolve to name
+                        // Get club name from pre-loaded map
                         string clubName = "Unknown Club";
                         var clubId = content.GetValue<int>("clubId");
 
                         if (clubId > 0)
                         {
-                            // New data with numeric clubId property
-                            clubName = _clubService.GetClubNameById(clubId) ?? $"Club {clubId}";
+                            clubName = clubNameMap.TryGetValue(clubId, out var name) ? name : $"Club {clubId}";
                         }
                         else
                         {
-                            // Fallback for old data or missing clubId - try memberClub (migration path)
                             var memberClubStr = content.GetValue<string>("memberClub");
                             if (!string.IsNullOrWhiteSpace(memberClubStr) && int.TryParse(memberClubStr, out var legacyClubId))
                             {
-                                clubName = _clubService.GetClubNameById(legacyClubId) ?? $"Club {legacyClubId}";
+                                clubName = clubNameMap.TryGetValue(legacyClubId, out var name) ? name : $"Club {legacyClubId}";
                             }
                             else if (!string.IsNullOrWhiteSpace(memberClubStr))
                             {
@@ -1145,18 +1229,17 @@ namespace HpskSite.Controllers
                             }
                             else if (memberId > 0)
                             {
-                                // Last fallback: get from member's primary club
                                 var member = _memberService.GetById(memberId);
                                 var primaryClubIdStr = member?.GetValue<string>("primaryClubId");
                                 if (!string.IsNullOrEmpty(primaryClubIdStr) && int.TryParse(primaryClubIdStr, out var primaryClubId))
                                 {
-                                    clubName = _clubService.GetClubNameById(primaryClubId) ?? $"Club {primaryClubId}";
+                                    clubName = clubNameMap.TryGetValue(primaryClubId, out var name) ? name : $"Club {primaryClubId}";
                                 }
                             }
                         }
 
-                        // Get payment status for this registration
-                        var paymentStatus = GetRegistrationPaymentStatus(content.Id, competitionId.Value);
+                        // Get payment status from pre-loaded map
+                        var paymentStatus = paymentStatusMap.TryGetValue(content.Id, out var status) ? status : "No Invoice";
 
                         // Get shooting classes (new JSON array format)
                         var shootingClassesJson = content.GetValue<string>("shootingClasses");

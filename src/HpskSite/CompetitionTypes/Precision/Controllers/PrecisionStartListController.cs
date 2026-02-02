@@ -332,6 +332,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                         TeamFormatDisplay = _renderer.GetTeamFormatDisplay(sl.GetValue<string>("teamFormat") ?? ""),
                         TeamCount = _repository.GetTeamCountFromContent(sl),
                         TotalShooters = _repository.GetTotalShootersFromContent(sl),
+                        UniqueShooters = _repository.GetUniqueShootersFromContent(sl),
                         Status = sl.GetValue<bool>("isOfficialStartList") ? "Official" : "",
                         Url = GetStartListDisplayUrl(sl, competitionId)
                     }).ToList()
@@ -387,6 +388,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                         TeamFormatDisplay = _renderer.GetTeamFormatDisplay(currentStartList.GetValue<string>("teamFormat") ?? ""),
                         TeamCount = _repository.GetTeamCountFromContent(currentStartList),
                         TotalShooters = _repository.GetTotalShootersFromContent(currentStartList),
+                        UniqueShooters = _repository.GetUniqueShootersFromContent(currentStartList),
                         IsOfficial = currentStartList.GetValue<bool>("isOfficialStartList"),
                         Url = GetStartListDisplayUrl(currentStartList, competitionId)
                     }
@@ -603,6 +605,38 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error unpublishing start lists for competition {CompetitionId}", competitionId);
+            }
+        }
+
+        /// <summary>
+        /// Get unique weapon classes registered for a competition
+        /// Used by the UI to populate the class start order dropdown
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetRegisteredWeaponClasses(int competitionId)
+        {
+            try
+            {
+                if (competitionId <= 0)
+                {
+                    return Json(new { Success = false, Classes = new List<string>() });
+                }
+
+                var registrations = await _repository.GetCompetitionRegistrations(competitionId);
+
+                // Extract unique weapon class prefixes (A, B, C, R, M, L)
+                var classes = registrations
+                    .Select(r => r.MemberClass.Substring(0, 1).ToUpper())
+                    .Distinct()
+                    .OrderBy(c => c)
+                    .ToList();
+
+                return Json(new { Success = true, Classes = classes });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting registered weapon classes for competition {CompetitionId}", competitionId);
+                return Json(new { Success = false, Classes = new List<string>() });
             }
         }
 
@@ -985,6 +1019,8 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 var result = _contentService.Save(startList);
                 if (result.Success)
                 {
+                    // Publish to make changes visible on frontend
+                    _contentService.Publish(startList, Array.Empty<string>());
                     return Json(new
                     {
                         success = true,
@@ -1098,6 +1134,8 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 var result = _contentService.Save(startList);
                 if (result.Success)
                 {
+                    // Publish to make changes visible on frontend
+                    _contentService.Publish(startList, Array.Empty<string>());
                     return Json(new { success = true, message = "Skyttan har tagits bort." });
                 }
                 else
@@ -1177,6 +1215,8 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 var result = _contentService.Save(startList);
                 if (result.Success)
                 {
+                    // Publish to make changes visible on frontend
+                    _contentService.Publish(startList, Array.Empty<string>());
                     return Json(new
                     {
                         success = true,
@@ -1235,6 +1275,18 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 team.StartTime = request.StartTime;
                 team.EndTime = request.EndTime;
 
+                // Sort teams by start time and renumber them
+                // Teams should always be ordered from first start to last, with Skjutlag 1 being the first to start
+                configuration.Teams = configuration.Teams
+                    .OrderBy(t => TimeSpan.TryParse(t.StartTime, out var ts) ? ts : TimeSpan.MaxValue)
+                    .ToList();
+
+                // Renumber teams based on new sort order
+                for (int i = 0; i < configuration.Teams.Count; i++)
+                {
+                    configuration.Teams[i].TeamNumber = i + 1;
+                }
+
                 // Get competition name
                 var competitionId = startList.GetValue<int>("competitionId");
                 var competition = _contentService.GetById(competitionId);
@@ -1251,7 +1303,9 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 var result = _contentService.Save(startList);
                 if (result.Success)
                 {
-                    return Json(new { success = true, message = "Lagets tider har uppdaterats." });
+                    // Publish to make changes visible on frontend
+                    _contentService.Publish(startList, Array.Empty<string>());
+                    return Json(new { success = true, message = "Lagets tider har uppdaterats och lagen har sorterats om." });
                 }
                 else
                 {
@@ -1369,6 +1423,8 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 var result = _contentService.Save(startList);
                 if (result.Success)
                 {
+                    // Publish to make changes visible on frontend
+                    _contentService.Publish(startList, Array.Empty<string>());
                     return Json(new { success = true, message = $"Skyttan har flyttats till Lag {request.TargetTeamNumber}." });
                 }
                 return Json(new { success = false, message = "Kunde inte spara startlistan." });
@@ -1481,6 +1537,8 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 var result = _contentService.Save(startList);
                 if (result.Success)
                 {
+                    // Publish to make changes visible on frontend
+                    _contentService.Publish(startList, Array.Empty<string>());
                     return Json(new { success = true, message = $"{movedCount} skytt(ar) har flyttats till Lag {request.TargetTeamNumber}." });
                 }
                 return Json(new { success = false, message = "Kunde inte spara startlistan." });
@@ -1519,31 +1577,50 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     return Json(new { success = false, message = "Startlistan har ingen konfigurationsdata." });
                 }
 
-                // Find shooter
+                // Find shooter in the specific team (a shooter can appear in multiple teams for different classes)
                 StartListShooter? shooter = null;
                 StartListTeam? team = null;
-                foreach (var t in configuration.Teams)
+
+                if (request.TeamNumber > 0)
                 {
-                    shooter = t.Shooters?.FirstOrDefault(s => s.MemberId == request.MemberId);
-                    if (shooter != null)
+                    // Find in specific team
+                    team = configuration.Teams.FirstOrDefault(t => t.TeamNumber == request.TeamNumber);
+                    if (team != null)
                     {
-                        team = t;
-                        break;
+                        shooter = team.Shooters?.FirstOrDefault(s => s.MemberId == request.MemberId);
+                    }
+                }
+                else
+                {
+                    // Fallback: find first occurrence (backward compatibility)
+                    foreach (var t in configuration.Teams)
+                    {
+                        shooter = t.Shooters?.FirstOrDefault(s => s.MemberId == request.MemberId);
+                        if (shooter != null)
+                        {
+                            team = t;
+                            break;
+                        }
                     }
                 }
 
                 if (shooter == null || team == null)
                 {
-                    return Json(new { success = false, message = "Skyttan kunde inte hittas." });
+                    return Json(new { success = false, message = "Skyttan kunde inte hittas i det angivna laget." });
                 }
 
-                // Update weapon class
+                // Get old weapon class from shooter or request
+                var oldWeaponClass = !string.IsNullOrWhiteSpace(request.OldWeaponClass)
+                    ? request.OldWeaponClass
+                    : shooter.WeaponClass;
+
+                // Update weapon class in start list
                 shooter.WeaponClass = request.NewWeaponClass;
 
                 // Update team weapon classes
                 team.WeaponClasses = team.Shooters?.Select(s => s.WeaponClass).Distinct().ToList() ?? new List<string>();
 
-                // Save and regenerate
+                // Save and regenerate start list
                 var competitionId = startList.GetValue<int>("competitionId");
                 var competition = _contentService.GetById(competitionId);
                 var competitionName = competition?.Name ?? "Okänd tävling";
@@ -1557,7 +1634,25 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 var result = _contentService.Save(startList);
                 if (result.Success)
                 {
-                    return Json(new { success = true, message = $"Vapenklass har ändrats till {request.NewWeaponClass}." });
+                    // Publish to make changes visible on frontend
+                    _contentService.Publish(startList, Array.Empty<string>());
+
+                    // Also update the underlying registration so the change persists when regenerating start lists
+                    var registrationUpdated = await UpdateRegistrationWeaponClass(competitionId, request.MemberId, oldWeaponClass, request.NewWeaponClass);
+
+                    var message = $"Vapenklass har ändrats till {request.NewWeaponClass}.";
+                    if (registrationUpdated)
+                    {
+                        message += " Anmälan har också uppdaterats.";
+                    }
+                    else
+                    {
+                        message += " OBS: Anmälan kunde inte uppdateras automatiskt.";
+                        _logger.LogWarning("Could not update registration weapon class for member {MemberId} in competition {CompetitionId}",
+                            request.MemberId, competitionId);
+                    }
+
+                    return Json(new { success = true, message = message, registrationUpdated = registrationUpdated });
                 }
                 return Json(new { success = false, message = "Kunde inte spara startlistan." });
             }
@@ -1565,6 +1660,110 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
             {
                 _logger.LogError(ex, "Error updating weapon class for shooter {MemberId}", request.MemberId);
                 return Json(new { success = false, message = "Ett oväntat fel uppstod." });
+            }
+        }
+
+        /// <summary>
+        /// Update the weapon class in the member's competition registration
+        /// This ensures the change persists when a new start list is generated
+        /// </summary>
+        private async Task<bool> UpdateRegistrationWeaponClass(int competitionId, int memberId, string oldWeaponClass, string newWeaponClass)
+        {
+            try
+            {
+                // Find the competition
+                var competition = _contentService.GetById(competitionId);
+                if (competition == null)
+                {
+                    _logger.LogWarning("Competition {CompetitionId} not found when updating registration", competitionId);
+                    return false;
+                }
+
+                // Find the registrations hub
+                var children = _contentService.GetPagedChildren(competition.Id, 0, 20, out _);
+                var hub = children.FirstOrDefault(c => c.ContentType.Alias == "competitionRegistrationsHub");
+                if (hub == null)
+                {
+                    _logger.LogWarning("Registrations hub not found for competition {CompetitionId}", competitionId);
+                    return false;
+                }
+
+                // Find the member's registration
+                var registrations = _contentService.GetPagedChildren(hub.Id, 0, int.MaxValue, out _)
+                    .Where(c => c.ContentType.Alias == "competitionRegistration")
+                    .ToList();
+
+                var memberRegistration = registrations.FirstOrDefault(r => r.GetValue<int>("memberId") == memberId);
+                if (memberRegistration == null)
+                {
+                    _logger.LogWarning("Registration not found for member {MemberId} in competition {CompetitionId}", memberId, competitionId);
+                    return false;
+                }
+
+                // Get current shooting classes
+                var shootingClassesJson = memberRegistration.GetValue<string>("shootingClasses");
+                var shootingClasses = HpskSite.Models.CompetitionRegistrationDocument.DeserializeShootingClasses(shootingClassesJson);
+
+                if (!shootingClasses.Any())
+                {
+                    // Try legacy format
+                    var legacyClass = memberRegistration.GetValue<string>("shootingClass");
+                    if (!string.IsNullOrWhiteSpace(legacyClass))
+                    {
+                        // Update legacy format directly
+                        if (legacyClass.Equals(oldWeaponClass, StringComparison.OrdinalIgnoreCase))
+                        {
+                            memberRegistration.SetValue("shootingClass", newWeaponClass);
+                            var legacyResult = _contentService.Save(memberRegistration);
+                            if (legacyResult.Success)
+                            {
+                                _contentService.Publish(memberRegistration, Array.Empty<string>());
+                                _logger.LogInformation("Updated legacy registration weapon class for member {MemberId}: {OldClass} -> {NewClass}",
+                                    memberId, oldWeaponClass, newWeaponClass);
+                                return true;
+                            }
+                        }
+                    }
+                    return false;
+                }
+
+                // Find and update the specific class entry
+                // Match by class prefix (e.g., "A" matches "A1", "A2", etc.)
+                var oldClassPrefix = oldWeaponClass.Length > 0 ? oldWeaponClass.Substring(0, 1).ToUpper() : "";
+                var classEntry = shootingClasses.FirstOrDefault(c =>
+                    c.Class.Equals(oldWeaponClass, StringComparison.OrdinalIgnoreCase) ||
+                    (c.Class.Length > 0 && c.Class.Substring(0, 1).ToUpper() == oldClassPrefix));
+
+                if (classEntry == null)
+                {
+                    _logger.LogWarning("Class entry {OldClass} not found in registration for member {MemberId}", oldWeaponClass, memberId);
+                    return false;
+                }
+
+                // Update the class
+                classEntry.Class = newWeaponClass;
+
+                // Serialize and save
+                var updatedJson = System.Text.Json.JsonSerializer.Serialize(shootingClasses);
+                memberRegistration.SetValue("shootingClasses", updatedJson);
+
+                var saveResult = _contentService.Save(memberRegistration);
+                if (saveResult.Success)
+                {
+                    _contentService.Publish(memberRegistration, Array.Empty<string>());
+                    _logger.LogInformation("Updated registration weapon class for member {MemberId}: {OldClass} -> {NewClass}",
+                        memberId, oldWeaponClass, newWeaponClass);
+                    return true;
+                }
+
+                _logger.LogError("Failed to save registration update for member {MemberId}", memberId);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error updating registration weapon class for member {MemberId} in competition {CompetitionId}",
+                    memberId, competitionId);
+                return false;
             }
         }
 
@@ -1631,6 +1830,8 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 var result = _contentService.Save(startList);
                 if (result.Success)
                 {
+                    // Publish to make changes visible on frontend
+                    _contentService.Publish(startList, Array.Empty<string>());
                     return Json(new { success = true, message = "Laget har tagits bort." });
                 }
                 return Json(new { success = false, message = "Kunde inte spara startlistan." });
@@ -2249,6 +2450,8 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
     {
         public int StartListId { get; set; }
         public int MemberId { get; set; }
+        public int TeamNumber { get; set; }  // Which team the shooter is in (shooter can be in multiple teams)
+        public string OldWeaponClass { get; set; } = "";  // Current class to be replaced
         public string NewWeaponClass { get; set; } = "";
     }
 

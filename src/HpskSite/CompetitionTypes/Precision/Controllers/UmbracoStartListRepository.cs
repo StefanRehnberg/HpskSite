@@ -291,6 +291,27 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
             }
         }
 
+        public int GetUniqueShootersFromContent(IContent startList)
+        {
+            try
+            {
+                var configData = startList.GetValue<string>("configurationData");
+                if (string.IsNullOrEmpty(configData)) return 0;
+
+                var config = JsonConvert.DeserializeObject<StartListConfiguration>(configData);
+                return config?.Teams?
+                    .SelectMany(t => t.Shooters ?? Enumerable.Empty<StartListShooter>())
+                    .Select(s => s.MemberId)
+                    .Where(id => id > 0)
+                    .Distinct()
+                    .Count() ?? 0;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
         private IEnumerable<IContent> GetDescendantsOfType(IContent content, string contentTypeAlias)
         {
             var result = new List<IContent>();
