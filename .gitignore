@@ -30,6 +30,9 @@ firebase-service-account.json
 # Umbraco App_Data (runtime data)
 App_Data/
 
+# Log files
+Logs/
+
 # Sensitive configuration files (use .template.json versions instead)
 appsettings.Production.json
 appsettings.Development.json
