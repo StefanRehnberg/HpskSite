@@ -932,7 +932,7 @@
                             <HorizontalStackLayout HorizontalOptions="Center" Spacing="8">
                                 <Label Text="Matchkod:" FontSize="14" TextColor="#9ca3af" VerticalOptions="Center" />
                                 <Label Text="{Binding Match.MatchCode}" FontSize="20" FontAttributes="Bold" TextColor="White"
-                                       VerticalOptions="Center" FontFamily="Consolas" />
+                                       VerticalOptions="Center" />
                             </HorizontalStackLayout>
 
                             <!--  Share Link with Copy and QR buttons  -->
@@ -1102,7 +1102,7 @@
                         <VerticalStackLayout HorizontalOptions="Center">
                             <Label Text="Matchkod" FontSize="12" TextColor="#9ca3af" HorizontalOptions="Center" />
                             <Label Text="{Binding Match.MatchCode}" FontSize="24" FontAttributes="Bold" TextColor="White"
-                                   HorizontalOptions="Center" FontFamily="Consolas" />
+                                   HorizontalOptions="Center" />
                         </VerticalStackLayout>
 
                         <!--  Share Link  -->

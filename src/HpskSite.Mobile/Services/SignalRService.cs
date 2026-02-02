@@ -88,7 +88,15 @@ public class SignalRService : ISignalRService, IAsyncDisposable
         _hubConnection.Closed += OnConnectionClosed;
         _hubConnection.Reconnected += OnReconnected;
 
-        await _hubConnection.StartAsync();
+        try
+        {
+            await _hubConnection.StartAsync();
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"SignalR ConnectAsync failed: {ex.Message}");
+            // Don't throw - allow app to continue without real-time updates
+        }
     }
 
     public async Task DisconnectAsync()
@@ -98,9 +106,19 @@ public class SignalRService : ISignalRService, IAsyncDisposable
             _hubConnection.Closed -= OnConnectionClosed;
             _hubConnection.Reconnected -= OnReconnected;
 
-            await _hubConnection.StopAsync();
-            await _hubConnection.DisposeAsync();
-            _hubConnection = null;
+            try
+            {
+                await _hubConnection.StopAsync();
+                await _hubConnection.DisposeAsync();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"SignalR DisconnectAsync failed: {ex.Message}");
+            }
+            finally
+            {
+                _hubConnection = null;
+            }
         }
     }
 
@@ -112,7 +130,14 @@ public class SignalRService : ISignalRService, IAsyncDisposable
             return;
         }
 
-        await _hubConnection.InvokeAsync("JoinMatchGroup", matchCode);
+        try
+        {
+            await _hubConnection.InvokeAsync("JoinMatchGroup", matchCode);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"SignalR JoinMatchAsync failed: {ex.Message}");
+        }
     }
 
     public async Task LeaveMatchAsync(string matchCode)
@@ -122,7 +147,14 @@ public class SignalRService : ISignalRService, IAsyncDisposable
             return;
         }
 
-        await _hubConnection.InvokeAsync("LeaveMatchGroup", matchCode);
+        try
+        {
+            await _hubConnection.InvokeAsync("LeaveMatchGroup", matchCode);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"SignalR LeaveMatchAsync failed: {ex.Message}");
+        }
     }
 
     public async Task JoinOrganizerGroupAsync(string matchCode)
@@ -132,7 +164,14 @@ public class SignalRService : ISignalRService, IAsyncDisposable
             return;
         }
 
-        await _hubConnection.InvokeAsync("JoinOrganizerGroup", matchCode);
+        try
+        {
+            await _hubConnection.InvokeAsync("JoinOrganizerGroup", matchCode);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"SignalR JoinOrganizerGroupAsync failed: {ex.Message}");
+        }
     }
 
     public async Task LeaveOrganizerGroupAsync(string matchCode)
@@ -142,7 +181,14 @@ public class SignalRService : ISignalRService, IAsyncDisposable
             return;
         }
 
-        await _hubConnection.InvokeAsync("LeaveOrganizerGroup", matchCode);
+        try
+        {
+            await _hubConnection.InvokeAsync("LeaveOrganizerGroup", matchCode);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"SignalR LeaveOrganizerGroupAsync failed: {ex.Message}");
+        }
     }
 
     public async Task RegisterSpectatorAsync(string matchCode, int memberId, string name, string profilePictureUrl, string clubName)
@@ -152,7 +198,14 @@ public class SignalRService : ISignalRService, IAsyncDisposable
             return;
         }
 
-        await _hubConnection.InvokeAsync("RegisterSpectator", matchCode, memberId, name, profilePictureUrl ?? "", clubName ?? "");
+        try
+        {
+            await _hubConnection.InvokeAsync("RegisterSpectator", matchCode, memberId, name, profilePictureUrl ?? "", clubName ?? "");
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"SignalR RegisterSpectatorAsync failed: {ex.Message}");
+        }
     }
 
     public async Task UnregisterSpectatorAsync(string matchCode)
@@ -162,7 +215,14 @@ public class SignalRService : ISignalRService, IAsyncDisposable
             return;
         }
 
-        await _hubConnection.InvokeAsync("UnregisterSpectator", matchCode);
+        try
+        {
+            await _hubConnection.InvokeAsync("UnregisterSpectator", matchCode);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"SignalR UnregisterSpectatorAsync failed: {ex.Message}");
+        }
     }
 
     public async Task SendScoreUpdateAsync(string matchCode, int participantId, int seriesNumber, int shotNumber, int score)
@@ -172,7 +232,15 @@ public class SignalRService : ISignalRService, IAsyncDisposable
             throw new InvalidOperationException("Not connected to SignalR hub");
         }
 
-        await _hubConnection.InvokeAsync("UpdateScore", matchCode, participantId, seriesNumber, shotNumber, score);
+        try
+        {
+            await _hubConnection.InvokeAsync("UpdateScore", matchCode, participantId, seriesNumber, shotNumber, score);
+        }
+        catch (Exception ex) when (ex is not InvalidOperationException)
+        {
+            System.Diagnostics.Debug.WriteLine($"SignalR SendScoreUpdateAsync failed: {ex.Message}");
+            throw new InvalidOperationException($"Failed to send score update: {ex.Message}", ex);
+        }
     }
 
     private void RegisterHandlers()
