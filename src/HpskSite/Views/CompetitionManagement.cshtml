@@ -619,6 +619,12 @@ window.CompetitionConfig = {
         { "MClasses", mClasses },
         { "AllowDualCClassRegistration", allowDualCClassRegistration }
     })
+
+    @* Update Confirmation Modal - required by competition-registration.js for updating existing registrations *@
+    @await Html.PartialAsync("CompetitionUpdateConfirmModal")
+
+    @* Replace Confirmation Modal - required by competition-registration.js for replacing registrations *@
+    @await Html.PartialAsync("CompetitionReplaceConfirmModal")
 }
 
 @* Swish Payment Modal *@

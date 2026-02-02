@@ -1,4 +1,7 @@
 // Competition Registration System JavaScript
+// Version: 2026-02-02-v2 (with modal null checks)
+console.log('competition-registration.js loaded - version 2026-02-02-v2');
+
 // Configuration object will be provided by the view
 const COMPETITION_ID = window.CompetitionConfig ? window.CompetitionConfig.competitionId : null;
 const ALLOW_DUAL_C_CLASS_REGISTRATION = window.CompetitionConfig ? window.CompetitionConfig.allowDualCClassRegistration : false;
@@ -632,79 +635,108 @@ function updateClassAvailability() {
 
 async function submitRegistrationForm() {
     const submitBtn = document.getElementById('modalRegisterBtn');
-    const radioGroups = ['selectedAClass', 'selectedBClass', 'selectedRClass', 'selectedCRegular', 'selectedCVet', 'selectedCDam', 'selectedCJun', 'selectedLRegular', 'selectedLVet', 'selectedLDam', 'selectedLJun', 'selectedMClass'];
-    const selectedClasses = [];
-    const startPreferencesMap = {};
 
-    // Collect all selected classes and their preferences
-    radioGroups.forEach(groupName => {
-        const checkedRadio = document.querySelector(`input[name="${groupName}"]:checked`);
-        if (checkedRadio) {
-            const classId = checkedRadio.value;
-            const startPreference = classPreferences[classId] || 'Inget';
-            selectedClasses.push(classId);
-            startPreferencesMap[classId] = startPreference;
+    // Helper to reset button state
+    const resetButton = () => {
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '<i class="bi bi-person-plus"></i> Anmäl';
         }
-    });
+    };
 
-    if (selectedClasses.length === 0) {
-        alert('Du måste välja minst en skytteklass för att anmäla dig.');
-        return;
-    }
+    try {
+        const radioGroups = ['selectedAClass', 'selectedBClass', 'selectedRClass', 'selectedCRegular', 'selectedCVet', 'selectedCDam', 'selectedCJun', 'selectedLRegular', 'selectedLVet', 'selectedLDam', 'selectedLJun', 'selectedMClass'];
+        const selectedClasses = [];
+        const startPreferencesMap = {};
 
-    // Disable submit button and show loading
-    submitBtn.disabled = true;
-    submitBtn.innerHTML = '<i class="bi bi-hourglass-split spinner-border spinner-border-sm"></i> Anmäler...';
-
-    // Check if user already has a registration for this competition
-    const hasExistingRegistration = existingRegistrations.length > 0;
-
-    if (hasExistingRegistration) {
-        // Show confirmation dialog for updating existing registration
-        const confirmed = await new Promise((resolve) => {
-            const modalElement = document.getElementById('updateRegistrationConfirmModal');
-
-            // Dispose of any existing modal instance to prevent conflicts
-            const existingInstance = bootstrap.Modal.getInstance(modalElement);
-            if (existingInstance) {
-                existingInstance.dispose();
+        // Collect all selected classes and their preferences
+        radioGroups.forEach(groupName => {
+            const checkedRadio = document.querySelector(`input[name="${groupName}"]:checked`);
+            if (checkedRadio) {
+                const classId = checkedRadio.value;
+                const startPreference = classPreferences[classId] || 'Inget';
+                selectedClasses.push(classId);
+                startPreferencesMap[classId] = startPreference;
             }
-
-            const modal = new bootstrap.Modal(modalElement, {
-                backdrop: 'static',
-                keyboard: false
-            });
-            document.getElementById('existingClassName').textContent = 'alla valda klasser';
-
-            const confirmBtn = document.getElementById('confirmUpdateBtn');
-            const cancelBtn = document.getElementById('cancelUpdateBtn');
-
-            const newConfirmBtn = confirmBtn.cloneNode(true);
-            confirmBtn.parentNode.replaceChild(newConfirmBtn, confirmBtn);
-
-            const newCancelBtn = cancelBtn.cloneNode(true);
-            cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
-
-            newConfirmBtn.addEventListener('click', function() {
-                modal.hide();
-                // Wait for modal to fully hide before resolving
-                setTimeout(() => {
-                    modal.dispose();
-                    resolve(true);
-                }, 300);
-            });
-
-            newCancelBtn.addEventListener('click', function() {
-                modal.hide();
-                // Wait for modal to fully hide before resolving
-                setTimeout(() => {
-                    modal.dispose();
-                    resolve(false);
-                }, 300);
-            });
-
-            modal.show();
         });
+
+        if (selectedClasses.length === 0) {
+            alert('Du måste välja minst en skytteklass för att anmäla dig.');
+            return;
+        }
+
+        // Disable submit button and show loading
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<i class="bi bi-hourglass-split spinner-border spinner-border-sm"></i> Anmäler...';
+
+        // Check if user already has a registration for this competition
+        const hasExistingRegistration = existingRegistrations.length > 0;
+
+        if (hasExistingRegistration) {
+        // Show confirmation dialog for updating existing registration
+        const modalElement = document.getElementById('updateRegistrationConfirmModal');
+
+        let confirmed;
+        if (modalElement) {
+            // Use Bootstrap modal for confirmation
+            confirmed = await new Promise((resolve) => {
+                // Dispose of any existing modal instance to prevent conflicts
+                const existingInstance = bootstrap.Modal.getInstance(modalElement);
+                if (existingInstance) {
+                    existingInstance.dispose();
+                }
+
+                const modal = new bootstrap.Modal(modalElement, {
+                    backdrop: 'static',
+                    keyboard: false
+                });
+
+                const existingClassNameEl = document.getElementById('existingClassName');
+                if (existingClassNameEl) {
+                    existingClassNameEl.textContent = 'alla valda klasser';
+                }
+
+                const confirmBtn = document.getElementById('confirmUpdateBtn');
+                const cancelBtn = document.getElementById('cancelUpdateBtn');
+
+                if (confirmBtn && cancelBtn) {
+                    const newConfirmBtn = confirmBtn.cloneNode(true);
+                    confirmBtn.parentNode.replaceChild(newConfirmBtn, confirmBtn);
+
+                    const newCancelBtn = cancelBtn.cloneNode(true);
+                    cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
+
+                    newConfirmBtn.addEventListener('click', function() {
+                        modal.hide();
+                        // Wait for modal to fully hide before resolving
+                        setTimeout(() => {
+                            modal.dispose();
+                            resolve(true);
+                        }, 300);
+                    });
+
+                    newCancelBtn.addEventListener('click', function() {
+                        modal.hide();
+                        // Wait for modal to fully hide before resolving
+                        setTimeout(() => {
+                            modal.dispose();
+                            resolve(false);
+                        }, 300);
+                    });
+
+                    modal.show();
+                } else {
+                    // Buttons not found, fallback to browser confirm
+                    console.warn('Modal buttons not found, using fallback confirm dialog');
+                    modal.dispose();
+                    resolve(confirm('Du är redan anmäld. Vill du uppdatera din anmälan med de nya klasserna?'));
+                }
+            });
+        } else {
+            // Modal not found - fallback to browser's native confirm dialog
+            console.warn('updateRegistrationConfirmModal not found in DOM, using fallback confirm dialog');
+            confirmed = confirm('Du är redan anmäld. Vill du uppdatera din anmälan med de nya klasserna?');
+        }
 
         if (!confirmed) {
             submitBtn.disabled = false;
@@ -744,11 +776,14 @@ async function submitRegistrationForm() {
     } catch (error) {
         // Network error - restore button
         console.error('Registration error:', error);
-        if (submitBtn) {
-            submitBtn.disabled = false;
-            submitBtn.innerHTML = '<i class="bi bi-person-plus"></i> Anmäl';
-        }
+        resetButton();
         alert('Ett fel uppstod vid anmälan. Försök igen.');
+    }
+    } catch (outerError) {
+        // Catch any unexpected errors (including modal errors) and reset button
+        console.error('Unexpected registration error:', outerError);
+        resetButton();
+        alert('Ett oväntat fel uppstod. Försök igen.');
     }
 }
 
@@ -839,7 +874,12 @@ function openPreferenceModal(classId, className, classGroup) {
     document.getElementById('startPreference').value = existingPreference;
 
     // Show modal
-    new bootstrap.Modal(document.getElementById('preferenceModal')).show();
+    const preferenceModalEl = document.getElementById('preferenceModal');
+    if (preferenceModalEl) {
+        new bootstrap.Modal(preferenceModalEl).show();
+    } else {
+        console.warn('preferenceModal not found');
+    }
 }
 
 function savePreferences() {
@@ -908,16 +948,25 @@ function showSwishPaymentModalForMember(competitionId, targetMemberId) {
 
 // Show Swish payment modal with QR code
 function showSwishPaymentModal(competitionId, targetMemberId = '') {
-    const modal = new bootstrap.Modal(document.getElementById('swishPaymentModal'));
+    const swishModalEl = document.getElementById('swishPaymentModal');
+    if (!swishModalEl) {
+        console.warn('swishPaymentModal not found');
+        alert('Swish-betalning är inte tillgänglig just nu.');
+        return;
+    }
+
+    const modal = new bootstrap.Modal(swishModalEl);
     const modalBody = document.getElementById('swishPaymentModalBody');
 
     // Show loading spinner
-    modalBody.innerHTML = `
-        <div class="spinner-border text-primary" role="status">
-            <span class="visually-hidden">Laddar QR-kod...</span>
-        </div>
-        <p class="mt-2">Laddar betalningsinformation...</p>
-    `;
+    if (modalBody) {
+        modalBody.innerHTML = `
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Laddar QR-kod...</span>
+            </div>
+            <p class="mt-2">Laddar betalningsinformation...</p>
+        `;
+    }
 
     modal.show();
 
@@ -1505,8 +1554,13 @@ function showRegistrationTargetError(message) {
         }
 
         // Show the login required modal
-        const loginRequiredModal = new bootstrap.Modal(document.getElementById('loginRequiredModal'));
-        loginRequiredModal.show();
+        const loginRequiredModalEl = document.getElementById('loginRequiredModal');
+        if (loginRequiredModalEl) {
+            const loginRequiredModal = new bootstrap.Modal(loginRequiredModalEl);
+            loginRequiredModal.show();
+        } else {
+            alert('Du måste vara inloggad för att anmäla dig.');
+        }
     } else {
         // For other errors, show alert
         alert('Registration Error: ' + message);
@@ -1775,11 +1829,32 @@ function initializeButtonStateManagement() {
 
 // Show confirmation dialog for updating an existing registration
 function showUpdateConfirmationDialog(classId, callback) {
-    const modal = new bootstrap.Modal(document.getElementById('updateRegistrationConfirmModal'));
-    document.getElementById('existingClassName').textContent = classId;
+    const modalElement = document.getElementById('updateRegistrationConfirmModal');
+
+    // Fallback to native confirm if modal not found
+    if (!modalElement) {
+        console.warn('updateRegistrationConfirmModal not found, using native confirm');
+        const confirmed = confirm(`Du är redan anmäld i ${classId}. Vill du uppdatera din anmälan?`);
+        callback(confirmed);
+        return;
+    }
+
+    const modal = new bootstrap.Modal(modalElement);
+
+    const existingClassNameEl = document.getElementById('existingClassName');
+    if (existingClassNameEl) {
+        existingClassNameEl.textContent = classId;
+    }
 
     const confirmBtn = document.getElementById('confirmUpdateBtn');
     const cancelBtn = document.getElementById('cancelUpdateBtn');
+
+    if (!confirmBtn || !cancelBtn) {
+        console.warn('Modal buttons not found, using native confirm');
+        const confirmed = confirm(`Du är redan anmäld i ${classId}. Vill du uppdatera din anmälan?`);
+        callback(confirmed);
+        return;
+    }
 
     const newConfirmBtn = confirmBtn.cloneNode(true);
     confirmBtn.parentNode.replaceChild(newConfirmBtn, confirmBtn);
@@ -1802,16 +1877,38 @@ function showUpdateConfirmationDialog(classId, callback) {
 
 // Show confirmation dialog for replacing an existing registration with new class
 function showReplaceConfirmationDialog(existingClass, newClass, callback) {
-    const modal = new bootstrap.Modal(document.getElementById('replaceRegistrationConfirmModal'));
+    const modalElement = document.getElementById('replaceRegistrationConfirmModal');
 
-    // Set class names in all placeholders
-    document.getElementById('replaceExistingClassName').textContent = existingClass;
-    document.getElementById('replaceNewClassName').textContent = newClass;
-    document.getElementById('replaceOldClassNameAlert').textContent = existingClass;
-    document.getElementById('replaceNewClassNameAlert').textContent = newClass;
+    // Fallback to native confirm if modal not found
+    if (!modalElement) {
+        console.warn('replaceRegistrationConfirmModal not found, using native confirm');
+        const confirmed = confirm(`Du är redan anmäld i ${existingClass}. Vill du ersätta den med ${newClass}?`);
+        callback(confirmed);
+        return;
+    }
+
+    const modal = new bootstrap.Modal(modalElement);
+
+    // Set class names in all placeholders (with null checks)
+    const replaceExistingEl = document.getElementById('replaceExistingClassName');
+    const replaceNewEl = document.getElementById('replaceNewClassName');
+    const replaceOldAlertEl = document.getElementById('replaceOldClassNameAlert');
+    const replaceNewAlertEl = document.getElementById('replaceNewClassNameAlert');
+
+    if (replaceExistingEl) replaceExistingEl.textContent = existingClass;
+    if (replaceNewEl) replaceNewEl.textContent = newClass;
+    if (replaceOldAlertEl) replaceOldAlertEl.textContent = existingClass;
+    if (replaceNewAlertEl) replaceNewAlertEl.textContent = newClass;
 
     const confirmBtn = document.getElementById('confirmReplaceBtn');
     const cancelBtn = document.getElementById('cancelReplaceBtn');
+
+    if (!confirmBtn || !cancelBtn) {
+        console.warn('Replace modal buttons not found, using native confirm');
+        const confirmed = confirm(`Du är redan anmäld i ${existingClass}. Vill du ersätta den med ${newClass}?`);
+        callback(confirmed);
+        return;
+    }
 
     // Clone buttons to remove old event listeners
     const newConfirmBtn = confirmBtn.cloneNode(true);
