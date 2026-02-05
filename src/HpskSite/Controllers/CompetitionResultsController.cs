@@ -1033,9 +1033,10 @@ namespace HpskSite.Controllers
                 using var db = _umbracoDatabaseFactory.CreateDatabase();
                 using var transaction = db.GetTransaction();
 
+                // Note: TeamNumber removed from query - table doesn't have this column after identity-based refactoring
                 var existingSession = await db.FirstOrDefaultAsync<ResultEntrySession>(
-                    "WHERE CompetitionId = @0 AND TeamNumber = @1 AND Position = @2 AND SeriesNumber = @3",
-                    request.CompetitionId, request.TeamNumber, request.Position, request.SeriesNumber);
+                    "WHERE CompetitionId = @0 AND Position = @1 AND SeriesNumber = @2",
+                    request.CompetitionId, request.Position, request.SeriesNumber);
 
                 var now = DateTime.Now;
 
@@ -1081,9 +1082,10 @@ namespace HpskSite.Controllers
             {
                 using var db = _umbracoDatabaseFactory.CreateDatabase();
 
+                // Note: TeamNumber removed from query - table doesn't have this column after identity-based refactoring
                 return await db.FirstOrDefaultAsync<ResultEntrySession>(
-                    "WHERE CompetitionId = @0 AND TeamNumber = @1 AND Position = @2 AND SeriesNumber = @3 AND IsActive = 1",
-                    request.CompetitionId, request.TeamNumber, request.Position, request.SeriesNumber);
+                    "WHERE CompetitionId = @0 AND Position = @1 AND SeriesNumber = @2 AND IsActive = 1",
+                    request.CompetitionId, request.Position, request.SeriesNumber);
             }
             catch (Exception ex)
             {

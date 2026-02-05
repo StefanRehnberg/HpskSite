@@ -919,9 +919,10 @@ function loadClubCompetitions() {
         .then(response => response.json())
         .then(data => {
             if (data.success) {
-                // Filter for club-specific competitions only
+                // Filter for competitions belonging to this club (regardless of isClubOnly setting)
+                // Club admins need to manage all their club's competitions
                 const clubCompetitions = (data.data || []).filter(comp =>
-                    comp.clubId === clubId && comp.isClubOnly === true
+                    comp.clubId === clubId
                 );
                 displayClubCompetitions(clubCompetitions);
             } else {

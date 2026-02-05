@@ -1,6 +1,7 @@
 using HpskSite.Services;
 using HpskSite.Shared.DTOs;
 using HpskSite.Shared.Models;
+using HpskSite.Shared.Services;
 using AddGuestRequest = HpskSite.Shared.DTOs.AddGuestRequest;
 using AddGuestResponse = HpskSite.Shared.DTOs.AddGuestResponse;
 using HpskSite.CompetitionTypes.Precision.Services;
@@ -1532,21 +1533,22 @@ namespace HpskSite.Controllers.Api
                         {
                             var series = JsonSerializer.Deserialize<List<TrainingSeries>>(score.SeriesScores ?? "[]");
                             var limitedSeries = series?.Take(effectiveLimit).ToList() ?? new List<TrainingSeries>();
-                            int rawScore = limitedSeries.Sum(s => s.Total);
-                            int effectiveSeriesCount = Math.Min(series?.Count ?? 0, effectiveLimit);
+                            int effectiveSeriesCount = limitedSeries.Count;
+
+                            // Use ResultCalculator for correct raw total (each series capped at 50)
+                            int rawScore = ResultCalculator.CalculateRawTotal(limitedSeries);
 
                             // Determine participant key (positive for members, negative for guests)
                             int participantKey = score.MemberId ?? -(score.GuestParticipantId ?? 0);
 
                             // Calculate adjusted score with handicap (if match has handicap)
+                            // Uses per-series capping: each series is adjusted and clamped to 0-50 before summing
                             int adjustedScore = rawScore;
                             if (match.HasHandicap && handicapLookup.TryGetValue(participantKey, out var hcp))
                             {
                                 // Round handicap to quarter points
-                                var roundedHcp = Math.Round(hcp * 4) / 4;
-                                var handicapTotal = roundedHcp * effectiveSeriesCount;
-                                var maxPossible = 50 * effectiveSeriesCount;
-                                adjustedScore = Math.Min((int)Math.Round(rawScore + handicapTotal), maxPossible);
+                                var roundedHcp = (decimal)(Math.Round(hcp * 4) / 4);
+                                adjustedScore = ResultCalculator.CalculateAdjustedTotal(limitedSeries, roundedHcp);
                             }
 
                             equalizedScores.Add((participantKey, adjustedScore, rawScore, effectiveSeriesCount));

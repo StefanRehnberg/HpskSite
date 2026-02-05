@@ -27,12 +27,23 @@ namespace HpskSite.CompetitionTypes.Precision.Services
         decimal GetSeriesFinalScore(decimal rawSeriesScore, decimal handicapPerSeries);
 
         /// <summary>
+        /// Calculate total final score for a match using individual series scores.
+        /// This method correctly applies per-series capping (each series clamped to 0-50 after handicap).
+        /// </summary>
+        /// <param name="seriesScores">Individual series scores implementing ISeriesScore</param>
+        /// <param name="handicapPerSeries">The handicap bonus per series</param>
+        /// <returns>Final score with handicap applied per-series with proper capping</returns>
+        int GetMatchFinalScore(IEnumerable<ISeriesScore> seriesScores, decimal handicapPerSeries);
+
+        /// <summary>
         /// Calculate total final score for a match.
+        /// DEPRECATED: Use the overload with series scores for accurate per-series capping.
         /// </summary>
         /// <param name="rawTotal">Total raw score across all series</param>
         /// <param name="handicapPerSeries">The handicap bonus per series</param>
         /// <param name="seriesCount">Number of series completed</param>
         /// <returns>Final score (raw + total handicap)</returns>
+        [Obsolete("Use overload with series scores for accurate per-series capping")]
         decimal GetMatchFinalScore(decimal rawTotal, decimal handicapPerSeries, int seriesCount);
 
         /// <summary>
@@ -142,9 +153,26 @@ namespace HpskSite.CompetitionTypes.Precision.Services
         }
 
         /// <summary>
+        /// Calculate total final score for a match using individual series scores.
+        /// This method correctly applies per-series capping (each series clamped to 0-50 after handicap).
+        /// </summary>
+        /// <param name="seriesScores">Individual series scores implementing ISeriesScore</param>
+        /// <param name="handicapPerSeries">The handicap bonus per series</param>
+        /// <returns>Final score with handicap applied per-series with proper capping</returns>
+        public int GetMatchFinalScore(IEnumerable<ISeriesScore> seriesScores, decimal handicapPerSeries)
+        {
+            return ResultCalculator.CalculateAdjustedTotal(seriesScores, handicapPerSeries);
+        }
+
+        /// <summary>
         /// Calculate total final score for a match.
         /// Delegates to ResultCalculator for consistent calculation across server and mobile.
         /// </summary>
+        /// <remarks>
+        /// DEPRECATED: This method assumes average distribution across series, which is not accurate
+        /// for high-scoring shooters. Use the overload that accepts IEnumerable&lt;ISeriesScore&gt; instead.
+        /// </remarks>
+        [Obsolete("Use overload with series scores for accurate per-series capping. This method assumes average distribution which is incorrect for high-scoring shooters.")]
         public decimal GetMatchFinalScore(decimal rawTotal, decimal handicapPerSeries, int seriesCount)
         {
             return ResultCalculator.CalculateAdjustedMatchTotal(

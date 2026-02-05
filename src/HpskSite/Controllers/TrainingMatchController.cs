@@ -12,10 +12,14 @@ using HpskSite.Models.ViewModels.TrainingScoring;
 using HpskSite.Hubs;
 using HpskSite.CompetitionTypes.Precision.Services;
 using HpskSite.Services;
+using HpskSite.Shared.Services;
 using QRCoder;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Png;
 using System.Text.Json;
+
+// Alias for the Shared.Models.TrainingSeries that implements ISeriesScore
+using SharedTrainingSeries = HpskSite.Shared.Models.TrainingSeries;
 
 namespace HpskSite.Controllers
 {
@@ -426,6 +430,7 @@ namespace HpskSite.Controllers
                         }
 
                         var scoreList = new List<object>();
+                        List<SharedTrainingSeries>? seriesList = null;
                         if (scoreRow != null)
                         {
                             // Parse series scores JSON to get individual series
@@ -434,7 +439,7 @@ namespace HpskSite.Controllers
                             {
                                 try
                                 {
-                                    var seriesList = JsonSerializer.Deserialize<List<TrainingSeries>>(seriesJson);
+                                    seriesList = JsonSerializer.Deserialize<List<SharedTrainingSeries>>(seriesJson);
                                     if (seriesList != null)
                                     {
                                         foreach (var s in seriesList)
@@ -460,16 +465,18 @@ namespace HpskSite.Controllers
                         // Get frozen handicap data
                         decimal? frozenHandicap = p.FrozenHandicapPerSeries != null ? (decimal?)p.FrozenHandicapPerSeries : null;
                         bool? frozenIsProvisional = p.FrozenIsProvisional != null ? (bool?)p.FrozenIsProvisional : null;
-                        int rawTotalScore = scoreList.Sum(s => (int)((dynamic)s).total);
-                        int seriesCount = scoreList.Count;
+                        int seriesCount = seriesList?.Count ?? 0;
+                        int rawTotalScore = seriesList != null ? ResultCalculator.CalculateRawTotal(seriesList) : 0;
 
                         // Calculate final score with handicap overlay (if handicap enabled)
+                        // Uses per-series capping: each series is adjusted and clamped to 0-50 before summing
                         decimal? finalScore = null;
                         decimal? handicapTotal = null;
-                        if (hasHandicap && frozenHandicap.HasValue)
+                        if (hasHandicap && frozenHandicap.HasValue && seriesList != null)
                         {
-                            handicapTotal = frozenHandicap.Value * seriesCount;
-                            finalScore = _handicapCalculator.GetMatchFinalScore(rawTotalScore, frozenHandicap.Value, seriesCount);
+                            int adjustedTotal = ResultCalculator.CalculateAdjustedTotal(seriesList, frozenHandicap.Value);
+                            finalScore = adjustedTotal;
+                            handicapTotal = adjustedTotal - rawTotalScore;  // Actual handicap applied (may differ from theoretical due to per-series capping)
                         }
 
                         // Get team info
@@ -3170,7 +3177,7 @@ namespace HpskSite.Controllers
                         }
 
                         var scoreList = new List<object>();
-                        int rawTotalScore = 0;
+                        List<SharedTrainingSeries>? seriesList = null;
                         int seriesCount = 0;
                         if (scoreRow != null)
                         {
@@ -3179,7 +3186,7 @@ namespace HpskSite.Controllers
                             {
                                 try
                                 {
-                                    var seriesList = JsonSerializer.Deserialize<List<TrainingSeries>>(seriesJson);
+                                    seriesList = JsonSerializer.Deserialize<List<SharedTrainingSeries>>(seriesJson);
                                     if (seriesList != null)
                                     {
                                         foreach (var s in seriesList)
@@ -3195,7 +3202,6 @@ namespace HpskSite.Controllers
                                                 targetPhotoUrl = s.TargetPhotoUrl,
                                                 reactions = s.Reactions
                                             });
-                                            rawTotalScore += s.Total;
                                         }
                                         seriesCount = seriesList.Count;
                                     }
@@ -3204,13 +3210,17 @@ namespace HpskSite.Controllers
                             }
                         }
 
+                        int rawTotalScore = seriesList != null ? ResultCalculator.CalculateRawTotal(seriesList) : 0;
+
                         // Calculate final score with handicap overlay (if handicap enabled)
+                        // Uses per-series capping: each series is adjusted and clamped to 0-50 before summing
                         decimal? finalScore = null;
                         decimal? handicapTotal = null;
-                        if (hasHandicap && frozenHandicap.HasValue)
+                        if (hasHandicap && frozenHandicap.HasValue && seriesList != null)
                         {
-                            handicapTotal = frozenHandicap.Value * seriesCount;
-                            finalScore = _handicapCalculator.GetMatchFinalScore(rawTotalScore, frozenHandicap.Value, seriesCount);
+                            int adjustedTotal = ResultCalculator.CalculateAdjustedTotal(seriesList, frozenHandicap.Value);
+                            finalScore = adjustedTotal;
+                            handicapTotal = adjustedTotal - rawTotalScore;  // Actual handicap applied (may differ from theoretical due to per-series capping)
                         }
 
                         participantList.Add(new

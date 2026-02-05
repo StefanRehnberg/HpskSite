@@ -864,6 +864,233 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// Gets security status for a member (lockout status, failed login attempts, etc.)
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetMemberSecurityStatus(int memberId)
+        {
+            if (!await _authService.IsCurrentUserAdminAsync())
+            {
+                return Json(new { success = false, message = "Access denied" });
+            }
+
+            try
+            {
+                var member = _memberService.GetById(memberId);
+                if (member == null)
+                {
+                    return Json(new { success = false, message = "Member not found" });
+                }
+
+                // Get identity user
+                var identityUser = await _memberManager.FindByEmailAsync(member.Email ?? "");
+                if (identityUser == null)
+                {
+                    return Json(new { success = false, message = "Identity user not found" });
+                }
+
+                var isLockedOut = await _memberManager.IsLockedOutAsync(identityUser);
+                var lockoutEnd = identityUser.LockoutEnd;
+                var accessFailedCount = identityUser.AccessFailedCount;
+                var lastActive = member.GetValue<DateTime?>("lastActiveDate");
+                var hasPassword = !string.IsNullOrEmpty(identityUser.PasswordHash);
+
+                return Json(new
+                {
+                    success = true,
+                    data = new
+                    {
+                        memberId = memberId,
+                        memberName = member.Name ?? $"{member.GetValue("firstName")} {member.GetValue("lastName")}".Trim(),
+                        email = member.Email,
+                        isLockedOut = isLockedOut,
+                        lockoutEndUtc = lockoutEnd?.UtcDateTime,
+                        lockoutEndLocal = lockoutEnd.HasValue ? lockoutEnd.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm") : null,
+                        accessFailedCount = accessFailedCount,
+                        lastActiveDate = lastActive,
+                        lastActiveDisplay = FormatLastActive(lastActive),
+                        hasPassword = hasPassword,
+                        isApproved = member.IsApproved
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = "Error getting security status: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Unlocks a locked-out member
+        /// Members get locked out after too many failed login attempts
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> UnlockMember(int memberId)
+        {
+            if (!await _authService.IsCurrentUserAdminAsync())
+            {
+                return Json(new { success = false, message = "Access denied" });
+            }
+
+            try
+            {
+                var member = _memberService.GetById(memberId);
+                if (member == null)
+                {
+                    return Json(new { success = false, message = "Member not found" });
+                }
+
+                // Get identity user
+                var identityUser = await _memberManager.FindByEmailAsync(member.Email ?? "");
+                if (identityUser == null)
+                {
+                    return Json(new { success = false, message = "Identity user not found" });
+                }
+
+                // Check if actually locked out
+                var isLockedOut = await _memberManager.IsLockedOutAsync(identityUser);
+                if (!isLockedOut)
+                {
+                    return Json(new { success = true, message = "Member is not locked out" });
+                }
+
+                // Unlock the member
+                await _memberManager.SetLockoutEndDateAsync(identityUser, null);
+                await _memberManager.ResetAccessFailedCountAsync(identityUser);
+
+                return Json(new { success = true, message = "Member unlocked successfully" });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = "Error unlocking member: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Sets a new password for a member (admin only)
+        /// This allows admins to directly set a password for members who can't receive emails
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetMemberPassword(int memberId, string newPassword)
+        {
+            if (!await _authService.IsCurrentUserAdminAsync())
+            {
+                return Json(new { success = false, message = "Access denied" });
+            }
+
+            try
+            {
+                // Validate password
+                if (string.IsNullOrEmpty(newPassword) || newPassword.Length < 6)
+                {
+                    return Json(new { success = false, message = "Password must be at least 6 characters" });
+                }
+
+                var member = _memberService.GetById(memberId);
+                if (member == null)
+                {
+                    return Json(new { success = false, message = "Member not found" });
+                }
+
+                // Get identity user
+                var identityUser = await _memberManager.FindByEmailAsync(member.Email ?? "");
+                if (identityUser == null)
+                {
+                    return Json(new { success = false, message = "Identity user not found" });
+                }
+
+                // Generate a reset token and use it to set the new password
+                var resetToken = await _memberManager.GeneratePasswordResetTokenAsync(identityUser);
+                var result = await _memberManager.ResetPasswordAsync(identityUser, resetToken, newPassword);
+
+                if (!result.Succeeded)
+                {
+                    var errors = string.Join(", ", result.Errors.Select(e => e.Description));
+                    return Json(new { success = false, message = "Failed to set password: " + errors });
+                }
+
+                // Also unlock the account if it was locked
+                if (await _memberManager.IsLockedOutAsync(identityUser))
+                {
+                    await _memberManager.SetLockoutEndDateAsync(identityUser, null);
+                    await _memberManager.ResetAccessFailedCountAsync(identityUser);
+                }
+
+                Console.WriteLine($"[SetMemberPassword] Password set for member {member.Email} by admin");
+
+                return Json(new { success = true, message = "Password set successfully" });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[SetMemberPassword] Error: {ex.Message}");
+                return Json(new { success = false, message = "Error setting password: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Sends a password reset email to a member (admin-triggered)
+        /// This allows admins to help members who have forgotten their password
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SendPasswordResetAdmin(int memberId)
+        {
+            if (!await _authService.IsCurrentUserAdminAsync())
+            {
+                return Json(new { success = false, message = "Access denied" });
+            }
+
+            try
+            {
+                var member = _memberService.GetById(memberId);
+                if (member == null)
+                {
+                    return Json(new { success = false, message = "Member not found" });
+                }
+
+                if (string.IsNullOrEmpty(member.Email))
+                {
+                    return Json(new { success = false, message = "Member has no email address" });
+                }
+
+                // Get identity user
+                var identityUser = await _memberManager.FindByEmailAsync(member.Email);
+                if (identityUser == null)
+                {
+                    return Json(new { success = false, message = "Identity user not found" });
+                }
+
+                // Generate password reset token
+                var resetToken = await _memberManager.GeneratePasswordResetTokenAsync(identityUser);
+
+                // Store token with expiry (24 hours)
+                var tokenExpiry = DateTime.UtcNow.AddHours(24);
+                member.SetValue("passwordResetToken", resetToken);
+                member.SetValue("passwordResetTokenExpiry", tokenExpiry.ToString("o"));
+                _memberService.Save(member);
+
+                // Send password reset email
+                var memberName = member.Name ?? $"{member.GetValue("firstName")} {member.GetValue("lastName")}".Trim();
+                await _emailService.SendPasswordResetEmailAsync(
+                    member.Email,
+                    memberName,
+                    resetToken
+                );
+
+                Console.WriteLine($"[SendPasswordResetAdmin] Password reset email sent to {member.Email} by admin");
+
+                return Json(new { success = true, message = "Password reset email sent successfully" });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[SendPasswordResetAdmin] Error: {ex.Message}");
+                return Json(new { success = false, message = "Error sending password reset: " + ex.Message });
+            }
+        }
+
+        /// <summary>
         /// Gets all available member groups
         /// </summary>
         [HttpGet]

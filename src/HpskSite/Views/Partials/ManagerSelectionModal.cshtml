@@ -36,7 +36,7 @@
                 <!-- Selected Managers Section -->
                 <div class="mb-3" id="selectedManagersSection" style="display: none;">
                     <label class="form-label fw-bold">Valda tävlingsledare (<span id="selectedManagerCount">0</span>)</label>
-                    <div id="selectedManagersList" class="d-flex flex-wrap gap-2 p-2 bg-light rounded">
+                    <div id="selectedManagersList" class="d-flex flex-wrap gap-2 p-2 rounded">
                         <!-- Selected managers appear here as removable badges -->
                     </div>
                 </div>
@@ -75,10 +75,10 @@
 </div>
 
 <style>
-/* Manager Selection Modal Styles */
+/* Manager Selection Modal Styles - Dark/Light mode compatible */
 #managerSelectionModal .member-list-item {
     padding: 0.75rem;
-    border-bottom: 1px solid #dee2e6;
+    border-bottom: 1px solid var(--bs-border-color);
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -86,7 +86,7 @@
 }
 
 #managerSelectionModal .member-list-item:hover {
-    background-color: #f8f9fa;
+    background-color: var(--bs-tertiary-bg);
 }
 
 #managerSelectionModal .member-list-item:last-child {
@@ -99,16 +99,16 @@
 
 #managerSelectionModal .member-name {
     font-weight: 500;
-    color: #212529;
+    color: var(--bs-body-color);
 }
 
 #managerSelectionModal .member-club {
     font-size: 0.875rem;
-    color: #6c757d;
+    color: var(--bs-secondary-color);
 }
 
 #managerSelectionModal .manager-badge {
-    background-color: #0d6efd;
+    background-color: var(--bs-primary);
     color: white;
     padding: 0.5rem 0.75rem;
     border-radius: 0.375rem;
@@ -135,6 +135,17 @@
     opacity: 1;
 }
 
+/* Selected managers section - use theme-aware background */
+#managerSelectionModal #selectedManagersList {
+    background-color: var(--bs-tertiary-bg) !important;
+}
+
+/* Member list container */
+#managerSelectionModal .member-list {
+    background-color: var(--bs-body-bg);
+    border-color: var(--bs-border-color) !important;
+}
+
 /* Mobile responsive */
 @@media (max-width: 768px) {
     #managerSelectionModal .member-list-item {
@@ -153,6 +164,7 @@
 // Manager Selection State
 let managerSelectionState = {
     allMembers: [],
+    allClubs: [],
     selectedManagerIds: [],
     filteredMembers: [],
     selectedClubId: '' // For club filter
@@ -165,6 +177,11 @@ function openManagerSelectionModal() {
     managerSelectionState.selectedManagerIds = currentIds
         ? currentIds.split(',').map(id => parseInt(id)).filter(id => !isNaN(id))
         : [];
+
+    // Load clubs if not already loaded
+    if (managerSelectionState.allClubs.length === 0) {
+        loadClubsForManagerFilter();
+    }
 
     // Load members if not already loaded
     if (managerSelectionState.allMembers.length === 0) {
@@ -180,6 +197,44 @@ function openManagerSelectionModal() {
     modal.show();
 }
 
+// Load all clubs for the filter dropdown
+function loadClubsForManagerFilter() {
+    fetch('/umbraco/surface/ClubAdmin/GetClubsForRegistration')
+        .then(response => response.json())
+        .then(data => {
+            const clubs = data.clubs || data.data || [];
+            if (data.success && Array.isArray(clubs)) {
+                // Sort clubs using Swedish locale
+                managerSelectionState.allClubs = clubs.sort((a, b) =>
+                    a.name.localeCompare(b.name, 'sv-SE')
+                );
+                populateClubFilterFromApi();
+            }
+        })
+        .catch(error => {
+            console.error('Error loading clubs for filter:', error);
+            // Fallback: populate from members if API fails
+            populateClubFilterFromMembers();
+        });
+}
+
+// Populate club filter from API data
+function populateClubFilterFromApi() {
+    const clubFilterSelect = document.getElementById('clubFilterSelect');
+    if (!clubFilterSelect) return;
+
+    // Clear existing options except "Alla klubbar"
+    clubFilterSelect.innerHTML = '<option value="">Alla klubbar</option>';
+
+    // Add club options
+    managerSelectionState.allClubs.forEach(club => {
+        const option = document.createElement('option');
+        option.value = club.id;
+        option.textContent = club.name;
+        clubFilterSelect.appendChild(option);
+    });
+}
+
 // Load all members
 function loadMembersForManagerSelection() {
     fetch('/umbraco/surface/MemberAdmin/GetMembers', {
@@ -191,8 +246,12 @@ function loadMembersForManagerSelection() {
     .then(response => response.json())
     .then(data => {
         if (data.success && data.data) {
+            // Handle paginated response format: data.data.items (from GetMembers endpoint)
+            // or direct array format: data.data (legacy)
+            const members = Array.isArray(data.data) ? data.data : (data.data.items || []);
+
             // Map the response to expected format with name and club fields
-            managerSelectionState.allMembers = data.data.map(member => ({
+            managerSelectionState.allMembers = members.map(member => ({
                 id: member.id,
                 name: `${member.firstName || ''} ${member.lastName || ''}`.trim() || member.email,
                 clubId: member.primaryClubId || '',
@@ -200,8 +259,10 @@ function loadMembersForManagerSelection() {
             }));
             managerSelectionState.filteredMembers = managerSelectionState.allMembers;
 
-            // Populate club filter dropdown
-            populateClubFilter();
+            // Populate club filter from members only if API didn't load clubs
+            if (managerSelectionState.allClubs.length === 0) {
+                populateClubFilterFromMembers();
+            }
 
             renderManagerMembersList();
             updateSelectedManagersDisplay();
@@ -215,19 +276,19 @@ function loadMembersForManagerSelection() {
     });
 }
 
-// Populate club filter dropdown with unique clubs
-function populateClubFilter() {
+// Fallback: Populate club filter from members (only clubs that have members)
+function populateClubFilterFromMembers() {
     const clubFilterSelect = document.getElementById('clubFilterSelect');
     if (!clubFilterSelect) return;
 
-    // Get unique clubs (sorted by name)
+    // Get unique clubs from members (sorted using Swedish locale)
     const uniqueClubs = [...new Map(
         managerSelectionState.allMembers
             .filter(m => m.clubId) // Only members with clubs
             .map(m => [m.clubId, m.clubName])
     ).entries()]
         .map(([id, name]) => ({ id, name }))
-        .sort((a, b) => a.name.localeCompare(b.name));
+        .sort((a, b) => a.name.localeCompare(b.name, 'sv-SE'));
 
     // Clear existing options except "Alla klubbar"
     clubFilterSelect.innerHTML = '<option value="">Alla klubbar</option>';

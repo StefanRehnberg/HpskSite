@@ -586,18 +586,16 @@ window.setFieldValue = function(fieldId, value) {
         // Trigger change event to force UI update
         element.dispatchEvent(new Event('change', { bubbles: true }));
         element.dispatchEvent(new Event('input', { bubbles: true }));
-    } else {
-        console.error(`Field ${fieldId} not found!`);
     }
+    // Silently ignore missing fields - they may be optional in different contexts
 }
 
 window.setCheckboxValue = function(fieldId, checked) {
     const element = document.getElementById(fieldId);
     if (element) {
         element.checked = checked;
-    } else {
-        console.error(`Checkbox ${fieldId} not found!`);
     }
+    // Silently ignore missing checkboxes - they may be optional in different contexts
 }
 
 window.formatDateForInput = function(dateStr, includeTime = true) {
@@ -994,19 +992,32 @@ function ensureClubsLoaded() {
 
 function loadClubsForSelector() {
     const clubSelect = document.getElementById('clubId');
+    const helpText = clubSelect.parentElement.querySelector('small');
 
-    fetch('/umbraco/surface/CompetitionAdmin/GetClubsList')
-        .then(response => response.json())
+    // Use ClubAdmin endpoint which supports both regional and root-level club structures
+    fetch('/umbraco/surface/ClubAdmin/GetClubsForRegistration')
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            return response.json();
+        })
         .then(data => {
-            if (data.success && data.data && Array.isArray(data.data)) {
+            // GetClubsForRegistration returns { success: true, clubs: [...] }
+            const clubs = data.clubs || data.data || [];
+
+            if (data.success && Array.isArray(clubs) && clubs.length > 0) {
                 // Clear loading message
-                clubSelect.parentElement.querySelector('small').style.display = 'none';
+                helpText.style.display = 'none';
+
+                // Sort clubs using Swedish locale (handles Ö, Ä, Å correctly)
+                clubs.sort((a, b) => a.name.localeCompare(b.name, 'sv-SE'));
 
                 // Populate clubs
-                data.data.forEach(club => {
+                clubs.forEach(club => {
                     const option = document.createElement('option');
                     option.value = club.id;
-                    option.textContent = club.name + (club.city ? ` (${club.city})` : '');
+                    option.textContent = club.name;
                     clubSelect.appendChild(option);
                 });
 
@@ -1015,15 +1026,18 @@ function loadClubsForSelector() {
                 if (currentClubId && currentClubId !== '0') {
                     clubSelect.value = currentClubId;
                 }
+            } else if (data.success && clubs.length === 0) {
+                helpText.textContent = 'Inga klubbar finns registrerade';
+                helpText.classList.add('text-warning');
             } else {
-                clubSelect.parentElement.querySelector('small').textContent = 'Kunde inte ladda klubbar';
-                clubSelect.parentElement.querySelector('small').classList.add('text-danger');
+                helpText.textContent = data.message || 'Kunde inte ladda klubbar';
+                helpText.classList.add('text-danger');
             }
         })
         .catch(error => {
             console.error('Error loading clubs:', error);
-            clubSelect.parentElement.querySelector('small').textContent = 'Fel vid hämtning av klubbar';
-            clubSelect.parentElement.querySelector('small').classList.add('text-danger');
+            helpText.textContent = 'Fel vid hämtning av klubbar';
+            helpText.classList.add('text-danger');
         });
 }
 

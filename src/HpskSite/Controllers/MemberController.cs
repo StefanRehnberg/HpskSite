@@ -920,6 +920,14 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = $"Kunde inte återställa lösenordet: {errors}" });
                 }
 
+                // IMPORTANT: Explicitly unlock the user after successful password reset
+                // ResetPasswordAsync does NOT automatically reset the lockout counter
+                if (await _memberManager.IsLockedOutAsync(identityUser))
+                {
+                    await _memberManager.SetLockoutEndDateAsync(identityUser, null);
+                }
+                await _memberManager.ResetAccessFailedCountAsync(identityUser);
+
                 // Clear token after successful reset (single-use token)
                 member.SetValue("passwordResetToken", string.Empty);
                 member.SetValue("passwordResetTokenExpiry", string.Empty);
