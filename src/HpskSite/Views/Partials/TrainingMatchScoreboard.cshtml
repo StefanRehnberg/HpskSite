@@ -68,6 +68,10 @@
                 </div>
                 <span id="spectatorCount" class="badge bg-body-secondary text-primary">0</span>
             </div>
+            <!-- Pending Approvals Indicator (organizer only, for closed matches) -->
+            <span id="pendingApprovalsIndicator" class="badge bg-warning text-dark" style="display: none; cursor: pointer;" onclick="showPendingRequestsListModal()" title="Väntande förfrågningar">
+                <i class="bi bi-person-plus me-1"></i><span id="pendingApprovalsCount">0</span> väntar
+            </span>
             <div class="btn-group" id="matchActionButtons">
                 <!-- Settings button (creator only) -->
                 <button type="button" class="btn btn-light" id="matchSettingsBtn" onclick="showMatchSettingsModal()" title="Inställningar" style="display:none; font-size: 1.25rem; padding: 0.25rem 0.5rem;">

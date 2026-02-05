@@ -167,6 +167,98 @@ Location: `src/HpskSite/Controllers/TrainingMatchController.cs`
 
 The leaderboard calculation in `GetMatchHistory` uses the same per-series clamping logic.
 
+## Single Source of Truth Architecture
+
+**CRITICAL PRINCIPLE:** All handicap calculations MUST use `ResultCalculator` as the single source of truth. This ensures consistency across all platforms and prevents calculation discrepancies.
+
+### Why This Matters
+
+The handicap calculation involves several nuances:
+- Per-series capping (0-50 range)
+- Specific rounding behavior (`MidpointRounding.AwayFromZero`)
+- Order of operations (cap raw score → add handicap → round → clamp)
+
+Having multiple implementations leads to subtle bugs that are hard to debug.
+
+### Server-Side: Always Use ResultCalculator
+
+All server-side calculations MUST call `ResultCalculator` methods:
+
+```csharp
+using HpskSite.Shared.Services;
+
+// Correct: Use ResultCalculator directly
+int adjustedTotal = ResultCalculator.CalculateAdjustedTotal(seriesList, handicapPerSeries);
+
+// Also correct: Use HandicapCalculator (which delegates to ResultCalculator)
+int adjustedTotal = _handicapCalculator.GetMatchFinalScore(seriesList, handicapPerSeries);
+
+// WRONG: Using deprecated method that assumes average distribution
+decimal adjustedTotal = _handicapCalculator.GetMatchFinalScore(rawTotal, handicapPerSeries, seriesCount);
+```
+
+### Client-Side: Use Server-Calculated Values
+
+For historical/completed matches displayed in JavaScript, **always use the server-calculated values** rather than recalculating on the client.
+
+**Correct Pattern (use server values):**
+```javascript
+function getFinalScore(participant) {
+    // Server provides finalScore calculated by ResultCalculator.CalculateAdjustedTotal()
+    if (match.hasHandicap && participant.finalScore !== null && participant.finalScore !== undefined) {
+        return participant.finalScore;
+    }
+    return participant.totalScore ?? 0;
+}
+```
+
+**Wrong Pattern (client recalculation):**
+```javascript
+// DON'T recalculate on client for historical matches
+function calculateFinalScore(participant) {
+    // This could diverge from server calculation!
+    return participant.totalScore + (handicapPerSeries * seriesCount);
+}
+```
+
+### Exception: Live Scoreboard
+
+The **live scoreboard** (`TrainingMatchScoreboard.cshtml`) is the only place where client-side calculation is acceptable. This is because:
+
+1. Real-time updates require immediate recalculation
+2. Server hasn't saved/calculated the values yet
+3. The JavaScript implementation **exactly mirrors** `ResultCalculator`
+
+The live scoreboard's `calculateAdjustedTotalWithCap()` function must remain synchronized with `ResultCalculator.CalculateAdjustedTotal()`. Any changes to the calculation algorithm must be updated in **both** locations.
+
+### API Response Contract
+
+API endpoints that return match data MUST include:
+- `totalScore` - Raw total (sum of series without handicap)
+- `finalScore` - Adjusted total (calculated by `ResultCalculator.CalculateAdjustedTotal()`)
+- `handicapTotal` - Effective handicap applied (`finalScore - totalScore`)
+
+Controllers that return this data:
+- `TrainingMatchController.GetLeaderboard()`
+- `TrainingMatchController.ViewMatchAsSpectator()`
+- `MatchApiController.EnrichMatchHistoryItems()`
+
+### Deprecated Methods
+
+The following methods are deprecated and should NOT be used:
+
+```csharp
+// DEPRECATED - assumes average distribution across series
+[Obsolete("Use overload with series scores for accurate per-series capping")]
+decimal GetMatchFinalScore(decimal rawTotal, decimal handicapPerSeries, int seriesCount);
+
+// DEPRECATED - same issue
+[Obsolete("Use CalculateAdjustedTotal<T> for accurate per-series capping")]
+int CalculateAdjustedMatchTotal(int rawTotal, decimal handicapPerSeries, int seriesCount);
+```
+
+Always use the generic versions that accept `IEnumerable<ISeriesScore>`.
+
 ## Display Format
 
 ### Scoreboard Total Row
@@ -234,6 +326,12 @@ All implementations use:
 
 ## History
 
+- **2026-02-05**: Established single-source-of-truth architecture - all calculations must use `ResultCalculator`
+  - Fixed `TrainingMatchController.GetLeaderboard()` and `ViewMatchAsSpectator()` to use `ResultCalculator.CalculateAdjustedTotal()`
+  - Fixed `MatchApiController.EnrichMatchHistoryItems()` to use `ResultCalculator`
+  - Updated `TrainingMatch.cshtml` to use server-calculated values instead of client-side recalculation
+  - Added new `IHandicapCalculator.GetMatchFinalScore(IEnumerable<ISeriesScore>, decimal)` method
+  - Marked old `GetMatchFinalScore(decimal, decimal, int)` as obsolete
 - **2026-01-24**: Implemented per-series handicap capping (replaced old total-based calculation)
 - **Previous**: Used `FinalScore = RawTotal + (HandicapPerSeries × SeriesCount)` with total cap only
 

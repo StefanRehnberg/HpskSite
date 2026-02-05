@@ -465,16 +465,27 @@ namespace HpskSite.Controllers
                         // Get frozen handicap data
                         decimal? frozenHandicap = p.FrozenHandicapPerSeries != null ? (decimal?)p.FrozenHandicapPerSeries : null;
                         bool? frozenIsProvisional = p.FrozenIsProvisional != null ? (bool?)p.FrozenIsProvisional : null;
-                        int seriesCount = seriesList?.Count ?? 0;
-                        int rawTotalScore = seriesList != null ? ResultCalculator.CalculateRawTotal(seriesList) : 0;
+
+                        // Get max series count from match settings
+                        int? maxSeriesCount = GetMaxSeriesCount(match);
+
+                        // Limit series to maxSeriesCount if set, similar to mobile app and live scoreboard
+                        var effectiveSeries = seriesList;
+                        if (maxSeriesCount.HasValue && maxSeriesCount.Value > 0 && seriesList != null)
+                        {
+                            effectiveSeries = seriesList.Take(maxSeriesCount.Value).ToList();
+                        }
+
+                        int seriesCount = effectiveSeries?.Count ?? 0;
+                        int rawTotalScore = effectiveSeries != null ? ResultCalculator.CalculateRawTotal(effectiveSeries) : 0;
 
                         // Calculate final score with handicap overlay (if handicap enabled)
                         // Uses per-series capping: each series is adjusted and clamped to 0-50 before summing
                         decimal? finalScore = null;
                         decimal? handicapTotal = null;
-                        if (hasHandicap && frozenHandicap.HasValue && seriesList != null)
+                        if (hasHandicap && frozenHandicap.HasValue && effectiveSeries != null)
                         {
-                            int adjustedTotal = ResultCalculator.CalculateAdjustedTotal(seriesList, frozenHandicap.Value);
+                            int adjustedTotal = ResultCalculator.CalculateAdjustedTotal(effectiveSeries, frozenHandicap.Value);
                             finalScore = adjustedTotal;
                             handicapTotal = adjustedTotal - rawTotalScore;  // Actual handicap applied (may differ from theoretical due to per-series capping)
                         }
@@ -2783,6 +2794,85 @@ namespace HpskSite.Controllers
                         return Json(new { success = false, message = "Du är redan med i matchen" });
                     }
 
+                    // Check if match is open - if so, join directly without approval
+                    bool isOpen = match.IsOpen != null && (bool)match.IsOpen;
+                    if (isOpen)
+                    {
+                        // Same logic as JoinMatch - add user directly as participant
+
+                        // Get current max display order
+                        var maxOrder = db.SingleOrDefault<int?>(
+                            "SELECT MAX(DisplayOrder) FROM TrainingMatchParticipants WHERE TrainingMatchId = @0",
+                            (int)match.Id) ?? -1;
+
+                        // Calculate frozen handicap if match has handicap enabled
+                        decimal? frozenHandicap = null;
+                        bool? frozenIsProvisional = null;
+                        bool hasHandicap = match.HasHandicap != null && (bool)match.HasHandicap;
+
+                        if (hasHandicap)
+                        {
+                            var shooterClass = member.GetValue<string>("precisionShooterClass");
+                            if (string.IsNullOrEmpty(shooterClass))
+                            {
+                                return Json(new
+                                {
+                                    success = false,
+                                    needsShooterClass = true,
+                                    message = "Du måste välja din skytteklass för att kunna gå med i en handicapmatch"
+                                });
+                            }
+
+                            try
+                            {
+                                var weaponClass = (string)match.WeaponClass;
+                                await _statisticsService.RecalculateFromHistoryAsync(member.Id, weaponClass);
+                                var stats = await _statisticsService.GetStatisticsAsync(member.Id, weaponClass);
+                                var profile = _handicapCalculator.CalculateHandicap(stats, shooterClass);
+                                frozenHandicap = profile.HandicapPerSeries;
+                                frozenIsProvisional = profile.IsProvisional;
+                            }
+                            catch { /* Continue without handicap if calculation fails */ }
+                        }
+
+                        // Add as participant directly
+                        db.Insert("TrainingMatchParticipants", "Id", true, new
+                        {
+                            TrainingMatchId = (int)match.Id,
+                            MemberId = member.Id,
+                            DisplayOrder = maxOrder + 1,
+                            JoinedDate = DateTime.Now,
+                            FrozenHandicapPerSeries = frozenHandicap,
+                            FrozenIsProvisional = frozenIsProvisional
+                        });
+
+                        // Get member details for SignalR notification
+                        var firstName = member.GetValue<string>("firstName") ?? "";
+                        var lastName = member.GetValue<string>("lastName") ?? "";
+                        var profilePictureUrl = member.GetValue<string>("profilePictureUrl") ?? "";
+
+                        // Notify all participants via SignalR
+                        await _hubContext.SendParticipantJoined((string)match.MatchCode, new
+                        {
+                            memberId = member.Id,
+                            firstName = firstName,
+                            lastName = lastName,
+                            profilePictureUrl = profilePictureUrl,
+                            handicap = frozenHandicap,
+                            isProvisional = frozenIsProvisional
+                        });
+
+                        return Json(new
+                        {
+                            success = true,
+                            joined = true,  // Indicates direct join (not pending)
+                            message = "Du har gått med i matchen",
+                            matchCode = (string)match.MatchCode
+                        });
+                    }
+
+                    // Continue with existing code for closed matches - requires approval
+
                     // Check for existing request
                     var existingRequest = db.SingleOrDefault<dynamic>(
                         @"SELECT * FROM TrainingMatchJoinRequests
@@ -2790,10 +2880,10 @@ namespace HpskSite.Controllers
                         (int)match.Id, member.Id);
 
                     // Get member details for notification
-                    var firstName = member.GetValue<string>("firstName") ?? "";
-                    var lastName = member.GetValue<string>("lastName") ?? "";
-                    var memberName = $"{firstName} {lastName}".Trim();
-                    var profilePictureUrl = member.GetValue<string>("profilePictureUrl") ?? "";
+                    var memberFirstName = member.GetValue<string>("firstName") ?? "";
+                    var memberLastName = member.GetValue<string>("lastName") ?? "";
+                    var memberName = $"{memberFirstName} {memberLastName}".Trim();
+                    var memberProfilePictureUrl = member.GetValue<string>("profilePictureUrl") ?? "";
 
                     int requestId;
 
@@ -2816,7 +2906,7 @@ namespace HpskSite.Controllers
                               SET Status = @0, RequestDate = @1, MemberName = @2, MemberProfilePictureUrl = @3,
                                   ResponseDate = NULL, ResponseByMemberId = NULL
                               WHERE Id = @4",
-                            JoinRequestStatus.Pending, DateTime.Now, memberName, profilePictureUrl, requestId);
+                            JoinRequestStatus.Pending, DateTime.Now, memberName, memberProfilePictureUrl, requestId);
                     }
                     else
                     {
@@ -2826,7 +2916,7 @@ namespace HpskSite.Controllers
                             TrainingMatchId = (int)match.Id,
                             MemberId = member.Id,
                             MemberName = memberName,
-                            MemberProfilePictureUrl = profilePictureUrl,
+                            MemberProfilePictureUrl = memberProfilePictureUrl,
                             Status = JoinRequestStatus.Pending,
                             RequestDate = DateTime.Now
                         });
@@ -2847,7 +2937,7 @@ namespace HpskSite.Controllers
                             id = requestId,
                             memberId = member.Id,
                             memberName = memberName,
-                            profilePictureUrl = profilePictureUrl,
+                            profilePictureUrl = memberProfilePictureUrl,
                             matchCode = (string)match.MatchCode,
                             requestDate = DateTime.Now
                         });
@@ -3189,6 +3279,7 @@ namespace HpskSite.Controllers
                                     seriesList = JsonSerializer.Deserialize<List<SharedTrainingSeries>>(seriesJson);
                                     if (seriesList != null)
                                     {
+                                        // Show all series in the UI
                                         foreach (var s in seriesList)
                                         {
                                             scoreList.Add(new
@@ -3203,22 +3294,32 @@ namespace HpskSite.Controllers
                                                 reactions = s.Reactions
                                             });
                                         }
-                                        seriesCount = seriesList.Count;
                                     }
                                 }
                                 catch { }
                             }
                         }
 
-                        int rawTotalScore = seriesList != null ? ResultCalculator.CalculateRawTotal(seriesList) : 0;
+                        // Get max series count from match settings
+                        int? maxSeriesCount = GetMaxSeriesCount(match);
+
+                        // Limit series to maxSeriesCount for scoring, similar to mobile app and live scoreboard
+                        var effectiveSeries = seriesList;
+                        if (maxSeriesCount.HasValue && maxSeriesCount.Value > 0 && seriesList != null)
+                        {
+                            effectiveSeries = seriesList.Take(maxSeriesCount.Value).ToList();
+                        }
+
+                        seriesCount = effectiveSeries?.Count ?? 0;
+                        int rawTotalScore = effectiveSeries != null ? ResultCalculator.CalculateRawTotal(effectiveSeries) : 0;
 
                         // Calculate final score with handicap overlay (if handicap enabled)
                         // Uses per-series capping: each series is adjusted and clamped to 0-50 before summing
                         decimal? finalScore = null;
                         decimal? handicapTotal = null;
-                        if (hasHandicap && frozenHandicap.HasValue && seriesList != null)
+                        if (hasHandicap && frozenHandicap.HasValue && effectiveSeries != null)
                         {
-                            int adjustedTotal = ResultCalculator.CalculateAdjustedTotal(seriesList, frozenHandicap.Value);
+                            int adjustedTotal = ResultCalculator.CalculateAdjustedTotal(effectiveSeries, frozenHandicap.Value);
                             finalScore = adjustedTotal;
                             handicapTotal = adjustedTotal - rawTotalScore;  // Actual handicap applied (may differ from theoretical due to per-series capping)
                         }

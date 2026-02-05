@@ -1244,24 +1244,20 @@
                     .slice(0, maxSeriesCount);
             }
 
-            // Helper to calculate final score using equalized series (with handicap if applicable)
-            function calculateFinalScore(participant) {
-                const equalizedScores = getEqualizedScores(participant);
-                const totalScore = equalizedScores.reduce((sum, s) => sum + s.total, 0);
-                const seriesCount = equalizedScores.length;
-
-                if (match.hasHandicap && participant.handicapPerSeries !== null && participant.handicapPerSeries !== undefined) {
-                    const hcpPerSeries = roundToQuarter(participant.handicapPerSeries);
-                    const handicapTotal = hcpPerSeries * seriesCount;
-                    const maxPossible = 50 * seriesCount;
-                    return Math.min(Math.round(totalScore + handicapTotal), maxPossible);
+            // Get final score - use server-calculated value (from ResultCalculator)
+            // This ensures consistent calculations between server and client
+            function getFinalScore(participant) {
+                // Server provides finalScore calculated by ResultCalculator.CalculateAdjustedTotal()
+                if (match.hasHandicap && participant.finalScore !== null && participant.finalScore !== undefined) {
+                    return participant.finalScore;
                 }
-                return totalScore;
+                // Fallback to totalScore (raw score) if no handicap or no finalScore
+                return participant.totalScore ?? 0;
             }
 
-            // Sort participants by final score (with handicap if applicable)
+            // Sort participants by final score (using server-calculated values)
             const sortedParticipants = [...match.participants].sort((a, b) => {
-                return calculateFinalScore(b) - calculateFinalScore(a);
+                return getFinalScore(b) - getFinalScore(a);
             });
 
             // Create ranking map
@@ -1417,15 +1413,12 @@
                     ? `${effectiveSeriesCount} av ${actualSeriesCount} serier`
                     : `${effectiveSeriesCount} serier`;
 
-                // Check if handicap is enabled and participant has handicap data
-                if (match.hasHandicap && participant.handicapPerSeries !== null && participant.handicapPerSeries !== undefined) {
-                    // Use quarter-point handicap, then round final score to integer
-                    const hcpPerSeries = roundToQuarter(participant.handicapPerSeries);
-                    const handicapTotal = hcpPerSeries * effectiveSeriesCount;
-                    const maxPossible = 50 * effectiveSeriesCount;
-                    let finalScore = totalScore + handicapTotal;
-                    finalScore = Math.min(Math.round(finalScore), maxPossible);
-                    const hcpTotalDisplay = formatHandicap(handicapTotal);
+                // Check if handicap is enabled and participant has server-calculated finalScore
+                if (match.hasHandicap && participant.finalScore !== null && participant.finalScore !== undefined) {
+                    // Use server-calculated values from ResultCalculator
+                    const finalScore = participant.finalScore;
+                    const effectiveHandicap = participant.handicapTotal ?? 0;
+                    const hcpTotalDisplay = formatHandicap(effectiveHandicap);
 
                     td.innerHTML = `
                         <div class="total-score handicap-final">${finalScore}</div>
@@ -1794,7 +1787,10 @@
             container.style.display = 'block';
             if (empty) empty.style.display = 'none';
 
-            container.innerHTML = '<div class="list-group">' + matches.map(m => {
+            // Store matches globally for modal access
+            window.ongoingMatchesData = matches;
+
+            container.innerHTML = '<div class="list-group">' + matches.map((m, index) => {
                 // Compact avatars (max 3, smaller size)
                 const avatars = m.participants.slice(0, 3).map((p, i) => {
                     if (p.profilePictureUrl) {
@@ -1811,7 +1807,6 @@
                 }).join('');
 
                 const isMyMatch = m.createdByMemberId === currentMemberId;
-                const canManage = isMyMatch || isCurrentUserAdmin;
                 const isOpen = m.isOpen !== false;
 
                 // Weapon class as compact colored dot/badge
@@ -1825,26 +1820,11 @@
                 // Time display (compact)
                 const timeStr = new Date(m.createdDate).toLocaleString('sv-SE', { hour: '2-digit', minute: '2-digit' });
 
-                // Action buttons
-                const viewBtn = `<button class="btn btn-sm btn-outline-secondary match-action-btn" onclick="event.stopPropagation(); viewMatchAsSpectator('${m.matchCode}')" title="Visa match">
-                    <i class="bi bi-eye"></i>
-                </button>`;
-
-                let joinBtn = '';
-                if (!isMyMatch && isOpen) {
-                    joinBtn = `<button class="btn btn-sm btn-primary match-action-btn" onclick="event.stopPropagation(); joinMatchByCode('${m.matchCode}')" title="Gå med i match">
-                        <i class="bi bi-person-plus"></i>
-                    </button>`;
-                }
-
-                const stopBtn = canManage
-                    ? `<button class="btn btn-sm btn-outline-danger match-action-btn" onclick="event.stopPropagation(); stopMatchFromList('${m.matchCode}', '${(m.matchName || m.matchCode).replace(/'/g, "\\'")}')" title="Avsluta match">
-                           <i class="bi bi-stop-circle"></i>
-                       </button>`
-                    : '';
+                // Chevron indicator to show it's tappable
+                const chevron = '<i class="bi bi-chevron-right text-body-tertiary"></i>';
 
                 return `
-                    <div class="list-group-item list-group-item-action match-list-item" onclick="viewMatchAsSpectator('${m.matchCode}')">
+                    <div class="list-group-item list-group-item-action match-list-item" onclick="showMatchActionModal(window.ongoingMatchesData[${index}])">
                         <div class="d-flex align-items-center gap-2">
                             <!-- Weapon class indicator -->
                             <span class="weapon-dot bg-${weaponColor}" title="Klass ${m.weaponClass}">${m.weaponClass}</span>
@@ -1864,14 +1844,103 @@
                                 </div>
                             </div>
 
-                            <!-- Actions -->
-                            <div class="d-flex gap-1 match-actions" onclick="event.stopPropagation();">
-                                ${viewBtn}${joinBtn}${stopBtn}
-                            </div>
+                            <!-- Chevron to indicate tappable -->
+                            ${chevron}
                         </div>
                     </div>
                 `;
             }).join('') + '</div>';
+        }
+
+        // ===== Match Action Modal =====
+
+        let selectedMatchForAction = null;
+
+        function showMatchActionModal(match) {
+            selectedMatchForAction = match;
+
+            // Update modal content
+            document.getElementById('matchActionMatchName').textContent = match.matchName || match.matchCode;
+
+            // Weapon class badge with color
+            const weaponColors = { A: 'info', B: 'purple', C: 'success', R: 'warning', P: 'danger', M: 'dark', L: 'secondary' };
+            const weaponColor = weaponColors[match.weaponClass] || 'secondary';
+            const badge = document.getElementById('matchActionWeaponBadge');
+            badge.textContent = match.weaponClass;
+            badge.className = `badge bg-${weaponColor} me-2`;
+
+            // Participant avatars (show up to 5)
+            const avatarsContainer = document.getElementById('matchActionParticipants');
+            const avatars = match.participants.slice(0, 5).map((p, i) => {
+                if (p.profilePictureUrl) {
+                    return `<img src="${p.profilePictureUrl}" alt="${p.firstName}"
+                                class="rounded-circle border border-2 border-white"
+                                style="width: 48px; height: 48px; object-fit: cover; margin-left: ${i > 0 ? '-12px' : '0'}; z-index: ${5-i};"
+                                title="${p.firstName} ${p.lastName}">`;
+                } else {
+                    const initials = (p.firstName?.[0] || '') + (p.lastName?.[0] || '');
+                    return `<span class="rounded-circle bg-secondary text-white d-inline-flex align-items-center justify-content-center border border-2 border-white"
+                                style="width: 48px; height: 48px; font-size: 1rem; font-weight: bold; margin-left: ${i > 0 ? '-12px' : '0'}; z-index: ${5-i};"
+                                title="${p.firstName} ${p.lastName}">${initials}</span>`;
+                }
+            }).join('');
+            avatarsContainer.innerHTML = avatars || '<span class="text-muted">Inga deltagare än</span>';
+
+            // Participant count
+            document.getElementById('matchActionParticipantCount').textContent = match.participantCount || 0;
+
+            // Lock indicator for private matches
+            const lockIndicator = document.getElementById('matchActionLockIndicator');
+            lockIndicator.style.display = match.isOpen === false ? 'inline' : 'none';
+
+            // Join button - hide if user is the creator or match is closed
+            const joinBtn = document.getElementById('matchActionJoinBtn');
+            const isMyMatch = match.createdByMemberId === currentMemberId;
+            const isOpen = match.isOpen !== false;
+            joinBtn.style.display = (!isMyMatch && isOpen) ? 'block' : 'none';
+
+            // Organizer section - show stop button for match creator/admin
+            const orgSection = document.getElementById('matchActionOrganizerSection');
+            const canManage = isMyMatch || isCurrentUserAdmin;
+            orgSection.style.display = canManage ? 'block' : 'none';
+
+            // Show modal
+            const modal = new bootstrap.Modal(document.getElementById('matchActionModal'));
+            modal.show();
+        }
+
+        function matchActionView() {
+            if (!selectedMatchForAction) return;
+            const matchCode = selectedMatchForAction.matchCode;
+
+            // Close modal first
+            bootstrap.Modal.getInstance(document.getElementById('matchActionModal'))?.hide();
+
+            // View as spectator
+            viewMatchAsSpectator(matchCode);
+        }
+
+        function matchActionJoin() {
+            if (!selectedMatchForAction) return;
+            const matchCode = selectedMatchForAction.matchCode;
+
+            // Close modal first
+            bootstrap.Modal.getInstance(document.getElementById('matchActionModal'))?.hide();
+
+            // Join the match
+            joinMatchByCode(matchCode);
+        }
+
+        function matchActionStop() {
+            if (!selectedMatchForAction) return;
+            const matchCode = selectedMatchForAction.matchCode;
+            const matchName = selectedMatchForAction.matchName || selectedMatchForAction.matchCode;
+
+            // Close modal first
+            bootstrap.Modal.getInstance(document.getElementById('matchActionModal'))?.hide();
+
+            // Stop the match (uses existing function)
+            stopMatchFromList(matchCode, matchName);
         }
 
         // ===== Upcoming Matches Tab =====
@@ -2188,7 +2257,17 @@
             .then(response => response.json())
             .then(result => {
                 if (result.success) {
-                    showToast('Din förfrågan har skickats till matchvärden', 'success');
+                    if (result.joined) {
+                        // Direct join (open match) - refresh the match view
+                        showToast('Du har gått med i matchen', 'success');
+                        loadMatchByCode(matchCode);
+                    } else {
+                        // Pending approval (closed match) - show message
+                        showToast(result.message || 'Din förfrågan har skickats', 'info');
+                    }
+                } else if (result.needsShooterClass) {
+                    // User needs to set shooter class for handicap match
+                    showToast(result.message || 'Du måste välja din skytteklass', 'warning');
                 } else {
                     showToast(result.message || 'Kunde inte skicka förfrågan', 'danger');
                 }
@@ -2294,6 +2373,122 @@
             } else if (badge) {
                 badge.style.display = 'none';
             }
+
+            // Also update the scoreboard pending approvals indicator
+            const indicator = document.getElementById('pendingApprovalsIndicator');
+            const countSpan = document.getElementById('pendingApprovalsCount');
+            if (indicator && countSpan) {
+                if (pendingJoinRequests.length > 0) {
+                    countSpan.textContent = pendingJoinRequests.length;
+                    indicator.style.display = 'inline-block';
+                } else {
+                    indicator.style.display = 'none';
+                }
+            }
+        }
+
+        // Show the pending requests list modal
+        function showPendingRequestsListModal() {
+            const listContainer = document.getElementById('pendingRequestsList');
+            const noRequestsMsg = document.getElementById('noPendingRequestsMessage');
+
+            if (pendingJoinRequests.length === 0) {
+                listContainer.style.display = 'none';
+                noRequestsMsg.style.display = 'block';
+            } else {
+                listContainer.style.display = 'block';
+                noRequestsMsg.style.display = 'none';
+
+                listContainer.innerHTML = pendingJoinRequests.map(req => {
+                    const initials = req.memberName.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
+                    const avatar = req.profilePictureUrl
+                        ? `<img src="${req.profilePictureUrl}" alt="${req.memberName}" class="rounded-circle" style="width: 48px; height: 48px; object-fit: cover;">`
+                        : `<div class="rounded-circle bg-primary text-white d-flex align-items-center justify-content-center" style="width: 48px; height: 48px; font-size: 1rem; font-weight: bold;">${initials}</div>`;
+
+                    return `
+                        <div class="list-group-item d-flex align-items-center gap-3 py-3" data-request-id="${req.id}">
+                            ${avatar}
+                            <div class="flex-grow-1">
+                                <div class="fw-medium">${req.memberName}</div>
+                                <small class="text-muted">Begärde ${formatRelativeTime(req.requestDate)}</small>
+                            </div>
+                            <div class="btn-group btn-group-sm">
+                                <button class="btn btn-outline-danger" onclick="respondToRequestFromList(${req.id}, 'Block')" title="Blockera">
+                                    <i class="bi bi-x-lg"></i>
+                                </button>
+                                <button class="btn btn-success" onclick="respondToRequestFromList(${req.id}, 'Accept')" title="Acceptera">
+                                    <i class="bi bi-check-lg"></i>
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            }
+
+            const modal = new bootstrap.Modal(document.getElementById('pendingRequestsListModal'));
+            modal.show();
+        }
+
+        // Format relative time (e.g., "2 minuter sedan")
+        function formatRelativeTime(dateStr) {
+            const date = new Date(dateStr);
+            const now = new Date();
+            const diffMs = now - date;
+            const diffMins = Math.floor(diffMs / 60000);
+
+            if (diffMins < 1) return 'just nu';
+            if (diffMins < 60) return `${diffMins} min sedan`;
+            const diffHours = Math.floor(diffMins / 60);
+            if (diffHours < 24) return `${diffHours} tim sedan`;
+            return date.toLocaleDateString('sv-SE');
+        }
+
+        // Respond to a join request from the list modal
+        function respondToRequestFromList(requestId, action) {
+            const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value;
+
+            fetch('/umbraco/surface/TrainingMatch/RespondToJoinRequest', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'RequestVerificationToken': token || ''
+                },
+                body: JSON.stringify({
+                    requestId: requestId,
+                    action: action
+                })
+            })
+            .then(response => response.json())
+            .then(result => {
+                if (result.success) {
+                    showToast(result.message, 'success');
+
+                    // Remove the request from local list
+                    pendingJoinRequests = pendingJoinRequests.filter(r => r.id !== requestId);
+                    updatePendingRequestsBadge();
+
+                    // Remove the item from the modal list
+                    const listItem = document.querySelector(`[data-request-id="${requestId}"]`);
+                    if (listItem) listItem.remove();
+
+                    // If no more requests, show the "no requests" message
+                    if (pendingJoinRequests.length === 0) {
+                        document.getElementById('pendingRequestsList').style.display = 'none';
+                        document.getElementById('noPendingRequestsMessage').style.display = 'block';
+                    }
+
+                    // Refresh match to show new participant if accepted
+                    if (action === 'Accept' && currentMatchCode) {
+                        refreshMatch();
+                    }
+                } else {
+                    showToast(result.message || 'Något gick fel', 'danger');
+                }
+            })
+            .catch(error => {
+                console.error('Error responding to join request:', error);
+                showToast('Något gick fel', 'danger');
+            });
         }
 
         // ===== Toast Notifications =====
@@ -2666,6 +2861,52 @@
     </script>
 }
 
+<!-- Match Action Modal (for selecting View or Join from ongoing matches list) -->
+<div class="modal fade" id="matchActionModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title">
+                    <span id="matchActionWeaponBadge" class="badge me-2">C</span>
+                    <span id="matchActionMatchName">Match</span>
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body text-center py-4">
+                <!-- Match info -->
+                <div class="mb-4">
+                    <div id="matchActionParticipants" class="d-flex justify-content-center mb-2">
+                        <!-- Participant avatars will be added here -->
+                    </div>
+                    <p class="text-muted mb-0">
+                        <i class="bi bi-people me-1"></i><span id="matchActionParticipantCount">0</span> deltagare
+                        <span id="matchActionLockIndicator" class="ms-2" style="display: none;">
+                            <i class="bi bi-lock-fill"></i> Privat
+                        </span>
+                    </p>
+                </div>
+
+                <!-- Action buttons - large and easy to tap -->
+                <div class="d-grid gap-3">
+                    <button type="button" class="btn btn-lg btn-outline-primary py-3" onclick="matchActionView()">
+                        <i class="bi bi-eye me-2"></i>Visa match
+                    </button>
+                    <button type="button" class="btn btn-lg btn-success py-3" id="matchActionJoinBtn" onclick="matchActionJoin()">
+                        <i class="bi bi-person-plus me-2"></i>Gå med i match
+                    </button>
+                </div>
+
+                <!-- Stop match button (only for organizer) -->
+                <div id="matchActionOrganizerSection" class="mt-4 pt-3 border-top" style="display: none;">
+                    <button type="button" class="btn btn-outline-danger" onclick="matchActionStop()">
+                        <i class="bi bi-stop-circle me-1"></i>Avsluta match
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Share Match Modal -->
 <div class="modal fade" id="shareMatchModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
@@ -2723,6 +2964,29 @@
                 <button class="btn btn-success" onclick="respondToJoinRequest('Accept')">
                     <i class="bi bi-check-circle me-1"></i> Acceptera
                 </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Pending Requests List Modal (for organizer to see all pending) -->
+<div class="modal fade" id="pendingRequestsListModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-warning">
+                <h5 class="modal-title">
+                    <i class="bi bi-person-plus me-2"></i>Väntande förfrågningar
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div id="pendingRequestsList" class="list-group">
+                    <!-- Pending requests will be listed here dynamically -->
+                </div>
+                <div id="noPendingRequestsMessage" class="text-center text-muted py-4" style="display: none;">
+                    <i class="bi bi-check-circle fs-1 d-block mb-2 text-success"></i>
+                    <p>Inga väntande förfrågningar</p>
+                </div>
             </div>
         </div>
     </div>
@@ -2933,6 +3197,34 @@
     /* History modal score cells */
     #historyScoreboardBody .score-cell.has-score:hover {
         background-color: var(--bs-tertiary-bg);
+    }
+
+    /* Match Action Modal styles */
+    #matchActionModal .bg-purple {
+        background-color: #7c3aed;
+    }
+
+    #matchActionModal .btn-lg {
+        font-size: 1.1rem;
+    }
+
+    /* Ensure buttons have good touch targets on mobile */
+    #matchActionModal .btn-lg.py-3 {
+        min-height: 60px;
+    }
+
+    /* Pending Requests List Modal styles */
+    #pendingRequestsListModal .list-group-item {
+        border-left: none;
+        border-right: none;
+    }
+
+    #pendingRequestsListModal .list-group-item:first-child {
+        border-top: none;
+    }
+
+    #pendingRequestsListModal .list-group-item:last-child {
+        border-bottom: none;
     }
 </style>
 
