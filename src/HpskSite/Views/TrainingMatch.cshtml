@@ -2260,7 +2260,7 @@
                     if (result.joined) {
                         // Direct join (open match) - refresh the match view
                         showToast('Du har gått med i matchen', 'success');
-                        loadMatchByCode(matchCode);
+                        loadMatch(matchCode);
                     } else {
                         // Pending approval (closed match) - show message
                         showToast(result.message || 'Din förfrågan har skickats', 'info');

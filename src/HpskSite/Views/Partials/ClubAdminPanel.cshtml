@@ -1263,6 +1263,7 @@ let editMemberAvailableClubs = [];
 let editMemberAvailableGroups = [];
 let editMemberCurrentMemberId = null;
 let editMemberIsSiteAdmin = false;
+let editMemberPreservedAdminGroups = []; // Preserve ClubAdmin_* and RegionalAdmin_* groups on save
 
 // Initialize edit member data (load clubs and groups)
 async function initEditMemberData() {
@@ -1396,10 +1397,17 @@ function populateEditMemberForm(member) {
     // Additional clubs
     renderEditMemberAdditionalClubs(member.additionalClubIds || []);
 
+    // Preserve ClubAdmin_* and RegionalAdmin_* groups - these are filtered from the UI
+    // but must be preserved when saving to prevent accidental removal of admin rights
+    const memberGroups = member.groups || [];
+    editMemberPreservedAdminGroups = memberGroups.filter(g =>
+        g.startsWith('ClubAdmin_') || g.startsWith('RegionalAdmin_')
+    );
+
     // Member groups (site admin only)
     if (editMemberIsSiteAdmin) {
         document.getElementById('editMemberGroupsSection').style.display = 'block';
-        renderEditMemberGroups(member.groups || []);
+        renderEditMemberGroups(memberGroups);
     } else {
         document.getElementById('editMemberGroupsSection').style.display = 'none';
     }
@@ -1741,10 +1749,14 @@ async function saveEditClubMember() {
         .map(cb => cb.value);
     formData.append('additionalClubIds', additionalClubs.join(','));
 
-    // Member groups
-    const groups = Array.from(document.querySelectorAll('input[name="editMemberGroups"]:checked'))
+    // Member groups - include checked groups from UI
+    const selectedGroups = Array.from(document.querySelectorAll('input[name="editMemberGroups"]:checked'))
         .map(cb => cb.value);
-    groups.forEach(g => formData.append('groups', g));
+
+    // IMPORTANT: Add back preserved admin groups (ClubAdmin_*, RegionalAdmin_*)
+    // These are filtered from the UI but must be preserved to prevent accidental removal
+    const allGroups = [...new Set([...selectedGroups, ...editMemberPreservedAdminGroups])];
+    allGroups.forEach(g => formData.append('groups', g));
 
     // Shooter class
     const shooterClassRadio = document.querySelector('input[name="editMemberShooterClass"]:checked');

@@ -5,6 +5,7 @@
 @using System.Globalization;
 @inject IMemberManager MemberManager
 @inject IMemberService MemberService
+@inject HpskSite.Services.AdminAuthorizationService AuthorizationService
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
     Layout = "Master.cshtml";
@@ -55,17 +56,15 @@
     // Check if current member is club admin or member for this specific club
     if (currentMember != null && clubId > 0)
     {
-        // Get the member from MemberService using Email (most reliable way)
+        // Use AdminAuthorizationService for club admin check
+        // This correctly checks: Site Admin, ClubAdmin_{clubId}, AND RegionalAdmin_{regionCode}
+        isClubAdmin = await AuthorizationService.IsClubAdminForClub(clubId);
+
+        // Get the member from MemberService for club membership check
         var member = MemberService.GetByEmail(currentMember.Email);
 
         if (member != null)
         {
-            var memberRoles = MemberService.GetAllRoles(member.Id).ToList();
-            var clubAdminGroupName = $"ClubAdmin_{clubId}";
-
-            // Check if member is in ClubAdmin_{clubId} group OR Administrators group (site admins)
-            isClubAdmin = memberRoles.Contains(clubAdminGroupName) || memberRoles.Contains("Administrators");
-
             // Check if member belongs to this club (primary or additional)
             var primaryClubId = member.GetValue("primaryClubId")?.ToString();
             var memberClubIds = member.GetValue("memberClubIds")?.ToString() ?? "";
