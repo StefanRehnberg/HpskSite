@@ -92,12 +92,47 @@ namespace HpskSite.Controllers
                 // Build lookup for club regions
                 var clubRegionLookup = validClubs.ToDictionary(c => c.Id ?? 0, c => c.RegionalFederation);
 
-                // Get clubs in the selected region if region filter is active
+                // Determine effective region(s) for filtering
+                // For regional admins: use their managed regions if no specific region provided
+                // For site admins: use provided region or no filter
+                string? effectiveRegion = region;
+                List<string>? effectiveRegions = null;
+
+                if (isRegionalAdmin && !isSiteAdmin)
+                {
+                    if (!string.IsNullOrEmpty(region) && managedRegions.Contains(region))
+                    {
+                        // Specific region selected that's in their managed regions - use it
+                        effectiveRegion = region;
+                    }
+                    else if (managedRegions.Count == 1)
+                    {
+                        // Single region admin - force to their region
+                        effectiveRegion = managedRegions.First();
+                    }
+                    else
+                    {
+                        // Multi-region admin with no specific region - filter by all their regions
+                        effectiveRegion = null;
+                        effectiveRegions = managedRegions;
+                    }
+                }
+
+                // Get clubs in the selected region(s) if region filter is active
                 var clubsInRegion = new HashSet<int>();
-                if (!string.IsNullOrEmpty(region))
+                if (!string.IsNullOrEmpty(effectiveRegion))
                 {
                     clubsInRegion = validClubs
-                        .Where(c => c.RegionalFederation == region)
+                        .Where(c => c.RegionalFederation == effectiveRegion)
+                        .Select(c => c.Id ?? 0)
+                        .Where(id => id > 0)
+                        .ToHashSet();
+                }
+                else if (effectiveRegions != null && effectiveRegions.Any())
+                {
+                    // Multi-region filter
+                    clubsInRegion = validClubs
+                        .Where(c => effectiveRegions.Contains(c.RegionalFederation ?? ""))
                         .Select(c => c.Id ?? 0)
                         .Where(id => id > 0)
                         .ToHashSet();
@@ -119,8 +154,8 @@ namespace HpskSite.Controllers
                     );
                 }
 
-                // Apply region filter
-                if (!string.IsNullOrEmpty(region) && clubsInRegion.Any())
+                // Apply region filter (always enforced for regional admins)
+                if (clubsInRegion.Any())
                 {
                     regularMembers = regularMembers.Where(m =>
                     {
@@ -486,9 +521,39 @@ namespace HpskSite.Controllers
                 var clubs = GetClubsFromStorage()
                     .Where(c => c.IsActive);
 
-                if (!string.IsNullOrEmpty(region))
+                // Determine effective region(s) for filtering
+                string? effectiveRegion = region;
+                List<string>? effectiveRegions = null;
+
+                if (isRegionalAdmin && !isSiteAdmin)
                 {
-                    clubs = clubs.Where(c => c.RegionalFederation == region);
+                    if (!string.IsNullOrEmpty(region) && managedRegions.Contains(region))
+                    {
+                        // Specific region selected that's in their managed regions - use it
+                        effectiveRegion = region;
+                    }
+                    else if (managedRegions.Count == 1)
+                    {
+                        // Single region admin - force to their region
+                        effectiveRegion = managedRegions.First();
+                    }
+                    else
+                    {
+                        // Multi-region admin with no specific region - filter by all their regions
+                        effectiveRegion = null;
+                        effectiveRegions = managedRegions;
+                    }
+                }
+
+                // Apply region filter
+                if (!string.IsNullOrEmpty(effectiveRegion))
+                {
+                    clubs = clubs.Where(c => c.RegionalFederation == effectiveRegion);
+                }
+                else if (effectiveRegions != null && effectiveRegions.Any())
+                {
+                    // Multi-region filter
+                    clubs = clubs.Where(c => effectiveRegions.Contains(c.RegionalFederation ?? ""));
                 }
 
                 var clubList = clubs
@@ -1494,12 +1559,45 @@ namespace HpskSite.Controllers
                 // Get clubs for club name lookup and region filtering
                 var clubs = GetClubsFromStorage();
 
-                // Build a set of club IDs in the selected region (if region filter is active)
+                // Determine effective region(s) for filtering
+                string? effectiveRegion = region;
+                List<string>? effectiveRegions = null;
+
+                if (isRegionalAdmin && !isSiteAdmin)
+                {
+                    if (!string.IsNullOrEmpty(region) && managedRegions.Contains(region))
+                    {
+                        // Specific region selected that's in their managed regions - use it
+                        effectiveRegion = region;
+                    }
+                    else if (managedRegions.Count == 1)
+                    {
+                        // Single region admin - force to their region
+                        effectiveRegion = managedRegions.First();
+                    }
+                    else
+                    {
+                        // Multi-region admin with no specific region - filter by all their regions
+                        effectiveRegion = null;
+                        effectiveRegions = managedRegions;
+                    }
+                }
+
+                // Build a set of club IDs in the selected region(s) (if region filter is active)
                 var clubsInRegion = new HashSet<int>();
-                if (!string.IsNullOrEmpty(region))
+                if (!string.IsNullOrEmpty(effectiveRegion))
                 {
                     clubsInRegion = clubs
-                        .Where(c => c.IsActive && c.RegionalFederation == region)
+                        .Where(c => c.IsActive && c.RegionalFederation == effectiveRegion)
+                        .Select(c => c.Id ?? 0)
+                        .Where(id => id > 0)
+                        .ToHashSet();
+                }
+                else if (effectiveRegions != null && effectiveRegions.Any())
+                {
+                    // Multi-region filter
+                    clubsInRegion = clubs
+                        .Where(c => c.IsActive && effectiveRegions.Contains(c.RegionalFederation ?? ""))
                         .Select(c => c.Id ?? 0)
                         .Where(id => id > 0)
                         .ToHashSet();
@@ -1529,8 +1627,8 @@ namespace HpskSite.Controllers
                             RegistrationDate = m.CreateDate
                         };
                     })
-                    // Apply region filter if specified
-                    .Where(m => string.IsNullOrEmpty(region) || (m.ClubId.HasValue && clubsInRegion.Contains(m.ClubId.Value)))
+                    // Apply region filter (always enforced for regional admins)
+                    .Where(m => !clubsInRegion.Any() || (m.ClubId.HasValue && clubsInRegion.Contains(m.ClubId.Value)))
                     .OrderBy(m => m.RegistrationDate)
                     .ToList();
 

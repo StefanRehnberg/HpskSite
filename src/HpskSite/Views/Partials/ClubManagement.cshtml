@@ -374,10 +374,17 @@ function populateAdminKretsFilter() {
     const select = document.getElementById('adminKretsFilter');
     if (!select) return;
 
-    // Get user's default region and locked region from parent container data attributes
+    // Get user's default region and managed regions from parent container data attributes
     const clubsTab = document.getElementById('clubs');
     const userDefaultRegion = clubsTab?.dataset.userDefaultRegion || '';
-    const lockedRegion = clubsTab?.dataset.lockedRegion || '';
+    const isSiteAdmin = clubsTab?.dataset.isSiteAdmin === 'true';
+    let managedRegions = [];
+    try {
+        managedRegions = JSON.parse(clubsTab?.dataset.managedRegions || '[]');
+    } catch (e) {
+        console.error('Error parsing managed regions:', e);
+    }
+    const isRegionalAdmin = !isSiteAdmin && managedRegions.length > 0;
 
     // Show loading state
     select.innerHTML = '<option value="">Laddar kretsar...</option>';
@@ -389,20 +396,39 @@ function populateAdminKretsFilter() {
         .then(data => {
             select.innerHTML = '';
             if (data.success && data.regions && data.regions.length > 0) {
-                // If region is locked (regional admin), only show that region
-                if (lockedRegion) {
-                    const lockedRegionData = data.regions.find(r => r.id === lockedRegion);
-                    if (lockedRegionData) {
-                        const option = document.createElement('option');
-                        option.value = lockedRegionData.id;
-                        option.textContent = lockedRegionData.name;
-                        option.selected = true;
-                        select.appendChild(option);
+                if (isRegionalAdmin) {
+                    // Regional admin - show only their managed regions
+                    if (managedRegions.length === 1) {
+                        // Single region - show only that region, disabled
+                        const regionData = data.regions.find(r => r.id === managedRegions[0]);
+                        if (regionData) {
+                            const option = document.createElement('option');
+                            option.value = regionData.id;
+                            option.textContent = regionData.name;
+                            option.selected = true;
+                            select.appendChild(option);
+                        }
+                        select.disabled = true;
+                    } else {
+                        // Multiple regions - show dropdown with their regions
+                        data.regions
+                            .filter(r => managedRegions.includes(r.id))
+                            .forEach((region, index) => {
+                                const option = document.createElement('option');
+                                option.value = region.id;
+                                option.textContent = region.name;
+                                if (region.id === userDefaultRegion) {
+                                    option.selected = true;
+                                } else if (index === 0) {
+                                    option.selected = true;
+                                }
+                                select.appendChild(option);
+                            });
+                        if (userDefaultRegion && managedRegions.includes(userDefaultRegion)) {
+                            select.value = userDefaultRegion;
+                        }
+                        select.disabled = false;
                     }
-                    // Keep dropdown disabled for regional admins
-                    select.disabled = true;
-                    // Load clubs for the locked region
-                    loadClubs();
                 } else {
                     // Site admin - show all regions (no "Alla kretsar" option - too slow with 500+ clubs)
                     let defaultFound = false;
@@ -424,28 +450,45 @@ function populateAdminKretsFilter() {
                         select.value = userDefaultRegion;
                     }
                     select.disabled = false;
-                    // Load clubs for the selected region
-                    loadClubs();
                 }
+                // Load clubs for the selected region
+                loadClubs();
             } else {
                 select.innerHTML = '<option value="">Inga kretsar hittades</option>';
+                loadClubs();
             }
         })
         .catch(error => {
             console.error('Error loading regions:', error);
             // Fallback to hardcoded list if API fails
             select.innerHTML = '';
-            // If locked, only show locked region from fallback
-            if (lockedRegion) {
-                const lockedFederation = regionalFederations.find(f => f.value === lockedRegion);
-                if (lockedFederation) {
+            if (isRegionalAdmin) {
+                // Show only managed regions from fallback
+                const filteredFederations = regionalFederations.filter(f => managedRegions.includes(f.value));
+                if (filteredFederations.length === 1) {
                     const option = document.createElement('option');
-                    option.value = lockedFederation.value;
-                    option.textContent = lockedFederation.description;
+                    option.value = filteredFederations[0].value;
+                    option.textContent = filteredFederations[0].description;
                     option.selected = true;
                     select.appendChild(option);
+                    select.disabled = true;
+                } else {
+                    filteredFederations.forEach((f, index) => {
+                        const option = document.createElement('option');
+                        option.value = f.value;
+                        option.textContent = f.description;
+                        if (f.value === userDefaultRegion) {
+                            option.selected = true;
+                        } else if (index === 0) {
+                            option.selected = true;
+                        }
+                        select.appendChild(option);
+                    });
+                    if (userDefaultRegion && managedRegions.includes(userDefaultRegion)) {
+                        select.value = userDefaultRegion;
+                    }
+                    select.disabled = false;
                 }
-                select.disabled = true;
             } else {
                 regionalFederations.forEach((f, index) => {
                     const option = document.createElement('option');

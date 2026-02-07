@@ -597,12 +597,11 @@ document.addEventListener('DOMContentLoaded', function() {
                     searchInput.value = '';
                     currentFilters.search = '';
                 }
+                // Load regions first - it will handle loading users, clubs, and pending approvals
+                // with the correct region filter (locked for regional admins)
                 loadRegions();
-                loadClubsForRegion('');  // Load all clubs for filter dropdown
-                loadUsers();
                 loadMemberGroups();
                 loadClubsForDropdown();
-                loadPendingApprovals();
                 userManagementLoaded = true;
             }
         });
@@ -716,34 +715,64 @@ function updateSortIndicators() {
 }
 
 function loadRegions() {
-    // Get user's default region and locked region from parent container data attributes
+    // Get user's default region and managed regions from parent container data attributes
     const usersTab = document.getElementById('users');
     const userDefaultRegion = usersTab?.dataset.userDefaultRegion || '';
-    const lockedRegion = usersTab?.dataset.lockedRegion || '';
+    const isSiteAdmin = usersTab?.dataset.isSiteAdmin === 'true';
+    let managedRegions = [];
+    try {
+        managedRegions = JSON.parse(usersTab?.dataset.managedRegions || '[]');
+    } catch (e) {
+        console.error('Error parsing managed regions:', e);
+    }
+    const isRegionalAdmin = !isSiteAdmin && managedRegions.length > 0;
 
     fetch('/umbraco/surface/MemberAdmin/GetRegionsForUserManagement')
         .then(response => response.json())
         .then(data => {
             const regionSelect = document.getElementById('superiorRegionFilter');
             if (data.success && data.regions && regionSelect) {
-                // If region is locked (regional admin), only show that region
-                if (lockedRegion) {
-                    regionSelect.innerHTML = '';
-                    const lockedRegionData = data.regions.find(r => r.id === lockedRegion);
-                    if (lockedRegionData) {
-                        const option = document.createElement('option');
-                        option.value = lockedRegionData.id;
-                        option.textContent = lockedRegionData.name;
-                        option.selected = true;
-                        regionSelect.appendChild(option);
+                if (isRegionalAdmin) {
+                    // Regional admin - show only their managed regions
+                    if (managedRegions.length === 1) {
+                        // Single region - show only that region, disabled
+                        regionSelect.innerHTML = '';
+                        const regionData = data.regions.find(r => r.id === managedRegions[0]);
+                        if (regionData) {
+                            const option = document.createElement('option');
+                            option.value = regionData.id;
+                            option.textContent = regionData.name;
+                            option.selected = true;
+                            regionSelect.appendChild(option);
+                        }
+                        regionSelect.disabled = true;
+                        currentFilters.region = managedRegions[0];
+                        loadClubsForRegion(managedRegions[0]);
+                    } else {
+                        // Multiple regions - show dropdown with their regions
+                        regionSelect.innerHTML = '<option value="">Alla mina kretsar</option>';
+                        data.regions
+                            .filter(r => managedRegions.includes(r.id))
+                            .forEach(region => {
+                                const option = document.createElement('option');
+                                option.value = region.id;
+                                option.textContent = region.name;
+                                if (region.id === userDefaultRegion) {
+                                    option.selected = true;
+                                }
+                                regionSelect.appendChild(option);
+                            });
+                        // Set initial filter
+                        if (userDefaultRegion && managedRegions.includes(userDefaultRegion)) {
+                            currentFilters.region = userDefaultRegion;
+                            loadClubsForRegion(userDefaultRegion);
+                        } else {
+                            // Default to first region for multi-region admins
+                            currentFilters.region = managedRegions[0];
+                            regionSelect.value = managedRegions[0];
+                            loadClubsForRegion(managedRegions[0]);
+                        }
                     }
-                    // Disable the dropdown for regional admins
-                    regionSelect.disabled = true;
-                    // Apply the locked region as filter
-                    currentFilters.region = lockedRegion;
-                    loadClubsForRegion(lockedRegion);
-                    loadPendingApprovals();
-                    loadUsers();
                 } else {
                     // Site admin - show all regions with "Alla kretsar" option
                     regionSelect.innerHTML = '<option value="">Alla kretsar</option>';
@@ -757,17 +786,25 @@ function loadRegions() {
                         }
                         regionSelect.appendChild(option);
                     });
-                    // If user has a default region, set the filter and reload data
+                    // Load data with appropriate filter
                     if (userDefaultRegion && regionSelect.value === userDefaultRegion) {
                         currentFilters.region = userDefaultRegion;
                         loadClubsForRegion(userDefaultRegion);
-                        loadPendingApprovals();
-                        loadUsers();
+                    } else {
+                        // No default region - load all clubs
+                        loadClubsForRegion('');
                     }
                 }
+                loadPendingApprovals();
+                loadUsers();
             }
         })
-        .catch(error => console.error('Error loading regions:', error));
+        .catch(error => {
+            console.error('Error loading regions:', error);
+            // Still try to load data even if regions fail
+            loadPendingApprovals();
+            loadUsers();
+        });
 }
 
 function loadClubsForRegion(region) {

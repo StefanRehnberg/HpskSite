@@ -250,10 +250,17 @@ function populateInvoicesRegionFilter() {
     const select = document.getElementById('invoicesRegionFilter');
     if (!select) return;
 
-    // Get user's default region and locked region from parent container data attributes
+    // Get user's default region and managed regions from parent container data attributes
     const invoicesTab = document.getElementById('invoices');
     const userDefaultRegion = invoicesTab?.dataset.userDefaultRegion || '';
-    const lockedRegion = invoicesTab?.dataset.lockedRegion || '';
+    const isSiteAdmin = invoicesTab?.dataset.isSiteAdmin === 'true';
+    let managedRegions = [];
+    try {
+        managedRegions = JSON.parse(invoicesTab?.dataset.managedRegions || '[]');
+    } catch (e) {
+        console.error('Error parsing managed regions:', e);
+    }
+    const isRegionalAdmin = !isSiteAdmin && managedRegions.length > 0;
 
     // Show loading state
     select.innerHTML = '<option value="">Laddar kretsar...</option>';
@@ -265,22 +272,41 @@ function populateInvoicesRegionFilter() {
         .then(data => {
             select.innerHTML = '';
             if (data.success && data.regions && data.regions.length > 0) {
-                // If region is locked (regional admin), only show that region
-                if (lockedRegion) {
-                    const lockedRegionData = data.regions.find(r => r.id === lockedRegion);
-                    if (lockedRegionData) {
-                        const option = document.createElement('option');
-                        option.value = lockedRegionData.id;
-                        option.textContent = lockedRegionData.name;
-                        option.selected = true;
-                        select.appendChild(option);
+                if (isRegionalAdmin) {
+                    // Regional admin - show only their managed regions
+                    if (managedRegions.length === 1) {
+                        // Single region - show only that region, disabled
+                        const regionData = data.regions.find(r => r.id === managedRegions[0]);
+                        if (regionData) {
+                            const option = document.createElement('option');
+                            option.value = regionData.id;
+                            option.textContent = regionData.name;
+                            option.selected = true;
+                            select.appendChild(option);
+                        }
+                        select.disabled = true;
+                        currentInvoicesRegion = managedRegions[0];
+                    } else {
+                        // Multiple regions - show dropdown with their regions
+                        data.regions
+                            .filter(r => managedRegions.includes(r.id))
+                            .forEach((region, index) => {
+                                const option = document.createElement('option');
+                                option.value = region.id;
+                                option.textContent = region.name;
+                                if (region.id === userDefaultRegion) {
+                                    option.selected = true;
+                                } else if (index === 0) {
+                                    option.selected = true;
+                                }
+                                select.appendChild(option);
+                            });
+                        if (userDefaultRegion && managedRegions.includes(userDefaultRegion)) {
+                            select.value = userDefaultRegion;
+                        }
+                        select.disabled = false;
+                        currentInvoicesRegion = select.value;
                     }
-                    // Keep dropdown disabled for regional admins
-                    select.disabled = true;
-                    currentInvoicesRegion = lockedRegion;
-                    // Load data for the locked region
-                    loadActiveCompetitionsFilter();
-                    loadInvoicesList();
                 } else {
                     // Site admin - show all regions (no "Alla kretsar" option to avoid loading too much data)
                     let defaultFound = false;
@@ -301,17 +327,21 @@ function populateInvoicesRegionFilter() {
                     }
                     select.disabled = false;
                     currentInvoicesRegion = select.value;
-                    // Load data for the selected region
-                    loadActiveCompetitionsFilter();
-                    loadInvoicesList();
                 }
+                // Load data for the selected region
+                loadActiveCompetitionsFilter();
+                loadInvoicesList();
             } else {
                 select.innerHTML = '<option value="">Inga kretsar hittades</option>';
+                loadActiveCompetitionsFilter();
+                loadInvoicesList();
             }
         })
         .catch(error => {
             console.error('Error loading regions:', error);
             select.innerHTML = '<option value="">Fel vid laddning</option>';
+            loadActiveCompetitionsFilter();
+            loadInvoicesList();
         });
 }
 

@@ -145,14 +145,37 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetCompetitionsList(int? year = null, bool includeCompleted = false, string? type = null, string? region = null)
         {
-            // Check if user is site admin OR club admin for any club
+            // Check if user is site admin, club admin, or regional admin
             bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
             var managedClubIds = await _authorizationService.GetManagedClubIds();
             bool isClubAdmin = managedClubIds.Any();
+            var managedRegions = await _authorizationService.GetManagedRegions();
+            bool isRegionalAdmin = !isSiteAdmin && managedRegions.Any();
 
-            if (!isSiteAdmin && !isClubAdmin)
+            if (!isSiteAdmin && !isClubAdmin && !isRegionalAdmin)
             {
                 return Ok(new { success = false, message = "Access denied" });
+            }
+
+            // Determine effective region(s) for regional admin filtering
+            string? effectiveRegion = region;
+            List<string>? effectiveRegions = null;
+
+            if (isRegionalAdmin && !isSiteAdmin)
+            {
+                if (!string.IsNullOrEmpty(region) && managedRegions.Contains(region))
+                {
+                    effectiveRegion = region;
+                }
+                else if (managedRegions.Count == 1)
+                {
+                    effectiveRegion = managedRegions.First();
+                }
+                else
+                {
+                    effectiveRegion = null;
+                    effectiveRegions = managedRegions;
+                }
             }
 
             try
@@ -241,7 +264,8 @@ namespace HpskSite.Controllers
                         }
 
                         // Region filter - filter by club's regional federation OR competition's direct regionalFederation
-                        if (!string.IsNullOrEmpty(region))
+                        // For regional admins, always enforce region filtering
+                        if (!string.IsNullOrEmpty(effectiveRegion))
                         {
                             var compClubId = comp.GetValue<int?>("clubId") ?? 0;
                             var compRegion = comp.GetValue<string>("regionalFederation") ?? "";
@@ -250,17 +274,36 @@ namespace HpskSite.Controllers
                             if (compClubId > 0)
                             {
                                 if (!clubRegionLookup.TryGetValue(compClubId, out var clubRegion) ||
-                                    !clubRegion.Equals(region, StringComparison.OrdinalIgnoreCase))
+                                    !clubRegion.Equals(effectiveRegion, StringComparison.OrdinalIgnoreCase))
                                     return false;
                             }
                             // If competition has no club but has a direct region, use that
                             else if (!string.IsNullOrEmpty(compRegion))
                             {
-                                if (!compRegion.Equals(region, StringComparison.OrdinalIgnoreCase))
+                                if (!compRegion.Equals(effectiveRegion, StringComparison.OrdinalIgnoreCase))
                                     return false;
                             }
                             // If competition has neither club nor region, it's national - show in all regions
                             // (no filter applied, competition matches)
+                        }
+                        else if (effectiveRegions != null && effectiveRegions.Any())
+                        {
+                            // Multi-region filter for regional admins
+                            var compClubId = comp.GetValue<int?>("clubId") ?? 0;
+                            var compRegion = comp.GetValue<string>("regionalFederation") ?? "";
+
+                            if (compClubId > 0)
+                            {
+                                if (!clubRegionLookup.TryGetValue(compClubId, out var clubRegion) ||
+                                    !effectiveRegions.Contains(clubRegion))
+                                    return false;
+                            }
+                            else if (!string.IsNullOrEmpty(compRegion))
+                            {
+                                if (!effectiveRegions.Contains(compRegion))
+                                    return false;
+                            }
+                            // National competitions (no club, no region) - include them
                         }
 
                         return true;
@@ -1894,8 +1937,29 @@ namespace HpskSite.Controllers
 
             try
             {
-                // Check cache first (include region in cache key)
-                var cacheKeyRegion = region ?? "all";
+                // Determine effective region(s) for filtering first (needed for cache key)
+                string? effectiveRegion = region;
+                List<string>? effectiveRegions = null;
+
+                if (isRegionalAdmin && !isSiteAdmin)
+                {
+                    if (!string.IsNullOrEmpty(region) && managedRegions.Contains(region))
+                    {
+                        effectiveRegion = region;
+                    }
+                    else if (managedRegions.Count == 1)
+                    {
+                        effectiveRegion = managedRegions.First();
+                    }
+                    else
+                    {
+                        effectiveRegion = null;
+                        effectiveRegions = managedRegions;
+                    }
+                }
+
+                // Check cache first (include effective region in cache key)
+                var cacheKeyRegion = effectiveRegion ?? (effectiveRegions != null ? string.Join("_", effectiveRegions) : "all");
                 var cacheKey = $"{SeriesListCacheKey}_{cacheKeyRegion}";
                 var cachedResult = _appCaches.RuntimeCache.Get(cacheKey);
                 if (cachedResult != null)
@@ -1936,7 +2000,7 @@ namespace HpskSite.Controllers
 
                 // If region filter is applied, find series that have at least one competition from that region
                 HashSet<int>? seriesIdsWithRegion = null;
-                if (!string.IsNullOrEmpty(region))
+                if (!string.IsNullOrEmpty(effectiveRegion))
                 {
                     seriesIdsWithRegion = allCompetitions
                         .Where(comp =>
@@ -1948,12 +2012,38 @@ namespace HpskSite.Controllers
                             if (clubId > 0)
                             {
                                 return clubRegionLookup.TryGetValue(clubId, out var clubRegion) &&
-                                       clubRegion.Equals(region, StringComparison.OrdinalIgnoreCase);
+                                       clubRegion.Equals(effectiveRegion, StringComparison.OrdinalIgnoreCase);
                             }
                             // If competition has no club but has a direct region, use that
                             else if (!string.IsNullOrEmpty(compRegion))
                             {
-                                return compRegion.Equals(region, StringComparison.OrdinalIgnoreCase);
+                                return compRegion.Equals(effectiveRegion, StringComparison.OrdinalIgnoreCase);
+                            }
+                            // If competition has neither club nor region, it's national - include in all regions
+                            return true;
+                        })
+                        .Select(comp => comp.ParentId)
+                        .ToHashSet();
+                }
+                else if (effectiveRegions != null && effectiveRegions.Any())
+                {
+                    // Multi-region filter
+                    seriesIdsWithRegion = allCompetitions
+                        .Where(comp =>
+                        {
+                            var clubId = comp.GetValue<int?>("clubId") ?? 0;
+                            var compRegion = comp.GetValue<string>("regionalFederation") ?? "";
+
+                            // If competition has a club, use the club's region
+                            if (clubId > 0)
+                            {
+                                return clubRegionLookup.TryGetValue(clubId, out var clubRegion) &&
+                                       effectiveRegions.Contains(clubRegion);
+                            }
+                            // If competition has no club but has a direct region, use that
+                            else if (!string.IsNullOrEmpty(compRegion))
+                            {
+                                return effectiveRegions.Contains(compRegion);
                             }
                             // If competition has neither club nor region, it's national - include in all regions
                             return true;

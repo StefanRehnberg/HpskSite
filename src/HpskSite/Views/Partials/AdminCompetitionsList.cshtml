@@ -197,32 +197,57 @@ function onRegionFilterChange() {
 
 // Load regions for competitions filter dropdown
 function loadCompetitionsRegions() {
-    // Get user's default region and locked region from the tab's data attributes
+    // Get user's default region and managed regions from the tab's data attributes
     const competitionsTab = document.getElementById('competitions');
     const userDefaultRegion = competitionsTab?.dataset.userDefaultRegion || '';
-    const lockedRegion = competitionsTab?.dataset.lockedRegion || '';
+    const isSiteAdmin = competitionsTab?.dataset.isSiteAdmin === 'true';
+    let managedRegions = [];
+    try {
+        managedRegions = JSON.parse(competitionsTab?.dataset.managedRegions || '[]');
+    } catch (e) {
+        console.error('Error parsing managed regions:', e);
+    }
+    const isRegionalAdmin = !isSiteAdmin && managedRegions.length > 0;
 
     fetch('/umbraco/surface/RegionalAdmin/GetAllRegions')
         .then(response => response.json())
         .then(data => {
             const regionSelect = document.getElementById('regionFilter');
             if (data.success && data.regions) {
-                // If region is locked (regional admin), only show that region
-                if (lockedRegion) {
-                    regionSelect.innerHTML = '';
-                    const lockedRegionData = data.regions.find(r => r.id === lockedRegion);
-                    if (lockedRegionData) {
-                        const option = document.createElement('option');
-                        option.value = lockedRegionData.id;
-                        option.textContent = lockedRegionData.name;
-                        option.selected = true;
-                        regionSelect.appendChild(option);
+                if (isRegionalAdmin) {
+                    // Regional admin - show only their managed regions
+                    if (managedRegions.length === 1) {
+                        // Single region - show only that region, disabled
+                        regionSelect.innerHTML = '';
+                        const regionData = data.regions.find(r => r.id === managedRegions[0]);
+                        if (regionData) {
+                            const option = document.createElement('option');
+                            option.value = regionData.id;
+                            option.textContent = regionData.name;
+                            option.selected = true;
+                            regionSelect.appendChild(option);
+                        }
+                        regionSelect.disabled = true;
+                        serverFilters.region = managedRegions[0];
+                    } else {
+                        // Multiple regions - show dropdown with their regions
+                        regionSelect.innerHTML = '<option value="">Alla mina kretsar</option>';
+                        data.regions
+                            .filter(r => managedRegions.includes(r.id))
+                            .forEach(region => {
+                                const option = document.createElement('option');
+                                option.value = region.id;
+                                option.textContent = region.name;
+                                if (region.id === userDefaultRegion) {
+                                    option.selected = true;
+                                }
+                                regionSelect.appendChild(option);
+                            });
+                        // Set initial filter to default region if it's in managed regions
+                        if (userDefaultRegion && managedRegions.includes(userDefaultRegion)) {
+                            serverFilters.region = userDefaultRegion;
+                        }
                     }
-                    // Disable the dropdown for regional admins
-                    regionSelect.disabled = true;
-                    // Apply the locked region as filter
-                    serverFilters.region = lockedRegion;
-                    loadCompetitionsList();
                 } else {
                     // Site admin - show all regions with "Alla kretsar" option
                     regionSelect.innerHTML = '<option value="">Alla kretsar</option>';
@@ -237,17 +262,23 @@ function loadCompetitionsRegions() {
                         regionSelect.appendChild(option);
                     });
 
-                    // If user has a default region, apply it as filter and reload
+                    // If user has a default region, apply it as filter
                     if (userDefaultRegion && regionSelect.value === userDefaultRegion) {
                         serverFilters.region = userDefaultRegion;
-                        loadCompetitionsList();
                     }
                 }
+                // Always load competitions after region setup is complete
+                loadCompetitionsList();
             } else {
                 console.error('Failed to load competitions regions:', data.message || 'Unknown error');
+                // Load anyway to show error
+                loadCompetitionsList();
             }
         })
-        .catch(error => console.error('Error loading competitions regions:', error));
+        .catch(error => {
+            console.error('Error loading competitions regions:', error);
+            loadCompetitionsList();
+        });
 }
 
 // Load competitions list when tab is shown
@@ -257,12 +288,10 @@ function initCompetitionsList() {
     // Populate year filter on page load
     populateYearFilter();
 
-    // Load regions for filter dropdown
-    loadCompetitionsRegions();
-
     // Load immediately if competitions tab is active (default)
+    // loadCompetitionsRegions() will call loadCompetitionsList() after setting up filters
     if (competitionsTab && competitionsTab.classList.contains('active')) {
-        loadCompetitionsList();
+        loadCompetitionsRegions();
         competitionsListLoaded = true;
     }
 
@@ -270,7 +299,7 @@ function initCompetitionsList() {
     if (competitionsTab) {
         competitionsTab.addEventListener('shown.bs.tab', function() {
             if (!competitionsListLoaded) {
-                loadCompetitionsList();
+                loadCompetitionsRegions();
                 competitionsListLoaded = true;
             }
         });
