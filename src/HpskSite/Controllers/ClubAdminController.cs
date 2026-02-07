@@ -57,7 +57,12 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetClubs()
         {
-            if (!await _authService.IsCurrentUserAdminAsync())
+            // Allow site admins and regional admins
+            bool isSiteAdmin = await _authService.IsCurrentUserAdminAsync();
+            var managedRegions = await _authService.GetManagedRegions();
+            bool isRegionalAdmin = !isSiteAdmin && managedRegions.Any();
+
+            if (!isSiteAdmin && !isRegionalAdmin)
             {
                 return Json(new { success = false, message = "Access denied" });
             }

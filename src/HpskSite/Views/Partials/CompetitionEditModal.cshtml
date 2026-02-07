@@ -363,13 +363,43 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                                 <small class="form-text text-muted d-block mt-1">Begränsa denna tävling till medlemmar från en specifik klubb</small>
                             </div>
                         </div>
-                        <div class="col-md-6" id="clubSelectorContainer">
-                            <div class="mb-3">
-                                <label for="clubId" class="form-label">Ansvarig klubb <span class="text-danger">*</span></label>
-                                <select class="form-select" id="clubId" name="clubId" required>
-                                    <option value="">-- Välj klubb --</option>
-                                </select>
-                                <small class="form-text text-muted">Laddar klubbar...</small>
+                    </div>
+
+                    <!-- Organizer Section: Club OR Region -->
+                    <div class="card mb-3 border-info">
+                        <div class="card-header bg-info bg-opacity-10">
+                            <i class="bi bi-building me-1"></i>Arrangör / Synlighet
+                        </div>
+                        <div class="card-body">
+                            <p class="text-muted small mb-3">
+                                Välj <strong>klubb</strong> om tävlingen arrangeras av en specifik klubb.
+                                Välj <strong>krets</strong> om tävlingen arrangeras av en krets (t.ex. Hemmabana).
+                                Lämna båda tomma för nationella tävlingar som ska synas överallt.
+                            </p>
+
+                            <div class="row">
+                                <div class="col-md-6" id="clubSelectorContainer">
+                                    <div class="mb-3">
+                                        <label for="clubId" class="form-label">Ansvarig klubb</label>
+                                        <select class="form-select" id="clubId" name="clubId" onchange="onEditClubChange()">
+                                            <option value="">-- Ingen klubb --</option>
+                                        </select>
+                                        <small class="form-text text-muted">Laddar klubbar...</small>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="regionalFederation" class="form-label">Krets (endast om ingen klubb)</label>
+                                        <select class="form-select" id="regionalFederation" name="regionalFederation">
+                                            <option value="">-- Ingen krets --</option>
+                                        </select>
+                                        <small class="form-text text-muted">Laddar kretsar...</small>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="alert alert-light py-2 mb-0" id="edit_organizerHelpText">
+                                <i class="bi bi-info-circle me-1"></i>Om varken klubb eller krets väljs syns tävlingen för alla.
                             </div>
                         </div>
                     </div>
@@ -1026,6 +1056,9 @@ function loadClubsForSelector() {
                 if (currentClubId && currentClubId !== '0') {
                     clubSelect.value = currentClubId;
                 }
+
+                // Update organizer UI based on club selection
+                updateEditOrganizerUI();
             } else if (data.success && clubs.length === 0) {
                 helpText.textContent = 'Inga klubbar finns registrerade';
                 helpText.classList.add('text-warning');
@@ -1041,21 +1074,117 @@ function loadClubsForSelector() {
         });
 }
 
-// Update populateEditModal to handle club fields
+function loadRegionsForSelector() {
+    const regionSelect = document.getElementById('regionalFederation');
+    const helpText = regionSelect.parentElement.querySelector('small');
+
+    fetch('/umbraco/surface/RegionalAdmin/GetAllRegions')
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (data.success && data.regions && data.regions.length > 0) {
+                // Clear loading message
+                helpText.style.display = 'none';
+
+                // Populate regions
+                data.regions.forEach(region => {
+                    const option = document.createElement('option');
+                    option.value = region.id;
+                    option.textContent = region.name;
+                    regionSelect.appendChild(option);
+                });
+
+                // Set the current region if editing
+                const currentRegion = regionSelect.dataset.currentValue;
+                if (currentRegion) {
+                    regionSelect.value = currentRegion;
+                }
+            } else {
+                helpText.textContent = data.message || 'Kunde inte ladda kretsar';
+                helpText.classList.add('text-danger');
+            }
+        })
+        .catch(error => {
+            console.error('Error loading regions:', error);
+            helpText.textContent = 'Fel vid hämtning av kretsar';
+            helpText.classList.add('text-danger');
+        });
+}
+
+// Ensure regions are loaded
+function ensureRegionsLoaded() {
+    const regionSelect = document.getElementById('regionalFederation');
+    if (regionSelect.options.length <= 1) {
+        loadRegionsForSelector();
+    } else {
+        // Regions already loaded, just set the value from dataset
+        const currentRegion = regionSelect.dataset.currentValue;
+        if (currentRegion) {
+            regionSelect.value = currentRegion;
+        }
+    }
+    // Update UI based on current club selection
+    updateEditOrganizerUI();
+}
+
+// Handle club selection change - disable region if club is selected
+function onEditClubChange() {
+    const regionSelect = document.getElementById('regionalFederation');
+    // Clear region when club is selected
+    if (document.getElementById('clubId').value) {
+        regionSelect.value = '';
+    }
+    updateEditOrganizerUI();
+}
+
+// Update the organizer help text and region dropdown state
+function updateEditOrganizerUI() {
+    const clubSelect = document.getElementById('clubId');
+    const regionSelect = document.getElementById('regionalFederation');
+    const helpText = document.getElementById('edit_organizerHelpText');
+
+    if (clubSelect && clubSelect.value) {
+        // Club selected - disable region dropdown
+        regionSelect.disabled = true;
+        if (helpText) {
+            helpText.innerHTML = '<i class="bi bi-building me-1"></i>Tävlingen kopplas till vald klubb och dess krets.';
+            helpText.classList.remove('alert-light');
+            helpText.classList.add('alert-info');
+        }
+    } else {
+        // No club - enable region dropdown
+        regionSelect.disabled = false;
+        if (helpText) {
+            helpText.innerHTML = '<i class="bi bi-info-circle me-1"></i>Om varken klubb eller krets väljs syns tävlingen för alla.';
+            helpText.classList.remove('alert-info');
+            helpText.classList.add('alert-light');
+        }
+    }
+}
+
+// Update populateEditModal to handle club and region fields
 const originalPopulateEditModal = window.populateEditModal;
 window.populateEditModal = function(competition) {
     // Call original function
     originalPopulateEditModal(competition);
 
-    // Handle club fields
+    // Handle club and region fields
     if (competition) {
         setCheckboxValue('isClubOnly', competition.isClubOnly || false);
 
         // Set clubId as data attribute for later use
         document.getElementById('clubId').dataset.currentValue = competition.clubId || '0';
 
-        // Always ensure clubs are loaded
+        // Set regionalFederation as data attribute for later use
+        document.getElementById('regionalFederation').dataset.currentValue = competition.regionalFederation || '';
+
+        // Always ensure clubs and regions are loaded
         ensureClubsLoaded();
+        ensureRegionsLoaded();
 
         // Handle external competition fields
         setCheckboxValue('isExternal', competition.isExternal || false);

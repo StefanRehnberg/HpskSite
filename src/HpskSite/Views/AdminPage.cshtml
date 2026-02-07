@@ -1,7 +1,9 @@
 @using Umbraco.Cms.Web.Website.Controllers
 @using Umbraco.Cms.Web.Website.Models
 @using Umbraco.Cms.Core.Security
+@using Umbraco.Cms.Core.Services
 @inject IMemberManager MemberManager
+@inject IMemberService MemberService
 @inject HpskSite.Services.AdminAuthorizationService AuthService
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
@@ -11,12 +13,48 @@
     var currentMember = await MemberManager.GetCurrentMemberAsync();
     var isLoggedIn = currentMember != null;
 
-    bool isAdmin = false;
+    bool isSiteAdmin = false;
+    bool isRegionalAdmin = false;
+    string userDefaultRegion = "";
+    string lockedRegion = ""; // For regional admins, this locks the dropdown
+    List<string> managedRegions = new List<string>();
+
     if (isLoggedIn && currentMember != null)
     {
         // Check if user is site administrator
-        isAdmin = await AuthService.IsCurrentUserAdminAsync();
+        isSiteAdmin = await AuthService.IsCurrentUserAdminAsync();
+
+        // Check if user is a regional admin
+        managedRegions = await AuthService.GetManagedRegions();
+        isRegionalAdmin = !isSiteAdmin && managedRegions.Any();
+
+        // For regional admins, lock to their first managed region
+        if (isRegionalAdmin && managedRegions.Any())
+        {
+            lockedRegion = managedRegions.First();
+            userDefaultRegion = lockedRegion;
+        }
+        else
+        {
+            // For site admins, get user's default region from their primary club
+            var member = MemberService.GetByEmail(currentMember.Email);
+            if (member != null)
+            {
+                var primaryClubIdStr = member.GetValue<string>("primaryClubId");
+                if (!string.IsNullOrEmpty(primaryClubIdStr) && int.TryParse(primaryClubIdStr, out var clubId))
+                {
+                    var clubNode = Umbraco.Content(clubId);
+                    if (clubNode != null)
+                    {
+                        userDefaultRegion = clubNode.Value<string>("regionalFederation") ?? "";
+                    }
+                }
+            }
+        }
     }
+
+    // Allow access if site admin OR regional admin
+    bool hasAccess = isSiteAdmin || isRegionalAdmin;
 }
 
 @* Check if user is logged in *@
@@ -32,14 +70,14 @@
     return;
 }
 
-@* Check if user is administrator *@
-@if (!isAdmin)
+@* Check if user has admin access (site admin or regional admin) *@
+@if (!hasAccess)
 {
     <div class="container mt-4">
         <div class="alert alert-danger">
             <h4>Access Denied</h4>
-            <p>You must be a site administrator to access this page.</p>
-            <p>Only members in the "Administrators" group have access to the administration panel.</p>
+            <p>You must be a site administrator or regional administrator to access this page.</p>
+            <p>Only members in the "Administrators" or "RegionalAdmin_*" groups have access to the administration panel.</p>
             <a href="/" class="btn btn-primary">Return to Home</a>
         </div>
     </div>
@@ -50,14 +88,25 @@
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
             <h1>Administration Panel</h1>
-            <p class="mb-0">Welcome, @(currentMember?.UserName ?? "Unknown User")!</p>
+            <p class="mb-0">
+                Welcome, @(currentMember?.UserName ?? "Unknown User")!
+                @if (isRegionalAdmin && !isSiteAdmin)
+                {
+                    <span class="badge bg-info ms-2">
+                        <i class="bi bi-geo-alt me-1"></i>Kretsadministratör
+                    </span>
+                }
+            </p>
         </div>
-        <div class="admin-tools">
-            <a href="/umbraco" target="_blank" class="btn btn-outline-primary">
-                <i class="bi bi-gear-fill me-2"></i>Umbraco Backoffice
-                <i class="bi bi-box-arrow-up-right ms-1"></i>
-            </a>
-        </div>
+        @if (isSiteAdmin)
+        {
+            <div class="admin-tools">
+                <a href="/umbraco" target="_blank" class="btn btn-outline-primary">
+                    <i class="bi bi-gear-fill me-2"></i>Umbraco Backoffice
+                    <i class="bi bi-box-arrow-up-right ms-1"></i>
+                </a>
+            </div>
+        }
     </div>
 
     @* Anti-forgery token for AJAX requests *@
@@ -72,17 +121,20 @@
             <button class="nav-link" id="series-tab" data-bs-toggle="tab" data-bs-target="#series" type="button" role="tab">Serier</button>
         </li>
         <li class="nav-item" role="presentation">
-            <button class="nav-link" id="users-tab" data-bs-toggle="tab" data-bs-target="#users" type="button" role="tab">Användarhantering</button>
+            <button class="nav-link" id="users-tab" data-bs-toggle="tab" data-bs-target="#users" type="button" role="tab">Användare</button>
         </li>
         <li class="nav-item" role="presentation">
-            <button class="nav-link" id="clubs-tab" data-bs-toggle="tab" data-bs-target="#clubs" type="button" role="tab">Klubbhantering</button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="regions-tab" data-bs-toggle="tab" data-bs-target="#regions" type="button" role="tab">Kretshantering</button>
+            <button class="nav-link" id="clubs-tab" data-bs-toggle="tab" data-bs-target="#clubs" type="button" role="tab">Klubbar</button>
         </li>
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="invoices-tab" data-bs-toggle="tab" data-bs-target="#invoices" type="button" role="tab">Fakturor</button>
         </li>
+        @if (isSiteAdmin)
+        {
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="regions-tab" data-bs-toggle="tab" data-bs-target="#regions" type="button" role="tab">Kretsar</button>
+            </li>
+        }
     </ul>
 
     <!-- Load modals BEFORE tab content so JavaScript functions are available -->
@@ -101,7 +153,7 @@
 
     <!-- Tab content -->
     <div class="tab-content" id="adminTabContent">
-        <div class="tab-pane fade show active" id="competitions" role="tabpanel">
+        <div class="tab-pane fade show active" id="competitions" role="tabpanel" data-user-default-region="@userDefaultRegion" data-locked-region="@lockedRegion">
             <div class="card mt-3">
                 <div class="card-body">
                     @await Html.PartialAsync("AdminCompetitionsList")
@@ -109,7 +161,7 @@
             </div>
         </div>
 
-        <div class="tab-pane fade" id="series" role="tabpanel">
+        <div class="tab-pane fade" id="series" role="tabpanel" data-user-default-region="@userDefaultRegion" data-locked-region="@lockedRegion">
             <div class="card mt-3">
                 <div class="card-body">
                     @await Html.PartialAsync("AdminSeriesList")
@@ -117,15 +169,15 @@
             </div>
         </div>
 
-        <div class="tab-pane fade" id="users" role="tabpanel">
+        <div class="tab-pane fade" id="users" role="tabpanel" data-user-default-region="@userDefaultRegion" data-locked-region="@lockedRegion" data-is-site-admin="@isSiteAdmin.ToString().ToLower()">
             <div class="card mt-3">
                 <div class="card-body">
                     @await Html.PartialAsync("UserManagement")
                 </div>
             </div>
         </div>
-        
-        <div class="tab-pane fade" id="clubs" role="tabpanel">
+
+        <div class="tab-pane fade" id="clubs" role="tabpanel" data-user-default-region="@userDefaultRegion" data-locked-region="@lockedRegion">
             <div class="card mt-3">
                 <div class="card-body">
                     @await Html.PartialAsync("ClubManagement")
@@ -133,20 +185,23 @@
             </div>
         </div>
 
-        <div class="tab-pane fade" id="regions" role="tabpanel">
-            <div class="card mt-3">
-                <div class="card-body">
-                    @await Html.PartialAsync("RegionalManagement")
-                </div>
-            </div>
-        </div>
-
-        <div class="tab-pane fade" id="invoices" role="tabpanel">
+        <div class="tab-pane fade" id="invoices" role="tabpanel" data-user-default-region="@userDefaultRegion" data-locked-region="@lockedRegion">
             <div class="card mt-3">
                 <div class="card-body">
                     @await Html.PartialAsync("AdminInvoicesList")
                 </div>
             </div>
         </div>
+
+        @if (isSiteAdmin)
+        {
+            <div class="tab-pane fade" id="regions" role="tabpanel">
+                <div class="card mt-3">
+                    <div class="card-body">
+                        @await Html.PartialAsync("RegionalManagement")
+                    </div>
+                </div>
+            </div>
+        }
     </div>
 </div>

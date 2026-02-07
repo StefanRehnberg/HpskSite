@@ -74,7 +74,12 @@ namespace HpskSite.Controllers
             string sortBy = "lastActiveSortValue",
             bool sortDesc = true)
         {
-            if (!await _authService.IsCurrentUserAdminAsync())
+            // Allow site admins and regional admins
+            bool isSiteAdmin = await _authService.IsCurrentUserAdminAsync();
+            var managedRegions = await _authService.GetManagedRegions();
+            bool isRegionalAdmin = !isSiteAdmin && managedRegions.Any();
+
+            if (!isSiteAdmin && !isRegionalAdmin)
             {
                 return Json(new { success = false, message = "Access denied" });
             }
@@ -415,7 +420,12 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetRegionsForUserManagement()
         {
-            if (!await _authService.IsCurrentUserAdminAsync())
+            // Allow site admins and regional admins
+            bool isSiteAdmin = await _authService.IsCurrentUserAdminAsync();
+            var managedRegions = await _authService.GetManagedRegions();
+            bool isRegionalAdmin = !isSiteAdmin && managedRegions.Any();
+
+            if (!isSiteAdmin && !isRegionalAdmin)
             {
                 return Json(new { success = false, message = "Access denied" });
             }
@@ -461,7 +471,12 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetClubsForRegion(string region)
         {
-            if (!await _authService.IsCurrentUserAdminAsync())
+            // Allow site admins and regional admins
+            bool isSiteAdmin = await _authService.IsCurrentUserAdminAsync();
+            var managedRegions = await _authService.GetManagedRegions();
+            bool isRegionalAdmin = !isSiteAdmin && managedRegions.Any();
+
+            if (!isSiteAdmin && !isRegionalAdmin)
             {
                 return Json(new { success = false, message = "Access denied" });
             }
@@ -755,22 +770,29 @@ namespace HpskSite.Controllers
                         }
                     }
 
-                    // Update groups
-                    var currentRoles = _memberService.GetAllRoles(member.Id).ToList();
-                    var newGroups = groups ?? new string[0];
-                    var rolesToRemove = currentRoles.Except(newGroups).ToList();
-                    var rolesToAdd = newGroups.Except(currentRoles).ToList();
-
-                    Console.WriteLine($"Current roles: {string.Join(", ", currentRoles)}");
-                    Console.WriteLine($"New roles: {string.Join(", ", newGroups)}");
-
-                    foreach (var role in rolesToRemove)
+                    // Update groups - only site admins can modify member groups
+                    if (isSiteAdmin)
                     {
-                        _memberService.DissociateRole(member.Id, role);
+                        var currentRoles = _memberService.GetAllRoles(member.Id).ToList();
+                        var newGroups = groups ?? new string[0];
+                        var rolesToRemove = currentRoles.Except(newGroups).ToList();
+                        var rolesToAdd = newGroups.Except(currentRoles).ToList();
+
+                        Console.WriteLine($"Current roles: {string.Join(", ", currentRoles)}");
+                        Console.WriteLine($"New roles: {string.Join(", ", newGroups)}");
+
+                        foreach (var role in rolesToRemove)
+                        {
+                            _memberService.DissociateRole(member.Id, role);
+                        }
+                        foreach (var role in rolesToAdd)
+                        {
+                            _memberService.AssignRole(member.Id, role);
+                        }
                     }
-                    foreach (var role in rolesToAdd)
+                    else
                     {
-                        _memberService.AssignRole(member.Id, role);
+                        Console.WriteLine("Skipping group update - user is not a site admin");
                     }
 
                     return Json(new { success = true, message = "Member updated successfully." });
@@ -1096,7 +1118,12 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetMemberGroups()
         {
-            if (!await _authService.IsCurrentUserAdminAsync())
+            // Allow site admins and regional admins
+            bool isSiteAdmin = await _authService.IsCurrentUserAdminAsync();
+            var managedRegions = await _authService.GetManagedRegions();
+            bool isRegionalAdmin = !isSiteAdmin && managedRegions.Any();
+
+            if (!isSiteAdmin && !isRegionalAdmin)
             {
                 return Json(new { success = false, message = "Access denied" });
             }
@@ -1445,11 +1472,17 @@ namespace HpskSite.Controllers
 
         /// <summary>
         /// Gets all members pending approval
+        /// Optionally filtered by region (filters by club's RegionalFederation)
         /// </summary>
         [HttpGet]
-        public async Task<IActionResult> GetPendingApprovals()
+        public async Task<IActionResult> GetPendingApprovals(string? region = null)
         {
-            if (!await _authService.IsCurrentUserAdminAsync())
+            // Allow site admins and regional admins
+            bool isSiteAdmin = await _authService.IsCurrentUserAdminAsync();
+            var managedRegions = await _authService.GetManagedRegions();
+            bool isRegionalAdmin = !isSiteAdmin && managedRegions.Any();
+
+            if (!isSiteAdmin && !isRegionalAdmin)
             {
                 return Json(new { success = false, message = "Access denied" });
             }
@@ -1458,18 +1491,31 @@ namespace HpskSite.Controllers
             {
                 var allMembers = _memberService.GetAll(0, int.MaxValue, out var totalRecords);
 
-                // Get clubs for club name lookup
+                // Get clubs for club name lookup and region filtering
                 var clubs = GetClubsFromStorage();
+
+                // Build a set of club IDs in the selected region (if region filter is active)
+                var clubsInRegion = new HashSet<int>();
+                if (!string.IsNullOrEmpty(region))
+                {
+                    clubsInRegion = clubs
+                        .Where(c => c.IsActive && c.RegionalFederation == region)
+                        .Select(c => c.Id ?? 0)
+                        .Where(id => id > 0)
+                        .ToHashSet();
+                }
 
                 var pendingMembers = allMembers
                     .Where(m => m.ContentType.Alias != ClubMemberTypeAlias) // Exclude clubs
                     .Where(m => !m.IsApproved) // Only non-approved members
                     .Select(m => {
-                        var primaryClubId = m.GetValue("primaryClubId")?.ToString();
+                        var primaryClubIdStr = m.GetValue("primaryClubId")?.ToString();
                         var clubName = "No Club";
+                        int? parsedClubId = null;
 
-                        if (!string.IsNullOrEmpty(primaryClubId) && int.TryParse(primaryClubId, out var clubId))
+                        if (!string.IsNullOrEmpty(primaryClubIdStr) && int.TryParse(primaryClubIdStr, out var clubId))
                         {
+                            parsedClubId = clubId;
                             var club = clubs.FirstOrDefault(c => c.Id == clubId);
                             clubName = club?.Name ?? $"Unknown Club (ID: {clubId})";
                         }
@@ -1479,9 +1525,12 @@ namespace HpskSite.Controllers
                             Name = $"{m.GetValue("firstName")} {m.GetValue("lastName")}".Trim(),
                             Email = m.Email,
                             ClubName = clubName,
+                            ClubId = parsedClubId,
                             RegistrationDate = m.CreateDate
                         };
                     })
+                    // Apply region filter if specified
+                    .Where(m => string.IsNullOrEmpty(region) || (m.ClubId.HasValue && clubsInRegion.Contains(m.ClubId.Value)))
                     .OrderBy(m => m.RegistrationDate)
                     .ToList();
 
@@ -1583,12 +1632,14 @@ namespace HpskSite.Controllers
                         {
                             var clubId = clubNode.Id;
                             var clubName = clubNode.Value<string>("clubName") ?? clubNode.Name ?? "";
+                            var regionalFederation = clubNode.Value<string>("regionalFederation") ?? "";
 
                             var club = new ClubViewModel
                             {
                                 Id = clubId,
                                 Name = clubName,
-                                IsActive = clubNode.IsPublished()
+                                IsActive = clubNode.IsPublished(),
+                                RegionalFederation = regionalFederation
                             };
 
                             clubs.Add(club);

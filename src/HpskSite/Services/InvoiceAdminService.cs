@@ -87,6 +87,33 @@ namespace HpskSite.Services
                         filteredCompetitions.Count, filters.ClubId.Value);
                 }
 
+                // If filtering by region, narrow down to competitions belonging to clubs in that region
+                if (!string.IsNullOrEmpty(filters.Region))
+                {
+                    // Build club regions lookup
+                    var allClubs = new List<IContent>();
+                    foreach (var root in rootContent)
+                    {
+                        var descendants = GetFlatDescendants(root);
+                        allClubs.AddRange(descendants.Where(c => c.ContentType.Alias == "club"));
+                    }
+                    var clubRegions = allClubs.ToDictionary(
+                        club => club.Id,
+                        club => club.GetValue<string>("regionalFederation") ?? ""
+                    );
+
+                    filteredCompetitions = filteredCompetitions
+                        .Where(comp =>
+                        {
+                            var clubId = comp.GetValue<int>("clubId");
+                            return clubId > 0 && clubRegions.TryGetValue(clubId, out var clubRegion) && clubRegion == filters.Region;
+                        })
+                        .ToList();
+
+                    _logger.LogInformation("Filtered to {RegionCount} competitions for region {Region}",
+                        filteredCompetitions.Count, filters.Region);
+                }
+
                 // Step 3: Group invoice hubs by competition ID for O(1) lookup
                 var hubsByCompetition = allInvoicesHubs.ToDictionary(hub => hub.ParentId);
 

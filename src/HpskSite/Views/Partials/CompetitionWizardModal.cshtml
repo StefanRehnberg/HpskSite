@@ -59,12 +59,41 @@
                             <input type="text" class="form-control" id="wizard_competitionDate" name="competitionDate" required>
                         </div>
 
-                        <div class="mb-3">
-                            <label for="wizard_clubId" class="form-label">Ansvarig klubb <span class="text-danger">*</span></label>
-                            <select class="form-select" id="wizard_clubId" name="clubId" required>
-                                <option value="">-- Välj klubb --</option>
-                            </select>
-                            <small class="form-text text-muted" id="wizard_clubHelpText"></small>
+                        <!-- Organizer Section: Club OR Region -->
+                        <div class="card mb-3 border-info">
+                            <div class="card-header bg-info bg-opacity-10">
+                                <i class="bi bi-building me-1"></i>Arrangör / Synlighet
+                            </div>
+                            <div class="card-body">
+                                <p class="text-muted small mb-3">
+                                    Välj <strong>klubb</strong> om tävlingen arrangeras av en specifik klubb.
+                                    Välj <strong>krets</strong> om tävlingen arrangeras av en krets (t.ex. Hemmabana).
+                                    Lämna båda tomma för nationella tävlingar som ska synas överallt.
+                                </p>
+
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="wizard_clubId" class="form-label">Ansvarig klubb</label>
+                                            <select class="form-select" id="wizard_clubId" name="clubId" onchange="onWizardClubChange()">
+                                                <option value="">-- Ingen klubb --</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="wizard_regionalFederation" class="form-label">Krets (endast om ingen klubb)</label>
+                                            <select class="form-select" id="wizard_regionalFederation" name="regionalFederation">
+                                                <option value="">-- Ingen krets --</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="alert alert-light py-2 mb-0" id="wizard_organizerHelpText">
+                                    <i class="bi bi-info-circle me-1"></i>Om varken klubb eller krets väljs syns tävlingen för alla.
+                                </div>
+                            </div>
                         </div>
                     </div>
 
@@ -615,6 +644,7 @@ document.getElementById('competitionWizardModal').addEventListener('show.bs.moda
     resetWizard();
     detectContext();
     loadClubsForWizard();
+    loadRegionsForWizard();
     loadSeriesForWizard();
     updateWizardUI();
 
@@ -717,7 +747,7 @@ function loadClubsForWizard() {
         .then(data => {
             if (data.success && data.clubs) {
                 const select = document.getElementById('wizard_clubId');
-                select.innerHTML = '<option value="">-- Välj klubb --</option>';
+                select.innerHTML = '<option value="">-- Ingen klubb --</option>';
 
                 data.clubs.forEach(club => {
                     const option = document.createElement('option');
@@ -731,14 +761,60 @@ function loadClubsForWizard() {
                     select.value = wizardContext.clubId;
                     // Disable dropdown to prevent changes - club admins can only create for their club
                     select.disabled = true;
-                    document.getElementById('wizard_clubHelpText').textContent = 'Tävlingen skapas för denna klubb';
+                    document.getElementById('wizard_organizerHelpText').innerHTML =
+                        '<i class="bi bi-lock me-1"></i>Tävlingen skapas för denna klubb';
 
                     // Pre-check "isClubOnly" but keep it editable so club can invite other clubs
                     document.getElementById('wizard_isClubOnly').checked = true;
+
+                    // Also disable region dropdown when on club page
+                    document.getElementById('wizard_regionalFederation').disabled = true;
                 }
             }
         })
         .catch(error => console.error('Error loading clubs:', error));
+}
+
+// Load regions for dropdown
+function loadRegionsForWizard() {
+    fetch('/umbraco/surface/RegionalAdmin/GetAllRegions')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.regions) {
+                const select = document.getElementById('wizard_regionalFederation');
+                select.innerHTML = '<option value="">-- Ingen krets --</option>';
+
+                data.regions.forEach(region => {
+                    const option = document.createElement('option');
+                    option.value = region.id;
+                    option.textContent = region.name;
+                    select.appendChild(option);
+                });
+            }
+        })
+        .catch(error => console.error('Error loading regions:', error));
+}
+
+// Handle club selection change - disable region if club is selected
+function onWizardClubChange() {
+    const clubSelect = document.getElementById('wizard_clubId');
+    const regionSelect = document.getElementById('wizard_regionalFederation');
+    const helpText = document.getElementById('wizard_organizerHelpText');
+
+    if (clubSelect.value) {
+        // Club selected - disable region dropdown and clear its value
+        regionSelect.value = '';
+        regionSelect.disabled = true;
+        helpText.innerHTML = '<i class="bi bi-building me-1"></i>Tävlingen kopplas till vald klubb och dess krets.';
+        helpText.classList.remove('alert-light');
+        helpText.classList.add('alert-info');
+    } else {
+        // No club - enable region dropdown
+        regionSelect.disabled = false;
+        helpText.innerHTML = '<i class="bi bi-info-circle me-1"></i>Om varken klubb eller krets väljs syns tävlingen för alla.';
+        helpText.classList.remove('alert-info');
+        helpText.classList.add('alert-light');
+    }
 }
 
 // Load series for dropdown
@@ -1121,6 +1197,10 @@ window.resetWizard = function() {
 
     // Re-detect context (club page vs admin page)
     detectContext();
+
+    // Reset dropdowns to enabled state (will be disabled again if on club page)
+    document.getElementById('wizard_clubId').disabled = false;
+    document.getElementById('wizard_regionalFederation').disabled = false;
 
     // Auto-check "isClubOnly" checkbox if on club page
     if (wizardContext.isClubPage) {

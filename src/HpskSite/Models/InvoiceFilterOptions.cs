@@ -17,6 +17,11 @@ namespace HpskSite.Models
         public int? ClubId { get; set; }
 
         /// <summary>
+        /// Filter by region (shows invoices from competitions belonging to clubs in this region)
+        /// </summary>
+        public string? Region { get; set; }
+
+        /// <summary>
         /// Filter by payment status: "Pending", "Paid", "Cancelled", "Failed", "Refunded"
         /// </summary>
         public string? PaymentStatus { get; set; }

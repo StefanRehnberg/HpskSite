@@ -49,12 +49,37 @@
                         <small class="form-text text-muted">Välj serie som tävlingen ingår i</small>
                     </div>
 
-                    <div class="mb-3">
-                        <label for="advert_clubId" class="form-label">Ansvarig klubb</label>
-                        <select class="form-select" id="advert_clubId" name="clubId">
-                            <option value="">-- Välj klubb --</option>
-                        </select>
-                        <small class="form-text text-muted">Klubben som arrangerar tävlingen</small>
+                    <!-- Organizer Section: Club OR Region -->
+                    <div class="card mb-3 border-info">
+                        <div class="card-header bg-info bg-opacity-10 py-2">
+                            <small><i class="bi bi-building me-1"></i>Arrangör / Synlighet</small>
+                        </div>
+                        <div class="card-body py-2">
+                            <p class="text-muted small mb-2">
+                                Välj <strong>klubb</strong> eller <strong>krets</strong>. Lämna båda tomma för nationella tävlingar.
+                            </p>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-2">
+                                        <label for="advert_clubId" class="form-label small mb-1">Ansvarig klubb</label>
+                                        <select class="form-select form-select-sm" id="advert_clubId" name="clubId" onchange="onAdvertClubChange()">
+                                            <option value="">-- Ingen klubb --</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-2">
+                                        <label for="advert_regionalFederation" class="form-label small mb-1">Krets (om ingen klubb)</label>
+                                        <select class="form-select form-select-sm" id="advert_regionalFederation" name="regionalFederation">
+                                            <option value="">-- Ingen krets --</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                            <small class="form-text text-muted" id="advert_organizerHelpText">
+                                <i class="bi bi-info-circle me-1"></i>Om varken klubb eller krets väljs syns annonsen för alla.
+                            </small>
+                        </div>
                     </div>
 
                     <div class="mb-3">
@@ -249,6 +274,9 @@ document.getElementById('competitionAdvertModal')?.addEventListener('shown.bs.mo
     // Load clubs list
     loadAdvertClubsList();
 
+    // Load regions list
+    loadAdvertRegionsList();
+
     // Load shooting classes
     loadAdvertShootingClasses();
 });
@@ -280,7 +308,7 @@ function loadAdvertClubsList() {
         .then(data => {
             if (data.success && data.clubs) {
                 const select = document.getElementById('advert_clubId');
-                select.innerHTML = '<option value="">-- Välj klubb --</option>';
+                select.innerHTML = '<option value="">-- Ingen klubb --</option>';
 
                 data.clubs.forEach(club => {
                     const option = document.createElement('option');
@@ -291,6 +319,42 @@ function loadAdvertClubsList() {
             }
         })
         .catch(error => console.error('Error loading clubs:', error));
+}
+
+// Load regions list for dropdown
+function loadAdvertRegionsList() {
+    fetch('/umbraco/surface/RegionalAdmin/GetAllRegions')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.regions) {
+                const select = document.getElementById('advert_regionalFederation');
+                select.innerHTML = '<option value="">-- Ingen krets --</option>';
+
+                data.regions.forEach(region => {
+                    const option = document.createElement('option');
+                    option.value = region.id;
+                    option.textContent = region.name;
+                    select.appendChild(option);
+                });
+            }
+        })
+        .catch(error => console.error('Error loading regions:', error));
+}
+
+// Handle club selection change - disable region if club is selected
+function onAdvertClubChange() {
+    const clubSelect = document.getElementById('advert_clubId');
+    const regionSelect = document.getElementById('advert_regionalFederation');
+    const helpText = document.getElementById('advert_organizerHelpText');
+
+    if (clubSelect.value) {
+        regionSelect.value = '';
+        regionSelect.disabled = true;
+        helpText.innerHTML = '<i class="bi bi-building me-1"></i>Annonsen kopplas till vald klubb och dess krets.';
+    } else {
+        regionSelect.disabled = false;
+        helpText.innerHTML = '<i class="bi bi-info-circle me-1"></i>Om varken klubb eller krets väljs syns annonsen för alla.';
+    }
 }
 
 // Load shooting classes for checkbox selection

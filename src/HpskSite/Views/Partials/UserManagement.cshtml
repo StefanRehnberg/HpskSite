@@ -10,6 +10,27 @@
 <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
 
 <div id="userManagement">
+    <!-- Superior Region Filter -->
+    <div class="card mb-3 border-primary">
+        <div class="card-body py-2">
+            <div class="row align-items-center">
+                <div class="col-md-4">
+                    <label class="form-label fw-bold mb-1">
+                        <i class="bi bi-funnel me-1"></i>Filtrera på krets
+                    </label>
+                    <select id="superiorRegionFilter" class="form-select">
+                        <option value="">Alla kretsar</option>
+                    </select>
+                </div>
+                <div class="col-md-8">
+                    <small class="text-muted">
+                        Filtrerar både väntande godkännanden och medlemslistan
+                    </small>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Pending Approvals Section -->
     <div class="card mb-3 border-warning">
         <div class="card-header bg-warning text-dark">
@@ -28,7 +49,7 @@
     </div>
 
     <div class="d-flex justify-content-between align-items-center mb-3">
-        <h4>Användarhantering</h4>
+        <h4>Användare</h4>
         <div>
             <button class="btn btn-success" onclick="showAddUserModal()">
                 <i class="bi bi-plus-circle me-1"></i>Ny användare
@@ -40,13 +61,6 @@
     <div class="card mb-3">
         <div class="card-body py-2">
             <div class="row g-2 align-items-end">
-                <!-- Region dropdown -->
-                <div class="col-md-2">
-                    <label class="form-label small mb-1">Krets</label>
-                    <select id="filterRegion" class="form-select form-select-sm">
-                        <option value="">Alla kretsar</option>
-                    </select>
-                </div>
                 <!-- Club dropdown (filtered by region) -->
                 <div class="col-md-3">
                     <label class="form-label small mb-1">Klubb</label>
@@ -66,13 +80,13 @@
                     </select>
                 </div>
                 <!-- Search box -->
-                <div class="col-md-3">
+                <div class="col-md-4">
                     <label class="form-label small mb-1">Sök</label>
                     <input type="text" id="filterSearch" class="form-control form-control-sm"
                            placeholder="Namn eller e-post..." autocomplete="off">
                 </div>
                 <!-- Export button -->
-                <div class="col-md-2">
+                <div class="col-md-3">
                     <button class="btn btn-outline-secondary btn-sm w-100" onclick="exportMembers()">
                         <i class="bi bi-download me-1"></i>Exportera
                     </button>
@@ -643,15 +657,21 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Region filter change
-    const regionSelect = document.getElementById('filterRegion');
-    if (regionSelect) {
-        regionSelect.addEventListener('change', function(e) {
+    // Superior region filter change - filters both pending approvals and members
+    const superiorRegionSelect = document.getElementById('superiorRegionFilter');
+    if (superiorRegionSelect) {
+        superiorRegionSelect.addEventListener('change', function(e) {
             currentFilters.region = e.target.value;
             currentFilters.clubId = '';
             currentPage = 1;
+            // Reset club dropdown to "all clubs" when region changes
+            const clubSelect = document.getElementById('filterClub');
+            if (clubSelect) {
+                clubSelect.value = '';
+            }
             loadClubsForRegion(e.target.value);
-            loadUsers();
+            loadPendingApprovals();  // Reload pending approvals with region filter
+            loadUsers();             // Reload members with region filter
         });
     }
 
@@ -696,18 +716,55 @@ function updateSortIndicators() {
 }
 
 function loadRegions() {
+    // Get user's default region and locked region from parent container data attributes
+    const usersTab = document.getElementById('users');
+    const userDefaultRegion = usersTab?.dataset.userDefaultRegion || '';
+    const lockedRegion = usersTab?.dataset.lockedRegion || '';
+
     fetch('/umbraco/surface/MemberAdmin/GetRegionsForUserManagement')
         .then(response => response.json())
         .then(data => {
-            const regionSelect = document.getElementById('filterRegion');
-            if (data.success && data.regions) {
-                regionSelect.innerHTML = '<option value="">Alla kretsar</option>';
-                data.regions.forEach(region => {
-                    const option = document.createElement('option');
-                    option.value = region.id;
-                    option.textContent = region.name;
-                    regionSelect.appendChild(option);
-                });
+            const regionSelect = document.getElementById('superiorRegionFilter');
+            if (data.success && data.regions && regionSelect) {
+                // If region is locked (regional admin), only show that region
+                if (lockedRegion) {
+                    regionSelect.innerHTML = '';
+                    const lockedRegionData = data.regions.find(r => r.id === lockedRegion);
+                    if (lockedRegionData) {
+                        const option = document.createElement('option');
+                        option.value = lockedRegionData.id;
+                        option.textContent = lockedRegionData.name;
+                        option.selected = true;
+                        regionSelect.appendChild(option);
+                    }
+                    // Disable the dropdown for regional admins
+                    regionSelect.disabled = true;
+                    // Apply the locked region as filter
+                    currentFilters.region = lockedRegion;
+                    loadClubsForRegion(lockedRegion);
+                    loadPendingApprovals();
+                    loadUsers();
+                } else {
+                    // Site admin - show all regions with "Alla kretsar" option
+                    regionSelect.innerHTML = '<option value="">Alla kretsar</option>';
+                    data.regions.forEach(region => {
+                        const option = document.createElement('option');
+                        option.value = region.id;
+                        option.textContent = region.name;
+                        // Pre-select user's default region
+                        if (region.id === userDefaultRegion) {
+                            option.selected = true;
+                        }
+                        regionSelect.appendChild(option);
+                    });
+                    // If user has a default region, set the filter and reload data
+                    if (userDefaultRegion && regionSelect.value === userDefaultRegion) {
+                        currentFilters.region = userDefaultRegion;
+                        loadClubsForRegion(userDefaultRegion);
+                        loadPendingApprovals();
+                        loadUsers();
+                    }
+                }
             }
         })
         .catch(error => console.error('Error loading regions:', error));
@@ -1035,6 +1092,29 @@ function showAddUserModal() {
     // Clear shooter class selection
     document.querySelectorAll('input[name="precisionShooterClass"]').forEach(radio => radio.checked = false);
 
+    // Check if current user is site admin (regional admins cannot edit member groups)
+    const usersTab = document.getElementById('users');
+    const isSiteAdmin = usersTab?.dataset.isSiteAdmin === 'true';
+
+    // Disable member groups dropdown for regional admins
+    const memberGroupsDropdown = document.getElementById('memberGroupsDropdown');
+    const memberGroupsLabel = document.querySelector('label[for="memberGroupsDropdown"]');
+    if (!isSiteAdmin) {
+        memberGroupsDropdown.disabled = true;
+        memberGroupsDropdown.classList.add('disabled');
+        memberGroupsDropdown.title = 'Endast sidadministratörer kan ändra medlemsgrupper';
+        if (memberGroupsLabel) {
+            memberGroupsLabel.innerHTML = 'Medlemsgrupper <small class="text-muted">(endast för sidadministratörer)</small>';
+        }
+    } else {
+        memberGroupsDropdown.disabled = false;
+        memberGroupsDropdown.classList.remove('disabled');
+        memberGroupsDropdown.title = '';
+        if (memberGroupsLabel) {
+            memberGroupsLabel.textContent = 'Medlemsgrupper';
+        }
+    }
+
     renderMemberGroups([]);
     renderClubSelectors(null, []);
     new bootstrap.Modal(document.getElementById('memberModal')).show();
@@ -1046,6 +1126,29 @@ function editUser(userId) {
     // Reset form and show loading state immediately
     document.getElementById('memberForm').reset();
     document.getElementById('memberId').value = userId;
+
+    // Check if current user is site admin (regional admins cannot edit member groups)
+    const usersTab = document.getElementById('users');
+    const isSiteAdmin = usersTab?.dataset.isSiteAdmin === 'true';
+
+    // Disable member groups dropdown for regional admins
+    const memberGroupsDropdown = document.getElementById('memberGroupsDropdown');
+    const memberGroupsLabel = document.querySelector('label[for="memberGroupsDropdown"]');
+    if (!isSiteAdmin) {
+        memberGroupsDropdown.disabled = true;
+        memberGroupsDropdown.classList.add('disabled');
+        memberGroupsDropdown.title = 'Endast sidadministratörer kan ändra medlemsgrupper';
+        if (memberGroupsLabel) {
+            memberGroupsLabel.innerHTML = 'Medlemsgrupper <small class="text-muted">(endast för sidadministratörer)</small>';
+        }
+    } else {
+        memberGroupsDropdown.disabled = false;
+        memberGroupsDropdown.classList.remove('disabled');
+        memberGroupsDropdown.title = '';
+        if (memberGroupsLabel) {
+            memberGroupsLabel.textContent = 'Medlemsgrupper';
+        }
+    }
 
     // Show loading overlay on form
     showMemberFormLoading(true);
@@ -1452,7 +1555,13 @@ function loadPendingApprovals() {
     const container = document.getElementById('pendingApprovals');
     const countBadge = document.getElementById('pendingCount');
 
-    fetch('/umbraco/surface/MemberAdmin/GetPendingApprovals')
+    // Build URL with optional region parameter
+    const region = currentFilters.region || '';
+    const url = region
+        ? `/umbraco/surface/MemberAdmin/GetPendingApprovals?region=${encodeURIComponent(region)}`
+        : '/umbraco/surface/MemberAdmin/GetPendingApprovals';
+
+    fetch(url)
         .then(response => response.json())
         .then(data => {
             if (data.success) {
@@ -1460,7 +1569,10 @@ function loadPendingApprovals() {
                 countBadge.textContent = pendingMembers.length;
 
                 if (pendingMembers.length === 0) {
-                    container.innerHTML = '<div class="alert alert-info mb-0">Inga väntande godkännanden.</div>';
+                    const message = region
+                        ? 'Inga väntande godkännanden för vald krets.'
+                        : 'Inga väntande godkännanden.';
+                    container.innerHTML = `<div class="alert alert-info mb-0">${message}</div>`;
                 } else {
                     displayPendingApprovals(pendingMembers);
                 }

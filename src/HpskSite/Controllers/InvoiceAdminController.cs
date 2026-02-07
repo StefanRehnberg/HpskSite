@@ -65,6 +65,7 @@ namespace HpskSite.Controllers
         public async Task<IActionResult> GetInvoices(
             int? competitionId = null,
             int? clubId = null,
+            string? region = null,
             string? paymentStatus = null,
             string? memberSearch = null,
             string? invoiceNumberSearch = null,
@@ -73,11 +74,13 @@ namespace HpskSite.Controllers
             int page = 1,
             int pageSize = 50)
         {
-            // Authorization: Site admin OR club admin for specified club
+            // Authorization: Site admin OR club admin for specified club OR regional admin
             bool isSiteAdmin = await _authService.IsCurrentUserAdminAsync();
             bool isClubAdmin = clubId.HasValue && await _authService.IsClubAdminForClub(clubId.Value);
+            var managedRegions = await _authService.GetManagedRegions();
+            bool isRegionalAdmin = !isSiteAdmin && managedRegions.Any();
 
-            if (!isSiteAdmin && !isClubAdmin)
+            if (!isSiteAdmin && !isClubAdmin && !isRegionalAdmin)
             {
                 return Json(new { success = false, message = "Access denied" });
             }
@@ -101,6 +104,7 @@ namespace HpskSite.Controllers
                 {
                     CompetitionId = competitionId,
                     ClubId = clubId,
+                    Region = region,
                     PaymentStatus = paymentStatus,
                     MemberSearch = memberSearch,
                     InvoiceNumberSearch = invoiceNumberSearch,
@@ -133,11 +137,17 @@ namespace HpskSite.Controllers
 
         /// <summary>
         /// Get active competitions for filter dropdown
+        /// Optionally filtered by region
         /// </summary>
         [HttpGet]
-        public async Task<IActionResult> GetActiveCompetitionsForFilter()
+        public async Task<IActionResult> GetActiveCompetitionsForFilter(string? region = null)
         {
-            if (!await _authService.IsCurrentUserAdminAsync())
+            // Allow site admins and regional admins
+            bool isSiteAdmin = await _authService.IsCurrentUserAdminAsync();
+            var managedRegions = await _authService.GetManagedRegions();
+            bool isRegionalAdmin = !isSiteAdmin && managedRegions.Any();
+
+            if (!isSiteAdmin && !isRegionalAdmin)
             {
                 return Json(new { success = false, message = "Access denied" });
             }
@@ -145,9 +155,37 @@ namespace HpskSite.Controllers
             try
             {
                 var umbracoContext = _umbracoContextAccessor.GetRequiredUmbracoContext();
-                var competitions = umbracoContext.Content.GetAtRoot()
+
+                // Build a lookup of club regions if filtering by region
+                Dictionary<int, string>? clubRegions = null;
+                if (!string.IsNullOrEmpty(region))
+                {
+                    clubRegions = new Dictionary<int, string>();
+                    var clubs = umbracoContext.Content.GetAtRoot()
+                        .SelectMany(root => root.DescendantsOfType("club"))
+                        .ToList();
+                    foreach (var club in clubs)
+                    {
+                        var clubRegion = club.Value<string>("regionalFederation") ?? "";
+                        clubRegions[club.Id] = clubRegion;
+                    }
+                }
+
+                var competitionsQuery = umbracoContext.Content.GetAtRoot()
                     .SelectMany(root => root.DescendantsOfType("competition"))
-                    .Where(comp => comp.Value<bool>("isActive"))
+                    .Where(comp => comp.Value<bool>("isActive"));
+
+                // Filter by region if specified
+                if (!string.IsNullOrEmpty(region) && clubRegions != null)
+                {
+                    competitionsQuery = competitionsQuery.Where(comp =>
+                    {
+                        var clubId = comp.Value<int>("clubId");
+                        return clubId > 0 && clubRegions.TryGetValue(clubId, out var clubRegion) && clubRegion == region;
+                    });
+                }
+
+                var competitions = competitionsQuery
                     .OrderByDescending(comp => comp.Value<DateTime?>("competitionDate"))
                     .Select(comp => new
                     {

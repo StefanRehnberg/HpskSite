@@ -22,6 +22,28 @@
         </div>
     </div>
 
+    <!-- Region Filter (Superior filter) -->
+    <div class="card mb-3 border-primary">
+        <div class="card-body py-2">
+            <div class="row align-items-center">
+                <div class="col-md-4">
+                    <label for="regionFilter" class="form-label fw-bold mb-1">
+                        <i class="bi bi-geo-alt me-1"></i>Filtrera på krets
+                    </label>
+                    <select class="form-select" id="regionFilter" onchange="onRegionFilterChange()">
+                        <option value="">Alla kretsar</option>
+                        <!-- Populated by JavaScript -->
+                    </select>
+                </div>
+                <div class="col-md-8">
+                    <small class="text-muted">
+                        Välj en krets för att visa endast tävlingar från klubbar i den kretsen
+                    </small>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Filter Section -->
     <div class="card mb-4">
         <div class="card-body">
@@ -135,7 +157,8 @@ let availableTypes = []; // Cache types for dropdown
 let serverFilters = {
     year: new Date().getFullYear(),
     includeCompleted: false,
-    type: ''
+    type: '',
+    region: ''
 };
 
 // Populate year filter dropdown (2024 to current year + 1)
@@ -167,12 +190,75 @@ function onTypeFilterChange() {
     loadCompetitionsList();
 }
 
+function onRegionFilterChange() {
+    serverFilters.region = document.getElementById('regionFilter').value;
+    loadCompetitionsList();
+}
+
+// Load regions for competitions filter dropdown
+function loadCompetitionsRegions() {
+    // Get user's default region and locked region from the tab's data attributes
+    const competitionsTab = document.getElementById('competitions');
+    const userDefaultRegion = competitionsTab?.dataset.userDefaultRegion || '';
+    const lockedRegion = competitionsTab?.dataset.lockedRegion || '';
+
+    fetch('/umbraco/surface/RegionalAdmin/GetAllRegions')
+        .then(response => response.json())
+        .then(data => {
+            const regionSelect = document.getElementById('regionFilter');
+            if (data.success && data.regions) {
+                // If region is locked (regional admin), only show that region
+                if (lockedRegion) {
+                    regionSelect.innerHTML = '';
+                    const lockedRegionData = data.regions.find(r => r.id === lockedRegion);
+                    if (lockedRegionData) {
+                        const option = document.createElement('option');
+                        option.value = lockedRegionData.id;
+                        option.textContent = lockedRegionData.name;
+                        option.selected = true;
+                        regionSelect.appendChild(option);
+                    }
+                    // Disable the dropdown for regional admins
+                    regionSelect.disabled = true;
+                    // Apply the locked region as filter
+                    serverFilters.region = lockedRegion;
+                    loadCompetitionsList();
+                } else {
+                    // Site admin - show all regions with "Alla kretsar" option
+                    regionSelect.innerHTML = '<option value="">Alla kretsar</option>';
+                    data.regions.forEach(region => {
+                        const option = document.createElement('option');
+                        option.value = region.id;
+                        option.textContent = region.name;
+                        // Pre-select user's default region
+                        if (userDefaultRegion && region.id === userDefaultRegion) {
+                            option.selected = true;
+                        }
+                        regionSelect.appendChild(option);
+                    });
+
+                    // If user has a default region, apply it as filter and reload
+                    if (userDefaultRegion && regionSelect.value === userDefaultRegion) {
+                        serverFilters.region = userDefaultRegion;
+                        loadCompetitionsList();
+                    }
+                }
+            } else {
+                console.error('Failed to load competitions regions:', data.message || 'Unknown error');
+            }
+        })
+        .catch(error => console.error('Error loading competitions regions:', error));
+}
+
 // Load competitions list when tab is shown
-document.addEventListener('DOMContentLoaded', function() {
+function initCompetitionsList() {
     const competitionsTab = document.getElementById('competitions-tab');
 
     // Populate year filter on page load
     populateYearFilter();
+
+    // Load regions for filter dropdown
+    loadCompetitionsRegions();
 
     // Load immediately if competitions tab is active (default)
     if (competitionsTab && competitionsTab.classList.contains('active')) {
@@ -189,7 +275,15 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
-});
+}
+
+// Initialize - handle both cases: DOMContentLoaded not yet fired, or already fired
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initCompetitionsList);
+} else {
+    // DOM already loaded, run immediately
+    initCompetitionsList();
+}
 
 function loadCompetitionsList() {
     const spinner = document.getElementById('competitionsLoadingSpinner');
@@ -214,6 +308,9 @@ function loadCompetitionsList() {
     url += `includeCompleted=${serverFilters.includeCompleted}`;
     if (serverFilters.type) {
         url += `&type=${encodeURIComponent(serverFilters.type)}`;
+    }
+    if (serverFilters.region) {
+        url += `&region=${encodeURIComponent(serverFilters.region)}`;
     }
 
     fetch(url, {
@@ -270,16 +367,18 @@ function populateTypeFilter() {
 }
 
 function clearFilters() {
-    // Reset to defaults: current year, hide completed, no type filter
+    // Reset to defaults: current year, hide completed, no type filter, no region filter
     const currentYear = new Date().getFullYear();
     document.getElementById('yearFilter').value = currentYear.toString();
     document.getElementById('typeFilter').value = '';
-    serverFilters.type = '';
+    document.getElementById('regionFilter').value = '';
     document.getElementById('showCompleted').checked = false;
 
     // Update server filters and reload
     serverFilters.year = currentYear;
     serverFilters.includeCompleted = false;
+    serverFilters.type = '';
+    serverFilters.region = '';
     loadCompetitionsList();
 }
 

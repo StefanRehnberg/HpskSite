@@ -140,10 +140,10 @@ namespace HpskSite.Controllers
 
         /// <summary>
         /// Get all competitions with basic info for the admin list (OPTIMIZED)
-        /// Supports server-side filtering by year, completed status, and type
+        /// Supports server-side filtering by year, completed status, type, and region
         /// </summary>
         [HttpGet]
-        public async Task<IActionResult> GetCompetitionsList(int? year = null, bool includeCompleted = false, string? type = null)
+        public async Task<IActionResult> GetCompetitionsList(int? year = null, bool includeCompleted = false, string? type = null, string? region = null)
         {
             // Check if user is site admin OR club admin for any club
             bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
@@ -160,12 +160,13 @@ namespace HpskSite.Controllers
                 var today = DateTime.Today;
                 var filterYear = year ?? today.Year; // Default to current year
 
-                // Check cache (include type in cache key)
+                // Check cache (include type and region in cache key)
                 string? cacheKey = null;
                 var cacheKeyType = type ?? "all";
+                var cacheKeyRegion = region ?? "all";
                 if (isSiteAdmin)
                 {
-                    cacheKey = string.Format(CompetitionsListCacheKey, filterYear, includeCompleted) + $"_{cacheKeyType}";
+                    cacheKey = string.Format(CompetitionsListCacheKey, filterYear, includeCompleted) + $"_{cacheKeyType}_{cacheKeyRegion}";
                     var cachedResult = _appCaches.RuntimeCache.Get(cacheKey);
                     if (cachedResult != null)
                     {
@@ -176,6 +177,7 @@ namespace HpskSite.Controllers
                 // OPTIMIZED: Use GetPagedDescendants for single database query instead of tree traversal
                 var allCompetitions = new List<Umbraco.Cms.Core.Models.IContent>();
                 var registrationCounts = new Dictionary<int, int>();
+                var clubRegionLookup = new Dictionary<int, string>(); // clubId -> regionalFederation
 
                 var rootContent = _contentService.GetRootContent();
                 foreach (var root in rootContent)
@@ -198,6 +200,15 @@ namespace HpskSite.Controllers
                             {
                                 registrationCounts.TryGetValue(compId, out var count);
                                 registrationCounts[compId] = count + 1;
+                            }
+                        }
+                        else if (item.ContentType.Alias == "club")
+                        {
+                            // Build club -> region lookup for region filtering
+                            var clubRegion = item.GetValue<string>("regionalFederation") ?? "";
+                            if (!clubRegionLookup.ContainsKey(item.Id))
+                            {
+                                clubRegionLookup[item.Id] = clubRegion;
                             }
                         }
                     }
@@ -227,6 +238,29 @@ namespace HpskSite.Controllers
                             var compType = comp.GetValue<string>("competitionType") ?? "";
                             if (!compType.Equals(type, StringComparison.OrdinalIgnoreCase))
                                 return false;
+                        }
+
+                        // Region filter - filter by club's regional federation OR competition's direct regionalFederation
+                        if (!string.IsNullOrEmpty(region))
+                        {
+                            var compClubId = comp.GetValue<int?>("clubId") ?? 0;
+                            var compRegion = comp.GetValue<string>("regionalFederation") ?? "";
+
+                            // If competition has a club, use the club's region
+                            if (compClubId > 0)
+                            {
+                                if (!clubRegionLookup.TryGetValue(compClubId, out var clubRegion) ||
+                                    !clubRegion.Equals(region, StringComparison.OrdinalIgnoreCase))
+                                    return false;
+                            }
+                            // If competition has no club but has a direct region, use that
+                            else if (!string.IsNullOrEmpty(compRegion))
+                            {
+                                if (!compRegion.Equals(region, StringComparison.OrdinalIgnoreCase))
+                                    return false;
+                            }
+                            // If competition has neither club nor region, it's national - show in all regions
+                            // (no filter applied, competition matches)
                         }
 
                         return true;
@@ -416,7 +450,8 @@ namespace HpskSite.Controllers
                     externalRegistrationEmail = competition.GetValue<string>("externalRegistrationEmail") ?? "",
                     isExternal = competition.GetValue<bool>("isExternal"),
                     seriesId = seriesId,
-                    clubId = competitionClubId
+                    clubId = competitionClubId,
+                    regionalFederation = competition.GetValue<string>("regionalFederation") ?? ""
                 };
 
                 return Ok(new
@@ -1842,19 +1877,26 @@ namespace HpskSite.Controllers
 
         /// <summary>
         /// Get all competition series with basic info for the admin list
+        /// Supports optional region filter - shows series containing competitions from clubs in the selected region
         /// </summary>
         [HttpGet]
-        public async Task<IActionResult> GetSeriesList()
+        public async Task<IActionResult> GetSeriesList(string? region = null)
         {
-            if (!await _authorizationService.IsCurrentUserAdminAsync())
+            // Allow site admins and regional admins
+            bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
+            var managedRegions = await _authorizationService.GetManagedRegions();
+            bool isRegionalAdmin = !isSiteAdmin && managedRegions.Any();
+
+            if (!isSiteAdmin && !isRegionalAdmin)
             {
                 return Ok(new { success = false, message = "Access denied" });
             }
 
             try
             {
-                // Check cache first
-                var cacheKey = SeriesListCacheKey;
+                // Check cache first (include region in cache key)
+                var cacheKeyRegion = region ?? "all";
+                var cacheKey = $"{SeriesListCacheKey}_{cacheKeyRegion}";
                 var cachedResult = _appCaches.RuntimeCache.Get(cacheKey);
                 if (cachedResult != null)
                 {
@@ -1874,29 +1916,71 @@ namespace HpskSite.Controllers
                     .Where(x => x.ContentType.Alias == "competitionSeries")
                     .ToList();
 
-                // OPTIMIZED: Pre-calculate competition counts per series (by ParentId) - eliminates N+1
-                var competitionCountsByParent = allContent
+                // Get all competitions with their parent (series) ID and club ID
+                var allCompetitions = allContent
                     .Where(x => x.ContentType.Alias == "competition")
+                    .ToList();
+
+                // OPTIMIZED: Pre-calculate competition counts per series (by ParentId) - eliminates N+1
+                var competitionCountsByParent = allCompetitions
                     .GroupBy(x => x.ParentId)
                     .ToDictionary(g => g.Key, g => g.Count());
 
-                var now = DateTime.Now;
-                var seriesData = allSeries.Select(series => new
+                // Build club -> region lookup for region filtering
+                var clubRegionLookup = allContent
+                    .Where(x => x.ContentType.Alias == "club")
+                    .ToDictionary(
+                        x => x.Id,
+                        x => x.GetValue<string>("regionalFederation") ?? ""
+                    );
+
+                // If region filter is applied, find series that have at least one competition from that region
+                HashSet<int>? seriesIdsWithRegion = null;
+                if (!string.IsNullOrEmpty(region))
                 {
-                    id = series.Id,
-                    name = series.GetValue<string>("seriesName") ?? series.Name,
-                    shortDescription = series.GetValue<string>("seriesShortDescription") ?? "",
-                    description = series.GetValue<string>("seriesDescription") ?? "",
-                    startDate = series.GetValue<DateTime?>("seriesStartDate"),
-                    endDate = series.GetValue<DateTime?>("seriesEndDate"),
-                    showInMenu = series.GetValue<bool>("showInMenu"),
-                    isActive = series.GetValue<bool>("isActive"),
-                    // Use pre-calculated count instead of per-series query
-                    competitionCount = competitionCountsByParent.TryGetValue(series.Id, out var count) ? count : 0,
-                    status = GetSeriesStatus(series, now)
-                })
-                .OrderByDescending(s => s.startDate ?? DateTime.MinValue)
-                .ToList();
+                    seriesIdsWithRegion = allCompetitions
+                        .Where(comp =>
+                        {
+                            var clubId = comp.GetValue<int?>("clubId") ?? 0;
+                            var compRegion = comp.GetValue<string>("regionalFederation") ?? "";
+
+                            // If competition has a club, use the club's region
+                            if (clubId > 0)
+                            {
+                                return clubRegionLookup.TryGetValue(clubId, out var clubRegion) &&
+                                       clubRegion.Equals(region, StringComparison.OrdinalIgnoreCase);
+                            }
+                            // If competition has no club but has a direct region, use that
+                            else if (!string.IsNullOrEmpty(compRegion))
+                            {
+                                return compRegion.Equals(region, StringComparison.OrdinalIgnoreCase);
+                            }
+                            // If competition has neither club nor region, it's national - include in all regions
+                            return true;
+                        })
+                        .Select(comp => comp.ParentId)
+                        .ToHashSet();
+                }
+
+                var now = DateTime.Now;
+                var seriesData = allSeries
+                    .Where(series => seriesIdsWithRegion == null || seriesIdsWithRegion.Contains(series.Id))
+                    .Select(series => new
+                    {
+                        id = series.Id,
+                        name = series.GetValue<string>("seriesName") ?? series.Name,
+                        shortDescription = series.GetValue<string>("seriesShortDescription") ?? "",
+                        description = series.GetValue<string>("seriesDescription") ?? "",
+                        startDate = series.GetValue<DateTime?>("seriesStartDate"),
+                        endDate = series.GetValue<DateTime?>("seriesEndDate"),
+                        showInMenu = series.GetValue<bool>("showInMenu"),
+                        isActive = series.GetValue<bool>("isActive"),
+                        // Use pre-calculated count instead of per-series query
+                        competitionCount = competitionCountsByParent.TryGetValue(series.Id, out var count) ? count : 0,
+                        status = GetSeriesStatus(series, now)
+                    })
+                    .OrderByDescending(s => s.startDate ?? DateTime.MinValue)
+                    .ToList();
 
                 // Cache the result
                 var result = new { success = true, data = seriesData };
