@@ -44,9 +44,21 @@
 
                         <div class="mb-3">
                             <label for="wizard_competitionType" class="form-label">Tävlingstyp <span class="text-danger">*</span></label>
-                            <select class="form-select" id="wizard_competitionType" name="competitionType" required>
+                            <select class="form-select" id="wizard_competitionType" name="competitionType" required onchange="onCompetitionTypeChange()">
                                 <option value="Precision" selected>Precision</option>
+                                <option value="Milsnabb">Milsnabb</option>
+                                <option value="Duell">Duell</option>
+                                <option value="Nationell_Helmatch">Nationell Helmatch</option>
+                                <option value="Springskytte">Springskytte</option>
+                                <option value="Faltkytte">Fältskytte</option>
+                                <option value="MagnumPrecision">Magnum Precision</option>
+                                <option value="__other__">Annat...</option>
                             </select>
+                        </div>
+                        <div class="mb-3 d-none" id="wizard_customTypeContainer">
+                            <label for="wizard_customCompetitionType" class="form-label">Ange tävlingstyp <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="wizard_customCompetitionType" name="customCompetitionType" placeholder="">
+                            <small class="form-text text-muted">Skriv in den tävlingstyp som saknas i listan</small>
                         </div>
 
                         <div class="mb-3">
@@ -638,6 +650,23 @@ let wizardContext = {
     clubId: null
 };
 
+// Handle competition type dropdown change - show/hide custom input
+function onCompetitionTypeChange() {
+    const typeSelect = document.getElementById('wizard_competitionType');
+    const customContainer = document.getElementById('wizard_customTypeContainer');
+    const customInput = document.getElementById('wizard_customCompetitionType');
+
+    if (typeSelect.value === '__other__') {
+        customContainer.classList.remove('d-none');
+        customInput.required = true;
+        customInput.focus();
+    } else {
+        customContainer.classList.add('d-none');
+        customInput.required = false;
+        customInput.value = '';
+    }
+}
+
 // Initialize wizard when modal opens
 document.getElementById('competitionWizardModal').addEventListener('show.bs.modal', function() {
     wizardCurrentStep = 0;
@@ -1098,8 +1127,19 @@ function submitWizard() {
         }
     });
 
+    // Handle competition type - use custom value if "Annat" is selected
+    const typeSelect = document.getElementById('wizard_competitionType');
+    if (typeSelect.value === '__other__') {
+        const customType = document.getElementById('wizard_customCompetitionType').value.trim();
+        fields.competitionType = customType || 'Precision';
+    } else {
+        fields.competitionType = typeSelect.value || 'Precision';
+    }
+
+    // Remove the placeholder custom type field from submission
+    delete fields.customCompetitionType;
+
     // Add defaults
-    fields.competitionType = 'Precision';
     fields.isActive = true;
 
     // Context-aware: Set clubId and isClubOnly if created from club page
@@ -1179,6 +1219,11 @@ window.resetWizard = function() {
     if (form) {
         form.reset();
     }
+
+    // Reset custom competition type field
+    document.getElementById('wizard_customTypeContainer').classList.add('d-none');
+    document.getElementById('wizard_customCompetitionType').value = '';
+    document.getElementById('wizard_customCompetitionType').required = false;
 
     // Clear shooting class selection
     document.getElementById('wizard_shootingClassIds').value = '';

@@ -46,6 +46,20 @@
     // Get unique venues for filtering
     var allVenues = allCompetitions.Select(c => c.Value<string>("venue")).Where(v => !string.IsNullOrEmpty(v)).Distinct().OrderBy(v => v).ToList();
 
+    // Get unique competition types for filtering (from actual competition data)
+    var allCompetitionTypes = allCompetitions
+        .Select(c => {
+            var typeId = c.Value<string>("competitionType") ?? "";
+            var typeObj = HpskSite.Models.CompetitionTypes.GetById(typeId);
+            var typeName = typeObj?.Name ?? (!string.IsNullOrEmpty(typeId) ? typeId : null);
+            return new { Id = typeId, Name = typeName };
+        })
+        .Where(t => !string.IsNullOrEmpty(t.Name))
+        .GroupBy(t => t.Id)
+        .Select(g => g.First())
+        .OrderBy(t => t.Name)
+        .ToList();
+
     // Group competitions by status
     var now = DateTime.Now;
     var openCompetitions = allCompetitions.Where(c =>
@@ -165,24 +179,26 @@
                                 </label>
                                 <select class="form-select" id="filterCompetitionType">
                                     <option value="">Alla typer</option>
-                                    @foreach (var type in competitionTypes.Where(t => t.Value<bool>("isActive", fallback: Fallback.ToDefaultValue, defaultValue: true)))
+                                    @foreach (var type in allCompetitionTypes)
                                     {
                                         <option value="@type.Id">@type.Name</option>
                                     }
                                 </select>
                             </div>
 
-                            <!-- Shooting Class Filter -->
+                            <!-- Weapon Class Filter -->
                             <div class="col-md-2">
-                                <label for="filterShootingClass" class="form-label">
-                                    <i class="bi bi-target"></i> Skytteklass
+                                <label for="filterWeaponClass" class="form-label">
+                                    <i class="bi bi-target"></i> Vapenklass
                                 </label>
-                                <select class="form-select" id="filterShootingClass">
-                                    <option value="">Alla klasser</option>
-                                    @foreach (var shootingClass in shootingClasses)
-                                    {
-                                        <option value="@shootingClass.Id">@shootingClass.Name</option>
-                                    }
+                                <select class="form-select" id="filterWeaponClass">
+                                    <option value="">Alla vapenklasser</option>
+                                    <option value="A">A - Tjänstevapen</option>
+                                    <option value="B">B - Kal. 32-45</option>
+                                    <option value="C">C - Kal. 22</option>
+                                    <option value="R">R - Revolver</option>
+                                    <option value="M">M - Magnum</option>
+                                    <option value="L">L - Luftpistol</option>
                                 </select>
                             </div>
 
@@ -381,7 +397,7 @@
                 var registrationFee = competition.Value<string>("registrationFee");
                 var competitionTypeId = competition.Value<string>("competitionType") ?? "";
                 var competitionTypeObj = HpskSite.Models.CompetitionTypes.GetById(competitionTypeId);
-                var competitionTypeName = competitionTypeObj?.Name ?? "Okänd typ";
+                var competitionTypeName = competitionTypeObj?.Name ?? (!string.IsNullOrEmpty(competitionTypeId) ? competitionTypeId : "Okänd typ");
                 var numberOfSeriesOrStations = competition.Value<int>("numberOfSeriesOrStations");
                 var numberOfFinalSeries = competition.Value<int>("numberOfFinalSeries");
 
@@ -441,6 +457,7 @@
                     ? string.Join(", ", competitionShootingClasses.Select(sc => sc.Name))
                     : "Inga klasser";
                 var allShootingClassIds = string.Join(",", competitionShootingClasses.Select(sc => sc.Id));
+                var allWeaponClasses = string.Join(",", competitionShootingClasses.Select(sc => sc.Weapon.ToString()).Distinct());
                 var isActive = competition.Value<bool>("isActive");
 
                 // External competition properties
@@ -518,7 +535,7 @@
                      data-venue="@venue"
                      data-description="@description?.ToLower()"
                      data-competition-type="@competitionTypeId"
-                     data-shooting-class="@allShootingClassIds"
+                     data-weapon-class="@allWeaponClasses"
                      data-season="@seasonId"
                      data-series="@seriesId"
                      data-date="@compDate.ToString("yyyy-MM-dd")"
@@ -623,7 +640,7 @@
     <div class="mt-4 d-none" id="competitionsList">
         <div class="table-responsive">
             <table class="table table-hover">
-                <thead class="table-light">
+                <thead>
                     <tr>
                         <th scope="col" style="width: 22%">Tävling</th>
                         <th scope="col" style="width: 12%">Status</th>
@@ -775,7 +792,7 @@
                         var registrationFee = competition.Value<string>("registrationFee");
                         var competitionTypeId = competition.Value<string>("competitionType") ?? "";
                         var competitionTypeObj = HpskSite.Models.CompetitionTypes.GetById(competitionTypeId);
-                        var competitionTypeName = competitionTypeObj?.Name ?? "Okänd typ";
+                        var competitionTypeName = competitionTypeObj?.Name ?? (!string.IsNullOrEmpty(competitionTypeId) ? competitionTypeId : "Okänd typ");
                         var numberOfSeriesOrStations = competition.Value<int>("numberOfSeriesOrStations");
                         var numberOfFinalSeries = competition.Value<int>("numberOfFinalSeries");
 
@@ -838,6 +855,7 @@
                             ? string.Join(", ", competitionShootingClasses.Select(sc => sc.Name))
                             : "Inga klasser";
                         var allShootingClassIds = string.Join(",", competitionShootingClasses.Select(sc => sc.Id));
+                        var allWeaponClasses = string.Join(",", competitionShootingClasses.Select(sc => sc.Weapon.ToString()).Distinct());
                         var isActive = competition.Value<bool>("isActive");
 
                         // Get season information - check if competition's parent is a season
@@ -893,7 +911,7 @@
                             data-venue="@venue"
                             data-description="@description?.ToLower()"
                             data-competition-type="@competitionTypeId"
-                            data-shooting-class="@allShootingClassIds"
+                            data-weapon-class="@allWeaponClasses"
                             data-season="@seasonId"
                             data-series="@seriesId"
                             data-date="@compDate.ToString("yyyy-MM-dd")"
@@ -983,14 +1001,11 @@
 }
 
 .card {
-    transition: all 0.3s ease;
-    border: 1px solid #dee2e6;
+    border: 1px solid var(--bs-border-color);
 }
 
 .card:hover {
-    transform: translateY(-3px);
-    box-shadow: 0 8px 25px rgba(0,0,0,0.15);
-    border-color: #007bff;
+    border-color: var(--bs-primary);
 }
 
 .badge {
@@ -1011,12 +1026,6 @@
 .btn {
     border-radius: 6px;
     font-weight: 500;
-    transition: all 0.2s ease;
-}
-
-.btn:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
 }
 
 .filter-pill.active {
@@ -1025,22 +1034,12 @@
     border-color: var(--bs-primary);
 }
 
-.competition-card {
-    transition: all 0.3s ease;
-}
-
 .competition-card.filtered-out {
     display: none !important;
 }
 
 .filter-pill {
-    transition: all 0.2s ease;
     font-weight: 500;
-}
-
-.filter-pill:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
 }
 
 #expanderIcon {
@@ -1052,19 +1051,42 @@
 }
 
 /* List view specific styles */
+#competitionsList .table {
+    border-collapse: separate;
+    border-spacing: 0 0.25rem;
+}
+
 #competitionsList .table th {
     font-weight: 600;
-    border-bottom: 2px solid #dee2e6;
-    color: #495057;
+    color: var(--bs-emphasis-color);
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    border: none;
+    padding: 0.5rem 0.75rem;
 }
 
 #competitionsList .table td {
     vertical-align: middle;
-    border-color: rgba(0,0,0,0.05);
+    background-color: var(--bs-body-bg);
+    border-top: 1px solid var(--bs-border-color);
+    border-bottom: 1px solid var(--bs-border-color);
+    padding: 0.75rem;
 }
 
-#competitionsList .table-hover tbody tr:hover {
-    background-color: rgba(0,123,255,0.05);
+#competitionsList .table td:first-child {
+    border-left: 1px solid var(--bs-border-color);
+    border-radius: 0.375rem 0 0 0.375rem;
+}
+
+#competitionsList .table td:last-child {
+    border-right: 1px solid var(--bs-border-color);
+    border-radius: 0 0.375rem 0.375rem 0;
+}
+
+#competitionsList .table-hover tbody tr:hover td {
+    background-color: rgba(var(--bs-primary-rgb), 0.05);
+    border-color: var(--bs-primary);
 }
 
 /* View toggle button styles */
@@ -1103,10 +1125,6 @@
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
-.series-card:hover .series-highlight {
-    transform: translateY(-5px);
-    box-shadow: 0 12px 30px rgba(0,0,0,0.2);
-}
 
 /* Series row styling in list view */
 .series-row {
@@ -1124,7 +1142,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Get filter elements
     const searchInput = document.getElementById('searchCompetitions');
     const typeFilter = document.getElementById('filterCompetitionType');
-    const shootingClassFilter = document.getElementById('filterShootingClass');
+    const weaponClassFilter = document.getElementById('filterWeaponClass');
     const seasonFilter = document.getElementById('filterSeason');
     const venueFilter = document.getElementById('filterVenue');
     const sortSelect = document.getElementById('sortCompetitions');
@@ -1144,7 +1162,7 @@ document.addEventListener('DOMContentLoaded', function() {
     function filterCompetitions() {
         const searchTerm = searchInput.value.toLowerCase();
         const selectedType = typeFilter.value;
-        const selectedShootingClass = shootingClassFilter.value;
+        const selectedWeaponClass = weaponClassFilter.value;
         const selectedSeason = seasonFilter.value;
         const selectedVenue = venueFilter.value;
         const sortBy = sortSelect.value;
@@ -1157,7 +1175,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const cardStatus = card.dataset.status;
             const searchText = card.dataset.searchText || '';
             const cardType = card.dataset.competitionType || '';
-            const cardShootingClass = card.dataset.shootingClass || '';
+            const cardWeaponClass = card.dataset.weaponClass || '';
             const cardSeries = card.dataset.series || '';
             const cardSeason = card.dataset.season || '';
             const cardVenue = card.dataset.venue || '';
@@ -1171,9 +1189,9 @@ document.addEventListener('DOMContentLoaded', function() {
             // Competition type filter
             let matchesType = !selectedType || cardType === selectedType;
 
-            // Shooting class filter - handle multiple classes (comma-separated)
-            let matchesShootingClass = !selectedShootingClass ||
-                cardShootingClass.split(',').some(classId => classId.trim() === selectedShootingClass);
+            // Weapon class filter - handle multiple classes (comma-separated)
+            let matchesWeaponClass = !selectedWeaponClass ||
+                cardWeaponClass.split(',').some(wc => wc.trim() === selectedWeaponClass);
 
             // Series filtering removed - series are always shown
 
@@ -1184,7 +1202,7 @@ document.addEventListener('DOMContentLoaded', function() {
             let matchesVenue = !selectedVenue || cardVenue === selectedVenue;
 
             // Show/hide card
-            if (matchesStatus && matchesSearch && matchesType && matchesShootingClass && matchesSeason && matchesVenue) {
+            if (matchesStatus && matchesSearch && matchesType && matchesWeaponClass && matchesSeason && matchesVenue) {
                 card.classList.remove('filtered-out');
                 visibleCards.push(card);
             } else {
@@ -1303,7 +1321,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Filter change handlers
     typeFilter.addEventListener('change', filterCompetitions);
-    shootingClassFilter.addEventListener('change', filterCompetitions);
+    weaponClassFilter.addEventListener('change', filterCompetitions);
     seasonFilter.addEventListener('change', filterCompetitions);
     venueFilter.addEventListener('change', filterCompetitions);
     sortSelect.addEventListener('change', filterCompetitions);
@@ -1312,7 +1330,7 @@ document.addEventListener('DOMContentLoaded', function() {
     clearFiltersBtn.addEventListener('click', function() {
         searchInput.value = '';
         typeFilter.value = '';
-        shootingClassFilter.value = '';
+        weaponClassFilter.value = '';
         seasonFilter.value = '';
         venueFilter.value = '';
         sortSelect.value = 'date-asc';

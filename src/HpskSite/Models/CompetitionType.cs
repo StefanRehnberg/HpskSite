@@ -24,7 +24,7 @@
             new CompetitionType("Nationell_Helmatch", "Nationell Helmatch", "Precision, Snabbskytte och Fält "),
             new CompetitionType("Springskytte", "Springskytte", "Springskytte med Springskytte mål"),
             new CompetitionType("Faltkytte", "Fältskytte", "Fältskytte"),
-            new CompetitionType("Faltkytte_Norsk", "PoängFältskytte", "PoängFältskytte"),
+            new CompetitionType("MagnumPrecision", "Magnum Precision", "Magnum Precision 50 m"),
         };
 
         public static CompetitionType? GetById(string id)

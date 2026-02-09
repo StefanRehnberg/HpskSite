@@ -109,6 +109,7 @@ namespace HpskSite.Controllers
                     isActive = content.GetValue<bool>("isActive"),
                     isClubOnly = content.GetValue<bool>("isClubOnly"),
                     clubId = content.GetValue<int?>("clubId") ?? 0,
+                    regionalFederation = content.GetValue<string>("regionalFederation") ?? "",
                     swishNumber = content.GetValue<string>("swishNumber") ?? "",
                     competitionManagers = competitionManagerIds,
                     shootingClassIds = GetShootingClassIdsString(content),

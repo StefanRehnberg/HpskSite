@@ -885,6 +885,11 @@ function saveCompetition() {
         .map(id => parseInt(id));
     fields.competitionManagers = managerIds;
 
+    // Handle regionalFederation - it may be disabled when a club is selected
+    // Always include it explicitly (empty string clears it when club is selected)
+    const regionSelect = document.getElementById('regionalFederation');
+    fields.regionalFederation = regionSelect.disabled ? '' : (regionSelect.value || '');
+
     // Ensure unchecked checkboxes are explicitly set to false
     const checkboxFields = ['showLiveResults', 'addToMenu', 'allowDualCClass', 'isClubOnly', 'isActive', 'isAwardingStandardMedals', 'isExternal'];
     checkboxFields.forEach(field => {

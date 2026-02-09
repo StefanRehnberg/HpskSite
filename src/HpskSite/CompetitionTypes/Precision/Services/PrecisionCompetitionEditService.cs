@@ -303,6 +303,7 @@ namespace HpskSite.CompetitionTypes.Precision.Services
                 "isActive" => "isActive",
                 "isClubOnly" => "isClubOnly",
                 "clubId" => "clubId",
+                "regionalFederation" => "regionalFederation",
                 "competitionManagers" => "competitionManagers",
                 "swishNumber" => "swishNumber",
                 "addToMenu" => "addToMenu",
