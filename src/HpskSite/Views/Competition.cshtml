@@ -271,14 +271,12 @@
                         else if (Model.Parent.Parent?.ContentType.Alias == "competitionSeason")
                         {
                             <li class="breadcrumb-item"><a href="@Model.Parent.Parent.Parent.Url()">Tävlingar</a></li>
-                            <li class="breadcrumb-item"><a href="@Model.Parent.Parent.Url()">@Model.Parent.Parent.Name</a></li>
                         }
                         <li class="breadcrumb-item"><a href="@Model.Parent.Url()">@Model.Parent.Name</a></li>
                     }
                     else if (Model.Parent?.ContentType.Alias == "competitionSeason")
                     {
                         <li class="breadcrumb-item"><a href="@Model.Parent.Parent.Url()">Tävlingar</a></li>
-                        <li class="breadcrumb-item"><a href="@Model.Parent.Url()">@Model.Parent.Name</a></li>
                     }
                     <li class="breadcrumb-item active">@competitionName</li>
                 </ol>

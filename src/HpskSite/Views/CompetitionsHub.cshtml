@@ -43,6 +43,13 @@
     var competitionSeasons = Model.Root().DescendantsOrSelf().Where(x => x.ContentType.Alias == "competitionSeason").ToList();
     var competitionSeries = Model.Root().DescendantsOrSelf().Where(x => x.ContentType.Alias == "competitionSeries").ToList();
 
+    // Build club-to-region lookup for determining effective region
+    var allClubs = Model.Root().DescendantsOrSelf().Where(x => x.ContentType.Alias == "club").ToList();
+    var clubRegionLookup = allClubs.ToDictionary(
+        c => c.Id,
+        c => c.Value<string>("regionalFederation") ?? ""
+    );
+
     // Get unique venues for filtering
     var allVenues = allCompetitions.Select(c => c.Value<string>("venue")).Where(v => !string.IsNullOrEmpty(v)).Distinct().OrderBy(v => v).ToList();
 
@@ -120,6 +127,23 @@
         <div class="col-12">
             <!-- Primary Filter Pills (Always Visible) -->
             <div class="d-flex flex-wrap gap-2 mb-3 align-items-center">
+                <!-- Region Filter Dropdown -->
+                <div class="dropdown" id="regionFilterDropdown">
+                    <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
+                        <i class="bi bi-geo-alt me-1"></i><span id="regionFilterLabel">Alla kretsar</span>
+                    </button>
+                    <div class="dropdown-menu p-3">
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" type="checkbox" id="regionSelectAll" checked>
+                            <label class="form-check-label fw-bold" for="regionSelectAll">Alla kretsar</label>
+                        </div>
+                        <hr class="my-2">
+                        <div id="regionCheckboxes">
+                            <!-- Populated by JavaScript -->
+                        </div>
+                    </div>
+                </div>
+
                 <button class="btn btn-outline-secondary filter-pill active" data-status="open" title="Klicka för att visa/dölja öppna tävlingar">
                     <i class="bi bi-folder-fill me-2"></i>
                     Öppna (<span id="open-count">@openCompetitions.Count</span>)
@@ -141,11 +165,6 @@
                 <button class="btn btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#advancedFilters" aria-expanded="false" aria-controls="advancedFilters">
                     <i class="bi bi-funnel"></i> Mer filter
                     <i class="bi bi-chevron-down ms-1" id="expanderIcon"></i>
-                </button>
-
-                <!-- Clear Filters -->
-                <button class="btn btn-outline-dark" id="clearFilters">
-                    <i class="bi bi-x-circle"></i> Rensa
                 </button>
 
                 <!-- View Toggle Buttons -->
@@ -242,6 +261,11 @@
                                     <option value="name-desc">Namn Z-A</option>
                                 </select>
                             </div>
+                        </div>
+                        <div class="mt-3 text-end">
+                            <button class="btn btn-outline-secondary" id="clearFilters">
+                                <i class="bi bi-x-circle me-1"></i>Rensa filter
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -460,6 +484,18 @@
                 var allWeaponClasses = string.Join(",", competitionShootingClasses.Select(sc => sc.Weapon.ToString()).Distinct());
                 var isActive = competition.Value<bool>("isActive");
 
+                // Get region - from club if competition has clubId, otherwise from direct regionalFederation
+                var competitionClubId = competition.Value<int>("clubId");
+                var competitionRegion = "";
+                if (competitionClubId > 0 && clubRegionLookup.TryGetValue(competitionClubId, out var clubRegion))
+                {
+                    competitionRegion = clubRegion;
+                }
+                else
+                {
+                    competitionRegion = competition.Value<string>("regionalFederation") ?? "";
+                }
+
                 // External competition properties
                 var isExternal = competition.Value<bool>("isExternal");
                 IPublishedContent? invitationFile = null;
@@ -536,6 +572,7 @@
                      data-description="@description?.ToLower()"
                      data-competition-type="@competitionTypeId"
                      data-weapon-class="@allWeaponClasses"
+                     data-region="@competitionRegion"
                      data-season="@seasonId"
                      data-series="@seriesId"
                      data-date="@compDate.ToString("yyyy-MM-dd")"
@@ -858,6 +895,18 @@
                         var allWeaponClasses = string.Join(",", competitionShootingClasses.Select(sc => sc.Weapon.ToString()).Distinct());
                         var isActive = competition.Value<bool>("isActive");
 
+                        // Get region - from club if competition has clubId, otherwise from direct regionalFederation
+                        var listCompetitionClubId = competition.Value<int>("clubId");
+                        var competitionRegion = "";
+                        if (listCompetitionClubId > 0 && clubRegionLookup.TryGetValue(listCompetitionClubId, out var listClubRegion))
+                        {
+                            competitionRegion = listClubRegion;
+                        }
+                        else
+                        {
+                            competitionRegion = competition.Value<string>("regionalFederation") ?? "";
+                        }
+
                         // Get season information - check if competition's parent is a season
                         var seasonId = "";
                         var parent = competition.Parent();
@@ -912,6 +961,7 @@
                             data-description="@description?.ToLower()"
                             data-competition-type="@competitionTypeId"
                             data-weapon-class="@allWeaponClasses"
+                            data-region="@competitionRegion"
                             data-season="@seasonId"
                             data-series="@seriesId"
                             data-date="@compDate.ToString("yyyy-MM-dd")"
@@ -1026,6 +1076,30 @@
 .btn {
     border-radius: 6px;
     font-weight: 500;
+}
+
+/* Region filter dropdown */
+#regionFilterDropdown .dropdown-menu {
+    min-width: 300px !important;
+    width: max-content;
+    max-height: 400px;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+#regionFilterDropdown .form-check {
+    padding: 0.35rem 0.75rem;
+    margin: 0;
+    white-space: nowrap;
+}
+
+#regionFilterDropdown .form-check:hover {
+    background-color: var(--bs-tertiary-bg);
+}
+
+#regionFilterDropdown .form-check-label {
+    cursor: pointer;
+    padding-left: 0.5rem;
 }
 
 .filter-pill.active {
@@ -1157,6 +1231,94 @@ document.addEventListener('DOMContentLoaded', function() {
 
     let activeStatuses = new Set(['open', 'upcoming', 'active']); // Default: show open, upcoming, active - hide completed
     let currentView = 'card'; // Default view
+    let selectedRegions = new Set(); // Empty = all regions
+    let allRegions = []; // Will be populated from API
+
+    // Load regions for filter
+    function loadRegions() {
+        fetch('/umbraco/surface/RegionalAdmin/GetAllRegions')
+            .then(response => response.json())
+            .then(data => {
+                if (data.success && data.regions) {
+                    allRegions = data.regions;
+                    const container = document.getElementById('regionCheckboxes');
+                    container.innerHTML = '';
+
+                    data.regions.forEach(region => {
+                        const div = document.createElement('div');
+                        div.className = 'form-check';
+                        div.innerHTML = `
+                            <input class="form-check-input region-checkbox" type="checkbox" value="${region.id}" id="region_${region.id}" checked>
+                            <label class="form-check-label" for="region_${region.id}">${region.name}</label>
+                        `;
+                        container.appendChild(div);
+                    });
+
+                    // Add event listeners to region checkboxes
+                    document.querySelectorAll('.region-checkbox').forEach(cb => {
+                        cb.addEventListener('change', onRegionCheckboxChange);
+                    });
+
+                    // Add event listener to "Select All" checkbox
+                    document.getElementById('regionSelectAll').addEventListener('change', onRegionSelectAllChange);
+                }
+            })
+            .catch(error => console.error('Error loading regions:', error));
+    }
+
+    function onRegionCheckboxChange() {
+        updateSelectedRegions();
+        updateRegionSelectAll();
+        updateRegionFilterLabel();
+        filterCompetitions();
+    }
+
+    function onRegionSelectAllChange() {
+        const selectAll = document.getElementById('regionSelectAll');
+        document.querySelectorAll('.region-checkbox').forEach(cb => {
+            cb.checked = selectAll.checked;
+        });
+        updateSelectedRegions();
+        updateRegionFilterLabel();
+        filterCompetitions();
+    }
+
+    function updateSelectedRegions() {
+        selectedRegions.clear();
+        const allChecked = document.querySelectorAll('.region-checkbox:checked');
+        const allCheckboxes = document.querySelectorAll('.region-checkbox');
+
+        // If all are checked, leave selectedRegions empty (means "all")
+        if (allChecked.length < allCheckboxes.length) {
+            allChecked.forEach(cb => selectedRegions.add(cb.value));
+        }
+    }
+
+    function updateRegionSelectAll() {
+        const allChecked = document.querySelectorAll('.region-checkbox:checked').length;
+        const total = document.querySelectorAll('.region-checkbox').length;
+        const selectAllCheckbox = document.getElementById('regionSelectAll');
+
+        selectAllCheckbox.checked = allChecked === total;
+        selectAllCheckbox.indeterminate = allChecked > 0 && allChecked < total;
+    }
+
+    function updateRegionFilterLabel() {
+        const label = document.getElementById('regionFilterLabel');
+        const allChecked = document.querySelectorAll('.region-checkbox:checked');
+        const total = document.querySelectorAll('.region-checkbox').length;
+
+        if (allChecked.length === 0) {
+            label.textContent = 'Ingen krets';
+        } else if (allChecked.length === total) {
+            label.textContent = 'Alla kretsar';
+        } else if (allChecked.length === 1) {
+            const region = allRegions.find(r => r.id === allChecked[0].value);
+            label.textContent = region ? region.name : '1 krets';
+        } else {
+            label.textContent = `${allChecked.length} kretsar`;
+        }
+    }
 
     // Filter function
     function filterCompetitions() {
@@ -1176,6 +1338,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const searchText = card.dataset.searchText || '';
             const cardType = card.dataset.competitionType || '';
             const cardWeaponClass = card.dataset.weaponClass || '';
+            const cardRegion = card.dataset.region || '';
             const cardSeries = card.dataset.series || '';
             const cardSeason = card.dataset.season || '';
             const cardVenue = card.dataset.venue || '';
@@ -1193,6 +1356,12 @@ document.addEventListener('DOMContentLoaded', function() {
             let matchesWeaponClass = !selectedWeaponClass ||
                 cardWeaponClass.split(',').some(wc => wc.trim() === selectedWeaponClass);
 
+            // Region filter - if selectedRegions is empty, show all; otherwise check if card's region is selected
+            // Also show competitions with no region (national competitions) when any region is selected
+            let matchesRegion = selectedRegions.size === 0 ||
+                selectedRegions.has(cardRegion) ||
+                cardRegion === '';
+
             // Series filtering removed - series are always shown
 
             // Season filter
@@ -1202,7 +1371,7 @@ document.addEventListener('DOMContentLoaded', function() {
             let matchesVenue = !selectedVenue || cardVenue === selectedVenue;
 
             // Show/hide card
-            if (matchesStatus && matchesSearch && matchesType && matchesWeaponClass && matchesSeason && matchesVenue) {
+            if (matchesStatus && matchesSearch && matchesType && matchesWeaponClass && matchesRegion && matchesSeason && matchesVenue) {
                 card.classList.remove('filtered-out');
                 visibleCards.push(card);
             } else {
@@ -1335,12 +1504,28 @@ document.addEventListener('DOMContentLoaded', function() {
         venueFilter.value = '';
         sortSelect.value = 'date-asc';
 
-        // Reset to all statuses active
-        activeStatuses = new Set(['open', 'upcoming', 'active', 'completed']);
-        filterPills.forEach(p => p.classList.add('active'));
+        // Reset to default statuses (excluding completed)
+        activeStatuses = new Set(['open', 'upcoming', 'active']);
+        filterPills.forEach(p => {
+            const status = p.dataset.status;
+            if (status === 'completed') {
+                p.classList.remove('active');
+            } else {
+                p.classList.add('active');
+            }
+        });
+
+        // Reset region filter to all
+        selectedRegions.clear();
+        document.getElementById('regionSelectAll').checked = true;
+        document.querySelectorAll('.region-checkbox').forEach(cb => cb.checked = true);
+        updateRegionFilterLabel();
 
         filterCompetitions();
     });
+
+    // Load regions for filter dropdown
+    loadRegions();
 
     // Initial filter
     filterCompetitions();

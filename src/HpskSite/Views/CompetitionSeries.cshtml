@@ -39,7 +39,6 @@
                     else if (Model.Parent()?.ContentType.Alias == "competitionSeason")
                     {
                         <li class="breadcrumb-item"><a href="@Model.Parent().Parent().Url()">Tävlingar</a></li>
-                        <li class="breadcrumb-item"><a href="@Model.Parent().Url()">@Model.Parent().Name</a></li>
                     }
                     <li class="breadcrumb-item active">@seriesName</li>
                 </ol>
