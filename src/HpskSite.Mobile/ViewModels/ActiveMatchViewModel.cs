@@ -816,7 +816,7 @@ public partial class ActiveMatchViewModel : BaseViewModel
     {
         IsGuestQrModalOpen = false;
         // Reload match to show the new guest
-        _ = LoadMatchDataAsync();
+        _ = SafeLoadMatchDataAsync();
     }
 
     /// <summary>
@@ -1413,6 +1413,23 @@ public partial class ActiveMatchViewModel : BaseViewModel
     }
 
     /// <summary>
+    /// Fire-and-forget wrapper for LoadMatchDataAsync with error handling.
+    /// Prevents unobserved task exceptions from crashing the app.
+    /// </summary>
+    private async Task SafeLoadMatchDataAsync()
+    {
+        try
+        {
+            await LoadMatchDataAsync();
+        }
+        catch (Exception ex)
+        {
+            App.Log($"Background match reload failed for {MatchCode}: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"SafeLoadMatchDataAsync: Exception - {ex}");
+        }
+    }
+
+    /// <summary>
     /// Internal method to load match data without IsBusy checks
     /// </summary>
     private async Task LoadMatchDataAsync()
@@ -1506,6 +1523,7 @@ public partial class ActiveMatchViewModel : BaseViewModel
             {
                 ErrorMessage = spectatorResult.Message ?? "Kunde inte ladda match";
                 HasError = true;
+                App.Log($"LoadMatchData (spectator) failed for {MatchCode}: {ErrorMessage}");
             }
         }
         else
@@ -1602,6 +1620,7 @@ public partial class ActiveMatchViewModel : BaseViewModel
             {
                 ErrorMessage = result.Message ?? "Kunde inte ladda match";
                 HasError = true;
+                App.Log($"LoadMatchData failed for {MatchCode}: {ErrorMessage}");
             }
         }
     }
@@ -1706,45 +1725,32 @@ public partial class ActiveMatchViewModel : BaseViewModel
                 // Store the saved series number for photo upload
                 _savedSeriesNumber = request.SeriesNumber;
 
+                // Always advance/close panel immediately so UI is in a good state
+                // (critical on Android: camera Intent can destroy the Activity)
+                AdvanceOrCloseAfterSave();
+
+                // Reload match data to get updated scores (do this in background)
+                _ = SafeLoadMatchDataAsync();
+
                 if (capturePhoto)
                 {
-                    // User wants to capture a photo - do it now
+                    // User wants to capture a photo - do it after panel is closed
                     IsBusy = false; // Allow UI to update before camera
                     await CaptureAndUploadPhotoAsync();
                 }
-                else
-                {
-                    // Just save without photo - advance to next series or close
-                    if (IsEditMode)
-                    {
-                        // Edit mode: close panel
-                        IsScoreEntryOpen = false;
-                        IsEditMode = false;
-                        EditingSeriesNumber = 0;
-                        EditingSeriesPhotoUrl = null;
-                    }
-                    else
-                    {
-                        // New entry mode: advance to next series
-                        AdvanceToNextSeries();
-                    }
-                }
-
-                // Reload match data to get updated scores (do this in background)
-                _ = LoadMatchDataAsync();
             }
             else
             {
                 ErrorMessage = result.Message ?? "Kunde inte spara poäng";
                 HasError = true;
-                System.Diagnostics.Debug.WriteLine($"SaveScoreInternalAsync: Failed - {ErrorMessage}");
+                App.Log($"SaveScore failed for match {MatchCode}: {ErrorMessage}");
             }
         }
         catch (Exception ex)
         {
             ErrorMessage = $"Fel: {ex.Message}";
             HasError = true;
-            System.Diagnostics.Debug.WriteLine($"SaveScoreInternalAsync: Exception - {ex}");
+            App.Log($"SaveScore exception for match {MatchCode}: {ex.Message}");
         }
         finally
         {
@@ -1753,7 +1759,9 @@ public partial class ActiveMatchViewModel : BaseViewModel
     }
 
     /// <summary>
-    /// Capture photo and upload it after saving score
+    /// Capture photo and upload it after saving score.
+    /// The score entry panel is already closed before this is called,
+    /// so even if Android destroys the Activity during camera use, the score is safe.
     /// </summary>
     private async Task CaptureAndUploadPhotoAsync()
     {
@@ -1770,7 +1778,6 @@ public partial class ActiveMatchViewModel : BaseViewModel
                 {
                     await Shell.Current.DisplayAlert("Kamerabehörighet",
                         "Kamerabehörighet krävs för att ta bilder. Gå till Inställningar för att aktivera.", "OK");
-                    AdvanceOrCloseAfterSave();
                     return;
                 }
             }
@@ -1780,7 +1787,6 @@ public partial class ActiveMatchViewModel : BaseViewModel
             if (photo == null)
             {
                 System.Diagnostics.Debug.WriteLine("CaptureAndUploadPhotoAsync: User cancelled photo capture");
-                AdvanceOrCloseAfterSave();
                 return;
             }
 
@@ -1811,24 +1817,25 @@ public partial class ActiveMatchViewModel : BaseViewModel
             if (result.Success)
             {
                 System.Diagnostics.Debug.WriteLine($"CaptureAndUploadPhotoAsync: Upload success! URL={result.Data?.PhotoUrl}");
+                // Reload to show the photo in scoreboard
+                _ = SafeLoadMatchDataAsync();
             }
             else
             {
+                App.Log($"Photo upload failed for match {MatchCode} series {_savedSeriesNumber}: {result.Message}");
                 ErrorMessage = result.Message ?? "Kunde inte ladda upp bilden";
                 HasError = true;
-                System.Diagnostics.Debug.WriteLine($"CaptureAndUploadPhotoAsync: Upload failed - {ErrorMessage}");
             }
         }
         catch (Exception ex)
         {
+            App.Log($"Photo capture/upload exception for match {MatchCode}: {ex.Message}");
             ErrorMessage = $"Fel vid fotohantering: {ex.Message}";
             HasError = true;
-            System.Diagnostics.Debug.WriteLine($"CaptureAndUploadPhotoAsync: Exception - {ex}");
         }
         finally
         {
             IsUploadingPhoto = false;
-            AdvanceOrCloseAfterSave();
         }
     }
 

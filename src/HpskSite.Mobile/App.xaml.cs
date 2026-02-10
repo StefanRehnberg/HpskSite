@@ -19,7 +19,7 @@ public partial class App : Application
 
 	private void SetupExceptionHandling()
 	{
-		_logPath = Path.Combine(FileSystem.AppDataDirectory, "app.log");
+		_logPath = Path.Combine(FileSystem.AppDataDirectory, "crash.log");
 
 		// Catch all unhandled exceptions
 		AppDomain.CurrentDomain.UnhandledException += (sender, args) =>

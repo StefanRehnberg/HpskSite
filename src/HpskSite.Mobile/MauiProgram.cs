@@ -27,6 +27,9 @@ public static class MauiProgram
             {
                 fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
                 fonts.AddFont("OpenSans-Semibold.ttf", "OpenSansSemibold");
+                // Map Consolas alias to avoid RuntimeException on Android
+                // (requested by a dependency but not bundled as an asset)
+                fonts.AddFont("OpenSans-Regular.ttf", "Consolas");
             });
 
         // Register services

@@ -276,7 +276,7 @@
                                                            Text="{Binding HandicapPerSeries, Converter={StaticResource HandicapFormatConverter}}"
                                                            TextColor="#17a2b8" />
                                                     <Label FontAttributes="Bold" FontSize="9"
-                                                           IsVisible="{Binding IsProvisional}"
+                                                           IsVisible="{Binding IsProvisional, TargetNullValue=False, FallbackValue=False}"
                                                            Text="(P)"
                                                            TextColor="{StaticResource Warning}" />
                                                 </HorizontalStackLayout>

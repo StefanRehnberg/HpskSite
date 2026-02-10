@@ -261,7 +261,7 @@
                                                     <!--  Provisional badge  -->
                                                     <Border Padding="4,2"
                                                             BackgroundColor="{StaticResource Warning}"
-                                                            IsVisible="{Binding IsProvisional}"
+                                                            IsVisible="{Binding IsProvisional, TargetNullValue=False, FallbackValue=False}"
                                                             Stroke="Transparent"
                                                             StrokeShape="RoundRectangle 4">
                                                         <Label FontAttributes="Bold" FontSize="10"
@@ -297,13 +297,13 @@
 
                                             <!--  Status: Full handicap  -->
                                             <Label FontAttributes="Italic" FontSize="11"
-                                                   IsVisible="{Binding IsProvisional, Converter={StaticResource InvertedBoolConverter}}"
+                                                   IsVisible="{Binding IsProvisional, Converter={StaticResource InvertedBoolConverter}, TargetNullValue=False, FallbackValue=True}"
                                                    Text="Fullständigt handicap baserat på ditt faktiska snitt"
                                                    TextColor="{StaticResource Success}" />
 
                                             <!--  Status: Provisional progress  -->
                                             <Label FontAttributes="Italic" FontSize="11"
-                                                   IsVisible="{Binding IsProvisional}"
+                                                   IsVisible="{Binding IsProvisional, TargetNullValue=False, FallbackValue=False}"
                                                    TextColor="{StaticResource Warning}">
                                                 <Label.FormattedText>
                                                     <FormattedString>

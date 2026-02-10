@@ -76,10 +76,10 @@ public partial class CreateMatchViewModel : BaseViewModel
     private string _selectedWeaponClass;
 
     [ObservableProperty]
-    private DateTime? _startDate;
+    private DateTime? _startDate = DateTime.Today;
 
     [ObservableProperty]
-    private TimeSpan? _startTime;
+    private TimeSpan? _startTime = new TimeSpan(DateTime.Now.Hour + 1, 0, 0);
 
     [ObservableProperty]
     private bool _isOpen = true;
