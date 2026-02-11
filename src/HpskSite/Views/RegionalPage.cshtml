@@ -116,51 +116,48 @@
     ViewBag.regionName = regionName;
 }
 
+<!-- Tab Navigation (visible to all visitors) -->
+@await Html.PartialAsync("RegionalNavigation")
+
 @if (isRegionalAdmin)
 {
-    <!-- Tab Navigation for admins -->
-    @await Html.PartialAsync("RegionalNavigation")
-
     @Html.AntiForgeryToken()
     @await Html.PartialAsync("FeaturedItemsPicker")
+}
 
-    <div class="tab-content" id="regionPageTabContent">
-        <!-- Home Tab -->
-        <div class="tab-pane fade show active" id="regionHome" role="tabpanel" aria-labelledby="regionHome-tab">
-            @await Html.PartialAsync("_RegionPublicContent", Model, new ViewDataDictionary(ViewData)
-            {
-                { "clubsPage", clubsPage },
-                { "clubsUrl", clubsUrl },
-                { "clubCount", clubCount },
-                { "featuredItems", featuredItems },
-                { "aboutRegion", aboutRegion },
-                { "contactPerson", contactPerson },
-                { "contactEmail", contactEmail },
-                { "contactPhone", contactPhone }
-            })
-        </div>
+<div class="tab-content" id="regionPageTabContent">
+    <!-- Home Tab -->
+    <div class="tab-pane fade show active" id="regionHome" role="tabpanel" aria-labelledby="regionHome-tab">
+        @await Html.PartialAsync("_RegionPublicContent", Model, new ViewDataDictionary(ViewData)
+        {
+            { "clubsPage", clubsPage },
+            { "clubsUrl", clubsUrl },
+            { "clubCount", clubCount },
+            { "featuredItems", featuredItems },
+            { "aboutRegion", aboutRegion },
+            { "contactPerson", contactPerson },
+            { "contactEmail", contactEmail },
+            { "contactPhone", contactPhone }
+        })
+    </div>
 
+    <!-- Documents Tab -->
+    <div class="tab-pane fade" id="regionDocuments" role="tabpanel" aria-labelledby="regionDocuments-tab">
+        @{
+            ViewBag.DocumentOwnerType = 1;
+            ViewBag.DocumentOwnerId = Model.Id;
+        }
+        @await Html.PartialAsync("DocumentArchive")
+    </div>
+
+    @if (isRegionalAdmin)
+    {
         <!-- Administration Tab -->
         <div class="tab-pane fade" id="regionAdmin" role="tabpanel" aria-labelledby="regionAdmin-tab">
             @await Html.PartialAsync("RegionalAdminPanel")
         </div>
-    </div>
-}
-else
-{
-    <!-- Non-admin: render public content directly (no tabs) -->
-    @await Html.PartialAsync("_RegionPublicContent", Model, new ViewDataDictionary(ViewData)
-    {
-        { "clubsPage", clubsPage },
-        { "clubsUrl", clubsUrl },
-        { "clubCount", clubCount },
-        { "featuredItems", featuredItems },
-        { "aboutRegion", aboutRegion },
-        { "contactPerson", contactPerson },
-        { "contactEmail", contactEmail },
-        { "contactPhone", contactPhone }
-    })
-}
+    }
+</div>
 
 <script>
 (function() {

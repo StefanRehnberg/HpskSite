@@ -108,7 +108,7 @@
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Fil <span class="text-danger">*</span></label>
-                        <input type="file" class="form-control" id="@(uniquePrefix)_docFile" required>
+                        <input type="file" class="form-control" id="@(uniquePrefix)_docFile" required onchange="docAdmin_onFileSelected('@uniquePrefix', this)">
                         <div class="form-text">Max 20 MB. Tillåtna: PDF, Word, Excel, PowerPoint, text, CSV, ZIP, bilder.</div>
                     </div>
                 </form>
@@ -337,7 +337,14 @@ function docAdmin_showUploadModal(prefix) {
 function docAdmin_uploadDocument(prefix) {
     const state = window.docAdminState[prefix];
     const fileInput = document.getElementById(`${prefix}_docFile`);
-    const title = document.getElementById(`${prefix}_docTitle`).value.trim();
+    const titleInput = document.getElementById(`${prefix}_docTitle`);
+    var title = titleInput.value.trim();
+
+    // Auto-fill title from filename if empty
+    if (!title && fileInput.files && fileInput.files[0]) {
+        title = fileInput.files[0].name.replace(/\.[^/.]+$/, '');
+        titleInput.value = title;
+    }
 
     if (!title) { alert('Titel krävs.'); return; }
     if (!fileInput.files || !fileInput.files[0]) { alert('Välj en fil.'); return; }
@@ -367,7 +374,6 @@ function docAdmin_uploadDocument(prefix) {
                 bootstrap.Modal.getInstance(document.getElementById(`${prefix}_uploadModal`)).hide();
                 docAdmin_loadDocuments(prefix);
                 docAdmin_loadStorageInfo(prefix);
-                alert('Dokument uppladdat!');
             } else {
                 alert('Fel: ' + data.message);
             }
@@ -590,6 +596,14 @@ function docAdmin_populateCategoryDropdown(prefix, selectId, selectedValue) {
         const selected = cat.id == selectedValue ? 'selected' : '';
         select.innerHTML += `<option value="${cat.id}" ${selected}>${docAdmin_escapeHtml(cat.name)}</option>`;
     });
+}
+
+function docAdmin_onFileSelected(prefix, input) {
+    if (!input.files || !input.files[0]) return;
+    const titleInput = document.getElementById(`${prefix}_docTitle`);
+    if (!titleInput.value.trim()) {
+        titleInput.value = input.files[0].name.replace(/\.[^/.]+$/, '');
+    }
 }
 
 function docAdmin_escapeHtml(text) {
