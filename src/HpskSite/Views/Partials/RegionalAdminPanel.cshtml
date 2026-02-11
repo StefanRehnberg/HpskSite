@@ -1,0 +1,377 @@
+@{
+    var regionContentId = ViewBag.regionContentId as int? ?? 0;
+    var regionName = ViewBag.regionName as string ?? "Krets";
+}
+
+<!-- CKEditor 5 Rich Text Editor -->
+<script src="https://cdn.ckeditor.com/ckeditor5/41.0.0/classic/ckeditor.js"></script>
+
+<div class="regional-admin-panel">
+    <div class="alert alert-info mb-4">
+        <i class="bi bi-shield-check me-2"></i>
+        <strong>Kretsadministration</strong> - Du kan hantera dokument, texter och bilder för @regionName här.
+    </div>
+
+    <!-- Admin Sub-Tabs -->
+    <ul class="nav nav-tabs mb-3" id="regionAdminTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="regionDocuments-tab" data-bs-toggle="tab" data-bs-target="#regionDocumentsTab" type="button">
+                <i class="bi bi-file-earmark-text me-2"></i>Dokument
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="regionSettings-tab" data-bs-toggle="tab" data-bs-target="#regionSettingsTab" type="button">
+                <i class="bi bi-gear me-2"></i>Inställningar
+            </button>
+        </li>
+    </ul>
+
+    <!-- Sub-Tab Content -->
+    <div class="tab-content" id="regionAdminTabContent">
+        <!-- Documents Sub-Tab -->
+        <div class="tab-pane fade show active" id="regionDocumentsTab">
+            @{ ViewBag.DocumentOwnerType = 1; ViewBag.DocumentOwnerId = regionContentId; }
+            @await Html.PartialAsync("ClubDocumentAdmin")
+        </div>
+
+        <!-- Settings Sub-Tab -->
+        <div class="tab-pane fade" id="regionSettingsTab">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title mb-4">
+                        <i class="bi bi-gear me-2"></i>Kretsinställningar
+                    </h5>
+                    <form id="regionSettingsForm">
+                        <!-- Texts Section -->
+                        <h6 class="text-muted mb-3">
+                            <i class="bi bi-card-text me-2"></i>Texter
+                        </h6>
+                        <div class="mb-3">
+                            <label class="form-label">Välkomsttitel</label>
+                            <input type="text" class="form-control" id="regionWelcomeTitle" name="welcomeTitle" placeholder="T.ex. Välkommen till @regionName">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Välkomsttext</label>
+                            <textarea class="form-control" id="regionWelcomeText" name="welcomeText" rows="4" placeholder="Kort välkomsttext som visas i bannern"></textarea>
+                            <small class="text-muted">Visas i hero-bannern på kretssidan. Stöder grundläggande HTML-formatering.</small>
+                        </div>
+                        <div class="mb-4">
+                            <label class="form-label">Om kretsen</label>
+                            <textarea class="form-control" id="regionAboutRegion" name="aboutRegion" rows="6" placeholder="Utförlig information om kretsen"></textarea>
+                            <small class="text-muted">Visas under "Om @regionName" på kretssidan. Stöder grundläggande HTML-formatering.</small>
+                        </div>
+
+                        <hr class="my-4">
+
+                        <!-- Contact Information Section -->
+                        <h6 class="text-muted mb-3">
+                            <i class="bi bi-person-lines-fill me-2"></i>Kontaktinformation
+                        </h6>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Kontaktperson</label>
+                                <input type="text" class="form-control" id="regionContactPerson" name="contactPerson" placeholder="Namn på kontaktperson">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Kontakt E-post</label>
+                                <input type="email" class="form-control" id="regionContactEmail" name="contactEmail" placeholder="kontakt@krets.se">
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Kontakt Telefon</label>
+                                <input type="tel" class="form-control" id="regionContactPhone" name="contactPhone" placeholder="+46 70 123 45 67">
+                            </div>
+                        </div>
+
+                        <hr class="my-4">
+
+                        <!-- Images Section -->
+                        <h6 class="text-muted mb-3">
+                            <i class="bi bi-image me-2"></i>Bilder
+                        </h6>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Logotyp</label>
+                                <div id="regionLogoPreview" class="mb-2" style="display: none;">
+                                    <img id="regionLogoImg" src="" alt="Logo" class="img-thumbnail" style="max-height: 100px; max-width: 200px;">
+                                    <button type="button" class="btn btn-sm btn-outline-danger ms-2" onclick="removeRegionImage('logo')">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </div>
+                                <input type="file" class="form-control" id="regionLogoFile" accept="image/jpeg,image/png,image/gif,image/webp" onchange="uploadRegionImage('logo', this)">
+                                <small class="text-muted">JPG, PNG, GIF eller WebP. Max 5 MB.</small>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Bannerbild</label>
+                                <div id="regionBannerPreview" class="mb-2" style="display: none;">
+                                    <img id="regionBannerImg" src="" alt="Banner" class="img-thumbnail" style="max-height: 100px; max-width: 300px;">
+                                    <button type="button" class="btn btn-sm btn-outline-danger ms-2" onclick="removeRegionImage('bannerImage')">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </div>
+                                <input type="file" class="form-control" id="regionBannerFile" accept="image/jpeg,image/png,image/gif,image/webp" onchange="uploadRegionImage('bannerImage', this)">
+                                <small class="text-muted">JPG, PNG, GIF eller WebP. Max 5 MB. Rekommenderad storlek: 1200x300 px.</small>
+                            </div>
+                        </div>
+
+                        <div class="d-flex justify-content-end mt-3">
+                            <button type="submit" class="btn btn-success btn-lg">
+                                <i class="bi bi-save me-2"></i>Spara Inställningar
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function() {
+    var regionContentId = @regionContentId;
+    var welcomeTextEditor = null;
+    var aboutRegionEditor = null;
+
+    function getAntiForgeryToken() {
+        var tokenInput = document.querySelector('input[name="__RequestVerificationToken"]');
+        return tokenInput ? tokenInput.value : '';
+    }
+
+    // Load region info when settings tab is shown
+    document.getElementById('regionSettings-tab').addEventListener('shown.bs.tab', function () {
+        loadRegionInfo();
+
+        // Initialize CKEditor for welcomeText
+        if (!welcomeTextEditor) {
+            ClassicEditor
+                .create(document.querySelector('#regionWelcomeText'), {
+                    toolbar: ['bold', 'italic', 'link', '|', 'undo', 'redo']
+                })
+                .then(function(editor) {
+                    welcomeTextEditor = editor;
+                })
+                .catch(function(error) {
+                    console.error('Error initializing CKEditor for welcomeText:', error);
+                });
+        }
+
+        // Initialize CKEditor for aboutRegion
+        if (!aboutRegionEditor) {
+            ClassicEditor
+                .create(document.querySelector('#regionAboutRegion'), {
+                    toolbar: ['heading', '|', 'bold', 'italic', 'link', 'bulletedList', 'numberedList', '|', 'blockQuote', 'undo', 'redo']
+                })
+                .then(function(editor) {
+                    aboutRegionEditor = editor;
+                })
+                .catch(function(error) {
+                    console.error('Error initializing CKEditor for aboutRegion:', error);
+                });
+        }
+    });
+
+    function loadRegionInfo() {
+        fetch('/umbraco/surface/Club/GetRegionInfo?contentId=' + regionContentId)
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.success && data.data) {
+                    document.getElementById('regionWelcomeTitle').value = data.data.welcomeTitle || '';
+                    document.getElementById('regionContactPerson').value = data.data.contactPerson || '';
+                    document.getElementById('regionContactEmail').value = data.data.contactEmail || '';
+                    document.getElementById('regionContactPhone').value = data.data.contactPhone || '';
+
+                    // Set CKEditor content or textarea fallback
+                    var welcomeTextContent = data.data.welcomeText || '';
+                    if (welcomeTextEditor) {
+                        welcomeTextEditor.setData(welcomeTextContent);
+                    } else {
+                        document.getElementById('regionWelcomeText').value = welcomeTextContent;
+                    }
+
+                    var aboutRegionContent = data.data.aboutRegion || '';
+                    if (aboutRegionEditor) {
+                        aboutRegionEditor.setData(aboutRegionContent);
+                    } else {
+                        document.getElementById('regionAboutRegion').value = aboutRegionContent;
+                    }
+
+                    // Logo preview
+                    if (data.data.logoUrl) {
+                        document.getElementById('regionLogoImg').src = data.data.logoUrl;
+                        document.getElementById('regionLogoPreview').style.display = '';
+                    } else {
+                        document.getElementById('regionLogoPreview').style.display = 'none';
+                    }
+
+                    // Banner preview
+                    if (data.data.bannerImageUrl) {
+                        document.getElementById('regionBannerImg').src = data.data.bannerImageUrl;
+                        document.getElementById('regionBannerPreview').style.display = '';
+                    } else {
+                        document.getElementById('regionBannerPreview').style.display = 'none';
+                    }
+                }
+            })
+            .catch(function(err) {
+                console.error('Error loading region info:', err);
+            });
+    }
+
+    // Save region settings
+    document.getElementById('regionSettingsForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+
+        // Sync CKEditor content
+        if (welcomeTextEditor) {
+            document.getElementById('regionWelcomeText').value = welcomeTextEditor.getData();
+        }
+        if (aboutRegionEditor) {
+            document.getElementById('regionAboutRegion').value = aboutRegionEditor.getData();
+        }
+
+        var formData = new FormData(this);
+        formData.append('contentId', regionContentId);
+        formData.append('__RequestVerificationToken', getAntiForgeryToken());
+
+        var saveBtn = this.querySelector('button[type="submit"]');
+        var originalText = saveBtn.innerHTML;
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Sparar...';
+
+        fetch('/umbraco/surface/Club/UpdateRegionInfo', {
+            method: 'POST',
+            body: formData
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.success) {
+                alert('Inställningar sparade!');
+            } else {
+                alert('Fel: ' + data.message);
+            }
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = originalText;
+        })
+        .catch(function(err) {
+            console.error('Error saving region settings:', err);
+            alert('Fel vid sparande av inställningar.');
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = originalText;
+        });
+    });
+
+    // Upload region image
+    window.uploadRegionImage = function(imageType, input) {
+        if (!input.files || !input.files[0]) return;
+
+        var file = input.files[0];
+
+        // Validate file size (5 MB max)
+        if (file.size > 5 * 1024 * 1024) {
+            alert('Filen är för stor. Max 5 MB tillåtet.');
+            input.value = '';
+            return;
+        }
+
+        var formData = new FormData();
+        formData.append('contentId', regionContentId);
+        formData.append('imageType', imageType);
+        formData.append('imageFile', file);
+        formData.append('__RequestVerificationToken', getAntiForgeryToken());
+
+        // Show loading
+        var previewId = imageType === 'logo' ? 'regionLogoPreview' : 'regionBannerPreview';
+        var imgId = imageType === 'logo' ? 'regionLogoImg' : 'regionBannerImg';
+
+        fetch('/umbraco/surface/Club/UploadRegionImage', {
+            method: 'POST',
+            body: formData
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.success) {
+                document.getElementById(imgId).src = data.imageUrl;
+                document.getElementById(previewId).style.display = '';
+                alert('Bild uppladdad!');
+            } else {
+                alert('Fel: ' + data.message);
+            }
+            input.value = '';
+        })
+        .catch(function(err) {
+            console.error('Error uploading image:', err);
+            alert('Fel vid uppladdning av bild.');
+            input.value = '';
+        });
+    };
+
+    // Remove region image (clear the property)
+    window.removeRegionImage = function(imageType) {
+        if (!confirm('Är du säker på att du vill ta bort denna bild?')) return;
+
+        var formData = new FormData();
+        formData.append('contentId', regionContentId);
+        formData.append('imageType', imageType);
+        formData.append('__RequestVerificationToken', getAntiForgeryToken());
+
+        fetch('/umbraco/surface/Club/RemoveRegionImage', {
+            method: 'POST',
+            body: formData
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.success) {
+                var previewId = imageType === 'logo' ? 'regionLogoPreview' : 'regionBannerPreview';
+                document.getElementById(previewId).style.display = 'none';
+            } else {
+                alert('Fel: ' + data.message);
+            }
+        })
+        .catch(function(err) {
+            console.error('Error removing image:', err);
+            alert('Fel vid borttagning av bild.');
+        });
+    };
+})();
+</script>
+
+<style>
+.regional-admin-panel .nav-tabs .nav-link {
+    color: var(--bs-secondary-color);
+}
+
+.regional-admin-panel .nav-tabs .nav-link:hover {
+    color: var(--bs-body-color);
+}
+
+.regional-admin-panel .nav-tabs .nav-link.active {
+    color: var(--bs-primary);
+    border-bottom: 3px solid var(--bs-primary);
+    background-color: transparent;
+}
+
+/* CKEditor dark mode support */
+[data-bs-theme="dark"] .regional-admin-panel .ck.ck-editor__main > .ck-editor__editable {
+    background-color: var(--bs-body-bg);
+    color: var(--bs-body-color);
+    border-color: var(--bs-border-color);
+}
+
+[data-bs-theme="dark"] .regional-admin-panel .ck.ck-toolbar {
+    background-color: var(--bs-tertiary-bg);
+    border-color: var(--bs-border-color);
+}
+
+[data-bs-theme="dark"] .regional-admin-panel .ck.ck-toolbar .ck-button {
+    color: var(--bs-body-color);
+}
+
+[data-bs-theme="dark"] .regional-admin-panel .ck.ck-toolbar .ck-button:hover {
+    background-color: var(--bs-secondary-bg);
+}
+
+[data-bs-theme="dark"] .regional-admin-panel .ck.ck-editor__editable.ck-focused {
+    border-color: var(--bs-primary);
+}
+</style>

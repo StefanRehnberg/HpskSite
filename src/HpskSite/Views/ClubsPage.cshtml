@@ -22,66 +22,60 @@
     ViewBag.Title = isInRegionalContext ? $"Klubbar i {regionName}" : "Klubbar";
 }
 
-<div class="container-fluid">
-    <!-- Clubs Directory -->
-    <div class="card">
-        <div class="card-header">
-            @if (isInRegionalContext)
-            {
-                <h5 class="mb-0">Klubbar i @regionName</h5>
-                <p class="mb-0 small text-muted">Hitta och kontakta skytteföreningar i din krets</p>
-            }
-            else
-            {
-                <h5 class="mb-0">Klubbkatalog</h5>
-                <p class="mb-0 small text-muted">Hitta och kontakta skytteföreningar</p>
-            }
-        </div>
-        <div class="card-body">
-            <!-- Filter Section -->
-            @if (!isInRegionalContext)
-            {
-                <div class="row mb-3">
-                    <div class="col-md-4">
-                        <label for="kretsFilter" class="form-label">Välj krets</label>
-                        <select class="form-select form-select-lg-mobile" id="kretsFilter" onchange="filterClubsByKrets()">
-                            <option value="">Alla kretsar</option>
-                        </select>
-                    </div>
-                </div>
-            }
-            else
-            {
-                <!-- Hidden input to store region code for JavaScript -->
-                <input type="hidden" id="kretsFilter" value="@activeRegionCode" />
-                <div class="mb-3">
-                    <a href="@Model.Root().Url()clubs" class="btn btn-outline-secondary btn-sm">
-                        <i class="bi bi-arrow-left me-1"></i> Visa alla klubbar i hela Sverige
-                    </a>
-                </div>
-            }
+<div class="container-fluid clubs-directory">
+    <!-- Header -->
+    <div class="mb-4">
+        @if (isInRegionalContext)
+        {
+            <h4 class="mb-1"><i class="bi bi-building me-2"></i>Klubbar i @regionName</h4>
+            <p class="text-muted mb-0">Hitta och kontakta pistolskytteklubbar i din krets</p>
+        }
+        else
+        {
+            <h4 class="mb-1"><i class="bi bi-building me-2"></i>Klubbkatalog</h4>
+            <p class="text-muted mb-0">Hitta och kontakta pistolskytteklubbar</p>
+        }
+    </div>
 
-            <div id="clubsTableContainer">
-                <div class="text-center">
-                    <div class="spinner-border" role="status">
-                        <span class="visually-hidden">Laddar...</span>
-                    </div>
-                    <p>Laddar klubbar...</p>
-                </div>
+    <!-- Filter Section -->
+    @if (!isInRegionalContext)
+    {
+        <div class="row mb-4">
+            <div class="col-md-4">
+                <select class="form-select" id="kretsFilter" onchange="filterClubsByKrets()">
+                    <option value="">Alla kretsar</option>
+                </select>
             </div>
+        </div>
+    }
+    else
+    {
+        <input type="hidden" id="kretsFilter" value="@activeRegionCode" />
+    }
+
+    <!-- Club count -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <small class="text-muted" id="clubCountLabel"></small>
+    </div>
+
+    <!-- Clubs Grid -->
+    <div id="clubsContainer">
+        <div class="text-center py-5">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">Laddar...</span>
+            </div>
+            <p class="text-muted mt-2">Laddar klubbar...</p>
         </div>
     </div>
 </div>
 
-@* Bootstrap Icons (Bootstrap JS is already loaded in Master.cshtml) *@
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
 
 <script>
-// Regional context from server
 const isInRegionalContext = @(isInRegionalContext ? "true" : "false");
 const presetRegionCode = '@activeRegionCode';
+const currentPageUrl = '@Model.Url()'.replace(/\/$/, '');
 
-// Regional Federations data (from Models/Federations.cs)
 const regionalFederations = [
     { value: 'Blekinge', description: 'Blekinge Pistolskyttekrets' },
     { value: 'Dalarna', description: 'Dalarnas Pistolskyttekrets' },
@@ -113,54 +107,43 @@ const regionalFederations = [
 
 function populateKretsFilter() {
     const select = document.getElementById('kretsFilter');
-
-    // If in regional context, filter is a hidden input - don't populate dropdown
-    if (isInRegionalContext) {
-        return;
-    }
+    if (isInRegionalContext) return;
 
     select.innerHTML = '<option value="">Alla kretsar</option>';
     regionalFederations.forEach(f => {
-        // Default to Halland if not in regional context and no preset
         const selected = (presetRegionCode ? f.value === presetRegionCode : f.value === 'Halland') ? 'selected' : '';
         select.innerHTML += `<option value="${f.value}" ${selected}>${f.description}</option>`;
     });
 }
 
 function filterClubsByKrets() {
-    // Use server-side filtering for performance
-    loadClubsTable();
+    loadClubs();
 }
 
 document.addEventListener('DOMContentLoaded', function() {
     populateKretsFilter();
-    loadClubsTable();
+    loadClubs();
 });
 
-async function loadClubsTable() {
-    const container = document.getElementById('clubsTableContainer');
+async function loadClubs() {
+    const container = document.getElementById('clubsContainer');
     const selectedKrets = document.getElementById('kretsFilter').value;
 
-    // Show loading state
     container.innerHTML = `
-        <div class="text-center">
-            <div class="spinner-border" role="status">
-                <span class="visually-hidden">Laddar...</span>
-            </div>
-            <p>Laddar klubbar...</p>
-        </div>
-    `;
+        <div class="text-center py-5">
+            <div class="spinner-border" role="status"><span class="visually-hidden">Laddar...</span></div>
+            <p class="text-muted mt-2">Laddar klubbar...</p>
+        </div>`;
 
     try {
-        // Use server-side filtering endpoint
         const url = `/umbraco/surface/ClubAdmin/GetClubsByKrets?krets=${encodeURIComponent(selectedKrets)}`;
         const response = await fetch(url);
         const data = await response.json();
 
         if (data.success) {
-            displayClubsTable(data.clubs);
+            displayClubs(data.clubs);
         } else {
-            container.innerHTML = '<div class="alert alert-danger">Fel vid laddning av klubbar: ' + data.message + '</div>';
+            container.innerHTML = '<div class="alert alert-danger">Fel vid laddning av klubbar.</div>';
         }
     } catch (error) {
         console.error('Error loading clubs:', error);
@@ -168,226 +151,169 @@ async function loadClubsTable() {
     }
 }
 
-function displayClubsTable(clubs) {
-    const container = document.getElementById('clubsTableContainer');
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function displayClubs(clubs) {
+    const container = document.getElementById('clubsContainer');
+    const countLabel = document.getElementById('clubCountLabel');
 
     if (!clubs || clubs.length === 0) {
         container.innerHTML = '<div class="alert alert-info">Inga klubbar hittades.</div>';
+        countLabel.textContent = '';
         return;
     }
 
-    let tableHtml = `
-        <div class="table-responsive">
-            <table class="table table-hover align-middle">
-                <thead>
-                    <tr>
-                        <th style="width: 50px;"></th>
-                        <th>Klubbnamn</th>
-                        <th class="d-none d-md-table-cell">Stad</th>
-                        <th class="d-none d-lg-table-cell">E-post</th>
-                        <th class="d-none d-lg-table-cell">Tel</th>
-                        <th style="width: 120px;"></th>
-                    </tr>
-                </thead>
-                <tbody>
-    `;
+    countLabel.textContent = `${clubs.length} klubb${clubs.length !== 1 ? 'ar' : ''}`;
+
+    let html = '<div class="row g-3">';
 
     clubs.forEach(club => {
-        // Determine navigation URL: external website or internal club page
+        // Determine navigation URL
         let navigationUrl = '';
         let linkTarget = '';
 
         if (club.webSite && club.webSite.trim() !== '') {
-            // Club has external website - use that
             navigationUrl = club.webSite;
             linkTarget = ' target="_blank" rel="noopener noreferrer"';
         } else {
-            // No external website - navigate to internal club page
-            // Use current page URL as base for regional context
-            const currentPageUrl = '@Model.Url()'.replace(/\/$/, '');
             const clubSlug = club.urlSegment || club.name.toLowerCase().replace(/\s+/g, '-');
             navigationUrl = `${currentPageUrl}/${clubSlug}`;
         }
 
-        tableHtml += `
-            <tr>
-                <td class="club-logo-cell">
-                    ${club.logoUrl
-                        ? `<img src="${club.logoUrl}" alt="" class="club-list-logo">`
-                        : `<div class="club-logo-placeholder-small"><i class="bi bi-shield"></i></div>`
-                    }
-                </td>
-                <td>
-                    <div class="club-name-cell">
-                        <strong class="d-block">${club.name}</strong>
-                        ${club.description ? `<small class="text-muted d-block mt-1 club-description">${club.description}</small>` : ''}
-                        ${club.city ? `<small class="text-muted d-block d-md-none mt-1"><i class="bi bi-geo-alt"></i> ${club.city}</small>` : ''}
+        const logoHtml = club.logoUrl
+            ? `<img src="${escapeHtml(club.logoUrl)}" alt="" class="club-card-logo">`
+            : `<div class="club-card-logo-placeholder"><i class="bi bi-shield"></i></div>`;
+
+        const description = club.description
+            ? `<p class="club-card-description">${escapeHtml(club.description)}</p>`
+            : '';
+
+        const city = club.city
+            ? `<small class="text-muted"><i class="bi bi-geo-alt me-1"></i>${escapeHtml(club.city)}</small>`
+            : '';
+
+        html += `
+            <div class="col-12 col-md-6 col-lg-4">
+                <a href="${navigationUrl}"${linkTarget} class="club-card card h-100 text-decoration-none">
+                    <div class="card-body d-flex align-items-start gap-3">
+                        ${logoHtml}
+                        <div class="flex-grow-1 min-width-0">
+                            <h6 class="club-card-name mb-1">${escapeHtml(club.name)}</h6>
+                            ${city}
+                            ${description}
+                        </div>
+                        <i class="bi bi-chevron-right text-muted club-card-arrow"></i>
                     </div>
-                </td>
-                <td class="d-none d-md-table-cell">${club.city || '-'}</td>
-                <td class="d-none d-lg-table-cell">${club.contactEmail ? `<a href="mailto:${club.contactEmail}" class="club-email-link">${club.contactEmail}</a>` : '-'}</td>
-                <td class="d-none d-lg-table-cell">${club.contactPhone || '-'}</td>
-                <td class="text-end club-actions">
-                    ${club.contactEmail ? `<a href="mailto:${club.contactEmail}" class="btn btn-outline-secondary club-action-btn d-lg-none" title="E-post"><i class="bi bi-envelope"></i></a>` : ''}
-                    ${club.contactPhone ? `<a href="tel:${club.contactPhone}" class="btn btn-outline-secondary club-action-btn d-lg-none" title="Ring"><i class="bi bi-telephone"></i></a>` : ''}
-                    <a href="${navigationUrl}"${linkTarget} class="btn btn-outline-primary club-action-btn" title="Öppna hemsida" data-bs-toggle="tooltip">
-                        <i class="bi bi-globe"></i>
-                    </a>
-                </td>
-            </tr>
-        `;
+                </a>
+            </div>`;
     });
 
-    tableHtml += `
-                </tbody>
-            </table>
-        </div>
-    `;
-
-    container.innerHTML = tableHtml;
-
-    // Initialize Bootstrap tooltips
-    const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
-    tooltipTriggerList.map(function (tooltipTriggerEl) {
-        return new bootstrap.Tooltip(tooltipTriggerEl);
-    });
+    html += '</div>';
+    container.innerHTML = html;
 }
 </script>
 
 <style>
-.club-logo-cell {
-    width: 50px;
-    padding: 0.25rem !important;
-    vertical-align: middle;
+.clubs-directory h4 {
+    font-weight: 600;
 }
 
-.club-list-logo {
-    width: 40px;
-    height: 40px;
+/* Card styling */
+.club-card {
+    border: 1px solid var(--bs-border-color);
+    transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s;
+    color: var(--bs-body-color);
+}
+
+.club-card:hover {
+    border-color: var(--bs-primary);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    transform: translateY(-2px);
+    color: var(--bs-body-color);
+}
+
+.club-card .card-body {
+    padding: 1rem;
+}
+
+/* Logo */
+.club-card-logo {
+    width: 48px;
+    height: 48px;
     object-fit: contain;
-    border-radius: 4px;
+    border-radius: 6px;
+    flex-shrink: 0;
 }
 
-.club-logo-placeholder-small {
-    width: 40px;
-    height: 40px;
+.club-card-logo-placeholder {
+    width: 48px;
+    height: 48px;
     display: flex;
     align-items: center;
     justify-content: center;
     background: var(--bs-tertiary-bg);
-    border-radius: 4px;
+    border-radius: 6px;
     color: var(--bs-secondary-color);
-    font-size: 1.2rem;
+    font-size: 1.4rem;
+    flex-shrink: 0;
 }
 
-.club-name-cell {
-    min-height: 25px;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-}
-
-.table > thead {
-    background-color: var(--bs-tertiary-bg);
-    border-bottom: 2px solid var(--bs-border-color);
-}
-
-.table > thead > tr > th {
+/* Name */
+.club-card-name {
     font-weight: 600;
     color: var(--bs-body-color);
-    border-bottom: 2px solid var(--bs-border-color);
-    padding: 0.5rem 0.75rem;
+    line-height: 1.3;
 }
 
-.table tbody tr {
-    transition: background-color 0.2s ease;
+.club-card:hover .club-card-name {
+    color: var(--bs-primary);
 }
 
-.table tbody tr:hover {
-    background-color: var(--bs-tertiary-bg);
-}
-
-.table td {
-    vertical-align: middle;
-    padding: 0.5rem 0.75rem;
-}
-
-/* Mobile-friendly club table styles */
-
-/* Action buttons - larger touch targets */
-.club-action-btn {
-    min-width: 44px;
-    min-height: 44px;
-    padding: 0.5rem;
-    margin: 2px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-}
-
-/* Action buttons container */
-.club-actions {
-    white-space: nowrap;
-}
-
-/* Email link truncation on medium screens */
-.club-email-link {
-    display: inline-block;
-    max-width: 200px;
+/* Description */
+.club-card-description {
+    font-size: 0.8rem;
+    color: var(--bs-secondary-color);
+    margin: 0.25rem 0 0 0;
+    display: -webkit-box;
+    -webkit-line-clamp: 1;
+    -webkit-box-orient: vertical;
     overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    vertical-align: middle;
 }
 
-/* Mobile adjustments */
+/* Arrow indicator */
+.club-card-arrow {
+    flex-shrink: 0;
+    font-size: 1rem;
+    align-self: center;
+    opacity: 0.4;
+    transition: opacity 0.2s, transform 0.2s;
+}
+
+.club-card:hover .club-card-arrow {
+    opacity: 1;
+    transform: translateX(2px);
+}
+
+/* Ensure text truncation works */
+.min-width-0 {
+    min-width: 0;
+}
+
+/* Mobile: single column, slightly more breathing room */
 @@media (max-width: 767.98px) {
-    /* Hide description on very small screens to save space */
-    .club-description {
-        display: none !important;
+    .club-card .card-body {
+        padding: 0.85rem;
     }
 
-    /* Tighter padding on mobile */
-    .table td {
-        padding: 0.5rem 0.35rem;
-    }
-
-    /* Action buttons column */
-    .club-actions {
-        display: flex;
-        flex-wrap: wrap;
-        justify-content: flex-end;
-        gap: 4px;
-    }
-
-    /* Smaller action buttons on mobile but still touch-friendly */
-    .club-action-btn {
-        min-width: 40px;
-        min-height: 40px;
-        padding: 0.4rem;
-        font-size: 0.9rem;
-    }
-}
-
-/* Medium screens - show city, hide contact info */
-@@media (min-width: 768px) and (max-width: 991.98px) {
-    .club-email-link {
-        max-width: 150px;
-    }
-}
-
-/* Large screens - full email visible */
-@@media (min-width: 992px) {
-    .club-email-link {
-        max-width: none;
-    }
-}
-
-/* Larger select on mobile for better touch target */
-@@media (max-width: 767.98px) {
-    .form-select-lg-mobile {
-        min-height: 48px;
-        font-size: 1rem;
+    .club-card-logo,
+    .club-card-logo-placeholder {
+        width: 40px;
+        height: 40px;
     }
 }
 </style>

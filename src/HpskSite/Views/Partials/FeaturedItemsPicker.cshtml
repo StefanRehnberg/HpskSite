@@ -1,0 +1,232 @@
+<!-- Featured Items Picker Modal -->
+<div class="modal fade" id="featuredItemsPickerModal" tabindex="-1" aria-labelledby="featuredItemsPickerLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="featuredItemsPickerLabel">
+                    <i class="bi bi-star-fill me-2 text-warning"></i>Redigera Utvalda Tävlingar
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <!-- Search -->
+                <div class="mb-3">
+                    <input type="text" class="form-control" id="featuredPickerSearch" placeholder="Sök tävlingar..." oninput="filterFeaturedItems()">
+                </div>
+
+                <!-- Loading spinner -->
+                <div id="featuredPickerLoading" class="text-center py-4">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Laddar...</span>
+                    </div>
+                </div>
+
+                <!-- Items list -->
+                <div id="featuredPickerItems" style="display: none;">
+                    <!-- Series section -->
+                    <div id="featuredPickerSeries" style="display: none;">
+                        <h6 class="text-muted mb-2"><i class="bi bi-collection me-1"></i>Serier</h6>
+                        <div id="featuredPickerSeriesList" class="mb-3"></div>
+                    </div>
+
+                    <!-- Competitions section -->
+                    <div id="featuredPickerCompetitions" style="display: none;">
+                        <h6 class="text-muted mb-2"><i class="bi bi-trophy me-1"></i>Tävlingar</h6>
+                        <div id="featuredPickerCompetitionsList"></div>
+                    </div>
+
+                    <!-- No results -->
+                    <div id="featuredPickerNoResults" class="text-center text-muted py-3" style="display: none;">
+                        Inga tävlingar hittades.
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <span id="featuredPickerSelectedCount" class="me-auto text-muted small"></span>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" onclick="saveFeaturedItems()">
+                    <i class="bi bi-check-lg me-1"></i>Spara
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    // Module-scoped state
+    let _allItems = [];
+    let _currentContentId = 0;
+    let _currentContentType = '';
+    let _currentFeaturedIds = [];
+    let _modalInstance = null;
+
+    window.openFeaturedPicker = function (contentId, contentType, featuredIds) {
+        _currentContentId = contentId;
+        _currentContentType = contentType;
+        _currentFeaturedIds = featuredIds || [];
+
+        // Show loading, hide items
+        document.getElementById('featuredPickerLoading').style.display = '';
+        document.getElementById('featuredPickerItems').style.display = 'none';
+        document.getElementById('featuredPickerSearch').value = '';
+
+        // Open modal
+        var modalEl = document.getElementById('featuredItemsPickerModal');
+        _modalInstance = _modalInstance || new bootstrap.Modal(modalEl);
+        _modalInstance.show();
+
+        // Fetch available competitions
+        fetch('/umbraco/surface/Club/GetAvailableCompetitions')
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (data.success) {
+                    _allItems = data.items || [];
+                    renderFeaturedItems();
+                } else {
+                    document.getElementById('featuredPickerLoading').innerHTML =
+                        '<p class="text-danger">Kunde inte ladda tävlingar: ' + (data.message || '') + '</p>';
+                }
+            })
+            .catch(function (err) {
+                console.error('Error loading competitions:', err);
+                document.getElementById('featuredPickerLoading').innerHTML =
+                    '<p class="text-danger">Fel vid hämtning av tävlingar.</p>';
+            });
+    };
+
+    function renderFeaturedItems() {
+        var search = (document.getElementById('featuredPickerSearch').value || '').toLowerCase();
+
+        var series = [];
+        var competitions = [];
+
+        _allItems.forEach(function (item) {
+            var nameMatch = item.name && item.name.toLowerCase().indexOf(search) !== -1;
+            var seriesMatch = item.seriesName && item.seriesName.toLowerCase().indexOf(search) !== -1;
+            if (!search || nameMatch || seriesMatch) {
+                if (item.type === 'series') {
+                    series.push(item);
+                } else {
+                    competitions.push(item);
+                }
+            }
+        });
+
+        // Render series
+        var seriesContainer = document.getElementById('featuredPickerSeriesList');
+        var seriesSection = document.getElementById('featuredPickerSeries');
+        if (series.length > 0) {
+            seriesSection.style.display = '';
+            seriesContainer.innerHTML = series.map(function (item) {
+                var checked = _currentFeaturedIds.indexOf(item.id) !== -1 ? 'checked' : '';
+                return '<label class="list-group-item list-group-item-action d-flex align-items-center" style="cursor: pointer;">'
+                    + '<input type="checkbox" class="form-check-input me-3 featured-item-check" value="' + item.id + '" ' + checked + ' onchange="updateFeaturedCount()">'
+                    + '<div class="flex-grow-1">'
+                    + '<strong>' + escapeHtmlPicker(item.name) + '</strong>'
+                    + '</div>'
+                    + '<span class="badge" style="background-color: #6f42c1;">Serie</span>'
+                    + '</label>';
+            }).join('');
+        } else {
+            seriesSection.style.display = 'none';
+        }
+
+        // Render competitions
+        var compContainer = document.getElementById('featuredPickerCompetitionsList');
+        var compSection = document.getElementById('featuredPickerCompetitions');
+        if (competitions.length > 0) {
+            compSection.style.display = '';
+            compContainer.innerHTML = competitions.map(function (item) {
+                var checked = _currentFeaturedIds.indexOf(item.id) !== -1 ? 'checked' : '';
+                var dateStr = item.date ? new Date(item.date).toLocaleDateString('sv-SE') : '';
+                var seriesInfo = item.seriesName ? '<small class="text-muted d-block">' + escapeHtmlPicker(item.seriesName) + '</small>' : '';
+                return '<label class="list-group-item list-group-item-action d-flex align-items-center" style="cursor: pointer;">'
+                    + '<input type="checkbox" class="form-check-input me-3 featured-item-check" value="' + item.id + '" ' + checked + ' onchange="updateFeaturedCount()">'
+                    + '<div class="flex-grow-1">'
+                    + '<strong>' + escapeHtmlPicker(item.name) + '</strong>'
+                    + seriesInfo
+                    + (dateStr ? '<small class="text-muted"><i class="bi bi-calendar3 me-1"></i>' + dateStr + '</small>' : '')
+                    + '</div>'
+                    + '<span class="badge bg-primary">Tävling</span>'
+                    + '</label>';
+            }).join('');
+        } else {
+            compSection.style.display = 'none';
+        }
+
+        // No results
+        var noResults = document.getElementById('featuredPickerNoResults');
+        noResults.style.display = (series.length === 0 && competitions.length === 0) ? '' : 'none';
+
+        // Hide loading, show items
+        document.getElementById('featuredPickerLoading').style.display = 'none';
+        document.getElementById('featuredPickerItems').style.display = '';
+
+        updateFeaturedCount();
+    }
+
+    window.filterFeaturedItems = function () {
+        renderFeaturedItems();
+    };
+
+    window.updateFeaturedCount = function () {
+        var checked = document.querySelectorAll('.featured-item-check:checked').length;
+        document.getElementById('featuredPickerSelectedCount').textContent =
+            checked > 0 ? checked + ' vald' + (checked > 1 ? 'a' : '') : '';
+    };
+
+    window.saveFeaturedItems = function () {
+        var checkedBoxes = document.querySelectorAll('.featured-item-check:checked');
+        var selectedIds = [];
+        checkedBoxes.forEach(function (cb) { selectedIds.push(cb.value); });
+
+        var token = document.querySelector('input[name="__RequestVerificationToken"]');
+        if (!token) {
+            alert('Säkerhetstoken saknas. Ladda om sidan och försök igen.');
+            return;
+        }
+
+        var saveBtn = document.querySelector('#featuredItemsPickerModal .btn-primary');
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Sparar...';
+
+        var formData = new FormData();
+        formData.append('contentId', _currentContentId);
+        formData.append('contentType', _currentContentType);
+        formData.append('itemIds', selectedIds.join(','));
+
+        fetch('/umbraco/surface/Club/SaveFeaturedItems', {
+            method: 'POST',
+            headers: {
+                'RequestVerificationToken': token.value
+            },
+            body: formData,
+            credentials: 'same-origin'
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (data.success) {
+                if (_modalInstance) _modalInstance.hide();
+                location.reload();
+            } else {
+                alert('Kunde inte spara: ' + (data.message || 'Okänt fel'));
+                saveBtn.disabled = false;
+                saveBtn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Spara';
+            }
+        })
+        .catch(function (err) {
+            console.error('Error saving featured items:', err);
+            alert('Fel vid sparande av utvalda tävlingar.');
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Spara';
+        });
+    };
+
+    function escapeHtmlPicker(text) {
+        if (!text) return '';
+        var map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+        return text.replace(/[&<>"']/g, function (m) { return map[m]; });
+    }
+})();
+</script>

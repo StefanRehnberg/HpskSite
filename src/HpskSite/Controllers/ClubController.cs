@@ -12,6 +12,7 @@ using Umbraco.Extensions;
 using HpskSite.Extensions;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Umbraco.Cms.Core.Security;
@@ -29,6 +30,7 @@ namespace HpskSite.Controllers
         private readonly IMemberService _memberService;
         private readonly IMemberManager _memberManager;
         private readonly AdminAuthorizationService _authorizationService;
+        private readonly IMediaService _mediaService;
 
         public ClubController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -40,13 +42,15 @@ namespace HpskSite.Controllers
             IContentService contentService,
             IMemberService memberService,
             IMemberManager memberManager,
-            AdminAuthorizationService authorizationService)
+            AdminAuthorizationService authorizationService,
+            IMediaService mediaService)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _contentService = contentService;
             _memberService = memberService;
             _memberManager = memberManager;
             _authorizationService = authorizationService;
+            _mediaService = mediaService;
         }
 
         /// <summary>
@@ -870,6 +874,9 @@ namespace HpskSite.Controllers
                         return Ok(new { success = false, message = "Club not found" });
                     }
 
+                    var logo = clubNode.Value<IPublishedContent>("logo");
+                    var bannerImage = clubNode.Value<IPublishedContent>("bannerImage");
+
                     return Ok(new
                     {
                         success = true,
@@ -883,7 +890,9 @@ namespace HpskSite.Controllers
                             city = clubNode.Value<string>("city") ?? "",
                             postalCode = clubNode.Value<string>("postalCode") ?? "",
                             description = clubNode.Value<string>("description") ?? "",
-                            aboutClub = clubNode.Value<string>("aboutClub") ?? ""
+                            aboutClub = clubNode.Value<string>("aboutClub") ?? "",
+                            logoUrl = logo?.Url() ?? "",
+                            bannerImageUrl = bannerImage?.Url() ?? ""
                         }
                     });
                 }
@@ -1078,6 +1087,640 @@ namespace HpskSite.Controllers
             catch (Exception ex)
             {
                 return Ok(new { success = false, message = "Error declining member: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Get all available competitions and series for the featured items picker
+        /// </summary>
+        [HttpGet]
+        public IActionResult GetAvailableCompetitions()
+        {
+            try
+            {
+                if (UmbracoContext.Content == null)
+                {
+                    return Ok(new { success = false, message = "Umbraco context not available" });
+                }
+
+                // Find competitionsHub by searching all root nodes' children
+                IPublishedContent competitionsHub = null;
+                foreach (var root in UmbracoContext.Content.GetAtRoot())
+                {
+                    competitionsHub = root.Children?.FirstOrDefault(x => x.ContentType.Alias == "competitionsHub");
+                    if (competitionsHub != null) break;
+                }
+
+                if (competitionsHub == null)
+                {
+                    return Ok(new { success = true, items = new List<object>() });
+                }
+
+                var seriesItems = new List<object>();
+                var competitionItems = new List<object>();
+                var today = DateTime.Today;
+                var seriesIdsWithUpcoming = new HashSet<int>();
+
+                // First pass: find upcoming competitions and track which series have them
+                foreach (var node in competitionsHub.Descendants())
+                {
+                    if (node.ContentType.Alias == "competition")
+                    {
+                        var compDate = node.Value<DateTime?>("competitionDate");
+                        if (!compDate.HasValue || compDate.Value.Date < today) continue;
+
+                        var compName = node.Value<string>("competitionName") ?? node.Name;
+                        var parentSeriesName = (string)null;
+                        if (node.Parent?.ContentType.Alias == "competitionSeries")
+                        {
+                            parentSeriesName = node.Parent.Value<string>("seriesName") ?? node.Parent.Name;
+                            seriesIdsWithUpcoming.Add(node.Parent.Id);
+                        }
+
+                        competitionItems.Add(new
+                        {
+                            id = node.Id,
+                            key = node.Key,
+                            name = compName,
+                            type = "competition",
+                            date = compDate.Value.ToString("yyyy-MM-dd"),
+                            seriesName = parentSeriesName
+                        });
+                    }
+                }
+
+                // Second pass: add series that have at least one upcoming competition
+                foreach (var node in competitionsHub.Descendants())
+                {
+                    if (node.ContentType.Alias == "competitionSeries" && seriesIdsWithUpcoming.Contains(node.Id))
+                    {
+                        var seriesName = node.Value<string>("seriesName") ?? node.Name;
+                        seriesItems.Add(new
+                        {
+                            id = node.Id,
+                            key = node.Key,
+                            name = seriesName,
+                            type = "series",
+                            date = (string)null,
+                            seriesName = (string)null
+                        });
+                    }
+                }
+
+                // Sort competitions by date descending
+                competitionItems = competitionItems
+                    .OrderByDescending(i => ((dynamic)i).date ?? "")
+                    .ToList();
+
+                // Series first, then competitions
+                var items = new List<object>();
+                items.AddRange(seriesItems);
+                items.AddRange(competitionItems);
+
+                return Ok(new { success = true, items });
+            }
+            catch (Exception ex)
+            {
+                return Ok(new { success = false, message = "Error loading competitions: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Save featured items for a club or regional page
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveFeaturedItems(int contentId, string contentType, string itemIds)
+        {
+            try
+            {
+                if (contentId <= 0 || string.IsNullOrWhiteSpace(contentType))
+                {
+                    return Ok(new { success = false, message = "Content ID and type are required" });
+                }
+
+                // Authorization check based on content type
+                if (contentType == "club")
+                {
+                    if (!await _authorizationService.IsClubAdminForClub(contentId))
+                    {
+                        return Ok(new { success = false, message = "Access denied - insufficient permissions" });
+                    }
+                }
+                else if (contentType == "regionalPage")
+                {
+                    // Look up regionCode from content
+                    var publishedContent = UmbracoContext.Content?.GetById(contentId);
+                    if (publishedContent == null)
+                    {
+                        return Ok(new { success = false, message = "Content not found" });
+                    }
+                    var regionCode = publishedContent.Value<string>("regionCode") ?? "";
+                    if (string.IsNullOrEmpty(regionCode) || !await _authorizationService.IsRegionalAdminForRegion(regionCode))
+                    {
+                        return Ok(new { success = false, message = "Access denied - insufficient permissions" });
+                    }
+                }
+                else
+                {
+                    return Ok(new { success = false, message = "Invalid content type" });
+                }
+
+                var content = _contentService.GetById(contentId);
+                if (content == null)
+                {
+                    return Ok(new { success = false, message = "Content not found" });
+                }
+
+                // Build UDI strings from item IDs
+                var udiStrings = new List<string>();
+                if (!string.IsNullOrWhiteSpace(itemIds))
+                {
+                    var ids = itemIds.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                        .Select(s => s.Trim())
+                        .Where(s => int.TryParse(s, out _))
+                        .Select(s => int.Parse(s));
+
+                    foreach (var id in ids)
+                    {
+                        var itemContent = _contentService.GetById(id);
+                        if (itemContent != null)
+                        {
+                            udiStrings.Add($"umb://document/{itemContent.Key:N}");
+                        }
+                    }
+                }
+
+                content.SetValue("featuredItems", string.Join(",", udiStrings));
+                _contentService.Save(content);
+                _contentService.Publish(content, Array.Empty<string>());
+
+                return Ok(new { success = true, message = "Featured items updated", count = udiStrings.Count });
+            }
+            catch (Exception ex)
+            {
+                return Ok(new { success = false, message = "Error saving featured items: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Get region information for settings form
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetRegionInfo(int contentId)
+        {
+            try
+            {
+                if (contentId <= 0)
+                {
+                    return Ok(new { success = false, message = "Invalid content ID" });
+                }
+
+                if (UmbracoContext.Content == null)
+                {
+                    return Ok(new { success = false, message = "Umbraco context not available" });
+                }
+
+                var regionNode = UmbracoContext.Content.GetById(contentId);
+                if (regionNode == null || regionNode.ContentType.Alias != "regionalPage")
+                {
+                    return Ok(new { success = false, message = "Region not found" });
+                }
+
+                // Auth check
+                var regionCode = regionNode.Value<string>("regionCode") ?? "";
+                if (string.IsNullOrEmpty(regionCode) || !await _authorizationService.IsRegionalAdminForRegion(regionCode))
+                {
+                    return Ok(new { success = false, message = "Access denied - insufficient permissions" });
+                }
+
+                var logo = regionNode.Value<IPublishedContent>("logo");
+                var bannerImage = regionNode.Value<IPublishedContent>("bannerImage");
+
+                return Ok(new
+                {
+                    success = true,
+                    data = new
+                    {
+                        welcomeTitle = regionNode.Value<string>("welcomeTitle") ?? "",
+                        welcomeText = regionNode.Value<string>("welcomeText") ?? "",
+                        aboutRegion = regionNode.Value<string>("aboutRegion") ?? "",
+                        contactPerson = regionNode.Value<string>("contactPerson") ?? "",
+                        contactEmail = regionNode.Value<string>("contactEmail") ?? "",
+                        contactPhone = regionNode.Value<string>("contactPhone") ?? "",
+                        logoUrl = logo?.Url() ?? "",
+                        bannerImageUrl = bannerImage?.Url() ?? ""
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                return Ok(new { success = false, message = "Error loading region info: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Update region text and contact information
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> UpdateRegionInfo(int contentId, string welcomeTitle = "",
+            string welcomeText = "", string aboutRegion = "", string contactPerson = "",
+            string contactEmail = "", string contactPhone = "")
+        {
+            try
+            {
+                if (contentId <= 0)
+                {
+                    return Ok(new { success = false, message = "Content ID is required" });
+                }
+
+                // Look up regionCode from published content for auth
+                if (UmbracoContext.Content == null)
+                {
+                    return Ok(new { success = false, message = "Umbraco context not available" });
+                }
+
+                var publishedNode = UmbracoContext.Content.GetById(contentId);
+                if (publishedNode == null || publishedNode.ContentType.Alias != "regionalPage")
+                {
+                    return Ok(new { success = false, message = "Region not found" });
+                }
+
+                var regionCode = publishedNode.Value<string>("regionCode") ?? "";
+                if (string.IsNullOrEmpty(regionCode) || !await _authorizationService.IsRegionalAdminForRegion(regionCode))
+                {
+                    return Ok(new { success = false, message = "Access denied - insufficient permissions" });
+                }
+
+                var regionContent = _contentService.GetById(contentId);
+                if (regionContent == null)
+                {
+                    return Ok(new { success = false, message = "Region content not found" });
+                }
+
+                regionContent.SetValue("welcomeTitle", welcomeTitle);
+                regionContent.SetValue("welcomeText", welcomeText);
+                regionContent.SetValue("aboutRegion", aboutRegion);
+                regionContent.SetValue("contactPerson", contactPerson);
+                regionContent.SetValue("contactEmail", contactEmail);
+                regionContent.SetValue("contactPhone", contactPhone);
+
+                _contentService.Save(regionContent);
+                _contentService.Publish(regionContent, Array.Empty<string>());
+
+                return Ok(new { success = true, message = "Region information updated successfully" });
+            }
+            catch (Exception ex)
+            {
+                return Ok(new { success = false, message = "Error updating region info: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Upload a logo or banner image for a region
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> UploadRegionImage(int contentId, string imageType, IFormFile imageFile)
+        {
+            try
+            {
+                if (contentId <= 0 || string.IsNullOrWhiteSpace(imageType))
+                {
+                    return Ok(new { success = false, message = "Content ID and image type are required" });
+                }
+
+                if (imageType != "logo" && imageType != "bannerImage")
+                {
+                    return Ok(new { success = false, message = "Invalid image type" });
+                }
+
+                // Auth check
+                if (UmbracoContext.Content == null)
+                {
+                    return Ok(new { success = false, message = "Umbraco context not available" });
+                }
+
+                var publishedNode = UmbracoContext.Content.GetById(contentId);
+                if (publishedNode == null || publishedNode.ContentType.Alias != "regionalPage")
+                {
+                    return Ok(new { success = false, message = "Region not found" });
+                }
+
+                var regionCode = publishedNode.Value<string>("regionCode") ?? "";
+                if (string.IsNullOrEmpty(regionCode) || !await _authorizationService.IsRegionalAdminForRegion(regionCode))
+                {
+                    return Ok(new { success = false, message = "Access denied - insufficient permissions" });
+                }
+
+                // Validate file
+                if (imageFile == null || imageFile.Length == 0)
+                {
+                    return Ok(new { success = false, message = "No file uploaded" });
+                }
+
+                if (imageFile.Length > 5 * 1024 * 1024)
+                {
+                    return Ok(new { success = false, message = "File too large. Maximum 5 MB allowed." });
+                }
+
+                var extension = Path.GetExtension(imageFile.FileName).ToLowerInvariant();
+                var allowedExtensions = new[] { ".jpg", ".jpeg", ".png", ".gif", ".webp" };
+                if (!allowedExtensions.Contains(extension))
+                {
+                    return Ok(new { success = false, message = "Invalid file type. Only JPG, PNG, GIF and WebP allowed." });
+                }
+
+                // Find or create "Region Images" folder in Media Library
+                var regionImagesFolder = _mediaService.GetRootMedia()
+                    .FirstOrDefault(m => m.Name == "Region Images");
+
+                if (regionImagesFolder == null)
+                {
+                    regionImagesFolder = _mediaService.CreateMedia("Region Images", -1, "Folder");
+                    _mediaService.Save(regionImagesFolder);
+                }
+
+                // Create media item
+                string fileName = Path.GetFileName(imageFile.FileName);
+                string fileExtension = Path.GetExtension(fileName);
+                string uniqueFileName = $"{Path.GetFileNameWithoutExtension(fileName)}_{Guid.NewGuid()}{fileExtension}";
+
+                var mediaItem = _mediaService.CreateMedia(fileName, regionImagesFolder.Id, "Image");
+
+                // Save file to physical location
+                var mediaFolderPath = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "media", "region-images");
+                if (!Directory.Exists(mediaFolderPath))
+                {
+                    Directory.CreateDirectory(mediaFolderPath);
+                }
+
+                var physicalFilePath = Path.Combine(mediaFolderPath, uniqueFileName);
+                using (var fileStream = new FileStream(physicalFilePath, FileMode.Create))
+                {
+                    await imageFile.CopyToAsync(fileStream);
+                }
+
+                // Set media properties
+                var relativePath = $"/media/region-images/{uniqueFileName}";
+                mediaItem.SetValue("umbracoFile", relativePath);
+                mediaItem.SetValue("umbracoExtension", fileExtension.TrimStart('.'));
+                mediaItem.SetValue("umbracoBytes", imageFile.Length.ToString());
+
+                var mediaSaveResult = _mediaService.Save(mediaItem);
+                if (!mediaSaveResult.Success)
+                {
+                    if (System.IO.File.Exists(physicalFilePath))
+                    {
+                        System.IO.File.Delete(physicalFilePath);
+                    }
+                    return Ok(new { success = false, message = "Failed to save image to media library" });
+                }
+
+                // Link media to region content property
+                var regionContent = _contentService.GetById(contentId);
+                if (regionContent == null)
+                {
+                    return Ok(new { success = false, message = "Region content not found" });
+                }
+
+                regionContent.SetValue(imageType, mediaItem.GetUdi().ToString());
+                _contentService.Save(regionContent);
+                _contentService.Publish(regionContent, Array.Empty<string>());
+
+                return Ok(new
+                {
+                    success = true,
+                    message = "Image uploaded successfully",
+                    imageUrl = relativePath
+                });
+            }
+            catch (Exception ex)
+            {
+                return Ok(new { success = false, message = "Error uploading image: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Remove a logo or banner image from a region
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> RemoveRegionImage(int contentId, string imageType)
+        {
+            try
+            {
+                if (contentId <= 0 || string.IsNullOrWhiteSpace(imageType))
+                {
+                    return Ok(new { success = false, message = "Content ID and image type are required" });
+                }
+
+                if (imageType != "logo" && imageType != "bannerImage")
+                {
+                    return Ok(new { success = false, message = "Invalid image type" });
+                }
+
+                // Auth check
+                if (UmbracoContext.Content == null)
+                {
+                    return Ok(new { success = false, message = "Umbraco context not available" });
+                }
+
+                var publishedNode = UmbracoContext.Content.GetById(contentId);
+                if (publishedNode == null || publishedNode.ContentType.Alias != "regionalPage")
+                {
+                    return Ok(new { success = false, message = "Region not found" });
+                }
+
+                var regionCode = publishedNode.Value<string>("regionCode") ?? "";
+                if (string.IsNullOrEmpty(regionCode) || !await _authorizationService.IsRegionalAdminForRegion(regionCode))
+                {
+                    return Ok(new { success = false, message = "Access denied - insufficient permissions" });
+                }
+
+                var regionContent = _contentService.GetById(contentId);
+                if (regionContent == null)
+                {
+                    return Ok(new { success = false, message = "Region content not found" });
+                }
+
+                regionContent.SetValue(imageType, null);
+                _contentService.Save(regionContent);
+                _contentService.Publish(regionContent, Array.Empty<string>());
+
+                return Ok(new { success = true, message = "Image removed successfully" });
+            }
+            catch (Exception ex)
+            {
+                return Ok(new { success = false, message = "Error removing image: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Upload a logo or banner image for a club
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> UploadClubImage(int clubId, string imageType, IFormFile imageFile)
+        {
+            try
+            {
+                if (clubId <= 0 || string.IsNullOrWhiteSpace(imageType))
+                {
+                    return Ok(new { success = false, message = "Club ID and image type are required" });
+                }
+
+                if (imageType != "logo" && imageType != "bannerImage")
+                {
+                    return Ok(new { success = false, message = "Invalid image type" });
+                }
+
+                // Auth check
+                if (!await _authorizationService.IsClubAdminForClub(clubId))
+                {
+                    return Ok(new { success = false, message = "Access denied - insufficient permissions" });
+                }
+
+                if (UmbracoContext.Content == null)
+                {
+                    return Ok(new { success = false, message = "Umbraco context not available" });
+                }
+
+                var clubNode = UmbracoContext.Content.GetById(clubId);
+                if (clubNode == null || clubNode.ContentType.Alias != "club")
+                {
+                    return Ok(new { success = false, message = "Club not found" });
+                }
+
+                // Validate file
+                if (imageFile == null || imageFile.Length == 0)
+                {
+                    return Ok(new { success = false, message = "No file uploaded" });
+                }
+
+                if (imageFile.Length > 5 * 1024 * 1024)
+                {
+                    return Ok(new { success = false, message = "File too large. Maximum 5 MB allowed." });
+                }
+
+                var extension = Path.GetExtension(imageFile.FileName).ToLowerInvariant();
+                var allowedExtensions = new[] { ".jpg", ".jpeg", ".png", ".gif", ".webp" };
+                if (!allowedExtensions.Contains(extension))
+                {
+                    return Ok(new { success = false, message = "Invalid file type. Only JPG, PNG, GIF and WebP allowed." });
+                }
+
+                // Find or create "Club Images" folder in Media Library
+                var clubImagesFolder = _mediaService.GetRootMedia()
+                    .FirstOrDefault(m => m.Name == "Club Images");
+
+                if (clubImagesFolder == null)
+                {
+                    clubImagesFolder = _mediaService.CreateMedia("Club Images", -1, "Folder");
+                    _mediaService.Save(clubImagesFolder);
+                }
+
+                // Create media item
+                string fileName = Path.GetFileName(imageFile.FileName);
+                string fileExtension = Path.GetExtension(fileName);
+                string uniqueFileName = $"{Path.GetFileNameWithoutExtension(fileName)}_{Guid.NewGuid()}{fileExtension}";
+
+                var mediaItem = _mediaService.CreateMedia(fileName, clubImagesFolder.Id, "Image");
+
+                // Save file to physical location
+                var mediaFolderPath = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "media", "club-images");
+                if (!Directory.Exists(mediaFolderPath))
+                {
+                    Directory.CreateDirectory(mediaFolderPath);
+                }
+
+                var physicalFilePath = Path.Combine(mediaFolderPath, uniqueFileName);
+                using (var fileStream = new FileStream(physicalFilePath, FileMode.Create))
+                {
+                    await imageFile.CopyToAsync(fileStream);
+                }
+
+                // Set media properties
+                var relativePath = $"/media/club-images/{uniqueFileName}";
+                mediaItem.SetValue("umbracoFile", relativePath);
+                mediaItem.SetValue("umbracoExtension", fileExtension.TrimStart('.'));
+                mediaItem.SetValue("umbracoBytes", imageFile.Length.ToString());
+
+                var mediaSaveResult = _mediaService.Save(mediaItem);
+                if (!mediaSaveResult.Success)
+                {
+                    if (System.IO.File.Exists(physicalFilePath))
+                    {
+                        System.IO.File.Delete(physicalFilePath);
+                    }
+                    return Ok(new { success = false, message = "Failed to save image to media library" });
+                }
+
+                // Link media to club content property
+                var clubContent = _contentService.GetById(clubId);
+                if (clubContent == null)
+                {
+                    return Ok(new { success = false, message = "Club content not found" });
+                }
+
+                clubContent.SetValue(imageType, mediaItem.GetUdi().ToString());
+                _contentService.Save(clubContent);
+                _contentService.Publish(clubContent, Array.Empty<string>());
+
+                return Ok(new
+                {
+                    success = true,
+                    message = "Image uploaded successfully",
+                    imageUrl = relativePath
+                });
+            }
+            catch (Exception ex)
+            {
+                return Ok(new { success = false, message = "Error uploading image: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Remove a logo or banner image from a club
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> RemoveClubImage(int clubId, string imageType)
+        {
+            try
+            {
+                if (clubId <= 0 || string.IsNullOrWhiteSpace(imageType))
+                {
+                    return Ok(new { success = false, message = "Club ID and image type are required" });
+                }
+
+                if (imageType != "logo" && imageType != "bannerImage")
+                {
+                    return Ok(new { success = false, message = "Invalid image type" });
+                }
+
+                // Auth check
+                if (!await _authorizationService.IsClubAdminForClub(clubId))
+                {
+                    return Ok(new { success = false, message = "Access denied - insufficient permissions" });
+                }
+
+                var clubContent = _contentService.GetById(clubId);
+                if (clubContent == null || clubContent.ContentType.Alias != "club")
+                {
+                    return Ok(new { success = false, message = "Club not found" });
+                }
+
+                clubContent.SetValue(imageType, null);
+                _contentService.Save(clubContent);
+                _contentService.Publish(clubContent, Array.Empty<string>());
+
+                return Ok(new { success = true, message = "Image removed successfully" });
+            }
+            catch (Exception ex)
+            {
+                return Ok(new { success = false, message = "Error removing image: " + ex.Message });
             }
         }
 

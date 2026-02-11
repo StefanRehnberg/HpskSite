@@ -41,6 +41,11 @@
                 <i class="bi bi-gear me-2"></i>Inställningar
             </button>
         </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="documents-tab" data-bs-toggle="tab" data-bs-target="#documentsTab" type="button">
+                <i class="bi bi-file-earmark-text me-2"></i>Dokument
+            </button>
+        </li>
     </ul>
 
     <!-- Tab Content -->
@@ -102,6 +107,12 @@
         <!-- Invoices Tab -->
         <div class="tab-pane fade" id="invoicesTab">
             @await Html.PartialAsync("ClubAdminInvoicesList")
+        </div>
+
+        <!-- Documents Tab -->
+        <div class="tab-pane fade" id="documentsTab">
+            @{ ViewBag.DocumentOwnerType = 0; ViewBag.DocumentOwnerId = clubId; }
+            @await Html.PartialAsync("ClubDocumentAdmin")
         </div>
 
         <!-- Settings Tab -->
@@ -175,6 +186,37 @@
                             <label class="form-label">Utförlig Information (Om Klubben)</label>
                             <textarea class="form-control" id="aboutClub" name="aboutClub" rows="8" placeholder="Utförlig information om klubben, historia, verksamhet, etc. (kan innehålla HTML)"></textarea>
                             <small class="text-muted">Visas på klubbsidan under "Om Klubben". Stöder grundläggande HTML-formatering.</small>
+                        </div>
+
+                        <hr class="my-4">
+
+                        <!-- Images Section -->
+                        <h6 class="text-muted mb-3">
+                            <i class="bi bi-image me-2"></i>Bilder
+                        </h6>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Logotyp</label>
+                                <div id="clubLogoPreview" class="mb-2" style="display: none;">
+                                    <img id="clubLogoImg" src="" alt="Logo" class="img-thumbnail" style="max-height: 100px; max-width: 200px;">
+                                    <button type="button" class="btn btn-sm btn-outline-danger ms-2" onclick="removeClubImage('logo')">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </div>
+                                <input type="file" class="form-control" id="clubLogoFile" accept="image/jpeg,image/png,image/gif,image/webp" onchange="uploadClubImage('logo', this)">
+                                <small class="text-muted">JPG, PNG, GIF eller WebP. Max 5 MB.</small>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Bannerbild</label>
+                                <div id="clubBannerPreview" class="mb-2" style="display: none;">
+                                    <img id="clubBannerImg" src="" alt="Banner" class="img-thumbnail" style="max-height: 100px; max-width: 300px;">
+                                    <button type="button" class="btn btn-sm btn-outline-danger ms-2" onclick="removeClubImage('bannerImage')">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </div>
+                                <input type="file" class="form-control" id="clubBannerFile" accept="image/jpeg,image/png,image/gif,image/webp" onchange="uploadClubImage('bannerImage', this)">
+                                <small class="text-muted">JPG, PNG, GIF eller WebP. Max 5 MB. Rekommenderad storlek: 1200x300 px.</small>
+                            </div>
                         </div>
 
                         <div class="d-flex justify-content-end">
@@ -772,6 +814,22 @@ function loadClubSettings() {
                 } else {
                     document.getElementById('aboutClub').value = aboutClubContent;
                 }
+
+                // Logo preview
+                if (data.data.logoUrl) {
+                    document.getElementById('clubLogoImg').src = data.data.logoUrl;
+                    document.getElementById('clubLogoPreview').style.display = '';
+                } else {
+                    document.getElementById('clubLogoPreview').style.display = 'none';
+                }
+
+                // Banner preview
+                if (data.data.bannerImageUrl) {
+                    document.getElementById('clubBannerImg').src = data.data.bannerImageUrl;
+                    document.getElementById('clubBannerPreview').style.display = '';
+                } else {
+                    document.getElementById('clubBannerPreview').style.display = 'none';
+                }
             }
         })
         .catch(error => {
@@ -1221,6 +1279,78 @@ function sendMemberInvitation(memberId) {
     .catch(error => {
         console.error('Invitation error:', error);
         alert('❌ Kunde inte skicka inbjudan: ' + error.message);
+    });
+}
+
+// Upload club image (logo or banner)
+function uploadClubImage(imageType, input) {
+    if (!input.files || !input.files[0]) return;
+
+    var file = input.files[0];
+
+    // Validate file size (5 MB max)
+    if (file.size > 5 * 1024 * 1024) {
+        alert('Filen är för stor. Max 5 MB tillåtet.');
+        input.value = '';
+        return;
+    }
+
+    var formData = new FormData();
+    formData.append('clubId', clubId);
+    formData.append('imageType', imageType);
+    formData.append('imageFile', file);
+    formData.append('__RequestVerificationToken', getAntiForgeryToken());
+
+    var previewId = imageType === 'logo' ? 'clubLogoPreview' : 'clubBannerPreview';
+    var imgId = imageType === 'logo' ? 'clubLogoImg' : 'clubBannerImg';
+
+    fetch('/umbraco/surface/Club/UploadClubImage', {
+        method: 'POST',
+        body: formData
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.success) {
+            document.getElementById(imgId).src = data.imageUrl;
+            document.getElementById(previewId).style.display = '';
+            alert('Bild uppladdad!');
+        } else {
+            alert('Fel: ' + data.message);
+        }
+        input.value = '';
+    })
+    .catch(function(err) {
+        console.error('Error uploading image:', err);
+        alert('Fel vid uppladdning av bild.');
+        input.value = '';
+    });
+}
+
+// Remove club image (clear the property)
+function removeClubImage(imageType) {
+    if (!confirm('Är du säker på att du vill ta bort denna bild?')) return;
+
+    var formData = new FormData();
+    formData.append('clubId', clubId);
+    formData.append('imageType', imageType);
+    formData.append('__RequestVerificationToken', getAntiForgeryToken());
+
+    fetch('/umbraco/surface/Club/RemoveClubImage', {
+        method: 'POST',
+        body: formData
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.success) {
+            var previewId = imageType === 'logo' ? 'clubLogoPreview' : 'clubBannerPreview';
+            document.getElementById(previewId).style.display = 'none';
+        } else {
+            alert('Fel: ' + data.message);
+        }
+    })
+    .catch(function(err) {
+        console.error('Error removing image:', err);
+        alert('Fel vid borttagning av bild.');
     });
 }
 
@@ -1957,5 +2087,29 @@ document.getElementById('editMemberPersonNumber').addEventListener('blur', funct
     display: flex;
     align-items: center;
     gap: 10px;
+}
+
+/* CKEditor dark mode support */
+[data-bs-theme="dark"] .club-admin-panel .ck.ck-editor__main > .ck-editor__editable {
+    background-color: var(--bs-body-bg);
+    color: var(--bs-body-color);
+    border-color: var(--bs-border-color);
+}
+
+[data-bs-theme="dark"] .club-admin-panel .ck.ck-toolbar {
+    background-color: var(--bs-tertiary-bg);
+    border-color: var(--bs-border-color);
+}
+
+[data-bs-theme="dark"] .club-admin-panel .ck.ck-toolbar .ck-button {
+    color: var(--bs-body-color);
+}
+
+[data-bs-theme="dark"] .club-admin-panel .ck.ck-toolbar .ck-button:hover {
+    background-color: var(--bs-secondary-bg);
+}
+
+[data-bs-theme="dark"] .club-admin-panel .ck.ck-editor__editable.ck-focused {
+    border-color: var(--bs-primary);
 }
 </style>

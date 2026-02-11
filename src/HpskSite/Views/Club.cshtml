@@ -171,6 +171,14 @@ window.currentClubId = clubId;
                         </div>
                     </div>
 
+                    <!-- Public Quick Link Documents -->
+                    <div id="publicQuickLinkDocumentsCard" class="card mb-4" style="display: none;">
+                        <div class="card-header">
+                            <h5 class="mb-0"><i class="bi bi-file-earmark-text me-2"></i>Dokument</h5>
+                        </div>
+                        <div class="list-group list-group-flush" id="publicQuickLinkDocuments"></div>
+                    </div>
+
                     <!-- Login Prompt -->
                     <div class="card">
                         <div class="card-body text-center">
@@ -231,12 +239,25 @@ window.currentClubId = clubId;
                         <!-- Sidebar Column -->
                         <div class="col-lg-4">
                             <!-- Featured Items (Competitions and Series) -->
-                            @if (featuredItems.Any())
+                            @if (featuredItems.Any() || isClubAdmin)
                             {
+                                var featuredItemIds = featuredItems.Select(f => f.Id).ToList();
                                 <div class="card mb-4">
-                                    <div class="card-header">
+                                    <div class="card-header d-flex justify-content-between align-items-center">
                                         <h5 class="mb-0"><i class="bi bi-star-fill me-2 text-warning"></i>Utvalda Tävlingar</h5>
+                                        @if (isClubAdmin)
+                                        {
+                                            <button class="btn btn-sm btn-outline-secondary" onclick="openFeaturedPicker(@clubId, 'club', [@string.Join(",", featuredItemIds)])" title="Redigera">
+                                                <i class="bi bi-pencil"></i>
+                                            </button>
+                                        }
                                     </div>
+                                    @if (!featuredItems.Any())
+                                    {
+                                        <div class="card-body text-center text-muted">
+                                            <small>Inga utvalda tävlingar. Klicka pennan för att lägga till.</small>
+                                        </div>
+                                    }
                                     <div class="list-group list-group-flush">
                                         @foreach (var item in featuredItems)
                                         {
@@ -432,6 +453,7 @@ window.currentClubId = clubId;
                                             </div>
                                         </a>
                                     }
+                                    <div id="clubQuickLinkDocuments"></div>
                                 </div>
                             </div>
                         </div>
@@ -446,6 +468,12 @@ window.currentClubId = clubId;
                 <!-- TIER 2: Members Directory (All logged-in users) -->
                 <div class="tab-pane fade" id="clubMembers" role="tabpanel">
                     @await Html.PartialAsync("ClubMembersDirectory")
+                </div>
+
+                <!-- TIER 2: Documents Tab (All logged-in users) -->
+                <div class="tab-pane fade" id="clubDocuments" role="tabpanel">
+                    @{ ViewBag.DocumentOwnerType = 0; ViewBag.DocumentOwnerId = clubId; }
+                    @await Html.PartialAsync("DocumentArchive")
                 </div>
 
                 @if (isClubAdmin)
@@ -475,6 +503,7 @@ window.currentClubId = clubId;
     @await Html.PartialAsync("CompetitionWizardModal")
     @await Html.PartialAsync("CompetitionEditModal")
     @await Html.PartialAsync("CompetitionDeleteConfirmModal")
+    @await Html.PartialAsync("FeaturedItemsPicker")
 }
 
 <!-- JavaScript for club page functionality -->
@@ -493,6 +522,11 @@ const eventTypeColors = {
 };
 
 document.addEventListener('DOMContentLoaded', function() {
+    // Always load public quick link documents (visible to everyone)
+    if (clubId > 0) {
+        loadClubQuickLinkDocuments();
+    }
+
     // Only load events for logged-in users (they appear in the tabs)
     // Public visitors don't see events or news - only the about section
     if (clubId > 0 && isLoggedIn) {
@@ -543,6 +577,38 @@ function loadUpcomingEvents() {
             console.error('Error loading events:', error);
             document.getElementById('upcomingEventsContainer').innerHTML = '<p class="text-danger">Fel vid hämtning av händelser.</p>';
         });
+}
+
+function loadClubQuickLinkDocuments() {
+    fetch(`/umbraco/surface/Document/GetQuickLinks?ownerType=0&ownerId=${clubId}`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.success && data.data && data.data.length > 0) {
+                let html = '';
+                data.data.forEach(doc => {
+                    html += `<a href="/umbraco/surface/Document/DownloadDocument?id=${doc.id}" class="list-group-item list-group-item-action d-flex align-items-center" target="_blank">
+                        <i class="bi ${doc.icon} me-3 text-primary"></i>
+                        <div>
+                            <strong>${doc.title}</strong>
+                            <small class="d-block text-muted">${doc.fileName}</small>
+                        </div>
+                    </a>`;
+                });
+
+                // Populate logged-in quick links section
+                const memberContainer = document.getElementById('clubQuickLinkDocuments');
+                if (memberContainer) memberContainer.innerHTML = html;
+
+                // Populate public quick links section
+                const publicContainer = document.getElementById('publicQuickLinkDocuments');
+                if (publicContainer) {
+                    publicContainer.innerHTML = html;
+                    const card = document.getElementById('publicQuickLinkDocumentsCard');
+                    if (card) card.style.display = '';
+                }
+            }
+        })
+        .catch(err => console.error('Quick link documents error:', err));
 }
 
 function escapeHtml(text) {

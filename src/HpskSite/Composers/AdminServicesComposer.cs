@@ -2,6 +2,7 @@ using Umbraco.Cms.Core.Composing;
 using Umbraco.Cms.Core.DependencyInjection;
 using HpskSite.Services;
 using HpskSite.Models.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace HpskSite.Composers
 {
@@ -24,6 +25,13 @@ namespace HpskSite.Composers
             // Configure member activity options from appsettings.json
             builder.Services.Configure<MemberActivityOptions>(
                 builder.Config.GetSection("MemberActivity"));
+
+            // Register DocumentService as scoped (uses IScopeProvider)
+            builder.Services.AddScoped<DocumentService>();
+
+            // Configure document archive options from appsettings.json
+            builder.Services.Configure<DocumentArchiveOptions>(
+                builder.Config.GetSection("DocumentArchive"));
         }
     }
 }

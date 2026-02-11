@@ -1,0 +1,19 @@
+@{
+    var isRegionalAdmin = ViewBag.isRegionalAdmin as bool? ?? false;
+}
+
+@if (isRegionalAdmin)
+{
+    <ul class="nav nav-tabs mb-4" id="regionPageTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="regionHome-tab" data-bs-toggle="tab" data-bs-target="#regionHome" type="button" role="tab" aria-controls="regionHome" aria-selected="true">
+                <i class="bi bi-house-fill me-2"></i>Hem
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="regionAdmin-tab" data-bs-toggle="tab" data-bs-target="#regionAdmin" type="button" role="tab" aria-controls="regionAdmin" aria-selected="false">
+                <i class="bi bi-shield-check me-2"></i>Administration
+            </button>
+        </li>
+    </ul>
+}

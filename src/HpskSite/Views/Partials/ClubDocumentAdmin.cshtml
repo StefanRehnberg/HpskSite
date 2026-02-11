@@ -1,0 +1,601 @@
+@{
+    var docOwnerType = ViewBag.DocumentOwnerType as int? ?? 0;
+    var docOwnerId = ViewBag.DocumentOwnerId as int? ?? 0;
+    var uniquePrefix = $"doc_{docOwnerType}_{docOwnerId}";
+}
+
+<div class="document-admin" id="@(uniquePrefix)_admin">
+    <!-- Storage Usage Bar -->
+    <div class="card mb-3">
+        <div class="card-body py-2">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+                <small class="text-muted"><i class="bi bi-hdd me-1"></i>Lagringsutrymme</small>
+                <small class="text-muted" id="@(uniquePrefix)_storageText">Laddar...</small>
+            </div>
+            <div class="progress" style="height: 8px;">
+                <div class="progress-bar" id="@(uniquePrefix)_storageBar" role="progressbar" style="width: 0%"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sub-tabs: Documents | Categories -->
+    <ul class="nav nav-pills mb-3" id="@(uniquePrefix)_subtabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" data-bs-toggle="pill" data-bs-target="#@(uniquePrefix)_docsTab" type="button">
+                <i class="bi bi-file-earmark-text me-1"></i>Dokument
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" data-bs-toggle="pill" data-bs-target="#@(uniquePrefix)_catsTab" type="button">
+                <i class="bi bi-folder me-1"></i>Kategorier
+            </button>
+        </li>
+    </ul>
+
+    <div class="tab-content">
+        <!-- Documents Tab -->
+        <div class="tab-pane fade show active" id="@(uniquePrefix)_docsTab">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h6 class="mb-0">Dokument</h6>
+                <button class="btn btn-primary btn-sm" id="@(uniquePrefix)_uploadBtn" onclick="docAdmin_showUploadModal('@uniquePrefix')">
+                    <i class="bi bi-upload me-1"></i>Ladda upp
+                </button>
+            </div>
+            <div id="@(uniquePrefix)_docsContainer">
+                <div class="text-center py-3">
+                    <div class="spinner-border spinner-border-sm" role="status">
+                        <span class="visually-hidden">Laddar...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Categories Tab -->
+        <div class="tab-pane fade" id="@(uniquePrefix)_catsTab">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h6 class="mb-0">Kategorier</h6>
+                <button class="btn btn-primary btn-sm" onclick="docAdmin_showCategoryModal('@uniquePrefix')">
+                    <i class="bi bi-plus-circle me-1"></i>Ny kategori
+                </button>
+            </div>
+            <div id="@(uniquePrefix)_catsContainer">
+                <div class="text-center py-3">
+                    <div class="spinner-border spinner-border-sm" role="status">
+                        <span class="visually-hidden">Laddar...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Upload Document Modal -->
+<div class="modal fade" id="@(uniquePrefix)_uploadModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Ladda upp dokument</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="@(uniquePrefix)_uploadForm">
+                    <div class="mb-3">
+                        <label class="form-label">Titel <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="@(uniquePrefix)_docTitle" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Beskrivning</label>
+                        <textarea class="form-control" id="@(uniquePrefix)_docDescription" rows="2"></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Kategori</label>
+                        <select class="form-select" id="@(uniquePrefix)_docCategory">
+                            <option value="">-- Ingen kategori --</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Åtkomstnivå</label>
+                        <select class="form-select" id="@(uniquePrefix)_docAccessLevel">
+                            <option value="0">Publik</option>
+                            <option value="1">Inloggade</option>
+                            <option value="2" selected>Klubbmedlemmar</option>
+                            <option value="3">Klubbadministratörer</option>
+                        </select>
+                    </div>
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" id="@(uniquePrefix)_docQuickLink">
+                        <label class="form-check-label" for="@(uniquePrefix)_docQuickLink">Visa som snabblänk</label>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Fil <span class="text-danger">*</span></label>
+                        <input type="file" class="form-control" id="@(uniquePrefix)_docFile" required>
+                        <div class="form-text">Max 20 MB. Tillåtna: PDF, Word, Excel, PowerPoint, text, CSV, ZIP, bilder.</div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="@(uniquePrefix)_uploadSaveBtn" onclick="docAdmin_uploadDocument('@uniquePrefix')">
+                    <i class="bi bi-upload me-1"></i>Ladda upp
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Document Modal -->
+<div class="modal fade" id="@(uniquePrefix)_editDocModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Redigera dokument</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="@(uniquePrefix)_editDocForm">
+                    <input type="hidden" id="@(uniquePrefix)_editDocId">
+                    <div class="mb-3">
+                        <label class="form-label">Titel <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="@(uniquePrefix)_editDocTitle" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Beskrivning</label>
+                        <textarea class="form-control" id="@(uniquePrefix)_editDocDescription" rows="2"></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Kategori</label>
+                        <select class="form-select" id="@(uniquePrefix)_editDocCategory">
+                            <option value="">-- Ingen kategori --</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Åtkomstnivå</label>
+                        <select class="form-select" id="@(uniquePrefix)_editDocAccessLevel">
+                            <option value="0">Publik</option>
+                            <option value="1">Inloggade</option>
+                            <option value="2">Klubbmedlemmar</option>
+                            <option value="3">Klubbadministratörer</option>
+                        </select>
+                    </div>
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" id="@(uniquePrefix)_editDocQuickLink">
+                        <label class="form-check-label" for="@(uniquePrefix)_editDocQuickLink">Visa som snabblänk</label>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Sorteringsordning</label>
+                        <input type="number" class="form-control" id="@(uniquePrefix)_editDocSortOrder" value="0">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" onclick="docAdmin_saveEditDocument('@uniquePrefix')">
+                    <i class="bi bi-save me-1"></i>Spara
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Category Modal (Create/Edit) -->
+<div class="modal fade" id="@(uniquePrefix)_categoryModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="@(uniquePrefix)_categoryModalTitle">Ny kategori</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="@(uniquePrefix)_categoryForm">
+                    <input type="hidden" id="@(uniquePrefix)_catId">
+                    <div class="mb-3">
+                        <label class="form-label">Namn <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="@(uniquePrefix)_catName" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Beskrivning</label>
+                        <textarea class="form-control" id="@(uniquePrefix)_catDescription" rows="2"></textarea>
+                    </div>
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" id="@(uniquePrefix)_catQuickLink">
+                        <label class="form-check-label" for="@(uniquePrefix)_catQuickLink">Visa som snabblänk</label>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" onclick="docAdmin_saveCategory('@uniquePrefix')">
+                    <i class="bi bi-save me-1"></i>Spara
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Document Admin state per instance
+window.docAdminState = window.docAdminState || {};
+window.docAdminState['@uniquePrefix'] = {
+    ownerType: @docOwnerType,
+    ownerId: @docOwnerId,
+    documents: [],
+    categories: []
+};
+
+// Initialize on load
+(function() {
+    const prefix = '@uniquePrefix';
+    docAdmin_loadStorageInfo(prefix);
+    docAdmin_loadDocuments(prefix);
+    docAdmin_loadCategories(prefix);
+})();
+
+function docAdmin_getToken() {
+    const tokenInput = document.querySelector('input[name="__RequestVerificationToken"]');
+    return tokenInput ? tokenInput.value : '';
+}
+
+// ===== STORAGE =====
+
+function docAdmin_loadStorageInfo(prefix) {
+    const state = window.docAdminState[prefix];
+    fetch(`/umbraco/surface/Document/GetStorageInfo?ownerType=${state.ownerType}&ownerId=${state.ownerId}`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                const d = data.data;
+                const textEl = document.getElementById(`${prefix}_storageText`);
+                const barEl = document.getElementById(`${prefix}_storageBar`);
+                const uploadBtn = document.getElementById(`${prefix}_uploadBtn`);
+                textEl.textContent = `Använt ${d.usedMB.toFixed(1)} MB av ${d.limitMB} MB`;
+                barEl.style.width = `${Math.min(d.percentage, 100)}%`;
+                barEl.className = 'progress-bar ' + (d.percentage >= 90 ? 'bg-danger' : d.percentage >= 70 ? 'bg-warning' : 'bg-success');
+                if (uploadBtn) uploadBtn.disabled = d.percentage >= 100;
+            }
+        })
+        .catch(err => console.error('Storage info error:', err));
+}
+
+// ===== DOCUMENTS =====
+
+function docAdmin_loadDocuments(prefix) {
+    const state = window.docAdminState[prefix];
+    fetch(`/umbraco/surface/Document/GetDocuments?ownerType=${state.ownerType}&ownerId=${state.ownerId}`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                state.documents = data.data;
+                docAdmin_renderDocuments(prefix);
+            }
+        })
+        .catch(err => {
+            document.getElementById(`${prefix}_docsContainer`).innerHTML = '<div class="alert alert-danger">Fel vid laddning av dokument.</div>';
+        });
+}
+
+function docAdmin_renderDocuments(prefix) {
+    const state = window.docAdminState[prefix];
+    const container = document.getElementById(`${prefix}_docsContainer`);
+    const docs = state.documents;
+
+    if (!docs || docs.length === 0) {
+        container.innerHTML = '<div class="alert alert-info">Inga dokument har laddats upp ännu.</div>';
+        return;
+    }
+
+    let html = '<div class="table-responsive"><table class="table table-sm table-striped">';
+    html += '<thead><tr><th>Titel</th><th>Kategori</th><th>Åtkomst</th><th>Storlek</th><th>Snabblänk</th><th>Åtgärder</th></tr></thead><tbody>';
+
+    docs.forEach(doc => {
+        const size = doc.fileSize >= 1048576
+            ? (doc.fileSize / 1048576).toFixed(1) + ' MB'
+            : (doc.fileSize / 1024).toFixed(0) + ' KB';
+
+        const accessBadges = {
+            0: '<span class="badge bg-success">Publik</span>',
+            1: '<span class="badge bg-info">Inloggade</span>',
+            2: '<span class="badge bg-primary">Medlemmar</span>',
+            3: '<span class="badge bg-warning text-dark">Admin</span>'
+        };
+
+        const quickLinkIcon = doc.showInQuickLinks
+            ? '<i class="bi bi-star-fill text-warning"></i>'
+            : '<i class="bi bi-star text-muted"></i>';
+
+        html += `<tr>
+            <td><strong>${docAdmin_escapeHtml(doc.title)}</strong><br><small class="text-muted">${docAdmin_escapeHtml(doc.fileName)}</small></td>
+            <td>${docAdmin_escapeHtml(doc.categoryName || '-')}</td>
+            <td>${accessBadges[doc.accessLevel] || '-'}</td>
+            <td><small>${size}</small></td>
+            <td>${quickLinkIcon}</td>
+            <td>
+                <button class="btn btn-sm btn-outline-primary" onclick="docAdmin_editDocument('${prefix}', ${doc.id})" title="Redigera"><i class="bi bi-pencil"></i></button>
+                <button class="btn btn-sm btn-outline-danger" onclick="docAdmin_deleteDocument('${prefix}', ${doc.id}, '${docAdmin_escapeHtml(doc.title)}')" title="Radera"><i class="bi bi-trash"></i></button>
+            </td>
+        </tr>`;
+    });
+
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+}
+
+function docAdmin_showUploadModal(prefix) {
+    const state = window.docAdminState[prefix];
+    // Reset form
+    document.getElementById(`${prefix}_docTitle`).value = '';
+    document.getElementById(`${prefix}_docDescription`).value = '';
+    document.getElementById(`${prefix}_docAccessLevel`).value = '2';
+    document.getElementById(`${prefix}_docQuickLink`).checked = false;
+    document.getElementById(`${prefix}_docFile`).value = '';
+
+    // Populate category dropdown
+    docAdmin_populateCategoryDropdown(prefix, `${prefix}_docCategory`, '');
+
+    new bootstrap.Modal(document.getElementById(`${prefix}_uploadModal`)).show();
+}
+
+function docAdmin_uploadDocument(prefix) {
+    const state = window.docAdminState[prefix];
+    const fileInput = document.getElementById(`${prefix}_docFile`);
+    const title = document.getElementById(`${prefix}_docTitle`).value.trim();
+
+    if (!title) { alert('Titel krävs.'); return; }
+    if (!fileInput.files || !fileInput.files[0]) { alert('Välj en fil.'); return; }
+
+    const btn = document.getElementById(`${prefix}_uploadSaveBtn`);
+    const origText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Laddar upp...';
+
+    const formData = new FormData();
+    formData.append('title', title);
+    formData.append('description', document.getElementById(`${prefix}_docDescription`).value);
+    formData.append('categoryId', document.getElementById(`${prefix}_docCategory`).value);
+    formData.append('ownerType', state.ownerType);
+    formData.append('ownerId', state.ownerId);
+    formData.append('accessLevel', document.getElementById(`${prefix}_docAccessLevel`).value);
+    formData.append('showInQuickLinks', document.getElementById(`${prefix}_docQuickLink`).checked);
+    formData.append('file', fileInput.files[0]);
+    formData.append('__RequestVerificationToken', docAdmin_getToken());
+
+    fetch('/umbraco/surface/Document/UploadDocument', { method: 'POST', body: formData })
+        .then(r => r.json())
+        .then(data => {
+            btn.disabled = false;
+            btn.innerHTML = origText;
+            if (data.success) {
+                bootstrap.Modal.getInstance(document.getElementById(`${prefix}_uploadModal`)).hide();
+                docAdmin_loadDocuments(prefix);
+                docAdmin_loadStorageInfo(prefix);
+                alert('Dokument uppladdat!');
+            } else {
+                alert('Fel: ' + data.message);
+            }
+        })
+        .catch(err => {
+            btn.disabled = false;
+            btn.innerHTML = origText;
+            console.error('Upload error:', err);
+            alert('Fel vid uppladdning.');
+        });
+}
+
+function docAdmin_editDocument(prefix, docId) {
+    const state = window.docAdminState[prefix];
+    const doc = state.documents.find(d => d.id === docId);
+    if (!doc) return;
+
+    document.getElementById(`${prefix}_editDocId`).value = doc.id;
+    document.getElementById(`${prefix}_editDocTitle`).value = doc.title;
+    document.getElementById(`${prefix}_editDocDescription`).value = doc.description || '';
+    document.getElementById(`${prefix}_editDocAccessLevel`).value = doc.accessLevel;
+    document.getElementById(`${prefix}_editDocQuickLink`).checked = doc.showInQuickLinks;
+    document.getElementById(`${prefix}_editDocSortOrder`).value = doc.sortOrder || 0;
+
+    docAdmin_populateCategoryDropdown(prefix, `${prefix}_editDocCategory`, doc.categoryId || '');
+
+    new bootstrap.Modal(document.getElementById(`${prefix}_editDocModal`)).show();
+}
+
+function docAdmin_saveEditDocument(prefix) {
+    const state = window.docAdminState[prefix];
+    const docId = document.getElementById(`${prefix}_editDocId`).value;
+    const title = document.getElementById(`${prefix}_editDocTitle`).value.trim();
+    if (!title) { alert('Titel krävs.'); return; }
+
+    const formData = new FormData();
+    formData.append('id', docId);
+    formData.append('title', title);
+    formData.append('description', document.getElementById(`${prefix}_editDocDescription`).value);
+    formData.append('categoryId', document.getElementById(`${prefix}_editDocCategory`).value);
+    formData.append('accessLevel', document.getElementById(`${prefix}_editDocAccessLevel`).value);
+    formData.append('showInQuickLinks', document.getElementById(`${prefix}_editDocQuickLink`).checked);
+    formData.append('sortOrder', document.getElementById(`${prefix}_editDocSortOrder`).value);
+    formData.append('__RequestVerificationToken', docAdmin_getToken());
+
+    fetch('/umbraco/surface/Document/UpdateDocument', { method: 'POST', body: formData })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                bootstrap.Modal.getInstance(document.getElementById(`${prefix}_editDocModal`)).hide();
+                docAdmin_loadDocuments(prefix);
+                alert('Dokument uppdaterat!');
+            } else {
+                alert('Fel: ' + data.message);
+            }
+        })
+        .catch(err => { console.error('Update error:', err); alert('Fel vid uppdatering.'); });
+}
+
+function docAdmin_deleteDocument(prefix, docId, docTitle) {
+    if (!confirm(`Vill du radera dokumentet "${docTitle}"? Detta kan inte ångras.`)) return;
+
+    const formData = new FormData();
+    formData.append('id', docId);
+    formData.append('__RequestVerificationToken', docAdmin_getToken());
+
+    fetch('/umbraco/surface/Document/DeleteDocument', { method: 'POST', body: formData })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                docAdmin_loadDocuments(prefix);
+                docAdmin_loadStorageInfo(prefix);
+                alert('Dokument raderat!');
+            } else {
+                alert('Fel: ' + data.message);
+            }
+        })
+        .catch(err => { console.error('Delete error:', err); alert('Fel vid radering.'); });
+}
+
+// ===== CATEGORIES =====
+
+function docAdmin_loadCategories(prefix) {
+    const state = window.docAdminState[prefix];
+    fetch(`/umbraco/surface/Document/GetCategories?ownerType=${state.ownerType}&ownerId=${state.ownerId}`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                state.categories = data.data;
+                docAdmin_renderCategories(prefix);
+            }
+        })
+        .catch(err => {
+            document.getElementById(`${prefix}_catsContainer`).innerHTML = '<div class="alert alert-danger">Fel vid laddning av kategorier.</div>';
+        });
+}
+
+function docAdmin_renderCategories(prefix) {
+    const state = window.docAdminState[prefix];
+    const container = document.getElementById(`${prefix}_catsContainer`);
+    const cats = state.categories;
+
+    if (!cats || cats.length === 0) {
+        container.innerHTML = '<div class="alert alert-info">Inga kategorier skapade ännu.</div>';
+        return;
+    }
+
+    let html = '<div class="table-responsive"><table class="table table-sm table-striped">';
+    html += '<thead><tr><th>Namn</th><th>Beskrivning</th><th>Snabblänk</th><th>Åtgärder</th></tr></thead><tbody>';
+
+    cats.forEach(cat => {
+        const quickLinkIcon = cat.showInQuickLinks
+            ? '<i class="bi bi-star-fill text-warning"></i>'
+            : '<i class="bi bi-star text-muted"></i>';
+
+        html += `<tr>
+            <td><strong>${docAdmin_escapeHtml(cat.name)}</strong></td>
+            <td><small>${docAdmin_escapeHtml(cat.description || '-')}</small></td>
+            <td>${quickLinkIcon}</td>
+            <td>
+                <button class="btn btn-sm btn-outline-primary" onclick="docAdmin_editCategory('${prefix}', ${cat.id})" title="Redigera"><i class="bi bi-pencil"></i></button>
+                <button class="btn btn-sm btn-outline-danger" onclick="docAdmin_deleteCategory('${prefix}', ${cat.id}, '${docAdmin_escapeHtml(cat.name)}')" title="Radera"><i class="bi bi-trash"></i></button>
+            </td>
+        </tr>`;
+    });
+
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+}
+
+function docAdmin_showCategoryModal(prefix, catId) {
+    document.getElementById(`${prefix}_catId`).value = '';
+    document.getElementById(`${prefix}_catName`).value = '';
+    document.getElementById(`${prefix}_catDescription`).value = '';
+    document.getElementById(`${prefix}_catQuickLink`).checked = false;
+    document.getElementById(`${prefix}_categoryModalTitle`).textContent = 'Ny kategori';
+    new bootstrap.Modal(document.getElementById(`${prefix}_categoryModal`)).show();
+}
+
+function docAdmin_editCategory(prefix, catId) {
+    const state = window.docAdminState[prefix];
+    const cat = state.categories.find(c => c.id === catId);
+    if (!cat) return;
+
+    document.getElementById(`${prefix}_catId`).value = cat.id;
+    document.getElementById(`${prefix}_catName`).value = cat.name;
+    document.getElementById(`${prefix}_catDescription`).value = cat.description || '';
+    document.getElementById(`${prefix}_catQuickLink`).checked = cat.showInQuickLinks;
+    document.getElementById(`${prefix}_categoryModalTitle`).textContent = 'Redigera kategori';
+
+    new bootstrap.Modal(document.getElementById(`${prefix}_categoryModal`)).show();
+}
+
+function docAdmin_saveCategory(prefix) {
+    const state = window.docAdminState[prefix];
+    const catId = document.getElementById(`${prefix}_catId`).value;
+    const name = document.getElementById(`${prefix}_catName`).value.trim();
+    if (!name) { alert('Namn krävs.'); return; }
+
+    const formData = new FormData();
+    formData.append('name', name);
+    formData.append('description', document.getElementById(`${prefix}_catDescription`).value);
+    formData.append('showInQuickLinks', document.getElementById(`${prefix}_catQuickLink`).checked);
+    formData.append('__RequestVerificationToken', docAdmin_getToken());
+
+    let url;
+    if (catId) {
+        url = '/umbraco/surface/Document/UpdateCategory';
+        formData.append('id', catId);
+        formData.append('sortOrder', '0');
+    } else {
+        url = '/umbraco/surface/Document/CreateCategory';
+        formData.append('ownerType', state.ownerType);
+        formData.append('ownerId', state.ownerId);
+    }
+
+    fetch(url, { method: 'POST', body: formData })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                bootstrap.Modal.getInstance(document.getElementById(`${prefix}_categoryModal`)).hide();
+                docAdmin_loadCategories(prefix);
+                docAdmin_loadDocuments(prefix); // Refresh docs to update category names
+                alert(catId ? 'Kategori uppdaterad!' : 'Kategori skapad!');
+            } else {
+                alert('Fel: ' + data.message);
+            }
+        })
+        .catch(err => { console.error('Category save error:', err); alert('Fel vid sparande.'); });
+}
+
+function docAdmin_deleteCategory(prefix, catId, catName) {
+    if (!confirm(`Vill du radera kategorin "${catName}"? Dokument i denna kategori kommer att bli okategoriserade.`)) return;
+
+    const formData = new FormData();
+    formData.append('id', catId);
+    formData.append('__RequestVerificationToken', docAdmin_getToken());
+
+    fetch('/umbraco/surface/Document/DeleteCategory', { method: 'POST', body: formData })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                docAdmin_loadCategories(prefix);
+                docAdmin_loadDocuments(prefix);
+                alert('Kategori raderad!');
+            } else {
+                alert('Fel: ' + data.message);
+            }
+        })
+        .catch(err => { console.error('Category delete error:', err); alert('Fel vid radering.'); });
+}
+
+// ===== HELPERS =====
+
+function docAdmin_populateCategoryDropdown(prefix, selectId, selectedValue) {
+    const state = window.docAdminState[prefix];
+    const select = document.getElementById(selectId);
+    select.innerHTML = '<option value="">-- Ingen kategori --</option>';
+    (state.categories || []).forEach(cat => {
+        const selected = cat.id == selectedValue ? 'selected' : '';
+        select.innerHTML += `<option value="${cat.id}" ${selected}>${docAdmin_escapeHtml(cat.name)}</option>`;
+    });
+}
+
+function docAdmin_escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+</script>
