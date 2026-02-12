@@ -427,7 +427,10 @@ namespace HpskSite.Controllers
                 newEvent.SetValue("contactPerson", contactPerson);
                 newEvent.SetValue("contactEmail", contactEmail);
                 newEvent.SetValue("contactPhone", contactPhone);
-                newEvent.SetValue("eventDate", eventDate ?? DateTime.Now);
+                if (eventDate.HasValue)
+                {
+                    newEvent.SetValue("eventDate", eventDate.Value);
+                }
                 newEvent.SetValue("isActive", true);
 
                 // Save and publish
@@ -648,7 +651,14 @@ namespace HpskSite.Controllers
                 eventContent.SetValue("contactPerson", contactPerson);
                 eventContent.SetValue("contactEmail", contactEmail);
                 eventContent.SetValue("contactPhone", contactPhone);
-                eventContent.SetValue("eventDate", eventDate ?? DateTime.Now);
+                if (eventDate.HasValue)
+                {
+                    eventContent.SetValue("eventDate", eventDate.Value);
+                }
+                else
+                {
+                    eventContent.SetValue("eventDate", null);
+                }
 
                 // Save and publish
                 _contentService.Save(eventContent);
@@ -1721,6 +1731,256 @@ namespace HpskSite.Controllers
             catch (Exception ex)
             {
                 return Ok(new { success = false, message = "Error removing image: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Get region events (children of region node with type clubSimpleEvent)
+        /// </summary>
+        [HttpGet]
+        public IActionResult GetRegionEvents(int regionId)
+        {
+            try
+            {
+                if (regionId <= 0)
+                {
+                    return Ok(new { success = false, message = "Invalid region ID" });
+                }
+
+                var events = new List<dynamic>();
+
+                if (UmbracoContext.Content != null)
+                {
+                    var regionNode = UmbracoContext.Content.GetById(regionId);
+                    if (regionNode == null || regionNode.ContentType.Alias != "regionalPage")
+                    {
+                        return Ok(new { success = false, message = "Region not found" });
+                    }
+
+                    var allEvents = regionNode.Children
+                        .Where(c => c.ContentType.Alias == "clubSimpleEvent")
+                        .OrderBy(c => c.Value<DateTime?>("eventDate") ?? DateTime.MinValue)
+                        .ToList();
+
+                    foreach (var evt in allEvents)
+                    {
+                        events.Add(new
+                        {
+                            id = evt.Id,
+                            name = evt.Value<string>("eventName") ?? evt.Name,
+                            date = evt.Value<DateTime?>("eventDate"),
+                            type = evt.Value<string>("eventType") ?? "Träning",
+                            description = evt.Value<string>("description") ?? "",
+                            venue = evt.Value<string>("venue") ?? "",
+                            contactPerson = evt.Value<string>("contactPerson") ?? "",
+                            contactEmail = evt.Value<string>("contactEmail") ?? "",
+                            isActive = evt.Value<bool>("isActive"),
+                            url = evt.Url()
+                        });
+                    }
+                }
+
+                return Ok(new
+                {
+                    success = true,
+                    data = events
+                });
+            }
+            catch (Exception ex)
+            {
+                return Ok(new { success = false, message = "Error loading region events: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Create a new event as child of a region node
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> CreateRegionEvent(int regionId, string eventName, string eventType = "Träning",
+            string description = "", string venue = "", string contactPerson = "",
+            string contactEmail = "", string contactPhone = "", DateTime? eventDate = null)
+        {
+            try
+            {
+                if (regionId <= 0 || string.IsNullOrWhiteSpace(eventName))
+                {
+                    return Ok(new { success = false, message = "Region ID and event name are required" });
+                }
+
+                if (UmbracoContext.Content == null)
+                {
+                    return Ok(new { success = false, message = "Umbraco context not available" });
+                }
+
+                var regionNode = UmbracoContext.Content.GetById(regionId);
+                if (regionNode == null || regionNode.ContentType.Alias != "regionalPage")
+                {
+                    return Ok(new { success = false, message = "Region not found" });
+                }
+
+                var regionCode = regionNode.Value<string>("regionCode") ?? "";
+                if (string.IsNullOrEmpty(regionCode) || !await _authorizationService.IsRegionalAdminForRegion(regionCode))
+                {
+                    return Ok(new { success = false, message = "Access denied - insufficient permissions" });
+                }
+
+                var newEvent = _contentService.Create(
+                    eventName,
+                    regionId,
+                    "clubSimpleEvent"
+                );
+
+                newEvent.SetValue("eventName", eventName);
+                newEvent.SetValue("eventType", eventType);
+                newEvent.SetValue("description", description);
+                newEvent.SetValue("venue", venue);
+                newEvent.SetValue("contactPerson", contactPerson);
+                newEvent.SetValue("contactEmail", contactEmail);
+                newEvent.SetValue("contactPhone", contactPhone);
+                if (eventDate.HasValue)
+                {
+                    newEvent.SetValue("eventDate", eventDate.Value);
+                }
+                newEvent.SetValue("isActive", true);
+
+                _contentService.Save(newEvent);
+                _contentService.Publish(newEvent, Array.Empty<string>());
+
+                return Ok(new
+                {
+                    success = true,
+                    message = "Event created successfully",
+                    data = new
+                    {
+                        id = newEvent.Id,
+                        name = eventName,
+                        date = eventDate ?? DateTime.Now,
+                        type = eventType
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                return Ok(new { success = false, message = "Error creating region event: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Edit an existing region event
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> EditRegionEvent(int eventId, string eventName, string eventType = "Träning",
+            string description = "", string venue = "", string contactPerson = "",
+            string contactEmail = "", string contactPhone = "", DateTime? eventDate = null)
+        {
+            try
+            {
+                if (eventId <= 0 || string.IsNullOrWhiteSpace(eventName))
+                {
+                    return Ok(new { success = false, message = "Event ID and name are required" });
+                }
+
+                var eventContent = _contentService.GetById(eventId);
+                if (eventContent == null || eventContent.ContentType.Alias != "clubSimpleEvent")
+                {
+                    return Ok(new { success = false, message = "Event not found" });
+                }
+
+                // Get parent region node for auth
+                var parentId = eventContent.ParentId;
+                if (UmbracoContext.Content == null)
+                {
+                    return Ok(new { success = false, message = "Umbraco context not available" });
+                }
+
+                var regionNode = UmbracoContext.Content.GetById(parentId);
+                if (regionNode == null || regionNode.ContentType.Alias != "regionalPage")
+                {
+                    return Ok(new { success = false, message = "Parent region not found" });
+                }
+
+                var regionCode = regionNode.Value<string>("regionCode") ?? "";
+                if (string.IsNullOrEmpty(regionCode) || !await _authorizationService.IsRegionalAdminForRegion(regionCode))
+                {
+                    return Ok(new { success = false, message = "Access denied - insufficient permissions" });
+                }
+
+                eventContent.SetValue("eventName", eventName);
+                eventContent.SetValue("eventType", eventType);
+                eventContent.SetValue("description", description);
+                eventContent.SetValue("venue", venue);
+                eventContent.SetValue("contactPerson", contactPerson);
+                eventContent.SetValue("contactEmail", contactEmail);
+                eventContent.SetValue("contactPhone", contactPhone);
+                if (eventDate.HasValue)
+                {
+                    eventContent.SetValue("eventDate", eventDate.Value);
+                }
+                else
+                {
+                    eventContent.SetValue("eventDate", null);
+                }
+
+                _contentService.Save(eventContent);
+                _contentService.Publish(eventContent, Array.Empty<string>());
+
+                return Ok(new { success = true, message = "Event updated successfully" });
+            }
+            catch (Exception ex)
+            {
+                return Ok(new { success = false, message = "Error updating region event: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Delete a region event
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeleteRegionEvent(int eventId)
+        {
+            try
+            {
+                if (eventId <= 0)
+                {
+                    return Ok(new { success = false, message = "Event ID is required" });
+                }
+
+                var eventContent = _contentService.GetById(eventId);
+                if (eventContent == null || eventContent.ContentType.Alias != "clubSimpleEvent")
+                {
+                    return Ok(new { success = false, message = "Event not found" });
+                }
+
+                // Get parent region node for auth
+                var parentId = eventContent.ParentId;
+                if (UmbracoContext.Content == null)
+                {
+                    return Ok(new { success = false, message = "Umbraco context not available" });
+                }
+
+                var regionNode = UmbracoContext.Content.GetById(parentId);
+                if (regionNode == null || regionNode.ContentType.Alias != "regionalPage")
+                {
+                    return Ok(new { success = false, message = "Parent region not found" });
+                }
+
+                var regionCode = regionNode.Value<string>("regionCode") ?? "";
+                if (string.IsNullOrEmpty(regionCode) || !await _authorizationService.IsRegionalAdminForRegion(regionCode))
+                {
+                    return Ok(new { success = false, message = "Access denied - insufficient permissions" });
+                }
+
+                _contentService.Unpublish(eventContent);
+                _contentService.Delete(eventContent);
+
+                return Ok(new { success = true, message = "Event deleted successfully" });
+            }
+            catch (Exception ex)
+            {
+                return Ok(new { success = false, message = "Error deleting region event: " + ex.Message });
             }
         }
 

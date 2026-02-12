@@ -60,7 +60,8 @@ function docArchive_populateFilter(prefix) {
     const state = window.docArchiveState[prefix];
     const select = document.getElementById(`${prefix}_categoryFilter`);
     select.innerHTML = '<option value="">Alla kategorier</option>';
-    (state.categories || []).forEach(cat => {
+    const sorted = (state.categories || []).slice().sort((a, b) => b.name.localeCompare(a.name, 'sv'));
+    sorted.forEach(cat => {
         select.innerHTML += `<option value="${cat.id}">${docArchive_escape(cat.name)}</option>`;
     });
 }
@@ -100,8 +101,10 @@ function docArchive_render(prefix) {
 
     let html = '';
 
-    // Render categorized groups
-    for (const [catName, catDocs] of Object.entries(grouped)) {
+    // Render categorized groups (descending alphanumeric, Swedish locale)
+    const sortedCatNames = Object.keys(grouped).sort((a, b) => b.localeCompare(a, 'sv'));
+    for (const catName of sortedCatNames) {
+        const catDocs = grouped[catName];
         html += `<div class="mb-4">
             <h6 class="text-muted border-bottom pb-2"><i class="bi bi-folder me-2"></i>${docArchive_escape(catName)}</h6>
             <div class="list-group">`;
@@ -140,17 +143,10 @@ function docArchive_renderDocItem(doc) {
         ? (doc.fileSize / 1048576).toFixed(1) + ' MB'
         : (doc.fileSize / 1024).toFixed(0) + ' KB';
 
-    const accessBadges = {
-        0: '',
-        1: '<span class="badge bg-info ms-2">Inloggade</span>',
-        2: '<span class="badge bg-primary ms-2">Medlemmar</span>',
-        3: '<span class="badge bg-warning text-dark ms-2">Admin</span>'
-    };
-
     return `<a href="/umbraco/surface/Document/DownloadDocument?id=${doc.id}" class="list-group-item list-group-item-action d-flex align-items-center" target="_blank">
         <i class="bi ${icon} fs-4 me-3 text-primary"></i>
         <div class="flex-grow-1">
-            <strong>${docArchive_escape(doc.title)}</strong>${accessBadges[doc.accessLevel] || ''}
+            <strong>${docArchive_escape(doc.title)}</strong>
             ${doc.description ? `<small class="d-block text-muted">${docArchive_escape(doc.description)}</small>` : ''}
             <small class="text-muted">${docArchive_escape(doc.fileName)} (${size})</small>
         </div>

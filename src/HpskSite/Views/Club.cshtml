@@ -208,19 +208,6 @@ window.currentClubId = clubId;
                     <div class="row">
                         <!-- Main Content Column -->
                         <div class="col-lg-8">
-                            <!-- Welcome Message (Optional) -->
-                            @if (!string.IsNullOrEmpty(welcomeMessage))
-                            {
-                                <div class="card mb-4">
-                                    <div class="card-header">
-                                        <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Om klubben</h5>
-                                    </div>
-                                    <div class="card-body">
-                                        @Html.Raw(welcomeMessage)
-                                    </div>
-                                </div>
-                            }
-
                             <!-- Upcoming Events -->
                             <div class="card mb-4">
                                 <div class="card-header">
@@ -460,6 +447,25 @@ window.currentClubId = clubId;
                     </div>
                 </div>
 
+                <!-- TIER 2: About Tab (All logged-in users) -->
+                <div class="tab-pane fade" id="clubAbout" role="tabpanel">
+                    @if (!string.IsNullOrEmpty(welcomeMessage))
+                    {
+                        <div class="card mb-4">
+                            <div class="card-header">
+                                <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Om klubben</h5>
+                            </div>
+                            <div class="card-body">
+                                @Html.Raw(welcomeMessage)
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="alert alert-info">Ingen information om klubben har lagts till ännu.</div>
+                    }
+                </div>
+
                 <!-- TIER 2: Calendar Tab (All logged-in users) -->
                 <div class="tab-pane fade" id="clubCalendar" role="tabpanel">
                     @await Html.PartialAsync("ClubCalendar")
@@ -517,6 +523,7 @@ const eventTypeColors = {
     'Städning': '#d63384',   // Pink
     'Möte': '#fd7e14',       // Orange
     'Socialt': '#0dcaf0',    // Cyan
+    'Nyhet': '#6610f2',      // Purple
     'Annat': '#6c757d',      // Gray
     'default': '#6c757d'
 };
@@ -540,26 +547,63 @@ function loadUpcomingEvents() {
         .then(data => {
             const container = document.getElementById('upcomingEventsContainer');
             if (data.success && data.data && data.data.length > 0) {
-                // Filter to only future events
                 const now = new Date();
-                const futureEvents = data.data.filter(event => new Date(event.date) >= now);
+                // Show future events + all Nyhet items (news persist regardless of date)
+                const visibleEvents = data.data.filter(event =>
+                    event.type === 'Nyhet' || (event.date && new Date(event.date) >= now)
+                );
 
-                if (futureEvents.length > 0) {
+                if (visibleEvents.length > 0) {
+                    // Sort: Nyhet without date first, then by date ascending
+                    visibleEvents.sort((a, b) => {
+                        const aIsNews = a.type === 'Nyhet';
+                        const bIsNews = b.type === 'Nyhet';
+                        if (aIsNews && !a.date) return -1;
+                        if (bIsNews && !b.date) return 1;
+                        const aDate = a.date ? new Date(a.date) : new Date(0);
+                        const bDate = b.date ? new Date(b.date) : new Date(0);
+                        return aDate - bDate;
+                    });
+
                     let html = '<ul class="list-group list-group-flush">';
-                    futureEvents.slice(0, 5).forEach(event => {
-                        const date = new Date(event.date).toLocaleDateString('sv-SE');
+                    visibleEvents.slice(0, 5).forEach(event => {
                         const color = eventTypeColors[event.type] || eventTypeColors.default;
                         const eventNameHtml = event.url
-                            ? `<a href="${event.url}" class="text-decoration-none"><h6 class="mb-1">${event.name}</h6></a>`
-                            : `<h6 class="mb-1">${event.name}</h6>`;
+                            ? `<a href="${event.url}" class="text-decoration-none"><h6 class="mb-0">${event.name}</h6></a>`
+                            : `<h6 class="mb-0">${event.name}</h6>`;
+
+                        // Date text (inline with name) - skip invalid/missing dates
+                        let dateText = '';
+                        if (event.date) {
+                            const d = new Date(event.date);
+                            if (d.getFullYear() > 1900) {
+                                dateText = event.type === 'Nyhet'
+                                    ? d.toLocaleDateString('sv-SE')
+                                    : d.toLocaleDateString('sv-SE') + (event.venue ? ' - ' + event.venue : '');
+                            }
+                        }
+
+                        // Extract first line of plain text from description
+                        let snippet = '';
+                        if (event.description) {
+                            const tmp = document.createElement('div');
+                            tmp.innerHTML = event.description;
+                            const text = (tmp.textContent || '').trim();
+                            const firstLine = text.split(/\r?\n/)[0].trim();
+                            snippet = firstLine.length > 120 ? firstLine.substring(0, 117) + '...' : firstLine;
+                        }
+
                         html += `
-                            <li class="list-group-item">
+                            <li class="list-group-item py-2">
                                 <div class="d-flex justify-content-between align-items-start">
-                                    <div>
-                                        ${eventNameHtml}
-                                        <small class="text-muted">${date}${event.venue ? ' - ' + event.venue : ''}</small>
+                                    <div style="min-width: 0; flex: 1;">
+                                        <div class="d-flex align-items-baseline gap-2">
+                                            ${eventNameHtml}
+                                            ${dateText ? `<small class="text-muted flex-shrink-0">${dateText}</small>` : ''}
+                                        </div>
+                                        ${snippet ? `<p class="mb-0 text-muted small event-snippet">${snippet}</p>` : ''}
                                     </div>
-                                    <span class="badge" style="background-color: ${color}">${event.type}</span>
+                                    <span class="badge ms-2 flex-shrink-0" style="background-color: ${color}">${event.type}</span>
                                 </div>
                             </li>
                         `;
@@ -706,5 +750,11 @@ window.openAdminEditModal = function(competitionId) {
 
 .list-group-item:hover {
     background-color: var(--bs-secondary-bg);
+}
+
+.event-snippet {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 </style>

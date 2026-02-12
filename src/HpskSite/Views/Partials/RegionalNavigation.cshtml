@@ -1,5 +1,6 @@
 @{
     var isRegionalAdmin = ViewBag.isRegionalAdmin as bool? ?? false;
+    var isLoggedIn = ViewBag.isLoggedIn as bool? ?? false;
 }
 
 <ul class="nav nav-tabs mb-4" id="regionPageTabs" role="tablist">
@@ -9,10 +10,18 @@
         </button>
     </li>
     <li class="nav-item" role="presentation">
-        <button class="nav-link" id="regionDocuments-tab" data-bs-toggle="tab" data-bs-target="#regionDocuments" type="button" role="tab" aria-controls="regionDocuments" aria-selected="false">
-            <i class="bi bi-archive me-2"></i>Dokument
+        <button class="nav-link" id="regionAbout-tab" data-bs-toggle="tab" data-bs-target="#regionAbout" type="button" role="tab" aria-controls="regionAbout" aria-selected="false">
+            <i class="bi bi-info-circle me-2"></i>Om
         </button>
     </li>
+    @if (isLoggedIn)
+    {
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="regionDocuments-tab" data-bs-toggle="tab" data-bs-target="#regionDocuments" type="button" role="tab" aria-controls="regionDocuments" aria-selected="false">
+                <i class="bi bi-archive me-2"></i>Dokument
+            </button>
+        </li>
+    }
     @if (isRegionalAdmin)
     {
         <li class="nav-item" role="presentation">

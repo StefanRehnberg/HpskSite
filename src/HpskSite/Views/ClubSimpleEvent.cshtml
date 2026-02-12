@@ -7,7 +7,9 @@
     // Event properties from Umbraco content
     var eventName = Model.Value<string>("eventName") ?? Model.Name;
     var description = Model.Value<string>("description") ?? "";
-    var eventDate = Model.Value<DateTime>("eventDate");
+    var eventDateRaw = Model.Value<DateTime?>("eventDate");
+    var hasDate = eventDateRaw.HasValue && eventDateRaw.Value.Year > 1900;
+    var eventDate = eventDateRaw ?? DateTime.MinValue;
     var eventEndDate = Model.Value<DateTime?>("eventEndDate");
     var eventType = Model.Value<string>("eventType") ?? "Träning";
     var venue = Model.Value<string>("venue") ?? "";
@@ -31,6 +33,7 @@
         "Städning" => "#d63384",
         "Möte" => "#fd7e14",
         "Socialt" => "#0dcaf0",
+        "Nyhet" => "#6610f2",
         "Annat" => "#6c757d",
         _ => "#6c757d"
     };
@@ -42,6 +45,7 @@
         "Städning" => "bi-bucket",
         "Möte" => "bi-megaphone",
         "Socialt" => "bi-people",
+        "Nyhet" => "bi-newspaper",
         "Annat" => "bi-calendar-event",
         _ => "bi-calendar-event"
     };
@@ -53,6 +57,7 @@
         "Städning" => "🧹",
         "Möte" => "📢",
         "Socialt" => "🎉",
+        "Nyhet" => "📰",
         "Annat" => "📌",
         _ => "📌"
     };
@@ -62,7 +67,7 @@
     var eventTypeEmoji = GetEventTypeEmoji(eventType);
 
     // Date calculations
-    var hasValidEndDate = eventEndDate.HasValue &&
+    var hasValidEndDate = hasDate && eventEndDate.HasValue &&
                           eventEndDate.Value > DateTime.MinValue &&
                           eventEndDate.Value.Year > 1900 &&
                           eventEndDate.Value.Date >= eventDate.Date;
@@ -70,42 +75,65 @@
     var durationDays = isMultiDay ? (eventEndDate!.Value.Date - eventDate.Date).Days + 1 : 1;
 
     // Status calculations
-    var isUpcoming = eventDate.Date >= DateTime.Now.Date;
-    var isOngoing = !isUpcoming && (hasValidEndDate && eventEndDate!.Value.Date >= DateTime.Now.Date || !hasValidEndDate && eventDate.Date == DateTime.Now.Date);
-    var isPast = !isUpcoming && !isOngoing;
+    var isNyhet = eventType == "Nyhet";
+    var isUpcoming = hasDate && eventDate.Date >= DateTime.Now.Date;
+    var isOngoing = hasDate && !isUpcoming && (hasValidEndDate && eventEndDate!.Value.Date >= DateTime.Now.Date || !hasValidEndDate && eventDate.Date == DateTime.Now.Date);
+    var isPast = hasDate && !isUpcoming && !isOngoing;
 
-    string statusDisplay = (isActive, isUpcoming, isOngoing, isPast) switch
+    string statusDisplay = (isActive, isNyhet, hasDate, isUpcoming, isOngoing, isPast) switch
     {
-        (false, _, _, _) => "Inaktiv",
-        (_, true, _, _) => "Kommande",
-        (_, _, true, _) => "Pågår",
-        (_, _, _, true) => "Avslutad",
-        _ => "Okänd status"
+        (false, _, _, _, _, _) => "Inaktiv",
+        (_, true, false, _, _, _) => "Publicerad",
+        (_, _, _, true, _, _) => "Kommande",
+        (_, _, _, _, true, _) => "Pågår",
+        (_, _, _, _, _, true) => "Avslutad",
+        _ => "Publicerad"
     };
 
-    string statusColor = (isActive, isUpcoming, isOngoing, isPast) switch
+    string statusColor = (isActive, isNyhet, hasDate, isUpcoming, isOngoing, isPast) switch
     {
-        (false, _, _, _) => "#757575",
-        (_, true, _, _) => "#2196F3",
-        (_, _, true, _) => "#FF5722",
-        (_, _, _, true) => "#9E9E9E",
+        (false, _, _, _, _, _) => "#757575",
+        (_, true, false, _, _, _) => "#6610f2",
+        (_, _, _, true, _, _) => "#2196F3",
+        (_, _, _, _, true, _) => "#FF5722",
+        (_, _, _, _, _, true) => "#9E9E9E",
         _ => "#9E9E9E"
     };
 
-    // Parent club access
-    var clubNode = Model.Parent;
-    var clubName = clubNode?.Value<string>("clubName") ?? clubNode?.Name ?? "";
-    var clubLogo = clubNode?.Value<IPublishedContent>("logo");
-    var clubBannerImage = clubNode?.Value<IPublishedContent>("bannerImage");
-    var clubUrl = clubNode?.Url() ?? "/";
+    // Parent access - detect if parent is a club or a region
+    var parentNode = Model.Parent;
+    var isRegionEvent = parentNode?.ContentType.Alias == "regionalPage";
+
+    // Club-specific properties (only if parent is a club)
+    var clubNode = isRegionEvent ? null : parentNode;
+    var clubName = isRegionEvent ? "" : (clubNode?.Value<string>("clubName") ?? clubNode?.Name ?? "");
+    var clubLogo = isRegionEvent ? null : clubNode?.Value<IPublishedContent>("logo");
+    var clubBannerImage = isRegionEvent ? null : clubNode?.Value<IPublishedContent>("bannerImage");
+    var clubUrl = isRegionEvent ? "/" : (clubNode?.Url() ?? "/");
+
+    // Region-specific properties (only if parent is a region)
+    var regionNode = isRegionEvent ? parentNode : null;
+    var ownerName = isRegionEvent
+        ? (regionNode?.Value<string>("regionName") ?? regionNode?.Name ?? "")
+        : clubName;
+    var ownerLogo = isRegionEvent
+        ? regionNode?.Value<IPublishedContent>("logo")
+        : clubLogo;
+    var ownerBannerImage = isRegionEvent
+        ? regionNode?.Value<IPublishedContent>("bannerImage")
+        : clubBannerImage;
+    var ownerUrl = isRegionEvent
+        ? (regionNode?.Url() ?? "/")
+        : clubUrl;
 
     // Breadcrumb path
-    var clubsPage = clubNode?.Parent;
-    var regionPage = clubsPage?.Parent?.ContentType.Alias == "regionalPage"
-        ? clubsPage?.Parent : null;
+    var clubsPage = isRegionEvent ? null : clubNode?.Parent;
+    var regionPage = isRegionEvent
+        ? regionNode
+        : (clubsPage?.Parent?.ContentType.Alias == "regionalPage" ? clubsPage?.Parent : null);
 
-    // Hero image (event image or fall back to club banner)
-    var heroImage = eventImage ?? clubBannerImage;
+    // Hero image (event image or fall back to owner banner)
+    var heroImage = eventImage ?? ownerBannerImage;
 
     // Short description for meta (strip HTML and truncate)
     var shortDescription = System.Text.RegularExpressions.Regex.Replace(description, "<[^>]*>", "");
@@ -114,7 +142,7 @@
         shortDescription = shortDescription.Substring(0, 157) + "...";
     }
 
-    ViewBag.Title = $"{eventName} - {clubName}";
+    ViewBag.Title = $"{eventName} - {ownerName}";
 
     // Determine darker color for gradient
     var colorDark = eventTypeColor switch
@@ -124,6 +152,7 @@
         "#d63384" => "#a02468",  // Pink darker
         "#fd7e14" => "#c85a00",  // Orange darker
         "#0dcaf0" => "#0a9bb8",  // Cyan darker
+        "#6610f2" => "#4709ac",  // Purple darker (Nyhet)
         "#6c757d" => "#495057",  // Gray darker
         _ => "#495057"
     };
@@ -145,17 +174,24 @@
             <nav aria-label="breadcrumb">
                 <ol class="breadcrumb">
                     <li class="breadcrumb-item"><a href="@Model.Root().Url()">Hem</a></li>
-                    @if (regionPage != null)
+                    @if (isRegionEvent)
                     {
-                        <li class="breadcrumb-item"><a href="@regionPage.Url()">@regionPage.Name</a></li>
+                        <li class="breadcrumb-item"><a href="@ownerUrl">@ownerName</a></li>
                     }
-                    @if (clubsPage != null && clubsPage.ContentType.Alias == "clubsPage")
+                    else
                     {
-                        <li class="breadcrumb-item"><a href="@clubsPage.Url()">Klubbar</a></li>
-                    }
-                    @if (clubNode != null)
-                    {
-                        <li class="breadcrumb-item"><a href="@clubUrl">@clubName</a></li>
+                        @if (regionPage != null)
+                        {
+                            <li class="breadcrumb-item"><a href="@regionPage.Url()">@regionPage.Name</a></li>
+                        }
+                        @if (clubsPage != null && clubsPage.ContentType.Alias == "clubsPage")
+                        {
+                            <li class="breadcrumb-item"><a href="@clubsPage.Url()">Klubbar</a></li>
+                        }
+                        @if (clubNode != null)
+                        {
+                            <li class="breadcrumb-item"><a href="@clubUrl">@clubName</a></li>
+                        }
                     }
                     <li class="breadcrumb-item active" aria-current="page">@eventName</li>
                 </ol>
@@ -183,21 +219,29 @@
                                     <h1 class="display-5 fw-bold text-white mb-2">@eventName</h1>
                                     <!-- Date & Venue Subtitle -->
                                     <p class="lead text-white-50 mb-0">
-                                        <i class="bi bi-calendar3 me-2"></i>
-                                        @if (isMultiDay)
+                                        @if (hasDate)
                                         {
-                                            @eventDate.ToString("d MMMM", CultureInfo.GetCultureInfo("sv-SE"))
-                                            <text> - </text>
-                                            @eventEndDate!.Value.ToString("d MMMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))
-                                            <span class="ms-2">(@durationDays dagar)</span>
+                                            <i class="bi bi-calendar3 me-2"></i>
+                                            if (isMultiDay)
+                                            {
+                                                @eventDate.ToString("d MMMM", CultureInfo.GetCultureInfo("sv-SE"))
+                                                <text> - </text>
+                                                @eventEndDate!.Value.ToString("d MMMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))
+                                                <span class="ms-2">(@durationDays dagar)</span>
+                                            }
+                                            else
+                                            {
+                                                @eventDate.ToString("dddd, d MMMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))
+                                                if (eventDate.TimeOfDay != TimeSpan.Zero)
+                                                {
+                                                    <text> kl. @eventDate.ToString("HH:mm")</text>
+                                                }
+                                            }
                                         }
                                         else
                                         {
-                                            @eventDate.ToString("dddd, d MMMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))
-                                            @if (eventDate.TimeOfDay != TimeSpan.Zero)
-                                            {
-                                                <text> kl. @eventDate.ToString("HH:mm")</text>
-                                            }
+                                            <i class="bi bi-clock me-2"></i>
+                                            <text>Publicerad @Model.CreateDate.ToString("d MMMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))</text>
                                         }
                                         @if (!string.IsNullOrEmpty(venue))
                                         {
@@ -206,10 +250,10 @@
                                     </p>
                                 </div>
                                 <!-- Club Logo -->
-                                @if (clubLogo != null)
+                                @if (ownerLogo != null)
                                 {
                                     <div class="d-none d-md-block">
-                                        <img src="@clubLogo.Url()" alt="@clubName" class="rounded bg-white p-2" style="max-height: 80px; max-width: 120px;">
+                                        <img src="@ownerLogo.Url()" alt="@ownerName" class="rounded bg-white p-2" style="max-height: 80px; max-width: 120px;">
                                     </div>
                                 }
                             </div>
@@ -232,21 +276,29 @@
                             <h1 class="display-5 fw-bold text-white mb-2">@eventName</h1>
                             <!-- Date & Venue Subtitle -->
                             <p class="lead text-white-50 mb-0">
-                                <i class="bi bi-calendar3 me-2"></i>
-                                @if (isMultiDay)
+                                @if (hasDate)
                                 {
-                                    @eventDate.ToString("d MMMM", CultureInfo.GetCultureInfo("sv-SE"))
-                                    <text> - </text>
-                                    @eventEndDate!.Value.ToString("d MMMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))
-                                    <span class="ms-2">(@durationDays dagar)</span>
+                                    <i class="bi bi-calendar3 me-2"></i>
+                                    if (isMultiDay)
+                                    {
+                                        @eventDate.ToString("d MMMM", CultureInfo.GetCultureInfo("sv-SE"))
+                                        <text> - </text>
+                                        @eventEndDate!.Value.ToString("d MMMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))
+                                        <span class="ms-2">(@durationDays dagar)</span>
+                                    }
+                                    else
+                                    {
+                                        @eventDate.ToString("dddd, d MMMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))
+                                        if (eventDate.TimeOfDay != TimeSpan.Zero)
+                                        {
+                                            <text> kl. @eventDate.ToString("HH:mm")</text>
+                                        }
+                                    }
                                 }
                                 else
                                 {
-                                    @eventDate.ToString("dddd, d MMMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))
-                                    @if (eventDate.TimeOfDay != TimeSpan.Zero)
-                                    {
-                                        <text> kl. @eventDate.ToString("HH:mm")</text>
-                                    }
+                                    <i class="bi bi-clock me-2"></i>
+                                    <text>Publicerad @Model.CreateDate.ToString("d MMMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))</text>
                                 }
                                 @if (!string.IsNullOrEmpty(venue))
                                 {
@@ -289,29 +341,44 @@
                 <div class="card-body">
                     <div class="row">
                         <!-- Date/Time -->
-                        <div class="col-md-6 mb-3">
-                            <div class="d-flex align-items-start">
-                                <i class="bi bi-calendar-event fs-4 me-3" style="color: @eventTypeColor;"></i>
-                                <div>
-                                    <small class="text-secondary d-block">Datum & Tid</small>
-                                    @if (isMultiDay)
-                                    {
-                                        <strong>@eventDate.ToString("d MMMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))</strong>
-                                        <text> - </text>
-                                        <strong>@eventEndDate!.Value.ToString("d MMMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))</strong>
-                                        <br><small class="text-secondary">(@durationDays dagar)</small>
-                                    }
-                                    else
-                                    {
-                                        <strong>@eventDate.ToString("dddd, d MMMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))</strong>
-                                        @if (eventDate.TimeOfDay != TimeSpan.Zero)
+                        @if (hasDate)
+                        {
+                            <div class="col-md-6 mb-3">
+                                <div class="d-flex align-items-start">
+                                    <i class="bi bi-calendar-event fs-4 me-3" style="color: @eventTypeColor;"></i>
+                                    <div>
+                                        <small class="text-secondary d-block">Datum & Tid</small>
+                                        @if (isMultiDay)
                                         {
-                                            <br><span>Kl. @eventDate.ToString("HH:mm")</span>
+                                            <strong>@eventDate.ToString("d MMMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))</strong>
+                                            <text> - </text>
+                                            <strong>@eventEndDate!.Value.ToString("d MMMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))</strong>
+                                            <br><small class="text-secondary">(@durationDays dagar)</small>
                                         }
-                                    }
+                                        else
+                                        {
+                                            <strong>@eventDate.ToString("dddd, d MMMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))</strong>
+                                            @if (eventDate.TimeOfDay != TimeSpan.Zero)
+                                            {
+                                                <br><span>Kl. @eventDate.ToString("HH:mm")</span>
+                                            }
+                                        }
+                                    </div>
                                 </div>
                             </div>
-                        </div>
+                        }
+                        else
+                        {
+                            <div class="col-md-6 mb-3">
+                                <div class="d-flex align-items-start">
+                                    <i class="bi bi-clock fs-4 me-3" style="color: @eventTypeColor;"></i>
+                                    <div>
+                                        <small class="text-secondary d-block">Publicerad</small>
+                                        <strong>@Model.CreateDate.ToString("d MMMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))</strong>
+                                    </div>
+                                </div>
+                            </div>
+                        }
 
                         <!-- Venue -->
                         @if (!string.IsNullOrEmpty(venue))
@@ -393,7 +460,7 @@
                         <h5 class="mb-0"><i class="bi bi-text-paragraph me-2"></i>Beskrivning</h5>
                     </div>
                     <div class="card-body">
-                        @Html.Raw(description)
+                        <div id="event-description-content"></div>
                     </div>
                 </div>
             }
@@ -408,11 +475,14 @@
                 </div>
                 <div class="card-body">
                     <!-- Add to Calendar Button -->
-                    <div class="d-grid gap-2 mb-3">
-                        <button type="button" class="btn btn-outline-primary" onclick="addToCalendar()">
-                            <i class="bi bi-calendar-plus me-2"></i>Lägg till i kalender
-                        </button>
-                    </div>
+                    @if (hasDate)
+                    {
+                        <div class="d-grid gap-2 mb-3">
+                            <button type="button" class="btn btn-outline-primary" onclick="addToCalendar()">
+                                <i class="bi bi-calendar-plus me-2"></i>Lägg till i kalender
+                            </button>
+                        </div>
+                    }
 
                     <!-- Share Button -->
                     <div class="d-grid gap-2">
@@ -465,23 +535,23 @@
                 </div>
             }
 
-            <!-- Club Card -->
+            <!-- Owner Card (Club or Region) -->
             <div class="card mb-4">
                 <div class="card-header">
-                    <h5 class="mb-0"><i class="bi bi-building me-2"></i>Arrangerande klubb</h5>
+                    <h5 class="mb-0"><i class="bi @(isRegionEvent ? "bi-geo-alt" : "bi-building") me-2"></i>@(isRegionEvent ? "Arrangerande krets" : "Arrangerande klubb")</h5>
                 </div>
                 <div class="card-body">
                     <div class="d-flex align-items-center mb-3">
-                        @if (clubLogo != null)
+                        @if (ownerLogo != null)
                         {
-                            <img src="@clubLogo.Url()" alt="@clubName" class="rounded me-3" style="max-height: 50px; max-width: 70px;">
+                            <img src="@ownerLogo.Url()" alt="@ownerName" class="rounded me-3" style="max-height: 50px; max-width: 70px;">
                         }
                         <div>
-                            <strong>@clubName</strong>
+                            <strong>@ownerName</strong>
                         </div>
                     </div>
-                    <a href="@clubUrl" class="btn btn-outline-secondary btn-sm w-100">
-                        <i class="bi bi-arrow-left me-1"></i>Tillbaka till klubben
+                    <a href="@ownerUrl" class="btn btn-outline-secondary w-100 d-flex align-items-center justify-content-center">
+                        <i class="bi bi-arrow-left me-1"></i>@(isRegionEvent ? "Tillbaka till kretsen" : "Tillbaka till klubben")
                     </a>
                 </div>
             </div>
@@ -528,6 +598,19 @@
     background-color: #d63384 !important;
 }
 
+/* Prevent RTE content from breaking the two-column layout */
+.col-lg-8 .card-body img,
+.col-lg-8 .card-body video,
+.col-lg-8 .card-body iframe {
+    max-width: 100%;
+    height: auto;
+}
+
+.col-lg-8 .card-body {
+    overflow-wrap: break-word;
+    word-wrap: break-word;
+}
+
 /* Card icon colors - using CSS variable fallback for dark mode support */
 .card-body i {
     opacity: 0.9;
@@ -535,25 +618,38 @@
 </style>
 
 <script>
+// Safely inject description HTML so unclosed tags can't break the page layout
+(function() {
+    var el = document.getElementById('event-description-content');
+    if (el) {
+        el.innerHTML = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(description));
+    }
+})();
+
 // Event data for calendar/share functionality
 const eventData = {
     name: '@Html.Raw(eventName.Replace("'", "\\'"))',
     description: '@Html.Raw(shortDescription.Replace("'", "\\'").Replace("\n", " ").Replace("\r", ""))',
     venue: '@Html.Raw(venue.Replace("'", "\\'"))',
-    startDate: new Date('@eventDate.ToString("yyyy-MM-ddTHH:mm:ss")'),
-    @if (isMultiDay && eventEndDate.HasValue)
+    hasDate: @(hasDate ? "true" : "false"),
+    @if (hasDate)
     {
-        <text>endDate: new Date('@eventEndDate.Value.ToString("yyyy-MM-ddTHH:mm:ss")'),</text>
-    }
-    else
-    {
-        <text>endDate: new Date('@eventDate.AddHours(2).ToString("yyyy-MM-ddTHH:mm:ss")'),</text>
+        <text>startDate: new Date('@eventDate.ToString("yyyy-MM-ddTHH:mm:ss")'),</text>
+        if (isMultiDay && eventEndDate.HasValue)
+        {
+            <text>endDate: new Date('@eventEndDate.Value.ToString("yyyy-MM-ddTHH:mm:ss")'),</text>
+        }
+        else
+        {
+            <text>endDate: new Date('@eventDate.AddHours(2).ToString("yyyy-MM-ddTHH:mm:ss")'),</text>
+        }
     }
     url: window.location.href,
-    clubName: '@Html.Raw(clubName.Replace("'", "\\'"))'
+    clubName: '@Html.Raw(ownerName.Replace("'", "\\'"))'
 };
 
 function addToCalendar() {
+    if (!eventData.hasDate) return;
     // Create ICS file content
     const formatDate = (date) => {
         return date.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';

@@ -3,8 +3,80 @@
     var regionName = ViewBag.regionName as string ?? "Krets";
 }
 
+<!-- Flatpickr Date/Time Picker -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
+
 <!-- CKEditor 5 Rich Text Editor -->
 <script src="https://cdn.ckeditor.com/ckeditor5/41.0.0/classic/ckeditor.js"></script>
+
+<!-- Region Event Create/Edit Modal -->
+<div class="modal fade" id="regionEventModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="regionEventModalTitle">Ny Händelse</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="regionEventForm">
+                    <input type="hidden" id="regionEventId" name="eventId">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Händelsenamn *</label>
+                            <input type="text" class="form-control" id="regionEventName" name="eventName" required>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Typ *</label>
+                            <select class="form-select" id="regionEventType" name="eventType" required onchange="toggleRegionEventDateRequired()">
+                                <option value="Träning">Träning</option>
+                                <option value="Städning">Städning</option>
+                                <option value="Möte">Möte</option>
+                                <option value="Socialt">Socialt</option>
+                                <option value="Nyhet">Nyhet</option>
+                                <option value="Annat">Annat</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="mb-3" id="regionEventDateGroup">
+                        <label class="form-label" id="regionEventDateLabel">Datum *</label>
+                        <input type="text" class="form-control" id="regionEventDate" name="eventDate" required>
+                        <small class="form-text" id="regionEventDateHint" style="display: none;">Valfritt för nyheter. Lämna tomt för att visa utan datum.</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Plats</label>
+                        <input type="text" class="form-control" id="regionEventVenue" name="venue">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Beskrivning</label>
+                        <textarea class="form-control" id="regionEventDescription" name="description" rows="3"></textarea>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">Kontaktperson</label>
+                            <input type="text" class="form-control" id="regionEventContactPerson" name="contactPerson">
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">Kontakt E-post</label>
+                            <input type="email" class="form-control" id="regionEventContactEmail" name="contactEmail">
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">Kontakt Telefon</label>
+                            <input type="tel" class="form-control" id="regionEventContactPhone" name="contactPhone">
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" onclick="saveRegionEvent()">
+                    <i class="bi bi-save me-2"></i>Spara
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
 
 <div class="regional-admin-panel">
     <div class="alert alert-info mb-4">
@@ -20,6 +92,11 @@
             </button>
         </li>
         <li class="nav-item" role="presentation">
+            <button class="nav-link" id="regionEvents-tab" data-bs-toggle="tab" data-bs-target="#regionEventsTab" type="button">
+                <i class="bi bi-calendar-event me-2"></i>Händelser
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
             <button class="nav-link" id="regionSettings-tab" data-bs-toggle="tab" data-bs-target="#regionSettingsTab" type="button">
                 <i class="bi bi-gear me-2"></i>Inställningar
             </button>
@@ -32,6 +109,23 @@
         <div class="tab-pane fade show active" id="regionDocumentsTab">
             @{ ViewBag.DocumentOwnerType = 1; ViewBag.DocumentOwnerId = regionContentId; }
             @await Html.PartialAsync("ClubDocumentAdmin")
+        </div>
+
+        <!-- Events Sub-Tab -->
+        <div class="tab-pane fade" id="regionEventsTab">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5>Kretshändelser</h5>
+                <button class="btn btn-primary" onclick="showCreateRegionEventModal()">
+                    <i class="bi bi-plus-circle me-2"></i>Ny Händelse
+                </button>
+            </div>
+            <div id="regionEventsTableContainer">
+                <div class="text-center py-4">
+                    <div class="spinner-border" role="status">
+                        <span class="visually-hidden">Laddar händelser...</span>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Settings Sub-Tab -->
@@ -132,11 +226,202 @@
     var regionContentId = @regionContentId;
     var welcomeTextEditor = null;
     var aboutRegionEditor = null;
+    var allRegionEvents = [];
+
+    var eventTypeColors = {
+        'Tävling': '#0d6efd',
+        'Träning': '#198754',
+        'Städning': '#d63384',
+        'Möte': '#fd7e14',
+        'Socialt': '#0dcaf0',
+        'Nyhet': '#6610f2',
+        'Annat': '#6c757d',
+        'default': '#6c757d'
+    };
 
     function getAntiForgeryToken() {
         var tokenInput = document.querySelector('input[name="__RequestVerificationToken"]');
         return tokenInput ? tokenInput.value : '';
     }
+
+    // Initialize Flatpickr for region event date
+    flatpickr('#regionEventDate', {
+        locale: 'sv',
+        enableTime: true,
+        time_24hr: true,
+        dateFormat: 'Y-m-d H:i'
+    });
+
+    // Load region events when events tab is shown
+    document.getElementById('regionEvents-tab').addEventListener('shown.bs.tab', function () {
+        loadRegionEvents();
+    });
+
+    function loadRegionEvents() {
+        fetch('/umbraco/surface/Club/GetRegionEvents?regionId=' + regionContentId)
+            .then(function(response) { return response.json(); })
+            .then(function(data) {
+                if (data.success) {
+                    displayRegionEvents(data.data);
+                } else {
+                    document.getElementById('regionEventsTableContainer').innerHTML =
+                        '<div class="alert alert-warning">Inga händelser hittades.</div>';
+                }
+            })
+            .catch(function(error) {
+                console.error('Error loading events:', error);
+                document.getElementById('regionEventsTableContainer').innerHTML =
+                    '<div class="alert alert-danger">Fel vid laddning av händelser.</div>';
+            });
+    }
+
+    function displayRegionEvents(events) {
+        var container = document.getElementById('regionEventsTableContainer');
+        allRegionEvents = events || [];
+
+        if (!events || events.length === 0) {
+            container.innerHTML = '<div class="alert alert-info">Inga händelser har skapats ännu.</div>';
+            return;
+        }
+
+        var html = '<div class="table-responsive"><table class="table table-striped">';
+        html += '<thead><tr><th>Namn</th><th>Typ</th><th>Datum</th><th>Plats</th><th>Åtgärder</th></tr></thead><tbody>';
+
+        events.forEach(function(event) {
+            var date = event.date ? new Date(event.date).toLocaleString('sv-SE') : '-';
+            var color = eventTypeColors[event.type] || eventTypeColors['default'];
+            html += '<tr>'
+                + '<td><strong>' + event.name + '</strong></td>'
+                + '<td><span class="badge" style="background-color: ' + color + '">' + event.type + '</span></td>'
+                + '<td>' + date + '</td>'
+                + '<td>' + (event.venue || '-') + '</td>'
+                + '<td>'
+                + '<button class="btn btn-sm btn-outline-primary me-1" onclick="editRegionEvent(' + event.id + ')"><i class="bi bi-pencil"></i></button>'
+                + '<button class="btn btn-sm btn-outline-danger" onclick="deleteRegionEvent(' + event.id + ', \'' + event.name.replace(/'/g, "\\'") + '\')"><i class="bi bi-trash"></i></button>'
+                + '</td></tr>';
+        });
+
+        html += '</tbody></table></div>';
+        container.innerHTML = html;
+    }
+
+    window.showCreateRegionEventModal = function() {
+        document.getElementById('regionEventModalTitle').textContent = 'Ny Händelse';
+        document.getElementById('regionEventForm').reset();
+        document.getElementById('regionEventId').value = '';
+        toggleRegionEventDateRequired();
+        new bootstrap.Modal(document.getElementById('regionEventModal')).show();
+    };
+
+    window.editRegionEvent = function(eventId) {
+        var event = allRegionEvents.find(function(e) { return e.id === eventId; });
+        if (!event) {
+            alert('Händelse hittades inte');
+            return;
+        }
+
+        document.getElementById('regionEventModalTitle').textContent = 'Redigera Händelse';
+        document.getElementById('regionEventId').value = event.id;
+        document.getElementById('regionEventName').value = event.name || '';
+        document.getElementById('regionEventType').value = event.type || 'Träning';
+        toggleRegionEventDateRequired();
+        document.getElementById('regionEventDescription').value = event.description || '';
+        document.getElementById('regionEventVenue').value = event.venue || '';
+        document.getElementById('regionEventContactPerson').value = event.contactPerson || '';
+        document.getElementById('regionEventContactEmail').value = event.contactEmail || '';
+        document.getElementById('regionEventContactPhone').value = event.contactPhone || '';
+
+        if (event.date) {
+            var eventDate = new Date(event.date);
+            var fp = document.getElementById('regionEventDate')._flatpickr;
+            if (fp) {
+                fp.setDate(eventDate);
+            }
+        }
+
+        new bootstrap.Modal(document.getElementById('regionEventModal')).show();
+    };
+
+    window.saveRegionEvent = function() {
+        var form = document.getElementById('regionEventForm');
+        if (!form.checkValidity()) {
+            form.reportValidity();
+            return;
+        }
+
+        var saveBtn = document.querySelector('#regionEventModal .modal-footer .btn-primary');
+        if (!saveBtn) return;
+        var originalBtnText = saveBtn.innerHTML;
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Sparar...';
+
+        var formData = new FormData(form);
+        var eventId = formData.get('eventId');
+        var url = eventId
+            ? '/umbraco/surface/Club/EditRegionEvent'
+            : '/umbraco/surface/Club/CreateRegionEvent';
+
+        formData.append('regionId', regionContentId);
+        formData.append('__RequestVerificationToken', getAntiForgeryToken());
+
+        fetch(url, {
+            method: 'POST',
+            body: formData
+        })
+        .then(function(response) { return response.json(); })
+        .then(function(data) {
+            if (data.success) {
+                bootstrap.Modal.getInstance(document.getElementById('regionEventModal')).hide();
+                loadRegionEvents();
+                alert('Händelse sparad!');
+            } else {
+                alert('Fel: ' + data.message);
+            }
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = originalBtnText;
+        })
+        .catch(function(error) {
+            console.error('Error saving event:', error);
+            alert('Fel vid sparande av händelse.');
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = originalBtnText;
+        });
+    };
+
+    window.deleteRegionEvent = function(eventId, eventName) {
+        if (!confirm('Är du säker på att du vill ta bort händelsen "' + eventName + '"?')) return;
+
+        var formData = new FormData();
+        formData.append('__RequestVerificationToken', getAntiForgeryToken());
+
+        fetch('/umbraco/surface/Club/DeleteRegionEvent?eventId=' + eventId, {
+            method: 'POST',
+            body: formData
+        })
+        .then(function(response) { return response.json(); })
+        .then(function(data) {
+            if (data.success) {
+                loadRegionEvents();
+                alert('Händelse raderad!');
+            } else {
+                alert('Fel: ' + data.message);
+            }
+        })
+        .catch(function(error) {
+            console.error('Error deleting event:', error);
+            alert('Fel vid radering av händelse.');
+        });
+    };
+
+    window.toggleRegionEventDateRequired = function() {
+        var isNyhet = document.getElementById('regionEventType').value === 'Nyhet';
+        var dateInput = document.getElementById('regionEventDate');
+        var dateLabel = document.getElementById('regionEventDateLabel');
+        var dateHint = document.getElementById('regionEventDateHint');
+        dateInput.required = !isNyhet;
+        dateLabel.textContent = isNyhet ? 'Datum (valfritt)' : 'Datum *';
+        dateHint.style.display = isNyhet ? '' : 'none';
+    };
 
     // Load region info when settings tab is shown
     document.getElementById('regionSettings-tab').addEventListener('shown.bs.tab', function () {

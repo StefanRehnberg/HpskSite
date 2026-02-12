@@ -60,6 +60,10 @@
     ViewBag.OgDescription = !string.IsNullOrEmpty(welcomeText) ? welcomeText : $"Välkommen till {regionName}";
     ViewBag.OgImage = logo?.Url() ?? siteDefaultLogo;
 
+    // Check if user is logged in
+    var currentMember = await MemberManager.GetCurrentMemberAsync();
+    var isLoggedIn = currentMember != null;
+
     // Check if current user is regional admin
     var isRegionalAdmin = false;
     if (!string.IsNullOrEmpty(regionCode))
@@ -112,9 +116,14 @@
 
 @{
     ViewBag.isRegionalAdmin = isRegionalAdmin;
+    ViewBag.isLoggedIn = isLoggedIn;
     ViewBag.regionContentId = Model.Id;
     ViewBag.regionName = regionName;
 }
+
+<script>
+    var regionId = @Model.Id;
+</script>
 
 <!-- Tab Navigation (visible to all visitors) -->
 @await Html.PartialAsync("RegionalNavigation")
@@ -141,14 +150,38 @@
         })
     </div>
 
-    <!-- Documents Tab -->
-    <div class="tab-pane fade" id="regionDocuments" role="tabpanel" aria-labelledby="regionDocuments-tab">
-        @{
-            ViewBag.DocumentOwnerType = 1;
-            ViewBag.DocumentOwnerId = Model.Id;
+    <!-- Om (About) Tab -->
+    <div class="tab-pane fade" id="regionAbout" role="tabpanel" aria-labelledby="regionAbout-tab">
+        @if (!string.IsNullOrEmpty(aboutRegion))
+        {
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Om @regionName</h5>
+                </div>
+                <div class="card-body">
+                    <div id="regionAboutContent"></div>
+                </div>
+            </div>
         }
-        @await Html.PartialAsync("DocumentArchive")
+        else
+        {
+            <div class="alert alert-info">
+                <i class="bi bi-info-circle me-2"></i>Ingen information om kretsen har lagts till ännu.
+            </div>
+        }
     </div>
+
+    @if (isLoggedIn)
+    {
+        <!-- Documents Tab -->
+        <div class="tab-pane fade" id="regionDocuments" role="tabpanel" aria-labelledby="regionDocuments-tab">
+            @{
+                ViewBag.DocumentOwnerType = 1;
+                ViewBag.DocumentOwnerId = Model.Id;
+            }
+            @await Html.PartialAsync("DocumentArchive")
+        </div>
+    }
 
     @if (isRegionalAdmin)
     {
@@ -162,6 +195,14 @@
 <script>
 (function() {
     var regionOwnerId = @Model.Id;
+
+    // Safe RTE rendering for about region content
+    var aboutEl = document.getElementById('regionAboutContent');
+    if (aboutEl) {
+        aboutEl.innerHTML = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(aboutRegion ?? ""));
+    }
+
+    // Quick link documents
     fetch('/umbraco/surface/Document/GetQuickLinks?ownerType=1&ownerId=' + regionOwnerId)
         .then(function(r) { return r.json(); })
         .then(function(data) {
@@ -179,6 +220,96 @@
             }
         })
         .catch(function(err) { console.error('Region quick link documents error:', err); });
+
+    // Event type colors (same as club events)
+    var eventTypeColors = {
+        'Tävling': '#0d6efd',
+        'Träning': '#198754',
+        'Städning': '#d63384',
+        'Möte': '#fd7e14',
+        'Socialt': '#0dcaf0',
+        'Nyhet': '#6610f2',
+        'Annat': '#6c757d',
+        'default': '#6c757d'
+    };
+
+    // Load upcoming events for the region
+    function loadUpcomingEvents() {
+        fetch('/umbraco/surface/Club/GetRegionEvents?regionId=' + regionId)
+            .then(function(response) { return response.json(); })
+            .then(function(data) {
+                var container = document.getElementById('upcomingEventsContainer');
+                if (data.success && data.data && data.data.length > 0) {
+                    var now = new Date();
+                    var visibleEvents = data.data.filter(function(event) {
+                        return event.type === 'Nyhet' || (event.date && new Date(event.date) >= now);
+                    });
+
+                    if (visibleEvents.length > 0) {
+                        visibleEvents.sort(function(a, b) {
+                            var aIsNews = a.type === 'Nyhet';
+                            var bIsNews = b.type === 'Nyhet';
+                            if (aIsNews && !a.date) return -1;
+                            if (bIsNews && !b.date) return 1;
+                            var aDate = a.date ? new Date(a.date) : new Date(0);
+                            var bDate = b.date ? new Date(b.date) : new Date(0);
+                            return aDate - bDate;
+                        });
+
+                        var html = '<ul class="list-group list-group-flush">';
+                        visibleEvents.slice(0, 5).forEach(function(event) {
+                            var color = eventTypeColors[event.type] || eventTypeColors['default'];
+                            var eventNameHtml = event.url
+                                ? '<a href="' + event.url + '" class="text-decoration-none"><h6 class="mb-0">' + event.name + '</h6></a>'
+                                : '<h6 class="mb-0">' + event.name + '</h6>';
+
+                            var dateText = '';
+                            if (event.date) {
+                                var d = new Date(event.date);
+                                if (d.getFullYear() > 1900) {
+                                    dateText = event.type === 'Nyhet'
+                                        ? d.toLocaleDateString('sv-SE')
+                                        : d.toLocaleDateString('sv-SE') + (event.venue ? ' - ' + event.venue : '');
+                                }
+                            }
+
+                            var snippet = '';
+                            if (event.description) {
+                                var tmp = document.createElement('div');
+                                tmp.innerHTML = event.description;
+                                var text = (tmp.textContent || '').trim();
+                                var firstLine = text.split(/\r?\n/)[0].trim();
+                                snippet = firstLine.length > 120 ? firstLine.substring(0, 117) + '...' : firstLine;
+                            }
+
+                            html += '<li class="list-group-item py-2">'
+                                + '<div class="d-flex justify-content-between align-items-start">'
+                                + '<div style="min-width: 0; flex: 1;">'
+                                + '<div class="d-flex align-items-baseline gap-2">'
+                                + eventNameHtml
+                                + (dateText ? '<small class="text-muted flex-shrink-0">' + dateText + '</small>' : '')
+                                + '</div>'
+                                + (snippet ? '<p class="mb-0 text-muted small">' + snippet + '</p>' : '')
+                                + '</div>'
+                                + '<span class="badge ms-2 flex-shrink-0" style="background-color: ' + color + '">' + event.type + '</span>'
+                                + '</div></li>';
+                        });
+                        html += '</ul>';
+                        container.innerHTML = html;
+                    } else {
+                        container.innerHTML = '<p class="text-muted">Inga kommande händelser planerade.</p>';
+                    }
+                } else {
+                    container.innerHTML = '<p class="text-muted">Inga händelser hittades.</p>';
+                }
+            })
+            .catch(function(error) {
+                console.error('Error loading events:', error);
+                document.getElementById('upcomingEventsContainer').innerHTML = '<p class="text-danger">Fel vid hämtning av händelser.</p>';
+            });
+    }
+
+    loadUpcomingEvents();
 })();
 </script>
 

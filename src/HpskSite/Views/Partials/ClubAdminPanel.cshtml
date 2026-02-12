@@ -249,18 +249,20 @@
                         </div>
                         <div class="col-md-6 mb-3">
                             <label class="form-label">Typ *</label>
-                            <select class="form-select" id="eventType" name="eventType" required>
+                            <select class="form-select" id="eventType" name="eventType" required onchange="toggleEventDateRequired()">
                                 <option value="Träning">Träning</option>
                                 <option value="Städning">Städning</option>
                                 <option value="Möte">Möte</option>
                                 <option value="Socialt">Socialt</option>
+                                <option value="Nyhet">Nyhet</option>
                                 <option value="Annat">Annat</option>
                             </select>
                         </div>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label">Datum *</label>
+                    <div class="mb-3" id="eventDateGroup">
+                        <label class="form-label" id="eventDateLabel">Datum *</label>
                         <input type="text" class="form-control" id="eventDate" name="eventDate" required>
+                        <small class="form-text" id="eventDateHint" style="display: none;">Valfritt för nyheter. Lämna tomt för att visa utan datum.</small>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Plats</label>
@@ -763,7 +765,7 @@ function displayEvents(events) {
     html += '<thead><tr><th>Namn</th><th>Typ</th><th>Datum</th><th>Plats</th><th>Åtgärder</th></tr></thead><tbody>';
 
     events.forEach(event => {
-        const date = new Date(event.date).toLocaleString('sv-SE');
+        const date = event.date ? new Date(event.date).toLocaleString('sv-SE') : '-';
         const color = eventTypeColors[event.type] || eventTypeColors.default;
         html += `
             <tr>
@@ -838,10 +840,21 @@ function loadClubSettings() {
 }
 
 // Event Modal Functions
+function toggleEventDateRequired() {
+    const isNyhet = document.getElementById('eventType').value === 'Nyhet';
+    const dateInput = document.getElementById('eventDate');
+    const dateLabel = document.getElementById('eventDateLabel');
+    const dateHint = document.getElementById('eventDateHint');
+    dateInput.required = !isNyhet;
+    dateLabel.textContent = isNyhet ? 'Datum (valfritt)' : 'Datum *';
+    dateHint.style.display = isNyhet ? '' : 'none';
+}
+
 function showCreateEventModal() {
     document.getElementById('eventModalTitle').textContent = 'Ny Händelse';
     document.getElementById('eventForm').reset();
     document.getElementById('eventId').value = '';
+    toggleEventDateRequired();
     new bootstrap.Modal(document.getElementById('eventModal')).show();
 }
 
@@ -859,6 +872,7 @@ function editEvent(eventId) {
     document.getElementById('eventId').value = event.id;
     document.getElementById('eventName').value = event.name || '';
     document.getElementById('eventType').value = event.type || 'Träning';
+    toggleEventDateRequired();
     document.getElementById('eventDescription').value = event.description || '';
     document.getElementById('event_venue').value = event.venue || '';
     document.getElementById('eventContactPerson').value = event.contactPerson || '';
