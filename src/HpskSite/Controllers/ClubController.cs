@@ -385,7 +385,8 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> CreateClubEvent(int clubId, string eventName, string eventType = "Träning",
             string description = "", string venue = "", string contactPerson = "",
-            string contactEmail = "", string contactPhone = "", DateTime? eventDate = null)
+            string contactEmail = "", string contactPhone = "", DateTime? eventDate = null,
+            string pageName = "")
         {
             try
             {
@@ -413,8 +414,10 @@ namespace HpskSite.Controllers
                 }
 
                 // Create new event content as child of club
+                // Use pageName for the node name (URL slug) if provided, otherwise fall back to eventName
+                var nodeName = !string.IsNullOrWhiteSpace(pageName) ? pageName : eventName;
                 var newEvent = _contentService.Create(
-                    eventName,
+                    nodeName,
                     clubId,  // Parent is the club node
                     "clubSimpleEvent"
                 );
@@ -488,10 +491,12 @@ namespace HpskSite.Controllers
 
                     foreach (var evt in allEvents)
                     {
+                        var displayName = evt.Value<string>("eventName") ?? evt.Name;
                         events.Add(new
                         {
                             id = evt.Id,
-                            name = evt.Value<string>("eventName") ?? evt.Name,
+                            name = displayName,
+                            pageName = evt.Name != displayName ? evt.Name : "",
                             date = evt.Value<DateTime?>("eventDate"),
                             type = evt.Value<string>("eventType") ?? "Träning",
                             description = evt.Value<string>("description") ?? "",
@@ -621,7 +626,8 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> EditClubEvent(int eventId, string eventName, string eventType = "Träning",
             string description = "", string venue = "", string contactPerson = "",
-            string contactEmail = "", string contactPhone = "", DateTime? eventDate = null)
+            string contactEmail = "", string contactPhone = "", DateTime? eventDate = null,
+            string pageName = "")
         {
             try
             {
@@ -642,6 +648,10 @@ namespace HpskSite.Controllers
                 {
                     return Ok(new { success = false, message = "Access denied - insufficient permissions" });
                 }
+
+                // Update node name (URL slug) if pageName provided
+                var nodeName = !string.IsNullOrWhiteSpace(pageName) ? pageName : eventName;
+                eventContent.Name = nodeName;
 
                 // Update properties
                 eventContent.SetValue("eventName", eventName);
@@ -1764,10 +1774,12 @@ namespace HpskSite.Controllers
 
                     foreach (var evt in allEvents)
                     {
+                        var displayName = evt.Value<string>("eventName") ?? evt.Name;
                         events.Add(new
                         {
                             id = evt.Id,
-                            name = evt.Value<string>("eventName") ?? evt.Name,
+                            name = displayName,
+                            pageName = evt.Name != displayName ? evt.Name : "",
                             date = evt.Value<DateTime?>("eventDate"),
                             type = evt.Value<string>("eventType") ?? "Träning",
                             description = evt.Value<string>("description") ?? "",
@@ -1799,7 +1811,8 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> CreateRegionEvent(int regionId, string eventName, string eventType = "Träning",
             string description = "", string venue = "", string contactPerson = "",
-            string contactEmail = "", string contactPhone = "", DateTime? eventDate = null)
+            string contactEmail = "", string contactPhone = "", DateTime? eventDate = null,
+            string pageName = "")
         {
             try
             {
@@ -1825,8 +1838,9 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Access denied - insufficient permissions" });
                 }
 
+                var nodeName = !string.IsNullOrWhiteSpace(pageName) ? pageName : eventName;
                 var newEvent = _contentService.Create(
-                    eventName,
+                    nodeName,
                     regionId,
                     "clubSimpleEvent"
                 );
@@ -1873,7 +1887,8 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> EditRegionEvent(int eventId, string eventName, string eventType = "Träning",
             string description = "", string venue = "", string contactPerson = "",
-            string contactEmail = "", string contactPhone = "", DateTime? eventDate = null)
+            string contactEmail = "", string contactPhone = "", DateTime? eventDate = null,
+            string pageName = "")
         {
             try
             {
@@ -1906,6 +1921,10 @@ namespace HpskSite.Controllers
                 {
                     return Ok(new { success = false, message = "Access denied - insufficient permissions" });
                 }
+
+                // Update node name (URL slug) if pageName provided
+                var nodeName = !string.IsNullOrWhiteSpace(pageName) ? pageName : eventName;
+                eventContent.Name = nodeName;
 
                 eventContent.SetValue("eventName", eventName);
                 eventContent.SetValue("eventType", eventType);

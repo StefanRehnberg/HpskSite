@@ -245,19 +245,32 @@
                     <div class="row">
                         <div class="col-md-6 mb-3">
                             <label class="form-label">Händelsenamn *</label>
-                            <input type="text" class="form-control" id="eventName" name="eventName" required>
+                            <input type="text" class="form-control" id="eventName" name="eventName" required oninput="updateEventUrlPreview()">
                         </div>
                         <div class="col-md-6 mb-3">
                             <label class="form-label">Typ *</label>
-                            <select class="form-select" id="eventType" name="eventType" required onchange="toggleEventDateRequired()">
+                            <select class="form-select" id="eventType" required onchange="onEventTypeChange()">
                                 <option value="Träning">Träning</option>
                                 <option value="Städning">Städning</option>
                                 <option value="Möte">Möte</option>
                                 <option value="Socialt">Socialt</option>
                                 <option value="Nyhet">Nyhet</option>
-                                <option value="Annat">Annat</option>
+                                <option value="Annat">Annat...</option>
                             </select>
+                            <input type="text" class="form-control mt-2" id="eventCustomType" placeholder="Ange typ, t.ex. Workshop" style="display: none;" oninput="syncEventTypeValue()">
+                            <input type="hidden" id="eventTypeValue" name="eventType">
                         </div>
+                    </div>
+                    <div class="mb-2">
+                        <small class="text-muted">
+                            <i class="bi bi-link-45deg me-1"></i>URL: <span id="eventUrlPreview" class="font-monospace"></span>
+                            <a href="#" id="eventPageNameToggle" class="ms-2" onclick="toggleEventPageName(event)">Ändra sidnamn</a>
+                        </small>
+                    </div>
+                    <div class="mb-3" id="eventPageNameGroup" style="display: none;">
+                        <label class="form-label">Sidnamn (URL)</label>
+                        <input type="text" class="form-control" id="eventPageName" name="pageName" oninput="updateEventUrlPreview()">
+                        <small class="form-text">Kortare namn för en renare URL. Lämna tomt för att använda händelsenamnet.</small>
                     </div>
                     <div class="mb-3" id="eventDateGroup">
                         <label class="form-label" id="eventDateLabel">Datum *</label>
@@ -765,7 +778,8 @@ function displayEvents(events) {
     html += '<thead><tr><th>Namn</th><th>Typ</th><th>Datum</th><th>Plats</th><th>Åtgärder</th></tr></thead><tbody>';
 
     events.forEach(event => {
-        const date = event.date ? new Date(event.date).toLocaleString('sv-SE') : '-';
+        const dateObj = event.date ? new Date(event.date) : null;
+        const date = (dateObj && dateObj.getFullYear() > 1900) ? dateObj.toLocaleString('sv-SE') : '-';
         const color = eventTypeColors[event.type] || eventTypeColors.default;
         html += `
             <tr>
@@ -840,8 +854,67 @@ function loadClubSettings() {
 }
 
 // Event Modal Functions
+function slugify(text) {
+    return text.toLowerCase()
+        .replace(/å/g, 'a').replace(/ä/g, 'a').replace(/ö/g, 'o')
+        .replace(/[^a-z0-9\s-]/g, '')
+        .replace(/\s+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '');
+}
+
+function updateEventUrlPreview() {
+    var pageNameInput = document.getElementById('eventPageName');
+    var nameInput = document.getElementById('eventName');
+    var preview = document.getElementById('eventUrlPreview');
+    var source = (pageNameInput.value || nameInput.value || '').trim();
+    var slug = slugify(source) || '...';
+    preview.textContent = '/' + slug;
+}
+
+function toggleEventPageName(e) {
+    if (e) e.preventDefault();
+    var group = document.getElementById('eventPageNameGroup');
+    var toggle = document.getElementById('eventPageNameToggle');
+    if (group.style.display === 'none') {
+        group.style.display = '';
+        toggle.textContent = 'Dölj sidnamn';
+    } else {
+        group.style.display = 'none';
+        document.getElementById('eventPageName').value = '';
+        updateEventUrlPreview();
+        toggle.textContent = 'Ändra sidnamn';
+    }
+}
+
+var knownEventTypes = ['Träning', 'Städning', 'Möte', 'Socialt', 'Nyhet'];
+
+function onEventTypeChange() {
+    var select = document.getElementById('eventType');
+    var customInput = document.getElementById('eventCustomType');
+    if (select.value === 'Annat') {
+        customInput.style.display = '';
+        customInput.required = true;
+        customInput.focus();
+    } else {
+        customInput.style.display = 'none';
+        customInput.required = false;
+        customInput.value = '';
+    }
+    syncEventTypeValue();
+    toggleEventDateRequired();
+}
+
+function syncEventTypeValue() {
+    var select = document.getElementById('eventType');
+    var customInput = document.getElementById('eventCustomType');
+    var hidden = document.getElementById('eventTypeValue');
+    hidden.value = select.value === 'Annat' ? customInput.value : select.value;
+}
+
 function toggleEventDateRequired() {
-    const isNyhet = document.getElementById('eventType').value === 'Nyhet';
+    const resolvedType = document.getElementById('eventTypeValue').value || document.getElementById('eventType').value;
+    const isNyhet = resolvedType === 'Nyhet';
     const dateInput = document.getElementById('eventDate');
     const dateLabel = document.getElementById('eventDateLabel');
     const dateHint = document.getElementById('eventDateHint');
@@ -854,7 +927,14 @@ function showCreateEventModal() {
     document.getElementById('eventModalTitle').textContent = 'Ny Händelse';
     document.getElementById('eventForm').reset();
     document.getElementById('eventId').value = '';
+    document.getElementById('eventCustomType').style.display = 'none';
+    document.getElementById('eventCustomType').required = false;
+    document.getElementById('eventCustomType').value = '';
+    document.getElementById('eventPageNameGroup').style.display = 'none';
+    document.getElementById('eventPageNameToggle').textContent = 'Ändra sidnamn';
+    syncEventTypeValue();
     toggleEventDateRequired();
+    updateEventUrlPreview();
     new bootstrap.Modal(document.getElementById('eventModal')).show();
 }
 
@@ -871,7 +951,21 @@ function editEvent(eventId) {
     // Populate form fields
     document.getElementById('eventId').value = event.id;
     document.getElementById('eventName').value = event.name || '';
-    document.getElementById('eventType').value = event.type || 'Träning';
+
+    // Set event type — if not a known type, select "Annat" and populate custom field
+    var typeVal = event.type || 'Träning';
+    if (knownEventTypes.indexOf(typeVal) >= 0) {
+        document.getElementById('eventType').value = typeVal;
+        document.getElementById('eventCustomType').style.display = 'none';
+        document.getElementById('eventCustomType').required = false;
+        document.getElementById('eventCustomType').value = '';
+    } else {
+        document.getElementById('eventType').value = 'Annat';
+        document.getElementById('eventCustomType').style.display = '';
+        document.getElementById('eventCustomType').required = true;
+        document.getElementById('eventCustomType').value = typeVal;
+    }
+    syncEventTypeValue();
     toggleEventDateRequired();
     document.getElementById('eventDescription').value = event.description || '';
     document.getElementById('event_venue').value = event.venue || '';
@@ -879,11 +973,29 @@ function editEvent(eventId) {
     document.getElementById('eventContactEmail').value = event.contactEmail || '';
     document.getElementById('eventContactPhone').value = event.contactPhone || '';
 
+    // Page name (URL slug)
+    if (event.pageName) {
+        document.getElementById('eventPageName').value = event.pageName;
+        document.getElementById('eventPageNameGroup').style.display = '';
+        document.getElementById('eventPageNameToggle').textContent = 'Dölj sidnamn';
+    } else {
+        document.getElementById('eventPageName').value = '';
+        document.getElementById('eventPageNameGroup').style.display = 'none';
+        document.getElementById('eventPageNameToggle').textContent = 'Ändra sidnamn';
+    }
+    updateEventUrlPreview();
+
     // Format date for datetime-local input
     if (event.date) {
         const eventDate = new Date(event.date);
-        const formattedDate = eventDate.toISOString().slice(0, 16);
-        document.getElementById('eventDate').value = formattedDate;
+        if (eventDate.getFullYear() > 1900) {
+            const fp = document.getElementById('eventDate')._flatpickr;
+            if (fp) {
+                fp.setDate(eventDate);
+            } else {
+                document.getElementById('eventDate').value = eventDate.toISOString().slice(0, 16);
+            }
+        }
     }
 
     // Show modal
@@ -891,6 +1003,13 @@ function editEvent(eventId) {
 }
 
 function saveEvent() {
+    syncEventTypeValue();
+    var resolvedType = document.getElementById('eventTypeValue').value;
+    if (!resolvedType || !resolvedType.trim()) {
+        document.getElementById('eventCustomType').focus();
+        alert('Ange en händelsetyp.');
+        return;
+    }
     const form = document.getElementById('eventForm');
     if (!form.checkValidity()) {
         form.reportValidity();

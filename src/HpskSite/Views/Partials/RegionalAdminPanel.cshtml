@@ -25,19 +25,32 @@
                     <div class="row">
                         <div class="col-md-6 mb-3">
                             <label class="form-label">Händelsenamn *</label>
-                            <input type="text" class="form-control" id="regionEventName" name="eventName" required>
+                            <input type="text" class="form-control" id="regionEventName" name="eventName" required oninput="updateRegionEventUrlPreview()">
                         </div>
                         <div class="col-md-6 mb-3">
                             <label class="form-label">Typ *</label>
-                            <select class="form-select" id="regionEventType" name="eventType" required onchange="toggleRegionEventDateRequired()">
+                            <select class="form-select" id="regionEventType" required onchange="onRegionEventTypeChange()">
                                 <option value="Träning">Träning</option>
                                 <option value="Städning">Städning</option>
                                 <option value="Möte">Möte</option>
                                 <option value="Socialt">Socialt</option>
                                 <option value="Nyhet">Nyhet</option>
-                                <option value="Annat">Annat</option>
+                                <option value="Annat">Annat...</option>
                             </select>
+                            <input type="text" class="form-control mt-2" id="regionEventCustomType" placeholder="Ange typ, t.ex. Workshop" style="display: none;" oninput="syncRegionEventTypeValue()">
+                            <input type="hidden" id="regionEventTypeValue" name="eventType">
                         </div>
+                    </div>
+                    <div class="mb-2">
+                        <small class="text-muted">
+                            <i class="bi bi-link-45deg me-1"></i>URL: <span id="regionEventUrlPreview" class="font-monospace"></span>
+                            <a href="#" id="regionEventPageNameToggle" class="ms-2" onclick="toggleRegionEventPageName(event)">Ändra sidnamn</a>
+                        </small>
+                    </div>
+                    <div class="mb-3" id="regionEventPageNameGroup" style="display: none;">
+                        <label class="form-label">Sidnamn (URL)</label>
+                        <input type="text" class="form-control" id="regionEventPageName" name="pageName" oninput="updateRegionEventUrlPreview()">
+                        <small class="form-text">Kortare namn för en renare URL. Lämna tomt för att använda händelsenamnet.</small>
                     </div>
                     <div class="mb-3" id="regionEventDateGroup">
                         <label class="form-label" id="regionEventDateLabel">Datum *</label>
@@ -288,7 +301,8 @@
         html += '<thead><tr><th>Namn</th><th>Typ</th><th>Datum</th><th>Plats</th><th>Åtgärder</th></tr></thead><tbody>';
 
         events.forEach(function(event) {
-            var date = event.date ? new Date(event.date).toLocaleString('sv-SE') : '-';
+            var dateObj = event.date ? new Date(event.date) : null;
+            var date = (dateObj && dateObj.getFullYear() > 1900) ? dateObj.toLocaleString('sv-SE') : '-';
             var color = eventTypeColors[event.type] || eventTypeColors['default'];
             html += '<tr>'
                 + '<td><strong>' + event.name + '</strong></td>'
@@ -305,11 +319,51 @@
         container.innerHTML = html;
     }
 
+    function slugify(text) {
+        return text.toLowerCase()
+            .replace(/å/g, 'a').replace(/ä/g, 'a').replace(/ö/g, 'o')
+            .replace(/[^a-z0-9\s-]/g, '')
+            .replace(/\s+/g, '-')
+            .replace(/-+/g, '-')
+            .replace(/^-|-$/g, '');
+    }
+
+    window.updateRegionEventUrlPreview = function() {
+        var pageNameInput = document.getElementById('regionEventPageName');
+        var nameInput = document.getElementById('regionEventName');
+        var preview = document.getElementById('regionEventUrlPreview');
+        var source = (pageNameInput.value || nameInput.value || '').trim();
+        var slug = slugify(source) || '...';
+        preview.textContent = '/' + slug;
+    };
+
+    window.toggleRegionEventPageName = function(e) {
+        if (e) e.preventDefault();
+        var group = document.getElementById('regionEventPageNameGroup');
+        var toggle = document.getElementById('regionEventPageNameToggle');
+        if (group.style.display === 'none') {
+            group.style.display = '';
+            toggle.textContent = 'Dölj sidnamn';
+        } else {
+            group.style.display = 'none';
+            document.getElementById('regionEventPageName').value = '';
+            updateRegionEventUrlPreview();
+            toggle.textContent = 'Ändra sidnamn';
+        }
+    };
+
     window.showCreateRegionEventModal = function() {
         document.getElementById('regionEventModalTitle').textContent = 'Ny Händelse';
         document.getElementById('regionEventForm').reset();
         document.getElementById('regionEventId').value = '';
+        document.getElementById('regionEventCustomType').style.display = 'none';
+        document.getElementById('regionEventCustomType').required = false;
+        document.getElementById('regionEventCustomType').value = '';
+        document.getElementById('regionEventPageNameGroup').style.display = 'none';
+        document.getElementById('regionEventPageNameToggle').textContent = 'Ändra sidnamn';
+        syncRegionEventTypeValue();
         toggleRegionEventDateRequired();
+        updateRegionEventUrlPreview();
         new bootstrap.Modal(document.getElementById('regionEventModal')).show();
     };
 
@@ -323,7 +377,21 @@
         document.getElementById('regionEventModalTitle').textContent = 'Redigera Händelse';
         document.getElementById('regionEventId').value = event.id;
         document.getElementById('regionEventName').value = event.name || '';
-        document.getElementById('regionEventType').value = event.type || 'Träning';
+
+        // Set event type — if not a known type, select "Annat" and populate custom field
+        var typeVal = event.type || 'Träning';
+        if (knownRegionEventTypes.indexOf(typeVal) >= 0) {
+            document.getElementById('regionEventType').value = typeVal;
+            document.getElementById('regionEventCustomType').style.display = 'none';
+            document.getElementById('regionEventCustomType').required = false;
+            document.getElementById('regionEventCustomType').value = '';
+        } else {
+            document.getElementById('regionEventType').value = 'Annat';
+            document.getElementById('regionEventCustomType').style.display = '';
+            document.getElementById('regionEventCustomType').required = true;
+            document.getElementById('regionEventCustomType').value = typeVal;
+        }
+        syncRegionEventTypeValue();
         toggleRegionEventDateRequired();
         document.getElementById('regionEventDescription').value = event.description || '';
         document.getElementById('regionEventVenue').value = event.venue || '';
@@ -331,11 +399,25 @@
         document.getElementById('regionEventContactEmail').value = event.contactEmail || '';
         document.getElementById('regionEventContactPhone').value = event.contactPhone || '';
 
+        // Page name (URL slug)
+        if (event.pageName) {
+            document.getElementById('regionEventPageName').value = event.pageName;
+            document.getElementById('regionEventPageNameGroup').style.display = '';
+            document.getElementById('regionEventPageNameToggle').textContent = 'Dölj sidnamn';
+        } else {
+            document.getElementById('regionEventPageName').value = '';
+            document.getElementById('regionEventPageNameGroup').style.display = 'none';
+            document.getElementById('regionEventPageNameToggle').textContent = 'Ändra sidnamn';
+        }
+        updateRegionEventUrlPreview();
+
         if (event.date) {
             var eventDate = new Date(event.date);
-            var fp = document.getElementById('regionEventDate')._flatpickr;
-            if (fp) {
-                fp.setDate(eventDate);
+            if (eventDate.getFullYear() > 1900) {
+                var fp = document.getElementById('regionEventDate')._flatpickr;
+                if (fp) {
+                    fp.setDate(eventDate);
+                }
             }
         }
 
@@ -343,6 +425,13 @@
     };
 
     window.saveRegionEvent = function() {
+        syncRegionEventTypeValue();
+        var resolvedType = document.getElementById('regionEventTypeValue').value;
+        if (!resolvedType || !resolvedType.trim()) {
+            document.getElementById('regionEventCustomType').focus();
+            alert('Ange en händelsetyp.');
+            return;
+        }
         var form = document.getElementById('regionEventForm');
         if (!form.checkValidity()) {
             form.reportValidity();
@@ -413,8 +502,34 @@
         });
     };
 
+    var knownRegionEventTypes = ['Träning', 'Städning', 'Möte', 'Socialt', 'Nyhet'];
+
+    window.onRegionEventTypeChange = function() {
+        var select = document.getElementById('regionEventType');
+        var customInput = document.getElementById('regionEventCustomType');
+        if (select.value === 'Annat') {
+            customInput.style.display = '';
+            customInput.required = true;
+            customInput.focus();
+        } else {
+            customInput.style.display = 'none';
+            customInput.required = false;
+            customInput.value = '';
+        }
+        syncRegionEventTypeValue();
+        toggleRegionEventDateRequired();
+    };
+
+    window.syncRegionEventTypeValue = function() {
+        var select = document.getElementById('regionEventType');
+        var customInput = document.getElementById('regionEventCustomType');
+        var hidden = document.getElementById('regionEventTypeValue');
+        hidden.value = select.value === 'Annat' ? customInput.value : select.value;
+    };
+
     window.toggleRegionEventDateRequired = function() {
-        var isNyhet = document.getElementById('regionEventType').value === 'Nyhet';
+        var resolvedType = document.getElementById('regionEventTypeValue').value || document.getElementById('regionEventType').value;
+        var isNyhet = resolvedType === 'Nyhet';
         var dateInput = document.getElementById('regionEventDate');
         var dateLabel = document.getElementById('regionEventDateLabel');
         var dateHint = document.getElementById('regionEventDateHint');
