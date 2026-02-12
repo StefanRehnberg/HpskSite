@@ -25,6 +25,7 @@
     // New landing page properties
     var eventImage = Model.Value<IPublishedContent>("eventImage");
     var registrationRequired = Model.Value<bool>("registrationRequired");
+    var registrationUrl = Model.Value<string>("registrationUrl") ?? "";
     var feeAmount = Model.Value<string>("feeAmount") ?? "";
     var equipmentRequired = Model.Value<string>("equipmentRequired") ?? "";
     var targetAudience = Model.Value<string>("targetAudience") ?? "";
@@ -470,7 +471,16 @@
                                     <i class="bi bi-person-plus fs-4 me-3" style="color: @eventTypeColor;"></i>
                                     <div>
                                         <small class="text-secondary d-block">Anmälan</small>
-                                        <strong>Krävs</strong>
+                                        @if (!string.IsNullOrEmpty(registrationUrl))
+                                        {
+                                            <a href="@registrationUrl" target="_blank" rel="noopener noreferrer" class="fw-bold">
+                                                Anmäl dig här <i class="bi bi-box-arrow-up-right ms-1 small"></i>
+                                            </a>
+                                        }
+                                        else
+                                        {
+                                            <strong>Krävs</strong>
+                                        }
                                     </div>
                                 </div>
                             </div>

@@ -346,7 +346,7 @@
                 <div class="collapse navbar-collapse" id="navbarNav">
                     <ul class="navbar-nav ms-auto">
                         <li class="nav-item">
-                            <a class="nav-link @(Model.Root().IsAncestorOrSelf(Model) ? "active" : "")" 
+                            <a class="nav-link @(Model.Id == Model.Root().Id ? "active" : "")"
                                href="@Model.Root().Url()">Hem</a>
                         </li>
                         
@@ -503,11 +503,6 @@
                         }
                     </ul>
 
-                    <!-- Bug Report Button -->
-                    <button type="button" class="btn btn-outline-danger btn-sm me-2" data-bs-toggle="modal" data-bs-target="#bugReportModal">
-                        <i class="bi bi-bug"></i> <span class="d-none d-md-inline">Rapportera Fel</span>
-                    </button>
-
                     <!-- Theme Toggle Button -->
                     <button type="button" class="btn btn-outline-secondary btn-sm me-2" id="themeToggle"
                             title="Växla ljus/mörk läge" aria-label="Byt färgtema">
@@ -589,6 +584,9 @@
                     </p>
                 </div>
                 <div class="col-md-6 text-end">
+                    <button type="button" class="btn btn-outline-danger btn-sm mb-2" data-bs-toggle="modal" data-bs-target="#bugReportModal">
+                        <i class="bi bi-bug me-1"></i>Rapportera Fel
+                    </button>
                     <p class="mb-0">Built by SR & CC</p>
                 </div>
             </div>

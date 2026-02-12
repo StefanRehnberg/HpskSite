@@ -2075,6 +2075,7 @@ namespace HpskSite.Controllers
                         equipmentRequired = eventContent.GetValue<string>("equipmentRequired") ?? "",
                         targetAudience = eventContent.GetValue<string>("targetAudience") ?? "",
                         registrationRequired = eventContent.GetValue<bool>("registrationRequired"),
+                        registrationUrl = eventContent.GetValue<string>("registrationUrl") ?? "",
                         eventImageUrl = eventImageUrl,
                         contentBlocks = eventContent.GetValue<string>("contentBlocks") ?? "[]",
                         quickLinks = eventContent.GetValue<string>("quickLinks") ?? "[]"
@@ -2093,7 +2094,8 @@ namespace HpskSite.Controllers
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> EditEventDetails(int eventId, string feeAmount = "",
-            string equipmentRequired = "", string targetAudience = "", bool registrationRequired = false)
+            string equipmentRequired = "", string targetAudience = "", bool registrationRequired = false,
+            string registrationUrl = "")
         {
             try
             {
@@ -2117,6 +2119,7 @@ namespace HpskSite.Controllers
                 eventContent.SetValue("equipmentRequired", equipmentRequired);
                 eventContent.SetValue("targetAudience", targetAudience);
                 eventContent.SetValue("registrationRequired", registrationRequired);
+                eventContent.SetValue("registrationUrl", registrationUrl);
 
                 _contentService.Save(eventContent);
                 _contentService.Publish(eventContent, Array.Empty<string>());
