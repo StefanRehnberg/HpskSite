@@ -1,5 +1,9 @@
 @using Umbraco.Cms.Web.Common.PublishedModels;
 @using System.Globalization;
+@using Umbraco.Cms.Core.Security;
+@using Umbraco.Cms.Core.Services;
+@inject IMemberManager MemberManager
+@inject HpskSite.Services.AdminAuthorizationService AuthorizationService
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
     Layout = "Master.cshtml";
@@ -24,6 +28,10 @@
     var feeAmount = Model.Value<string>("feeAmount") ?? "";
     var equipmentRequired = Model.Value<string>("equipmentRequired") ?? "";
     var targetAudience = Model.Value<string>("targetAudience") ?? "";
+
+    // Content blocks and quick links (JSON stored as Textarea)
+    var contentBlocksJson = Model.Value<string>("contentBlocks") ?? "[]";
+    var quickLinksJson = Model.Value<string>("quickLinks") ?? "[]";
 
     // Event type display helpers
     string GetEventTypeColor(string type) => type switch
@@ -126,6 +134,21 @@
         ? (regionNode?.Url() ?? "/")
         : clubUrl;
 
+    // Admin authorization check
+    var isAdmin = false;
+    if (isRegionEvent)
+    {
+        var regionCode = regionNode?.Value<string>("regionCode") ?? "";
+        if (!string.IsNullOrEmpty(regionCode))
+        {
+            isAdmin = await AuthorizationService.IsRegionalAdminForRegion(regionCode);
+        }
+    }
+    else if (clubNode != null)
+    {
+        isAdmin = await AuthorizationService.IsClubAdminForClub(clubNode.Id);
+    }
+
     // Breadcrumb path
     var clubsPage = isRegionEvent ? null : clubNode?.Parent;
     var regionPage = isRegionEvent
@@ -168,6 +191,37 @@
 }
 
 <div class="container mt-4">
+    <!-- Admin Toolbar -->
+    @if (isAdmin)
+    {
+        @Html.AntiForgeryToken()
+        <script>
+            var eventPageId = @Model.Id;
+            var isRegionEvent = @(isRegionEvent ? "true" : "false");
+            var parentId = @(parentNode?.Id ?? 0);
+        </script>
+        <div class="row mb-3">
+            <div class="col-12">
+                <div class="alert alert-info d-flex align-items-center flex-wrap gap-2 py-2">
+                    <i class="bi bi-gear me-1"></i>
+                    <strong class="me-3">Admin</strong>
+                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="openEditDetailsModal()">
+                        <i class="bi bi-pencil me-1"></i>Redigera detaljer
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="openEditImageModal()">
+                        <i class="bi bi-image me-1"></i>Ändra bild
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-success" onclick="openContentBlockModal()">
+                        <i class="bi bi-plus-square me-1"></i>Nytt innehållsblock
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-success" onclick="openQuickLinkModal()">
+                        <i class="bi bi-link-45deg me-1"></i>Ny snabblänk
+                    </button>
+                </div>
+            </div>
+        </div>
+    }
+
     <!-- Breadcrumb -->
     <div class="row">
         <div class="col-12">
@@ -464,10 +518,16 @@
                     </div>
                 </div>
             }
+
+            <!-- Content Blocks Container -->
+            <div id="content-blocks-container"></div>
         </div>
 
         <!-- Sidebar Column -->
         <div class="col-lg-4">
+            <!-- Quick Links Container -->
+            <div id="quick-links-container"></div>
+
             <!-- Action Card -->
             <div class="card mb-4">
                 <div class="card-header" style="background-color: @eventTypeColor; color: white;">
@@ -615,6 +675,13 @@
 .card-body i {
     opacity: 0.9;
 }
+
+/* Content block images */
+.content-block-image {
+    max-width: 100%;
+    height: auto;
+    border-radius: 0.375rem;
+}
 </style>
 
 <script>
@@ -700,4 +767,108 @@ function shareEvent() {
         });
     }
 }
+
+// Render content blocks (public - always runs)
+(function() {
+    var blocksJson = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(contentBlocksJson));
+    var isAdmin = @(isAdmin ? "true" : "false");
+    try {
+        var blocks = JSON.parse(blocksJson);
+        if (!blocks || !blocks.length) return;
+        blocks.sort(function(a, b) { return (a.sortOrder || 0) - (b.sortOrder || 0); });
+        var container = document.getElementById('content-blocks-container');
+        if (!container) return;
+        blocks.forEach(function(block) {
+            var card = document.createElement('div');
+            card.className = 'card mb-4';
+            card.setAttribute('data-block-id', block.id);
+            var header = document.createElement('div');
+            header.className = 'card-header d-flex justify-content-between align-items-center';
+            var h5 = document.createElement('h5');
+            h5.className = 'mb-0';
+            h5.textContent = block.heading || '';
+            header.appendChild(h5);
+            if (isAdmin) {
+                var btnGroup = document.createElement('div');
+                btnGroup.className = 'btn-group btn-group-sm';
+                btnGroup.innerHTML = '<button type="button" class="btn btn-outline-secondary" onclick="moveContentBlock(\'' + block.id + '\', -1)" title="Flytta upp"><i class="bi bi-arrow-up"></i></button>'
+                    + '<button type="button" class="btn btn-outline-secondary" onclick="moveContentBlock(\'' + block.id + '\', 1)" title="Flytta ner"><i class="bi bi-arrow-down"></i></button>'
+                    + '<button type="button" class="btn btn-outline-primary" onclick="openContentBlockModal(\'' + block.id + '\')" title="Redigera"><i class="bi bi-pencil"></i></button>'
+                    + '<button type="button" class="btn btn-outline-danger" onclick="deleteContentBlock(\'' + block.id + '\')" title="Ta bort"><i class="bi bi-trash"></i></button>';
+                header.appendChild(btnGroup);
+            }
+            card.appendChild(header);
+            var body = document.createElement('div');
+            body.className = 'card-body';
+            if (block.imageUrl) {
+                var img = document.createElement('img');
+                img.src = block.imageUrl;
+                img.alt = block.heading || '';
+                img.className = 'content-block-image mb-3';
+                body.appendChild(img);
+            }
+            if (block.text) {
+                var textDiv = document.createElement('div');
+                textDiv.innerHTML = block.text;
+                body.appendChild(textDiv);
+            }
+            card.appendChild(body);
+            container.appendChild(card);
+        });
+    } catch(e) { console.error('Error rendering content blocks:', e); }
+})();
+
+// Render quick links (public - always runs)
+(function() {
+    var linksJson = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(quickLinksJson));
+    var isAdmin = @(isAdmin ? "true" : "false");
+    try {
+        var links = JSON.parse(linksJson);
+        if (!links || !links.length) return;
+        links.sort(function(a, b) { return (a.sortOrder || 0) - (b.sortOrder || 0); });
+        var container = document.getElementById('quick-links-container');
+        if (!container) return;
+        var card = document.createElement('div');
+        card.className = 'card mb-4';
+        var header = document.createElement('div');
+        header.className = 'card-header';
+        header.innerHTML = '<h5 class="mb-0"><i class="bi bi-link-45deg me-2"></i>Snabblänkar</h5>';
+        card.appendChild(header);
+        var listGroup = document.createElement('ul');
+        listGroup.className = 'list-group list-group-flush';
+        links.forEach(function(link) {
+            var li = document.createElement('li');
+            li.className = 'list-group-item d-flex justify-content-between align-items-center';
+            li.setAttribute('data-link-id', link.id);
+            var a = document.createElement('a');
+            a.href = link.url || '#';
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            a.className = 'text-decoration-none';
+            a.innerHTML = '<i class="bi ' + (link.icon || 'bi-link-45deg') + ' me-2"></i>' + escapeHtml(link.title || '');
+            li.appendChild(a);
+            if (isAdmin) {
+                var btnGroup = document.createElement('div');
+                btnGroup.className = 'btn-group btn-group-sm';
+                btnGroup.innerHTML = '<button type="button" class="btn btn-outline-primary btn-sm" onclick="openQuickLinkModal(\'' + link.id + '\')" title="Redigera"><i class="bi bi-pencil"></i></button>'
+                    + '<button type="button" class="btn btn-outline-danger btn-sm" onclick="deleteQuickLink(\'' + link.id + '\')" title="Ta bort"><i class="bi bi-trash"></i></button>';
+                li.appendChild(btnGroup);
+            }
+            listGroup.appendChild(li);
+        });
+        card.appendChild(listGroup);
+        container.appendChild(card);
+    } catch(e) { console.error('Error rendering quick links:', e); }
+})();
+
+function escapeHtml(text) {
+    var div = document.createElement('div');
+    div.appendChild(document.createTextNode(text));
+    return div.innerHTML;
+}
 </script>
+
+@if (isAdmin)
+{
+    @await Html.PartialAsync("EventPageAdminModals")
+}

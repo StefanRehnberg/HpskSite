@@ -2003,6 +2003,383 @@ namespace HpskSite.Controllers
             }
         }
 
+        // ==========================================
+        // Event Landing Page Editing Endpoints
+        // ==========================================
+
+        /// <summary>
+        /// Unified auth check for event page endpoints. Works for both club and region events.
+        /// Returns true if authorized, false otherwise.
+        /// </summary>
+        private async Task<bool> IsEventAdminAsync(IContent eventContent)
+        {
+            var parent = _contentService.GetById(eventContent.ParentId);
+            if (parent == null) return false;
+
+            if (parent.ContentType.Alias == "club")
+            {
+                return await _authorizationService.IsClubAdminForClub(parent.Id);
+            }
+            else if (parent.ContentType.Alias == "regionalPage")
+            {
+                var regionCode = parent.GetValue<string>("regionCode") ?? "";
+                if (string.IsNullOrEmpty(regionCode)) return false;
+                return await _authorizationService.IsRegionalAdminForRegion(regionCode);
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Get current editable data for an event page (detail fields, image URL, content blocks, quick links)
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetEventEditData(int eventId)
+        {
+            try
+            {
+                if (eventId <= 0)
+                {
+                    return Ok(new { success = false, message = "Invalid event ID" });
+                }
+
+                var eventContent = _contentService.GetById(eventId);
+                if (eventContent == null || eventContent.ContentType.Alias != "clubSimpleEvent")
+                {
+                    return Ok(new { success = false, message = "Event not found" });
+                }
+
+                if (!await IsEventAdminAsync(eventContent))
+                {
+                    return Ok(new { success = false, message = "Access denied - insufficient permissions" });
+                }
+
+                // Get event image URL if set
+                var eventImageUrl = "";
+                if (UmbracoContext.Content != null)
+                {
+                    var publishedEvent = UmbracoContext.Content.GetById(eventId);
+                    if (publishedEvent != null)
+                    {
+                        var eventImage = publishedEvent.Value<IPublishedContent>("eventImage");
+                        eventImageUrl = eventImage?.Url() ?? "";
+                    }
+                }
+
+                return Ok(new
+                {
+                    success = true,
+                    data = new
+                    {
+                        feeAmount = eventContent.GetValue<string>("feeAmount") ?? "",
+                        equipmentRequired = eventContent.GetValue<string>("equipmentRequired") ?? "",
+                        targetAudience = eventContent.GetValue<string>("targetAudience") ?? "",
+                        registrationRequired = eventContent.GetValue<bool>("registrationRequired"),
+                        eventImageUrl = eventImageUrl,
+                        contentBlocks = eventContent.GetValue<string>("contentBlocks") ?? "[]",
+                        quickLinks = eventContent.GetValue<string>("quickLinks") ?? "[]"
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                return Ok(new { success = false, message = "Error loading event data: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Edit event detail fields (fee, equipment, audience, registration required)
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> EditEventDetails(int eventId, string feeAmount = "",
+            string equipmentRequired = "", string targetAudience = "", bool registrationRequired = false)
+        {
+            try
+            {
+                if (eventId <= 0)
+                {
+                    return Ok(new { success = false, message = "Invalid event ID" });
+                }
+
+                var eventContent = _contentService.GetById(eventId);
+                if (eventContent == null || eventContent.ContentType.Alias != "clubSimpleEvent")
+                {
+                    return Ok(new { success = false, message = "Event not found" });
+                }
+
+                if (!await IsEventAdminAsync(eventContent))
+                {
+                    return Ok(new { success = false, message = "Access denied - insufficient permissions" });
+                }
+
+                eventContent.SetValue("feeAmount", feeAmount);
+                eventContent.SetValue("equipmentRequired", equipmentRequired);
+                eventContent.SetValue("targetAudience", targetAudience);
+                eventContent.SetValue("registrationRequired", registrationRequired);
+
+                _contentService.Save(eventContent);
+                _contentService.Publish(eventContent, Array.Empty<string>());
+
+                return Ok(new { success = true, message = "Event details updated successfully" });
+            }
+            catch (Exception ex)
+            {
+                return Ok(new { success = false, message = "Error updating event details: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Upload a hero image for an event page. Saves to "Event Images" media folder and links via UDI.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> UploadEventImage(int eventId, IFormFile imageFile)
+        {
+            try
+            {
+                if (eventId <= 0)
+                {
+                    return Ok(new { success = false, message = "Invalid event ID" });
+                }
+
+                var eventContent = _contentService.GetById(eventId);
+                if (eventContent == null || eventContent.ContentType.Alias != "clubSimpleEvent")
+                {
+                    return Ok(new { success = false, message = "Event not found" });
+                }
+
+                if (!await IsEventAdminAsync(eventContent))
+                {
+                    return Ok(new { success = false, message = "Access denied - insufficient permissions" });
+                }
+
+                if (imageFile == null || imageFile.Length == 0)
+                {
+                    return Ok(new { success = false, message = "No file uploaded" });
+                }
+
+                if (imageFile.Length > 5 * 1024 * 1024)
+                {
+                    return Ok(new { success = false, message = "File too large. Maximum 5 MB allowed." });
+                }
+
+                var extension = Path.GetExtension(imageFile.FileName).ToLowerInvariant();
+                var allowedExtensions = new[] { ".jpg", ".jpeg", ".png", ".gif", ".webp" };
+                if (!allowedExtensions.Contains(extension))
+                {
+                    return Ok(new { success = false, message = "Invalid file type. Only JPG, PNG, GIF and WebP allowed." });
+                }
+
+                // Find or create "Event Images" folder in Media Library
+                var eventImagesFolder = _mediaService.GetRootMedia()
+                    .FirstOrDefault(m => m.Name == "Event Images");
+
+                if (eventImagesFolder == null)
+                {
+                    eventImagesFolder = _mediaService.CreateMedia("Event Images", -1, "Folder");
+                    _mediaService.Save(eventImagesFolder);
+                }
+
+                string fileName = Path.GetFileName(imageFile.FileName);
+                string fileExtension = Path.GetExtension(fileName);
+                string uniqueFileName = $"{Path.GetFileNameWithoutExtension(fileName)}_{Guid.NewGuid()}{fileExtension}";
+
+                var mediaItem = _mediaService.CreateMedia(fileName, eventImagesFolder.Id, "Image");
+
+                var mediaFolderPath = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "media", "event-images");
+                if (!Directory.Exists(mediaFolderPath))
+                {
+                    Directory.CreateDirectory(mediaFolderPath);
+                }
+
+                var physicalFilePath = Path.Combine(mediaFolderPath, uniqueFileName);
+                using (var fileStream = new FileStream(physicalFilePath, FileMode.Create))
+                {
+                    await imageFile.CopyToAsync(fileStream);
+                }
+
+                var relativePath = $"/media/event-images/{uniqueFileName}";
+                mediaItem.SetValue("umbracoFile", relativePath);
+                mediaItem.SetValue("umbracoExtension", fileExtension.TrimStart('.'));
+                mediaItem.SetValue("umbracoBytes", imageFile.Length.ToString());
+
+                var mediaSaveResult = _mediaService.Save(mediaItem);
+                if (!mediaSaveResult.Success)
+                {
+                    if (System.IO.File.Exists(physicalFilePath))
+                    {
+                        System.IO.File.Delete(physicalFilePath);
+                    }
+                    return Ok(new { success = false, message = "Failed to save image to media library" });
+                }
+
+                // Link media to event content property via UDI
+                eventContent.SetValue("eventImage", mediaItem.GetUdi().ToString());
+                _contentService.Save(eventContent);
+                _contentService.Publish(eventContent, Array.Empty<string>());
+
+                return Ok(new
+                {
+                    success = true,
+                    message = "Event image uploaded successfully",
+                    imageUrl = relativePath
+                });
+            }
+            catch (Exception ex)
+            {
+                return Ok(new { success = false, message = "Error uploading event image: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Save content blocks JSON to event page
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveEventContentBlocks(int eventId, string contentBlocksJson)
+        {
+            try
+            {
+                if (eventId <= 0)
+                {
+                    return Ok(new { success = false, message = "Invalid event ID" });
+                }
+
+                var eventContent = _contentService.GetById(eventId);
+                if (eventContent == null || eventContent.ContentType.Alias != "clubSimpleEvent")
+                {
+                    return Ok(new { success = false, message = "Event not found" });
+                }
+
+                if (!await IsEventAdminAsync(eventContent))
+                {
+                    return Ok(new { success = false, message = "Access denied - insufficient permissions" });
+                }
+
+                eventContent.SetValue("contentBlocks", contentBlocksJson ?? "[]");
+                _contentService.Save(eventContent);
+                _contentService.Publish(eventContent, Array.Empty<string>());
+
+                return Ok(new { success = true, message = "Content blocks saved successfully" });
+            }
+            catch (Exception ex)
+            {
+                return Ok(new { success = false, message = "Error saving content blocks: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Save quick links JSON to event page
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveEventQuickLinks(int eventId, string quickLinksJson)
+        {
+            try
+            {
+                if (eventId <= 0)
+                {
+                    return Ok(new { success = false, message = "Invalid event ID" });
+                }
+
+                var eventContent = _contentService.GetById(eventId);
+                if (eventContent == null || eventContent.ContentType.Alias != "clubSimpleEvent")
+                {
+                    return Ok(new { success = false, message = "Event not found" });
+                }
+
+                if (!await IsEventAdminAsync(eventContent))
+                {
+                    return Ok(new { success = false, message = "Access denied - insufficient permissions" });
+                }
+
+                eventContent.SetValue("quickLinks", quickLinksJson ?? "[]");
+                _contentService.Save(eventContent);
+                _contentService.Publish(eventContent, Array.Empty<string>());
+
+                return Ok(new { success = true, message = "Quick links saved successfully" });
+            }
+            catch (Exception ex)
+            {
+                return Ok(new { success = false, message = "Error saving quick links: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Upload an image for a content block. Returns URL only (not linked to any Umbraco property).
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> UploadEventBlockImage(int eventId, IFormFile imageFile)
+        {
+            try
+            {
+                if (eventId <= 0)
+                {
+                    return Ok(new { success = false, message = "Invalid event ID" });
+                }
+
+                var eventContent = _contentService.GetById(eventId);
+                if (eventContent == null || eventContent.ContentType.Alias != "clubSimpleEvent")
+                {
+                    return Ok(new { success = false, message = "Event not found" });
+                }
+
+                if (!await IsEventAdminAsync(eventContent))
+                {
+                    return Ok(new { success = false, message = "Access denied - insufficient permissions" });
+                }
+
+                if (imageFile == null || imageFile.Length == 0)
+                {
+                    return Ok(new { success = false, message = "No file uploaded" });
+                }
+
+                if (imageFile.Length > 5 * 1024 * 1024)
+                {
+                    return Ok(new { success = false, message = "File too large. Maximum 5 MB allowed." });
+                }
+
+                var extension = Path.GetExtension(imageFile.FileName).ToLowerInvariant();
+                var allowedExtensions = new[] { ".jpg", ".jpeg", ".png", ".gif", ".webp" };
+                if (!allowedExtensions.Contains(extension))
+                {
+                    return Ok(new { success = false, message = "Invalid file type. Only JPG, PNG, GIF and WebP allowed." });
+                }
+
+                // Save to event-images folder (no Umbraco media link needed, just file storage)
+                var mediaFolderPath = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "media", "event-images");
+                if (!Directory.Exists(mediaFolderPath))
+                {
+                    Directory.CreateDirectory(mediaFolderPath);
+                }
+
+                string fileName = Path.GetFileName(imageFile.FileName);
+                string fileExtension = Path.GetExtension(fileName);
+                string uniqueFileName = $"block_{Guid.NewGuid()}{fileExtension}";
+
+                var physicalFilePath = Path.Combine(mediaFolderPath, uniqueFileName);
+                using (var fileStream = new FileStream(physicalFilePath, FileMode.Create))
+                {
+                    await imageFile.CopyToAsync(fileStream);
+                }
+
+                var relativePath = $"/media/event-images/{uniqueFileName}";
+
+                return Ok(new
+                {
+                    success = true,
+                    message = "Block image uploaded successfully",
+                    imageUrl = relativePath
+                });
+            }
+            catch (Exception ex)
+            {
+                return Ok(new { success = false, message = "Error uploading block image: " + ex.Message });
+            }
+        }
+
         /// <summary>
         /// Helper: Get all descendants of a content item (used for querying)
         /// </summary>

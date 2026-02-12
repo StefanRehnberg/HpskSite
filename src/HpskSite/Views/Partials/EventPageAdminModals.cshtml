@@ -1,0 +1,576 @@
+<!-- CKEditor 5 CDN for rich text editing in content blocks -->
+<script src="https://cdn.ckeditor.com/ckeditor5/41.4.2/classic/ckeditor.js"></script>
+
+<!-- Edit Details Modal -->
+<div class="modal fade" id="editDetailsModal" tabindex="-1" aria-labelledby="editDetailsModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="editDetailsModalLabel"><i class="bi bi-pencil me-2"></i>Redigera detaljer</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label for="editFeeAmount" class="form-label">Kostnad</label>
+                    <input type="text" class="form-control" id="editFeeAmount" placeholder="t.ex. 100 kr, Gratis">
+                </div>
+                <div class="mb-3">
+                    <label for="editTargetAudience" class="form-label">Målgrupp</label>
+                    <input type="text" class="form-control" id="editTargetAudience" placeholder="t.ex. Alla, Nybörjare">
+                </div>
+                <div class="mb-3">
+                    <label for="editEquipmentRequired" class="form-label">Utrustning att ta med</label>
+                    <textarea class="form-control" id="editEquipmentRequired" rows="3" placeholder="En rad per utrustning"></textarea>
+                </div>
+                <div class="form-check mb-3">
+                    <input class="form-check-input" type="checkbox" id="editRegistrationRequired">
+                    <label class="form-check-label" for="editRegistrationRequired">Anmälan krävs</label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" onclick="saveEventDetails()">
+                    <i class="bi bi-check-lg me-1"></i>Spara
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Image Modal -->
+<div class="modal fade" id="editImageModal" tabindex="-1" aria-labelledby="editImageModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="editImageModalLabel"><i class="bi bi-image me-2"></i>Ändra eventbild</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div id="currentImagePreview" class="mb-3 text-center" style="display: none;">
+                    <img id="currentImagePreviewImg" src="" alt="Nuvarande bild" class="img-fluid rounded" style="max-height: 200px;">
+                    <p class="text-muted mt-1 small">Nuvarande bild</p>
+                </div>
+                <div class="mb-3">
+                    <label for="eventImageFile" class="form-label">Välj ny bild</label>
+                    <input type="file" class="form-control" id="eventImageFile" accept=".jpg,.jpeg,.png,.gif,.webp">
+                    <div class="form-text">Max 5 MB. JPG, PNG, GIF eller WebP.</div>
+                </div>
+                <div id="newImagePreview" class="text-center" style="display: none;">
+                    <img id="newImagePreviewImg" src="" alt="Ny bild" class="img-fluid rounded" style="max-height: 200px;">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" onclick="uploadEventImage()">
+                    <i class="bi bi-upload me-1"></i>Ladda upp
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Content Block Modal -->
+<div class="modal fade" id="contentBlockModal" tabindex="-1" aria-labelledby="contentBlockModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="contentBlockModalLabel"><i class="bi bi-plus-square me-2"></i>Innehållsblock</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="editingBlockId" value="">
+                <div class="mb-3">
+                    <label for="blockHeading" class="form-label">Rubrik <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="blockHeading" required placeholder="Rubrik för blocket">
+                </div>
+                <div class="mb-3">
+                    <label for="blockText" class="form-label">Text (valfritt)</label>
+                    <textarea class="form-control" id="blockText" rows="6"></textarea>
+                </div>
+                <div class="mb-3">
+                    <label for="blockImageFile" class="form-label">Bild (valfritt)</label>
+                    <input type="file" class="form-control" id="blockImageFile" accept=".jpg,.jpeg,.png,.gif,.webp">
+                    <div class="form-text">Max 5 MB. JPG, PNG, GIF eller WebP.</div>
+                </div>
+                <div id="blockImagePreview" class="text-center" style="display: none;">
+                    <img id="blockImagePreviewImg" src="" alt="Blockbild" class="img-fluid rounded" style="max-height: 200px;">
+                    <button type="button" class="btn btn-sm btn-outline-danger mt-2" onclick="removeBlockImage()">
+                        <i class="bi bi-trash me-1"></i>Ta bort bild
+                    </button>
+                </div>
+                <input type="hidden" id="blockImageUrl" value="">
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" onclick="saveContentBlock()">
+                    <i class="bi bi-check-lg me-1"></i>Spara
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Quick Link Modal -->
+<div class="modal fade" id="quickLinkModal" tabindex="-1" aria-labelledby="quickLinkModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="quickLinkModalLabel"><i class="bi bi-link-45deg me-2"></i>Snabblänk</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="editingLinkId" value="">
+                <div class="mb-3">
+                    <label for="linkTitle" class="form-label">Titel <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="linkTitle" required placeholder="Länktext">
+                </div>
+                <div class="mb-3">
+                    <label for="linkUrl" class="form-label">URL <span class="text-danger">*</span></label>
+                    <input type="url" class="form-control" id="linkUrl" required placeholder="https://...">
+                </div>
+                <div class="mb-3">
+                    <label for="linkIcon" class="form-label">Ikon</label>
+                    <select class="form-select" id="linkIcon">
+                        <option value="bi-link-45deg">Länk</option>
+                        <option value="bi-file-earmark-text">Dokument</option>
+                        <option value="bi-download">Nedladdning</option>
+                        <option value="bi-globe">Webbplats</option>
+                        <option value="bi-camera-video">Video</option>
+                        <option value="bi-map">Karta</option>
+                        <option value="bi-calendar-event">Kalender</option>
+                        <option value="bi-info-circle">Information</option>
+                        <option value="bi-envelope">E-post</option>
+                        <option value="bi-telephone">Telefon</option>
+                        <option value="bi-facebook">Facebook</option>
+                        <option value="bi-instagram">Instagram</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" onclick="saveQuickLink()">
+                    <i class="bi bi-check-lg me-1"></i>Spara
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// ==========================================
+// Event Page Admin JavaScript
+// ==========================================
+
+let contentBlocks = [];
+let quickLinks = [];
+let blockEditorInstance = null;
+let blockImageUrlPending = '';
+
+function getAntiForgeryToken() {
+    var tokenInput = document.querySelector('input[name="__RequestVerificationToken"]');
+    return tokenInput ? tokenInput.value : '';
+}
+
+// ==========================================
+// Load admin data from server
+// ==========================================
+function loadEventAdminData() {
+    fetch('/umbraco/surface/Club/GetEventEditData?eventId=' + eventPageId)
+        .then(function(r) { return r.json(); })
+        .then(function(result) {
+            if (!result.success) return;
+            var d = result.data;
+
+            // Pre-fill detail fields
+            document.getElementById('editFeeAmount').value = d.feeAmount || '';
+            document.getElementById('editTargetAudience').value = d.targetAudience || '';
+            document.getElementById('editEquipmentRequired').value = d.equipmentRequired || '';
+            document.getElementById('editRegistrationRequired').checked = d.registrationRequired;
+
+            // Image preview
+            if (d.eventImageUrl) {
+                document.getElementById('currentImagePreviewImg').src = d.eventImageUrl;
+                document.getElementById('currentImagePreview').style.display = '';
+            }
+
+            // Parse content blocks and quick links
+            try { contentBlocks = JSON.parse(d.contentBlocks) || []; } catch(e) { contentBlocks = []; }
+            try { quickLinks = JSON.parse(d.quickLinks) || []; } catch(e) { quickLinks = []; }
+        })
+        .catch(function(err) { console.error('Error loading event admin data:', err); });
+}
+
+document.addEventListener('DOMContentLoaded', loadEventAdminData);
+
+// ==========================================
+// Edit Details
+// ==========================================
+function openEditDetailsModal() {
+    var modal = new bootstrap.Modal(document.getElementById('editDetailsModal'));
+    modal.show();
+}
+
+function saveEventDetails() {
+    var formData = new FormData();
+    formData.append('eventId', eventPageId);
+    formData.append('feeAmount', document.getElementById('editFeeAmount').value);
+    formData.append('equipmentRequired', document.getElementById('editEquipmentRequired').value);
+    formData.append('targetAudience', document.getElementById('editTargetAudience').value);
+    formData.append('registrationRequired', document.getElementById('editRegistrationRequired').checked);
+    formData.append('__RequestVerificationToken', getAntiForgeryToken());
+
+    fetch('/umbraco/surface/Club/EditEventDetails', {
+        method: 'POST',
+        body: formData
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(result) {
+        if (result.success) {
+            bootstrap.Modal.getInstance(document.getElementById('editDetailsModal')).hide();
+            location.reload();
+        } else {
+            alert('Fel: ' + (result.message || 'Kunde inte spara'));
+        }
+    })
+    .catch(function(err) { alert('Fel vid sparande: ' + err.message); });
+}
+
+// ==========================================
+// Edit Image
+// ==========================================
+function openEditImageModal() {
+    document.getElementById('eventImageFile').value = '';
+    document.getElementById('newImagePreview').style.display = 'none';
+    var modal = new bootstrap.Modal(document.getElementById('editImageModal'));
+    modal.show();
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    var fileInput = document.getElementById('eventImageFile');
+    if (fileInput) {
+        fileInput.addEventListener('change', function() {
+            var file = this.files[0];
+            if (file) {
+                var reader = new FileReader();
+                reader.onload = function(e) {
+                    document.getElementById('newImagePreviewImg').src = e.target.result;
+                    document.getElementById('newImagePreview').style.display = '';
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+    }
+});
+
+function uploadEventImage() {
+    var fileInput = document.getElementById('eventImageFile');
+    if (!fileInput.files.length) {
+        alert('Välj en bild först.');
+        return;
+    }
+
+    var formData = new FormData();
+    formData.append('eventId', eventPageId);
+    formData.append('imageFile', fileInput.files[0]);
+    formData.append('__RequestVerificationToken', getAntiForgeryToken());
+
+    fetch('/umbraco/surface/Club/UploadEventImage', {
+        method: 'POST',
+        body: formData
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(result) {
+        if (result.success) {
+            bootstrap.Modal.getInstance(document.getElementById('editImageModal')).hide();
+            location.reload();
+        } else {
+            alert('Fel: ' + (result.message || 'Kunde inte ladda upp bilden'));
+        }
+    })
+    .catch(function(err) { alert('Fel vid uppladdning: ' + err.message); });
+}
+
+// ==========================================
+// Content Blocks
+// ==========================================
+function openContentBlockModal(blockId) {
+    document.getElementById('editingBlockId').value = blockId || '';
+    document.getElementById('blockHeading').value = '';
+    document.getElementById('blockImageUrl').value = '';
+    document.getElementById('blockImagePreview').style.display = 'none';
+    document.getElementById('blockImageFile').value = '';
+    blockImageUrlPending = '';
+
+    // Destroy previous CKEditor instance if exists
+    if (blockEditorInstance) {
+        blockEditorInstance.destroy().catch(function() {});
+        blockEditorInstance = null;
+    }
+
+    var textArea = document.getElementById('blockText');
+    textArea.value = '';
+
+    if (blockId) {
+        var block = contentBlocks.find(function(b) { return b.id === blockId; });
+        if (block) {
+            document.getElementById('blockHeading').value = block.heading || '';
+            textArea.value = block.text || '';
+            if (block.imageUrl) {
+                blockImageUrlPending = block.imageUrl;
+                document.getElementById('blockImageUrl').value = block.imageUrl;
+                document.getElementById('blockImagePreviewImg').src = block.imageUrl;
+                document.getElementById('blockImagePreview').style.display = '';
+            }
+        }
+        document.getElementById('contentBlockModalLabel').innerHTML = '<i class="bi bi-pencil me-2"></i>Redigera innehållsblock';
+    } else {
+        document.getElementById('contentBlockModalLabel').innerHTML = '<i class="bi bi-plus-square me-2"></i>Nytt innehållsblock';
+    }
+
+    var modal = new bootstrap.Modal(document.getElementById('contentBlockModal'));
+    modal.show();
+
+    // Initialize CKEditor after modal is shown
+    document.getElementById('contentBlockModal').addEventListener('shown.bs.modal', function handler() {
+        document.getElementById('contentBlockModal').removeEventListener('shown.bs.modal', handler);
+        ClassicEditor
+            .create(document.getElementById('blockText'), {
+                toolbar: ['heading', '|', 'bold', 'italic', 'link', '|', 'bulletedList', 'numberedList', '|', 'undo', 'redo'],
+                language: 'sv'
+            })
+            .then(function(editor) {
+                blockEditorInstance = editor;
+            })
+            .catch(function(err) { console.error('CKEditor init error:', err); });
+    });
+}
+
+function removeBlockImage() {
+    blockImageUrlPending = '';
+    document.getElementById('blockImageUrl').value = '';
+    document.getElementById('blockImagePreview').style.display = 'none';
+    document.getElementById('blockImageFile').value = '';
+}
+
+// Auto-upload block image when file selected
+document.addEventListener('DOMContentLoaded', function() {
+    var blockFileInput = document.getElementById('blockImageFile');
+    if (blockFileInput) {
+        blockFileInput.addEventListener('change', function() {
+            var file = this.files[0];
+            if (!file) return;
+
+            var formData = new FormData();
+            formData.append('eventId', eventPageId);
+            formData.append('imageFile', file);
+            formData.append('__RequestVerificationToken', getAntiForgeryToken());
+
+            fetch('/umbraco/surface/Club/UploadEventBlockImage', {
+                method: 'POST',
+                body: formData
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(result) {
+                if (result.success) {
+                    blockImageUrlPending = result.imageUrl;
+                    document.getElementById('blockImageUrl').value = result.imageUrl;
+                    document.getElementById('blockImagePreviewImg').src = result.imageUrl;
+                    document.getElementById('blockImagePreview').style.display = '';
+                } else {
+                    alert('Fel: ' + (result.message || 'Kunde inte ladda upp bilden'));
+                }
+            })
+            .catch(function(err) { alert('Fel vid uppladdning: ' + err.message); });
+        });
+    }
+});
+
+function saveContentBlock() {
+    var heading = document.getElementById('blockHeading').value.trim();
+    if (!heading) {
+        alert('Rubrik krävs.');
+        return;
+    }
+
+    var text = blockEditorInstance ? blockEditorInstance.getData() : document.getElementById('blockText').value;
+    var imageUrl = blockImageUrlPending || document.getElementById('blockImageUrl').value;
+    var editingId = document.getElementById('editingBlockId').value;
+
+    if (editingId) {
+        // Update existing block
+        var block = contentBlocks.find(function(b) { return b.id === editingId; });
+        if (block) {
+            block.heading = heading;
+            block.text = text;
+            block.imageUrl = imageUrl;
+        }
+    } else {
+        // Create new block
+        var maxSort = contentBlocks.length > 0 ? Math.max.apply(null, contentBlocks.map(function(b) { return b.sortOrder || 0; })) : -1;
+        contentBlocks.push({
+            id: crypto.randomUUID(),
+            heading: heading,
+            text: text,
+            imageUrl: imageUrl,
+            sortOrder: maxSort + 1
+        });
+    }
+
+    persistContentBlocks();
+}
+
+function deleteContentBlock(blockId) {
+    if (!confirm('Vill du ta bort detta innehållsblock?')) return;
+    contentBlocks = contentBlocks.filter(function(b) { return b.id !== blockId; });
+    persistContentBlocks();
+}
+
+function moveContentBlock(blockId, direction) {
+    contentBlocks.sort(function(a, b) { return (a.sortOrder || 0) - (b.sortOrder || 0); });
+    var idx = contentBlocks.findIndex(function(b) { return b.id === blockId; });
+    if (idx < 0) return;
+    var newIdx = idx + direction;
+    if (newIdx < 0 || newIdx >= contentBlocks.length) return;
+
+    // Swap sort orders
+    var tempSort = contentBlocks[idx].sortOrder;
+    contentBlocks[idx].sortOrder = contentBlocks[newIdx].sortOrder;
+    contentBlocks[newIdx].sortOrder = tempSort;
+
+    persistContentBlocks();
+}
+
+function persistContentBlocks() {
+    var formData = new FormData();
+    formData.append('eventId', eventPageId);
+    formData.append('contentBlocksJson', JSON.stringify(contentBlocks));
+    formData.append('__RequestVerificationToken', getAntiForgeryToken());
+
+    fetch('/umbraco/surface/Club/SaveEventContentBlocks', {
+        method: 'POST',
+        body: formData
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(result) {
+        if (result.success) {
+            var modalEl = document.getElementById('contentBlockModal');
+            var modalInstance = bootstrap.Modal.getInstance(modalEl);
+            if (modalInstance) modalInstance.hide();
+            location.reload();
+        } else {
+            alert('Fel: ' + (result.message || 'Kunde inte spara'));
+        }
+    })
+    .catch(function(err) { alert('Fel vid sparande: ' + err.message); });
+}
+
+function renderContentBlocks() {
+    // Full page reload is used instead for simplicity
+    location.reload();
+}
+
+// ==========================================
+// Quick Links
+// ==========================================
+function openQuickLinkModal(linkId) {
+    document.getElementById('editingLinkId').value = linkId || '';
+    document.getElementById('linkTitle').value = '';
+    document.getElementById('linkUrl').value = '';
+    document.getElementById('linkIcon').value = 'bi-link-45deg';
+
+    if (linkId) {
+        var link = quickLinks.find(function(l) { return l.id === linkId; });
+        if (link) {
+            document.getElementById('linkTitle').value = link.title || '';
+            document.getElementById('linkUrl').value = link.url || '';
+            document.getElementById('linkIcon').value = link.icon || 'bi-link-45deg';
+        }
+        document.getElementById('quickLinkModalLabel').innerHTML = '<i class="bi bi-pencil me-2"></i>Redigera snabblänk';
+    } else {
+        document.getElementById('quickLinkModalLabel').innerHTML = '<i class="bi bi-link-45deg me-2"></i>Ny snabblänk';
+    }
+
+    var modal = new bootstrap.Modal(document.getElementById('quickLinkModal'));
+    modal.show();
+}
+
+function saveQuickLink() {
+    var title = document.getElementById('linkTitle').value.trim();
+    var url = document.getElementById('linkUrl').value.trim();
+    if (!title || !url) {
+        alert('Titel och URL krävs.');
+        return;
+    }
+
+    var icon = document.getElementById('linkIcon').value;
+    var editingId = document.getElementById('editingLinkId').value;
+
+    if (editingId) {
+        var link = quickLinks.find(function(l) { return l.id === editingId; });
+        if (link) {
+            link.title = title;
+            link.url = url;
+            link.icon = icon;
+        }
+    } else {
+        var maxSort = quickLinks.length > 0 ? Math.max.apply(null, quickLinks.map(function(l) { return l.sortOrder || 0; })) : -1;
+        quickLinks.push({
+            id: crypto.randomUUID(),
+            title: title,
+            url: url,
+            icon: icon,
+            sortOrder: maxSort + 1
+        });
+    }
+
+    persistQuickLinks();
+}
+
+function deleteQuickLink(linkId) {
+    if (!confirm('Vill du ta bort denna snabblänk?')) return;
+    quickLinks = quickLinks.filter(function(l) { return l.id !== linkId; });
+    persistQuickLinks();
+}
+
+function moveQuickLink(linkId, direction) {
+    quickLinks.sort(function(a, b) { return (a.sortOrder || 0) - (b.sortOrder || 0); });
+    var idx = quickLinks.findIndex(function(l) { return l.id === linkId; });
+    if (idx < 0) return;
+    var newIdx = idx + direction;
+    if (newIdx < 0 || newIdx >= quickLinks.length) return;
+
+    var tempSort = quickLinks[idx].sortOrder;
+    quickLinks[idx].sortOrder = quickLinks[newIdx].sortOrder;
+    quickLinks[newIdx].sortOrder = tempSort;
+
+    persistQuickLinks();
+}
+
+function persistQuickLinks() {
+    var formData = new FormData();
+    formData.append('eventId', eventPageId);
+    formData.append('quickLinksJson', JSON.stringify(quickLinks));
+    formData.append('__RequestVerificationToken', getAntiForgeryToken());
+
+    fetch('/umbraco/surface/Club/SaveEventQuickLinks', {
+        method: 'POST',
+        body: formData
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(result) {
+        if (result.success) {
+            var modalEl = document.getElementById('quickLinkModal');
+            var modalInstance = bootstrap.Modal.getInstance(modalEl);
+            if (modalInstance) modalInstance.hide();
+            location.reload();
+        } else {
+            alert('Fel: ' + (result.message || 'Kunde inte spara'));
+        }
+    })
+    .catch(function(err) { alert('Fel vid sparande: ' + err.message); });
+}
+
+function renderQuickLinks() {
+    location.reload();
+}
+</script>
