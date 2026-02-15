@@ -120,7 +120,7 @@
                     <th class="sortable" data-sort="primaryClubName">Klubb <i class="bi bi-arrow-down-up"></i></th>
                     <th class="sortable" data-sort="lastActiveSortValue">Webb <i class="bi bi-arrow-down-up"></i></th>
                     <th class="sortable" data-sort="lastMobileActiveSortValue">App <i class="bi bi-arrow-down-up"></i></th>
-                    <th>Grupper</th>
+                    <th>Admin</th>
                     <th>Status</th>
                     <th class="text-end">Åtgärder</th>
                 </tr>
@@ -959,10 +959,11 @@ function displayUsers() {
                 .join('');
         }
 
-        // Build groups badges
-        const groupsBadges = user.groups && user.groups.length > 0
-            ? user.groups.map(group => `<span class="badge bg-primary me-1 mb-1">${escapeHtml(group)}</span>`).join('')
-            : '<span class="text-muted">Inga grupper</span>';
+        // Build admin group badges (filter out "Users" — everyone is in that group)
+        const adminGroups = (user.groups || []).filter(g => g !== 'Users');
+        const groupsBadges = adminGroups.length > 0
+            ? adminGroups.map(group => `<span class="badge bg-primary me-1 mb-1">${escapeHtml(group)}</span>`).join('')
+            : '';
 
         const statusText = user.isApproved ? 'Godkänd' : 'Väntande';
         const statusClass = user.isApproved ? 'bg-success' : 'bg-warning';
@@ -1592,13 +1593,9 @@ function loadPendingApprovals() {
     const container = document.getElementById('pendingApprovals');
     const countBadge = document.getElementById('pendingCount');
 
-    // Build URL with optional region parameter
-    const region = currentFilters.region || '';
-    const url = region
-        ? `/umbraco/surface/MemberAdmin/GetPendingApprovals?region=${encodeURIComponent(region)}`
-        : '/umbraco/surface/MemberAdmin/GetPendingApprovals';
-
-    fetch(url)
+    // Always load all pending approvals (no region filter).
+    // Regional admins are already restricted server-side to their managed regions.
+    fetch('/umbraco/surface/MemberAdmin/GetPendingApprovals')
         .then(response => response.json())
         .then(data => {
             if (data.success) {
@@ -1606,10 +1603,7 @@ function loadPendingApprovals() {
                 countBadge.textContent = pendingMembers.length;
 
                 if (pendingMembers.length === 0) {
-                    const message = region
-                        ? 'Inga väntande godkännanden för vald krets.'
-                        : 'Inga väntande godkännanden.';
-                    container.innerHTML = `<div class="alert alert-info mb-0">${message}</div>`;
+                    container.innerHTML = '<div class="alert alert-info mb-0">Inga väntande godkännanden.</div>';
                 } else {
                     displayPendingApprovals(pendingMembers);
                 }
