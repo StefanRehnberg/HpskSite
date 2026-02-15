@@ -1,3 +1,8 @@
+<!-- Flatpickr Date Picker -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
+
 <!-- CKEditor 5 CDN for rich text editing in content blocks -->
 <script src="https://cdn.ckeditor.com/ckeditor5/41.4.2/classic/ckeditor.js"></script>
 
@@ -10,6 +15,11 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
+                <div class="mb-3">
+                    <label for="editEventEndDate" class="form-label">Slutdatum (valfritt)</label>
+                    <input type="text" class="form-control" id="editEventEndDate" placeholder="Lämna tomt för endagsevent">
+                    <div class="form-text">För flerdagsevent. Lämna tomt om eventet är en dag.</div>
+                </div>
                 <div class="mb-3">
                     <label for="editFeeAmount" class="form-label">Kostnad</label>
                     <input type="text" class="form-control" id="editFeeAmount" placeholder="t.ex. 100 kr, Gratis">
@@ -188,6 +198,7 @@ function loadEventAdminData() {
             var d = result.data;
 
             // Pre-fill detail fields
+            document.getElementById('editEventEndDate').value = d.eventEndDate || '';
             document.getElementById('editFeeAmount').value = d.feeAmount || '';
             document.getElementById('editTargetAudience').value = d.targetAudience || '';
             document.getElementById('editEquipmentRequired').value = d.equipmentRequired || '';
@@ -208,7 +219,14 @@ function loadEventAdminData() {
         .catch(function(err) { console.error('Error loading event admin data:', err); });
 }
 
-document.addEventListener('DOMContentLoaded', loadEventAdminData);
+document.addEventListener('DOMContentLoaded', function() {
+    loadEventAdminData();
+    flatpickr('#editEventEndDate', {
+        locale: 'sv',
+        dateFormat: 'Y-m-d',
+        allowInput: true
+    });
+});
 
 // ==========================================
 // Edit Details
@@ -230,6 +248,7 @@ function openEditDetailsModal() {
 function saveEventDetails() {
     var formData = new FormData();
     formData.append('eventId', eventPageId);
+    formData.append('eventEndDate', document.getElementById('editEventEndDate').value);
     formData.append('feeAmount', document.getElementById('editFeeAmount').value);
     formData.append('equipmentRequired', document.getElementById('editEquipmentRequired').value);
     formData.append('targetAudience', document.getElementById('editTargetAudience').value);

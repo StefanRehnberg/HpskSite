@@ -4,30 +4,46 @@ This document describes the handicap calculation system used in training matches
 
 ## Overview
 
-The handicap system allows shooters of different skill levels to compete fairly by applying a per-series handicap bonus (or penalty for elite shooters). The key principle is that handicaps are applied **per series** with a cap of 50 points per series.
+The handicap system allows shooters of different skill levels to compete fairly by applying a per-series handicap bonus (or penalty for elite shooters). The key principle is that handicaps are applied **per series** with a cap of 50 points per series, and rounding is deferred to the **final total** so that fractional handicaps accumulate correctly.
 
 ## Calculation Rules
 
 ### Per-Series Handicap Application
 
-For each series in a match:
+For each series in a match (as decimal, no rounding yet):
 
 ```
 AdjustedSeriesScore = clamp(RawScore + HandicapPerSeries, 0, 50)
 ```
 
-Then sum all adjusted series scores:
+Then sum all adjusted series scores and round once:
 
 ```
-FinalScore = Sum of all AdjustedSeriesScores
+FinalScore = Round(Sum of all AdjustedSeriesScores)
 ```
 
 ### Key Principles
 
 1. **Raw scores are capped at 50** before handicap is applied (handles invalid data)
 2. **Handicap is applied per series**, not to the total
-3. **Each adjusted series is clamped between 0 and 50**
-4. **Rounding uses "Away from Zero"** (standard rounding, matches JavaScript `Math.round()`)
+3. **Each adjusted series is clamped between 0 and 50** (as decimal)
+4. **Rounding happens only on the final total**, not per series - this ensures fractional handicaps (e.g. 1.25) accumulate correctly across series
+5. **Rounding uses "Away from Zero"** (standard rounding, matches JavaScript `Math.round()`)
+
+### Why Rounding at the End?
+
+Rounding per-series causes fractional handicaps to lose precision on every series. For example, with a 1.25 handicap, the `.25` would be rounded away on each series, losing `0.25 × seriesCount` points total.
+
+**Example with per-series rounding (OLD - WRONG):**
+- Scores: 46, 48, 46, 47, 48, 45 (6 series)
+- Handicap: 1.25 per series
+- Per-series: 47.25→47, 49.25→49, 47.25→47, 48.25→48, 49.25→49, 46.25→46
+- Total = **286** (lost 0.25 × 6 = 1.5 points to rounding)
+
+**Example with final rounding (CORRECT):**
+- Same scores and handicap
+- Per-series (decimal): 47.25, 49.25, 47.25, 48.25, 49.25, 46.25
+- Sum = 287.5 → Round = **288** (full handicap benefit preserved)
 
 ### Why Per-Series Capping?
 
@@ -38,10 +54,10 @@ The per-series capping ensures fairness. Without it, a high-scoring shooter coul
 - Handicap: 3.0 per series (6 series)
 - Calculation: 275 + (3 × 6) = 275 + 18 = **293**
 
-**Example with per-series capping (NEW - CORRECT):**
+**Example with per-series capping (CORRECT):**
 - Same scores and handicap
 - Per-series: 49+3=52→50, 46+3=49, 44+3=47, 46+3=49, 42+3=45, 48+3=51→50
-- Final: 50 + 49 + 47 + 49 + 45 + 50 = **290**
+- Sum = 290.0 → Round = **290**
 
 The shooter "loses" 3 points because two series hit the 50 cap.
 
@@ -52,7 +68,7 @@ Applied to shooters below average skill level to help them compete.
 
 ```
 Score: 45, Handicap: +3.0
-Adjusted: 45 + 3 = 48
+Adjusted: 45 + 3 = 48.0
 ```
 
 ### Zero Handicap
@@ -67,8 +83,9 @@ Adjusted: 45
 Applied to elite shooters who need to "give" points to others.
 
 ```
-Score: 49, Handicap: -2.5
-Adjusted: 49 - 2.5 = 46.5 → 47 (rounded)
+Scores: 49, 48, 50 (3 series), Handicap: -2.5
+Per-series (decimal): 46.5, 45.5, 47.5
+Sum = 139.5 → Round(139.5, AwayFromZero) = 140
 ```
 
 With extreme negative handicap, series can clamp at 0:
@@ -79,14 +96,15 @@ Adjusted: 5 - 10 = -5 → 0 (clamped)
 
 ## Effective Handicap
 
-The **effective handicap** is the actual points added/subtracted after clamping. This may differ from the **theoretical handicap** when series hit the 0 or 50 limits.
+The **effective handicap** is the actual points added/subtracted after clamping. This is calculated as `FinalScore - RawTotal`. It may differ from the **theoretical handicap** when series hit the 0 or 50 limits.
 
 **Example:**
 - Scores: 49, 46, 48 (3 series)
 - Handicap: +3.0 per series
 - Theoretical: 3 × 3 = 9 points
-- Per-series: 49+3=52→50 (+1 effective), 46+3=49 (+3 effective), 48+3=51→50 (+2 effective)
-- Effective: 1 + 3 + 2 = **6 points** (3 points "lost" to cap)
+- Per-series (decimal): 49+3=52→50, 46+3=49, 48+3=51→50
+- Sum = 149.0, Raw = 143
+- Effective: 149 - 143 = **6 points** (3 points "lost" to cap)
 
 ## Code Implementation
 
@@ -110,17 +128,17 @@ public static int CalculateAdjustedTotal<T>(
         return scores.Sum(s => Math.Min(s.Total, MaxScorePerSeries));
     }
 
-    // Apply handicap per series and clamp each between 0 and 50
-    int total = 0;
+    // Apply handicap per series and clamp each between 0 and 50 (as decimal).
+    // Accumulate the decimal sum across all series, then round only the final total.
+    decimal total = 0;
     foreach (var s in scores)
     {
         var rawCapped = Math.Min(s.Total, MaxScorePerSeries);
         var adjusted = rawCapped + handicapPerSeries;
-        var rounded = (int)Math.Round(adjusted, StandardRounding);
-        var clamped = Math.Clamp(rounded, 0, MaxScorePerSeries);
+        var clamped = Math.Clamp(adjusted, 0, (decimal)MaxScorePerSeries);
         total += clamped;
     }
-    return total;
+    return (int)Math.Round(total, StandardRounding);
 }
 
 // Calculate effective handicap applied
@@ -130,7 +148,12 @@ public static decimal CalculateEffectiveHandicap<T>(
     int? equalizedCount = null)
     where T : ISeriesScore
 {
-    // Returns actual handicap applied after clamping
+    // Effective handicap = adjusted total - raw total
+    // This ensures consistency with CalculateAdjustedTotal.
+    var scoresList = seriesScores.ToList();
+    int adjusted = CalculateAdjustedTotal(scoresList, handicapPerSeries, equalizedCount);
+    int raw = CalculateRawTotal(scoresList, equalizedCount);
+    return adjusted - raw;
 }
 ```
 
@@ -146,18 +169,19 @@ function calculateAdjustedTotalWithCap(scores, handicapPerSeries) {
         return { total: rawTotal, effectiveHandicap: 0 };
     }
 
-    let total = 0;
-    let effectiveHandicap = 0;
+    let rawTotal = 0;
+    let decimalTotal = 0;
     for (const s of scores) {
         const rawCapped = Math.min(s.total, 50);
+        rawTotal += rawCapped;
         const adjusted = rawCapped + handicapPerSeries;
-        const rounded = Math.round(adjusted);
-        // Clamp between 0 and 50
-        const clamped = Math.max(0, Math.min(rounded, 50));
-        total += clamped;
-        effectiveHandicap += (clamped - rawCapped);
+        // Clamp between 0 and 50 as decimal (no per-series rounding)
+        const clamped = Math.max(0, Math.min(adjusted, 50));
+        decimalTotal += clamped;
     }
-    return { total, effectiveHandicap };
+    // Round only the final total
+    const roundedTotal = Math.round(decimalTotal);
+    return { total: roundedTotal, effectiveHandicap: roundedTotal - rawTotal };
 }
 ```
 
@@ -165,7 +189,7 @@ function calculateAdjustedTotalWithCap(scores, handicapPerSeries) {
 
 Location: `src/HpskSite/Controllers/TrainingMatchController.cs`
 
-The leaderboard calculation in `GetMatchHistory` uses the same per-series clamping logic.
+The leaderboard calculation in `GetMatchHistory` uses the same per-series clamping logic with final-total rounding.
 
 ## Single Source of Truth Architecture
 
@@ -174,9 +198,9 @@ The leaderboard calculation in `GetMatchHistory` uses the same per-series clampi
 ### Why This Matters
 
 The handicap calculation involves several nuances:
-- Per-series capping (0-50 range)
-- Specific rounding behavior (`MidpointRounding.AwayFromZero`)
-- Order of operations (cap raw score → add handicap → round → clamp)
+- Per-series capping (0-50 range as decimal)
+- Final-total rounding (`MidpointRounding.AwayFromZero`)
+- Order of operations (cap raw score → add handicap → clamp as decimal → sum → round final total)
 
 Having multiple implementations leads to subtle bugs that are hard to debug.
 
@@ -290,8 +314,9 @@ Stefan
 |----------|----------|
 | Raw score > 50 | Capped at 50 before handicap applied |
 | Handicap = 0 | Returns raw total (optimized path) |
-| Positive handicap exceeds 50 | Capped at 50 per series |
-| Negative handicap below 0 | Clamped at 0 per series |
+| Positive handicap exceeds 50 | Capped at 50 per series (as decimal) |
+| Negative handicap below 0 | Clamped at 0 per series (as decimal) |
+| Fractional handicap (e.g. 1.25) | Accumulates across series, rounded only on final total |
 | Empty scores | Returns 0 |
 | Invalid input (null) | Returns 0 |
 
@@ -320,12 +345,19 @@ The calculation is implemented identically in:
 3. **C# (Mobile via Shared)** - Uses `ResultCalculator.cs`
 
 All implementations use:
-- Standard rounding (away from zero)
-- Clamping between 0 and 50
-- Same order of operations
+- Per-series clamping between 0 and 50 (as decimal)
+- Final-total rounding only (away from zero)
+- Same order of operations: cap raw → add handicap → clamp decimal → sum → round total
 
 ## History
 
+- **2026-02-15**: Fixed fractional handicap rounding - rounding now deferred to final total
+  - Previously rounded per-series, causing fractional handicaps (e.g. 1.25) to lose precision
+  - Fixed in `ResultCalculator.CalculateAdjustedTotal()`, `CalculateEffectiveHandicap()`, `CalculateAdjustedMatchTotal()`
+  - Fixed inline calculation in `TrainingMatchController.GetMatchHistory()`
+  - Fixed `MatchApiController.EnrichMatchHistoryItems()` to use `ResultCalculator.RoundToQuarter()`
+  - Fixed JavaScript `calculateAdjustedTotalWithCap()` in `TrainingMatchScoreboard.cshtml`
+  - Updated all unit tests with correct expected values
 - **2026-02-05**: Established single-source-of-truth architecture - all calculations must use `ResultCalculator`
   - Fixed `TrainingMatchController.GetLeaderboard()` and `ViewMatchAsSpectator()` to use `ResultCalculator.CalculateAdjustedTotal()`
   - Fixed `MatchApiController.EnrichMatchHistoryItems()` to use `ResultCalculator`

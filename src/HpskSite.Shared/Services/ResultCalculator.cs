@@ -115,17 +115,19 @@ namespace HpskSite.Shared.Services
                 return scores.Sum(s => Math.Min(s.Total, MaxScorePerSeries));
             }
 
-            // Apply handicap per series and clamp each between 0 and 50
-            int total = 0;
+            // Apply handicap per series and clamp each between 0 and 50 (as decimal).
+            // Accumulate the decimal sum across all series, then round only the final total.
+            // This prevents fractional handicaps (e.g. 1.25) from losing their decimal part
+            // on every series due to premature per-series rounding.
+            decimal total = 0;
             foreach (var s in scores)
             {
                 var rawCapped = Math.Min(s.Total, MaxScorePerSeries);
                 var adjusted = rawCapped + handicapPerSeries;
-                var rounded = (int)Math.Round(adjusted, StandardRounding);
-                var clamped = Math.Clamp(rounded, 0, MaxScorePerSeries);
+                var clamped = Math.Clamp(adjusted, 0, (decimal)MaxScorePerSeries);
                 total += clamped;
             }
-            return total;
+            return (int)Math.Round(total, StandardRounding);
         }
 
         /// <summary>
@@ -146,18 +148,12 @@ namespace HpskSite.Shared.Services
                 return 0;
             }
 
-            var scores = GetEffectiveScores(seriesScores, equalizedCount).ToList();
-            decimal effectiveTotal = 0;
-            foreach (var s in scores)
-            {
-                var rawCapped = Math.Min(s.Total, MaxScorePerSeries);
-                var adjusted = rawCapped + handicapPerSeries;
-                var rounded = (int)Math.Round(adjusted, StandardRounding);
-                var clamped = Math.Clamp(rounded, 0, MaxScorePerSeries);
-                // Effective handicap for this series is what we actually added
-                effectiveTotal += (clamped - rawCapped);
-            }
-            return effectiveTotal;
+            // Effective handicap = adjusted total - raw total
+            // This ensures consistency with CalculateAdjustedTotal (same rounding behavior).
+            var scoresList = seriesScores.ToList();
+            int adjusted = CalculateAdjustedTotal(scoresList, handicapPerSeries, equalizedCount);
+            int raw = CalculateRawTotal(scoresList, equalizedCount);
+            return adjusted - raw;
         }
 
         /// <summary>
@@ -183,14 +179,14 @@ namespace HpskSite.Shared.Services
             // Fallback: assume average distribution across series (not perfectly accurate)
             // This approximation applies per-series clamping to average scores
             var avgRawPerSeries = seriesCount > 0 ? (decimal)rawTotal / seriesCount : 0;
-            int total = 0;
+            decimal total = 0;
             for (int i = 0; i < seriesCount; i++)
             {
                 var adjusted = avgRawPerSeries + handicapPerSeries;
-                var clamped = Math.Clamp((int)Math.Round(adjusted, StandardRounding), 0, MaxScorePerSeries);
+                var clamped = Math.Clamp(adjusted, 0, (decimal)MaxScorePerSeries);
                 total += clamped;
             }
-            return total;
+            return (int)Math.Round(total, StandardRounding);
         }
 
         /// <summary>

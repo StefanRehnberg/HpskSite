@@ -1546,8 +1546,8 @@ namespace HpskSite.Controllers.Api
                             int adjustedScore = rawScore;
                             if (match.HasHandicap && handicapLookup.TryGetValue(participantKey, out var hcp))
                             {
-                                // Round handicap to quarter points
-                                var roundedHcp = (decimal)(Math.Round(hcp * 4) / 4);
+                                // Round handicap to quarter points using consistent rounding
+                                var roundedHcp = ResultCalculator.RoundToQuarter(hcp);
                                 adjustedScore = ResultCalculator.CalculateAdjustedTotal(limitedSeries, roundedHcp);
                             }
 

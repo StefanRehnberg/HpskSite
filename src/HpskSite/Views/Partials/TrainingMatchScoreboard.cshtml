@@ -361,7 +361,8 @@ function roundToQuarter(value) {
 }
 
 // Calculate adjusted total with per-series handicap clamping
-// Each series is adjusted and clamped between 0-50 individually, then summed
+// Each series is adjusted and clamped between 0-50 individually (as decimals), then summed.
+// Only the final total is rounded, so fractional handicaps accumulate correctly.
 function calculateAdjustedTotalWithCap(scores, handicapPerSeries) {
     // Short-circuit for zero handicap
     if (handicapPerSeries === 0) {
@@ -369,18 +370,19 @@ function calculateAdjustedTotalWithCap(scores, handicapPerSeries) {
         return { total: rawTotal, effectiveHandicap: 0 };
     }
 
-    let total = 0;
-    let effectiveHandicap = 0;
+    let rawTotal = 0;
+    let decimalTotal = 0;
     for (const s of scores) {
         const rawCapped = Math.min(s.total, 50);
+        rawTotal += rawCapped;
         const adjusted = rawCapped + handicapPerSeries;
-        const rounded = Math.round(adjusted);
-        // Clamp between 0 and 50 (handles both positive and negative handicaps)
-        const clamped = Math.max(0, Math.min(rounded, 50));
-        total += clamped;
-        effectiveHandicap += (clamped - rawCapped);
+        // Clamp between 0 and 50 as decimal (no per-series rounding)
+        const clamped = Math.max(0, Math.min(adjusted, 50));
+        decimalTotal += clamped;
     }
-    return { total, effectiveHandicap };
+    // Round only the final total
+    const roundedTotal = Math.round(decimalTotal);
+    return { total: roundedTotal, effectiveHandicap: roundedTotal - rawTotal };
 }
 
 // Build inline reaction HTML with responsive display

@@ -306,10 +306,10 @@ namespace HpskSite.Tests
                 new TestSeriesScore { SeriesNumber = 3, Total = 45, XCount = 2 }
             };
 
-            // Per-series capping: Each series 45 + 2.5 = 47.5 -> 48
-            // Total = 48 + 48 + 48 = 144
+            // Per-series: 45+2.5=47.5 each (no per-series rounding)
+            // Sum: 47.5+47.5+47.5 = 142.5 → Round(142.5, AwayFromZero) = 143
             var result = ResultCalculator.CalculateAdjustedTotal(scores, 2.5m);
-            Assert.Equal(144, result);
+            Assert.Equal(143, result);
         }
 
         [Fact]
@@ -354,10 +354,10 @@ namespace HpskSite.Tests
                 new TestSeriesScore { SeriesNumber = 3, Total = 45, XCount = 2 }
             };
 
-            // Only first 2 series, per-series capping: 45+2.5=47.5→48 each
-            // Total = 48 + 48 = 96
+            // Only first 2 series: 45+2.5=47.5 each
+            // Sum: 47.5+47.5 = 95.0 → Round(95.0) = 95
             var result = ResultCalculator.CalculateAdjustedTotal(scores, 2.5m, equalizedCount: 2);
-            Assert.Equal(96, result);
+            Assert.Equal(95, result);
         }
 
         // ============ RoundToInt Tests ============
@@ -421,21 +421,20 @@ namespace HpskSite.Tests
             // X count: 2+2+3+2+4+1+3+3+2+2 = 24
             Assert.Equal(24, xCount);
 
-            // Per-series capping: each series adjusted and capped at 50
-            // 47+1.75=49, 45+1.75=47, 48+1.75=50, 46+1.75=48, 49+1.75=50 (capped)
-            // 44+1.75=46, 47+1.75=49, 48+1.75=50, 45+1.75=47, 46+1.75=48
-            // Total = 49+47+50+48+50+46+49+50+47+48 = 484
-            Assert.Equal(484, adjustedTotal);
+            // Per-series (decimal, no per-series rounding):
+            // 48.75, 46.75, 49.75, 47.75, 50(capped from 50.75), 45.75, 48.75, 49.75, 46.75, 47.75
+            // Sum = 481.75 → Round(481.75) = 482
+            Assert.Equal(482, adjustedTotal);
 
             // Handicap actually applied
             var handicapApplied = adjustedTotal - rawTotal;
-            Assert.Equal(19, handicapApplied); // 484 - 465 = 19 (some lost to 50-cap on series 5)
+            Assert.Equal(17, handicapApplied); // 482 - 465 = 17 (some lost to 50-cap on series 5)
         }
 
         [Fact]
         public void Integration_ScenarioThatCausedOriginalBug()
         {
-            // This test verifies standard rounding (AwayFromZero) is used per series
+            // Verifies fractional handicaps accumulate correctly before final rounding
             var scores = new List<TestSeriesScore>
             {
                 new TestSeriesScore { SeriesNumber = 1, Total = 47, XCount = 2 },
@@ -446,13 +445,12 @@ namespace HpskSite.Tests
 
             decimal handicap = 1.5m;
 
-            // Per-series capping: each series 47 + 1.5 = 48.5 -> 49 (AwayFromZero)
-            // Total = 49 + 49 + 49 + 49 = 196
+            // Per-series: 47+1.5=48.5 each (no per-series rounding)
+            // Sum: 48.5*4 = 194.0 → Round(194.0) = 194
 
             var result = ResultCalculator.CalculateAdjustedTotal(scores, handicap);
 
-            // Per-series rounding: 49 × 4 = 196
-            Assert.Equal(196, result);
+            Assert.Equal(194, result);
         }
 
         // ============ Negative Handicap Tests ============
@@ -527,12 +525,12 @@ namespace HpskSite.Tests
             // Raw: 49 + 50 + 48 + 49 = 196
             Assert.Equal(196, rawTotal);
 
-            // Per-series: 49-1.75=47, 50-1.75=48, 48-1.75=46, 49-1.75=47
-            // Total = 47 + 48 + 46 + 47 = 188
-            Assert.Equal(188, adjustedTotal);
+            // Per-series (decimal): 47.25, 48.25, 46.25, 47.25
+            // Sum = 189.0 → Round(189.0) = 189
+            Assert.Equal(189, adjustedTotal);
 
-            // Handicap applied is negative (points deducted)
-            Assert.Equal(-8, adjustedTotal - rawTotal);
+            // Handicap applied is negative (points deducted): -1.75 * 4 = -7.0
+            Assert.Equal(-7, adjustedTotal - rawTotal);
         }
 
         // ============ Maximum Score Rules Tests ============
@@ -752,17 +750,16 @@ namespace HpskSite.Tests
             // Raw: 49+49+47+49+46+49 = 289
             Assert.Equal(289, rawTotal);
 
-            // Per-series capping:
-            // 49+1.75=50.75→50, 49+1.75=50.75→50, 47+1.75=48.75→49,
-            // 49+1.75=50.75→50, 46+1.75=47.75→48, 49+1.75=50.75→50
-            // Total = 50+50+49+50+48+50 = 297
+            // Per-series (decimal, clamped at 50):
+            // 50(cap), 50(cap), 48.75, 50(cap), 47.75, 50(cap)
+            // Sum = 296.5 → Round(296.5, AwayFromZero) = 297
             Assert.Equal(297, adjustedTotal);
 
-            // Effective handicap: 1+1+2+1+2+1 = 8 (out of theoretical 10.5)
+            // Effective handicap: 297 - 289 = 8
             Assert.Equal(8, effectiveHcp);
 
-            // OLD (wrong): 289 + 10.5 = 299.5 → 300
-            // NEW (correct): 297
+            // OLD (no per-series cap): 289 + 10.5 = 299.5 → 300
+            // CORRECT (per-series cap): 297
             Assert.NotEqual(300, adjustedTotal);
         }
 
@@ -906,12 +903,12 @@ namespace HpskSite.Tests
             // Raw: 49 + 48 + 50 = 147
             Assert.Equal(147, rawTotal);
 
-            // Per-series: 49-2.5=46.5→47, 48-2.5=45.5→46, 50-2.5=47.5→48
-            // Total = 47 + 46 + 48 = 141
-            Assert.Equal(141, adjustedTotal);
+            // Per-series (decimal): 46.5, 45.5, 47.5
+            // Sum = 139.5 → Round(139.5, AwayFromZero) = 140
+            Assert.Equal(140, adjustedTotal);
 
-            // Effective handicap: -2 + -2 + -2 = -6
-            Assert.Equal(-6, effectiveHcp);
+            // Effective handicap: 140 - 147 = -7 (theoretical: -2.5 * 3 = -7.5)
+            Assert.Equal(-7, effectiveHcp);
         }
 
         [Fact]

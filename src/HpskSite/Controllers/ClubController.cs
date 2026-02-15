@@ -2076,6 +2076,7 @@ namespace HpskSite.Controllers
                         targetAudience = eventContent.GetValue<string>("targetAudience") ?? "",
                         registrationRequired = eventContent.GetValue<bool>("registrationRequired"),
                         registrationUrl = eventContent.GetValue<string>("registrationUrl") ?? "",
+                        eventEndDate = eventContent.GetValue<DateTime?>("eventEndDate")?.ToString("yyyy-MM-dd") ?? "",
                         eventImageUrl = eventImageUrl,
                         contentBlocks = eventContent.GetValue<string>("contentBlocks") ?? "[]",
                         quickLinks = eventContent.GetValue<string>("quickLinks") ?? "[]"
@@ -2095,7 +2096,7 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> EditEventDetails(int eventId, string feeAmount = "",
             string equipmentRequired = "", string targetAudience = "", bool registrationRequired = false,
-            string registrationUrl = "")
+            string registrationUrl = "", string eventEndDate = "")
         {
             try
             {
@@ -2120,6 +2121,15 @@ namespace HpskSite.Controllers
                 eventContent.SetValue("targetAudience", targetAudience);
                 eventContent.SetValue("registrationRequired", registrationRequired);
                 eventContent.SetValue("registrationUrl", registrationUrl);
+
+                if (!string.IsNullOrEmpty(eventEndDate) && DateTime.TryParse(eventEndDate, out var parsedEndDate))
+                {
+                    eventContent.SetValue("eventEndDate", parsedEndDate);
+                }
+                else
+                {
+                    eventContent.SetValue("eventEndDate", null);
+                }
 
                 _contentService.Save(eventContent);
                 _contentService.Publish(eventContent, Array.Empty<string>());

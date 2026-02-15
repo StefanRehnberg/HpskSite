@@ -2274,15 +2274,16 @@ namespace HpskSite.Controllers
                                     int adjustedScore = rawScore;
                                     if (hasHandicap && handicapLookup.TryGetValue(p.ParticipantKey, out var hcp))
                                     {
-                                        var roundedHcp = Math.Round(hcp * 4) / 4;
-                                        adjustedScore = 0;
+                                        var roundedHcp = ResultCalculator.RoundToQuarter(hcp);
+                                        decimal decimalTotal = 0;
                                         foreach (var seriesTotal in effectiveSeriesTotals)
                                         {
                                             var rawCapped = Math.Min(seriesTotal, 50);
                                             var adjusted = rawCapped + roundedHcp;
-                                            var clamped = Math.Clamp((int)Math.Round(adjusted), 0, 50);
-                                            adjustedScore += clamped;
+                                            var clamped = Math.Clamp(adjusted, 0m, 50m);
+                                            decimalTotal += clamped;
                                         }
+                                        adjustedScore = (int)Math.Round(decimalTotal, MidpointRounding.AwayFromZero);
                                     }
 
                                     return new {
