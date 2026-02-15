@@ -37,7 +37,10 @@
                                 <option value="Nyhet">Nyhet</option>
                                 <option value="Annat">Annat...</option>
                             </select>
-                            <input type="text" class="form-control mt-2" id="regionEventCustomType" placeholder="Ange typ, t.ex. Workshop" style="display: none;" oninput="syncRegionEventTypeValue()">
+                            <input type="text" class="form-control mt-2" id="regionEventCustomType" placeholder="Ange typ, t.ex. Workshop" style="display: none;" oninput="syncRegionEventTypeValue(); checkRegionCompetitionTypeWarning()">
+                            <div class="alert alert-info py-1 px-2 mt-2 small" id="regionCompetitionTypeWarning" style="display: none;">
+                                <i class="bi bi-info-circle me-1"></i>Tävlingar skapas under fliken <strong>Tävlingar</strong> på den arrangerande klubbens adminsida, inte som en händelse.
+                            </div>
                             <input type="hidden" id="regionEventTypeValue" name="eventType">
                         </div>
                     </div>
@@ -515,6 +518,7 @@
             customInput.style.display = 'none';
             customInput.required = false;
             customInput.value = '';
+            document.getElementById('regionCompetitionTypeWarning').style.display = 'none';
         }
         syncRegionEventTypeValue();
         toggleRegionEventDateRequired();
@@ -525,6 +529,13 @@
         var customInput = document.getElementById('regionEventCustomType');
         var hidden = document.getElementById('regionEventTypeValue');
         hidden.value = select.value === 'Annat' ? customInput.value : select.value;
+    };
+
+    window.checkRegionCompetitionTypeWarning = function() {
+        var customInput = document.getElementById('regionEventCustomType');
+        var warning = document.getElementById('regionCompetitionTypeWarning');
+        var val = customInput.value.toLowerCase();
+        warning.style.display = val.indexOf('tävling') >= 0 ? '' : 'none';
     };
 
     window.toggleRegionEventDateRequired = function() {

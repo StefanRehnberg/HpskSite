@@ -257,7 +257,10 @@
                                 <option value="Nyhet">Nyhet</option>
                                 <option value="Annat">Annat...</option>
                             </select>
-                            <input type="text" class="form-control mt-2" id="eventCustomType" placeholder="Ange typ, t.ex. Workshop" style="display: none;" oninput="syncEventTypeValue()">
+                            <input type="text" class="form-control mt-2" id="eventCustomType" placeholder="Ange typ, t.ex. Workshop" style="display: none;" oninput="syncEventTypeValue(); checkCompetitionTypeWarning()">
+                            <div class="alert alert-info py-1 px-2 mt-2 small" id="competitionTypeWarning" style="display: none;">
+                                <i class="bi bi-info-circle me-1"></i>Tävlingar skapas under fliken <strong>Tävlingar</strong> på den arrangerande klubbens adminsida, inte som en händelse.
+                            </div>
                             <input type="hidden" id="eventTypeValue" name="eventType">
                         </div>
                     </div>
@@ -900,6 +903,7 @@ function onEventTypeChange() {
         customInput.style.display = 'none';
         customInput.required = false;
         customInput.value = '';
+        document.getElementById('competitionTypeWarning').style.display = 'none';
     }
     syncEventTypeValue();
     toggleEventDateRequired();
@@ -910,6 +914,13 @@ function syncEventTypeValue() {
     var customInput = document.getElementById('eventCustomType');
     var hidden = document.getElementById('eventTypeValue');
     hidden.value = select.value === 'Annat' ? customInput.value : select.value;
+}
+
+function checkCompetitionTypeWarning() {
+    var customInput = document.getElementById('eventCustomType');
+    var warning = document.getElementById('competitionTypeWarning');
+    var val = customInput.value.toLowerCase();
+    warning.style.display = val.indexOf('tävling') >= 0 ? '' : 'none';
 }
 
 function toggleEventDateRequired() {

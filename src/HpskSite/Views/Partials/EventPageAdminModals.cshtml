@@ -31,7 +31,10 @@
                             <option value="Nyhet">Nyhet</option>
                             <option value="Annat">Annat...</option>
                         </select>
-                        <input type="text" class="form-control mt-2" id="editEventCustomType" placeholder="Ange typ, t.ex. Workshop" style="display: none;">
+                        <input type="text" class="form-control mt-2" id="editEventCustomType" placeholder="Ange typ, t.ex. Workshop" style="display: none;" oninput="checkEditCompetitionTypeWarning()">
+                        <div class="alert alert-info py-1 px-2 mt-2 small" id="editCompetitionTypeWarning" style="display: none;">
+                            <i class="bi bi-info-circle me-1"></i>Tävlingar skapas under fliken <strong>Tävlingar</strong> på klubbens adminsida, inte som en händelse.
+                        </div>
                     </div>
                 </div>
                 <div class="mb-2">
@@ -341,7 +344,15 @@ function onEditEventTypeChange() {
     } else {
         customInput.style.display = 'none';
         customInput.value = '';
+        document.getElementById('editCompetitionTypeWarning').style.display = 'none';
     }
+}
+
+function checkEditCompetitionTypeWarning() {
+    var customInput = document.getElementById('editEventCustomType');
+    var warning = document.getElementById('editCompetitionTypeWarning');
+    var val = customInput.value.toLowerCase();
+    warning.style.display = val.indexOf('tävling') >= 0 ? '' : 'none';
 }
 
 function getEditEventTypeValue() {
