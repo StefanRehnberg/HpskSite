@@ -399,8 +399,49 @@ namespace HpskSite.Controllers
                         // Send confirmation email to user
                         await _emailService.SendRegistrationConfirmationToUserAsync(email, fullName, clubNameForEmail);
 
-                        // Send notification to admin
-                        await _emailService.SendRegistrationNotificationToAdminAsync(fullName, email, primaryClubId.HasValue ? clubNameForEmail : "Ingen klubb vald");
+                        // Look up club and regional admins if a club was selected
+                        List<string>? notifiedClubAdminNames = null;
+                        List<string>? notifiedRegionalAdminNames = null;
+                        string? regionCode = null;
+
+                        if (primaryClubId.HasValue)
+                        {
+                            var (clubAdmins, regionalAdmins, region) = GetAdminContactsForClub(primaryClubId.Value);
+                            regionCode = !string.IsNullOrEmpty(region) ? region : null;
+
+                            // Notify club admins
+                            if (clubAdmins.Any())
+                            {
+                                notifiedClubAdminNames = clubAdmins.Select(a => a.Name).ToList();
+                                foreach (var (adminName, adminEmail) in clubAdmins)
+                                {
+                                    await _emailService.SendRegistrationNotificationToClubAdminAsync(
+                                        adminEmail, adminName, fullName, email, clubNameForEmail,
+                                        member.Id);
+                                }
+                            }
+
+                            // Notify regional admins
+                            if (regionalAdmins.Any())
+                            {
+                                notifiedRegionalAdminNames = regionalAdmins.Select(a => a.Name).ToList();
+                                var hasClubAdmins = clubAdmins.Any();
+                                var clubAdminNameList = clubAdmins.Select(a => a.Name).ToList();
+                                foreach (var (adminName, adminEmail) in regionalAdmins)
+                                {
+                                    await _emailService.SendRegistrationNotificationToRegionalAdminAsync(
+                                        adminEmail, adminName, fullName, email, clubNameForEmail,
+                                        hasClubAdmins, clubAdminNameList, member.Id);
+                                }
+                            }
+                        }
+
+                        // Send notification to global admin (with info about who else was notified)
+                        await _emailService.SendRegistrationNotificationToAdminAsync(
+                            fullName, email,
+                            primaryClubId.HasValue ? clubNameForEmail : "Ingen klubb vald",
+                            notifiedClubAdminNames, notifiedRegionalAdminNames, regionCode,
+                            member.Id);
                     }
                     catch (Exception emailEx)
                     {
@@ -1053,6 +1094,144 @@ namespace HpskSite.Controllers
                 TempData["ErrorMessage"] = "Ett fel uppstod vid automatisk inloggning. Använd vanlig inloggning istället.";
                 return Redirect("/login-register?tab=login");
             }
+        }
+
+        /// <summary>
+        /// One-click member approval from admin notification email.
+        /// Uses HMAC-signed stateless token for authorization.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> QuickApprove(int memberId, long ts, string sig)
+        {
+            Console.WriteLine($"[QuickApprove] Attempting quick approve for memberId: {memberId}");
+
+            // Validate parameters
+            if (memberId <= 0 || ts <= 0 || string.IsNullOrEmpty(sig))
+            {
+                Console.WriteLine("[QuickApprove] Missing or invalid parameters");
+                return Content(QuickApproveHtmlPage("Ogiltig l&#228;nk", "L&#228;nken &#228;r ogiltig eller saknar parametrar.", false), "text/html");
+            }
+
+            // Validate HMAC signature and expiry
+            if (!_emailService.ValidateQuickApproveSignature(memberId, ts, sig))
+            {
+                Console.WriteLine($"[QuickApprove] Invalid or expired signature for memberId: {memberId}");
+                return Content(QuickApproveHtmlPage("Ogiltig eller utg&#229;ngen l&#228;nk", "L&#228;nken &#228;r ogiltig eller har g&#229;tt ut. Logga in p&#229; administrationspanelen f&#246;r att godk&#228;nna medlemmen manuellt.", false), "text/html");
+            }
+
+            try
+            {
+                // Find member
+                var member = _memberService.GetById(memberId);
+                if (member == null)
+                {
+                    Console.WriteLine($"[QuickApprove] Member not found: {memberId}");
+                    return Content(QuickApproveHtmlPage("Medlem hittades inte", "Medlemmen kunde inte hittas i systemet.", false), "text/html");
+                }
+
+                // Check if already approved
+                if (member.IsApproved)
+                {
+                    var alreadyName = member.Name;
+                    if (string.IsNullOrWhiteSpace(alreadyName))
+                    {
+                        var fn = member.GetValue<string>("firstName") ?? "";
+                        var ln = member.GetValue<string>("lastName") ?? "";
+                        alreadyName = $"{fn} {ln}".Trim();
+                    }
+                    Console.WriteLine($"[QuickApprove] Member already approved: {memberId}");
+                    return Content(QuickApproveHtmlPage("Redan godk&#228;nd", $"Medlemmen <strong>{System.Net.WebUtility.HtmlEncode(alreadyName)}</strong> &#228;r redan godk&#228;nd.", true), "text/html");
+                }
+
+                // Approve the member (same logic as MemberAdminController.ApproveMember)
+                member.IsApproved = true;
+                _memberService.Save(member);
+                Console.WriteLine($"[QuickApprove] Member approved and saved: {memberId}");
+
+                // Assign to Users group and remove from PendingApproval group
+                _memberService.AssignRole(member.Id, "Users");
+                _memberService.DissociateRole(member.Id, "PendingApproval");
+                Console.WriteLine($"[QuickApprove] Member groups updated: {memberId}");
+
+                // Generate auto-login token for approval email
+                var autoLoginToken = Guid.NewGuid().ToString("N");
+                var tokenExpiry = DateTime.UtcNow.AddDays(7);
+                member.SetValue("autoLoginToken", autoLoginToken);
+                member.SetValue("autoLoginTokenExpiry", tokenExpiry.ToString("o"));
+                _memberService.Save(member);
+
+                // Send approval notification email to the member
+                var memberName = member.Name;
+                if (string.IsNullOrWhiteSpace(memberName))
+                {
+                    var firstName = member.GetValue<string>("firstName") ?? "";
+                    var lastName = member.GetValue<string>("lastName") ?? "";
+                    memberName = $"{firstName} {lastName}".Trim();
+                }
+
+                try
+                {
+                    await _emailService.SendApprovalNotificationAsync(member.Email, memberName, autoLoginToken);
+                    Console.WriteLine($"[QuickApprove] Approval email sent to: {member.Email}");
+
+                    // Send confirmation to admin
+                    var clubId = member.GetValue<int>("primaryClubId");
+                    var clubName = "Ingen klubb";
+                    if (clubId > 0)
+                    {
+                        clubName = _clubService.GetClubNameById(clubId) ?? $"Klubb (ID: {clubId})";
+                    }
+                    await _emailService.SendApprovalConfirmationToAdminAsync(
+                        memberName, member.Email, clubName, "E-postl\u00e4nk (snabbgodk\u00e4nnande)");
+                }
+                catch (Exception emailEx)
+                {
+                    Console.WriteLine($"[QuickApprove] Failed to send approval email: {emailEx.Message}");
+                }
+
+                Console.WriteLine($"[QuickApprove] Approval completed for: {memberId}");
+                return Content(QuickApproveHtmlPage("Medlem godk&#228;nd!", $"<strong>{System.Net.WebUtility.HtmlEncode(memberName)}</strong> har godk&#228;nts och f&#229;tt ett e-postmeddelande med inloggningsl&#228;nk.", true), "text/html");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[QuickApprove] Error: {ex.Message}");
+                return Content(QuickApproveHtmlPage("Ett fel uppstod", "Kunde inte godk&#228;nna medlemmen. F&#246;rs&#246;k igen eller anv&#228;nd administrationspanelen.", false), "text/html");
+            }
+        }
+
+        private static string QuickApproveHtmlPage(string title, string message, bool success)
+        {
+            var bgColor = success ? "#28a745" : "#dc3545";
+            var icon = success ? "&#10003;" : "&#10007;";
+            return $@"<!DOCTYPE html>
+<html lang=""sv"">
+<head>
+    <meta charset=""UTF-8"">
+    <meta name=""viewport"" content=""width=device-width, initial-scale=1.0"">
+    <title>{title} - Pistol.nu</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; background-color: #f5f5f5; margin: 0; padding: 40px 20px; }}
+        .container {{ max-width: 500px; margin: 0 auto; background: white; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); overflow: hidden; }}
+        .header {{ background-color: {bgColor}; color: white; padding: 30px; text-align: center; }}
+        .header h1 {{ margin: 0; font-size: 24px; }}
+        .header .icon {{ font-size: 48px; display: block; margin-bottom: 15px; }}
+        .content {{ padding: 30px; text-align: center; line-height: 1.6; color: #333; }}
+        .content a {{ color: #007bff; text-decoration: none; }}
+        .content a:hover {{ text-decoration: underline; }}
+    </style>
+</head>
+<body>
+    <div class=""container"">
+        <div class=""header"">
+            <span class=""icon"">{icon}</span>
+            <h1>{title}</h1>
+        </div>
+        <div class=""content"">
+            <p>{message}</p>
+        </div>
+    </div>
+</body>
+</html>";
         }
 
         /// <summary>
@@ -2640,6 +2819,76 @@ namespace HpskSite.Controllers
                 Console.WriteLine($"[GuestMigration] Error during score migration: {ex.Message}");
                 Console.WriteLine($"[GuestMigration] Stack trace: {ex.StackTrace}");
             }
+        }
+
+        #endregion
+
+        #region Admin Contact Helpers
+
+        /// <summary>
+        /// Gets club admin and regional admin contacts for a given club.
+        /// Used to notify the right admins when a new member registers.
+        /// </summary>
+        private (List<(string Name, string Email)> ClubAdmins, List<(string Name, string Email)> RegionalAdmins, string RegionCode) GetAdminContactsForClub(int clubId)
+        {
+            var clubAdmins = new List<(string Name, string Email)>();
+            var regionalAdmins = new List<(string Name, string Email)>();
+            var regionCode = "";
+
+            try
+            {
+                // Single GetAll call reused for both lookups
+                var allMembers = _memberService.GetAll(0, int.MaxValue, out var totalRecords);
+                var members = allMembers
+                    .Where(m => m.ContentType.Alias != ClubMemberTypeAlias)
+                    .ToList();
+
+                // Find club admins
+                var clubAdminGroup = $"ClubAdmin_{clubId}";
+                foreach (var member in members)
+                {
+                    var roles = _memberService.GetAllRoles(member.Id);
+                    if (roles.Contains(clubAdminGroup))
+                    {
+                        var name = $"{member.GetValue("firstName")} {member.GetValue("lastName")}".Trim();
+                        if (!string.IsNullOrEmpty(member.Email))
+                        {
+                            clubAdmins.Add((name, member.Email));
+                        }
+                    }
+                }
+
+                // Get the club's region code
+                var clubContent = _contentService.GetById(clubId);
+                if (clubContent != null)
+                {
+                    regionCode = clubContent.GetValue<string>("regionalFederation") ?? "";
+                }
+
+                // Find regional admins
+                if (!string.IsNullOrEmpty(regionCode))
+                {
+                    var regionalAdminGroup = $"RegionalAdmin_{regionCode}";
+                    foreach (var member in members)
+                    {
+                        var roles = _memberService.GetAllRoles(member.Id);
+                        if (roles.Contains(regionalAdminGroup))
+                        {
+                            var name = $"{member.GetValue("firstName")} {member.GetValue("lastName")}".Trim();
+                            if (!string.IsNullOrEmpty(member.Email))
+                            {
+                                regionalAdmins.Add((name, member.Email));
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Error looking up admin contacts for club {clubId}: {ex.Message}");
+            }
+
+            return (clubAdmins, regionalAdmins, regionCode);
         }
 
         #endregion

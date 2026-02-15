@@ -1,6 +1,10 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 using System.Net.Mail;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -40,9 +44,81 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// Compute HMAC-SHA256 signature using the SMTP password as key
+        /// </summary>
+        private string ComputeHmac(string data)
+        {
+            using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(_password));
+            var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(data));
+            return Convert.ToHexString(hash).ToLowerInvariant();
+        }
+
+        /// <summary>
+        /// Generate a quick-approve URL for a pending member
+        /// </summary>
+        public string GenerateQuickApproveUrl(int memberId)
+        {
+            var ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            var sig = ComputeHmac($"{memberId}:{ts}");
+            var siteUrl = _configuration["SiteUrl"] ?? "https://pistol.nu";
+            return $"{siteUrl}/umbraco/surface/Member/QuickApprove?memberId={memberId}&ts={ts}&sig={sig}";
+        }
+
+        /// <summary>
+        /// Validate a quick-approve HMAC signature. Returns true if valid and not expired (7-day window).
+        /// </summary>
+        public bool ValidateQuickApproveSignature(int memberId, long timestamp, string signature)
+        {
+            if (string.IsNullOrEmpty(signature)) return false;
+
+            // Check 7-day expiry
+            var issued = DateTimeOffset.FromUnixTimeSeconds(timestamp);
+            if (DateTimeOffset.UtcNow - issued > TimeSpan.FromDays(7)) return false;
+
+            // Recompute and compare
+            var expected = ComputeHmac($"{memberId}:{timestamp}");
+            return CryptographicOperations.FixedTimeEquals(
+                Encoding.UTF8.GetBytes(expected),
+                Encoding.UTF8.GetBytes(signature));
+        }
+
+        /// <summary>
+        /// Send confirmation email to admin when a member has been approved
+        /// </summary>
+        public async Task SendApprovalConfirmationToAdminAsync(string memberName, string memberEmail, string clubName, string approvedBy)
+        {
+            if (string.IsNullOrEmpty(_adminEmail))
+            {
+                _logger.LogWarning("Admin email not configured. Cannot send approval confirmation.");
+                return;
+            }
+
+            var subject = $"Medlem godk&#228;nd: {memberName}";
+            var body = $@"
+<html>
+<body>
+    <h2>Medlem godk&#228;nd</h2>
+    <p>F&#246;ljande medlem har godk&#228;nts:</p>
+    <p><strong>Namn:</strong> {memberName}<br/>
+    <strong>E-post:</strong> {memberEmail}<br/>
+    <strong>Klubb:</strong> {clubName ?? "Ingen klubb"}</p>
+    <p><strong>Godk&#228;nd av:</strong> {approvedBy}</p>
+    <p>Medlemmen har f&#229;tt ett e-postmeddelande med en inloggningsl&#228;nk.</p>
+</body>
+</html>";
+
+            await SendEmailAsync(_adminEmail, subject, body);
+        }
+
+        /// <summary>
         /// Send email notification when a new user registers
         /// </summary>
-        public async Task SendRegistrationNotificationToAdminAsync(string memberName, string memberEmail, string clubName)
+        public async Task SendRegistrationNotificationToAdminAsync(
+            string memberName, string memberEmail, string clubName,
+            List<string>? notifiedClubAdmins = null,
+            List<string>? notifiedRegionalAdmins = null,
+            string? regionName = null,
+            int? pendingMemberId = null)
         {
             if (string.IsNullOrEmpty(_adminEmail))
             {
@@ -51,19 +127,153 @@ namespace HpskSite.Services
             }
 
             var subject = $"Ny medlemsregistrering: {memberName}";
+
+            var notifiedSection = "";
+            if (notifiedClubAdmins != null || notifiedRegionalAdmins != null)
+            {
+                var clubAdminList = notifiedClubAdmins != null && notifiedClubAdmins.Any()
+                    ? string.Join(", ", notifiedClubAdmins)
+                    : "Inga tilldelade";
+                var regionalAdminList = notifiedRegionalAdmins != null && notifiedRegionalAdmins.Any()
+                    ? string.Join(", ", notifiedRegionalAdmins)
+                    : "Inga tilldelade";
+                var regionDisplay = !string.IsNullOrEmpty(regionName) ? $" ({regionName})" : "";
+
+                notifiedSection = $@"
+    <hr/>
+    <h3>Aviserade administrat&#246;rer</h3>
+    <p><strong>Klubbadministrat&#246;rer:</strong> {clubAdminList}</p>
+    <p><strong>Regionala administrat&#246;rer{regionDisplay}:</strong> {regionalAdminList}</p>";
+            }
+
+            var approveButtonHtml = "";
+            if (pendingMemberId.HasValue)
+            {
+                var approveUrl = GenerateQuickApproveUrl(pendingMemberId.Value);
+                approveButtonHtml = $@"
+    <div style=""text-align: center; margin: 20px 0;"">
+        <a href=""{approveUrl}"" style=""display: inline-block; background-color: #28a745; color: white; padding: 14px 30px; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 16px;"">Godk&#228;nn medlem</a>
+    </div>
+    <p style=""color: #666; font-size: 13px;""><em>L&#228;nken &#228;r giltig i 7 dagar.</em></p>";
+            }
+
             var body = $@"
 <html>
 <body>
     <h2>Ny medlemsregistrering</h2>
-    <p>En ny medlem har registrerat sig och väntar på godkännande.</p>
+    <p>En ny medlem har registrerat sig och v&#228;ntar p&#229; godk&#228;nnande.</p>
     <p><strong>Namn:</strong> {memberName}<br/>
     <strong>E-post:</strong> {memberEmail}<br/>
     <strong>Klubb:</strong> {clubName ?? "Ingen klubb vald"}</p>
-    <p>Logga in på administrationspanelen för att godkänna eller avslå ansökan.</p>
+    {approveButtonHtml}
+    <p>Logga in p&#229; administrationspanelen f&#246;r att godk&#228;nna eller avsl&#229; ans&#246;kan.</p>
+    {notifiedSection}
 </body>
 </html>";
 
             await SendEmailAsync(_adminEmail, subject, body);
+        }
+
+        /// <summary>
+        /// Send registration notification to a club admin
+        /// </summary>
+        public async Task SendRegistrationNotificationToClubAdminAsync(
+            string adminEmail, string adminName, string memberName, string memberEmail, string clubName,
+            int? pendingMemberId = null)
+        {
+            var subject = $"Ny medlemsregistrering i {clubName}: {memberName}";
+
+            var approveButtonHtml = "";
+            if (pendingMemberId.HasValue)
+            {
+                var approveUrl = GenerateQuickApproveUrl(pendingMemberId.Value);
+                approveButtonHtml = $@"
+    <div style=""text-align: center; margin: 20px 0;"">
+        <a href=""{approveUrl}"" style=""display: inline-block; background-color: #28a745; color: white; padding: 14px 30px; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 16px;"">Godk&#228;nn medlem</a>
+    </div>
+    <p style=""color: #666; font-size: 13px;""><em>L&#228;nken &#228;r giltig i 7 dagar.</em></p>";
+            }
+
+            var body = $@"
+<html>
+<body>
+    <h2>Ny medlemsregistrering i {clubName}</h2>
+    <p>Hej {adminName},</p>
+    <p><strong>{memberName}</strong> vill registrera sig som medlem i <strong>{clubName}</strong> och inv&#228;ntar godk&#228;nnande.</p>
+    <p><strong>Namn:</strong> {memberName}<br/>
+    <strong>E-post:</strong> {memberEmail}</p>
+    {approveButtonHtml}
+    <p>Logga in p&#229; administrationspanelen f&#246;r att godk&#228;nna eller avsl&#229; ans&#246;kan.</p>
+    <p>Med v&#228;nliga h&#228;lsningar,<br/>Pistol.nu</p>
+</body>
+</html>";
+
+            await SendEmailAsync(adminEmail, subject, body);
+        }
+
+        /// <summary>
+        /// Send registration notification to a regional admin.
+        /// Content varies depending on whether the club has club admins.
+        /// </summary>
+        public async Task SendRegistrationNotificationToRegionalAdminAsync(
+            string adminEmail, string adminName, string memberName, string memberEmail,
+            string clubName, bool hasClubAdmins, List<string> clubAdminNames,
+            int? pendingMemberId = null)
+        {
+            var subject = $"Ny medlemsregistrering i {clubName}: {memberName}";
+
+            string statusBox;
+            if (!hasClubAdmins)
+            {
+                statusBox = $@"
+    <div style='background-color: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 20px 0;'>
+        <p style='margin: 0; color: #856404;'><strong>OBS: {clubName} har inga klubbadministrat&#246;rer!</strong></p>
+        <p style='margin: 10px 0 0 0; color: #856404;'>
+            Du som regional administrat&#246;r beh&#246;ver hantera denna ans&#246;kan eftersom klubben saknar tilldelade administratr&#246;rer.
+            Inga klubbadministrat&#246;rer har aviserats.
+        </p>
+    </div>";
+            }
+            else
+            {
+                var adminList = string.Join(", ", clubAdminNames);
+                statusBox = $@"
+    <div style='background-color: #d4edda; border-left: 4px solid #28a745; padding: 15px; margin: 20px 0;'>
+        <p style='margin: 0; color: #155724;'><strong>Klubbadministrat&#246;rer har aviserats</strong></p>
+        <p style='margin: 10px 0 0 0; color: #155724;'>
+            F&#246;ljande klubbadministrat&#246;rer har f&#229;tt en avisering: {adminList}.
+            Du beh&#246;ver inte prim&#228;rt agera, men kan godk&#228;nna ans&#246;kan sj&#228;lv om det beh&#246;vs.
+        </p>
+    </div>";
+            }
+
+            var approveButtonHtml = "";
+            if (pendingMemberId.HasValue)
+            {
+                var approveUrl = GenerateQuickApproveUrl(pendingMemberId.Value);
+                approveButtonHtml = $@"
+    <div style=""text-align: center; margin: 20px 0;"">
+        <a href=""{approveUrl}"" style=""display: inline-block; background-color: #28a745; color: white; padding: 14px 30px; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 16px;"">Godk&#228;nn medlem</a>
+    </div>
+    <p style=""color: #666; font-size: 13px;""><em>L&#228;nken &#228;r giltig i 7 dagar.</em></p>";
+            }
+
+            var body = $@"
+<html>
+<body>
+    <h2>Ny medlemsregistrering i {clubName}</h2>
+    <p>Hej {adminName},</p>
+    <p><strong>{memberName}</strong> vill registrera sig som medlem i <strong>{clubName}</strong> och inv&#228;ntar godk&#228;nnande.</p>
+    <p><strong>Namn:</strong> {memberName}<br/>
+    <strong>E-post:</strong> {memberEmail}</p>
+    {statusBox}
+    {approveButtonHtml}
+    <p>Logga in p&#229; administrationspanelen f&#246;r att godk&#228;nna eller avsl&#229; ans&#246;kan.</p>
+    <p>Med v&#228;nliga h&#228;lsningar,<br/>Pistol.nu</p>
+</body>
+</html>";
+
+            await SendEmailAsync(adminEmail, subject, body);
         }
 
         /// <summary>

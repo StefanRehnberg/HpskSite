@@ -1286,6 +1286,23 @@ namespace HpskSite.Controllers
                         autoLoginToken
                     );
                     Console.WriteLine($"[ApproveMember] Approval email sent successfully to: {member.Email}");
+
+                    // Send confirmation to admin
+                    var approvedBy = "Administrat\u00f6r (adminpanelen)";
+                    var currentUser = await _memberManager.GetCurrentMemberAsync();
+                    if (currentUser != null)
+                        approvedBy = currentUser.Name ?? currentUser.Email ?? approvedBy;
+
+                    var clubId = member.GetValue<int>("primaryClubId");
+                    var clubName = "Ingen klubb";
+                    if (clubId > 0)
+                    {
+                        var clubNode = Services.ContentService?.GetById(clubId);
+                        clubName = clubNode?.GetValue<string>("clubName") ?? clubNode?.Name ?? $"Klubb (ID: {clubId})";
+                    }
+
+                    await _emailService.SendApprovalConfirmationToAdminAsync(
+                        memberName, member.Email, clubName, approvedBy);
                 }
                 catch (Exception emailEx)
                 {
