@@ -164,8 +164,11 @@ namespace HpskSite.Controllers
             if (!await IsAdminForOwner(ownerType, ownerId))
                 return Json(new { success = false, message = "Åtkomst nekad." });
 
-            if (file == null || file.Length == 0)
+            if (file == null)
                 return Json(new { success = false, message = "Ingen fil vald." });
+
+            if (file.Length == 0)
+                return Json(new { success = false, message = "Filen är tom (0 bytes). Välj en fil med innehåll." });
 
             if (string.IsNullOrWhiteSpace(title))
                 return Json(new { success = false, message = "Titel krävs." });

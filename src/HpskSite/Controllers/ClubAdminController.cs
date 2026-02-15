@@ -83,7 +83,7 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetClub(int id)
         {
-            if (!await _authService.IsCurrentUserAdminAsync())
+            if (!await _authService.IsCurrentUserAdminAsync() && !await _authService.IsClubAdminForClub(id))
             {
                 return Json(new { success = false, message = "Access denied" });
             }
@@ -945,34 +945,22 @@ namespace HpskSite.Controllers
 
         /// <summary>
         /// Public endpoint to get regions (kretsar) for registration dropdown
-        /// Returns only regions that have active clubs, sorted in Swedish alphabetical order
+        /// Returns ALL regions from the Federations enum, sorted in Swedish alphabetical order
         /// </summary>
         [HttpGet]
         public IActionResult GetRegionsForRegistration()
         {
             try
             {
-                var clubs = GetClubsFromStorage();
                 var swedishComparer = StringComparer.Create(new System.Globalization.CultureInfo("sv-SE"), false);
 
-                // Get distinct regions that have active clubs
-                var regionsWithClubs = clubs
-                    .Where(c => c.IsActive && !string.IsNullOrEmpty(c.RegionalFederation))
-                    .Select(c => c.RegionalFederation)
-                    .Distinct()
-                    .ToList();
-
-                // Get the descriptions for each region and sort in Swedish
-                var regions = regionsWithClubs
-                    .Select(r => {
-                        if (Enum.TryParse<Federations.RegionalFederations>(r, out var federation))
-                        {
-                            return new {
-                                id = r,
-                                name = federation.GetDescription()
-                            };
-                        }
-                        return new { id = r, name = r };
+                // Get all regions from the enum
+                var regions = Enum.GetValues(typeof(Federations.RegionalFederations))
+                    .Cast<Federations.RegionalFederations>()
+                    .Select(f => new
+                    {
+                        id = f.ToString(),
+                        name = f.GetDescription()
                     })
                     .OrderBy(r => r.name, swedishComparer)
                     .ToList();
@@ -1226,7 +1214,7 @@ namespace HpskSite.Controllers
         [HttpPost]
         public async Task<IActionResult> AssignClubAdmin(int memberId, int clubId)
         {
-            if (!await _authService.IsCurrentUserAdminAsync() && !await _authService.IsClubAdmin(clubId))
+            if (!await _authService.IsCurrentUserAdminAsync() && !await _authService.IsClubAdminForClub(clubId))
             {
                 return Json(new { success = false, message = "Access denied" });
             }
@@ -1271,7 +1259,7 @@ namespace HpskSite.Controllers
         [HttpPost]
         public async Task<IActionResult> RemoveClubAdmin(int memberId, int clubId)
         {
-            if (!await _authService.IsCurrentUserAdminAsync() && !await _authService.IsClubAdmin(clubId))
+            if (!await _authService.IsCurrentUserAdminAsync() && !await _authService.IsClubAdminForClub(clubId))
             {
                 return Json(new { success = false, message = "Access denied" });
             }
@@ -1307,7 +1295,7 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetClubAdmins(int clubId)
         {
-            if (!await _authService.IsCurrentUserAdminAsync() && !await _authService.IsClubAdmin(clubId))
+            if (!await _authService.IsCurrentUserAdminAsync() && !await _authService.IsClubAdminForClub(clubId))
             {
                 return Json(new { success = false, message = "Access denied" });
             }
@@ -1342,7 +1330,7 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetAvailableMembersForClubAdmin(int clubId, int filterClubId = 0)
         {
-            if (!await _authService.IsCurrentUserAdminAsync() && !await _authService.IsClubAdmin(clubId))
+            if (!await _authService.IsCurrentUserAdminAsync() && !await _authService.IsClubAdminForClub(clubId))
             {
                 return Json(new { success = false, message = "Access denied" });
             }
@@ -1390,7 +1378,11 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetMemberAdminRoles(int memberId)
         {
-            if (!await _authService.IsCurrentUserAdminAsync())
+            bool isSiteAdmin = await _authService.IsCurrentUserAdminAsync();
+            var managedRegions = await _authService.GetManagedRegions();
+            bool isRegionalAdmin = !isSiteAdmin && managedRegions.Any();
+
+            if (!isSiteAdmin && !isRegionalAdmin)
             {
                 return Json(new { success = false, message = "Access denied" });
             }
@@ -1413,7 +1405,8 @@ namespace HpskSite.Controllers
                         var idStr = r.Replace("ClubAdmin_", "");
                         int.TryParse(idStr, out var clubId);
                         var club = clubs.FirstOrDefault(c => c.Id == clubId);
-                        return new { id = clubId, name = club?.Name ?? $"Okänd klubb ({idStr})", role = r };
+                        var clubRegion = club?.RegionalFederation ?? "";
+                        return new { id = clubId, name = club?.Name ?? $"Okänd klubb ({idStr})", role = r, regionCode = clubRegion };
                     })
                     .ToList();
 
@@ -1438,7 +1431,8 @@ namespace HpskSite.Controllers
                     success = true,
                     memberName = memberName,
                     clubAdminRoles = clubAdminRoles,
-                    regionalAdminRoles = regionalAdminRoles
+                    regionalAdminRoles = regionalAdminRoles,
+                    managedRegions = managedRegions
                 });
             }
             catch (Exception ex)
@@ -1928,9 +1922,12 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> AssignRegionalAdmin(int memberId, string regionCode)
         {
-            if (!await _authService.IsCurrentUserAdminAsync())
+            bool isSiteAdmin = await _authService.IsCurrentUserAdminAsync();
+            if (!isSiteAdmin)
             {
-                return Json(new { success = false, message = "Access denied" });
+                var managedRegions = await _authService.GetManagedRegions();
+                if (!managedRegions.Contains(regionCode))
+                    return Json(new { success = false, message = "Access denied" });
             }
 
             try
@@ -1972,9 +1969,12 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> RemoveRegionalAdmin(int memberId, string regionCode)
         {
-            if (!await _authService.IsCurrentUserAdminAsync())
+            bool isSiteAdmin = await _authService.IsCurrentUserAdminAsync();
+            if (!isSiteAdmin)
             {
-                return Json(new { success = false, message = "Access denied" });
+                var managedRegions = await _authService.GetManagedRegions();
+                if (!managedRegions.Contains(regionCode))
+                    return Json(new { success = false, message = "Access denied" });
             }
 
             try

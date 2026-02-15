@@ -454,7 +454,8 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
-        /// Gets regions that have members (for user management filter)
+        /// Gets all regions for user management filter dropdown
+        /// Returns ALL regions from the Federations enum, sorted in Swedish alphabetical order
         /// </summary>
         [HttpGet]
         public async Task<IActionResult> GetRegionsForUserManagement()
@@ -471,27 +472,15 @@ namespace HpskSite.Controllers
 
             try
             {
-                var clubs = GetClubsFromStorage();
                 var swedishComparer = StringComparer.Create(new System.Globalization.CultureInfo("sv-SE"), false);
 
-                // Get distinct regions that have active clubs
-                var regionsWithClubs = clubs
-                    .Where(c => c.IsActive && !string.IsNullOrEmpty(c.RegionalFederation))
-                    .Select(c => c.RegionalFederation)
-                    .Distinct()
-                    .ToList();
-
-                // Get the descriptions for each region and sort in Swedish
-                var regions = regionsWithClubs
-                    .Select(r => {
-                        if (Enum.TryParse<Federations.RegionalFederations>(r, out var federation))
-                        {
-                            return new {
-                                id = r,
-                                name = federation.GetDescription()
-                            };
-                        }
-                        return new { id = r, name = r };
+                // Get all regions from the enum
+                var regions = Enum.GetValues(typeof(Federations.RegionalFederations))
+                    .Cast<Federations.RegionalFederations>()
+                    .Select(f => new
+                    {
+                        id = f.ToString(),
+                        name = f.GetDescription()
                     })
                     .OrderBy(r => r.name, swedishComparer)
                     .ToList();
@@ -960,7 +949,7 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetMemberSecurityStatus(int memberId)
         {
-            if (!await _authService.IsCurrentUserAdminAsync())
+            if (!await _authService.CanEditMemberAsync(memberId))
             {
                 return Json(new { success = false, message = "Access denied" });
             }
@@ -1019,7 +1008,7 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> UnlockMember(int memberId)
         {
-            if (!await _authService.IsCurrentUserAdminAsync())
+            if (!await _authService.CanEditMemberAsync(memberId))
             {
                 return Json(new { success = false, message = "Access denied" });
             }
@@ -1066,7 +1055,7 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> SetMemberPassword(int memberId, string newPassword)
         {
-            if (!await _authService.IsCurrentUserAdminAsync())
+            if (!await _authService.CanEditMemberAsync(memberId))
             {
                 return Json(new { success = false, message = "Access denied" });
             }
@@ -1128,7 +1117,7 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> SendPasswordResetAdmin(int memberId)
         {
-            if (!await _authService.IsCurrentUserAdminAsync())
+            if (!await _authService.CanEditMemberAsync(memberId))
             {
                 return Json(new { success = false, message = "Access denied" });
             }

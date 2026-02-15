@@ -2479,6 +2479,7 @@ document.addEventListener('DOMContentLoaded', function() {
 // Member Admin Roles Modal
 // ==========================================
 let currentMemberForAdminRoles = null;
+let currentManagedRegions = [];
 
 const allRegionalFederations = [
     { value: 'Blekinge', description: 'Blekinge Pistolskyttekrets' },
@@ -2512,22 +2513,30 @@ const allRegionalFederations = [
 function showMemberAdminRolesModal(memberId) {
     currentMemberForAdminRoles = memberId;
 
-    // Reset dropdowns
-    populateRegionDropdowns();
+    // Reset dropdowns (will be re-populated after roles load with managedRegions)
+    document.getElementById('memberAdminRegionSelect').innerHTML = '<option value="">Laddar...</option>';
+    document.getElementById('memberAdminRegionForClubSelect').innerHTML = '<option value="">Laddar...</option>';
     document.getElementById('memberAdminClubSelect').innerHTML = '<option value="">Välj krets först...</option>';
     document.getElementById('memberAdminClubSelect').disabled = true;
     document.getElementById('assignMemberRegionalAdminBtn').disabled = true;
     document.getElementById('assignMemberClubAdminBtn').disabled = true;
 
-    // Load current roles
+    // Load current roles (this will also populate dropdowns with correct regions)
     loadMemberAdminRoles(memberId);
 
     new bootstrap.Modal(document.getElementById('memberAdminRolesModal')).show();
 }
 
-function populateRegionDropdowns() {
+function populateRegionDropdowns(managedRegions) {
+    var filteredRegions = allRegionalFederations;
+    if (managedRegions && managedRegions.length < allRegionalFederations.length) {
+        filteredRegions = allRegionalFederations.filter(function(f) {
+            return managedRegions.indexOf(f.value) !== -1;
+        });
+    }
+
     var regionOptions = '<option value="">Välj krets...</option>';
-    allRegionalFederations.forEach(function(f) {
+    filteredRegions.forEach(function(f) {
         regionOptions += '<option value="' + f.value + '">' + f.description + '</option>';
     });
     document.getElementById('memberAdminRegionSelect').innerHTML = regionOptions;
@@ -2547,8 +2556,10 @@ async function loadMemberAdminRoles(memberId) {
         const data = await response.json();
 
         if (data.success) {
+            currentManagedRegions = data.managedRegions || [];
             document.getElementById('memberAdminRolesModalTitle').textContent = 'Adminroller - ' + data.memberName;
-            displayMemberAdminRoles(data.regionalAdminRoles, data.clubAdminRoles);
+            populateRegionDropdowns(currentManagedRegions);
+            displayMemberAdminRoles(data.regionalAdminRoles, data.clubAdminRoles, currentManagedRegions);
         } else {
             container.innerHTML = '<div class="alert alert-danger">' + data.message + '</div>';
         }
@@ -2558,7 +2569,7 @@ async function loadMemberAdminRoles(memberId) {
     }
 }
 
-function displayMemberAdminRoles(regionalRoles, clubRoles) {
+function displayMemberAdminRoles(regionalRoles, clubRoles, managedRegions) {
     const container = document.getElementById('currentMemberAdminRoles');
 
     if (regionalRoles.length === 0 && clubRoles.length === 0) {
@@ -2569,17 +2580,24 @@ function displayMemberAdminRoles(regionalRoles, clubRoles) {
     let html = '<div class="list-group">';
 
     regionalRoles.forEach(function(role) {
+        var canRemove = managedRegions && managedRegions.indexOf(role.regionCode) !== -1;
         html += '<div class="list-group-item d-flex justify-content-between align-items-center">' +
-            '<div><i class="bi bi-globe me-2"></i><strong>Kretsadmin:</strong> ' + escapeHtml(role.name) + '</div>' +
-            '<button class="btn btn-sm btn-outline-danger" onclick="removeMemberRegionalAdmin(\'' + escapeHtml(role.regionCode) + '\', \'' + escapeHtml(role.name) + '\')">Ta bort</button>' +
-            '</div>';
+            '<div><i class="bi bi-globe me-2"></i><strong>Kretsadmin:</strong> ' + escapeHtml(role.name) + '</div>';
+        if (canRemove) {
+            html += '<button class="btn btn-sm btn-outline-danger" onclick="removeMemberRegionalAdmin(\'' + escapeHtml(role.regionCode) + '\', \'' + escapeHtml(role.name) + '\')">Ta bort</button>';
+        }
+        html += '</div>';
     });
 
     clubRoles.forEach(function(role) {
+        var canRemove = !managedRegions || managedRegions.length === allRegionalFederations.length ||
+            (role.regionCode && managedRegions.indexOf(role.regionCode) !== -1);
         html += '<div class="list-group-item d-flex justify-content-between align-items-center">' +
-            '<div><i class="bi bi-building me-2"></i><strong>Klubbadmin:</strong> ' + escapeHtml(role.name) + '</div>' +
-            '<button class="btn btn-sm btn-outline-danger" onclick="removeMemberClubAdmin(' + role.id + ', \'' + escapeHtml(role.name) + '\')">Ta bort</button>' +
-            '</div>';
+            '<div><i class="bi bi-building me-2"></i><strong>Klubbadmin:</strong> ' + escapeHtml(role.name) + '</div>';
+        if (canRemove) {
+            html += '<button class="btn btn-sm btn-outline-danger" onclick="removeMemberClubAdmin(' + role.id + ', \'' + escapeHtml(role.name) + '\')">Ta bort</button>';
+        }
+        html += '</div>';
     });
 
     html += '</div>';

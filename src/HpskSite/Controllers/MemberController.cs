@@ -2250,8 +2250,8 @@ namespace HpskSite.Controllers
         {
             try
             {
-                // Check if current user is admin
-                if (!await _authorizationService.IsCurrentUserAdminAsync())
+                // Check if current user can edit this member (site admin, regional admin, or club admin)
+                if (!await _authorizationService.CanEditMemberAsync(request.MemberId))
                 {
                     return Json(new { success = false, message = "Access denied" });
                 }
