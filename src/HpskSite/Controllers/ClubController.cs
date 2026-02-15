@@ -2071,6 +2071,17 @@ namespace HpskSite.Controllers
                     success = true,
                     data = new
                     {
+                        // Basic fields
+                        eventName = eventContent.GetValue<string>("eventName") ?? "",
+                        pageName = eventContent.Name ?? "",
+                        eventType = eventContent.GetValue<string>("eventType") ?? "",
+                        eventDate = eventContent.GetValue<DateTime?>("eventDate")?.ToString("yyyy-MM-dd HH:mm") ?? "",
+                        venue = eventContent.GetValue<string>("venue") ?? "",
+                        description = eventContent.GetValue<string>("description") ?? "",
+                        contactPerson = eventContent.GetValue<string>("contactPerson") ?? "",
+                        contactEmail = eventContent.GetValue<string>("contactEmail") ?? "",
+                        contactPhone = eventContent.GetValue<string>("contactPhone") ?? "",
+                        // Extended fields
                         feeAmount = eventContent.GetValue<string>("feeAmount") ?? "",
                         equipmentRequired = eventContent.GetValue<string>("equipmentRequired") ?? "",
                         targetAudience = eventContent.GetValue<string>("targetAudience") ?? "",
@@ -2094,9 +2105,12 @@ namespace HpskSite.Controllers
         /// </summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> EditEventDetails(int eventId, string feeAmount = "",
-            string equipmentRequired = "", string targetAudience = "", bool registrationRequired = false,
-            string registrationUrl = "", string eventEndDate = "")
+        public async Task<IActionResult> EditEventDetails(int eventId,
+            string eventName = "", string pageName = "", string eventType = "",
+            string eventDate = "", string venue = "", string description = "",
+            string contactPerson = "", string contactEmail = "", string contactPhone = "",
+            string feeAmount = "", string equipmentRequired = "", string targetAudience = "",
+            bool registrationRequired = false, string registrationUrl = "", string eventEndDate = "")
         {
             try
             {
@@ -2116,6 +2130,33 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Access denied - insufficient permissions" });
                 }
 
+                // Save basic fields
+                if (!string.IsNullOrWhiteSpace(eventName))
+                {
+                    eventContent.SetValue("eventName", eventName);
+                }
+                // Only update URL slug (node name) when pageName is explicitly provided
+                if (!string.IsNullOrWhiteSpace(pageName))
+                {
+                    eventContent.Name = pageName;
+                }
+                eventContent.SetValue("eventType", eventType);
+                eventContent.SetValue("venue", venue);
+                eventContent.SetValue("description", description);
+                eventContent.SetValue("contactPerson", contactPerson);
+                eventContent.SetValue("contactEmail", contactEmail);
+                eventContent.SetValue("contactPhone", contactPhone);
+
+                if (!string.IsNullOrEmpty(eventDate) && DateTime.TryParse(eventDate, out var parsedEventDate))
+                {
+                    eventContent.SetValue("eventDate", parsedEventDate);
+                }
+                else
+                {
+                    eventContent.SetValue("eventDate", null);
+                }
+
+                // Save extended fields
                 eventContent.SetValue("feeAmount", feeAmount);
                 eventContent.SetValue("equipmentRequired", equipmentRequired);
                 eventContent.SetValue("targetAudience", targetAudience);

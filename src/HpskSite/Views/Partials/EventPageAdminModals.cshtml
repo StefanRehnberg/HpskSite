@@ -8,13 +8,78 @@
 
 <!-- Edit Details Modal -->
 <div class="modal fade" id="editDetailsModal" tabindex="-1" aria-labelledby="editDetailsModalLabel" aria-hidden="true">
-    <div class="modal-dialog">
+    <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title" id="editDetailsModalLabel"><i class="bi bi-pencil me-2"></i>Redigera detaljer</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
+                <!-- Basic fields -->
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label for="editEventName" class="form-label">Händelsenamn <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="editEventName" required>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="editEventType" class="form-label">Typ</label>
+                        <select class="form-select" id="editEventType" onchange="onEditEventTypeChange()">
+                            <option value="Träning">Träning</option>
+                            <option value="Städning">Städning</option>
+                            <option value="Möte">Möte</option>
+                            <option value="Socialt">Socialt</option>
+                            <option value="Nyhet">Nyhet</option>
+                            <option value="Annat">Annat...</option>
+                        </select>
+                        <input type="text" class="form-control mt-2" id="editEventCustomType" placeholder="Ange typ, t.ex. Workshop" style="display: none;">
+                    </div>
+                </div>
+                <div class="mb-2">
+                    <small class="text-muted">
+                        <i class="bi bi-link-45deg me-1"></i>Sidnamn (URL): <span id="editPageNamePreview" class="font-monospace"></span>
+                        <a href="#" class="ms-2" onclick="toggleEditPageName(event)">Ändra</a>
+                    </small>
+                </div>
+                <div class="mb-3" id="editPageNameGroup" style="display: none;">
+                    <div class="alert alert-warning py-2 small mb-2">
+                        <i class="bi bi-exclamation-triangle me-1"></i>
+                        Att ändra sidnamnet ändrar sidans URL. Befintliga länkar till denna sida kommer sluta fungera.
+                    </div>
+                    <label for="editPageName" class="form-label">Sidnamn (URL)</label>
+                    <input type="text" class="form-control" id="editPageName">
+                    <div class="form-text">Ändra bara om du verkligen behöver en annan URL.</div>
+                </div>
+                <div class="mb-3">
+                    <label for="editEventDate" class="form-label">Datum</label>
+                    <input type="text" class="form-control" id="editEventDate">
+                </div>
+                <div class="mb-3">
+                    <label for="editVenue" class="form-label">Plats</label>
+                    <input type="text" class="form-control" id="editVenue">
+                </div>
+                <div class="mb-3">
+                    <label for="editDescription" class="form-label">Beskrivning</label>
+                    <textarea class="form-control" id="editDescription" rows="3"></textarea>
+                </div>
+                <div class="row">
+                    <div class="col-md-4 mb-3">
+                        <label for="editContactPerson" class="form-label">Kontaktperson</label>
+                        <input type="text" class="form-control" id="editContactPerson">
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label for="editContactEmail" class="form-label">Kontakt E-post</label>
+                        <input type="email" class="form-control" id="editContactEmail">
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label for="editContactPhone" class="form-label">Kontakt Telefon</label>
+                        <input type="tel" class="form-control" id="editContactPhone">
+                    </div>
+                </div>
+
+                <hr>
+                <h6 class="text-muted mb-3">Utökade detaljer</h6>
+
+                <!-- Extended fields (existing) -->
                 <div class="mb-3">
                     <label for="editEventEndDate" class="form-label">Slutdatum (valfritt)</label>
                     <input type="text" class="form-control" id="editEventEndDate" placeholder="Lämna tomt för endagsevent">
@@ -197,7 +262,20 @@ function loadEventAdminData() {
             if (!result.success) return;
             var d = result.data;
 
-            // Pre-fill detail fields
+            // Pre-fill basic fields
+            document.getElementById('editEventName').value = d.eventName || '';
+            document.getElementById('editPageName').value = d.pageName || '';
+            document.getElementById('editPageName').dataset.original = d.pageName || '';
+            document.getElementById('editPageNamePreview').textContent = d.pageName || '';
+            setEditEventType(d.eventType || '');
+            document.getElementById('editEventDate').value = d.eventDate || '';
+            document.getElementById('editVenue').value = d.venue || '';
+            document.getElementById('editDescription').value = d.description || '';
+            document.getElementById('editContactPerson').value = d.contactPerson || '';
+            document.getElementById('editContactEmail').value = d.contactEmail || '';
+            document.getElementById('editContactPhone').value = d.contactPhone || '';
+
+            // Pre-fill extended fields
             document.getElementById('editEventEndDate').value = d.eventEndDate || '';
             document.getElementById('editFeeAmount').value = d.feeAmount || '';
             document.getElementById('editTargetAudience').value = d.targetAudience || '';
@@ -221,6 +299,13 @@ function loadEventAdminData() {
 
 document.addEventListener('DOMContentLoaded', function() {
     loadEventAdminData();
+    flatpickr('#editEventDate', {
+        locale: 'sv',
+        enableTime: true,
+        time_24hr: true,
+        dateFormat: 'Y-m-d H:i',
+        allowInput: true
+    });
     flatpickr('#editEventEndDate', {
         locale: 'sv',
         dateFormat: 'Y-m-d',
@@ -239,15 +324,85 @@ function toggleRegistrationUrl() {
     }
 }
 
+// Page name (URL slug) toggle
+function toggleEditPageName(e) {
+    if (e) e.preventDefault();
+    var group = document.getElementById('editPageNameGroup');
+    group.style.display = group.style.display === 'none' ? '' : 'none';
+}
+
+// Event type dropdown toggle for custom type
+function onEditEventTypeChange() {
+    var sel = document.getElementById('editEventType');
+    var customInput = document.getElementById('editEventCustomType');
+    if (sel.value === 'Annat') {
+        customInput.style.display = '';
+        customInput.focus();
+    } else {
+        customInput.style.display = 'none';
+        customInput.value = '';
+    }
+}
+
+function getEditEventTypeValue() {
+    var sel = document.getElementById('editEventType');
+    if (sel.value === 'Annat') {
+        return document.getElementById('editEventCustomType').value.trim() || 'Annat';
+    }
+    return sel.value;
+}
+
+function setEditEventType(typeValue) {
+    var sel = document.getElementById('editEventType');
+    var customInput = document.getElementById('editEventCustomType');
+    var knownTypes = ['Träning', 'Städning', 'Möte', 'Socialt', 'Nyhet'];
+    if (knownTypes.indexOf(typeValue) >= 0) {
+        sel.value = typeValue;
+        customInput.style.display = 'none';
+        customInput.value = '';
+    } else if (typeValue) {
+        sel.value = 'Annat';
+        customInput.style.display = '';
+        customInput.value = typeValue;
+    } else {
+        sel.value = 'Träning';
+        customInput.style.display = 'none';
+        customInput.value = '';
+    }
+}
+
 function openEditDetailsModal() {
     toggleRegistrationUrl();
+    document.getElementById('editPageNameGroup').style.display = 'none';
     var modal = new bootstrap.Modal(document.getElementById('editDetailsModal'));
     modal.show();
 }
 
 function saveEventDetails() {
+    var eventName = document.getElementById('editEventName').value.trim();
+    if (!eventName) {
+        alert('Händelsenamn krävs.');
+        return;
+    }
+
     var formData = new FormData();
     formData.append('eventId', eventPageId);
+    // Basic fields
+    formData.append('eventName', eventName);
+    // Only send pageName if the user explicitly changed it
+    var pageNameInput = document.getElementById('editPageName');
+    var pageNameGroup = document.getElementById('editPageNameGroup');
+    if (pageNameGroup.style.display !== 'none' && pageNameInput.value.trim() !== pageNameInput.dataset.original) {
+        formData.append('pageName', pageNameInput.value.trim());
+    }
+    formData.append('eventType', getEditEventTypeValue());
+    formData.append('eventDate', document.getElementById('editEventDate').value);
+    formData.append('venue', document.getElementById('editVenue').value);
+    formData.append('description', document.getElementById('editDescription').value);
+    formData.append('contactPerson', document.getElementById('editContactPerson').value);
+    formData.append('contactEmail', document.getElementById('editContactEmail').value);
+    formData.append('contactPhone', document.getElementById('editContactPhone').value);
+    // Extended fields
     formData.append('eventEndDate', document.getElementById('editEventEndDate').value);
     formData.append('feeAmount', document.getElementById('editFeeAmount').value);
     formData.append('equipmentRequired', document.getElementById('editEquipmentRequired').value);
