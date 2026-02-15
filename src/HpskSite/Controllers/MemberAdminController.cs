@@ -230,9 +230,7 @@ namespace HpskSite.Controllers
                     var lastActive = m.GetValue<DateTime?>("lastActiveDate");
                     var lastMobileActive = m.GetValue<DateTime?>("lastMobileActiveDate");
                     var phoneNumber = m.GetValue("phoneNumber")?.ToString() ?? "";
-                    var memberRoles = _memberService.GetAllRoles(m.Id)
-                        .Where(g => !g.StartsWith("ClubAdmin_", StringComparison.OrdinalIgnoreCase))
-                        .ToArray();
+                    var memberRoles = _memberService.GetAllRoles(m.Id).ToArray();
 
                     return new MemberListItem
                     {
@@ -283,6 +281,11 @@ namespace HpskSite.Controllers
                     .Take(pageSize)
                     .ToList();
 
+                // Build club ID → name lookup for frontend badge display
+                var clubLookup = validClubs
+                    .Where(c => c.Id.HasValue)
+                    .ToDictionary(c => c.Id.Value.ToString(), c => c.Name ?? "");
+
                 return Json(new
                 {
                     success = true,
@@ -294,7 +297,8 @@ namespace HpskSite.Controllers
                         totalCount = totalCount,
                         totalPages = totalPages,
                         hasNextPage = page < totalPages,
-                        hasPreviousPage = page > 1
+                        hasPreviousPage = page > 1,
+                        clubLookup = clubLookup
                     }
                 });
             }

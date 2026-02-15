@@ -1384,6 +1384,69 @@ namespace HpskSite.Controllers
             }
         }
 
+        /// <summary>
+        /// Gets all admin roles (ClubAdmin and RegionalAdmin) for a specific member, with resolved names
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetMemberAdminRoles(int memberId)
+        {
+            if (!await _authService.IsCurrentUserAdminAsync())
+            {
+                return Json(new { success = false, message = "Access denied" });
+            }
+
+            try
+            {
+                var member = _memberService.GetById(memberId);
+                if (member == null)
+                {
+                    return Json(new { success = false, message = "Member not found" });
+                }
+
+                var allRoles = _memberService.GetAllRoles(member.Id);
+                var clubs = GetClubsFromStorage();
+
+                var clubAdminRoles = allRoles
+                    .Where(r => r.StartsWith("ClubAdmin_", StringComparison.OrdinalIgnoreCase))
+                    .Select(r =>
+                    {
+                        var idStr = r.Replace("ClubAdmin_", "");
+                        int.TryParse(idStr, out var clubId);
+                        var club = clubs.FirstOrDefault(c => c.Id == clubId);
+                        return new { id = clubId, name = club?.Name ?? $"Okänd klubb ({idStr})", role = r };
+                    })
+                    .ToList();
+
+                var regionalAdminRoles = allRoles
+                    .Where(r => r.StartsWith("RegionalAdmin_", StringComparison.OrdinalIgnoreCase))
+                    .Select(r =>
+                    {
+                        var regionCode = r.Replace("RegionalAdmin_", "");
+                        var regionName = regionCode;
+                        if (Enum.TryParse<HpskSite.Models.Federations.RegionalFederations>(regionCode, out var federation))
+                        {
+                            regionName = federation.GetDescription();
+                        }
+                        return new { regionCode = regionCode, name = regionName, role = r };
+                    })
+                    .ToList();
+
+                var memberName = $"{member.GetValue("firstName")} {member.GetValue("lastName")}".Trim();
+
+                return Json(new
+                {
+                    success = true,
+                    memberName = memberName,
+                    clubAdminRoles = clubAdminRoles,
+                    regionalAdminRoles = regionalAdminRoles
+                });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = "Error loading member admin roles: " + ex.Message });
+            }
+        }
+
         #endregion
 
         #region Helper Methods

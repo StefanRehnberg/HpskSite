@@ -514,6 +514,69 @@
 @* Include user management specific rejection reason modal *@
 @await Html.PartialAsync("~/Views/Partials/RejectionReasonModal_UserManagement.cshtml")
 
+<!-- Member Admin Roles Modal -->
+<div class="modal fade" id="memberAdminRolesModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="memberAdminRolesModalTitle">Adminroller</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <!-- Current admin roles -->
+                <h6>Nuvarande adminroller</h6>
+                <div id="currentMemberAdminRoles" class="mb-3">
+                    <div class="text-center">
+                        <div class="spinner-border spinner-border-sm" role="status"></div> Laddar...
+                    </div>
+                </div>
+
+                <hr>
+
+                <!-- Assign regional admin -->
+                <h6>Tilldela kretsadmin</h6>
+                <div class="row mb-3">
+                    <div class="col-md-8">
+                        <select class="form-select" id="memberAdminRegionSelect">
+                            <option value="">Välj krets...</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <button type="button" class="btn btn-primary w-100" id="assignMemberRegionalAdminBtn" onclick="assignMemberRegionalAdmin()" disabled>
+                            <i class="bi bi-plus-lg me-1"></i>Tilldela
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Assign club admin -->
+                <h6>Tilldela klubbadmin</h6>
+                <div class="row mb-2">
+                    <div class="col-md-8">
+                        <select class="form-select" id="memberAdminRegionForClubSelect" onchange="onMemberAdminRegionForClubChange()">
+                            <option value="">Välj krets...</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="row mb-3">
+                    <div class="col-md-8">
+                        <select class="form-select" id="memberAdminClubSelect" disabled>
+                            <option value="">Välj krets först...</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <button type="button" class="btn btn-primary w-100" id="assignMemberClubAdminBtn" onclick="assignMemberClubAdmin()" disabled>
+                            <i class="bi bi-plus-lg me-1"></i>Tilldela
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Template for user rows (Club Management pattern) -->
 <script type="text/html" id="user-row-template">
     <tr data-user-id="{id}" data-last-active-sort="{lastActiveSortValue}">
@@ -537,6 +600,9 @@
         <td class="text-end text-nowrap">
             <button class="btn btn-sm btn-outline-primary me-1" onclick="editUser({id})" title="Redigera">
                 <i class="bi bi-pencil"></i>
+            </button>
+            <button class="btn btn-sm btn-outline-warning me-1" onclick="showMemberAdminRolesModal({id})" title="Adminroller">
+                <i class="bi bi-person-gear"></i>
             </button>
             <button class="btn btn-sm btn-outline-secondary" onclick="showSecurityModal({id})" title="Säkerhet">
                 <i class="bi bi-shield-lock"></i>
@@ -577,6 +643,21 @@ let currentPage = 1;
 let currentFilters = { search: '', region: '', clubId: '', role: '' };
 let debounceTimer = null;
 let paginationData = null;
+let clubLookup = {};
+
+// Format admin group name for display
+function formatAdminGroupName(group) {
+    if (group.startsWith('ClubAdmin_')) {
+        const clubId = group.substring('ClubAdmin_'.length);
+        const clubName = clubLookup[clubId];
+        return clubName ? 'Admin ' + clubName : group;
+    }
+    if (group.startsWith('RegionalAdmin_')) {
+        const regionCode = group.substring('RegionalAdmin_'.length);
+        return 'Kretsadmin ' + regionCode;
+    }
+    return group;
+}
 
 // Lazy load user management data
 let userManagementLoaded = false;
@@ -904,6 +985,7 @@ function loadUsers() {
             }
 
             paginationData = data.data;
+            clubLookup = data.data.clubLookup || {};
             allUsers = data.data.items || [];
 
             if (allUsers.length === 0) {
@@ -962,7 +1044,7 @@ function displayUsers() {
         // Build admin group badges (filter out "Users" — everyone is in that group)
         const adminGroups = (user.groups || []).filter(g => g !== 'Users');
         const groupsBadges = adminGroups.length > 0
-            ? adminGroups.map(group => `<span class="badge bg-primary me-1 mb-1">${escapeHtml(group)}</span>`).join('')
+            ? adminGroups.map(group => `<span class="badge bg-primary me-1 mb-1">${escapeHtml(formatAdminGroupName(group))}</span>`).join('')
             : '';
 
         const statusText = user.isApproved ? 'Godkänd' : 'Väntande';
@@ -2392,6 +2474,247 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 });
+
+// ==========================================
+// Member Admin Roles Modal
+// ==========================================
+let currentMemberForAdminRoles = null;
+
+const allRegionalFederations = [
+    { value: 'Blekinge', description: 'Blekinge Pistolskyttekrets' },
+    { value: 'Dalarna', description: 'Dalarnas Pistolskyttekrets' },
+    { value: 'Gotland', description: 'Gotlands Pistolskyttekrets' },
+    { value: 'Gavleborg', description: 'Gävleborgs Pistolskyttekrets' },
+    { value: 'GoteborgOchBohuslan', description: 'Göteborg och Bohusläns Pistol.Krets' },
+    { value: 'Halland', description: 'Hallands Pistolskyttekrets' },
+    { value: 'Jamtland', description: 'Jämtlands Läns Pistolskyttekrets' },
+    { value: 'Jonkoping', description: 'Jönköpings Läns Pistolskyttekrets' },
+    { value: 'KalmarNorra', description: 'Kalmar Läns Norra Pistolskyttekrets' },
+    { value: 'KalmarSodra', description: 'Kalmar Läns Södra Pistolskyttekrets' },
+    { value: 'Kristianstad', description: 'Kristianstads Pistolskyttekrets' },
+    { value: 'Kronoberg', description: 'Kronobergs Läns Pistolskyttekrets' },
+    { value: 'Malmohus', description: 'Malmöhus Pistolskyttekrets' },
+    { value: 'Norrbotten', description: 'Norrbottens Pistolskyttekrets' },
+    { value: 'Skaraborg', description: 'Skaraborgs Pistolskyttekrets' },
+    { value: 'Stockholm', description: 'Stockholms Pistolskyttekrets' },
+    { value: 'Sodermanland', description: 'Södermanlands Pistolskyttekrets' },
+    { value: 'Uppsala', description: 'Uppsala Läns Pistolskyttekrets' },
+    { value: 'Varmland', description: 'Värmlands Pistolskyttekrets' },
+    { value: 'Vasterbotten', description: 'Västerbottens Läns Pistolskyttekrets' },
+    { value: 'Vasternorrland', description: 'Västernorrlands Läns Pistolskyttekrets' },
+    { value: 'VastgotaDal', description: 'Västgöta-Dals Pistolskyttekrets' },
+    { value: 'Vastmanland', description: 'Västmanlands Pistolskyttekrets' },
+    { value: 'Alvsborg', description: 'Älvsborgs Pistolskyttekrets' },
+    { value: 'Orebro', description: 'Örebro Läns Pistolskyttekrets' },
+    { value: 'Ostergotland', description: 'Östergötlands Pistolskyttekrets' }
+];
+
+function showMemberAdminRolesModal(memberId) {
+    currentMemberForAdminRoles = memberId;
+
+    // Reset dropdowns
+    populateRegionDropdowns();
+    document.getElementById('memberAdminClubSelect').innerHTML = '<option value="">Välj krets först...</option>';
+    document.getElementById('memberAdminClubSelect').disabled = true;
+    document.getElementById('assignMemberRegionalAdminBtn').disabled = true;
+    document.getElementById('assignMemberClubAdminBtn').disabled = true;
+
+    // Load current roles
+    loadMemberAdminRoles(memberId);
+
+    new bootstrap.Modal(document.getElementById('memberAdminRolesModal')).show();
+}
+
+function populateRegionDropdowns() {
+    var regionOptions = '<option value="">Välj krets...</option>';
+    allRegionalFederations.forEach(function(f) {
+        regionOptions += '<option value="' + f.value + '">' + f.description + '</option>';
+    });
+    document.getElementById('memberAdminRegionSelect').innerHTML = regionOptions;
+    document.getElementById('memberAdminRegionForClubSelect').innerHTML = regionOptions;
+
+    document.getElementById('memberAdminRegionSelect').onchange = function() {
+        document.getElementById('assignMemberRegionalAdminBtn').disabled = !this.value;
+    };
+}
+
+async function loadMemberAdminRoles(memberId) {
+    const container = document.getElementById('currentMemberAdminRoles');
+    container.innerHTML = '<div class="text-center"><div class="spinner-border spinner-border-sm" role="status"></div> Laddar...</div>';
+
+    try {
+        const response = await fetch('/umbraco/surface/ClubAdmin/GetMemberAdminRoles?memberId=' + memberId);
+        const data = await response.json();
+
+        if (data.success) {
+            document.getElementById('memberAdminRolesModalTitle').textContent = 'Adminroller - ' + data.memberName;
+            displayMemberAdminRoles(data.regionalAdminRoles, data.clubAdminRoles);
+        } else {
+            container.innerHTML = '<div class="alert alert-danger">' + data.message + '</div>';
+        }
+    } catch (error) {
+        console.error('Error loading member admin roles:', error);
+        container.innerHTML = '<div class="alert alert-danger">Fel vid laddning</div>';
+    }
+}
+
+function displayMemberAdminRoles(regionalRoles, clubRoles) {
+    const container = document.getElementById('currentMemberAdminRoles');
+
+    if (regionalRoles.length === 0 && clubRoles.length === 0) {
+        container.innerHTML = '<p class="text-muted mb-0">Inga adminroller tilldelade</p>';
+        return;
+    }
+
+    let html = '<div class="list-group">';
+
+    regionalRoles.forEach(function(role) {
+        html += '<div class="list-group-item d-flex justify-content-between align-items-center">' +
+            '<div><i class="bi bi-globe me-2"></i><strong>Kretsadmin:</strong> ' + escapeHtml(role.name) + '</div>' +
+            '<button class="btn btn-sm btn-outline-danger" onclick="removeMemberRegionalAdmin(\'' + escapeHtml(role.regionCode) + '\', \'' + escapeHtml(role.name) + '\')">Ta bort</button>' +
+            '</div>';
+    });
+
+    clubRoles.forEach(function(role) {
+        html += '<div class="list-group-item d-flex justify-content-between align-items-center">' +
+            '<div><i class="bi bi-building me-2"></i><strong>Klubbadmin:</strong> ' + escapeHtml(role.name) + '</div>' +
+            '<button class="btn btn-sm btn-outline-danger" onclick="removeMemberClubAdmin(' + role.id + ', \'' + escapeHtml(role.name) + '\')">Ta bort</button>' +
+            '</div>';
+    });
+
+    html += '</div>';
+    container.innerHTML = html;
+}
+
+async function onMemberAdminRegionForClubChange() {
+    const regionCode = document.getElementById('memberAdminRegionForClubSelect').value;
+    const clubSelect = document.getElementById('memberAdminClubSelect');
+    const assignBtn = document.getElementById('assignMemberClubAdminBtn');
+
+    if (!regionCode) {
+        clubSelect.innerHTML = '<option value="">Välj krets först...</option>';
+        clubSelect.disabled = true;
+        assignBtn.disabled = true;
+        return;
+    }
+
+    clubSelect.innerHTML = '<option value="">Laddar klubbar...</option>';
+    clubSelect.disabled = true;
+
+    try {
+        const response = await fetch('/umbraco/surface/ClubAdmin/GetClubsForRegion?region=' + encodeURIComponent(regionCode));
+        const data = await response.json();
+        if (data.success && data.clubs) {
+            clubSelect.innerHTML = '<option value="">Välj klubb...</option>';
+            data.clubs.forEach(function(club) {
+                clubSelect.innerHTML += '<option value="' + club.id + '">' + club.name + '</option>';
+            });
+            clubSelect.disabled = false;
+            clubSelect.onchange = function() {
+                assignBtn.disabled = !this.value;
+            };
+        } else {
+            clubSelect.innerHTML = '<option value="">Inga klubbar i kretsen</option>';
+        }
+    } catch (error) {
+        console.error('Error loading clubs:', error);
+        clubSelect.innerHTML = '<option value="">Fel vid laddning</option>';
+    }
+}
+
+async function assignMemberRegionalAdmin() {
+    const regionCode = document.getElementById('memberAdminRegionSelect').value;
+    if (!regionCode || !currentMemberForAdminRoles) return;
+
+    const formData = new FormData();
+    const token = document.querySelector('input[name="__RequestVerificationToken"]');
+    if (token) formData.append('__RequestVerificationToken', token.value);
+    formData.append('memberId', currentMemberForAdminRoles);
+    formData.append('regionCode', regionCode);
+
+    try {
+        const response = await fetch('/umbraco/surface/ClubAdmin/AssignRegionalAdmin', { method: 'POST', body: formData });
+        const data = await response.json();
+        if (data.success) {
+            loadMemberAdminRoles(currentMemberForAdminRoles);
+            loadUsers();
+        } else {
+            alert('Fel: ' + data.message);
+        }
+    } catch (error) {
+        alert('Fel vid tilldelning');
+    }
+}
+
+async function assignMemberClubAdmin() {
+    const clubId = document.getElementById('memberAdminClubSelect').value;
+    if (!clubId || !currentMemberForAdminRoles) return;
+
+    const formData = new FormData();
+    const token = document.querySelector('input[name="__RequestVerificationToken"]');
+    if (token) formData.append('__RequestVerificationToken', token.value);
+    formData.append('memberId', currentMemberForAdminRoles);
+    formData.append('clubId', clubId);
+
+    try {
+        const response = await fetch('/umbraco/surface/ClubAdmin/AssignClubAdmin', { method: 'POST', body: formData });
+        const data = await response.json();
+        if (data.success) {
+            loadMemberAdminRoles(currentMemberForAdminRoles);
+            loadUsers();
+        } else {
+            alert('Fel: ' + data.message);
+        }
+    } catch (error) {
+        alert('Fel vid tilldelning');
+    }
+}
+
+async function removeMemberRegionalAdmin(regionCode, regionName) {
+    if (!confirm('Ta bort kretsadmin för ' + regionName + '?')) return;
+
+    const formData = new FormData();
+    const token = document.querySelector('input[name="__RequestVerificationToken"]');
+    if (token) formData.append('__RequestVerificationToken', token.value);
+    formData.append('memberId', currentMemberForAdminRoles);
+    formData.append('regionCode', regionCode);
+
+    try {
+        const response = await fetch('/umbraco/surface/ClubAdmin/RemoveRegionalAdmin', { method: 'POST', body: formData });
+        const data = await response.json();
+        if (data.success) {
+            loadMemberAdminRoles(currentMemberForAdminRoles);
+            loadUsers();
+        } else {
+            alert('Fel: ' + data.message);
+        }
+    } catch (error) {
+        alert('Fel vid borttagning');
+    }
+}
+
+async function removeMemberClubAdmin(clubId, clubName) {
+    if (!confirm('Ta bort klubbadmin för ' + clubName + '?')) return;
+
+    const formData = new FormData();
+    const token = document.querySelector('input[name="__RequestVerificationToken"]');
+    if (token) formData.append('__RequestVerificationToken', token.value);
+    formData.append('memberId', currentMemberForAdminRoles);
+    formData.append('clubId', clubId);
+
+    try {
+        const response = await fetch('/umbraco/surface/ClubAdmin/RemoveClubAdmin', { method: 'POST', body: formData });
+        const data = await response.json();
+        if (data.success) {
+            loadMemberAdminRoles(currentMemberForAdminRoles);
+            loadUsers();
+        } else {
+            alert('Fel: ' + data.message);
+        }
+    } catch (error) {
+        alert('Fel vid borttagning');
+    }
+}
 
 </script>
 
