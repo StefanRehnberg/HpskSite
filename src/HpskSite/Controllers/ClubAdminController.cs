@@ -1340,7 +1340,7 @@ namespace HpskSite.Controllers
         /// Gets available members for club admin assignment (excluding existing admins)
         /// </summary>
         [HttpGet]
-        public async Task<IActionResult> GetAvailableMembersForClubAdmin(int clubId)
+        public async Task<IActionResult> GetAvailableMembersForClubAdmin(int clubId, int filterClubId = 0)
         {
             if (!await _authService.IsCurrentUserAdminAsync() && !await _authService.IsClubAdmin(clubId))
             {
@@ -1353,10 +1353,21 @@ namespace HpskSite.Controllers
                 var allMembers = _memberService.GetAll(0, int.MaxValue, out var totalRecords);
 
                 // Get members who are not clubs and not already admins of this club
-                var availableMembers = allMembers
+                var query = allMembers
                     .Where(m => m.ContentType.Alias != ClubMemberTypeAlias) // Exclude clubs
                     .Where(m => !_memberService.GetAllRoles(m.Id).Contains(groupName)) // Exclude existing club admins
-                    .Where(m => m.IsApproved) // Only approved members
+                    .Where(m => m.IsApproved); // Only approved members
+
+                // Filter by club membership if filterClubId is specified
+                if (filterClubId > 0)
+                {
+                    query = query.Where(m =>
+                        m.GetValue("primaryClubId")?.ToString() == filterClubId.ToString() ||
+                        (m.GetValue("memberClubIds")?.ToString() ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries)
+                            .Contains(filterClubId.ToString()));
+                }
+
+                var availableMembers = query
                     .Select(m => new {
                         Id = m.Id,
                         Name = $"{m.GetValue("firstName")} {m.GetValue("lastName")}".Trim(),
@@ -1782,7 +1793,7 @@ namespace HpskSite.Controllers
         /// Gets available members for regional admin assignment (excluding existing regional admins)
         /// </summary>
         [HttpGet]
-        public async Task<IActionResult> GetAvailableMembersForRegionalAdmin(string regionCode)
+        public async Task<IActionResult> GetAvailableMembersForRegionalAdmin(string regionCode, int clubId = 0)
         {
             if (!await _authService.IsCurrentUserAdminAsync())
             {
@@ -1799,10 +1810,36 @@ namespace HpskSite.Controllers
                 var groupName = $"RegionalAdmin_{regionCode}";
                 var allMembers = _memberService.GetAll(0, int.MaxValue, out var totalRecords);
 
-                var availableMembers = allMembers
+                var query = allMembers
                     .Where(m => m.ContentType.Alias != ClubMemberTypeAlias)
                     .Where(m => !_memberService.GetAllRoles(m.Id).Contains(groupName))
-                    .Where(m => m.IsApproved)
+                    .Where(m => m.IsApproved);
+
+                if (clubId > 0)
+                {
+                    // Filter by specific club
+                    query = query.Where(m =>
+                        m.GetValue("primaryClubId")?.ToString() == clubId.ToString() ||
+                        (m.GetValue("memberClubIds")?.ToString() ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries)
+                            .Contains(clubId.ToString()));
+                }
+                else
+                {
+                    // Filter by all clubs in the region
+                    var clubs = GetClubsFromStorage();
+                    var clubIdsInRegion = clubs
+                        .Where(c => c.IsActive && c.RegionalFederation == regionCode)
+                        .Select(c => c.Id?.ToString() ?? "")
+                        .Where(id => !string.IsNullOrEmpty(id))
+                        .ToHashSet();
+
+                    query = query.Where(m =>
+                        clubIdsInRegion.Contains(m.GetValue("primaryClubId")?.ToString() ?? "") ||
+                        (m.GetValue("memberClubIds")?.ToString() ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries)
+                            .Any(cid => clubIdsInRegion.Contains(cid.Trim())));
+                }
+
+                var availableMembers = query
                     .Select(m => new
                     {
                         id = m.Id,

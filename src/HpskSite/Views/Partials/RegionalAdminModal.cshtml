@@ -21,9 +21,15 @@
                     <div class="col-md-6">
                         <h6>Tilldela ny administratör</h6>
                         <div class="mb-3">
+                            <label for="regionalAdminClubFilter" class="form-label">Filtrera på klubb</label>
+                            <select class="form-select" id="regionalAdminClubFilter" onchange="onRegionalAdminClubFilterChange()">
+                                <option value="">Alla klubbar i kretsen</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
                             <label for="availableRegionalMembersSelect" class="form-label">Välj medlem</label>
                             <select class="form-select" id="availableRegionalMembersSelect">
-                                <option value="">Laddar tillgängliga medlemmar...</option>
+                                <option value="">Välj klubb först...</option>
                             </select>
                         </div>
                         <button type="button" class="btn btn-primary" id="assignRegionalAdminBtn" onclick="assignSelectedRegionalAdmin()" disabled>
@@ -49,10 +55,34 @@ function showRegionalAdminsModal(regionCode, regionName) {
     // Load current admins
     loadRegionalAdmins(regionCode);
 
-    // Load available members for dropdown
-    loadAvailableMembersForRegion(regionCode);
+    // Load clubs for the region filter, then load members
+    loadRegionalAdminClubFilter(regionCode);
 
     new bootstrap.Modal(document.getElementById('regionalAdminsModal')).show();
+}
+
+async function loadRegionalAdminClubFilter(regionCode) {
+    const clubSelect = document.getElementById('regionalAdminClubFilter');
+    clubSelect.innerHTML = '<option value="">Alla klubbar i kretsen</option>';
+
+    try {
+        const response = await fetch(`/umbraco/surface/ClubAdmin/GetClubsForRegion?region=${encodeURIComponent(regionCode)}`);
+        const data = await response.json();
+        if (data.success && data.clubs) {
+            data.clubs.forEach(club => {
+                clubSelect.innerHTML += `<option value="${club.id}">${club.name}</option>`;
+            });
+        }
+    } catch (error) {
+        console.error('Error loading clubs for region:', error);
+    }
+
+    // Load members for all clubs in the region by default
+    loadAvailableMembersForRegion(regionCode);
+}
+
+function onRegionalAdminClubFilterChange() {
+    loadAvailableMembersForRegion(currentRegionForAdmins);
 }
 
 async function loadRegionalAdmins(regionCode) {
@@ -108,8 +138,14 @@ async function loadAvailableMembersForRegion(regionCode) {
     select.innerHTML = '<option value="">Laddar tillgängliga medlemmar...</option>';
     assignBtn.disabled = true;
 
+    const clubId = document.getElementById('regionalAdminClubFilter').value;
+    let url = `/umbraco/surface/ClubAdmin/GetAvailableMembersForRegionalAdmin?regionCode=${encodeURIComponent(regionCode)}`;
+    if (clubId) {
+        url += `&clubId=${clubId}`;
+    }
+
     try {
-        const response = await fetch(`/umbraco/surface/ClubAdmin/GetAvailableMembersForRegionalAdmin?regionCode=${encodeURIComponent(regionCode)}`);
+        const response = await fetch(url);
         const data = await response.json();
 
         if (data.success) {

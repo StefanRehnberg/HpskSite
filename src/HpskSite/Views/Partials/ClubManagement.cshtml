@@ -242,9 +242,21 @@
                     <div class="col-md-6">
                         <h6>Assign New Admin</h6>
                         <div class="mb-3">
-                            <label for="availableMembersSelect" class="form-label">Select Member</label>
+                            <label for="clubAdminRegionFilter" class="form-label">Krets</label>
+                            <select class="form-select" id="clubAdminRegionFilter" onchange="onClubAdminRegionFilterChange()">
+                                <option value="">Välj krets...</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label for="clubAdminClubFilter" class="form-label">Klubb</label>
+                            <select class="form-select" id="clubAdminClubFilter" onchange="onClubAdminClubFilterChange()">
+                                <option value="">Välj krets först...</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label for="availableMembersSelect" class="form-label">Välj medlem</label>
                             <select class="form-select" id="availableMembersSelect">
-                                <option value="">Loading available members...</option>
+                                <option value="">Välj klubb först...</option>
                             </select>
                         </div>
                         <button type="button" class="btn btn-primary" id="assignAdminBtn" onclick="assignSelectedAdmin()" disabled>
@@ -296,7 +308,7 @@
             <button class="btn btn-sm btn-info me-1" onclick="showClubMembers({id}, '{name}')" title="View members">
                 <i class="bi bi-people"></i>
             </button>
-            <button class="btn btn-sm btn-secondary" onclick="showClubAdmins({id}, '{name}')" title="Manage admins">
+            <button class="btn btn-sm btn-secondary" onclick="showClubAdmins({id}, '{name}', '{regionalFederation}')" title="Manage admins">
                 <i class="bi bi-person-gear"></i>
             </button>
         </td>
@@ -591,6 +603,7 @@ function displayClubs(clubs) {
             .replace(/{name}/g, club.name || '')
             .replace(/{description}/g, club.description || '')
             .replace(/{kretsDisplay}/g, getKretsDescription(club.regionalFederation))
+            .replace(/{regionalFederation}/g, club.regionalFederation || '')
             .replace(/{city}/g, club.city || '-')
             .replace(/{contactDisplay}/g, contactDisplay)
             .replace(/{id}/g, club.id);
@@ -963,17 +976,71 @@ function switchToUserManagement() {
 // Club Admin Management Functions
 let currentClubForAdmins = null;
 
-function showClubAdmins(clubId, clubName) {
+function showClubAdmins(clubId, clubName, regionCode) {
     currentClubForAdmins = clubId;
     document.getElementById('clubAdminsModalTitle').textContent = `Manage Club Admins - ${clubName}`;
 
     // Load current admins
     loadClubAdmins(clubId);
 
-    // Load available members for dropdown
-    loadAvailableMembers(clubId);
+    // Populate region filter and pre-select the club's region
+    initClubAdminFilters(regionCode, clubId);
 
     new bootstrap.Modal(document.getElementById('clubAdminsModal')).show();
+}
+
+function initClubAdminFilters(regionCode, clubId) {
+    const regionSelect = document.getElementById('clubAdminRegionFilter');
+    regionSelect.innerHTML = '<option value="">Alla kretsar</option>';
+    regionalFederations.forEach(f => {
+        const selected = f.value === regionCode ? ' selected' : '';
+        regionSelect.innerHTML += `<option value="${f.value}"${selected}>${f.description}</option>`;
+    });
+
+    // Load clubs for the pre-selected region, then pre-select the club
+    loadClubAdminClubFilter(regionCode, clubId);
+}
+
+async function loadClubAdminClubFilter(regionCode, preselectClubId) {
+    const clubSelect = document.getElementById('clubAdminClubFilter');
+    const memberSelect = document.getElementById('availableMembersSelect');
+
+    if (!regionCode) {
+        clubSelect.innerHTML = '<option value="">Välj krets först...</option>';
+        memberSelect.innerHTML = '<option value="">Välj klubb först...</option>';
+        document.getElementById('assignAdminBtn').disabled = true;
+        return;
+    }
+
+    clubSelect.innerHTML = '<option value="">Laddar klubbar...</option>';
+
+    try {
+        const response = await fetch(`/umbraco/surface/ClubAdmin/GetClubsForRegion?region=${encodeURIComponent(regionCode)}`);
+        const data = await response.json();
+        if (data.success && data.clubs) {
+            clubSelect.innerHTML = '<option value="">Alla klubbar i kretsen</option>';
+            data.clubs.forEach(club => {
+                const selected = club.id == preselectClubId ? ' selected' : '';
+                clubSelect.innerHTML += `<option value="${club.id}"${selected}>${club.name}</option>`;
+            });
+            // Load members for the pre-selected or default club
+            loadAvailableMembers(currentClubForAdmins);
+        } else {
+            clubSelect.innerHTML = '<option value="">Inga klubbar</option>';
+        }
+    } catch (error) {
+        console.error('Error loading clubs for region:', error);
+        clubSelect.innerHTML = '<option value="">Fel vid laddning</option>';
+    }
+}
+
+function onClubAdminRegionFilterChange() {
+    const regionCode = document.getElementById('clubAdminRegionFilter').value;
+    loadClubAdminClubFilter(regionCode, 0);
+}
+
+function onClubAdminClubFilterChange() {
+    loadAvailableMembers(currentClubForAdmins);
 }
 
 async function loadClubAdmins(clubId) {
@@ -1026,21 +1093,27 @@ async function loadAvailableMembers(clubId) {
     const select = document.getElementById('availableMembersSelect');
     const assignBtn = document.getElementById('assignAdminBtn');
 
-    select.innerHTML = '<option value="">Loading available members...</option>';
+    select.innerHTML = '<option value="">Laddar medlemmar...</option>';
     assignBtn.disabled = true;
 
+    const filterClubId = document.getElementById('clubAdminClubFilter').value || '';
+    let url = `/umbraco/surface/ClubAdmin/GetAvailableMembersForClubAdmin?clubId=${clubId}`;
+    if (filterClubId) {
+        url += `&filterClubId=${filterClubId}`;
+    }
+
     try {
-        const response = await fetch(`/umbraco/surface/ClubAdmin/GetAvailableMembersForClubAdmin?clubId=${clubId}`);
+        const response = await fetch(url);
         const data = await response.json();
 
         if (data.success) {
             populateMemberDropdown(data.members);
         } else {
-            select.innerHTML = '<option value="">Error loading members</option>';
+            select.innerHTML = '<option value="">Fel vid laddning av medlemmar</option>';
         }
     } catch (error) {
         console.error('Error loading available members:', error);
-        select.innerHTML = '<option value="">Error loading members</option>';
+        select.innerHTML = '<option value="">Fel vid laddning av medlemmar</option>';
     }
 }
 
@@ -1049,12 +1122,12 @@ function populateMemberDropdown(members) {
     const assignBtn = document.getElementById('assignAdminBtn');
 
     if (!members || members.length === 0) {
-        select.innerHTML = '<option value="">No available members</option>';
+        select.innerHTML = '<option value="">Inga tillgängliga medlemmar</option>';
         assignBtn.disabled = true;
         return;
     }
 
-    let options = '<option value="">Select a member to assign...</option>';
+    let options = '<option value="">Välj en medlem att tilldela...</option>';
     members.forEach(member => {
         options += `<option value="${member.id}" data-name="${member.name}">${member.name} (${member.email})</option>`;
     });
@@ -1062,9 +1135,9 @@ function populateMemberDropdown(members) {
     select.innerHTML = options;
 
     // Enable assign button when selection changes
-    select.addEventListener('change', function() {
+    select.onchange = function() {
         assignBtn.disabled = !this.value;
-    });
+    };
 }
 
 function assignSelectedAdmin() {
