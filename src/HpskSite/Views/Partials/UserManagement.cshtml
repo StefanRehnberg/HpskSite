@@ -121,13 +121,12 @@
                     <th class="sortable" data-sort="lastActiveSortValue">Webb <i class="bi bi-arrow-down-up"></i></th>
                     <th class="sortable" data-sort="lastMobileActiveSortValue">App <i class="bi bi-arrow-down-up"></i></th>
                     <th>Admin</th>
-                    <th>Status</th>
                     <th class="text-end">Åtgärder</th>
                 </tr>
             </thead>
             <tbody id="usersTableBody">
                 <tr class="text-muted">
-                    <td colspan="7" class="text-center py-4">Laddar användare...</td>
+                    <td colspan="6" class="text-center py-4">Laddar användare...</td>
                 </tr>
             </tbody>
         </table>
@@ -593,10 +592,9 @@
             <span class="badge bg-secondary">{primaryClubName}</span>
             {additionalClubsBadges}
         </td>
-        <td class="{lastActiveClass}">{lastActiveDisplay}</td>
-        <td class="{lastMobileActiveClass}">{lastMobileActiveDisplay}</td>
+        <td class="{lastActiveClass} text-nowrap small">{lastActiveDisplay}</td>
+        <td class="{lastMobileActiveClass} text-nowrap small">{lastMobileActiveDisplay}</td>
         <td>{groupsBadges}</td>
-        <td><span class="badge {statusClass}">{statusText}</span></td>
         <td class="text-end text-nowrap">
             <button class="btn btn-sm btn-outline-primary me-1" onclick="editUser({id})" title="Redigera">
                 <i class="bi bi-pencil"></i>
@@ -645,18 +643,39 @@ let debounceTimer = null;
 let paginationData = null;
 let clubLookup = {};
 
+// Shorten club name for compact display
+function shortenClubName(name) {
+    return name
+        .replace(/Pistolskytteförening/gi, 'PSF')
+        .replace(/Pistolskytteklubb/gi, 'PSK')
+        .replace(/Pistolklubb/gi, 'PK')
+        .replace(/Sportskytteklubb/gi, 'SSK')
+        .replace(/Skytteklubb/gi, 'SK')
+        .replace(/Skytteförening/gi, 'SF');
+}
+
 // Format admin group name for display
 function formatAdminGroupName(group) {
+    if (group === 'Administrators') return 'Webbadmin';
+    if (group === 'PendingApproval') return 'Väntande';
     if (group.startsWith('ClubAdmin_')) {
         const clubId = group.substring('ClubAdmin_'.length);
         const clubName = clubLookup[clubId];
-        return clubName ? 'Admin ' + clubName : group;
+        return clubName ? shortenClubName(clubName) : group;
     }
     if (group.startsWith('RegionalAdmin_')) {
         const regionCode = group.substring('RegionalAdmin_'.length);
-        return 'Kretsadmin ' + regionCode;
+        return regionCode;
     }
     return group;
+}
+
+function getAdminBadgeClass(group) {
+    if (group === 'Administrators') return 'bg-danger';
+    if (group === 'PendingApproval') return 'bg-warning text-dark';
+    if (group.startsWith('RegionalAdmin_')) return 'bg-info';
+    if (group.startsWith('ClubAdmin_')) return 'bg-primary';
+    return 'bg-secondary';
 }
 
 // Lazy load user management data
@@ -1031,34 +1050,31 @@ function displayUsers() {
 
     tbody.innerHTML = allUsers.map(user => {
         const clubClass = user.hasInvalidClubReference ? 'text-danger fw-bold' : '';
-        const clubName = user.primaryClubName || 'Ingen klubb';
+        const clubName = shortenClubName(user.primaryClubName || 'Ingen klubb');
 
         // Build additional clubs badges
         let additionalClubsBadges = '';
         if (user.additionalClubNames && user.additionalClubNames.length > 0) {
             additionalClubsBadges = '<br>' + user.additionalClubNames
-                .map(name => `<span class="badge bg-info me-1 mt-1">${escapeHtml(name)}</span>`)
+                .map(name => `<span class="badge bg-info me-1 mt-1">${escapeHtml(shortenClubName(name))}</span>`)
                 .join('');
         }
 
         // Build admin group badges (filter out "Users" — everyone is in that group)
         const adminGroups = (user.groups || []).filter(g => g !== 'Users');
         const groupsBadges = adminGroups.length > 0
-            ? adminGroups.map(group => `<span class="badge bg-primary me-1 mb-1">${escapeHtml(formatAdminGroupName(group))}</span>`).join('')
+            ? adminGroups.map(group => `<span class="badge ${getAdminBadgeClass(group)} me-1 mb-1" style="font-size:.7em">${escapeHtml(formatAdminGroupName(group))}</span>`).join('')
             : '';
 
-        const statusText = user.isApproved ? 'Godkänd' : 'Väntande';
-        const statusClass = user.isApproved ? 'bg-success' : 'bg-warning';
-
         // Last active formatting
-        const lastActiveDisplay = user.lastActiveDisplay || 'Never';
+        const lastActiveDisplay = user.lastActiveDisplay || 'Aldrig';
         const lastActiveSortValue = user.lastActiveSortValue || 0;
-        const lastActiveClass = lastActiveDisplay === 'Never' ? 'text-muted' : '';
+        const lastActiveClass = lastActiveDisplay === 'Aldrig' ? 'text-muted' : '';
 
         // Mobile app last active formatting
-        const lastMobileActiveDisplay = user.lastMobileActiveDisplay || 'Never';
+        const lastMobileActiveDisplay = user.lastMobileActiveDisplay || 'Aldrig';
         const lastMobileActiveSortValue = user.lastMobileActiveSortValue || 0;
-        const lastMobileActiveClass = lastMobileActiveDisplay === 'Never' ? 'text-muted' : '';
+        const lastMobileActiveClass = lastMobileActiveDisplay === 'Aldrig' ? 'text-muted' : '';
 
         // Render avatar
         const avatarHtml = renderUserAvatar(user);
@@ -1073,8 +1089,6 @@ function displayUsers() {
             .replace(/{clubClass}/g, clubClass)
             .replace(/{additionalClubsBadges}/g, additionalClubsBadges)
             .replace(/{groupsBadges}/g, groupsBadges)
-            .replace(/{statusText}/g, statusText)
-            .replace(/{statusClass}/g, statusClass)
             .replace(/{lastActiveDisplay}/g, lastActiveDisplay)
             .replace(/{lastActiveSortValue}/g, lastActiveSortValue)
             .replace(/{lastActiveClass}/g, lastActiveClass)
@@ -1721,7 +1735,7 @@ function displayPendingApprovals(pendingMembers) {
 
     pendingMembers.forEach(member => {
         const regDate = new Date(member.registrationDate).toLocaleDateString('sv-SE');
-        const clubName = member.clubName || 'Ingen klubb';
+        const clubName = shortenClubName(member.clubName || 'Ingen klubb');
 
         html += template
             .replace(/{id}/g, member.id)

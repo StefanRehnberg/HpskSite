@@ -1777,7 +1777,7 @@ namespace HpskSite.Controllers
         {
             if (!lastActive.HasValue)
             {
-                return "Never";
+                return "Aldrig";
             }
 
             var elapsed = DateTime.UtcNow - lastActive.Value;
@@ -1785,25 +1785,32 @@ namespace HpskSite.Controllers
             // Less than 5 minutes
             if (elapsed.TotalMinutes < 5)
             {
-                return "Just now";
+                return "Just nu";
             }
 
             // Less than 1 hour
             if (elapsed.TotalMinutes < 60)
             {
                 var minutes = (int)elapsed.TotalMinutes;
-                return $"{minutes} min ago";
+                return $"{minutes} min sedan";
             }
 
             // Less than 24 hours
             if (elapsed.TotalHours < 24)
             {
                 var hours = (int)elapsed.TotalHours;
-                return $"{hours}h ago";
+                return $"{hours}h sedan";
             }
 
-            // 24 hours or more - show absolute date/time
-            return lastActive.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+            // Less than 7 days - show days
+            if (elapsed.TotalDays < 7)
+            {
+                var days = (int)elapsed.TotalDays;
+                return $"{days}d sedan";
+            }
+
+            // 7 days or more - show date only (no time)
+            return lastActive.Value.ToLocalTime().ToString("yyyy-MM-dd");
         }
 
         #endregion
