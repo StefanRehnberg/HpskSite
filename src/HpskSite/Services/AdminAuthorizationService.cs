@@ -442,6 +442,148 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// Checks if the current user is a Skjutledare (Range Master) for a specific club
+        /// Site administrators are implicitly Skjutledare for all clubs
+        /// </summary>
+        public async Task<bool> IsSkjutledareForClub(int clubId)
+        {
+            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            if (currentMember == null) return false;
+
+            if (await IsCurrentUserAdminAsync()) return true;
+
+            var currentMemberData = _memberService.GetByEmail(currentMember.Email ?? string.Empty);
+            if (currentMemberData == null) return false;
+
+            var memberRoles = _memberService.GetAllRoles(currentMemberData.Id);
+            return memberRoles.Contains($"Skjutledare_{clubId}");
+        }
+
+        /// <summary>
+        /// Checks if a specific member is a Skjutledare for a specific club
+        /// </summary>
+        public bool IsMemberSkjutledareForClub(int memberId, int clubId)
+        {
+            try
+            {
+                var member = _memberService.GetById(memberId);
+                if (member == null) return false;
+
+                var roles = _memberService.GetAllRoles(member.Id);
+                return roles.Contains($"Skjutledare_{clubId}");
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Gets list of club IDs where the current user is a Skjutledare
+        /// Returns all clubs for site administrators
+        /// </summary>
+        public async Task<List<int>> GetSkjutledareClubIds()
+        {
+            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            if (currentMember == null) return new List<int>();
+
+            if (await IsCurrentUserAdminAsync())
+            {
+                return GetClubsFromContent()
+                    .Where(c => c.Id.HasValue && c.Id.Value > 0)
+                    .Select(c => c.Id!.Value)
+                    .ToList();
+            }
+
+            var currentMemberData = _memberService.GetByEmail(currentMember.Email ?? string.Empty);
+            if (currentMemberData == null) return new List<int>();
+
+            var memberRoles = _memberService.GetAllRoles(currentMemberData.Id);
+            var clubIds = new List<int>();
+
+            foreach (var role in memberRoles.Where(r => r.StartsWith("Skjutledare_")))
+            {
+                if (int.TryParse(role.Replace("Skjutledare_", ""), out int clubId))
+                {
+                    clubIds.Add(clubId);
+                }
+            }
+
+            return clubIds;
+        }
+
+        /// <summary>
+        /// Checks if the current user is a Skjutledare for any of the member's clubs
+        /// Used for training step approval authorization
+        /// </summary>
+        public async Task<bool> IsSkjutledareForMember(int memberId)
+        {
+            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            if (currentMember == null) return false;
+
+            if (await IsCurrentUserAdminAsync()) return true;
+
+            var currentMemberData = _memberService.GetByEmail(currentMember.Email ?? string.Empty);
+            if (currentMemberData == null) return false;
+
+            var memberRoles = _memberService.GetAllRoles(currentMemberData.Id);
+            var skjutledareClubIds = memberRoles
+                .Where(r => r.StartsWith("Skjutledare_"))
+                .Select(r => int.TryParse(r.Replace("Skjutledare_", ""), out int cid) ? cid : 0)
+                .Where(id => id > 0)
+                .ToHashSet();
+
+            if (!skjutledareClubIds.Any()) return false;
+
+            var member = _memberService.GetById(memberId);
+            if (member == null) return false;
+
+            // Check primary club
+            if (int.TryParse(member.GetValue("primaryClubId")?.ToString(), out int primaryClubId) && skjutledareClubIds.Contains(primaryClubId))
+                return true;
+
+            // Check additional clubs
+            var additionalClubIds = member.GetValue("memberClubIds")?.ToString() ?? "";
+            if (!string.IsNullOrEmpty(additionalClubIds))
+            {
+                foreach (var clubIdStr in additionalClubIds.Split(',', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    if (int.TryParse(clubIdStr.Trim(), out int clubId) && skjutledareClubIds.Contains(clubId))
+                        return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Ensures that a Skjutledare group exists for a specific club
+        /// Creates the group if it doesn't exist
+        /// </summary>
+        public async Task<bool> EnsureSkjutledareGroup(int clubId)
+        {
+            try
+            {
+                var groupName = $"Skjutledare_{clubId}";
+                var existingGroup = await _memberGroupService.GetByNameAsync(groupName);
+
+                if (existingGroup == null)
+                {
+                    var newGroup = new MemberGroup();
+                    newGroup.Name = groupName;
+                    await _memberGroupService.CreateAsync(newGroup);
+                    return true;
+                }
+
+                return true;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
         /// Checks if the current user is a competition manager for a specific competition
         /// Site administrators have access to all competitions
         /// </summary>

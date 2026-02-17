@@ -145,14 +145,16 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetCompetitionsList(int? year = null, bool includeCompleted = false, string? type = null, string? region = null)
         {
-            // Check if user is site admin, club admin, or regional admin
+            // Check if user is site admin, club admin, skjutledare, or regional admin
             bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
             var managedClubIds = await _authorizationService.GetManagedClubIds();
             bool isClubAdmin = managedClubIds.Any();
             var managedRegions = await _authorizationService.GetManagedRegions();
             bool isRegionalAdmin = !isSiteAdmin && managedRegions.Any();
+            var skjutledareClubIds = await _authorizationService.GetSkjutledareClubIds();
+            bool isSkjutledare = skjutledareClubIds.Any();
 
-            if (!isSiteAdmin && !isClubAdmin && !isRegionalAdmin)
+            if (!isSiteAdmin && !isClubAdmin && !isRegionalAdmin && !isSkjutledare)
             {
                 return Ok(new { success = false, message = "Access denied" });
             }
@@ -239,7 +241,7 @@ namespace HpskSite.Controllers
 
                 // Apply server-side filters
                 var filteredCompetitions = allCompetitions
-                    .Where(comp => isSiteAdmin || managedClubIds.Contains(comp.GetValue<int?>("clubId") ?? 0))
+                    .Where(comp => isSiteAdmin || managedClubIds.Contains(comp.GetValue<int?>("clubId") ?? 0) || skjutledareClubIds.Contains(comp.GetValue<int?>("clubId") ?? 0))
                     .Where(comp =>
                     {
                         var compDate = comp.GetValue<DateTime?>("competitionDate");
@@ -407,12 +409,13 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetCompetition(int id)
         {
-            // Check if user is site admin OR club admin OR competition manager
+            // Check if user is site admin OR club admin OR skjutledare OR competition manager
             bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
             var managedClubIds = await _authorizationService.GetManagedClubIds();
             bool isCompetitionManager = await _authorizationService.IsCompetitionManager(id);
+            var skjutledareClubIds = await _authorizationService.GetSkjutledareClubIds();
 
-            if (!isSiteAdmin && !managedClubIds.Any() && !isCompetitionManager)
+            if (!isSiteAdmin && !managedClubIds.Any() && !isCompetitionManager && !skjutledareClubIds.Any())
             {
                 return Ok(new { success = false, message = "Access denied" });
             }
@@ -428,8 +431,9 @@ namespace HpskSite.Controllers
                 // Check authorization for this specific competition
                 var competitionClubId = competition.GetValue<int?>("clubId") ?? 0;
                 bool isClubAdmin = competitionClubId > 0 && managedClubIds.Contains(competitionClubId);
+                bool isSkjutledare = competitionClubId > 0 && skjutledareClubIds.Contains(competitionClubId);
 
-                if (!isSiteAdmin && !isCompetitionManager && !isClubAdmin)
+                if (!isSiteAdmin && !isCompetitionManager && !isClubAdmin && !isSkjutledare)
                 {
                     return Ok(new { success = false, message = "You don't have permission to view this competition" });
                 }
@@ -516,11 +520,12 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> CreateCompetition([FromBody] CreateCompetitionRequest request)
         {
-            // THREE-TIER AUTHORIZATION: Site Admin OR Club Admin (for their club)
+            // AUTHORIZATION: Site Admin OR Club Admin OR Skjutledare (for their club)
             bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
 
-            // Check Club Admin (if creating club competition)
+            // Check Club Admin / Skjutledare (if creating club competition)
             bool isClubAdmin = false;
+            bool isSkjutledare = false;
             if (request.Fields != null && request.Fields.TryGetValue("clubId", out var clubIdObj))
             {
                 int clubId = 0;
@@ -551,11 +556,13 @@ namespace HpskSite.Controllers
                 if (clubId > 0)
                 {
                     isClubAdmin = await _authorizationService.IsClubAdminForClub(clubId);
+                    if (!isClubAdmin)
+                        isSkjutledare = await _authorizationService.IsSkjutledareForClub(clubId);
                 }
             }
 
-            // Allow if Site Admin OR Club Admin for this club
-            if (!isSiteAdmin && !isClubAdmin)
+            // Allow if Site Admin OR Club Admin OR Skjutledare for this club
+            if (!isSiteAdmin && !isClubAdmin && !isSkjutledare)
             {
                 return Ok(new { success = false, message = "Access denied" });
             }
@@ -836,12 +843,14 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> CreateAdvertisement()
         {
-            // Authorization check - only site admins and club admins can create advertisements
+            // Authorization check - site admins, club admins, and skjutledare can create advertisements
             bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
             var managedClubIds = await _authorizationService.GetManagedClubIds();
             bool isClubAdmin = managedClubIds.Any();
+            var skjutledareClubIds = await _authorizationService.GetSkjutledareClubIds();
+            bool isSkjutledare = skjutledareClubIds.Any();
 
-            if (!isSiteAdmin && !isClubAdmin)
+            if (!isSiteAdmin && !isClubAdmin && !isSkjutledare)
             {
                 return Ok(new { success = false, message = "Access denied" });
             }
@@ -1151,19 +1160,22 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "This competition is not external. Use internal edit endpoint." });
                 }
 
-                // THREE-TIER AUTHORIZATION: Site Admin OR Competition Manager OR Club Admin
+                // AUTHORIZATION: Site Admin OR Competition Manager OR Club Admin OR Skjutledare
                 bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
                 bool isCompetitionManager = await _authorizationService.IsCompetitionManager(competitionId);
 
-                // Check Club Admin (if competition belongs to a club)
+                // Check Club Admin / Skjutledare (if competition belongs to a club)
                 bool isClubAdmin = false;
+                bool isSkjutledare = false;
                 var competitionClubId = competition.GetValue<int?>("clubId") ?? 0;
                 if (competitionClubId > 0)
                 {
                     isClubAdmin = await _authorizationService.IsClubAdminForClub(competitionClubId);
+                    if (!isClubAdmin)
+                        isSkjutledare = await _authorizationService.IsSkjutledareForClub(competitionClubId);
                 }
 
-                if (!isSiteAdmin && !isCompetitionManager && !isClubAdmin)
+                if (!isSiteAdmin && !isCompetitionManager && !isClubAdmin && !isSkjutledare)
                 {
                     return Ok(new { success = false, message = "You don't have permission to edit this competition" });
                 }
@@ -1408,19 +1420,22 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Invalid competition content type" });
                 }
 
-                // THREE-TIER AUTHORIZATION: Site Admin OR Club Admin (for competition's club)
+                // AUTHORIZATION: Site Admin OR Club Admin OR Skjutledare (for competition's club)
                 bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
 
-                // Check Club Admin (based on source competition's clubId)
+                // Check Club Admin / Skjutledare (based on source competition's clubId)
                 bool isClubAdmin = false;
+                bool isSkjutledare = false;
                 var competitionClubId = sourceCompetition.GetValue<int>("clubId");
                 if (competitionClubId > 0)
                 {
                     isClubAdmin = await _authorizationService.IsClubAdminForClub(competitionClubId);
+                    if (!isClubAdmin)
+                        isSkjutledare = await _authorizationService.IsSkjutledareForClub(competitionClubId);
                 }
 
-                // Allow if Site Admin OR Club Admin for this club
-                if (!isSiteAdmin && !isClubAdmin)
+                // Allow if Site Admin OR Club Admin OR Skjutledare for this club
+                if (!isSiteAdmin && !isClubAdmin && !isSkjutledare)
                 {
                     return Ok(new { success = false, message = "Access denied" });
                 }
@@ -1535,19 +1550,22 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Invalid competition content type" });
                 }
 
-                // THREE-TIER AUTHORIZATION: Site Admin OR Club Admin (for competition's club)
+                // AUTHORIZATION: Site Admin OR Club Admin OR Skjutledare (for competition's club)
                 bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
 
-                // Check Club Admin (based on competition's clubId)
+                // Check Club Admin / Skjutledare (based on competition's clubId)
                 bool isClubAdmin = false;
+                bool isSkjutledare = false;
                 var competitionClubId = competition.GetValue<int>("clubId");
                 if (competitionClubId > 0)
                 {
                     isClubAdmin = await _authorizationService.IsClubAdminForClub(competitionClubId);
+                    if (!isClubAdmin)
+                        isSkjutledare = await _authorizationService.IsSkjutledareForClub(competitionClubId);
                 }
 
-                // Allow if Site Admin OR Club Admin for this club
-                if (!isSiteAdmin && !isClubAdmin)
+                // Allow if Site Admin OR Club Admin OR Skjutledare for this club
+                if (!isSiteAdmin && !isClubAdmin && !isSkjutledare)
                 {
                     return Ok(new { success = false, message = "Access denied" });
                 }
@@ -1612,19 +1630,22 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Invalid competition content type" });
                 }
 
-                // THREE-TIER AUTHORIZATION: Site Admin OR Club Admin (for competition's club)
+                // AUTHORIZATION: Site Admin OR Club Admin OR Skjutledare (for competition's club)
                 bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
 
-                // Check Club Admin (based on competition's clubId)
+                // Check Club Admin / Skjutledare (based on competition's clubId)
                 bool isClubAdmin = false;
+                bool isSkjutledare = false;
                 var competitionClubId = competition.GetValue<int>("clubId");
                 if (competitionClubId > 0)
                 {
                     isClubAdmin = await _authorizationService.IsClubAdminForClub(competitionClubId);
+                    if (!isClubAdmin)
+                        isSkjutledare = await _authorizationService.IsSkjutledareForClub(competitionClubId);
                 }
 
-                // Allow if Site Admin OR Club Admin for this club
-                if (!isSiteAdmin && !isClubAdmin)
+                // Allow if Site Admin OR Club Admin OR Skjutledare for this club
+                if (!isSiteAdmin && !isClubAdmin && !isSkjutledare)
                 {
                     return Ok(new { success = false, message = "Access denied" });
                 }
@@ -2697,14 +2718,15 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> UploadInvitationFile(int competitionId, IFormFile invitationFile)
         {
-            // THREE-TIER AUTHORIZATION: Site Admin OR Competition Manager OR Club Admin
+            // AUTHORIZATION: Site Admin OR Competition Manager OR Club Admin OR Skjutledare
             bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
             bool isCompetitionManager = await _authorizationService.IsCompetitionManager(competitionId);
 
-            // Get managed clubs for authorization check
+            // Get managed clubs and skjutledare clubs for authorization check
             var managedClubIds = await _authorizationService.GetManagedClubIds();
+            var skjutledareClubIds = await _authorizationService.GetSkjutledareClubIds();
 
-            if (!isSiteAdmin && !isCompetitionManager && !managedClubIds.Any())
+            if (!isSiteAdmin && !isCompetitionManager && !managedClubIds.Any() && !skjutledareClubIds.Any())
             {
                 return Ok(new { success = false, message = "Access denied" });
             }
@@ -2725,11 +2747,12 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "File upload only available for external competitions" });
                 }
 
-                // Check club admin authorization
+                // Check club admin / skjutledare authorization
                 var competitionClubId = competition.GetValue<int?>("clubId") ?? 0;
                 bool isClubAdmin = competitionClubId > 0 && managedClubIds.Contains(competitionClubId);
+                bool isSkjutledare = competitionClubId > 0 && skjutledareClubIds.Contains(competitionClubId);
 
-                if (!isSiteAdmin && !isCompetitionManager && !isClubAdmin)
+                if (!isSiteAdmin && !isCompetitionManager && !isClubAdmin && !isSkjutledare)
                 {
                     return Ok(new { success = false, message = "You don't have permission to upload files for this competition" });
                 }

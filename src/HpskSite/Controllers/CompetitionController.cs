@@ -793,7 +793,10 @@ namespace HpskSite.Controllers
                 var clubAdminRole = rolesList.FirstOrDefault(r => r.StartsWith("ClubAdmin_"));
                 bool isClubAdmin = clubAdminRole != null;
 
-                Console.WriteLine($"User {memberData.Name} - isSiteAdmin: {isSiteAdmin}, isClubAdmin: {isClubAdmin}");
+                // Check if user is skjutledare
+                var skjutledareRole = rolesList.FirstOrDefault(r => r.StartsWith("Skjutledare_"));
+                bool isSkjutledare = skjutledareRole != null;
+
                 int? clubId = null;
                 string clubName = "";
 
@@ -828,6 +831,16 @@ namespace HpskSite.Controllers
                         clubName = _clubService.GetClubNameById(clubId.Value) ?? $"Club {clubId}";
                     }
                 }
+                else if (isSkjutledare && skjutledareRole != null)
+                {
+                    // Skjutledare - get their club ID from the role
+                    var clubIdStr = skjutledareRole.Replace("Skjutledare_", "");
+                    if (int.TryParse(clubIdStr, out int extractedClubId))
+                    {
+                        clubId = extractedClubId;
+                        clubName = _clubService.GetClubNameById(clubId.Value) ?? $"Club {clubId}";
+                    }
+                }
                 else
                 {
                     // Regular member - get their primary club
@@ -839,8 +852,8 @@ namespace HpskSite.Controllers
                     }
                 }
 
-                // Site admin role takes precedence over club admin
-                string userRole = isSiteAdmin ? "admin" : (isClubAdmin ? "clubAdmin" : "member");
+                // Site admin role takes precedence, then club admin, then skjutledare
+                string userRole = isSiteAdmin ? "admin" : (isClubAdmin ? "clubAdmin" : (isSkjutledare ? "skjutledare" : "member"));
 
                 return Json(new
                 {
@@ -926,16 +939,16 @@ namespace HpskSite.Controllers
                 bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
                 bool canAccess = false;
 
-                Console.WriteLine($"GetClubMembers - User {memberData.Name} - clubId: {clubId} - isSiteAdmin: {isSiteAdmin}");
-
                 if (isSiteAdmin)
                 {
                     canAccess = true;
                 }
                 else
                 {
-                    // Check if user is club admin for this specific club
+                    // Check if user is club admin or skjutledare for this specific club
                     canAccess = await _authorizationService.IsClubAdminForClub(clubId);
+                    if (!canAccess)
+                        canAccess = await _authorizationService.IsSkjutledareForClub(clubId);
                 }
 
                 if (!canAccess)
@@ -1023,11 +1036,13 @@ namespace HpskSite.Controllers
                 }
                 else
                 {
-                    // Club admin can only access members from their clubs
+                    // Club admin or skjutledare can access members from their clubs
                     var targetMemberClubId = targetMember.GetValue<string>("primaryClubId");
                     if (!string.IsNullOrEmpty(targetMemberClubId) && int.TryParse(targetMemberClubId, out int clubId))
                     {
                         canAccess = await _authorizationService.IsClubAdminForClub(clubId);
+                        if (!canAccess)
+                            canAccess = await _authorizationService.IsSkjutledareForClub(clubId);
                     }
                 }
 
@@ -1090,18 +1105,21 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Competition not found" });
                 }
 
-                // Check authorization - Site Admin, Competition Manager, or Club Admin
+                // Check authorization - Site Admin, Competition Manager, Club Admin, or Skjutledare
                 bool isCompetitionManager = await _authorizationService.IsCompetitionManager(competitionId.Value);
                 bool isClubAdmin = false;
+                bool isSkjutledare = false;
 
-                // Check if user is club admin for this competition's club
+                // Check if user is club admin or skjutledare for this competition's club
                 var competitionClubId = competition.Value<int>("clubId");
                 if (competitionClubId > 0)
                 {
                     isClubAdmin = await _authorizationService.IsClubAdminForClub(competitionClubId);
+                    if (!isClubAdmin)
+                        isSkjutledare = await _authorizationService.IsSkjutledareForClub(competitionClubId);
                 }
 
-                if (!isCompetitionManager && !isClubAdmin)
+                if (!isCompetitionManager && !isClubAdmin && !isSkjutledare)
                 {
                     return Json(new { success = false, message = "Access denied - insufficient permissions" });
                 }

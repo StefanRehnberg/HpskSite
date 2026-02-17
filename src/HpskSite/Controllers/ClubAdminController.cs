@@ -1372,6 +1372,117 @@ namespace HpskSite.Controllers
             }
         }
 
+        // ==================== Skjutledare Management ====================
+
+        /// <summary>
+        /// Gets list of Skjutledare for a specific club
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetSkjutledare(int clubId)
+        {
+            if (!await _authService.IsClubAdminForClub(clubId))
+            {
+                return Json(new { success = false, message = "Access denied" });
+            }
+
+            try
+            {
+                var groupName = $"Skjutledare_{clubId}";
+                var allMembers = _memberService.GetAll(0, int.MaxValue, out var totalRecords);
+
+                var skjutledare = allMembers
+                    .Where(m => m.ContentType.Alias != ClubMemberTypeAlias)
+                    .Where(m => _memberService.GetAllRoles(m.Id).Contains(groupName))
+                    .Select(m => new {
+                        Id = m.Id,
+                        Name = $"{m.GetValue("firstName")} {m.GetValue("lastName")}".Trim(),
+                        Email = m.Email
+                    })
+                    .ToList();
+
+                return Json(new { success = true, data = skjutledare });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = "Error loading skjutledare: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Assigns the Skjutledare role to a member for a specific club
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> AssignSkjutledare(int memberId, int clubId)
+        {
+            if (!await _authService.IsClubAdminForClub(clubId))
+            {
+                return Json(new { success = false, message = "Access denied" });
+            }
+
+            try
+            {
+                var member = _memberService.GetById(memberId);
+                if (member == null)
+                {
+                    return Json(new { success = false, message = "Member not found" });
+                }
+
+                await _authService.EnsureSkjutledareGroup(clubId);
+
+                var groupName = $"Skjutledare_{clubId}";
+                _memberService.AssignRole(member.Id, groupName);
+
+                return Json(new {
+                    success = true,
+                    message = $"{member.Name} tilldelad som skjutledare"
+                });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = "Error assigning skjutledare: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Removes the Skjutledare role from a member for a specific club
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> RemoveSkjutledare(int memberId, int clubId)
+        {
+            if (!await _authService.IsClubAdminForClub(clubId))
+            {
+                return Json(new { success = false, message = "Access denied" });
+            }
+
+            try
+            {
+                var member = _memberService.GetById(memberId);
+                if (member == null)
+                {
+                    return Json(new { success = false, message = "Member not found" });
+                }
+
+                var groupName = $"Skjutledare_{clubId}";
+                var currentRoles = _memberService.GetAllRoles(member.Id);
+
+                if (currentRoles.Contains(groupName))
+                {
+                    _memberService.DissociateRole(member.Id, groupName);
+                    return Json(new { success = true, message = "Skjutledarroll borttagen" });
+                }
+
+                return Json(new { success = true, message = "Medlemmen var inte skjutledare" });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = "Error removing skjutledare: " + ex.Message });
+            }
+        }
+
+        // ==================== Member Admin Roles ====================
+
         /// <summary>
         /// Gets all admin roles (ClubAdmin and RegionalAdmin) for a specific member, with resolved names
         /// </summary>

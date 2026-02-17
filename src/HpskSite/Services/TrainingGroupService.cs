@@ -27,18 +27,25 @@ namespace HpskSite.Services
             _memberManager = memberManager;
         }
 
-        public List<TrainingGroup> GetTrainingGroupsForClub(int clubId)
+        public List<TrainingGroup> GetTrainingGroupsForClub(int clubId, bool includeInactive = false)
         {
             using var db = _databaseFactory.CreateDatabase();
 
-            var records = db.Fetch<dynamic>(
-                @"SELECT g.*,
+            var sql = includeInactive
+                ? @"SELECT g.*,
+                    (SELECT COUNT(*) FROM TrainingGroupMembers m WHERE m.TrainingGroupId = g.Id AND m.IsActive = 1 AND m.Role = 'Member') AS MemberCount,
+                    (SELECT COUNT(*) FROM TrainingGroupMembers m WHERE m.TrainingGroupId = g.Id AND m.IsActive = 1 AND m.Role = 'Trainer') AS TrainerCount
+                  FROM TrainingGroups g
+                  WHERE g.ClubId = @0
+                  ORDER BY g.IsActive DESC, g.StartDate DESC"
+                : @"SELECT g.*,
                     (SELECT COUNT(*) FROM TrainingGroupMembers m WHERE m.TrainingGroupId = g.Id AND m.IsActive = 1 AND m.Role = 'Member') AS MemberCount,
                     (SELECT COUNT(*) FROM TrainingGroupMembers m WHERE m.TrainingGroupId = g.Id AND m.IsActive = 1 AND m.Role = 'Trainer') AS TrainerCount
                   FROM TrainingGroups g
                   WHERE g.ClubId = @0 AND g.IsActive = 1
-                  ORDER BY g.StartDate DESC",
-                clubId);
+                  ORDER BY g.StartDate DESC";
+
+            var records = db.Fetch<dynamic>(sql, clubId);
 
             return records.Select(r => (TrainingGroup)MapTrainingGroup(r)).ToList();
         }
@@ -178,15 +185,26 @@ namespace HpskSite.Services
             return MapTrainingGroup(inserted.First());
         }
 
-        public bool UpdateTrainingGroup(int trainingGroupId, string name, string? description, DateTime startDate)
+        public bool UpdateTrainingGroup(int trainingGroupId, string name, string? description, DateTime startDate, bool? isActive = null)
         {
             using var db = _databaseFactory.CreateDatabase();
 
-            db.Execute(
-                @"UPDATE TrainingGroups
-                  SET Name = @0, Description = @1, StartDate = @2
-                  WHERE Id = @3",
-                name, description, startDate, trainingGroupId);
+            if (isActive.HasValue)
+            {
+                db.Execute(
+                    @"UPDATE TrainingGroups
+                      SET Name = @0, Description = @1, StartDate = @2, IsActive = @3
+                      WHERE Id = @4",
+                    name, description, startDate, isActive.Value ? 1 : 0, trainingGroupId);
+            }
+            else
+            {
+                db.Execute(
+                    @"UPDATE TrainingGroups
+                      SET Name = @0, Description = @1, StartDate = @2
+                      WHERE Id = @3",
+                    name, description, startDate, trainingGroupId);
+            }
 
             return true;
         }
@@ -280,17 +298,24 @@ namespace HpskSite.Services
             return result.Any();
         }
 
-        public List<TrainingGroup> GetAllTrainingGroups(string? regionFilter)
+        public List<TrainingGroup> GetAllTrainingGroups(string? regionFilter, bool includeInactive = false)
         {
             using var db = _databaseFactory.CreateDatabase();
 
-            var records = db.Fetch<dynamic>(
-                @"SELECT g.*,
+            var sql = includeInactive
+                ? @"SELECT g.*,
+                    (SELECT COUNT(*) FROM TrainingGroupMembers m WHERE m.TrainingGroupId = g.Id AND m.IsActive = 1 AND m.Role = 'Member') AS MemberCount,
+                    (SELECT COUNT(*) FROM TrainingGroupMembers m WHERE m.TrainingGroupId = g.Id AND m.IsActive = 1 AND m.Role = 'Trainer') AS TrainerCount
+                  FROM TrainingGroups g
+                  ORDER BY g.IsActive DESC, g.StartDate DESC"
+                : @"SELECT g.*,
                     (SELECT COUNT(*) FROM TrainingGroupMembers m WHERE m.TrainingGroupId = g.Id AND m.IsActive = 1 AND m.Role = 'Member') AS MemberCount,
                     (SELECT COUNT(*) FROM TrainingGroupMembers m WHERE m.TrainingGroupId = g.Id AND m.IsActive = 1 AND m.Role = 'Trainer') AS TrainerCount
                   FROM TrainingGroups g
                   WHERE g.IsActive = 1
-                  ORDER BY g.StartDate DESC");
+                  ORDER BY g.StartDate DESC";
+
+            var records = db.Fetch<dynamic>(sql);
 
             var groups = records.Select(r => (TrainingGroup)MapTrainingGroup(r)).ToList();
 
@@ -322,6 +347,10 @@ namespace HpskSite.Services
 
             // Club admin for this club's region or club
             if (await _authorizationService.IsClubAdminForClub(clubId))
+                return true;
+
+            // Skjutledare for this club
+            if (await _authorizationService.IsSkjutledareForClub(clubId))
                 return true;
 
             // Trainer in this training group

@@ -591,7 +591,9 @@
 <script>
 let isAdmin = false;
 let isSiteAdmin = false;
+let isSkjutledare = false;
 let managedClubIds = [];
+let skjutledareClubIds = [];
 let currentMemberProgress = null;
 let allLevels = [];
 let leaderboardData = [];
@@ -1293,9 +1295,11 @@ async function checkAdminStatus() {
         ]);
 
         if (adminRes?.success && adminRes.data) {
-            isAdmin = adminRes.data.isAdmin;
+            isAdmin = adminRes.data.isAdmin || adminRes.data.isSkjutledare;
             isSiteAdmin = adminRes.data.isSiteAdmin;
+            isSkjutledare = adminRes.data.isSkjutledare || false;
             managedClubIds = adminRes.data.managedClubIds || [];
+            skjutledareClubIds = adminRes.data.skjutledareClubIds || [];
 
             if (isAdmin) {
                 document.getElementById('admin-tab-item').style.display = 'block';
@@ -1332,16 +1336,17 @@ async function checkAdminStatus() {
 /**
  * Check if current user can approve a member based on club membership
  * Site admins can approve anyone
- * Club admins can only approve members from their managed clubs
+ * Club admins and skjutledare can approve members from their clubs
  */
 function canApproveParticipant(participant) {
     // Site admins can approve anyone
     if (isSiteAdmin) return true;
 
-    // Not an admin at all
-    if (!isAdmin || managedClubIds.length === 0) return false;
+    // Not an admin or skjutledare at all
+    if (!isAdmin && !isSkjutledare) return false;
+    if (managedClubIds.length === 0 && skjutledareClubIds.length === 0) return false;
 
-    // Club admin - check if participant belongs to any managed clubs
+    // Check if participant belongs to any managed clubs or skjutledare clubs
     const participantClubIds = [];
 
     // Add primary club
@@ -1358,8 +1363,8 @@ function canApproveParticipant(participant) {
         participantClubIds.push(...additionalIds);
     }
 
-    // Check if any participant club matches managed clubs
-    return participantClubIds.some(clubId => managedClubIds.includes(clubId));
+    // Check if any participant club matches managed clubs or skjutledare clubs
+    return participantClubIds.some(clubId => managedClubIds.includes(clubId) || skjutledareClubIds.includes(clubId));
 }
 
 async function loadAdminPanel() {
@@ -1530,8 +1535,9 @@ function showCreateTrainingGroupModal() {
         clubsData.forEach(c => {
             clubSelect.innerHTML += `<option value="${c.id}">${c.name}</option>`;
         });
-    } else if (managedClubIds.length > 0 && clubsData.length > 0) {
-        clubsData.filter(c => managedClubIds.includes(c.id)).forEach(c => {
+    } else if ((managedClubIds.length > 0 || skjutledareClubIds.length > 0) && clubsData.length > 0) {
+        const allMyClubIds = [...new Set([...managedClubIds, ...skjutledareClubIds])];
+        clubsData.filter(c => allMyClubIds.includes(c.id)).forEach(c => {
             clubSelect.innerHTML += `<option value="${c.id}">${c.name}</option>`;
         });
     }

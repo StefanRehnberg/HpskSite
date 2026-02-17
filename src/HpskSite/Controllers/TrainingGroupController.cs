@@ -55,22 +55,26 @@ namespace HpskSite.Controllers
             {
                 bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
                 var managedClubIds = await _authorizationService.GetManagedClubIds();
+                var skjutledareClubIds = await _authorizationService.GetSkjutledareClubIds();
 
-                if (!isSiteAdmin && !managedClubIds.Any())
+                if (!isSiteAdmin && !managedClubIds.Any() && !skjutledareClubIds.Any())
                     return Json(new { success = false, message = "Access denied" });
 
                 List<Shared.Models.TrainingGroup> groups;
 
                 if (isSiteAdmin)
                 {
-                    groups = _trainingGroupService.GetAllTrainingGroups(null);
+                    groups = _trainingGroupService.GetAllTrainingGroups(null, includeInactive: true);
                 }
                 else
                 {
                     groups = new List<Shared.Models.TrainingGroup>();
-                    foreach (var clubId in managedClubIds)
+                    // Combine managed club IDs and skjutledare club IDs
+                    var allClubIds = new HashSet<int>(managedClubIds);
+                    foreach (var id in skjutledareClubIds) allClubIds.Add(id);
+                    foreach (var clubId in allClubIds)
                     {
-                        groups.AddRange(_trainingGroupService.GetTrainingGroupsForClub(clubId));
+                        groups.AddRange(_trainingGroupService.GetTrainingGroupsForClub(clubId, includeInactive: true));
                     }
                 }
 
@@ -150,7 +154,9 @@ namespace HpskSite.Controllers
         {
             try
             {
-                if (!await _authorizationService.IsClubAdminForClub(clubId))
+                bool isClubAdmin = await _authorizationService.IsClubAdminForClub(clubId);
+                bool isSkjutledare = !isClubAdmin && await _authorizationService.IsSkjutledareForClub(clubId);
+                if (!isClubAdmin && !isSkjutledare)
                     return Json(new { success = false, message = "Access denied" });
 
                 if (string.IsNullOrWhiteSpace(name))
@@ -184,7 +190,7 @@ namespace HpskSite.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> UpdateTrainingGroup(int trainingGroupId, string name, string? description, string startDate)
+        public async Task<IActionResult> UpdateTrainingGroup(int trainingGroupId, string name, string? description, string startDate, bool? isActive = null)
         {
             try
             {
@@ -197,7 +203,7 @@ namespace HpskSite.Controllers
                 if (!DateTime.TryParse(startDate, out DateTime parsedDate))
                     return Json(new { success = false, message = "Invalid start date" });
 
-                _trainingGroupService.UpdateTrainingGroup(trainingGroupId, name, description, parsedDate);
+                _trainingGroupService.UpdateTrainingGroup(trainingGroupId, name, description, parsedDate, isActive);
 
                 return Json(new { success = true, message = "Träningsgrupp uppdaterad" });
             }
@@ -452,10 +458,11 @@ namespace HpskSite.Controllers
                 if (currentMember == null)
                     return Json(new { success = false, message = "Not logged in" });
 
-                // Must be some kind of admin or trainer
+                // Must be some kind of admin, skjutledare, or trainer
                 bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
                 var managedClubIds = await _authorizationService.GetManagedClubIds();
-                if (!isSiteAdmin && !managedClubIds.Any())
+                var skjutledareClubIds = await _authorizationService.GetSkjutledareClubIds();
+                if (!isSiteAdmin && !managedClubIds.Any() && !skjutledareClubIds.Any())
                     return Json(new { success = false, message = "Access denied" });
 
                 if (string.IsNullOrWhiteSpace(query) || query.Length < 2)

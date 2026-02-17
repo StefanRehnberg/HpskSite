@@ -34,11 +34,12 @@ This folder contains all technical documentation for the HPSK Site project.
 - **TRAINING_SCORING_SYSTEM.md** - Training scoring system (personal training log)
 - **TRAINING_MATCH_HANDICAP_SYSTEM.md** - Training match handicap calculations
 - **TRAINING_MATCH_TEAM_SYSTEM.md** - Team-based training match competitions
+- **TRAINING_GROUPS_SYSTEM.md** - Training groups: group lifecycle, member/trainer management, step approval
 
 ### System Architecture & Migrations
 - **CLUB_SYSTEM_MIGRATIONS.md** - Club system migration details (2025-10-30/31)
 - **LOGIN_REGISTRATION_SYSTEM.md** - Complete login/registration documentation
-- **AUTHORIZATION_SECURITY_AUDIT.md** - Security audit & fixes (2025-11-02)
+- **AUTHORIZATION_SECURITY_AUDIT.md** - Security audit & fixes (2025-11-02, updated 2026-02 with Skjutledare/Trainer roles)
 
 ### Technical Reference
 - **CONTROLLER_ROUTING_POST_MIGRATION.md** - Controller routing notes
@@ -78,8 +79,9 @@ This folder contains all technical documentation for the HPSK Site project.
 8. See **TRAINING_SCORING_SYSTEM.md** for training log implementation
 9. See **TRAINING_MATCH_HANDICAP_SYSTEM.md** for handicap calculation rules
 10. See **TRAINING_MATCH_TEAM_SYSTEM.md** for team-based training matches
-11. See **AUTHORIZATION_SECURITY_AUDIT.md** for security patterns
-12. See **PAYMENT_INVOICE_SYSTEM.md** for payment/invoice implementation
+11. See **TRAINING_GROUPS_SYSTEM.md** for training group management and Skjutledare role
+12. See **AUTHORIZATION_SECURITY_AUDIT.md** for security patterns (including Skjutledare/Trainer)
+13. See **PAYMENT_INVOICE_SYSTEM.md** for payment/invoice implementation
 
 ---
 

@@ -1090,7 +1090,7 @@ namespace HpskSite.Services
         {
             var subject = $"Du har lagts till i tr\u00e4ningsgruppen {groupName}";
             var siteUrl = _configuration["SiteUrl"] ?? "https://pistol.nu";
-            var trainingUrl = $"{siteUrl}/training-stairs/";
+            var trainingUrl = $"{siteUrl}/skyttetrappan/";
 
             var body = $@"
 <html>
@@ -1149,7 +1149,7 @@ namespace HpskSite.Services
         {
             var subject = $"Steg godk\u00e4nt: {levelName} - Steg {stepNumber}";
             var siteUrl = _configuration["SiteUrl"] ?? "https://pistol.nu";
-            var trainingUrl = $"{siteUrl}/training-stairs/";
+            var trainingUrl = $"{siteUrl}/skyttetrappan/";
 
             var body = $@"
 <html>

@@ -107,6 +107,25 @@
                     </div>
                 </div>
             </div>
+
+            <hr class="my-4">
+
+            <!-- Skjutledare Management Section -->
+            <h5 class="mb-3">
+                <i class="bi bi-shield-check me-2"></i>Skjutledare
+            </h5>
+            <p class="text-muted small">Skjutledare kan godkänna träningssteg och hantera tävlingar för klubben.</p>
+            <div id="skjutledareList" class="mb-3">
+                <div class="text-center text-muted py-3">Laddar...</div>
+            </div>
+            <div class="d-flex gap-2">
+                <select id="skjutledareSelect" class="form-select form-select-sm" style="max-width: 300px;">
+                    <option value="">Välj medlem...</option>
+                </select>
+                <button class="btn btn-sm btn-success" onclick="assignSkjutledare()">
+                    <i class="bi bi-plus-circle me-1"></i>Lägg till
+                </button>
+            </div>
         </div>
 
         <!-- Invoices Tab -->
@@ -715,6 +734,13 @@
                         <label class="form-label">Startdatum *</label>
                         <input type="text" class="form-control" id="clubTgStartDate" required>
                     </div>
+                    <div class="mb-3 d-none" id="clubTgIsActiveGroup">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="clubTgIsActive" checked>
+                            <label class="form-check-label" for="clubTgIsActive">Aktiv</label>
+                        </div>
+                        <small class="text-muted">Inaktiva grupper visas inte för deltagare.</small>
+                    </div>
                 </form>
             </div>
             <div class="modal-footer">
@@ -820,6 +846,7 @@ document.getElementById('competitions-tab').addEventListener('shown.bs.tab', fun
 
 document.getElementById('members-tab').addEventListener('shown.bs.tab', function () {
     loadClubMembers();
+    loadSkjutledare();
 });
 
 document.getElementById('invoices-tab').addEventListener('shown.bs.tab', function () {
@@ -2336,10 +2363,12 @@ async function loadClubTrainingGroups() {
         </tr></thead><tbody>`;
 
         clubTrainingGroups.forEach(g => {
+            const inactiveClass = g.isActive ? '' : ' class="table-secondary text-muted"';
             html += `
-                <tr style="cursor: pointer;" onclick="expandClubTrainingGroup(${g.id})">
+                <tr${inactiveClass} style="cursor: pointer;" onclick="expandClubTrainingGroup(${g.id})">
                     <td>
                         <span class="fw-bold">${g.name}</span>
+                        ${!g.isActive ? ' <span class="badge bg-secondary">Inaktiv</span>' : ''}
                         ${g.description ? `<br><small class="text-muted">${g.description}</small>` : ''}
                     </td>
                     <td>${g.startDate}</td>
@@ -2348,9 +2377,6 @@ async function loadClubTrainingGroups() {
                     <td class="text-end">
                         <button class="btn btn-sm btn-outline-secondary me-1" onclick="event.stopPropagation(); editClubTrainingGroup(${g.id})" title="Redigera">
                             <i class="bi bi-pencil"></i>
-                        </button>
-                        <button class="btn btn-sm btn-outline-danger" onclick="event.stopPropagation(); deactivateClubTrainingGroup(${g.id}, '${g.name.replace(/'/g, "\\'")}')" title="Ta bort">
-                            <i class="bi bi-trash"></i>
                         </button>
                     </td>
                 </tr>
@@ -2476,7 +2502,8 @@ function showCreateClubTrainingGroupModal() {
     document.getElementById('clubTgId').value = '';
     document.getElementById('clubTgName').value = '';
     document.getElementById('clubTgDescription').value = '';
-    // Reset flatpickr to today
+    document.getElementById('clubTgIsActiveGroup').classList.add('d-none');
+    document.getElementById('clubTgIsActive').checked = true;
     const fpInstance = document.getElementById('clubTgStartDate')._flatpickr;
     if (fpInstance) fpInstance.setDate(new Date());
     new bootstrap.Modal(document.getElementById('clubTrainingGroupModal')).show();
@@ -2490,6 +2517,8 @@ async function editClubTrainingGroup(groupId) {
     document.getElementById('clubTgId').value = groupId;
     document.getElementById('clubTgName').value = group.name;
     document.getElementById('clubTgDescription').value = group.description || '';
+    document.getElementById('clubTgIsActiveGroup').classList.remove('d-none');
+    document.getElementById('clubTgIsActive').checked = group.isActive;
     const fpInstance = document.getElementById('clubTgStartDate')._flatpickr;
     if (fpInstance) fpInstance.setDate(group.startDate);
     new bootstrap.Modal(document.getElementById('clubTrainingGroupModal')).show();
@@ -2515,6 +2544,7 @@ async function submitClubTrainingGroup() {
         let url;
         if (id) {
             formData.append('trainingGroupId', id);
+            formData.append('isActive', document.getElementById('clubTgIsActive').checked);
             url = '/umbraco/surface/TrainingGroup/UpdateTrainingGroup';
         } else {
             formData.append('clubId', clubId);
@@ -2703,6 +2733,112 @@ async function removeClubTgMember(groupId, memberId, memberName) {
         }
     } catch (error) {
         console.error('Error removing member:', error);
+        alert('Ett fel uppstod');
+    }
+}
+
+// ========== SKJUTLEDARE MANAGEMENT ==========
+
+async function loadSkjutledare() {
+    const listEl = document.getElementById('skjutledareList');
+    try {
+        const res = await fetch(`/umbraco/surface/ClubAdmin/GetSkjutledare?clubId=${clubId}`);
+        const data = await res.json();
+        if (!data.success) {
+            listEl.innerHTML = '<div class="text-danger">Kunde inte ladda skjutledare</div>';
+            return;
+        }
+        if (data.data.length === 0) {
+            listEl.innerHTML = '<div class="text-muted small">Inga skjutledare tilldelade.</div>';
+        } else {
+            listEl.innerHTML = data.data.map(s => `
+                <div class="d-flex align-items-center justify-content-between py-1 border-bottom">
+                    <div>
+                        <i class="bi bi-shield-check text-success me-2"></i>
+                        <strong>${s.name}</strong>
+                        <span class="text-muted ms-2 small">${s.email}</span>
+                    </div>
+                    <button class="btn btn-sm btn-outline-danger py-0 px-2" onclick="removeSkjutledare(${s.id}, '${s.name}')">
+                        <i class="bi bi-x-lg"></i>
+                    </button>
+                </div>
+            `).join('');
+        }
+        // Load available members for dropdown
+        loadSkjutledareDropdown(data.data.map(s => s.id));
+    } catch (error) {
+        console.error('Error loading skjutledare:', error);
+        listEl.innerHTML = '<div class="text-danger">Fel vid laddning</div>';
+    }
+}
+
+async function loadSkjutledareDropdown(existingIds) {
+    const select = document.getElementById('skjutledareSelect');
+    try {
+        const res = await fetch(`/umbraco/surface/ClubAdmin/GetClubMembers?clubId=${clubId}`);
+        const data = await res.json();
+        if (data.success && data.data) {
+            select.innerHTML = '<option value="">Välj medlem...</option>';
+            data.data
+                .filter(m => !existingIds.includes(m.id))
+                .forEach(m => {
+                    select.innerHTML += `<option value="${m.id}">${m.memberName} (${m.email})</option>`;
+                });
+        }
+    } catch (error) {
+        console.error('Error loading members for skjutledare dropdown:', error);
+    }
+}
+
+async function assignSkjutledare() {
+    const select = document.getElementById('skjutledareSelect');
+    const memberId = select.value;
+    if (!memberId) {
+        alert('Välj en medlem först');
+        return;
+    }
+    try {
+        const formData = new FormData();
+        formData.append('memberId', memberId);
+        formData.append('clubId', clubId);
+        formData.append('__RequestVerificationToken', getAntiForgeryToken());
+
+        const res = await fetch('/umbraco/surface/ClubAdmin/AssignSkjutledare', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await res.json();
+        if (data.success) {
+            loadSkjutledare();
+        } else {
+            alert('Fel: ' + data.message);
+        }
+    } catch (error) {
+        console.error('Error assigning skjutledare:', error);
+        alert('Ett fel uppstod');
+    }
+}
+
+async function removeSkjutledare(memberId, name) {
+    if (!confirm(`Ta bort ${name} som skjutledare?`)) return;
+    try {
+        const formData = new FormData();
+        formData.append('memberId', memberId);
+        formData.append('clubId', clubId);
+        formData.append('__RequestVerificationToken', getAntiForgeryToken());
+
+        const res = await fetch('/umbraco/surface/ClubAdmin/RemoveSkjutledare', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await res.json();
+        if (data.success) {
+            loadSkjutledare();
+        } else {
+            alert('Fel: ' + data.message);
+        }
+    } catch (error) {
+        console.error('Error removing skjutledare:', error);
         alert('Ett fel uppstod');
     }
 }

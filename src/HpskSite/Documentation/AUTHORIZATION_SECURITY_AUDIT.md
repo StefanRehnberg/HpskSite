@@ -12,10 +12,11 @@ Critical security vulnerabilities were identified and fixed across multiple cont
 
 ---
 
-## Three-Tier Authorization Pattern
+## Multi-Tier Authorization Pattern
 
-Most endpoints now follow a standardized three-tier authorization pattern:
+Most endpoints now follow a standardized multi-tier authorization pattern. The exact tiers vary by endpoint:
 
+### Competition endpoints (CompetitionAdminController, CompetitionController)
 ```csharp
 // Check Site Admin first (has access to everything)
 bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
@@ -31,14 +32,39 @@ if (competitionClubId > 0)
     isClubAdmin = await _authorizationService.IsClubAdminForClub(competitionClubId);
 }
 
+// Check Skjutledare (Range Master) for the club (added 2026-02)
+bool isSkjutledare = false;
+if (!isClubAdmin && competitionClubId > 0)
+{
+    isSkjutledare = await _authorizationService.IsSkjutledareForClub(competitionClubId);
+}
+
 // Grant access if ANY role applies
-if (!isSiteAdmin && !isCompetitionManager && !isClubAdmin)
+if (!isSiteAdmin && !isCompetitionManager && !isClubAdmin && !isSkjutledare)
 {
     return Json(new { success = false, message = "Access denied" });
 }
 ```
 
-**Key Principle:** Access granted if user has ANY applicable role (Site Admin OR Competition Manager OR Club Admin)
+### Training step approval endpoints (TrainingController)
+```csharp
+// Four-tier: Site Admin > Trainer > Skjutledare > Club Admin
+bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
+bool isTrainer = await _trainingGroupService.IsTrainerForMember(currentMemberId, targetMemberId);
+bool isSkjutledare = !isTrainer ? await _authorizationService.IsSkjutledareForMember(targetMemberId) : false;
+bool isClubAdmin = !isTrainer && !isSkjutledare ? await _authorizationService.IsClubAdminForClub(clubId) : false;
+
+if (!isSiteAdmin && !isTrainer && !isSkjutledare && !isClubAdmin)
+    return Json(new { success = false, message = "Access denied" });
+```
+
+### Training group management endpoints (TrainingGroupController)
+```csharp
+// Four-tier: Site Admin > Club Admin > Skjutledare > Trainer (in group)
+// See TrainingGroupService.CanManageTrainingGroup()
+```
+
+**Key Principle:** Access granted if user has ANY applicable role. Checks are ordered to short-circuit efficiently (most privileged first).
 
 ---
 
@@ -308,11 +334,13 @@ else if (Model.Value<int>("clubId") > 0)
 ### After Audit
 ✅ Proper role-based access control across all endpoints
 ✅ Club admins can only access their assigned clubs
-✅ Three-tier authorization pattern (Site Admin > Competition Manager > Club Admin)
+✅ Multi-tier authorization pattern (Site Admin > Competition Manager > Club Admin > Skjutledare > Trainer)
 ✅ Server-side filtering for data security
-✅ Centralized authorization service (17 calls)
+✅ Centralized authorization service with expanded role support
 ✅ Consistent authorization checks across entire codebase
 ✅ Admin UI elements properly hidden from regular users
+✅ Skjutledare role added for training + competition management (2026-02)
+✅ Training group-based Trainer role for step approval (2026-02)
 
 ---
 
@@ -331,6 +359,22 @@ else if (Model.Value<int>("clubId") > 0)
 - [x] Can view registrations for assigned club's competitions
 - [x] Can see manage button only on assigned club's competitions
 - [x] Cannot access site admin functions
+
+**As Skjutledare (Range Master):**
+- [x] Can approve training steps for members of their club
+- [x] Can create and manage training groups for their club
+- [x] Can view and manage competitions for their club
+- [x] Can view competition registrations for their club's competitions
+- [x] Cannot approve member applications
+- [x] Cannot modify club settings
+- [x] Cannot assign other admins or Skjutledare
+
+**As Trainer (Training Group):**
+- [x] Can approve training steps for members in their active training group
+- [x] Can manage their training group (add/remove members)
+- [x] Cannot approve steps for members outside their group
+- [x] Cannot manage competitions
+- [x] Cannot access club admin functions
 
 **As Regular User:**
 - [x] Cannot modify any club data
@@ -359,11 +403,20 @@ else if (Model.Value<int>("clubId") > 0)
 All authorization now flows through `Services/AdminAuthorizationService.cs`:
 
 **Key Methods:**
-- `IsCurrentUserAdminAsync()` - Site admin check (17 calls)
-- `IsClubAdminForClub(clubId)` - Club-specific admin check (15+ calls)
-- `GetManagedClubIds()` - Get clubs user can administer (5+ calls)
-- `IsCompetitionManager(competitionId)` - Check if user manages specific competition (3 calls)
+- `IsCurrentUserAdminAsync()` - Site admin check
+- `IsClubAdminForClub(clubId)` - Club-specific admin check (includes regional admin)
+- `GetManagedClubIds()` - Get clubs user can administer
+- `IsCompetitionManager(competitionId)` - Check if user manages specific competition
 - `EnsureClubAdminGroup(clubId, clubName)` - Create club admin groups
+- `IsSkjutledareForClub(clubId)` - Check if user is Skjutledare for specific club (added 2026-02)
+- `IsSkjutledareForMember(memberId)` - Check if user is Skjutledare for member's club(s) (added 2026-02)
+- `IsMemberSkjutledareForClub(memberId, clubId)` - Check if specific member is Skjutledare (added 2026-02)
+- `GetSkjutledareClubIds()` - Get clubs where user is Skjutledare (added 2026-02)
+- `EnsureSkjutledareGroup(clubId)` - Create Skjutledare member group if missing (added 2026-02)
+
+**Training Group Authorization** (via `TrainingGroupService.cs`):
+- `CanManageTrainingGroup(trainingGroupId)` - Four-tier check: Site Admin > Club Admin > Skjutledare > Trainer
+- `IsTrainerForMember(trainerMemberId, targetMemberId)` - Check if user is Trainer in same active group
 
 **Registered:** Singleton in `AdminServicesComposer.cs`
 
@@ -372,15 +425,17 @@ All authorization now flows through `Services/AdminAuthorizationService.cs`:
 ## Recommendations
 
 1. ✅ **Always use AdminAuthorizationService** - Don't create duplicate authorization logic
-2. ✅ **Use three-tier pattern** - Check Site Admin, then specific role, then Club Admin
+2. ✅ **Use multi-tier pattern** - Check Site Admin, then specific role, then Club Admin, then Skjutledare, then Trainer
 3. ✅ **Server-side filtering** - Never trust client-side authorization
-4. ✅ **Test with multiple roles** - Verify each role has appropriate access
+4. ✅ **Test with multiple roles** - Verify each role has appropriate access (including Skjutledare and Trainer)
 5. ✅ **Consistent error messages** - Use Swedish "Du har inte behörighet..." messages
 6. ⚠️ **Regular security audits** - Review authorization logic when adding new endpoints
+7. ✅ **Short-circuit auth checks** - Order checks from most to least privileged to avoid unnecessary calls
 
 ---
 
 **Audit Completed:** 2025-11-02
+**Last Updated:** 2026-02 (Skjutledare and Trainer roles added)
 **Status:** ✅ All vulnerabilities fixed
 **Build Status:** ✅ 0 errors
 **Testing:** ✅ Verified with multiple user roles

@@ -119,18 +119,28 @@ Home
   - isActive (Boolean)
 
 ### Club Admin System
-**Member Groups Pattern**: `ClubAdmin_{ClubId}` (e.g., ClubAdmin_1098)
+**Member Groups Patterns**:
+- `ClubAdmin_{ClubId}` (e.g., ClubAdmin_1098) — Club administrator
+- `Skjutledare_{ClubId}` (e.g., Skjutledare_1098) — Range Master (Skjutledare)
+- `RegionalAdmin_{RegionCode}` (e.g., RegionalAdmin_Stockholm) — Regional administrator
 
 **Permission Hierarchy:**
 1. Site Administrators - Full access to all clubs
-2. Club Administrators - Access only to assigned club(s)
-3. Regular Users - No admin access
+2. Regional Administrators - Full access to all clubs in their region
+3. Club Administrators - Access only to assigned club(s)
+4. Skjutledare (Range Master) - Approve training steps + manage competitions for their club
+5. Trainer (Training Group) - Approve training steps for their training group members only
+6. Regular Users - No admin access
 
-**Key API Methods** (AdminController.cs):
+**Key API Methods** (AdminAuthorizationService.cs):
 ```csharp
-GetClubsAsContent()          // Retrieves clubs from content tree
-IsClubAdminForClub(clubId)   // Check if user is club admin
-GetManagedClubIds()          // Get clubs user can administer
+IsCurrentUserAdminAsync()          // Site admin check
+IsClubAdminForClub(clubId)         // Club-specific admin check (includes regional admin)
+IsSkjutledareForClub(clubId)       // Check if Skjutledare for specific club
+IsSkjutledareForMember(memberId)   // Check if Skjutledare for member's club
+GetManagedClubIds()                // Get clubs user can administer
+GetSkjutledareClubIds()            // Get clubs where user is Skjutledare
+EnsureSkjutledareGroup(clubId)     // Create Skjutledare group if missing
 ```
 
 ### Club Admin Panel ✅ COMPLETE (Phase 1)
@@ -232,7 +242,7 @@ var clubName = club?.Name;  // Will be null or incorrect
 ## Training System (Skyttetrappan)
 
 ### Overview
-9 progressive training levels (🥉 Nybörjartrappa Brons → 🏅 Rekordtrappan), 74 total steps.
+9 progressive training levels, 74 total steps. Training progress is stored on member properties (not on training groups), so progress persists even when training groups are closed.
 
 ### Member Properties Required
 Add to hpskMember type in backoffice:
@@ -245,10 +255,55 @@ Add to hpskMember type in backoffice:
 ### API Endpoints (TrainingController.cs)
 **Public:** GetTrainingOverview, GetLeaderboard, GetMemberProgress
 **Member:** StartTraining
-**Admin:** CompleteStep, ResetProgress, GetMemberProgress?memberId=X
+**Admin/Trainer/Skjutledare:** CompleteStep, GetMemberProgress?memberId=X
+**Site Admin only:** ResetProgress
+
+### Step Approval Authorization
+Training step approval (`CompleteStep`) uses a four-tier authorization check:
+1. **Site Admin** — can approve any member
+2. **Trainer** — can approve members in their active training group (`IsTrainerForMember`)
+3. **Skjutledare** — can approve members at their club, even without an active training group (`IsSkjutledareForMember`)
+4. **Club Admin** — can approve members at their club (`IsClubAdminForClub`)
+
+The same tiers apply to `GetMemberProgress` when viewing another member's progress.
+
+### Training Groups System
+
+**Database Tables:** `TrainingGroups`, `TrainingGroupMembers` (see `Scripts/CreateTrainingGroupTables.sql`)
+
+**Service:** `TrainingGroupService.cs` — CRUD for training groups, member/trainer management, authorization checks
+
+**Controller:** `TrainingGroupController.cs` — API endpoints for training group management
+
+**Key Concepts:**
+- Training groups belong to a club (`ClubId`) and have an `IsActive` flag
+- Members in a group have a `Role` of either `"Member"` or `"Trainer"`
+- Trainers can approve steps for members in their active group
+- When a group is deactivated (closed), `IsTrainerForMember` returns false, but Skjutledare and Club Admins can still approve steps
+- Progress is stored on member properties, not on the group — closing a group preserves all progress
+
+**Authorization for Training Group Management (`CanManageTrainingGroup`):**
+1. Site Admin
+2. Club Admin for the group's club
+3. Skjutledare for the group's club
+4. Trainer in the group
+
+**UI Locations:**
+- `/skyttetrappan/` — "Min Traningsgrupp" tab (members/trainers), "Administration" tab (admins/skjutledare)
+- Club Admin Panel — "Traningsgrupper" tab for club-scoped management
+
+**Features:**
+- Create/edit/deactivate training groups
+- Add/remove members and trainers
+- Per-member step-by-step approval view (Visa framsteg)
+- Group email messaging (trainer to group members)
+- Opt-in welcome email when adding members
+- Email notification on step approval
 
 ### Implementation Status
 ✅ Models, API, UI, Admin Interface
+✅ Training Groups (database, service, controller, UI)
+✅ Skjutledare integration
 ⏳ Member properties setup in Umbraco backoffice
 
 ## Training Scoring System
@@ -595,7 +650,7 @@ POST /umbraco/surface/RegistrationAdmin/AddLateRegistration
 ### Key Pages
 - **/admin** - Admin dashboard with tabs (Competitions, Clubs, Users, Training)
 - **/clubs** - Club directory for club admins
-- **/training-stairs** - Training system interface
+- **/skyttetrappan** - Training system interface
 - **/login-register** - Login and registration page
 - **/user-profile** - User profile with dashboard, training results
 
@@ -752,6 +807,8 @@ Navigate to **Members → Member Groups**:
 - Users (default group for all members)
 - PendingApproval (for members awaiting approval)
 - ClubAdmin_XXXX groups (created automatically by system for each club)
+- Skjutledare_XXXX groups (created automatically when assigning Skjutledare via club admin panel)
+- RegionalAdmin_XXXX groups (created automatically for regional admins)
 
 ## Common Patterns
 
@@ -813,8 +870,10 @@ The `/Migrations` folder contains disabled database schemas for direct competiti
 - **Authorization Security Fixes (2025-11-02)** - Comprehensive security audit and fixes across 6 areas (see [Documentation](Documentation/AUTHORIZATION_SECURITY_AUDIT.md))
 - **Login & Registration System (2025-11-02)** - Complete overhaul with email notifications, smart redirects, approval workflow (see [Documentation](Documentation/LOGIN_REGISTRATION_SYSTEM.md))
 - **Club System (2025-10-30/31)** - Document Type based with migrations to ClubService and numeric clubId (see [Documentation](Documentation/CLUB_SYSTEM_MIGRATIONS.md))
-- **Club Admin Panel (Phase 1)** - Events, Competitions, Settings tabs with proper authorization
-- **Training System (Skyttetrappan)** - Backend, UI, admin interface
+- **Club Admin Panel** - Events, Competitions, Members, Training Groups, Settings tabs with proper authorization
+- **Training System (Skyttetrappan)** - Backend, UI, admin interface, training groups, step approval workflow
+- **Training Groups System (2026-02)** - Database tables, service, controller, UI in both TrainingStairs and ClubAdminPanel. Includes group lifecycle (create/edit/deactivate), member/trainer management, step-by-step approval, group email messaging
+- **Skjutledare (Range Master) Role (2026-02)** - New club-level trust role. Can approve training steps and manage competitions for their club. Member group pattern `Skjutledare_{ClubId}`. Managed via club admin panel Members tab
 - **Training Scoring System (2025-10-31)** - Complete with dashboard, Chart.js visualizations, unified results (see [Documentation](Documentation/TRAINING_SCORING_SYSTEM.md))
 - **Competition Series System** - Full CRUD with CKEditor 5
 - **Competition Admin System** - Full CRUD operations with role-based access

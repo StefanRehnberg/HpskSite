@@ -140,9 +140,10 @@ namespace HpskSite.Controllers
 
                 if (memberId.HasValue)
                 {
-                    // Check authorization: site admin, trainer for member, or club admin
+                    // Check authorization: site admin, trainer for member, skjutledare, or club admin
                     bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
                     bool isTrainer = false;
+                    bool isSkjutledare = false;
                     bool isClubAdmin = false;
 
                     if (!isSiteAdmin)
@@ -153,6 +154,9 @@ namespace HpskSite.Controllers
                             isTrainer = await _trainingGroupService.IsTrainerForMember(currentData.Id, memberId.Value);
 
                         if (!isTrainer)
+                            isSkjutledare = await _authorizationService.IsSkjutledareForMember(memberId.Value);
+
+                        if (!isTrainer && !isSkjutledare)
                         {
                             var target = _memberService.GetById(memberId.Value);
                             var targetClubId = int.TryParse(target?.GetValue("primaryClubId")?.ToString(), out int cid) ? cid : 0;
@@ -161,7 +165,7 @@ namespace HpskSite.Controllers
                         }
                     }
 
-                    if (!isSiteAdmin && !isTrainer && !isClubAdmin)
+                    if (!isSiteAdmin && !isTrainer && !isSkjutledare && !isClubAdmin)
                     {
                         return Json(new { success = false, message = "Access denied" });
                     }
@@ -277,6 +281,7 @@ namespace HpskSite.Controllers
             {
                 bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
                 bool isTrainer = false;
+                bool isSkjutledare = false;
                 bool isClubAdmin = false;
 
                 if (!isSiteAdmin)
@@ -289,6 +294,9 @@ namespace HpskSite.Controllers
                     }
 
                     if (!isTrainer)
+                        isSkjutledare = await _authorizationService.IsSkjutledareForMember(memberId);
+
+                    if (!isTrainer && !isSkjutledare)
                     {
                         var targetMember = _memberService.GetById(memberId);
                         var targetClubId = int.TryParse(targetMember?.GetValue("primaryClubId")?.ToString(), out int cid) ? cid : 0;
@@ -297,7 +305,7 @@ namespace HpskSite.Controllers
                     }
                 }
 
-                if (!isSiteAdmin && !isTrainer && !isClubAdmin)
+                if (!isSiteAdmin && !isTrainer && !isSkjutledare && !isClubAdmin)
                 {
                     return Json(new { success = false, message = "Access denied" });
                 }
@@ -540,13 +548,16 @@ namespace HpskSite.Controllers
 
                 var isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
                 var managedClubIds = await _authorizationService.GetManagedClubIds();
+                var skjutledareClubIds = await _authorizationService.GetSkjutledareClubIds();
 
                 return Json(new {
                     success = true,
                     data = new {
-                        isAdmin = isSiteAdmin || managedClubIds.Any(), // True if site admin OR club admin
+                        isAdmin = isSiteAdmin || managedClubIds.Any(),
                         isSiteAdmin = isSiteAdmin,
-                        managedClubIds = managedClubIds
+                        managedClubIds = managedClubIds,
+                        isSkjutledare = skjutledareClubIds.Any(),
+                        skjutledareClubIds = skjutledareClubIds
                     }
                 });
             }
