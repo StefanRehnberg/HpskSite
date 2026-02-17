@@ -284,7 +284,7 @@
                 @{
                     var rootPage = Model.Root();
                     var competitionsPage = rootPage?.Children.FirstOrDefault(x => x.ContentType.Alias == "competitionsHub");
-                    var trainingPage = rootPage?.Children.FirstOrDefault(x => x.Url().Contains("training-page"));
+                    var trainingPage = rootPage?.Children.FirstOrDefault(x => x.Url().Contains("skyttetrappan"));
                 }
                 @if (competitionsPage != null)
                 {

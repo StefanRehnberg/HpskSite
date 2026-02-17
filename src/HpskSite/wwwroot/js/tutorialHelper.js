@@ -19,8 +19,8 @@ const TutorialHelper = {
             'dashboard': 'tutorial-03',     // Dashboard tab
             'profile': 'tutorial-03'        // Profile tab
         },
-        'training-match': 'tutorial-04',    // Träningsmatch
-        'training-stairs': 'tutorial-05',   // Skyttetrappan
+        // 'training-match' — tutorial button is in the "Hur fungerar det?" card instead
+        // 'training-stairs' — tutorial button is in the "Hur fungerar det?" card instead
         'club-admin': 'tutorial-07',        // Godkänna medlemmar
         'club-events': 'tutorial-09',       // Hantera evenemang
         'admin': 'tutorial-11'              // Skapa tävling
@@ -73,10 +73,16 @@ const TutorialHelper = {
             .catch(error => console.error('Error loading tutorials:', error));
     },
 
-    // Open tutorial overlay
-    open: function(tutorialId) {
+    // Open tutorial overlay (waits for tutorials to load if needed)
+    open: function(tutorialId, retries) {
         const tutorial = this.tutorials[tutorialId];
         if (!tutorial) {
+            // Tutorials may not have loaded yet — retry a few times
+            const remaining = retries !== undefined ? retries : 20;
+            if (remaining > 0 && Object.keys(this.tutorials).length === 0) {
+                setTimeout(() => this.open(tutorialId, remaining - 1), 250);
+                return;
+            }
             console.error('Tutorial not found:', tutorialId);
             alert('Tutorial hittades inte: ' + tutorialId);
             return;
@@ -234,7 +240,7 @@ const TutorialHelper = {
         if (path.includes('competitions') || path.includes('tavlingar')) return 'competitions';
         if (path.includes('user-profile') || path.includes('profil')) return 'user-profile';
         if (path.includes('traningsmatch') || path.includes('training-match')) return 'training-match';
-        if (path.includes('training-stairs') || path.includes('skyttetrappan') || path.includes('training-page')) return 'training-stairs';
+        if (path.includes('training-stairs') || path.includes('skyttetrappan')) return 'training-stairs';
         if (path.includes('club-admin') || path.includes('klubbadmin')) return 'club-admin';
         if (path.includes('club') && path.includes('events')) return 'club-events';
         if (path.includes('admin')) return 'admin';

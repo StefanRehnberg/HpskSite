@@ -12,70 +12,119 @@
     var isLoggedIn = currentMember != null;
 }
 
-<div class="container">
-    <!-- Header Section -->
-    <div class="row mb-4">
-        <div class="col-12">
-            <div class="text-center mb-4">
-                <h1 class="display-4 text-primary">🎯 @pageTitle</h1>
-                <p class="lead">@pageSubtitle</p>
-            </div>
-
-            <!-- Training Overview Card -->
-            <div class="card mb-4">
-                <div class="card-body">
-                    @{
-                        var overviewTitle = Model.Value<string>("overviewTitle") ?? "Vad är Skyttetrappan?";
-                        var overviewContent = Model.Value<string>("overviewContent") ??
-                            "<p>Skyttetrappan är ett strukturerat träningsprogram som hjälper dig att utveckla dina skytteskillnader steg för steg. Programmet består av 9 nivåer med totalt 74 steg, från nybörjarnivå till svensk rekordnivå.</p>" +
-                            "<p>Varje nivå har ett specifikt mål och syfte, och du avancerar genom att slutföra stegen under handledning av en instruktör. Programmet är utformat för att ge dig en tydlig utvecklingsväg och motivation att förbättra ditt skytte.</p>";
-                        var overviewLoginMessage = Model.Value<string>("overviewLoginMessage") ??
-                            "<strong>Logga in för att börja:</strong> Du behöver vara inloggad som medlem för att starta ditt träningsprogram och se dina personliga framsteg.";
-                    }
-                    <h2 class="card-title">@overviewTitle</h2>
-                    @Html.Raw(overviewContent)
-
-                    @if (!isLoggedIn)
-                    {
-                        <div class="alert alert-info">
-                            <i class="bi bi-info-circle"></i>
-                            @Html.Raw(overviewLoginMessage)
-                            <a href="/login-register" class="btn btn-primary btn-sm ms-2">Logga in</a>
-                        </div>
-                    }
-                </div>
-            </div>
-        </div>
+<div class="container py-4">
+    <!-- Page Header -->
+    <div class="mb-4">
+        <h1 class="h3 mb-1">Skyttetrappan</h1>
+        <p class="text-muted mb-0">Progressivt träningsprogram för pistolskytte</p>
     </div>
 
-    <!-- Main Navigation Tabs -->
     <div class="row">
-        <div class="col-12">
-            <ul class="nav nav-pills nav-fill mb-4" id="trainingTabs" role="tablist">
+        <!-- Sidebar -->
+        <div class="col-lg-4 order-2 order-lg-2 mb-4 mb-lg-0">
+            @if (isLoggedIn)
+            {
+                <!-- Kom igång Card (hidden once training has started) -->
+                <div class="card border-success mb-3" id="startTrainingCard" style="display: none;">
+                    <div class="card-header bg-success text-white">
+                        <h6 class="mb-0"><i class="bi bi-bullseye me-2"></i>Kom igång</h6>
+                    </div>
+                    <div class="card-body">
+                        <p class="small mb-3">Du har inte påbörjat träningsprogrammet än. Starta för att börja följa dina framsteg!</p>
+                        <div class="d-grid gap-2">
+                            <button class="btn btn-success" onclick="startTraining()">
+                                <i class="bi bi-play-circle me-2"></i>Börja träning
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            }
+
+            <!-- Help Card -->
+            <div class="card" id="helpCard">
+                <div class="card-header bg-body-tertiary">
+                    <h6 class="mb-0"><i class="bi bi-question-circle me-2"></i>Hur fungerar det?</h6>
+                </div>
+                <div class="card-body">
+                    <ul class="small mb-3 ps-3">
+                        <li>9 nivåer från nybörjare till rekord</li>
+                        <li>74 steg med tydliga mål</li>
+                        <li>Avancera under handledning av instruktör</li>
+                        <li>Följ dina framsteg i realtid</li>
+                    </ul>
+                    <div class="d-flex flex-column gap-2">
+                        <button class="btn btn-sm btn-outline-primary" onclick="TutorialHelper.open('tutorial-05')">
+                            <i class="bi bi-play-circle me-1"></i>Se instruktionsvideo
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- About Card -->
+            <div class="card mt-3">
+                <div class="card-header bg-body-tertiary">
+                    <h6 class="mb-0"><i class="bi bi-lightbulb me-2"></i>Om Skyttetrappan</h6>
+                </div>
+                <div class="card-body">
+                    <p class="small mb-2">
+                        Skyttetrappan finns till för att ge nya skyttar ett roligt och strukturerat sätt att träna mot sina första tre guldserier. Tydliga delmål och steg gör det lättare att se framsteg och hålla motivationen uppe.
+                    </p>
+                    <p class="small mb-2">
+                        Efter guldnivån kan den som vill fortsätta i sin egen takt uppåt i trappan, men det är helt frivilligt.
+                    </p>
+                    <p class="small mb-2">
+                        Programmet är under testning och långt ifrån färdigt. Vi uppskattar all feedback och hoppas att många klubbar vill vara med och prova!
+                    </p>
+                    <div class="d-flex flex-column gap-2">
+                        <a href="mailto:trappan@pistol.nu" class="btn btn-sm btn-outline-secondary">
+                            <i class="bi bi-envelope me-1"></i>Frågor eller förslag? Maila oss
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            @if (!isLoggedIn)
+            {
+                <!-- Login Card -->
+                <div class="card mt-3 border-info">
+                    <div class="card-body">
+                        <i class="bi bi-info-circle me-2 text-info"></i>
+                        <strong>Logga in för att börja</strong>
+                        <p class="small text-muted mt-2 mb-2">Du behöver vara inloggad som medlem för att starta ditt träningsprogram och se dina personliga framsteg.</p>
+                        <a href="/login-register" class="btn btn-primary btn-sm">Logga in</a>
+                    </div>
+                </div>
+            }
+        </div>
+
+        <!-- Main Content -->
+        <div class="col-lg-8 order-1 order-lg-1">
+            <!-- Main Navigation Tabs -->
+            <ul class="nav nav-tabs mb-4" id="trainingTabs" role="tablist">
                 <!-- Tab 1: Trappan (always first, always default active) -->
                 <li class="nav-item" role="presentation">
-                    <button class="nav-link active" id="levels-tab" data-bs-toggle="pill" data-bs-target="#levels" type="button" role="tab">
+                    <button class="nav-link active" id="levels-tab" data-bs-toggle="tab" data-bs-target="#levels" type="button" role="tab">
                         <i class="bi bi-ladder me-1"></i>Trappan
                     </button>
                 </li>
-                <!-- Tab 2: Deltagare -->
-                <li class="nav-item" role="presentation">
-                    <button class="nav-link" id="leaderboard-tab" data-bs-toggle="pill" data-bs-target="#leaderboard-content" type="button" role="tab">
-                        <i class="bi bi-trophy me-1"></i>Deltagare
-                    </button>
-                </li>
-                <!-- Tab 3: Mina Framsteg (only visible if logged in) -->
+                <!-- Tab 2: Mina Framsteg (only visible if logged in) -->
                 @if (isLoggedIn)
                 {
                     <li class="nav-item" role="presentation">
-                        <button class="nav-link" id="progress-tab" data-bs-toggle="pill" data-bs-target="#progress" type="button" role="tab">
+                        <button class="nav-link" id="progress-tab" data-bs-toggle="tab" data-bs-target="#progress" type="button" role="tab">
                             <i class="bi bi-person-check me-1"></i>Mina Framsteg
                         </button>
                     </li>
                 }
+                <!-- Tab 3: Deltagare -->
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="leaderboard-tab" data-bs-toggle="tab" data-bs-target="#leaderboard-content" type="button" role="tab">
+                        <i class="bi bi-trophy me-1"></i>Deltagare
+                    </button>
+                </li>
                 <!-- Tab 4: Administration (only visible if admin, hidden by default) -->
                 <li class="nav-item" role="presentation" id="admin-tab-item" style="display: none;">
-                    <button class="nav-link" id="admin-tab" data-bs-toggle="pill" data-bs-target="#admin" type="button" role="tab">
+                    <button class="nav-link" id="admin-tab" data-bs-toggle="tab" data-bs-target="#admin" type="button" role="tab">
                         <i class="bi bi-gear me-1"></i>Administration
                     </button>
                 </li>
@@ -101,7 +150,22 @@
                     </div>
                 </div>
 
-                <!-- Leaderboard Tab (Tab 2 - Deltagare) -->
+                <!-- My Progress Tab (Tab 2 - Mina Framsteg, only for logged-in users) -->
+                @if (isLoggedIn)
+                {
+                    <div class="tab-pane fade" id="progress" role="tabpanel">
+                        <div id="memberProgress">
+                            <div class="text-center py-5">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Laddar...</span>
+                                </div>
+                                <p class="mt-3">Laddar dina träningsframsteg...</p>
+                            </div>
+                        </div>
+                    </div>
+                }
+
+                <!-- Leaderboard Tab (Tab 3 - Deltagare) -->
                 <div class="tab-pane fade" id="leaderboard-content" role="tabpanel">
                     <div class="card border-info">
                         <div class="card-header bg-info text-white">
@@ -118,26 +182,6 @@
                         </div>
                     </div>
                 </div>
-
-                <!-- My Progress Tab (Tab 3 - Mina Framsteg, only for logged-in users) -->
-                @if (isLoggedIn)
-                {
-                    <div class="tab-pane fade" id="progress" role="tabpanel">
-                        <div class="card border-primary">
-                            <div class="card-header bg-primary text-white">
-                                <h4 class="mb-0"><i class="bi bi-person-check me-2"></i>Ditt nästa trappsteg</h4>
-                            </div>
-                            <div class="card-body" id="memberProgress">
-                                <div class="text-center py-5">
-                                    <div class="spinner-border text-primary" role="status">
-                                        <span class="visually-hidden">Laddar...</span>
-                                    </div>
-                                    <p class="mt-3">Laddar dina träningsframsteg...</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                }
 
                 <!-- Admin Tab (Tab 4 - Administration) -->
                 <div class="tab-pane fade" id="admin" role="tabpanel">
@@ -157,15 +201,14 @@
                     </div>
                 </div>
             </div>
+
+            @if (isLoggedIn)
+            {
+                <!-- Anti-forgery token for AJAX requests -->
+                @Html.AntiForgeryToken()
+            }
         </div>
     </div>
-
-    @if (isLoggedIn)
-    {
-        <!-- Anti-forgery token for AJAX requests -->
-        @Html.AntiForgeryToken()
-
-    }
 </div>
 
 <!-- Training Step Modal -->
@@ -358,6 +401,9 @@ let managedClubIds = [];
 let currentMemberProgress = null;
 let allLevels = [];
 let leaderboardData = [];
+let clubsData = [];
+let regionsData = [];
+let clubRegionMap = {};
 
 document.addEventListener('DOMContentLoaded', function() {
     loadTrainingData();
@@ -447,14 +493,31 @@ async function loadTrainingData() {
 
         if (isUserLoggedIn) {
             // Display member progress if logged in
-            if (currentMemberProgress) {
+            // Check trainingStartDate to determine if member has actually started
+            if (currentMemberProgress && currentMemberProgress.trainingStartDate) {
                 displayMemberProgress(currentMemberProgress);
             } else {
-                displayStartTrainingOption();
+                // Show "Kom igång" card in sidebar
+                const startCard = document.getElementById('startTrainingCard');
+                if (startCard) startCard.style.display = 'block';
             }
 
-            // Check if user is admin
-            checkAdminStatus();
+            // Check if user is admin, then load leaderboard (needs admin status for buttons)
+            await checkAdminStatus();
+        }
+
+        // Fetch clubs and regions for participant filtering
+        const [clubsRes, regionsRes] = await Promise.all([
+            fetch('/umbraco/surface/ClubAdmin/GetClubsPublic').then(r => r.json()).catch(() => null),
+            fetch('/umbraco/surface/RegionalAdmin/GetAllRegions').then(r => r.json()).catch(() => null)
+        ]);
+
+        if (clubsRes?.success) {
+            clubsData = clubsRes.clubs;
+            clubsData.forEach(c => { clubRegionMap[c.id] = c.regionalFederation; });
+        }
+        if (regionsRes?.success) {
+            regionsData = regionsRes.regions;
         }
 
         // Load leaderboard
@@ -468,75 +531,67 @@ async function loadTrainingData() {
 }
 
 function displayMemberProgress(progress) {
-    console.log('Displaying progress:', progress);
     const container = document.getElementById('memberProgress');
     const currentLevel = allLevels.find(l => l.levelId === progress.currentLevel);
     const currentStep = currentLevel?.steps.find(s => s.stepNumber === progress.currentStep);
 
     const progressPercent = Math.round(progress.overallCompletionPercentage || 0);
     const levelPercent = Math.round(progress.levelCompletionPercentage || 0);
-
-    console.log('Level percent:', levelPercent, 'Overall percent:', progressPercent);
+    const completedCount = progress.completedSteps?.length || 0;
+    const totalSteps = allLevels.reduce((sum, l) => sum + l.steps.length, 0);
 
     container.innerHTML = `
-        <div class="member-progress-card">
-            <div class="row align-items-center">
-                <div class="col-md-8">
-                    <h4>
-                        <span class="badge-level">${currentLevel?.badge || '🎯'}</span>
-                        ${currentLevel?.name || 'Okänd nivå'}
-                    </h4>
-                    <p class="mb-2">
-                        <strong>Nuvarande steg:</strong> ${progress.currentStep} av ${currentLevel?.steps.length || 0}
-                    </p>
-                    <p class="mb-3">${currentStep?.description || 'Inget aktuellt steg'}</p>
-
-                    <div class="mb-2">
-                        <small class="text-muted">Framsteg denna nivå:</small>
-                        <div class="progress" style="height: 8px;">
-                            <div class="progress-bar" role="progressbar" style="width: ${levelPercent}%"></div>
-                        </div>
+        <!-- Current level & step -->
+        <div class="card mb-3">
+            <div class="card-body">
+                <div class="d-flex align-items-start justify-content-between">
+                    <div>
+                        <h5 class="mb-1">
+                            <span class="badge-level me-1">${currentLevel?.badge || '🎯'}</span>
+                            ${currentLevel?.name || 'Okänd nivå'}
+                        </h5>
+                        <p class="mb-1">
+                            <strong>Steg ${progress.currentStep}</strong> av ${currentLevel?.steps.length || 0}
+                        </p>
+                        <p class="text-muted small mb-0">${currentStep?.description || 'Inget aktuellt steg'}</p>
                     </div>
-
-                    <div class="mb-2">
-                        <small class="text-muted">Total framsteg:</small>
-                        <div class="progress" style="height: 8px;">
-                            <div class="progress-bar bg-success" role="progressbar" style="width: ${progressPercent}%"></div>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-4 text-center">
-                    <div class="d-inline-block">
-                        <canvas class="progress-ring" width="60" height="60"></canvas>
-                        <div class="position-absolute" style="top: 50%; left: 50%; transform: translate(-50%, -50%);">
-                            <small class="fw-bold">${progressPercent}%</small>
-                        </div>
-                    </div>
-                    <p class="small text-muted mt-2">
-                        ${progress.completedSteps?.length || 0} steg slutförda<br>
-                        Påbörjad: ${formatDate(progress.trainingStartDate)}
-                    </p>
+                    <span class="badge bg-primary fs-6">${progressPercent}%</span>
                 </div>
             </div>
         </div>
-    `;
 
-    // Draw progress ring
-    drawProgressRing(container.querySelector('.progress-ring'), progressPercent);
-}
+        <!-- Progress bars -->
+        <div class="card mb-3">
+            <div class="card-body py-3">
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between mb-1">
+                        <small class="text-muted">Nivå</small>
+                        <small class="text-muted">${levelPercent}%</small>
+                    </div>
+                    <div class="progress" style="height: 8px;">
+                        <div class="progress-bar" role="progressbar" style="width: ${levelPercent}%"></div>
+                    </div>
+                </div>
+                <div>
+                    <div class="d-flex justify-content-between mb-1">
+                        <small class="text-muted">Totalt</small>
+                        <small class="text-muted">${completedCount} av ${totalSteps} steg</small>
+                    </div>
+                    <div class="progress" style="height: 8px;">
+                        <div class="progress-bar bg-success" role="progressbar" style="width: ${progressPercent}%"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
 
-function displayStartTrainingOption() {
-    const container = document.getElementById('memberProgress');
-    container.innerHTML = `
-        <div class="text-center">
-            <h4>Välkommen till Skyttetrappan!</h4>
-            <p>Du har inte påbörjat träningsprogrammet än.</p>
-            <button class="btn btn-primary btn-lg" onclick="startTraining()">
-                <i class="bi bi-play-circle"></i> Börja Träning
-            </button>
+        <!-- Stats -->
+        <div class="d-flex gap-3 small text-muted">
+            <span><i class="bi bi-check-circle me-1"></i>${completedCount} steg slutförda</span>
+            <span><i class="bi bi-calendar me-1"></i>Påbörjad ${formatDate(progress.trainingStartDate)}</span>
         </div>
     `;
 }
+
 
 function displayTrainingLevels(levels) {
     const container = document.getElementById('trainingLevels');
@@ -618,8 +673,27 @@ function displayLeaderboard(data) {
         return;
     }
 
-    // Add group toggle buttons
+    // Build filter dropdowns HTML
+    let filterHtml = '';
+    if (regionsData.length > 0 || clubsData.length > 0) {
+        filterHtml = `
+            <div class="row g-2 mb-3">
+                <div class="col-sm-6">
+                    <select class="form-select form-select-sm" id="regionFilter">
+                        <option value="">Alla regioner</option>
+                    </select>
+                </div>
+                <div class="col-sm-6">
+                    <select class="form-select form-select-sm" id="clubFilter">
+                        <option value="">Alla klubbar</option>
+                    </select>
+                </div>
+            </div>
+        `;
+    }
+
     let html = `
+        ${filterHtml}
         <div class="mb-3">
             <div class="btn-group" role="group" aria-label="Visa deltagare">
                 <input type="radio" class="btn-check" name="participantView" id="groupedView" autocomplete="off" checked>
@@ -634,21 +708,129 @@ function displayLeaderboard(data) {
 
     container.innerHTML = html;
 
+    // Populate filter dropdowns and restore saved selections
+    populateFilterDropdowns();
+
     // Add event listeners for toggle
     document.getElementById('groupedView').addEventListener('change', () => {
         if (document.getElementById('groupedView').checked) {
-            displayGroupedParticipants(data);
+            refreshParticipantDisplay();
         }
     });
 
     document.getElementById('allView').addEventListener('change', () => {
         if (document.getElementById('allView').checked) {
-            displayAllParticipants(data);
+            refreshParticipantDisplay();
         }
     });
 
-    // Show grouped view by default
-    displayGroupedParticipants(data);
+    // Show default view with filtered data
+    refreshParticipantDisplay();
+}
+
+function populateFilterDropdowns() {
+    const regionSelect = document.getElementById('regionFilter');
+    const clubSelect = document.getElementById('clubFilter');
+    if (!regionSelect || !clubSelect) return;
+
+    // Determine which regions have active participants
+    const participantClubIds = new Set(leaderboardData.map(m => m.primaryClubId).filter(Boolean));
+    const participantRegions = new Set();
+    participantClubIds.forEach(cid => {
+        const region = clubRegionMap[cid];
+        if (region) participantRegions.add(region);
+    });
+
+    // Populate regions (only those with participants)
+    regionsData
+        .filter(r => participantRegions.has(r.name))
+        .sort((a, b) => a.name.localeCompare(b.name, 'sv'))
+        .forEach(r => {
+            const opt = document.createElement('option');
+            opt.value = r.name;
+            opt.textContent = r.name;
+            regionSelect.appendChild(opt);
+        });
+
+    // Restore saved region
+    const savedRegion = sessionStorage.getItem('skyttetrappan_region') || '';
+    regionSelect.value = savedRegion;
+    if (regionSelect.value !== savedRegion) regionSelect.value = '';
+
+    // Populate clubs based on selected region
+    populateClubDropdown();
+
+    // Restore saved club
+    const savedClub = sessionStorage.getItem('skyttetrappan_club') || '';
+    clubSelect.value = savedClub;
+    if (clubSelect.value !== savedClub) clubSelect.value = '';
+
+    // Wire up change events
+    regionSelect.addEventListener('change', () => {
+        sessionStorage.setItem('skyttetrappan_region', regionSelect.value);
+        populateClubDropdown();
+        sessionStorage.setItem('skyttetrappan_club', '');
+        refreshParticipantDisplay();
+    });
+
+    clubSelect.addEventListener('change', () => {
+        sessionStorage.setItem('skyttetrappan_club', clubSelect.value);
+        refreshParticipantDisplay();
+    });
+}
+
+function populateClubDropdown() {
+    const clubSelect = document.getElementById('clubFilter');
+    if (!clubSelect) return;
+
+    const regionVal = document.getElementById('regionFilter')?.value || '';
+
+    clubSelect.innerHTML = '<option value="">Alla klubbar</option>';
+
+    const participantClubIds = new Set(leaderboardData.map(m => m.primaryClubId).filter(Boolean));
+
+    clubsData
+        .filter(c => participantClubIds.has(c.id) && (!regionVal || c.regionalFederation === regionVal))
+        .sort((a, b) => a.name.localeCompare(b.name, 'sv'))
+        .forEach(c => {
+            const opt = document.createElement('option');
+            opt.value = c.id;
+            opt.textContent = c.name;
+            clubSelect.appendChild(opt);
+        });
+}
+
+function getFilteredLeaderboard() {
+    const regionVal = document.getElementById('regionFilter')?.value || '';
+    const clubVal = document.getElementById('clubFilter')?.value || '';
+
+    let filtered = leaderboardData;
+
+    if (regionVal) {
+        filtered = filtered.filter(m => clubRegionMap[m.primaryClubId] === regionVal);
+    }
+    if (clubVal) {
+        const clubId = parseInt(clubVal);
+        filtered = filtered.filter(m => m.primaryClubId === clubId);
+    }
+
+    return filtered;
+}
+
+function refreshParticipantDisplay() {
+    const filtered = getFilteredLeaderboard();
+    const display = document.getElementById('participantDisplay');
+
+    if (filtered.length === 0) {
+        display.innerHTML = '<p class="text-muted">Inga deltagare matchar vald filtrering.</p>';
+        return;
+    }
+
+    if (document.getElementById('allView')?.checked) {
+        displayAllParticipants(filtered);
+    } else {
+        displayGroupedParticipants(filtered);
+    }
 }
 
 function displayGroupedParticipants(data) {
@@ -676,26 +858,13 @@ function displayGroupedParticipants(data) {
         html += `
             <div class="card mb-3">
                 <div class="card-header">
-                    <h5 class="mb-0">
+                    <h6 class="mb-0">
                         <span class="badge-level me-2">${levelBadge}</span>
                         ${levelName}
                         <span class="badge bg-info ms-2">${members.length} deltagare</span>
-                    </h5>
+                    </h6>
                 </div>
-                <div class="card-body">
-                    <div class="table-responsive">
-                        <table class="table table-sm table-hover mb-0">
-                            <thead>
-                                <tr>
-                                    <th>Namn</th>
-                                    <th>Klubb</th>
-                                    <th>Steg</th>
-                                    <th>Framsteg</th>
-                                    <th>Senaste Aktivitet</th>
-                                    ${isAdmin ? '<th>Åtgärder</th>' : ''}
-                                </tr>
-                            </thead>
-                            <tbody>
+                <div class="list-group list-group-flush">
         `;
 
         // Sort by step number (descending) and then by name
@@ -705,44 +874,41 @@ function displayGroupedParticipants(data) {
             }
             return a.memberName.localeCompare(b.memberName);
         }).forEach(member => {
-            const lastActivity = member.lastActivity ? formatDate(member.lastActivity) : 'Aldrig';
             const progress = Math.round(member.overallProgress || 0);
 
             html += `
-                <tr class="participant-row">
-                    <td class="fw-bold">${member.memberName}</td>
-                    <td class="text-muted">${member.clubName || 'Ingen klubb'}</td>
-                    <td>
-                        <span class="badge bg-primary">${member.currentStep}</span>
-                    </td>
-                    <td>
-                        <div class="progress" style="width: 100px; height: 18px;">
-                            <div class="progress-bar bg-success" role="progressbar" style="width: ${progress}%">
-                                <small>${progress}%</small>
-                            </div>
+                <div class="list-group-item">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div class="me-3" style="min-width: 0;">
+                            <div class="fw-bold text-truncate">${member.memberName}</div>
+                            <small class="text-muted text-truncate d-block">${member.clubName || 'Ingen klubb'}</small>
                         </div>
-                    </td>
-                    <td class="small text-muted">${lastActivity}</td>
-                    ${isAdmin && canApproveParticipant(member) ? `<td>
-                        <button class="btn btn-sm btn-outline-primary" onclick="viewMemberProgress(${member.memberId})">
-                            <i class="bi bi-eye"></i>
-                        </button>
-                        <button class="btn btn-sm btn-success" onclick="showCompleteStepModal(${member.memberId}, '${member.memberName}', ${member.currentLevel}, ${member.currentStep})">
-                            <i class="bi bi-check"></i> Godkänn
-                        </button>
-                    </td>` : isAdmin ? `<td>
-                        <button class="btn btn-sm btn-outline-primary" onclick="viewMemberProgress(${member.memberId})">
-                            <i class="bi bi-eye"></i>
-                        </button>
-                    </td>` : ''}
-                </tr>
+                        <div class="d-flex align-items-center gap-2 flex-shrink-0">
+                            <span class="badge bg-primary">Steg ${member.currentStep}</span>
+                            <div class="progress" style="width: 60px; height: 16px;">
+                                <div class="progress-bar bg-success" role="progressbar" style="width: ${progress}%">
+                                    <small style="font-size: 0.65rem;">${progress}%</small>
+                                </div>
+                            </div>
+                            ${isAdmin && canApproveParticipant(member) ? `
+                                <button class="btn btn-sm btn-outline-primary py-0 px-1" onclick="viewMemberProgress(${member.memberId})">
+                                    <i class="bi bi-eye"></i>
+                                </button>
+                                <button class="btn btn-sm btn-success py-0 px-1" onclick="showCompleteStepModal(${member.memberId}, '${member.memberName}', ${member.currentLevel}, ${member.currentStep})">
+                                    <i class="bi bi-check"></i> Godkänn
+                                </button>
+                            ` : isAdmin ? `
+                                <button class="btn btn-sm btn-outline-primary py-0 px-1" onclick="viewMemberProgress(${member.memberId})">
+                                    <i class="bi bi-eye"></i>
+                                </button>
+                            ` : ''}
+                        </div>
+                    </div>
+                </div>
             `;
         });
 
         html += `
-                            </tbody>
-                        </table>
-                    </div>
                 </div>
             </div>
         `;
@@ -754,22 +920,7 @@ function displayGroupedParticipants(data) {
 function displayAllParticipants(data) {
     const display = document.getElementById('participantDisplay');
 
-    let html = `
-        <div class="table-responsive">
-            <table class="table table-hover">
-                <thead>
-                    <tr>
-                        <th style="width: 20%;">Namn</th>
-                        <th style="width: 20%;">Klubb</th>
-                        <th style="width: 8%;">Nivå</th>
-                        <th style="width: 8%;">Steg</th>
-                        <th style="width: 15%;">Framsteg</th>
-                        <th style="width: 15%;">Senaste Aktivitet</th>
-                        ${isAdmin ? '<th style="width: 14%;">Åtgärder</th>' : ''}
-                    </tr>
-                </thead>
-                <tbody>
-    `;
+    let html = '<div class="list-group">';
 
     // Sort by level (desc), then step (desc), then name
     data.sort((a, b) => {
@@ -781,53 +932,44 @@ function displayAllParticipants(data) {
         }
         return a.memberName.localeCompare(b.memberName);
     }).forEach(member => {
-        const lastActivity = member.lastActivity ? formatDate(member.lastActivity) : 'Aldrig';
         const progress = Math.round(member.overallProgress || 0);
 
         html += `
-            <tr class="participant-row">
-                <td class="fw-bold">${member.memberName}</td>
-                <td class="text-muted">${member.clubName || 'Ingen klubb'}</td>
-                <td>
-                    <span class="badge-level me-1">${member.levelBadge}</span>
-                    <small>${member.levelName}</small>
-                </td>
-                <td>
-                    <span class="badge bg-primary">${member.currentStep}</span>
-                </td>
-                <td>
-                    <div class="progress" style="width: 100px; height: 20px;">
-                        <div class="progress-bar bg-success" role="progressbar" style="width: ${progress}%">
-                            <small>${progress}%</small>
+            <div class="list-group-item">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div class="me-3" style="min-width: 0;">
+                        <div class="fw-bold text-truncate">
+                            <span class="badge-level me-1">${member.levelBadge}</span>
+                            ${member.memberName}
                         </div>
+                        <small class="text-muted text-truncate d-block">${member.clubName || 'Ingen klubb'}</small>
                     </div>
-                </td>
-                <td class="small text-muted">${lastActivity}</td>
-                ${isAdmin && canApproveParticipant(member) ? `
-                    <td>
-                        <button class="btn btn-sm btn-outline-primary" onclick="viewMemberProgress(${member.memberId})">
-                            <i class="bi bi-eye"></i>
-                        </button>
-                        <button class="btn btn-sm btn-success" onclick="showCompleteStepModal(${member.memberId}, '${member.memberName}', ${member.currentLevel}, ${member.currentStep})">
-                            <i class="bi bi-check"></i> Godkänn
-                        </button>
-                    </td>
-                ` : isAdmin ? `
-                    <td>
-                        <button class="btn btn-sm btn-outline-primary" onclick="viewMemberProgress(${member.memberId})">
-                            <i class="bi bi-eye"></i>
-                        </button>
-                    </td>
-                ` : ''}
-            </tr>
+                    <div class="d-flex align-items-center gap-2 flex-shrink-0">
+                        <span class="badge bg-primary">Steg ${member.currentStep}</span>
+                        <div class="progress" style="width: 60px; height: 16px;">
+                            <div class="progress-bar bg-success" role="progressbar" style="width: ${progress}%">
+                                <small style="font-size: 0.65rem;">${progress}%</small>
+                            </div>
+                        </div>
+                        ${isAdmin && canApproveParticipant(member) ? `
+                            <button class="btn btn-sm btn-outline-primary py-0 px-1" onclick="viewMemberProgress(${member.memberId})">
+                                <i class="bi bi-eye"></i>
+                            </button>
+                            <button class="btn btn-sm btn-success py-0 px-1" onclick="showCompleteStepModal(${member.memberId}, '${member.memberName}', ${member.currentLevel}, ${member.currentStep})">
+                                <i class="bi bi-check"></i> Godkänn
+                            </button>
+                        ` : isAdmin ? `
+                            <button class="btn btn-sm btn-outline-primary py-0 px-1" onclick="viewMemberProgress(${member.memberId})">
+                                <i class="bi bi-eye"></i>
+                            </button>
+                        ` : ''}
+                    </div>
+                </div>
+            </div>
         `;
     });
 
-    html += `
-                </tbody>
-            </table>
-        </div>
-    `;
+    html += '</div>';
 
     display.innerHTML = html;
 }
@@ -1048,8 +1190,16 @@ async function viewMemberProgress(memberId) {
             document.getElementById('progressClubName').textContent = progress.primaryClubName || 'Ingen klubb';
 
             const currentLevel = data.currentLevel;
-            document.getElementById('progressCurrentLevel').textContent =
-                currentLevel ? `${currentLevel.badge} ${currentLevel.name} - Steg ${progress.currentStep}` : 'Nivå 1';
+            const currentStep = data.currentStep;
+            const levelEl = document.getElementById('progressCurrentLevel');
+            if (currentLevel) {
+                levelEl.innerHTML = `
+                    ${currentLevel.badge} ${currentLevel.name} - Steg ${progress.currentStep}
+                    ${currentStep ? `<br><small class="text-muted">Nästa steg: ${currentStep.description}</small>` : ''}
+                `;
+            } else {
+                levelEl.textContent = 'Nivå 1';
+            }
 
             document.getElementById('progressPercentage').textContent =
                 `${Math.round(progress.overallCompletionPercentage)}%`;
@@ -1205,8 +1355,9 @@ function loadFallbackData() {
     const isUserLoggedIn = @Html.Raw(isLoggedIn.ToString().ToLower());
 
     if (isUserLoggedIn) {
-        // Show option to start training
-        displayStartTrainingOption();
+        // Show "Kom igång" card in sidebar
+        const startCard = document.getElementById('startTrainingCard');
+        if (startCard) startCard.style.display = 'block';
     }
 
     // Show fallback message for leaderboard

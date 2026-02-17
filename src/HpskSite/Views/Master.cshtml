@@ -351,15 +351,15 @@
                         </li>
                         
                         @{
-                            var trainingStairsPage = Model.Root().Children.FirstOrDefault(x => x.Url().Contains("training-page"));
-                            bool isTrainingActive = (trainingStairsPage != null && trainingStairsPage.IsAncestorOrSelf(Model)) || Model.Url().Contains("training-page");
+                            var trainingStairsPage = Model.Root().Children.FirstOrDefault(x => x.Url().Contains("skyttetrappan"));
+                            bool isTrainingActive = (trainingStairsPage != null && trainingStairsPage.IsAncestorOrSelf(Model)) || Model.Url().Contains("skyttetrappan");
                         }
                         <li class="nav-item dropdown">
                             <a class="nav-link dropdown-toggle @(isTrainingActive ? "active" : "")" href="#" role="button" data-bs-toggle="dropdown">
                                 Träning
                             </a>
                             <ul class="dropdown-menu">
-                                <li><a class="dropdown-item" href="/training-page">Skyttetrappan</a></li>
+                                <li><a class="dropdown-item" href="/skyttetrappan">Skyttetrappan</a></li>
                                 <li><a class="dropdown-item" href="/traningsmatch/">Träningsmatch</a></li>
                             </ul>
                         </li>

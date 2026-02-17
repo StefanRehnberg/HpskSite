@@ -166,22 +166,22 @@
                     </div>
                 </div>
 
-                <!-- Help Card (Collapsible) -->
+                <!-- Help Card -->
                 <div class="card" id="helpCard">
-                    <div class="card-header bg-body-tertiary" style="cursor: pointer;" data-bs-toggle="collapse" data-bs-target="#helpCardBody">
-                        <div class="d-flex justify-content-between align-items-center">
-                            <h6 class="mb-0"><i class="bi bi-question-circle me-2"></i>Hur fungerar det?</h6>
-                            <i class="bi bi-chevron-down help-collapse-icon"></i>
-                        </div>
+                    <div class="card-header bg-body-tertiary">
+                        <h6 class="mb-0"><i class="bi bi-question-circle me-2"></i>Hur fungerar det?</h6>
                     </div>
-                    <div id="helpCardBody" class="collapse">
-                        <div class="card-body">
-                            <ul class="small mb-3 ps-3">
-                                <li>Skapa en match och dela koden med andra</li>
-                                <li>Gå med via kod eller QR-skanner</li>
-                                <li>Ange poäng serie för serie i realtid</li>
-                                <li>Se live-resultat och jämför med andra</li>
-                            </ul>
+                    <div class="card-body">
+                        <ul class="small mb-3 ps-3">
+                            <li>Skapa en match och dela koden med andra</li>
+                            <li>Gå med via kod eller QR-skanner</li>
+                            <li>Ange poäng serie för serie i realtid</li>
+                            <li>Se live-resultat och jämför med andra</li>
+                        </ul>
+                        <div class="d-flex flex-column gap-2">
+                            <button class="btn btn-sm btn-outline-primary" onclick="TutorialHelper.open('tutorial-04')">
+                                <i class="bi bi-play-circle me-1"></i>Se instruktionsvideo
+                            </button>
                             <a href="#" class="small" data-bs-toggle="modal" data-bs-target="#handicapInfoModal">
                                 <i class="bi bi-info-circle me-1"></i>Läs mer om handicap
                             </a>
