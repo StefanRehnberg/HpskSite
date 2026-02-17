@@ -116,13 +116,19 @@
                         </button>
                     </li>
                 }
-                <!-- Tab 3: Deltagare -->
+                <!-- Tab 3: Min Träningsgrupp (hidden by default, shown via JS if user belongs to a training group) -->
+                <li class="nav-item" role="presentation" id="mytraininggroup-tab-item" style="display: none;">
+                    <button class="nav-link" id="mytraininggroup-tab" data-bs-toggle="tab" data-bs-target="#mytraininggroup" type="button" role="tab">
+                        <i class="bi bi-people-fill me-1"></i>Min Träningsgrupp
+                    </button>
+                </li>
+                <!-- Tab 4: Deltagare -->
                 <li class="nav-item" role="presentation">
                     <button class="nav-link" id="leaderboard-tab" data-bs-toggle="tab" data-bs-target="#leaderboard-content" type="button" role="tab">
                         <i class="bi bi-trophy me-1"></i>Deltagare
                     </button>
                 </li>
-                <!-- Tab 4: Administration (only visible if admin, hidden by default) -->
+                <!-- Tab 5: Administration (only visible if admin, hidden by default) -->
                 <li class="nav-item" role="presentation" id="admin-tab-item" style="display: none;">
                     <button class="nav-link" id="admin-tab" data-bs-toggle="tab" data-bs-target="#admin" type="button" role="tab">
                         <i class="bi bi-gear me-1"></i>Administration
@@ -165,7 +171,39 @@
                     </div>
                 }
 
-                <!-- Leaderboard Tab (Tab 3 - Deltagare) -->
+                <!-- My Training Group Tab -->
+                <div class="tab-pane fade" id="mytraininggroup" role="tabpanel">
+                    <div class="card border-primary">
+                        <div class="card-header bg-primary text-white">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <h4 class="mb-0"><i class="bi bi-people-fill me-2"></i>Min Träningsgrupp</h4>
+                                    <small class="opacity-75" id="trainingGroupHeader"></small>
+                                </div>
+                                <div class="d-flex align-items-center gap-2">
+                                    <div id="trainingGroupSelector" style="display: none;">
+                                        <select class="form-select form-select-sm bg-white" id="trainingGroupSelect" onchange="onTrainingGroupChanged()">
+                                        </select>
+                                    </div>
+                                    <button class="btn btn-sm btn-outline-light" id="sendGroupMessageBtn" style="display: none;"
+                                            onclick="showSendGroupMessageModal()" title="Skicka meddelande till gruppen">
+                                        <i class="bi bi-envelope"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card-body" id="trainingGroupContent">
+                            <div class="text-center py-5">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Laddar...</span>
+                                </div>
+                                <p class="mt-3">Laddar träningsgrupp...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Leaderboard Tab (Tab 4 - Deltagare) -->
                 <div class="tab-pane fade" id="leaderboard-content" role="tabpanel">
                     <div class="card border-info">
                         <div class="card-header bg-info text-white">
@@ -183,7 +221,7 @@
                     </div>
                 </div>
 
-                <!-- Admin Tab (Tab 4 - Administration) -->
+                <!-- Admin Tab (Tab 5 - Administration) -->
                 <div class="tab-pane fade" id="admin" role="tabpanel">
                     <div class="card border-danger">
                         <div class="card-header bg-danger text-white">
@@ -316,7 +354,158 @@
                 </div>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+                <button type="button" class="btn btn-outline-danger" id="progressResetBtn" style="display: none;">
+                    <i class="bi bi-arrow-counterclockwise me-1"></i>Nollställ
+                </button>
+                <button type="button" class="btn btn-secondary ms-auto" data-bs-dismiss="modal">Stäng</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Send Group Message Modal -->
+<div class="modal fade" id="sendGroupMessageModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-envelope me-2"></i>Skicka meddelande till gruppen</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label for="groupMsgSubject" class="form-label">Ämne *</label>
+                    <input type="text" class="form-control" id="groupMsgSubject" placeholder="T.ex. Träningen inställd tisdag">
+                </div>
+                <div class="mb-3">
+                    <label for="groupMsgBody" class="form-label">Meddelande *</label>
+                    <textarea class="form-control" id="groupMsgBody" rows="5" placeholder="Skriv ditt meddelande här..."></textarea>
+                </div>
+                <small class="text-muted">Meddelandet skickas via e-post till alla medlemmar i gruppen.</small>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="sendGroupMsgBtn" onclick="sendGroupMessage()">
+                    <i class="bi bi-send me-2"></i>Skicka
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Create Training Group Modal -->
+<div class="modal fade" id="createTrainingGroupModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-plus-circle me-2"></i>Skapa ny träningsgrupp</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="createTrainingGroupForm">
+                    <div class="mb-3">
+                        <label for="tgName" class="form-label">Namn</label>
+                        <input type="text" class="form-control" id="tgName" required placeholder="T.ex. Nybörjargrupp VT2026">
+                    </div>
+                    <div class="mb-3">
+                        <label for="tgClubId" class="form-label">Klubb</label>
+                        <select class="form-select" id="tgClubId" required>
+                            <option value="">Välj klubb...</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="tgDescription" class="form-label">Beskrivning (valfritt)</label>
+                        <textarea class="form-control" id="tgDescription" rows="2" placeholder="Kort beskrivning av gruppen..."></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label for="tgStartDate" class="form-label">Startdatum</label>
+                        <input type="text" class="form-control" id="tgStartDate" required>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-success" onclick="submitCreateTrainingGroup()">
+                    <i class="bi bi-plus-circle me-1"></i>Skapa
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Training Group Modal -->
+<div class="modal fade" id="editTrainingGroupModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-pencil me-2"></i>Redigera träningsgrupp</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="editTrainingGroupForm">
+                    <input type="hidden" id="editTgId">
+                    <div class="mb-3">
+                        <label for="editTgName" class="form-label">Namn</label>
+                        <input type="text" class="form-control" id="editTgName" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="editTgDescription" class="form-label">Beskrivning</label>
+                        <textarea class="form-control" id="editTgDescription" rows="2"></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label for="editTgStartDate" class="form-label">Startdatum</label>
+                        <input type="text" class="form-control" id="editTgStartDate" required>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" onclick="submitEditTrainingGroup()">
+                    <i class="bi bi-check-circle me-1"></i>Spara
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Training Group Member Modal -->
+<div class="modal fade" id="addTrainingGroupMemberModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-person-plus me-2"></i>Lägg till medlem</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="addMemberTgId">
+                <div class="mb-3">
+                    <label for="memberSearchInput" class="form-label">Sök medlem</label>
+                    <input type="text" class="form-control" id="memberSearchInput" placeholder="Namn eller e-post..." oninput="searchMembersForTrainingGroup()">
+                </div>
+                <div id="memberSearchResults" class="list-group mb-3" style="max-height: 200px; overflow-y: auto;">
+                </div>
+                <div id="selectedMemberInfo" class="alert alert-info d-none mb-3">
+                    <strong id="selectedMemberName"></strong>
+                    <input type="hidden" id="selectedMemberIdForAdd">
+                </div>
+                <div class="mb-3">
+                    <label for="addMemberRole" class="form-label">Roll</label>
+                    <select class="form-select" id="addMemberRole">
+                        <option value="Member">Medlem</option>
+                        <option value="Trainer">Tränare</option>
+                    </select>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="addMemberSendEmail">
+                    <label class="form-check-label" for="addMemberSendEmail">
+                        Skicka e-post till medlemmen
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-success" onclick="confirmAddMember()">
+                    <i class="bi bi-person-plus me-2"></i>Lägg till
+                </button>
             </div>
         </div>
     </div>
@@ -394,6 +583,11 @@
     }
 </style>
 
+<!-- Flatpickr Date Picker -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
+
 <script>
 let isAdmin = false;
 let isSiteAdmin = false;
@@ -404,6 +598,9 @@ let leaderboardData = [];
 let clubsData = [];
 let regionsData = [];
 let clubRegionMap = {};
+let myTrainingGroups = [];
+let selectedTrainingGroupId = null;
+let selectedMemberForAdd = null;
 
 document.addEventListener('DOMContentLoaded', function() {
     loadTrainingData();
@@ -897,10 +1094,12 @@ function displayGroupedParticipants(data) {
                                 <button class="btn btn-sm btn-success py-0 px-1" onclick="showCompleteStepModal(${member.memberId}, '${member.memberName}', ${member.currentLevel}, ${member.currentStep})">
                                     <i class="bi bi-check"></i> Godkänn
                                 </button>
+                                ${isSiteAdmin ? `<button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="resetMemberProgress(${member.memberId}, '${member.memberName}')" title="Nollställ framsteg"><i class="bi bi-arrow-counterclockwise"></i></button>` : ''}
                             ` : isAdmin ? `
                                 <button class="btn btn-sm btn-outline-primary py-0 px-1" onclick="viewMemberProgress(${member.memberId})">
                                     <i class="bi bi-eye"></i>
                                 </button>
+                                ${isSiteAdmin ? `<button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="resetMemberProgress(${member.memberId}, '${member.memberName}')" title="Nollställ framsteg"><i class="bi bi-arrow-counterclockwise"></i></button>` : ''}
                             ` : ''}
                         </div>
                     </div>
@@ -958,10 +1157,12 @@ function displayAllParticipants(data) {
                             <button class="btn btn-sm btn-success py-0 px-1" onclick="showCompleteStepModal(${member.memberId}, '${member.memberName}', ${member.currentLevel}, ${member.currentStep})">
                                 <i class="bi bi-check"></i> Godkänn
                             </button>
+                            ${isSiteAdmin ? `<button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="resetMemberProgress(${member.memberId}, '${member.memberName}')" title="Nollställ framsteg"><i class="bi bi-arrow-counterclockwise"></i></button>` : ''}
                         ` : isAdmin ? `
                             <button class="btn btn-sm btn-outline-primary py-0 px-1" onclick="viewMemberProgress(${member.memberId})">
                                 <i class="bi bi-eye"></i>
                             </button>
+                            ${isSiteAdmin ? `<button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="resetMemberProgress(${member.memberId}, '${member.memberName}')" title="Nollställ framsteg"><i class="bi bi-arrow-counterclockwise"></i></button>` : ''}
                         ` : ''}
                     </div>
                 </div>
@@ -972,6 +1173,34 @@ function displayAllParticipants(data) {
     html += '</div>';
 
     display.innerHTML = html;
+}
+
+async function resetMemberProgress(memberId, memberName) {
+    if (!confirm(`Vill du nollställa träningsframsteg för ${memberName}? Detta kan inte ångras.`)) return;
+
+    try {
+        const token = document.querySelector('input[name="__RequestVerificationToken"]').value;
+        const formData = new FormData();
+        formData.append('__RequestVerificationToken', token);
+        formData.append('memberId', memberId);
+
+        const response = await fetch('/umbraco/surface/Training/ResetProgress', {
+            method: 'POST',
+            body: formData
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            alert('Träningsframsteg nollställda för ' + memberName);
+            refreshData();
+        } else {
+            alert('Fel: ' + result.message);
+        }
+    } catch (error) {
+        console.error('Error resetting progress:', error);
+        alert('Ett fel uppstod vid nollställning');
+    }
 }
 
 async function startTraining() {
@@ -1058,18 +1287,42 @@ function showStepDetails(levelId, stepNumber) {
 
 async function checkAdminStatus() {
     try {
-        const response = await fetch('/umbraco/surface/Training/GetTrainingAdminStatus');
-        const result = await response.json();
+        const [adminRes, tgRes] = await Promise.all([
+            fetch('/umbraco/surface/Training/GetTrainingAdminStatus').then(r => r.json()).catch(() => null),
+            fetch('/umbraco/surface/TrainingGroup/GetMyTrainingGroups').then(r => r.json()).catch(() => null)
+        ]);
 
-        if (result.success && result.data) {
-            isAdmin = result.data.isAdmin;
-            isSiteAdmin = result.data.isSiteAdmin;
-            managedClubIds = result.data.managedClubIds || [];
+        if (adminRes?.success && adminRes.data) {
+            isAdmin = adminRes.data.isAdmin;
+            isSiteAdmin = adminRes.data.isSiteAdmin;
+            managedClubIds = adminRes.data.managedClubIds || [];
 
             if (isAdmin) {
                 document.getElementById('admin-tab-item').style.display = 'block';
                 loadAdminPanel();
             }
+        }
+
+        if (tgRes?.success && tgRes.data && tgRes.data.length > 0) {
+            myTrainingGroups = tgRes.data;
+            document.getElementById('mytraininggroup-tab-item').style.display = 'block';
+
+            // If multiple groups, show selector
+            if (myTrainingGroups.length > 1) {
+                const selector = document.getElementById('trainingGroupSelector');
+                const select = document.getElementById('trainingGroupSelect');
+                selector.style.display = 'block';
+                select.innerHTML = myTrainingGroups.map(g =>
+                    `<option value="${g.id}">${g.name}</option>`
+                ).join('');
+            }
+
+            selectedTrainingGroupId = myTrainingGroups[0].id;
+
+            // Load training group data when tab is activated
+            document.getElementById('mytraininggroup-tab').addEventListener('shown.bs.tab', function() {
+                loadTrainingGroupProgress();
+            });
         }
     } catch (error) {
         console.error('Error checking admin status:', error);
@@ -1109,14 +1362,611 @@ function canApproveParticipant(participant) {
     return participantClubIds.some(clubId => managedClubIds.includes(clubId));
 }
 
-function loadAdminPanel() {
-    // Admin panel implementation would go here
-    document.getElementById('adminContent').innerHTML = `
-        <p>Instruktör/Admin verktyg kommer här...</p>
-        <button class="btn btn-info" onclick="refreshData()">
-            <i class="bi bi-arrow-clockwise"></i> Uppdatera Data
-        </button>
+async function loadAdminPanel() {
+    const container = document.getElementById('adminContent');
+    container.innerHTML = `
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h5 class="mb-0">Träningsgrupper</h5>
+            <button class="btn btn-success btn-sm" onclick="showCreateTrainingGroupModal()">
+                <i class="bi bi-plus-circle me-1"></i>Skapa ny träningsgrupp
+            </button>
+        </div>
+        <div id="adminTrainingGroupList">
+            <div class="text-center py-3">
+                <div class="spinner-border spinner-border-sm text-secondary" role="status"></div>
+                <span class="ms-2">Laddar träningsgrupper...</span>
+            </div>
+        </div>
     `;
+
+    try {
+        const response = await fetch('/umbraco/surface/TrainingGroup/GetTrainingGroups');
+        const result = await response.json();
+
+        if (result.success) {
+            renderAdminTrainingGroupList(result.data);
+        } else {
+            document.getElementById('adminTrainingGroupList').innerHTML =
+                `<div class="alert alert-warning">${result.message || 'Kunde inte ladda träningsgrupper'}</div>`;
+        }
+    } catch (error) {
+        console.error('Error loading admin panel:', error);
+        document.getElementById('adminTrainingGroupList').innerHTML =
+            '<div class="alert alert-danger">Fel vid laddning av träningsgrupper</div>';
+    }
+}
+
+function renderAdminTrainingGroupList(groups) {
+    const container = document.getElementById('adminTrainingGroupList');
+
+    if (!groups || groups.length === 0) {
+        container.innerHTML = `
+            <div class="alert alert-info">
+                <i class="bi bi-info-circle me-2"></i>Inga träningsgrupper skapade ännu.
+                Klicka "Skapa ny träningsgrupp" för att komma igång.
+            </div>
+        `;
+        return;
+    }
+
+    let html = '<div class="table-responsive"><table class="table table-hover">';
+    html += `<thead><tr>
+        <th>Namn</th>
+        <th>Klubb</th>
+        <th>Startdatum</th>
+        <th class="text-center">Medlemmar</th>
+        <th class="text-center">Tränare</th>
+        <th></th>
+    </tr></thead><tbody>`;
+
+    groups.forEach(g => {
+        html += `
+            <tr style="cursor: pointer;" onclick="expandTrainingGroup(${g.id}, this)">
+                <td class="fw-bold">${g.name}</td>
+                <td>${g.clubName || '-'}</td>
+                <td>${g.startDate}</td>
+                <td class="text-center"><span class="badge bg-primary">${g.memberCount}</span></td>
+                <td class="text-center"><span class="badge bg-info">${g.trainerCount}</span></td>
+                <td class="text-end">
+                    <button class="btn btn-sm btn-outline-secondary me-1" onclick="event.stopPropagation(); showEditTrainingGroupModal(${g.id}, '${escapeHtml(g.name)}', '${escapeHtml(g.description || '')}', '${g.startDate}')">
+                        <i class="bi bi-pencil"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="event.stopPropagation(); deactivateTrainingGroup(${g.id}, '${escapeHtml(g.name)}')">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </td>
+            </tr>
+            <tr id="tg-detail-${g.id}" style="display: none;">
+                <td colspan="6" class="bg-body-tertiary">
+                    <div id="tg-members-${g.id}" class="p-2">
+                        <div class="text-center py-2">
+                            <div class="spinner-border spinner-border-sm text-secondary" role="status"></div>
+                        </div>
+                    </div>
+                </td>
+            </tr>
+        `;
+    });
+
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+}
+
+async function expandTrainingGroup(trainingGroupId, rowEl) {
+    const detailRow = document.getElementById(`tg-detail-${trainingGroupId}`);
+
+    if (detailRow.style.display === 'none') {
+        detailRow.style.display = '';
+        await loadTrainingGroupMembers(trainingGroupId);
+    } else {
+        detailRow.style.display = 'none';
+    }
+}
+
+async function loadTrainingGroupMembers(trainingGroupId) {
+    const container = document.getElementById(`tg-members-${trainingGroupId}`);
+
+    try {
+        const response = await fetch(`/umbraco/surface/TrainingGroup/GetTrainingGroup?trainingGroupId=${trainingGroupId}`);
+        const result = await response.json();
+
+        if (!result.success) {
+            container.innerHTML = `<div class="alert alert-warning">${result.message}</div>`;
+            return;
+        }
+
+        const group = result.data;
+        let html = `
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <strong>Medlemmar (${group.members.length})</strong>
+                <button class="btn btn-sm btn-outline-success" onclick="showAddMemberModal(${trainingGroupId})">
+                    <i class="bi bi-person-plus me-1"></i>Lägg till medlem
+                </button>
+            </div>
+        `;
+
+        if (group.members.length === 0) {
+            html += '<p class="text-muted small">Inga medlemmar i gruppen ännu.</p>';
+        } else {
+            html += '<div class="table-responsive"><table class="table table-sm mb-0">';
+            html += '<thead><tr><th>Namn</th><th>Klubb</th><th>Roll</th><th>Tillagd</th><th></th></tr></thead><tbody>';
+
+            group.members.forEach(m => {
+                html += `
+                    <tr>
+                        <td>${m.memberName}</td>
+                        <td class="text-muted">${m.clubName || '-'}</td>
+                        <td>
+                            <span class="badge ${m.isTrainer ? 'bg-info' : 'bg-secondary'}">${m.isTrainer ? 'Tränare' : 'Medlem'}</span>
+                        </td>
+                        <td class="text-muted small">${m.joinedDate}</td>
+                        <td class="text-end">
+                            <button class="btn btn-sm btn-outline-secondary py-0 px-1" onclick="toggleMemberRole(${trainingGroupId}, ${m.memberId}, '${m.role}')" title="${m.isTrainer ? 'Gör till medlem' : 'Gör till tränare'}">
+                                <i class="bi bi-arrow-left-right"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="removeTrainingGroupMember(${trainingGroupId}, ${m.memberId}, '${escapeHtml(m.memberName)}')" title="Ta bort">
+                                <i class="bi bi-x-lg"></i>
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            html += '</tbody></table></div>';
+        }
+
+        container.innerHTML = html;
+    } catch (error) {
+        container.innerHTML = '<div class="alert alert-danger">Fel vid laddning</div>';
+    }
+}
+
+function showCreateTrainingGroupModal() {
+    // Populate clubs dropdown
+    const clubSelect = document.getElementById('tgClubId');
+    clubSelect.innerHTML = '<option value="">Välj klubb...</option>';
+
+    if (isSiteAdmin && clubsData.length > 0) {
+        clubsData.forEach(c => {
+            clubSelect.innerHTML += `<option value="${c.id}">${c.name}</option>`;
+        });
+    } else if (managedClubIds.length > 0 && clubsData.length > 0) {
+        clubsData.filter(c => managedClubIds.includes(c.id)).forEach(c => {
+            clubSelect.innerHTML += `<option value="${c.id}">${c.name}</option>`;
+        });
+    }
+
+    document.getElementById('tgName').value = '';
+    document.getElementById('tgDescription').value = '';
+    document.getElementById('tgStartDate').value = '';
+
+    // Init flatpickr if available
+    if (typeof flatpickr !== 'undefined') {
+        flatpickr('#tgStartDate', { locale: 'sv', dateFormat: 'Y-m-d', defaultDate: 'today' });
+    }
+
+    new bootstrap.Modal(document.getElementById('createTrainingGroupModal')).show();
+}
+
+async function submitCreateTrainingGroup() {
+    const name = document.getElementById('tgName').value.trim();
+    const clubId = document.getElementById('tgClubId').value;
+    const description = document.getElementById('tgDescription').value.trim();
+    const startDate = document.getElementById('tgStartDate').value;
+
+    if (!name || !clubId || !startDate) {
+        alert('Fyll i alla obligatoriska fält');
+        return;
+    }
+
+    try {
+        const token = document.querySelector('input[name="__RequestVerificationToken"]').value;
+        const formData = new FormData();
+        formData.append('__RequestVerificationToken', token);
+        formData.append('name', name);
+        formData.append('clubId', clubId);
+        formData.append('description', description);
+        formData.append('startDate', startDate);
+
+        const response = await fetch('/umbraco/surface/TrainingGroup/CreateTrainingGroup', {
+            method: 'POST',
+            body: formData
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            bootstrap.Modal.getInstance(document.getElementById('createTrainingGroupModal')).hide();
+            loadAdminPanel();
+        } else {
+            alert('Fel: ' + result.message);
+        }
+    } catch (error) {
+        console.error('Error creating training group:', error);
+        alert('Ett fel uppstod');
+    }
+}
+
+function showEditTrainingGroupModal(id, name, description, startDate) {
+    document.getElementById('editTgId').value = id;
+    document.getElementById('editTgName').value = name;
+    document.getElementById('editTgDescription').value = description;
+    document.getElementById('editTgStartDate').value = startDate;
+
+    if (typeof flatpickr !== 'undefined') {
+        flatpickr('#editTgStartDate', { locale: 'sv', dateFormat: 'Y-m-d' });
+    }
+
+    new bootstrap.Modal(document.getElementById('editTrainingGroupModal')).show();
+}
+
+async function submitEditTrainingGroup() {
+    const id = document.getElementById('editTgId').value;
+    const name = document.getElementById('editTgName').value.trim();
+    const description = document.getElementById('editTgDescription').value.trim();
+    const startDate = document.getElementById('editTgStartDate').value;
+
+    if (!name || !startDate) {
+        alert('Fyll i alla obligatoriska fält');
+        return;
+    }
+
+    try {
+        const token = document.querySelector('input[name="__RequestVerificationToken"]').value;
+        const formData = new FormData();
+        formData.append('__RequestVerificationToken', token);
+        formData.append('trainingGroupId', id);
+        formData.append('name', name);
+        formData.append('description', description);
+        formData.append('startDate', startDate);
+
+        const response = await fetch('/umbraco/surface/TrainingGroup/UpdateTrainingGroup', {
+            method: 'POST',
+            body: formData
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            bootstrap.Modal.getInstance(document.getElementById('editTrainingGroupModal')).hide();
+            loadAdminPanel();
+        } else {
+            alert('Fel: ' + result.message);
+        }
+    } catch (error) {
+        alert('Ett fel uppstod');
+    }
+}
+
+async function deactivateTrainingGroup(id, name) {
+    if (!confirm(`Vill du ta bort träningsgruppen "${name}"?`)) return;
+
+    try {
+        const token = document.querySelector('input[name="__RequestVerificationToken"]').value;
+        const formData = new FormData();
+        formData.append('__RequestVerificationToken', token);
+        formData.append('trainingGroupId', id);
+
+        const response = await fetch('/umbraco/surface/TrainingGroup/DeactivateTrainingGroup', {
+            method: 'POST',
+            body: formData
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            loadAdminPanel();
+        } else {
+            alert('Fel: ' + result.message);
+        }
+    } catch (error) {
+        alert('Ett fel uppstod');
+    }
+}
+
+function showAddMemberModal(trainingGroupId) {
+    document.getElementById('addMemberTgId').value = trainingGroupId;
+    document.getElementById('memberSearchInput').value = '';
+    document.getElementById('memberSearchResults').innerHTML = '';
+    document.getElementById('addMemberRole').value = 'Member';
+    document.getElementById('selectedMemberInfo').classList.add('d-none');
+    document.getElementById('selectedMemberIdForAdd').value = '';
+    document.getElementById('addMemberSendEmail').checked = false;
+    selectedMemberForAdd = null;
+
+    new bootstrap.Modal(document.getElementById('addTrainingGroupMemberModal')).show();
+}
+
+let memberSearchTimeout = null;
+async function searchMembersForTrainingGroup() {
+    clearTimeout(memberSearchTimeout);
+    const query = document.getElementById('memberSearchInput').value.trim();
+    const resultsContainer = document.getElementById('memberSearchResults');
+
+    if (query.length < 2) {
+        resultsContainer.innerHTML = '';
+        return;
+    }
+
+    memberSearchTimeout = setTimeout(async () => {
+        try {
+            const tgId = document.getElementById('addMemberTgId').value;
+            const response = await fetch(`/umbraco/surface/TrainingGroup/SearchMembers?query=${encodeURIComponent(query)}`);
+            const result = await response.json();
+
+            if (result.success && result.data.length > 0) {
+                resultsContainer.innerHTML = result.data.map(m => `
+                    <button type="button" class="list-group-item list-group-item-action" onclick="selectMemberForAdd(${m.memberId}, '${escapeHtml(m.memberName)}')">
+                        <div class="d-flex justify-content-between">
+                            <span>${m.memberName}</span>
+                            <small class="text-muted">${m.clubName || ''}</small>
+                        </div>
+                    </button>
+                `).join('');
+            } else {
+                resultsContainer.innerHTML = '<div class="list-group-item text-muted">Inga resultat</div>';
+            }
+        } catch (error) {
+            resultsContainer.innerHTML = '<div class="list-group-item text-danger">Sökfel</div>';
+        }
+    }, 300);
+}
+
+function selectMemberForAdd(memberId, memberName) {
+    document.getElementById('selectedMemberIdForAdd').value = memberId;
+    document.getElementById('selectedMemberName').textContent = memberName;
+    document.getElementById('selectedMemberInfo').classList.remove('d-none');
+    document.getElementById('memberSearchResults').innerHTML = '';
+    document.getElementById('memberSearchInput').value = '';
+}
+
+async function confirmAddMember() {
+    const trainingGroupId = document.getElementById('addMemberTgId').value;
+    const memberId = document.getElementById('selectedMemberIdForAdd').value;
+    const role = document.getElementById('addMemberRole').value;
+    const sendEmail = document.getElementById('addMemberSendEmail').checked;
+
+    if (!memberId) { alert('Välj en medlem först'); return; }
+
+    try {
+        const token = document.querySelector('input[name="__RequestVerificationToken"]').value;
+        const formData = new FormData();
+        formData.append('__RequestVerificationToken', token);
+        formData.append('trainingGroupId', trainingGroupId);
+        formData.append('memberId', memberId);
+        formData.append('role', role);
+        formData.append('sendEmail', sendEmail);
+
+        const response = await fetch('/umbraco/surface/TrainingGroup/AddTrainingGroupMember', {
+            method: 'POST',
+            body: formData
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            bootstrap.Modal.getInstance(document.getElementById('addTrainingGroupMemberModal')).hide();
+            await loadTrainingGroupMembers(parseInt(trainingGroupId));
+        } else {
+            alert('Fel: ' + result.message);
+        }
+    } catch (error) {
+        alert('Ett fel uppstod');
+    }
+}
+
+async function toggleMemberRole(trainingGroupId, memberId, currentRole) {
+    const newRole = currentRole === 'Trainer' ? 'Member' : 'Trainer';
+
+    try {
+        const token = document.querySelector('input[name="__RequestVerificationToken"]').value;
+        const formData = new FormData();
+        formData.append('__RequestVerificationToken', token);
+        formData.append('trainingGroupId', trainingGroupId);
+        formData.append('memberId', memberId);
+        formData.append('role', newRole);
+
+        const response = await fetch('/umbraco/surface/TrainingGroup/SetTrainingGroupMemberRole', {
+            method: 'POST',
+            body: formData
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            await loadTrainingGroupMembers(trainingGroupId);
+        } else {
+            alert('Fel: ' + result.message);
+        }
+    } catch (error) {
+        alert('Ett fel uppstod');
+    }
+}
+
+async function removeTrainingGroupMember(trainingGroupId, memberId, memberName) {
+    if (!confirm(`Ta bort ${memberName} från träningsgruppen?`)) return;
+
+    try {
+        const token = document.querySelector('input[name="__RequestVerificationToken"]').value;
+        const formData = new FormData();
+        formData.append('__RequestVerificationToken', token);
+        formData.append('trainingGroupId', trainingGroupId);
+        formData.append('memberId', memberId);
+
+        const response = await fetch('/umbraco/surface/TrainingGroup/RemoveTrainingGroupMember', {
+            method: 'POST',
+            body: formData
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            await loadTrainingGroupMembers(trainingGroupId);
+        } else {
+            alert('Fel: ' + result.message);
+        }
+    } catch (error) {
+        alert('Ett fel uppstod');
+    }
+}
+
+// Training Group member view functions
+function onTrainingGroupChanged() {
+    selectedTrainingGroupId = parseInt(document.getElementById('trainingGroupSelect').value);
+    loadTrainingGroupProgress();
+}
+
+async function loadTrainingGroupProgress() {
+    if (!selectedTrainingGroupId) return;
+
+    const container = document.getElementById('trainingGroupContent');
+    container.innerHTML = `
+        <div class="text-center py-3">
+            <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+            <span class="ms-2">Laddar...</span>
+        </div>
+    `;
+
+    try {
+        const response = await fetch(`/umbraco/surface/TrainingGroup/GetTrainingGroupProgress?trainingGroupId=${selectedTrainingGroupId}`);
+        const result = await response.json();
+
+        if (!result.success) {
+            container.innerHTML = `<div class="alert alert-warning">${result.message}</div>`;
+            return;
+        }
+
+        const data = result.data;
+        const group = data.group;
+        const myGroup = myTrainingGroups.find(g => g.id === selectedTrainingGroupId);
+        const isTrainer = myGroup?.myRole === 'Trainer';
+
+        // Update header
+        document.getElementById('trainingGroupHeader').textContent =
+            `${group.clubName || ''} - Startdatum: ${group.startDate}`;
+
+        // Show/hide send message button for trainers/admins
+        document.getElementById('sendGroupMessageBtn').style.display =
+            (isTrainer || isAdmin) ? '' : 'none';
+
+        // Show trainer names
+        let trainers = myGroup?.trainers || [];
+        let trainerHtml = trainers.length > 0
+            ? `<div class="mb-3"><small class="text-muted">Tränare: ${trainers.map(t => t.memberName).join(', ')}</small></div>`
+            : '';
+
+        let html = trainerHtml;
+
+        if (data.members.length === 0) {
+            html += '<p class="text-muted">Inga medlemmar i gruppen.</p>';
+        } else {
+            // Sort: trainers first, then by level desc, step desc
+            const sorted = [...data.members].sort((a, b) => {
+                if (a.role === 'Trainer' && b.role !== 'Trainer') return -1;
+                if (a.role !== 'Trainer' && b.role === 'Trainer') return 1;
+                if (b.currentLevel !== a.currentLevel) return b.currentLevel - a.currentLevel;
+                return b.currentStep - a.currentStep;
+            });
+
+            html += '<div class="list-group">';
+            sorted.forEach(m => {
+                const progress = Math.round(m.overallProgress || 0);
+                html += `
+                    <div class="list-group-item">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div class="me-3" style="min-width: 0;">
+                                <div class="fw-bold text-truncate">
+                                    ${m.levelBadge ? `<span class="me-1">${m.levelBadge}</span>` : ''}
+                                    ${m.memberName}
+                                    ${m.role === 'Trainer' ? '<span class="badge bg-info ms-1">Tränare</span>' : ''}
+                                </div>
+                                <small class="text-muted">${m.levelName} - Steg ${m.currentStep}</small>
+                                ${m.lastActivity ? `<br><small class="text-muted">Senast aktiv: ${m.lastActivity}</small>` : ''}
+                            </div>
+                            <div class="d-flex align-items-center gap-2 flex-shrink-0">
+                                <div class="text-end me-2">
+                                    <small class="d-block">${m.completedSteps} steg</small>
+                                    <div class="progress" style="width: 60px; height: 16px;">
+                                        <div class="progress-bar bg-success" role="progressbar" style="width: ${progress}%">
+                                            <small style="font-size: 0.65rem;">${progress}%</small>
+                                        </div>
+                                    </div>
+                                </div>
+                                ${(isTrainer || isAdmin) && m.role !== 'Trainer' ? `
+                                    <button class="btn btn-sm btn-outline-primary py-0 px-2" onclick="viewMemberProgressWithApproval(${m.memberId}, '${escapeHtml(m.memberName)}')" title="Visa framsteg">
+                                        <i class="bi bi-eye"></i>
+                                    </button>
+                                    <button class="btn btn-sm btn-success py-0 px-2" onclick="showCompleteStepModal(${m.memberId}, '${escapeHtml(m.memberName)}', ${m.currentLevel}, ${m.currentStep})" title="Godkänn steg">
+                                        <i class="bi bi-check-lg"></i> Godkänn
+                                    </button>
+                                ` : ''}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+            html += '</div>';
+        }
+
+        container.innerHTML = html;
+    } catch (error) {
+        console.error('Error loading training group progress:', error);
+        container.innerHTML = '<div class="alert alert-danger">Fel vid laddning av träningsgrupp</div>';
+    }
+}
+
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.appendChild(document.createTextNode(str));
+    return div.innerHTML;
+}
+
+function showSendGroupMessageModal() {
+    document.getElementById('groupMsgSubject').value = '';
+    document.getElementById('groupMsgBody').value = '';
+    new bootstrap.Modal(document.getElementById('sendGroupMessageModal')).show();
+}
+
+async function sendGroupMessage() {
+    const subject = document.getElementById('groupMsgSubject').value.trim();
+    const message = document.getElementById('groupMsgBody').value.trim();
+
+    if (!subject) { alert('Ange ett ämne'); return; }
+    if (!message) { alert('Skriv ett meddelande'); return; }
+    if (!selectedTrainingGroupId) { alert('Ingen träningsgrupp vald'); return; }
+
+    const btn = document.getElementById('sendGroupMsgBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span> Skickar...';
+
+    try {
+        const token = document.querySelector('input[name="__RequestVerificationToken"]').value;
+        const formData = new FormData();
+        formData.append('__RequestVerificationToken', token);
+        formData.append('trainingGroupId', selectedTrainingGroupId);
+        formData.append('subject', subject);
+        formData.append('message', message);
+
+        const response = await fetch('/umbraco/surface/TrainingGroup/SendGroupMessage', {
+            method: 'POST',
+            body: formData
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            bootstrap.Modal.getInstance(document.getElementById('sendGroupMessageModal')).hide();
+            alert(result.message);
+        } else {
+            alert('Fel: ' + result.message);
+        }
+    } catch (error) {
+        console.error('Error sending group message:', error);
+        alert('Ett fel uppstod vid sändning av meddelande');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-send me-2"></i>Skicka';
+    }
 }
 
 function showCompleteStepModal(memberId, memberName, levelId = null, stepNumber = null) {
@@ -1166,6 +2016,13 @@ async function submitStepCompletion() {
         if (data.success) {
             alert('Steg markerat som slutfört!');
             bootstrap.Modal.getInstance(document.getElementById('completeStepModal')).hide();
+            // Also close the member progress modal if open
+            const progressModal = bootstrap.Modal.getInstance(document.getElementById('memberProgressModal'));
+            if (progressModal) progressModal.hide();
+            // Refresh training group view if active
+            if (selectedTrainingGroupId && document.getElementById('mytraininggroup')?.classList.contains('show')) {
+                loadTrainingGroupProgress();
+            }
             refreshData(); // Reload all data
         } else {
             alert('Fel: ' + data.message);
@@ -1249,6 +2106,9 @@ async function viewMemberProgress(memberId) {
                 noStepsMsg.style.display = 'block';
             }
 
+            // Hide reset button in read-only view
+            document.getElementById('progressResetBtn').style.display = 'none';
+
             // Show modal
             new bootstrap.Modal(document.getElementById('memberProgressModal')).show();
         } else {
@@ -1256,6 +2116,119 @@ async function viewMemberProgress(memberId) {
         }
     } catch (error) {
         console.error('Error fetching member progress:', error);
+        alert('Ett fel uppstod vid hämtning av medlemsframsteg');
+    }
+}
+
+async function viewMemberProgressWithApproval(memberId, memberName) {
+    try {
+        const response = await fetch(`/umbraco/surface/Training/GetMemberProgress?memberId=${memberId}`);
+        const result = await response.json();
+
+        if (!result.success || !result.data) {
+            alert('Kunde inte hämta medlemsframsteg: ' + (result.message || 'Okänt fel'));
+            return;
+        }
+
+        const data = result.data;
+        const progress = data.progress;
+        const completedSteps = progress.completedSteps || [];
+
+        // Populate member info
+        document.getElementById('progressMemberName').textContent = progress.memberName;
+        document.getElementById('progressClubName').textContent = progress.primaryClubName || 'Ingen klubb';
+
+        const currentLevel = data.currentLevel;
+        const levelEl = document.getElementById('progressCurrentLevel');
+        if (currentLevel) {
+            levelEl.innerHTML = `${currentLevel.badge} ${currentLevel.name} - Steg ${progress.currentStep}`;
+        } else {
+            levelEl.textContent = 'Nivå 1';
+        }
+
+        document.getElementById('progressPercentage').textContent =
+            `${Math.round(progress.overallCompletionPercentage)}%`;
+
+        // Build accordion of all levels with approve buttons
+        const stepsList = document.getElementById('completedStepsList');
+        const noStepsMsg = document.getElementById('noStepsMessage');
+        noStepsMsg.style.display = 'none';
+        stepsList.style.display = 'block';
+
+        let html = '<div class="accordion" id="progressAccordion">';
+        data.allLevels.forEach((level, idx) => {
+            const levelCompleted = level.steps.every(s =>
+                completedSteps.some(cs => cs.levelId === level.levelId && cs.stepNumber === s.stepNumber));
+            const levelStepsCompleted = level.steps.filter(s =>
+                completedSteps.some(cs => cs.levelId === level.levelId && cs.stepNumber === s.stepNumber)).length;
+            const isCurrentLevel = level.levelId === progress.currentLevel;
+            const expanded = isCurrentLevel ? 'true' : 'false';
+            const show = isCurrentLevel ? 'show' : '';
+
+            html += `
+                <div class="accordion-item">
+                    <h2 class="accordion-header">
+                        <button class="accordion-button ${show ? '' : 'collapsed'} py-2" type="button" data-bs-toggle="collapse" data-bs-target="#lvl${level.levelId}" aria-expanded="${expanded}">
+                            <span class="me-2">${level.badge}</span>
+                            <strong>${level.name}</strong>
+                            <span class="ms-2 badge ${levelCompleted ? 'bg-success' : 'bg-secondary'}">${levelStepsCompleted}/${level.steps.length}</span>
+                        </button>
+                    </h2>
+                    <div id="lvl${level.levelId}" class="accordion-collapse collapse ${show}" data-bs-parent="#progressAccordion">
+                        <div class="accordion-body p-2">
+                            <div class="list-group list-group-flush">`;
+
+            level.steps.forEach(step => {
+                const completed = completedSteps.find(cs => cs.levelId === level.levelId && cs.stepNumber === step.stepNumber);
+                if (completed) {
+                    const completedDate = formatDate(completed.completedDate);
+                    html += `
+                        <div class="list-group-item px-2 py-1 d-flex justify-content-between align-items-center">
+                            <div>
+                                <i class="bi bi-check-circle-fill text-success me-1"></i>
+                                <small>Steg ${step.stepNumber}: ${step.description}</small>
+                                <br><small class="text-muted ms-4">${completedDate}${completed.instructorName ? ' - ' + completed.instructorName : ''}</small>
+                            </div>
+                        </div>`;
+                } else {
+                    html += `
+                        <div class="list-group-item px-2 py-1 d-flex justify-content-between align-items-center">
+                            <div>
+                                <i class="bi bi-circle text-muted me-1"></i>
+                                <small>Steg ${step.stepNumber}: ${step.description}</small>
+                            </div>
+                            <button class="btn btn-sm btn-success py-0 px-2" onclick="showCompleteStepModal(${memberId}, '${escapeHtml(memberName || progress.memberName)}', ${level.levelId}, ${step.stepNumber})" title="Godkänn">
+                                <i class="bi bi-check-lg"></i>
+                            </button>
+                        </div>`;
+                }
+            });
+
+            html += `
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+        });
+        html += '</div>';
+
+        stepsList.innerHTML = html;
+
+        // Show reset button for site admins
+        const resetBtn = document.getElementById('progressResetBtn');
+        if (isSiteAdmin) {
+            resetBtn.style.display = '';
+            resetBtn.onclick = () => {
+                bootstrap.Modal.getInstance(document.getElementById('memberProgressModal')).hide();
+                resetMemberProgress(memberId, memberName || progress.memberName);
+            };
+        } else {
+            resetBtn.style.display = 'none';
+        }
+
+        new bootstrap.Modal(document.getElementById('memberProgressModal')).show();
+    } catch (error) {
+        console.error('Error fetching member progress with approval:', error);
         alert('Ett fel uppstod vid hämtning av medlemsframsteg');
     }
 }

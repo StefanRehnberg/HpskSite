@@ -26,6 +26,9 @@ namespace HpskSite.Composers
             builder.Services.Configure<MemberActivityOptions>(
                 builder.Config.GetSection("MemberActivity"));
 
+            // Register TrainingGroupService as scoped
+            builder.Services.AddScoped<TrainingGroupService>();
+
             // Register DocumentService as scoped (uses IScopeProvider)
             builder.Services.AddScoped<DocumentService>();
 

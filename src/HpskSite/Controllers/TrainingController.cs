@@ -8,6 +8,7 @@ using Umbraco.Cms.Infrastructure.Persistence;
 using Umbraco.Cms.Web.Website.Controllers;
 using Umbraco.Cms.Core.Security;
 using Umbraco.Cms.Core.Models;
+using Microsoft.Extensions.Logging;
 using HpskSite.Models.ViewModels.Training;
 using HpskSite.Services;
 
@@ -19,6 +20,9 @@ namespace HpskSite.Controllers
         private readonly IMemberManager _memberManager;
         private readonly ClubService _clubService;
         private readonly AdminAuthorizationService _authorizationService;
+        private readonly TrainingGroupService _trainingGroupService;
+        private readonly EmailService _emailService;
+        private readonly ILogger<TrainingController> _logger;
         private const string ClubMemberTypeAlias = "hpskClub";
 
         public TrainingController(
@@ -31,13 +35,19 @@ namespace HpskSite.Controllers
             IMemberService memberService,
             IMemberManager memberManager,
             ClubService clubService,
-            AdminAuthorizationService authorizationService)
+            AdminAuthorizationService authorizationService,
+            TrainingGroupService trainingGroupService,
+            EmailService emailService,
+            ILogger<TrainingController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _memberService = memberService;
             _memberManager = memberManager;
             _clubService = clubService;
             _authorizationService = authorizationService;
+            _trainingGroupService = trainingGroupService;
+            _emailService = emailService;
+            _logger = logger;
         }
 
         /// <summary>
@@ -130,11 +140,32 @@ namespace HpskSite.Controllers
 
                 if (memberId.HasValue)
                 {
-                    // Admin accessing specific member's progress
-                    if (!await _authorizationService.IsCurrentUserAdminAsync())
+                    // Check authorization: site admin, trainer for member, or club admin
+                    bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
+                    bool isTrainer = false;
+                    bool isClubAdmin = false;
+
+                    if (!isSiteAdmin)
+                    {
+                        var currentUser = await _memberManager.GetCurrentMemberAsync();
+                        var currentData = currentUser != null ? _memberService.GetByEmail(currentUser.Email ?? "") : null;
+                        if (currentData != null)
+                            isTrainer = await _trainingGroupService.IsTrainerForMember(currentData.Id, memberId.Value);
+
+                        if (!isTrainer)
+                        {
+                            var target = _memberService.GetById(memberId.Value);
+                            var targetClubId = int.TryParse(target?.GetValue("primaryClubId")?.ToString(), out int cid) ? cid : 0;
+                            if (targetClubId > 0)
+                                isClubAdmin = await _authorizationService.IsClubAdminForClub(targetClubId);
+                        }
+                    }
+
+                    if (!isSiteAdmin && !isTrainer && !isClubAdmin)
                     {
                         return Json(new { success = false, message = "Access denied" });
                     }
+
                     member = _memberService.GetById(memberId.Value);
                 }
                 else
@@ -244,7 +275,29 @@ namespace HpskSite.Controllers
         {
             try
             {
-                if (!await _authorizationService.IsCurrentUserAdminAsync())
+                bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
+                bool isTrainer = false;
+                bool isClubAdmin = false;
+
+                if (!isSiteAdmin)
+                {
+                    var currentUser = await _memberManager.GetCurrentMemberAsync();
+                    var currentMemberData = currentUser != null ? _memberService.GetByEmail(currentUser.Email ?? "") : null;
+                    if (currentMemberData != null)
+                    {
+                        isTrainer = await _trainingGroupService.IsTrainerForMember(currentMemberData.Id, memberId);
+                    }
+
+                    if (!isTrainer)
+                    {
+                        var targetMember = _memberService.GetById(memberId);
+                        var targetClubId = int.TryParse(targetMember?.GetValue("primaryClubId")?.ToString(), out int cid) ? cid : 0;
+                        if (targetClubId > 0)
+                            isClubAdmin = await _authorizationService.IsClubAdminForClub(targetClubId);
+                    }
+                }
+
+                if (!isSiteAdmin && !isTrainer && !isClubAdmin)
                 {
                     return Json(new { success = false, message = "Access denied" });
                 }
@@ -271,8 +324,8 @@ namespace HpskSite.Controllers
                 }
 
                 // Get instructor name
-                var currentUser = await _memberManager.GetCurrentMemberAsync();
-                var instructorName = currentUser?.Name ?? "Admin";
+                var instructor = await _memberManager.GetCurrentMemberAsync();
+                var instructorName = instructor?.Name ?? "Admin";
 
                 // Complete the step
                 progress.CompleteStep(levelId, stepNumber, instructorName, notes);
@@ -280,6 +333,28 @@ namespace HpskSite.Controllers
                 // Save progress
                 progress.SaveToMember(member);
                 _memberService.Save(member);
+
+                // Send notification email (non-blocking)
+                try
+                {
+                    var memberEmail = member.Email;
+                    if (!string.IsNullOrEmpty(memberEmail))
+                    {
+                        var level = TrainingDefinitions.GetLevel(levelId);
+                        _ = _emailService.SendTrainingStepApprovedAsync(
+                            memberEmail,
+                            member.Name ?? "",
+                            level?.Name ?? $"Niv\u00e5 {levelId}",
+                            level?.Badge ?? "",
+                            stepNumber,
+                            step.Description,
+                            instructorName);
+                    }
+                }
+                catch (Exception emailEx)
+                {
+                    _logger.LogWarning(emailEx, "Failed to send step approval email to member {MemberId}", memberId);
+                }
 
                 return Json(new {
                     success = true,

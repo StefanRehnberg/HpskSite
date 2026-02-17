@@ -1077,5 +1077,158 @@ namespace HpskSite.Services
                 throw; // Re-throw so the controller can handle it
             }
         }
+        /// <summary>
+        /// Send notification email when a member is added to a training group
+        /// </summary>
+        public async Task SendTrainingGroupMemberAddedAsync(
+            string memberEmail,
+            string memberName,
+            string groupName,
+            string trainerNames,
+            string startDate,
+            string clubName)
+        {
+            var subject = $"Du har lagts till i tr\u00e4ningsgruppen {groupName}";
+            var siteUrl = _configuration["SiteUrl"] ?? "https://pistol.nu";
+            var trainingUrl = $"{siteUrl}/training-stairs/";
+
+            var body = $@"
+<html>
+<head>
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+        .button {{
+            display: inline-block;
+            background-color: #0d6efd;
+            color: white !important;
+            padding: 12px 24px;
+            text-decoration: none;
+            border-radius: 5px;
+            font-weight: bold;
+        }}
+    </style>
+</head>
+<body>
+    <h2>Hej {memberName}!</h2>
+    <p>Du har blivit tillagd i tr&auml;ningsgruppen <strong>{groupName}</strong> p&aring; Skyttetrappan.</p>
+
+    <div style='background-color: #e7f1ff; border-left: 4px solid #0d6efd; padding: 15px; margin: 20px 0;'>
+        <p style='margin: 0;'><strong>Gruppinformation:</strong></p>
+        <ul style='margin: 10px 0 0 0;'>
+            <li><strong>Grupp:</strong> {groupName}</li>
+            <li><strong>Klubb:</strong> {clubName}</li>
+            <li><strong>Startdatum:</strong> {startDate}</li>
+            {(string.IsNullOrEmpty(trainerNames) ? "" : $"<li><strong>Tr&auml;nare:</strong> {trainerNames}</li>")}
+        </ul>
+    </div>
+
+    <p>Din tr&auml;nare kan nu f&ouml;lja dina framsteg och godk&auml;nna avklarade steg i tr&auml;ningsprogrammet.</p>
+
+    <p style='text-align: center; margin: 30px 0;'>
+        <a href=""{trainingUrl}"" class=""button"">G&aring; till Skyttetrappan</a>
+    </p>
+
+    <p>Med v&auml;nliga h&auml;lsningar,<br/>Pistol.nu</p>
+</body>
+</html>";
+
+            await SendEmailAsync(memberEmail, subject, body);
+        }
+
+        /// <summary>
+        /// Send notification email when a training step is approved
+        /// </summary>
+        public async Task SendTrainingStepApprovedAsync(
+            string memberEmail,
+            string memberName,
+            string levelName,
+            string levelBadge,
+            int stepNumber,
+            string stepDescription,
+            string approverName)
+        {
+            var subject = $"Steg godk\u00e4nt: {levelName} - Steg {stepNumber}";
+            var siteUrl = _configuration["SiteUrl"] ?? "https://pistol.nu";
+            var trainingUrl = $"{siteUrl}/training-stairs/";
+
+            var body = $@"
+<html>
+<head>
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+        .button {{
+            display: inline-block;
+            background-color: #198754;
+            color: white !important;
+            padding: 12px 24px;
+            text-decoration: none;
+            border-radius: 5px;
+            font-weight: bold;
+        }}
+    </style>
+</head>
+<body>
+    <h2>Grattis {memberName}! {levelBadge}</h2>
+    <p>Ett steg i Skyttetrappan har godk&auml;nts f&ouml;r dig.</p>
+
+    <div style='background-color: #d1e7dd; border-left: 4px solid #198754; padding: 15px; margin: 20px 0;'>
+        <p style='margin: 0;'><strong>Godk&auml;nt steg:</strong></p>
+        <p style='margin: 10px 0 0 0; font-size: 16px;'>
+            {levelBadge} <strong>{levelName}</strong> &ndash; Steg {stepNumber}
+        </p>
+        <p style='margin: 5px 0 0 0; color: #555;'>{stepDescription}</p>
+        <p style='margin: 10px 0 0 0; font-size: 13px; color: #666;'>Godk&auml;nd av: {approverName}</p>
+    </div>
+
+    <p style='text-align: center; margin: 30px 0;'>
+        <a href=""{trainingUrl}"" class=""button"">Se dina framsteg</a>
+    </p>
+
+    <p>Forts&auml;tt tr&auml;na s&aring; ser vi dig p&aring; n&auml;sta niv&aring;!</p>
+    <p>Med v&auml;nliga h&auml;lsningar,<br/>Pistol.nu</p>
+</body>
+</html>";
+
+            await SendEmailAsync(memberEmail, subject, body);
+        }
+
+        /// <summary>
+        /// Send a group message from a trainer to a training group member
+        /// </summary>
+        public async Task SendTrainingGroupMessageAsync(
+            string recipientEmail,
+            string recipientName,
+            string senderName,
+            string groupName,
+            string messageSubject,
+            string messageBody)
+        {
+            var subject = $"[{groupName}] {messageSubject}";
+            var escapedBody = System.Net.WebUtility.HtmlEncode(messageBody).Replace("\n", "<br/>");
+
+            var body = $@"
+<html>
+<head>
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+    </style>
+</head>
+<body>
+    <h2>Meddelande fr&aring;n {senderName}</h2>
+    <p style='color: #666; font-size: 13px;'>Tr&auml;ningsgrupp: {groupName}</p>
+
+    <div style='background-color: #f8f9fa; border-left: 4px solid #6c757d; padding: 15px; margin: 20px 0;'>
+        {escapedBody}
+    </div>
+
+    <p style='color: #999; font-size: 12px;'>
+        Detta meddelande skickades via Pistol.nu fr&aring;n tr&auml;ningsgruppen {groupName}.
+        Svara inte p&aring; detta e-postmeddelande.
+    </p>
+</body>
+</html>";
+
+            await SendEmailAsync(recipientEmail, subject, body);
+        }
     }
 }

@@ -37,6 +37,11 @@
             </button>
         </li>
         <li class="nav-item" role="presentation">
+            <button class="nav-link" id="traininggroups-tab" data-bs-toggle="tab" data-bs-target="#trainingGroupsTab" type="button">
+                <i class="bi bi-people-fill me-2"></i>Träningsgrupper
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
             <button class="nav-link" id="settings-tab" data-bs-toggle="tab" data-bs-target="#settingsTab" type="button">
                 <i class="bi bi-gear me-2"></i>Inställningar
             </button>
@@ -113,6 +118,23 @@
         <div class="tab-pane fade" id="documentsTab">
             @{ ViewBag.DocumentOwnerType = 0; ViewBag.DocumentOwnerId = clubId; }
             @await Html.PartialAsync("ClubDocumentAdmin")
+        </div>
+
+        <!-- Training Groups Tab -->
+        <div class="tab-pane fade" id="trainingGroupsTab">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5>Träningsgrupper</h5>
+                <button class="btn btn-success" onclick="showCreateClubTrainingGroupModal()">
+                    <i class="bi bi-plus-circle me-2"></i>Ny Träningsgrupp
+                </button>
+            </div>
+            <div id="clubTrainingGroupList">
+                <div class="text-center py-4">
+                    <div class="spinner-border" role="status">
+                        <span class="visually-hidden">Laddar...</span>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Settings Tab -->
@@ -670,6 +692,84 @@
     </div>
 </div>
 
+<!-- Create/Edit Training Group Modal -->
+<div class="modal fade" id="clubTrainingGroupModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="clubTrainingGroupModalTitle">Ny Träningsgrupp</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="clubTrainingGroupForm">
+                    <input type="hidden" id="clubTgId">
+                    <div class="mb-3">
+                        <label class="form-label">Namn *</label>
+                        <input type="text" class="form-control" id="clubTgName" required placeholder="T.ex. Nybörjargrupp Vår 2026">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Beskrivning</label>
+                        <textarea class="form-control" id="clubTgDescription" rows="2" placeholder="Valfri beskrivning"></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Startdatum *</label>
+                        <input type="text" class="form-control" id="clubTgStartDate" required>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-success" onclick="submitClubTrainingGroup()">
+                    <i class="bi bi-save me-2"></i>Spara
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Member to Training Group Modal -->
+<div class="modal fade" id="clubTgAddMemberModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Lägg till medlem i träningsgrupp</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="clubTgAddGroupId">
+                <div class="mb-3">
+                    <label class="form-label">Sök medlem</label>
+                    <input type="text" class="form-control" id="clubTgMemberSearch" placeholder="Namn eller e-post..." oninput="searchClubTgMembers()">
+                </div>
+                <div id="clubTgMemberSearchResults" class="list-group mb-3" style="max-height: 200px; overflow-y: auto;"></div>
+                <div id="clubTgSelectedMember" class="alert alert-info d-none">
+                    <strong id="clubTgSelectedMemberName"></strong>
+                    <input type="hidden" id="clubTgSelectedMemberId">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Roll</label>
+                    <select class="form-select" id="clubTgMemberRole">
+                        <option value="Member">Medlem</option>
+                        <option value="Trainer">Tränare</option>
+                    </select>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="clubTgSendEmail">
+                    <label class="form-check-label" for="clubTgSendEmail">
+                        Skicka e-post till medlemmen
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-success" onclick="addClubTgMember()">
+                    <i class="bi bi-person-plus me-2"></i>Lägg till
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 // Club context - clubId is declared by parent page (Club.cshtml) as const clubId
 // We only set window.currentClubId if it wasn't already set by the parent
@@ -729,6 +829,10 @@ document.getElementById('invoices-tab').addEventListener('shown.bs.tab', functio
     }
 });
 
+document.getElementById('traininggroups-tab').addEventListener('shown.bs.tab', function () {
+    loadClubTrainingGroups();
+});
+
 // Load events initially
 document.addEventListener('DOMContentLoaded', function() {
     loadEvents();
@@ -744,6 +848,12 @@ document.addEventListener('DOMContentLoaded', function() {
     flatpickr('#newMemberMemberSince', {
         locale: 'sv',
         dateFormat: 'Y-m-d'
+    });
+
+    flatpickr('#clubTgStartDate', {
+        locale: 'sv',
+        dateFormat: 'Y-m-d',
+        defaultDate: 'today'
     });
 });
 
@@ -2180,6 +2290,422 @@ document.getElementById('editMemberPersonNumber').addEventListener('blur', funct
         this.classList.remove('is-invalid');
     }
 });
+
+// ========== TRAINING GROUPS TAB ==========
+
+let clubTrainingGroups = [];
+let clubTgSearchTimeout = null;
+let expandedClubTgId = null;
+
+async function loadClubTrainingGroups() {
+    const container = document.getElementById('clubTrainingGroupList');
+    container.innerHTML = `
+        <div class="text-center py-4">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">Laddar...</span>
+            </div>
+        </div>`;
+
+    try {
+        const response = await fetch('/umbraco/surface/TrainingGroup/GetTrainingGroups');
+        const result = await response.json();
+
+        if (!result.success) {
+            container.innerHTML = `<div class="alert alert-warning">${result.message || 'Kunde inte ladda träningsgrupper'}</div>`;
+            return;
+        }
+
+        // Filter to only show groups for this club
+        clubTrainingGroups = (result.data || []).filter(g => g.clubId === clubId);
+
+        if (clubTrainingGroups.length === 0) {
+            container.innerHTML = `
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle me-2"></i>Inga träningsgrupper ännu. Skapa en ny träningsgrupp för att komma igång.
+                </div>`;
+            return;
+        }
+
+        let html = '<div class="table-responsive"><table class="table table-hover">';
+        html += `<thead><tr>
+            <th>Namn</th>
+            <th>Startdatum</th>
+            <th class="text-center">Medlemmar</th>
+            <th class="text-center">Tränare</th>
+            <th></th>
+        </tr></thead><tbody>`;
+
+        clubTrainingGroups.forEach(g => {
+            html += `
+                <tr style="cursor: pointer;" onclick="expandClubTrainingGroup(${g.id})">
+                    <td>
+                        <span class="fw-bold">${g.name}</span>
+                        ${g.description ? `<br><small class="text-muted">${g.description}</small>` : ''}
+                    </td>
+                    <td>${g.startDate}</td>
+                    <td class="text-center"><span class="badge bg-primary">${g.memberCount}</span></td>
+                    <td class="text-center"><span class="badge bg-info">${g.trainerCount}</span></td>
+                    <td class="text-end">
+                        <button class="btn btn-sm btn-outline-secondary me-1" onclick="event.stopPropagation(); editClubTrainingGroup(${g.id})" title="Redigera">
+                            <i class="bi bi-pencil"></i>
+                        </button>
+                        <button class="btn btn-sm btn-outline-danger" onclick="event.stopPropagation(); deactivateClubTrainingGroup(${g.id}, '${g.name.replace(/'/g, "\\'")}')" title="Ta bort">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </td>
+                </tr>
+                <tr id="clubTgDetail_${g.id}" style="display: none;">
+                    <td colspan="5" class="bg-body-tertiary">
+                        <div id="clubTgMembers_${g.id}" class="p-2">
+                            <div class="text-center py-2">
+                                <div class="spinner-border spinner-border-sm text-secondary" role="status"></div>
+                            </div>
+                        </div>
+                    </td>
+                </tr>`;
+        });
+
+        html += '</tbody></table></div>';
+        container.innerHTML = html;
+
+        // Re-expand if there was one expanded
+        if (expandedClubTgId) {
+            const detailRow = document.getElementById(`clubTgDetail_${expandedClubTgId}`);
+            if (detailRow) {
+                detailRow.style.display = '';
+                loadClubTrainingGroupMembers(expandedClubTgId);
+            }
+        }
+    } catch (error) {
+        console.error('Error loading training groups:', error);
+        container.innerHTML = '<div class="alert alert-danger">Fel vid laddning av träningsgrupper.</div>';
+    }
+}
+
+async function expandClubTrainingGroup(groupId) {
+    const detailRow = document.getElementById(`clubTgDetail_${groupId}`);
+    if (!detailRow) return;
+
+    // Toggle visibility
+    if (detailRow.style.display !== 'none' && expandedClubTgId === groupId) {
+        detailRow.style.display = 'none';
+        expandedClubTgId = null;
+        return;
+    }
+
+    // Collapse others
+    clubTrainingGroups.forEach(g => {
+        const el = document.getElementById(`clubTgDetail_${g.id}`);
+        if (el) el.style.display = 'none';
+    });
+
+    detailRow.style.display = '';
+    expandedClubTgId = groupId;
+    loadClubTrainingGroupMembers(groupId);
+}
+
+async function loadClubTrainingGroupMembers(groupId) {
+    const container = document.getElementById(`clubTgMembers_${groupId}`);
+    if (!container) return;
+
+    try {
+        const response = await fetch(`/umbraco/surface/TrainingGroup/GetTrainingGroup?trainingGroupId=${groupId}`);
+        const result = await response.json();
+
+        if (!result.success) {
+            container.innerHTML = `<div class="alert alert-warning">${result.message}</div>`;
+            return;
+        }
+
+        const group = result.data;
+        const members = group.members || [];
+
+        let html = `
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <strong>Medlemmar (${members.length})</strong>
+                <button class="btn btn-sm btn-outline-success" onclick="event.stopPropagation(); showAddClubTgMemberModal(${groupId})">
+                    <i class="bi bi-person-plus me-1"></i>Lägg till medlem
+                </button>
+            </div>`;
+
+        if (members.length === 0) {
+            html += '<p class="text-muted small">Inga medlemmar i gruppen ännu.</p>';
+        } else {
+            html += '<div class="table-responsive"><table class="table table-sm mb-0">';
+            html += '<thead><tr><th>Namn</th><th>Klubb</th><th>Roll</th><th>Tillagd</th><th></th></tr></thead><tbody>';
+
+            // Sort: trainers first
+            const sorted = [...members].sort((a, b) => {
+                if (a.role === 'Trainer' && b.role !== 'Trainer') return -1;
+                if (a.role !== 'Trainer' && b.role === 'Trainer') return 1;
+                return 0;
+            });
+
+            sorted.forEach(m => {
+                html += `
+                    <tr>
+                        <td>${m.memberName}</td>
+                        <td class="text-muted">${m.clubName || '-'}</td>
+                        <td>
+                            <span class="badge ${m.isTrainer ? 'bg-info' : 'bg-secondary'}">${m.isTrainer ? 'Tränare' : 'Medlem'}</span>
+                        </td>
+                        <td class="text-muted small">${m.joinedDate}</td>
+                        <td class="text-end">
+                            <button class="btn btn-sm btn-outline-secondary py-0 px-1" onclick="event.stopPropagation(); toggleClubTgMemberRole(${groupId}, ${m.memberId}, '${m.role}')" title="${m.role === 'Trainer' ? 'Gör till medlem' : 'Gör till tränare'}">
+                                <i class="bi bi-arrow-left-right"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="event.stopPropagation(); removeClubTgMember(${groupId}, ${m.memberId}, '${m.memberName.replace(/'/g, "\\'")}')" title="Ta bort">
+                                <i class="bi bi-x-lg"></i>
+                            </button>
+                        </td>
+                    </tr>`;
+            });
+
+            html += '</tbody></table></div>';
+        }
+
+        container.innerHTML = html;
+    } catch (error) {
+        console.error('Error loading training group members:', error);
+        container.innerHTML = '<div class="alert alert-danger">Fel vid laddning</div>';
+    }
+}
+
+function showCreateClubTrainingGroupModal() {
+    document.getElementById('clubTrainingGroupModalTitle').textContent = 'Ny Träningsgrupp';
+    document.getElementById('clubTgId').value = '';
+    document.getElementById('clubTgName').value = '';
+    document.getElementById('clubTgDescription').value = '';
+    // Reset flatpickr to today
+    const fpInstance = document.getElementById('clubTgStartDate')._flatpickr;
+    if (fpInstance) fpInstance.setDate(new Date());
+    new bootstrap.Modal(document.getElementById('clubTrainingGroupModal')).show();
+}
+
+async function editClubTrainingGroup(groupId) {
+    const group = clubTrainingGroups.find(g => g.id === groupId);
+    if (!group) return;
+
+    document.getElementById('clubTrainingGroupModalTitle').textContent = 'Redigera Träningsgrupp';
+    document.getElementById('clubTgId').value = groupId;
+    document.getElementById('clubTgName').value = group.name;
+    document.getElementById('clubTgDescription').value = group.description || '';
+    const fpInstance = document.getElementById('clubTgStartDate')._flatpickr;
+    if (fpInstance) fpInstance.setDate(group.startDate);
+    new bootstrap.Modal(document.getElementById('clubTrainingGroupModal')).show();
+}
+
+async function submitClubTrainingGroup() {
+    const id = document.getElementById('clubTgId').value;
+    const name = document.getElementById('clubTgName').value.trim();
+    const description = document.getElementById('clubTgDescription').value.trim();
+    const startDate = document.getElementById('clubTgStartDate').value;
+
+    if (!name) { alert('Namn krävs'); return; }
+    if (!startDate) { alert('Startdatum krävs'); return; }
+
+    const token = getAntiForgeryToken();
+    const formData = new FormData();
+    formData.append('__RequestVerificationToken', token);
+    formData.append('name', name);
+    formData.append('description', description);
+    formData.append('startDate', startDate);
+
+    try {
+        let url;
+        if (id) {
+            formData.append('trainingGroupId', id);
+            url = '/umbraco/surface/TrainingGroup/UpdateTrainingGroup';
+        } else {
+            formData.append('clubId', clubId);
+            url = '/umbraco/surface/TrainingGroup/CreateTrainingGroup';
+        }
+
+        const response = await fetch(url, { method: 'POST', body: formData });
+        const result = await response.json();
+
+        if (result.success) {
+            bootstrap.Modal.getInstance(document.getElementById('clubTrainingGroupModal')).hide();
+            loadClubTrainingGroups();
+        } else {
+            alert('Fel: ' + result.message);
+        }
+    } catch (error) {
+        console.error('Error saving training group:', error);
+        alert('Ett fel uppstod');
+    }
+}
+
+async function deactivateClubTrainingGroup(groupId, groupName) {
+    if (!confirm(`Vill du ta bort träningsgruppen "${groupName}"?`)) return;
+
+    const token = getAntiForgeryToken();
+    const formData = new FormData();
+    formData.append('__RequestVerificationToken', token);
+    formData.append('trainingGroupId', groupId);
+
+    try {
+        const response = await fetch('/umbraco/surface/TrainingGroup/DeactivateTrainingGroup', {
+            method: 'POST', body: formData
+        });
+        const result = await response.json();
+
+        if (result.success) {
+            expandedClubTgId = null;
+            loadClubTrainingGroups();
+        } else {
+            alert('Fel: ' + result.message);
+        }
+    } catch (error) {
+        console.error('Error deactivating training group:', error);
+        alert('Ett fel uppstod');
+    }
+}
+
+function showAddClubTgMemberModal(groupId) {
+    document.getElementById('clubTgAddGroupId').value = groupId;
+    document.getElementById('clubTgMemberSearch').value = '';
+    document.getElementById('clubTgMemberSearchResults').innerHTML = '';
+    document.getElementById('clubTgSelectedMember').classList.add('d-none');
+    document.getElementById('clubTgSelectedMemberId').value = '';
+    document.getElementById('clubTgMemberRole').value = 'Member';
+    document.getElementById('clubTgSendEmail').checked = false;
+    new bootstrap.Modal(document.getElementById('clubTgAddMemberModal')).show();
+}
+
+function searchClubTgMembers() {
+    clearTimeout(clubTgSearchTimeout);
+    const query = document.getElementById('clubTgMemberSearch').value.trim();
+    const resultsContainer = document.getElementById('clubTgMemberSearchResults');
+
+    if (query.length < 2) {
+        resultsContainer.innerHTML = '';
+        return;
+    }
+
+    clubTgSearchTimeout = setTimeout(async () => {
+        try {
+            const response = await fetch(`/umbraco/surface/TrainingGroup/SearchMembers?query=${encodeURIComponent(query)}&clubId=${clubId}`);
+            const result = await response.json();
+
+            if (!result.success || !result.data || result.data.length === 0) {
+                resultsContainer.innerHTML = '<div class="list-group-item text-muted small">Inga resultat</div>';
+                return;
+            }
+
+            resultsContainer.innerHTML = result.data.map(m => `
+                <button type="button" class="list-group-item list-group-item-action py-1" onclick="selectClubTgMember(${m.memberId}, '${(m.memberName || '').replace(/'/g, "\\'")}')">
+                    <div class="d-flex justify-content-between">
+                        <span>${m.memberName}</span>
+                        <small class="text-muted">${m.clubName || ''}</small>
+                    </div>
+                    <small class="text-muted">${m.email || ''}</small>
+                </button>
+            `).join('');
+        } catch (error) {
+            console.error('Error searching members:', error);
+            resultsContainer.innerHTML = '<div class="list-group-item text-danger small">Sökfel</div>';
+        }
+    }, 300);
+}
+
+function selectClubTgMember(memberId, memberName) {
+    document.getElementById('clubTgSelectedMemberId').value = memberId;
+    document.getElementById('clubTgSelectedMemberName').textContent = memberName;
+    document.getElementById('clubTgSelectedMember').classList.remove('d-none');
+    document.getElementById('clubTgMemberSearchResults').innerHTML = '';
+    document.getElementById('clubTgMemberSearch').value = '';
+}
+
+async function addClubTgMember() {
+    const groupId = document.getElementById('clubTgAddGroupId').value;
+    const memberId = document.getElementById('clubTgSelectedMemberId').value;
+    const role = document.getElementById('clubTgMemberRole').value;
+    const sendEmail = document.getElementById('clubTgSendEmail').checked;
+
+    if (!memberId) { alert('Välj en medlem först'); return; }
+
+    const token = getAntiForgeryToken();
+    const formData = new FormData();
+    formData.append('__RequestVerificationToken', token);
+    formData.append('trainingGroupId', groupId);
+    formData.append('memberId', memberId);
+    formData.append('role', role);
+    formData.append('sendEmail', sendEmail);
+
+    try {
+        const response = await fetch('/umbraco/surface/TrainingGroup/AddTrainingGroupMember', {
+            method: 'POST', body: formData
+        });
+        const result = await response.json();
+
+        if (result.success) {
+            bootstrap.Modal.getInstance(document.getElementById('clubTgAddMemberModal')).hide();
+            loadClubTrainingGroupMembers(groupId);
+            loadClubTrainingGroups(); // refresh counts
+        } else {
+            alert('Fel: ' + result.message);
+        }
+    } catch (error) {
+        console.error('Error adding member:', error);
+        alert('Ett fel uppstod');
+    }
+}
+
+async function toggleClubTgMemberRole(groupId, memberId, currentRole) {
+    const newRole = currentRole === 'Trainer' ? 'Member' : 'Trainer';
+
+    const token = getAntiForgeryToken();
+    const formData = new FormData();
+    formData.append('__RequestVerificationToken', token);
+    formData.append('trainingGroupId', groupId);
+    formData.append('memberId', memberId);
+    formData.append('role', newRole);
+
+    try {
+        const response = await fetch('/umbraco/surface/TrainingGroup/SetTrainingGroupMemberRole', {
+            method: 'POST', body: formData
+        });
+        const result = await response.json();
+
+        if (result.success) {
+            loadClubTrainingGroupMembers(groupId);
+            loadClubTrainingGroups();
+        } else {
+            alert('Fel: ' + result.message);
+        }
+    } catch (error) {
+        console.error('Error toggling role:', error);
+        alert('Ett fel uppstod');
+    }
+}
+
+async function removeClubTgMember(groupId, memberId, memberName) {
+    if (!confirm(`Ta bort ${memberName} från träningsgruppen?`)) return;
+
+    const token = getAntiForgeryToken();
+    const formData = new FormData();
+    formData.append('__RequestVerificationToken', token);
+    formData.append('trainingGroupId', groupId);
+    formData.append('memberId', memberId);
+
+    try {
+        const response = await fetch('/umbraco/surface/TrainingGroup/RemoveTrainingGroupMember', {
+            method: 'POST', body: formData
+        });
+        const result = await response.json();
+
+        if (result.success) {
+            loadClubTrainingGroupMembers(groupId);
+            loadClubTrainingGroups();
+        } else {
+            alert('Fel: ' + result.message);
+        }
+    } catch (error) {
+        console.error('Error removing member:', error);
+        alert('Ett fel uppstod');
+    }
+}
 </script>
 
 <style>
