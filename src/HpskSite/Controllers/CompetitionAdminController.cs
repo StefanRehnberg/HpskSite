@@ -12,6 +12,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using HpskSite.Services;
+using HpskSite.CompetitionTypes.Common.SeriesCalculation;
 using Umbraco.Cms.Core.IO;
 using System.IO;
 using Umbraco.Extensions;
@@ -31,6 +32,7 @@ namespace HpskSite.Controllers
         private readonly IMediaService _mediaService;
         private readonly MediaFileManager _mediaFileManager;
         private readonly AppCaches _appCaches;
+        private readonly SeriesCalculationService _seriesCalculationService;
 
         // Cache configuration
         private const string SeriesListCacheKey = "admin_series_list";
@@ -49,7 +51,8 @@ namespace HpskSite.Controllers
             IMemberService memberService,
             AdminAuthorizationService authorizationService,
             IMediaService mediaService,
-            MediaFileManager mediaFileManager)
+            MediaFileManager mediaFileManager,
+            SeriesCalculationService seriesCalculationService)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _contentService = contentService;
@@ -58,6 +61,7 @@ namespace HpskSite.Controllers
             _authorizationService = authorizationService;
             _mediaService = mediaService;
             _mediaFileManager = mediaFileManager;
+            _seriesCalculationService = seriesCalculationService;
             _appCaches = appCaches;
         }
 
@@ -2200,6 +2204,8 @@ namespace HpskSite.Controllers
                         isActive = series.GetValue<bool>("isActive"),
                         clubId = series.GetValue<int>("clubId"),
                         regionalFederation = series.GetValue<string>("regionalFederation") ?? "",
+                        seriesCalculationStrategy = series.GetValue<string>("seriesCalculationStrategy") ?? "",
+                        seriesCalculationConfig = series.GetValue<string>("seriesCalculationConfig") ?? "",
                         // Use pre-calculated count instead of per-series query
                         competitionCount = competitionCountsByParent.TryGetValue(series.Id, out var count) ? count : 0,
                         status = GetSeriesStatus(series, now)
@@ -2340,6 +2346,8 @@ namespace HpskSite.Controllers
                     newSeries.SetValue("clubId", int.Parse(request.ClubId));
                 if (!string.IsNullOrEmpty(request.RegionalFederation))
                     newSeries.SetValue("regionalFederation", request.RegionalFederation);
+                newSeries.SetValue("seriesCalculationStrategy", request.SeriesCalculationStrategy ?? "");
+                newSeries.SetValue("seriesCalculationConfig", request.SeriesCalculationConfig ?? "");
 
                 var saveResult = _contentService.Save(newSeries);
                 if (!saveResult.Success)
@@ -2434,6 +2442,8 @@ namespace HpskSite.Controllers
                     series.SetValue("clubId", int.Parse(request.ClubId));
                 else if (!string.IsNullOrEmpty(request.RegionalFederation))
                     series.SetValue("regionalFederation", request.RegionalFederation);
+                series.SetValue("seriesCalculationStrategy", request.SeriesCalculationStrategy ?? "");
+                series.SetValue("seriesCalculationConfig", request.SeriesCalculationConfig ?? "");
 
                 var saveResult = _contentService.Save(series);
                 if (!saveResult.Success)
@@ -2621,6 +2631,14 @@ namespace HpskSite.Controllers
                 if (!string.IsNullOrEmpty(sourceRegion))
                     newSeries.SetValue("regionalFederation", sourceRegion);
 
+                // Copy series calculation properties
+                var sourceStrategy = sourceSeries.GetValue<string>("seriesCalculationStrategy");
+                if (!string.IsNullOrEmpty(sourceStrategy))
+                    newSeries.SetValue("seriesCalculationStrategy", sourceStrategy);
+                var sourceConfig = sourceSeries.GetValue<string>("seriesCalculationConfig");
+                if (!string.IsNullOrEmpty(sourceConfig))
+                    newSeries.SetValue("seriesCalculationConfig", sourceConfig);
+
                 var saveSeriesResult = _contentService.Save(newSeries);
                 if (!saveSeriesResult.Success)
                 {
@@ -2706,6 +2724,55 @@ namespace HpskSite.Controllers
             catch (Exception ex)
             {
                 return Ok(new { success = false, message = "Error copying series: " + ex.Message });
+            }
+        }
+
+        // ==================== SERIES CALCULATION ENDPOINTS ====================
+
+        /// <summary>
+        /// Get available series calculation strategies with parameter definitions.
+        /// Used by the series edit modal to populate the strategy dropdown.
+        /// </summary>
+        [HttpGet]
+        public IActionResult GetSeriesCalculationStrategies()
+        {
+            var strategies = SeriesCalculationRegistry.GetAll().Select(s => new
+            {
+                id = s.Id,
+                name = s.Name,
+                description = s.Description,
+                parameters = s.GetParameters().Select(p => new
+                {
+                    key = p.Key,
+                    label = p.Label,
+                    type = p.Type,
+                    defaultValue = p.DefaultValue
+                })
+            });
+
+            return Ok(new { success = true, data = strategies });
+        }
+
+        /// <summary>
+        /// Calculate and return series results for a given series.
+        /// Called by the series page to display standings.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetSeriesResults(int seriesId)
+        {
+            try
+            {
+                var result = await _seriesCalculationService.CalculateSeriesResults(seriesId);
+                if (result == null)
+                {
+                    return Ok(new { success = false, message = "No calculation strategy configured or series not found" });
+                }
+
+                return Ok(new { success = true, data = result });
+            }
+            catch (Exception ex)
+            {
+                return Ok(new { success = false, message = "Error calculating series results: " + ex.Message });
             }
         }
 
@@ -3086,6 +3153,8 @@ namespace HpskSite.Controllers
         public bool IsActive { get; set; } = true;
         public string ClubId { get; set; }
         public string RegionalFederation { get; set; }
+        public string SeriesCalculationStrategy { get; set; }
+        public string SeriesCalculationConfig { get; set; }
     }
 
     /// <summary>
@@ -3103,6 +3172,8 @@ namespace HpskSite.Controllers
         public bool IsActive { get; set; }
         public string ClubId { get; set; }
         public string RegionalFederation { get; set; }
+        public string SeriesCalculationStrategy { get; set; }
+        public string SeriesCalculationConfig { get; set; }
     }
 
     /// <summary>

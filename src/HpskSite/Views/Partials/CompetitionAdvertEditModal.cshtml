@@ -25,12 +25,6 @@
                     <strong>Externa tävlingar</strong> visas som annonser i tävlingslistan men har ingen intern hantering (inga anmälningar, startlistor, eller resultat).
                 </div>
 
-                <!-- Error Container -->
-                <div id="advertEditFormErrors" class="alert alert-danger d-none" role="alert">
-                    <strong>Fel vid sparning:</strong>
-                    <ul id="advertEditErrorList" class="mb-0 mt-2"></ul>
-                </div>
-
                 <form id="competitionAdvertEditForm">
                     <!-- Hidden field for competition ID -->
                     <input type="hidden" id="advertEdit_competitionId" name="competitionId" value="">
@@ -224,6 +218,11 @@
                     </div>
 
                 </form>
+
+                <div id="advertEditFormErrors" class="alert alert-danger d-none mb-0 mt-3" role="alert">
+                    <strong>Fel vid sparning:</strong>
+                    <ul id="advertEditErrorList" class="mb-0 mt-2"></ul>
+                </div>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
@@ -603,7 +602,9 @@ function saveAdvertEdit() {
                 errorList.appendChild(li);
             }
 
-            document.getElementById('advertEditFormErrors').classList.remove('d-none');
+            const errDiv = document.getElementById('advertEditFormErrors');
+            errDiv.classList.remove('d-none');
+            errDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
     })
     .catch(error => {

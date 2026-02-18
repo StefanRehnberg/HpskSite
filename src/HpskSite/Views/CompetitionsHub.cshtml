@@ -598,15 +598,26 @@
                                         }
                                     </div>
                                 </div>
-                                @{
-                                    var isUserRegisteredCard = await IsUserRegisteredForCompetition(competition.Id);
-                                }
-                                @if (isUserRegisteredCard)
-                                {
-                                    <span class="badge bg-light text-success ms-2" title="Du är anmäld till denna tävling">
-                                        <i class="bi bi-check-circle-fill"></i>
-                                    </span>
-                                }
+                                <div class="d-flex align-items-start ms-2">
+                                    @if (!string.IsNullOrEmpty(competitionTypeId))
+                                    {
+                                        <img src="/images/competition-types/@(competitionTypeId).png"
+                                             alt="@competitionTypeName"
+                                             title="@competitionTypeName"
+                                             class="competition-type-icon"
+                                             onerror="this.style.display='none'"
+                                             style="width:30px;height:30px;object-fit:contain;opacity:0.9;border-radius:4px;">
+                                    }
+                                    @{
+                                        var isUserRegisteredCard = await IsUserRegisteredForCompetition(competition.Id);
+                                    }
+                                    @if (isUserRegisteredCard)
+                                    {
+                                        <span class="badge bg-light text-success ms-1" title="Du är anmäld till denna tävling">
+                                            <i class="bi bi-check-circle-fill"></i>
+                                        </span>
+                                    }
+                                </div>
                             </div>
                         </div>
                                 <div class="card-body">

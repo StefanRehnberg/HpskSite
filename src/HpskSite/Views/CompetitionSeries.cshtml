@@ -23,6 +23,8 @@
     var seriesDescription = Model.Value<string>("seriesDescription");
     var seriesLogo = Model.Value<IPublishedContent>("seriesLogo");
     var isActive = Model.Value<bool>("isActive", fallback: Fallback.ToDefaultValue, defaultValue: true);
+    var seriesCalculationStrategy = Model.Value<string>("seriesCalculationStrategy") ?? "";
+    var seriesId = Model.Id;
 }
 
 <div class="container mt-4">
@@ -297,6 +299,24 @@
                     <i class="bi bi-info-circle"></i> Inga tävlingar har lagts till i denna serie ännu.
                 </div>
             }
+
+            @if (!string.IsNullOrEmpty(seriesCalculationStrategy))
+            {
+                <!-- Series Results -->
+                <div id="seriesResultsContainer" class="mt-4">
+                    <div class="text-center py-4" id="seriesResultsLoading">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Laddar...</span>
+                        </div>
+                        <p class="mt-2 text-muted">Beräknar serieresultat...</p>
+                    </div>
+                    <div id="seriesResultsContent" style="display: none;"></div>
+                    <div id="seriesResultsError" class="alert alert-warning d-none">
+                        <i class="bi bi-exclamation-triangle me-1"></i>
+                        <span id="seriesResultsErrorMessage"></span>
+                    </div>
+                </div>
+            }
         </div>
     </div>
 </div>
@@ -406,5 +426,195 @@ function toggleSeriesDescription() {
         toggleIcon.classList.add('rotated');
         toggleText.textContent = 'Visa mindre';
     }
+}
+
+@if (!string.IsNullOrEmpty(seriesCalculationStrategy))
+{
+    <text>
+    // Load series results
+    (function() {
+        const seriesId = @seriesId;
+        const container = document.getElementById('seriesResultsContent');
+        const loading = document.getElementById('seriesResultsLoading');
+        const errorDiv = document.getElementById('seriesResultsError');
+        const errorMsg = document.getElementById('seriesResultsErrorMessage');
+
+        fetch('/umbraco/surface/CompetitionAdmin/GetSeriesResults?seriesId=' + seriesId)
+            .then(response => response.json())
+            .then(data => {
+                loading.style.display = 'none';
+
+                if (!data.success || !data.data) {
+                    // No results or error - hide the whole container silently
+                    document.getElementById('seriesResultsContainer').style.display = 'none';
+                    return;
+                }
+
+                const result = data.data;
+                if (!result.sections || result.sections.length === 0) {
+                    document.getElementById('seriesResultsContainer').style.display = 'none';
+                    return;
+                }
+
+                container.style.display = 'block';
+                let html = '';
+
+                // Header
+                html += '<div class="card border-success mb-4">';
+                html += '<div class="card-header bg-success text-white">';
+                html += '<h3 class="mb-0"><i class="bi bi-bar-chart me-2"></i>Serieresultat</h3>';
+                html += '<small>' + escapeHtmlSeries(result.strategyName) + '</small>';
+                html += '</div>';
+                html += '<div class="card-body p-0">';
+
+                result.sections.forEach(function(section) {
+                    html += '<div class="p-3">';
+                    if (result.sections.length > 1) {
+                        html += '<h4 class="mb-3">' + escapeHtmlSeries(section.title) + '</h4>';
+                    }
+
+                    if (section.sectionType === 'Individual') {
+                        html += renderIndividualSection(section, result.competitions);
+                    } else if (section.sectionType === 'Club') {
+                        html += renderClubSection(section, result.competitions);
+                    }
+                    html += '</div>';
+                });
+
+                html += '</div></div>';
+                container.innerHTML = html;
+            })
+            .catch(error => {
+                loading.style.display = 'none';
+                // Silent failure - don't show error for public page
+                document.getElementById('seriesResultsContainer').style.display = 'none';
+                console.error('Error loading series results:', error);
+            });
+
+        function renderIndividualSection(section, competitions) {
+            let html = '';
+            const currentMemberId = parseInt(document.body.dataset.currentMemberId || '0');
+
+            section.classStandings.forEach(function(classGroup) {
+                if (classGroup.rows.length === 0) return;
+
+                html += '<div class="mb-4">';
+                html += '<h5 class="bg-light p-2 rounded">' + escapeHtmlSeries(classGroup.className) + '</h5>';
+                html += '<div class="table-responsive">';
+                html += '<table class="table table-sm table-striped table-hover mb-0">';
+                html += '<thead><tr>';
+                html += '<th style="width:50px">#</th>';
+                html += '<th>Namn</th>';
+                html += '<th>Klubb</th>';
+                competitions.forEach(function(comp) {
+                    const shortName = comp.name.length > 15 ? comp.name.substring(0, 15) + '...' : comp.name;
+                    html += '<th class="text-center" title="' + escapeHtmlSeries(comp.name) + '">' + escapeHtmlSeries(shortName) + '</th>';
+                });
+                html += '<th class="text-center"><strong>Totalt</strong></th>';
+                html += '<th class="text-center">X</th>';
+                html += '</tr></thead>';
+                html += '<tbody>';
+
+                classGroup.rows.forEach(function(row) {
+                    const isCurrentUser = row.entityId === currentMemberId;
+                    const rowClass = isCurrentUser ? ' style="background-color: rgba(13,110,253,0.1);"' : '';
+
+                    html += '<tr' + rowClass + '>';
+                    html += '<td><strong>' + row.rank + '</strong></td>';
+                    html += '<td>' + escapeHtmlSeries(row.name) + '</td>';
+                    html += '<td><small>' + escapeHtmlSeries(row.club) + '</small></td>';
+
+                    row.competitionScores.forEach(function(cell) {
+                        if (cell.score === null || cell.score === undefined) {
+                            html += '<td class="text-center text-muted">-</td>';
+                        } else if (!cell.counting) {
+                            html += '<td class="text-center" style="opacity:0.4;text-decoration:line-through;">' + cell.score + '</td>';
+                        } else {
+                            html += '<td class="text-center">' + cell.score + '</td>';
+                        }
+                    });
+
+                    html += '<td class="text-center"><strong>' + row.totalSeriesScore + '</strong></td>';
+                    html += '<td class="text-center">' + row.totalXCount + '</td>';
+                    html += '</tr>';
+                });
+
+                html += '</tbody></table></div></div>';
+            });
+
+            return html;
+        }
+
+        function renderClubSection(section, competitions) {
+            let html = '';
+
+            // Detect if any cell uses points different from score (placement scoring)
+            let usesPoints = false;
+            section.classStandings.forEach(function(classGroup) {
+                classGroup.rows.forEach(function(row) {
+                    row.competitionScores.forEach(function(cell) {
+                        if (cell.points !== null && cell.points !== undefined && cell.score !== null && cell.points !== cell.score) {
+                            usesPoints = true;
+                        }
+                    });
+                });
+            });
+
+            section.classStandings.forEach(function(classGroup) {
+                if (classGroup.rows.length === 0) return;
+
+                html += '<div class="mb-4">';
+                html += '<h5 class="bg-light p-2 rounded">' + escapeHtmlSeries(classGroup.className) + '</h5>';
+                html += '<div class="table-responsive">';
+                html += '<table class="table table-sm table-striped table-hover mb-0">';
+                html += '<thead><tr>';
+                html += '<th style="width:50px">#</th>';
+                html += '<th>Klubb</th>';
+                competitions.forEach(function(comp) {
+                    const shortName = comp.name.length > 15 ? comp.name.substring(0, 15) + '...' : comp.name;
+                    html += '<th class="text-center" title="' + escapeHtmlSeries(comp.name) + '">' + escapeHtmlSeries(shortName) + '</th>';
+                });
+                html += '<th class="text-center"><strong>Totalt</strong></th>';
+                html += '</tr></thead>';
+                html += '<tbody>';
+
+                classGroup.rows.forEach(function(row) {
+                    html += '<tr>';
+                    html += '<td><strong>' + row.rank + '</strong></td>';
+                    html += '<td>' + escapeHtmlSeries(row.name) + '</td>';
+
+                    row.competitionScores.forEach(function(cell) {
+                        if (cell.score === null || cell.score === undefined) {
+                            html += '<td class="text-center text-muted">-</td>';
+                        } else if (!cell.counting) {
+                            // Non-counting cell (bestOf) - dimmed with strikethrough
+                            const display = usesPoints && cell.points !== null ? cell.points : cell.score;
+                            html += '<td class="text-center" style="opacity:0.4;text-decoration:line-through;">' + display + '</td>';
+                        } else if (usesPoints && cell.points !== null && cell.points !== undefined) {
+                            // Placement scoring: show points with raw score as tooltip
+                            html += '<td class="text-center" title="Lagsumma: ' + cell.score + '">' + cell.points + '</td>';
+                        } else {
+                            html += '<td class="text-center">' + cell.score + '</td>';
+                        }
+                    });
+
+                    html += '<td class="text-center"><strong>' + row.totalSeriesScore + '</strong></td>';
+                    html += '</tr>';
+                });
+
+                html += '</tbody></table></div></div>';
+            });
+
+            return html;
+        }
+
+        function escapeHtmlSeries(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    })();
+    </text>
 }
 </script>

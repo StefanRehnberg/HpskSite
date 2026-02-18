@@ -120,11 +120,6 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
-                <div id="editFormErrors" class="alert alert-danger d-none mt-3" role="alert">
-                    <strong>Fel vid sparning:</strong>
-                    <ul id="errorList" class="mb-0 mt-2"></ul>
-                </div>
-
                 <form id="competitionEditForm">
                     <input type="hidden" id="competitionId" name="competitionId" value="@(competition?.Id ?? 0)">
                     <div class="row">
@@ -464,6 +459,11 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                         </div>
                     </div>
                 </form>
+
+                <div id="editFormErrors" class="alert alert-danger d-none mb-0 mt-3" role="alert">
+                    <strong>Fel vid sparning:</strong>
+                    <ul id="errorList" class="mb-0 mt-2"></ul>
+                </div>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
@@ -783,6 +783,8 @@ window.populateEditModal = function(competition) {
     const seriesDropdown = document.getElementById('competitionSeriesId');
     if (seriesDropdown) {
         seriesDropdown.dataset.pendingValue = seriesId;
+        // Store original series ID for detecting changes on save
+        seriesDropdown.dataset.originalSeriesId = seriesId;
     }
 
     // Status dropdown
@@ -882,6 +884,10 @@ function saveCompetition() {
         }
     }
 
+    // Remove seriesId from fields — it's not a content property, handled via Move after save
+    const newSeriesId = fields.seriesId || '';
+    delete fields.seriesId;
+
     // Handle competitionManagers - convert from hidden field to array of integers
     const managerIdsStr = document.getElementById('comp_competitionManagers_ids').value || '';
     const managerIds = managerIdsStr.split(',')
@@ -959,6 +965,48 @@ function saveCompetition() {
 
         if (data.success) {
             document.getElementById('editFormErrors').classList.add('d-none');
+
+            // Check if series assignment changed — if so, move the competition
+            const seriesDropdown = document.getElementById('competitionSeriesId');
+            const originalSeriesId = seriesDropdown ? (seriesDropdown.dataset.originalSeriesId || '') : '';
+            const seriesChanged = !isNewCompetition && String(newSeriesId) !== String(originalSeriesId);
+
+            if (seriesChanged) {
+                // Move competition to new series (or out of series)
+                fetch('/umbraco/surface/CompetitionAdmin/MoveCompetitionToSeries', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value
+                    },
+                    body: JSON.stringify({
+                        competitionId: competitionId,
+                        seriesId: newSeriesId ? parseInt(newSeriesId) : null
+                    })
+                })
+                .then(r => r.json())
+                .then(moveData => {
+                    if (moveData.success) {
+                        showNotification('Tävlingen uppdaterades och flyttades till vald serie!', 'success');
+                    } else {
+                        showNotification('Tävlingen sparades men kunde inte flyttas till serien: ' + (moveData.message || ''), 'warning');
+                    }
+                    bootstrap.Modal.getInstance(editModal).hide();
+                    if (typeof loadCompetitionsList === 'function') {
+                        setTimeout(() => loadCompetitionsList(), 500);
+                    }
+                })
+                .catch(err => {
+                    console.error('Error moving competition to series:', err);
+                    showNotification('Tävlingen sparades men serieflyttning misslyckades', 'warning');
+                    bootstrap.Modal.getInstance(editModal).hide();
+                    if (typeof loadCompetitionsList === 'function') {
+                        setTimeout(() => loadCompetitionsList(), 500);
+                    }
+                });
+                return; // Don't run the normal success flow below
+            }
+
             const message = isNewCompetition ? 'Tävlingen skapades framgångsrikt!' : 'Tävlingen uppdaterades framgångsrikt!';
             showNotification(message, 'success');
             bootstrap.Modal.getInstance(editModal).hide();
@@ -985,7 +1033,9 @@ function saveCompetition() {
                 errorList.appendChild(li);
             }
             
-            document.getElementById('editFormErrors').classList.remove('d-none');
+            const errDiv = document.getElementById('editFormErrors');
+            errDiv.classList.remove('d-none');
+            errDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
     })
     .catch(error => {

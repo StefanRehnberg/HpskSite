@@ -45,6 +45,7 @@ namespace HpskSite.Controllers
         private readonly ILogger<CompetitionResultsController> _logger;
         private readonly UmbracoStartListRepository _startListRepository;
         private readonly ClubService _clubService;
+        private readonly SeriesCalculationService _seriesCalculationService;
 
         public CompetitionResultsController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -60,7 +61,8 @@ namespace HpskSite.Controllers
             IAntiforgery antiforgery,
             ILogger<CompetitionResultsController> logger,
             UmbracoStartListRepository startListRepository,
-            ClubService clubService)
+            ClubService clubService,
+            SeriesCalculationService seriesCalculationService)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _contentService = contentService;
@@ -73,6 +75,7 @@ namespace HpskSite.Controllers
             _logger = logger;
             _startListRepository = startListRepository;
             _clubService = clubService;
+            _seriesCalculationService = seriesCalculationService;
         }
 
         [HttpPost]
@@ -156,6 +159,16 @@ namespace HpskSite.Controllers
 
                 // Update or create session
                 await UpdateOrCreateSession(request);
+
+                // Invalidate series results cache (if competition is part of a series)
+                try
+                {
+                    _seriesCalculationService.InvalidateCacheForCompetition(request.CompetitionId);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to invalidate series cache after result save, continuing");
+                }
 
                 // Update the live leaderboard in Umbraco content
                 _logger.LogInformation("Attempting to update live leaderboard for competition {CompetitionId}", request.CompetitionId);
@@ -415,6 +428,16 @@ namespace HpskSite.Controllers
                         Success = false,
                         Message = "Inget resultat hittades att ta bort."
                     });
+                }
+
+                // Invalidate series results cache (if competition is part of a series)
+                try
+                {
+                    _seriesCalculationService.InvalidateCacheForCompetition(request.CompetitionId);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to invalidate series cache after result delete, continuing");
                 }
 
                 // Update the live leaderboard in Umbraco content

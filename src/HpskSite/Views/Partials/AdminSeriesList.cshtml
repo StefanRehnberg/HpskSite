@@ -326,10 +326,13 @@ function renderSeries() {
         const dateRange = formatDateRange(series.startDate, series.endDate);
         const shortDesc = series.shortDescription || '';
         const organizer = getSeriesOrganizerDisplay(series);
+        const strategyBadge = series.seriesCalculationStrategy
+            ? ' <span class="badge bg-info ms-1" title="Serieresultat konfigurerad"><i class="bi bi-bar-chart"></i></span>'
+            : '';
 
         return template
             .replace(/{id}/g, series.id)
-            .replace(/{name}/g, escapeHtml(series.name))
+            .replace(/{name}/g, escapeHtml(series.name) + strategyBadge)
             .replace(/{shortDescription}/g, shortDesc ? escapeHtml(shortDesc) : '<em>Ingen beskrivning</em>')
             .replace(/{organizer}/g, organizer)
             .replace(/{dateRange}/g, dateRange)
@@ -408,6 +411,11 @@ window.openCreateSeriesModal = function() {
     if (clubSelect) { clubSelect.value = ''; clubSelect.disabled = false; }
     if (regionSelect) { regionSelect.value = ''; regionSelect.disabled = false; }
 
+    // Reset strategy fields
+    if (typeof populateSeriesStrategy === 'function') {
+        populateSeriesStrategy('', '');
+    }
+
     const modalLabel = document.getElementById('seriesEditModalLabel');
     modalLabel.innerHTML = '<i class="bi bi-plus-circle me-2"></i>Ny serie';
 
@@ -485,6 +493,14 @@ window.openSeriesEditModal = function(seriesId) {
                     regionSelect.value = series.regionalFederation || '';
                     // Disable region if club is selected
                     regionSelect.disabled = (series.clubId && series.clubId > 0);
+                }
+
+                // Populate strategy fields
+                if (typeof populateSeriesStrategy === 'function') {
+                    populateSeriesStrategy(
+                        series.seriesCalculationStrategy || '',
+                        series.seriesCalculationConfig || ''
+                    );
                 }
 
                 const modalLabel = document.getElementById('seriesEditModalLabel');
