@@ -125,7 +125,7 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.Strategies
             return new SeriesResultData
             {
                 StrategyId = Id,
-                StrategyName = Name,
+                StrategyName = $"Individuellt bästa {bestOf}",
                 CalculatedAt = DateTime.UtcNow,
                 Competitions = context.Competitions,
                 Sections = new List<SeriesResultSection>
