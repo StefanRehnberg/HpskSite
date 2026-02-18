@@ -12,25 +12,41 @@
 <!-- CKEditor 5 Rich Text Editor -->
 <script src="https://cdn.ckeditor.com/ckeditor5/41.0.0/classic/ckeditor.js"></script>
 
+<!-- CKEditor dark mode support -->
+<style>
+[data-bs-theme="dark"] #seriesEditModal .ck.ck-editor__main > .ck-editor__editable {
+    background-color: var(--bs-body-bg);
+    color: var(--bs-body-color);
+    border-color: var(--bs-border-color);
+}
+[data-bs-theme="dark"] #seriesEditModal .ck.ck-toolbar {
+    background-color: var(--bs-tertiary-bg);
+    border-color: var(--bs-border-color);
+}
+[data-bs-theme="dark"] #seriesEditModal .ck.ck-toolbar .ck-button {
+    color: var(--bs-body-color);
+}
+[data-bs-theme="dark"] #seriesEditModal .ck.ck-toolbar .ck-button:hover {
+    background-color: var(--bs-secondary-bg);
+}
+[data-bs-theme="dark"] #seriesEditModal .ck.ck-editor__editable.ck-focused {
+    border-color: var(--bs-primary);
+}
+</style>
+
 <div class="modal fade" id="seriesEditModal" tabindex="-1" role="dialog">
     <div class="modal-dialog modal-xl" role="document">
         <div class="modal-content">
             <!-- Modal Header -->
-            <div class="modal-header bg-primary text-white">
+            <div class="modal-header">
                 <h5 class="modal-title" id="seriesEditModalLabel">
                     <i class="bi bi-plus-circle me-2"></i>New Series
                 </h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
 
             <!-- Modal Body -->
             <div class="modal-body">
-                <!-- Error Alert -->
-                <div class="alert alert-danger d-none" id="seriesEditFormErrors" role="alert">
-                    <strong>Validation Errors:</strong>
-                    <ul id="seriesErrorList" class="mb-0"></ul>
-                </div>
-
                 <!-- Series Form -->
                 <form id="seriesEditForm">
                     <!-- Hidden fields -->
@@ -40,6 +56,34 @@
                     <div class="mb-3">
                         <label for="seriesName" class="form-label">Series Name <span class="text-danger">*</span></label>
                         <input type="text" class="form-control" id="seriesName" name="seriesName" required>
+                    </div>
+
+                    <!-- Arrangör / Synlighet -->
+                    <div class="card mb-3 border-primary">
+                        <div class="card-body">
+                            <h6 class="card-title"><i class="bi bi-building me-1"></i>Arrangör / Synlighet</h6>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="seriesClubId" class="form-label">Ansvarig klubb</label>
+                                        <select class="form-select" id="seriesClubId" name="clubId" onchange="onSeriesClubChange()">
+                                            <option value="">-- Ingen klubb (nationell/krets) --</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="seriesRegionalFederation" class="form-label">Krets (endast om ingen klubb)</label>
+                                        <select class="form-select" id="seriesRegionalFederation" name="regionalFederation" onchange="onSeriesRegionChange()">
+                                            <option value="">-- Nationell --</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                            <small class="form-text text-muted" id="seriesOrganizerHelpText">
+                                Välj vilken klubb eller krets som arrangerar serien. Lämna tomt för nationella serier.
+                            </small>
+                        </div>
                     </div>
 
                     <!-- Short Description -->
@@ -92,13 +136,19 @@
                         </div>
                     </div>
                 </form>
+
+                <!-- Error Alert -->
+                <div class="alert alert-danger d-none mb-0 mt-3" id="seriesEditFormErrors" role="alert">
+                    <strong>Fel vid sparning:</strong>
+                    <ul id="seriesErrorList" class="mb-0"></ul>
+                </div>
             </div>
 
             <!-- Modal Footer -->
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
                 <button type="button" class="btn btn-primary" id="saveSeriesBtn" onclick="saveSeries()">
-                    <i class="bi bi-check-circle me-1"></i>Save Series
+                    <i class="bi bi-check-circle me-1"></i>Spara serie
                 </button>
             </div>
         </div>
@@ -109,6 +159,10 @@
 let editorInstance = null;  // Global reference to CKEditor instance
 
 document.addEventListener('DOMContentLoaded', function() {
+    // Load clubs and regions for organizer dropdowns
+    loadClubsForSeries();
+    loadRegionsForSeries();
+
     // Initialize CKEditor 5
     ClassicEditor
         .create(document.getElementById('seriesDescription'), {
@@ -163,6 +217,74 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 });
 
+// Load clubs into series organizer dropdown
+function loadClubsForSeries() {
+    fetch('/umbraco/surface/ClubAdmin/GetClubsForRegistration')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.clubs) {
+                const select = document.getElementById('seriesClubId');
+                select.innerHTML = '<option value="">-- Ingen klubb (nationell/krets) --</option>';
+                data.clubs.forEach(club => {
+                    const option = document.createElement('option');
+                    option.value = club.id;
+                    option.textContent = club.name;
+                    select.appendChild(option);
+                });
+            }
+        })
+        .catch(error => console.error('Error loading clubs for series:', error));
+}
+
+// Load regions into series organizer dropdown
+function loadRegionsForSeries() {
+    fetch('/umbraco/surface/RegionalAdmin/GetAllRegions')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.regions) {
+                const select = document.getElementById('seriesRegionalFederation');
+                select.innerHTML = '<option value="">-- Nationell --</option>';
+                data.regions.forEach(region => {
+                    const option = document.createElement('option');
+                    option.value = region.id;
+                    option.textContent = region.name;
+                    select.appendChild(option);
+                });
+            }
+        })
+        .catch(error => console.error('Error loading regions for series:', error));
+}
+
+// Handle club selection change - disable region if club is selected
+function onSeriesClubChange() {
+    const clubSelect = document.getElementById('seriesClubId');
+    const regionSelect = document.getElementById('seriesRegionalFederation');
+    const helpText = document.getElementById('seriesOrganizerHelpText');
+
+    if (clubSelect.value) {
+        regionSelect.value = '';
+        regionSelect.disabled = true;
+        helpText.textContent = 'Serien kopplas till vald klubb och dess krets.';
+    } else {
+        regionSelect.disabled = false;
+        helpText.textContent = 'Välj vilken klubb eller krets som arrangerar serien. Lämna tomt för nationella serier.';
+    }
+}
+
+// Handle region selection change
+function onSeriesRegionChange() {
+    const clubSelect = document.getElementById('seriesClubId');
+    const regionSelect = document.getElementById('seriesRegionalFederation');
+    const helpText = document.getElementById('seriesOrganizerHelpText');
+
+    if (regionSelect.value) {
+        clubSelect.value = '';
+        helpText.textContent = 'Serien kopplas till vald krets.';
+    } else {
+        helpText.textContent = 'Välj vilken klubb eller krets som arrangerar serien. Lämna tomt för nationella serier.';
+    }
+}
+
 // Save series (create or update)
 function saveSeries() {
     const form = document.getElementById('seriesEditForm');
@@ -192,6 +314,12 @@ function saveSeries() {
         if (key === 'seriesDescription') {
             // Use CKEditor HTML content (already synced to textarea in saveSeries())
             fields[key] = value;
+        } else if (key === 'clubId') {
+            fields[key] = value || '';
+        } else if (key === 'regionalFederation') {
+            // Read from select, respecting disabled state
+            const regionSelect = document.getElementById('seriesRegionalFederation');
+            fields[key] = regionSelect.disabled ? '' : (regionSelect.value || '');
         } else if (key === 'showInMenu') {
             fields[key] = value === 'on' || value === 'true';
         } else if (key === 'isActive') {
@@ -207,6 +335,15 @@ function saveSeries() {
         } else {
             fields[key] = value;
         }
+    }
+
+    // Ensure organizer fields are always included (disabled selects are excluded from FormData)
+    if (!('clubId' in fields)) {
+        fields['clubId'] = document.getElementById('seriesClubId').value || '';
+    }
+    if (!('regionalFederation' in fields)) {
+        const regionSelect = document.getElementById('seriesRegionalFederation');
+        fields['regionalFederation'] = regionSelect.disabled ? '' : (regionSelect.value || '');
     }
 
     const seriesId = parseInt(document.getElementById('seriesId').value) || 0;
@@ -276,7 +413,9 @@ function saveSeries() {
                 errorList.appendChild(li);
             }
 
-            document.getElementById('seriesEditFormErrors').classList.remove('d-none');
+            const errDiv = document.getElementById('seriesEditFormErrors');
+            errDiv.classList.remove('d-none');
+            errDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
     })
     .catch(error => {
@@ -288,7 +427,9 @@ function saveSeries() {
         const li = document.createElement('li');
         li.textContent = error.message;
         errorList.appendChild(li);
-        document.getElementById('seriesEditFormErrors').classList.remove('d-none');
+        const errDiv = document.getElementById('seriesEditFormErrors');
+        errDiv.classList.remove('d-none');
+        errDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     });
 }
 

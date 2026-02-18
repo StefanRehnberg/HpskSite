@@ -32,7 +32,7 @@
                 </div>
                 <div class="col-md-8">
                     <small class="text-muted">
-                        Välj en krets för att visa endast serier som innehåller tävlingar från klubbar i den kretsen
+                        Filtrera serier baserat på deras tilldelade krets
                     </small>
                 </div>
             </div>
@@ -50,6 +50,7 @@
             <thead class="table-light">
                 <tr>
                     <th>Namn</th>
+                    <th>Arrangör</th>
                     <th>Period</th>
                     <th>Status</th>
                     <th class="text-center">Tävlingar</th>
@@ -58,7 +59,7 @@
             </thead>
             <tbody id="seriesTableBody">
                 <tr class="text-muted">
-                    <td colspan="5" class="text-center py-4">Laddar serier...</td>
+                    <td colspan="6" class="text-center py-4">Laddar serier...</td>
                 </tr>
             </tbody>
         </table>
@@ -86,6 +87,7 @@
             <strong>{name}</strong><br>
             <small class="text-muted">{shortDescription}</small>
         </td>
+        <td>{organizer}</td>
         <td>
             <strong>{dateRange}</strong>
         </td>
@@ -112,9 +114,13 @@
 let seriesListLoaded = false;
 let allSeries = [];
 let seriesRegionFilter = ''; // Region filter state for series
+let seriesClubLookup = {}; // Map of clubId -> clubName for organizer display
 
 function initSeriesList() {
     const seriesTab = document.getElementById('series-tab');
+
+    // Load club lookup for organizer display
+    loadSeriesClubLookup();
 
     // Load immediately if series tab is active
     // loadSeriesRegions() will call loadSeriesList() after setting up filters
@@ -132,6 +138,20 @@ function initSeriesList() {
             }
         });
     }
+}
+
+// Load club names for organizer display in table
+function loadSeriesClubLookup() {
+    fetch('/umbraco/surface/ClubAdmin/GetClubsForRegistration')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.clubs) {
+                data.clubs.forEach(club => {
+                    seriesClubLookup[club.id] = club.name;
+                });
+            }
+        })
+        .catch(error => console.error('Error loading clubs for series lookup:', error));
 }
 
 // Initialize - handle both cases: DOMContentLoaded not yet fired, or already fired
@@ -269,7 +289,7 @@ function loadSeriesList() {
             if (!data.success) {
                 errorMessage.textContent = data.message || 'Kunde inte ladda serier';
                 errorAlert.classList.remove('d-none');
-                tbody.innerHTML = '<tr class="text-muted"><td colspan="5" class="text-center py-4">Fel vid laddning av serier</td></tr>';
+                tbody.innerHTML = '<tr class="text-muted"><td colspan="6" class="text-center py-4">Fel vid laddning av serier</td></tr>';
                 return;
             }
 
@@ -297,7 +317,7 @@ function renderSeries() {
     const template = document.getElementById('series-row-template').innerHTML;
 
     if (allSeries.length === 0) {
-        tbody.innerHTML = '<tr class="text-muted"><td colspan="5" class="text-center py-4">Inga serier hittades</td></tr>';
+        tbody.innerHTML = '<tr class="text-muted"><td colspan="6" class="text-center py-4">Inga serier hittades</td></tr>';
         return;
     }
 
@@ -305,11 +325,13 @@ function renderSeries() {
         const statusInfo = getStatusInfo(series.isActive);
         const dateRange = formatDateRange(series.startDate, series.endDate);
         const shortDesc = series.shortDescription || '';
+        const organizer = getSeriesOrganizerDisplay(series);
 
         return template
             .replace(/{id}/g, series.id)
             .replace(/{name}/g, escapeHtml(series.name))
             .replace(/{shortDescription}/g, shortDesc ? escapeHtml(shortDesc) : '<em>Ingen beskrivning</em>')
+            .replace(/{organizer}/g, organizer)
             .replace(/{dateRange}/g, dateRange)
             .replace(/{statusClass}/g, statusInfo.badgeClass)
             .replace(/{statusText}/g, statusInfo.text)
@@ -354,6 +376,20 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+function getSeriesOrganizerDisplay(series) {
+    if (series.clubId && series.clubId > 0) {
+        const clubName = seriesClubLookup[series.clubId];
+        if (clubName) {
+            return '<span class="badge bg-primary">' + escapeHtml(clubName) + '</span>';
+        }
+        return '<span class="badge bg-primary">Klubb #' + series.clubId + '</span>';
+    }
+    if (series.regionalFederation) {
+        return '<span class="badge bg-info">' + escapeHtml(series.regionalFederation) + '</span>';
+    }
+    return '<span class="badge bg-secondary">Nationell</span>';
+}
+
 // Open create modal for new series
 window.openCreateSeriesModal = function() {
     console.log('Opening create series modal');
@@ -365,6 +401,12 @@ window.openCreateSeriesModal = function() {
     document.getElementById('seriesEndDate').value = '';
     document.getElementById('showInMenu').checked = false;
     document.getElementById('isActive').value = 'true';
+
+    // Reset organizer fields
+    const clubSelect = document.getElementById('seriesClubId');
+    const regionSelect = document.getElementById('seriesRegionalFederation');
+    if (clubSelect) { clubSelect.value = ''; clubSelect.disabled = false; }
+    if (regionSelect) { regionSelect.value = ''; regionSelect.disabled = false; }
 
     const modalLabel = document.getElementById('seriesEditModalLabel');
     modalLabel.innerHTML = '<i class="bi bi-plus-circle me-2"></i>Ny serie';
@@ -431,6 +473,19 @@ window.openSeriesEditModal = function(seriesId) {
 
                 document.getElementById('showInMenu').checked = series.showInMenu;
                 document.getElementById('isActive').value = series.isActive ? 'true' : 'false';
+
+                // Populate organizer fields
+                const clubSelect = document.getElementById('seriesClubId');
+                const regionSelect = document.getElementById('seriesRegionalFederation');
+                if (clubSelect) {
+                    clubSelect.value = (series.clubId && series.clubId > 0) ? series.clubId.toString() : '';
+                    clubSelect.disabled = false;
+                }
+                if (regionSelect) {
+                    regionSelect.value = series.regionalFederation || '';
+                    // Disable region if club is selected
+                    regionSelect.disabled = (series.clubId && series.clubId > 0);
+                }
 
                 const modalLabel = document.getElementById('seriesEditModalLabel');
                 modalLabel.innerHTML = '<i class="bi bi-pencil me-2"></i>Redigera serie';
