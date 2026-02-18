@@ -354,7 +354,7 @@ namespace HpskSite.Controllers
 
                 // Apply server-side filters
                 var filteredCompetitions = allCompetitions
-                    .Where(comp => isSiteAdmin || managedClubIds.Contains(comp.GetValue<int?>("clubId") ?? 0) || skjutledareClubIds.Contains(comp.GetValue<int?>("clubId") ?? 0))
+                    .Where(comp => isSiteAdmin || isRegionalAdmin || managedClubIds.Contains(comp.GetValue<int?>("clubId") ?? 0) || skjutledareClubIds.Contains(comp.GetValue<int?>("clubId") ?? 0))
                     .Where(comp =>
                     {
                         var compDate = comp.GetValue<DateTime?>("competitionDate");
@@ -674,8 +674,16 @@ namespace HpskSite.Controllers
                 }
             }
 
-            // Allow if Site Admin OR Club Admin OR Skjutledare for this club
+            // Check Regional Admin
+            bool isRegionalAdmin = false;
             if (!isSiteAdmin && !isClubAdmin && !isSkjutledare)
+            {
+                var managedRegions = await _authorizationService.GetManagedRegions();
+                isRegionalAdmin = managedRegions.Any();
+            }
+
+            // Allow if Site Admin OR Club Admin OR Skjutledare OR Regional Admin
+            if (!isSiteAdmin && !isClubAdmin && !isSkjutledare && !isRegionalAdmin)
             {
                 return Ok(new { success = false, message = "Access denied" });
             }
@@ -2101,36 +2109,92 @@ namespace HpskSite.Controllers
                     return Ok(cachedResult);
                 }
 
-                // OPTIMIZED: Use flat descendants (iterative BFS) instead of recursive
-                var allContent = new List<Umbraco.Cms.Core.Models.IContent>();
-                var rootContent = _contentService.GetRootContent();
-                foreach (var root in rootContent)
+                // Find the competitionsHub — only traverse competition content, not the entire site
+                var rootContent = _contentService.GetRootContent().FirstOrDefault();
+                if (rootContent == null)
                 {
-                    allContent.AddRange(GetFlatDescendants(root));
+                    return Ok(new { success = true, data = new List<object>() });
                 }
 
-                // Get all series
-                var allSeries = allContent
+                // Look for competitionsHub in direct children first, then one level deeper (regional pages)
+                Umbraco.Cms.Core.Models.IContent? competitionsHub = null;
+                var rootChildren = _contentService.GetPagedChildren(rootContent.Id, 0, int.MaxValue, out _);
+                foreach (var child in rootChildren)
+                {
+                    if (child.ContentType.Alias == "competitionsHub")
+                    {
+                        competitionsHub = child;
+                        break;
+                    }
+                }
+                if (competitionsHub == null)
+                {
+                    // Check one level deeper (e.g., under regional pages)
+                    foreach (var child in rootChildren)
+                    {
+                        var grandChildren = _contentService.GetPagedChildren(child.Id, 0, int.MaxValue, out _);
+                        competitionsHub = grandChildren.FirstOrDefault(c => c.ContentType.Alias == "competitionsHub");
+                        if (competitionsHub != null) break;
+                    }
+                }
+                if (competitionsHub == null)
+                {
+                    return Ok(new { success = true, data = new List<object>() });
+                }
+
+                // Get series (direct children of competitionsHub)
+                var allSeries = _contentService.GetPagedChildren(competitionsHub.Id, 0, int.MaxValue, out _)
                     .Where(x => x.ContentType.Alias == "competitionSeries")
                     .ToList();
 
-                // Get all competitions with their parent (series) ID and club ID
-                var allCompetitions = allContent
-                    .Where(x => x.ContentType.Alias == "competition")
-                    .ToList();
+                // Get competitions (children of each series)
+                var allCompetitions = new List<Umbraco.Cms.Core.Models.IContent>();
+                foreach (var series in allSeries)
+                {
+                    var comps = _contentService.GetPagedChildren(series.Id, 0, int.MaxValue, out _)
+                        .Where(x => x.ContentType.Alias == "competition");
+                    allCompetitions.AddRange(comps);
+                }
 
-                // OPTIMIZED: Pre-calculate competition counts per series (by ParentId) - eliminates N+1
+                // Pre-calculate competition counts per series
                 var competitionCountsByParent = allCompetitions
                     .GroupBy(x => x.ParentId)
                     .ToDictionary(g => g.Key, g => g.Count());
 
-                // Build club -> region lookup for region filtering
-                var clubRegionLookup = allContent
-                    .Where(x => x.ContentType.Alias == "club")
-                    .ToDictionary(
+                // Build club -> region lookup for region filtering (only needed for regional admins)
+                Dictionary<int, string> clubRegionLookup;
+                if (!string.IsNullOrEmpty(effectiveRegion) || (effectiveRegions != null && effectiveRegions.Any()))
+                {
+                    // Only load clubs if we need region filtering
+                    var clubNodes = new List<Umbraco.Cms.Core.Models.IContent>();
+                    var children = _contentService.GetPagedChildren(rootContent.Id, 0, int.MaxValue, out _);
+                    foreach (var child in children)
+                    {
+                        if (child.ContentType.Alias == "clubsPage" || child.ContentType.Alias == "regionalPage")
+                        {
+                            var subChildren = _contentService.GetPagedChildren(child.Id, 0, int.MaxValue, out _);
+                            foreach (var sub in subChildren)
+                            {
+                                if (sub.ContentType.Alias == "club")
+                                    clubNodes.Add(sub);
+                                else if (sub.ContentType.Alias == "clubsPage")
+                                {
+                                    clubNodes.AddRange(
+                                        _contentService.GetPagedChildren(sub.Id, 0, int.MaxValue, out _)
+                                            .Where(c => c.ContentType.Alias == "club"));
+                                }
+                            }
+                        }
+                    }
+                    clubRegionLookup = clubNodes.ToDictionary(
                         x => x.Id,
                         x => x.GetValue<string>("regionalFederation") ?? ""
                     );
+                }
+                else
+                {
+                    clubRegionLookup = new Dictionary<int, string>();
+                }
 
                 // If region filter is applied, find series that have at least one competition from that region
                 HashSet<int>? seriesIdsWithRegion = null;
@@ -2188,7 +2252,16 @@ namespace HpskSite.Controllers
 
                 var now = DateTime.Now;
                 var seriesData = allSeries
-                    .Where(series => seriesIdsWithRegion == null || seriesIdsWithRegion.Contains(series.Id))
+                    .Where(series =>
+                    {
+                        // No region filter — show all
+                        if (seriesIdsWithRegion == null) return true;
+                        // Series has matching competitions
+                        if (seriesIdsWithRegion.Contains(series.Id)) return true;
+                        // Empty series — always show (newly created, no competitions yet)
+                        if (!competitionCountsByParent.ContainsKey(series.Id)) return true;
+                        return false;
+                    })
                     .Select(series => new
                     {
                         id = series.Id,
@@ -2264,7 +2337,15 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> CreateSeries([FromBody] CreateSeriesRequest request)
         {
-            if (!await _authorizationService.IsCurrentUserAdminAsync())
+            // AUTHORIZATION: Site Admin OR Regional Admin
+            bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
+            bool isRegionalAdmin = false;
+            if (!isSiteAdmin)
+            {
+                var managedRegions = await _authorizationService.GetManagedRegions();
+                isRegionalAdmin = managedRegions.Any();
+            }
+            if (!isSiteAdmin && !isRegionalAdmin)
             {
                 return Ok(new { success = false, message = "Access denied" });
             }
@@ -2380,7 +2461,15 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> UpdateSeries([FromBody] UpdateSeriesRequest request)
         {
-            if (!await _authorizationService.IsCurrentUserAdminAsync())
+            // AUTHORIZATION: Site Admin OR Regional Admin
+            bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
+            bool isRegionalAdmin = false;
+            if (!isSiteAdmin)
+            {
+                var managedRegions = await _authorizationService.GetManagedRegions();
+                isRegionalAdmin = managedRegions.Any();
+            }
+            if (!isSiteAdmin && !isRegionalAdmin)
             {
                 return Ok(new { success = false, message = "Access denied" });
             }
@@ -2441,7 +2530,15 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> DeleteSeries([FromBody] DeleteSeriesRequest request)
         {
-            if (!await _authorizationService.IsCurrentUserAdminAsync())
+            // AUTHORIZATION: Site Admin OR Regional Admin
+            bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
+            bool isRegionalAdmin = false;
+            if (!isSiteAdmin)
+            {
+                var managedRegions = await _authorizationService.GetManagedRegions();
+                isRegionalAdmin = managedRegions.Any();
+            }
+            if (!isSiteAdmin && !isRegionalAdmin)
             {
                 return Ok(new { success = false, message = "Access denied" });
             }
@@ -2495,7 +2592,15 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> CopySeriesWithCompetitions([FromBody] CopySeriesRequest request)
         {
-            if (!await _authorizationService.IsCurrentUserAdminAsync())
+            // AUTHORIZATION: Site Admin OR Regional Admin
+            bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
+            bool isRegionalAdmin = false;
+            if (!isSiteAdmin)
+            {
+                var managedRegions = await _authorizationService.GetManagedRegions();
+                isRegionalAdmin = managedRegions.Any();
+            }
+            if (!isSiteAdmin && !isRegionalAdmin)
             {
                 return Ok(new { success = false, message = "Access denied" });
             }

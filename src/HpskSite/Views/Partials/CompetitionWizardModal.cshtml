@@ -783,70 +783,95 @@ function suggestRegistrationDates(competitionDate) {
 let wizardUserRole = '';
 let wizardManagedClubIds = [];
 
-// Load clubs for dropdown (role-aware)
+// Populate club dropdown and apply default club-page behavior
+function populateWizardClubs(clubs) {
+    const select = document.getElementById('wizard_clubId');
+    select.innerHTML = '<option value="">-- Ingen klubb --</option>';
+
+    clubs.forEach(club => {
+        const option = document.createElement('option');
+        option.value = club.id;
+        option.textContent = club.name;
+        select.appendChild(option);
+    });
+
+    // On club pages: pre-select club and lock by default (unlocked later for admins)
+    if (wizardContext.isClubPage && wizardContext.clubId) {
+        select.value = wizardContext.clubId;
+
+        const origOption = select.options[select.selectedIndex];
+        wizardContext.clubName = origOption ? origOption.textContent : '';
+
+        // Default: lock dropdown (will be unlocked by applyClubPageContext if admin)
+        select.disabled = true;
+        document.getElementById('wizard_regionalFederation').disabled = true;
+
+        const clubName = origOption ? origOption.textContent : '';
+        const lockedInfo = document.getElementById('wizard_clubLockedInfo');
+        const lockedName = document.getElementById('wizard_clubLockedName');
+        if (lockedInfo && lockedName) {
+            lockedName.textContent = clubName;
+            lockedInfo.classList.remove('d-none');
+        }
+
+        document.getElementById('wizard_organizerHelpText').classList.add('d-none');
+        document.getElementById('wizard_isClubOnly').checked = true;
+    }
+}
+
+// Load clubs for dropdown
 function loadClubsForWizard() {
-    fetch('/umbraco/surface/CompetitionAdmin/GetClubsForCompetitionAdmin')
+    // Use public endpoint for club list (always available)
+    fetch('/umbraco/surface/ClubAdmin/GetClubsForRegistration')
         .then(response => response.json())
         .then(data => {
             if (data.success && data.clubs) {
-                // Store role info
-                wizardUserRole = data.role || '';
-                wizardManagedClubIds = data.managedClubIds || [];
-
-                const select = document.getElementById('wizard_clubId');
-                select.innerHTML = '<option value="">-- Ingen klubb --</option>';
-
-                // Clubs are already sorted by sv-SE on the server
-                data.clubs.forEach(club => {
-                    const option = document.createElement('option');
-                    option.value = club.id;
-                    option.textContent = club.name;
-                    select.appendChild(option);
-                });
-
-                // Context-aware: Pre-fill and lock club if on club page (non-admin roles)
-                if (wizardContext.isClubPage && wizardContext.clubId) {
-                    select.value = wizardContext.clubId;
-
-                    // Store the original club name for warning messages
-                    const origOption = select.options[select.selectedIndex];
-                    wizardContext.clubName = origOption ? origOption.textContent : '';
-
-                    if (wizardUserRole !== 'admin') {
-                        // Non-admin: lock dropdown
-                        select.disabled = true;
-
-                        // Show prominent locked info banner on the dedicated organizer step
-                        const selectedOption = select.options[select.selectedIndex];
-                        const clubName = selectedOption ? selectedOption.textContent : '';
-                        const lockedInfo = document.getElementById('wizard_clubLockedInfo');
-                        const lockedName = document.getElementById('wizard_clubLockedName');
-                        if (lockedInfo && lockedName) {
-                            lockedName.textContent = clubName;
-                            lockedInfo.classList.remove('d-none');
-                        }
-
-                        document.getElementById('wizard_organizerHelpText').classList.add('d-none');
-
-                        // Pre-check "isClubOnly" but keep it editable
-                        document.getElementById('wizard_isClubOnly').checked = true;
-
-                        // Also disable region dropdown when on club page
-                        document.getElementById('wizard_regionalFederation').disabled = true;
-                    } else {
-                        // Site admin on club page: pre-fill but keep enabled, with warning on change
-                        document.getElementById('wizard_organizerHelpText').innerHTML =
-                            '<i class="bi bi-building me-1"></i>Tävlingen kopplas till vald klubb och dess krets.';
-                        document.getElementById('wizard_organizerHelpText').classList.remove('alert-light');
-                        document.getElementById('wizard_organizerHelpText').classList.add('alert-info');
-
-                        // Pre-check "isClubOnly"
-                        document.getElementById('wizard_isClubOnly').checked = true;
-                    }
-                }
+                populateWizardClubs(data.clubs);
             }
         })
         .catch(error => console.error('Error loading clubs:', error));
+
+    // Separately fetch role info (optional — enhances behavior on club pages)
+    fetch('/umbraco/surface/CompetitionAdmin/GetClubsForCompetitionAdmin')
+        .then(response => {
+            if (!response.ok) return null;
+            return response.json();
+        })
+        .then(data => {
+            if (data && data.success) {
+                wizardUserRole = data.role || '';
+                wizardManagedClubIds = data.managedClubIds || [];
+                // Re-apply context now that we know the role
+                applyClubPageContext();
+            }
+        })
+        .catch(() => { /* Admin endpoint unavailable — default behavior is fine */ });
+}
+
+// Apply club page context (lock/unlock based on role)
+function applyClubPageContext() {
+    if (!wizardContext.isClubPage || !wizardContext.clubId) return;
+
+    const select = document.getElementById('wizard_clubId');
+    select.value = wizardContext.clubId;
+
+    const origOption = select.options[select.selectedIndex];
+    wizardContext.clubName = origOption ? origOption.textContent : '';
+
+    if (wizardUserRole === 'admin') {
+        // Site admin: keep enabled with info text
+        select.disabled = false;
+        document.getElementById('wizard_regionalFederation').disabled = false;
+        document.getElementById('wizard_organizerHelpText').innerHTML =
+            '<i class="bi bi-building me-1"></i>Tävlingen kopplas till vald klubb och dess krets.';
+        document.getElementById('wizard_organizerHelpText').classList.remove('alert-light');
+        document.getElementById('wizard_organizerHelpText').classList.add('alert-info');
+        document.getElementById('wizard_organizerHelpText').classList.remove('d-none');
+
+        const lockedInfo = document.getElementById('wizard_clubLockedInfo');
+        if (lockedInfo) lockedInfo.classList.add('d-none');
+    }
+    // Non-admin lock is already applied by populateWizardClubs
 }
 
 // Load regions for dropdown
@@ -1253,11 +1278,12 @@ function submitWizard() {
     // Add defaults
     fields.isActive = true;
 
-    // Context-aware: Set clubId and isClubOnly if created from club page
-    if (wizardContext.isClubPage && wizardContext.clubId) {
-        fields.clubId = wizardContext.clubId;
-        fields.isClubOnly = true;
-    }
+    // Use actual dropdown values (user may have changed them)
+    // For disabled dropdowns, FormData won't include them, so read directly
+    const clubSelect = document.getElementById('wizard_clubId');
+    const regionSelect = document.getElementById('wizard_regionalFederation');
+    fields.clubId = clubSelect.value || '';
+    fields.regionalFederation = regionSelect.value || '';
 
     const requestBody = { fields: fields };
 
