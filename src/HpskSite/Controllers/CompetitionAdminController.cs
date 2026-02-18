@@ -2109,92 +2109,43 @@ namespace HpskSite.Controllers
                     return Ok(cachedResult);
                 }
 
-                // Find the competitionsHub — only traverse competition content, not the entire site
+                // Use GetPagedDescendants for a single efficient query (same approach as GetCompetitionsList)
                 var rootContent = _contentService.GetRootContent().FirstOrDefault();
                 if (rootContent == null)
                 {
                     return Ok(new { success = true, data = new List<object>() });
                 }
 
-                // Look for competitionsHub in direct children first, then one level deeper (regional pages)
-                Umbraco.Cms.Core.Models.IContent? competitionsHub = null;
-                var rootChildren = _contentService.GetPagedChildren(rootContent.Id, 0, int.MaxValue, out _);
-                foreach (var child in rootChildren)
-                {
-                    if (child.ContentType.Alias == "competitionsHub")
-                    {
-                        competitionsHub = child;
-                        break;
-                    }
-                }
-                if (competitionsHub == null)
-                {
-                    // Check one level deeper (e.g., under regional pages)
-                    foreach (var child in rootChildren)
-                    {
-                        var grandChildren = _contentService.GetPagedChildren(child.Id, 0, int.MaxValue, out _);
-                        competitionsHub = grandChildren.FirstOrDefault(c => c.ContentType.Alias == "competitionsHub");
-                        if (competitionsHub != null) break;
-                    }
-                }
-                if (competitionsHub == null)
-                {
-                    return Ok(new { success = true, data = new List<object>() });
-                }
-
-                // Get series (direct children of competitionsHub)
-                var allSeries = _contentService.GetPagedChildren(competitionsHub.Id, 0, int.MaxValue, out _)
-                    .Where(x => x.ContentType.Alias == "competitionSeries")
-                    .ToList();
-
-                // Get competitions (children of each series)
+                var allSeries = new List<Umbraco.Cms.Core.Models.IContent>();
                 var allCompetitions = new List<Umbraco.Cms.Core.Models.IContent>();
-                foreach (var series in allSeries)
+                var clubRegionLookup = new Dictionary<int, string>();
+
+                var descendants = _contentService.GetPagedDescendants(rootContent.Id, 0, int.MaxValue, out _);
+                foreach (var item in descendants)
                 {
-                    var comps = _contentService.GetPagedChildren(series.Id, 0, int.MaxValue, out _)
-                        .Where(x => x.ContentType.Alias == "competition");
-                    allCompetitions.AddRange(comps);
+                    if (item.ContentType.Alias == "competitionSeries")
+                    {
+                        allSeries.Add(item);
+                    }
+                    else if (item.ContentType.Alias == "competition")
+                    {
+                        allCompetitions.Add(item);
+                    }
+                    else if (item.ContentType.Alias == "club" &&
+                             (!string.IsNullOrEmpty(effectiveRegion) || (effectiveRegions != null && effectiveRegions.Any())))
+                    {
+                        // Only collect club region info if we need region filtering
+                        if (!clubRegionLookup.ContainsKey(item.Id))
+                        {
+                            clubRegionLookup[item.Id] = item.GetValue<string>("regionalFederation") ?? "";
+                        }
+                    }
                 }
 
                 // Pre-calculate competition counts per series
                 var competitionCountsByParent = allCompetitions
                     .GroupBy(x => x.ParentId)
                     .ToDictionary(g => g.Key, g => g.Count());
-
-                // Build club -> region lookup for region filtering (only needed for regional admins)
-                Dictionary<int, string> clubRegionLookup;
-                if (!string.IsNullOrEmpty(effectiveRegion) || (effectiveRegions != null && effectiveRegions.Any()))
-                {
-                    // Only load clubs if we need region filtering
-                    var clubNodes = new List<Umbraco.Cms.Core.Models.IContent>();
-                    var children = _contentService.GetPagedChildren(rootContent.Id, 0, int.MaxValue, out _);
-                    foreach (var child in children)
-                    {
-                        if (child.ContentType.Alias == "clubsPage" || child.ContentType.Alias == "regionalPage")
-                        {
-                            var subChildren = _contentService.GetPagedChildren(child.Id, 0, int.MaxValue, out _);
-                            foreach (var sub in subChildren)
-                            {
-                                if (sub.ContentType.Alias == "club")
-                                    clubNodes.Add(sub);
-                                else if (sub.ContentType.Alias == "clubsPage")
-                                {
-                                    clubNodes.AddRange(
-                                        _contentService.GetPagedChildren(sub.Id, 0, int.MaxValue, out _)
-                                            .Where(c => c.ContentType.Alias == "club"));
-                                }
-                            }
-                        }
-                    }
-                    clubRegionLookup = clubNodes.ToDictionary(
-                        x => x.Id,
-                        x => x.GetValue<string>("regionalFederation") ?? ""
-                    );
-                }
-                else
-                {
-                    clubRegionLookup = new Dictionary<int, string>();
-                }
 
                 // If region filter is applied, find series that have at least one competition from that region
                 HashSet<int>? seriesIdsWithRegion = null;
