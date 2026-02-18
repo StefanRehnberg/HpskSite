@@ -218,36 +218,87 @@
     // Get current user info for highlighting in registered shooters modal
     var currentMemberName = currentMember?.Name ?? "";
     var currentMemberClub = "";
+    // Registration info computed server-side for performance
+    var regRole = "member";
+    var regMemberId = 0;
+    var regMemberEmail = "";
+    int? regClubId = null;
+    var regClubName = "";
+    var svComparer = StringComparer.Create(new CultureInfo("sv-SE"), ignoreCase: true);
+    var allClubsJson = "[]";
+
     if (currentMember != null)
     {
         var memberData = MemberService.GetByEmail(currentMember.Email ?? "");
         if (memberData != null)
         {
+            regMemberId = memberData.Id;
+            regMemberEmail = memberData.Email ?? "";
             var primaryClubIdStr = memberData.GetValue<string>("primaryClubId");
             if (!string.IsNullOrEmpty(primaryClubIdStr) && int.TryParse(primaryClubIdStr, out int primaryClubId))
             {
-                currentMemberClub = ClubService.GetClubNameById(primaryClubId) ?? "";
+                regClubId = primaryClubId;
+                regClubName = ClubService.GetClubNameById(primaryClubId) ?? "";
+                currentMemberClub = regClubName;
             }
+
+            // Determine role
+            var roles = MemberService.GetAllRoles(memberData.Id)?.ToList() ?? new List<string>();
+            bool isSiteAdmin = await AuthService.IsCurrentUserAdminAsync();
+            bool isClubAdmin = roles.Any(r => r.StartsWith("ClubAdmin_"));
+            bool isSkjutledare = roles.Any(r => r.StartsWith("Skjutledare_"));
+
+            if (isSiteAdmin) regRole = "admin";
+            else if (isClubAdmin) regRole = "clubAdmin";
+            else if (isSkjutledare) regRole = "skjutledare";
+
+            // For club admin / skjutledare without primaryClubId, use role-derived club
+            if (!regClubId.HasValue && isClubAdmin)
+            {
+                var clubAdminRole = roles.First(r => r.StartsWith("ClubAdmin_"));
+                if (int.TryParse(clubAdminRole.Replace("ClubAdmin_", ""), out int cid))
+                {
+                    regClubId = cid;
+                    regClubName = ClubService.GetClubNameById(cid) ?? "";
+                }
+            }
+            if (!regClubId.HasValue && isSkjutledare)
+            {
+                var skjRole = roles.First(r => r.StartsWith("Skjutledare_"));
+                if (int.TryParse(skjRole.Replace("Skjutledare_", ""), out int cid))
+                {
+                    regClubId = cid;
+                    regClubName = ClubService.GetClubNameById(cid) ?? "";
+                }
+            }
+
+            // Build club list for non-member roles (sorted Swedish)
+            if (regRole != "member")
+            {
+                var clubs = ClubService.GetAllClubs()
+                    .Where(c => c.IsActive)
+                    .OrderBy(c => c.Name, svComparer)
+                    .Select(c => new { id = c.Id, name = c.Name })
+                    .ToList();
+                allClubsJson = System.Text.Json.JsonSerializer.Serialize(clubs);
+            }
+            else if (regClubId.HasValue)
+            {
+                // Member only sees own club
+                var ownClub = new[] { new { id = regClubId.Value, name = regClubName } };
+                allClubsJson = System.Text.Json.JsonSerializer.Serialize(ownClub);
+            }
+
+            // Competition management check
+            bool isCompetitionManager = await AuthService.IsCompetitionManager(Model.Id);
+            bool isClubAdminForCompetition = false;
+            var competitionClubId = Model.Value<int>("clubId");
+            if (competitionClubId > 0)
+            {
+                isClubAdminForCompetition = await AuthService.IsClubAdminForClub(competitionClubId);
+            }
+            canManageCompetition = isSiteAdmin || isCompetitionManager || isClubAdminForCompetition;
         }
-    }
-
-    if (currentMember != null)
-    {
-        // Check if user is site admin (using centralized service)
-        bool isSiteAdmin = await AuthService.IsCurrentUserAdminAsync();
-
-        // Check if user is competition manager (using ID-based check)
-        bool isCompetitionManager = await AuthService.IsCompetitionManager(Model.Id);
-
-        // Check if user is club admin for this competition's club
-        bool isClubAdminForCompetition = false;
-        var competitionClubId = Model.Value<int>("clubId");
-        if (competitionClubId > 0)
-        {
-            isClubAdminForCompetition = await AuthService.IsClubAdminForClub(competitionClubId);
-        }
-
-        canManageCompetition = isSiteAdmin || isCompetitionManager || isClubAdminForCompetition;
     }
 }
 
@@ -833,7 +884,16 @@ window.CompetitionConfig = {
     competitionId: @Model.Id,
     allowDualCClassRegistration: @(allowDualCClassRegistration.ToString().ToLower()),
     registrationFee: @(Model.Value<decimal?>("registrationFee") ?? 0),
-    hasSwishNumber: @(hasSwishNumberValue.ToString().ToLower())
+    hasSwishNumber: @(hasSwishNumberValue.ToString().ToLower()),
+    registrationInfo: {
+        role: '@regRole',
+        memberId: @regMemberId,
+        memberName: '@Html.Raw(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(currentMemberName))',
+        email: '@Html.Raw(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(regMemberEmail))',
+        clubId: @(regClubId.HasValue ? regClubId.Value.ToString() : "null"),
+        clubName: '@Html.Raw(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(regClubName))'
+    },
+    clubs: @Html.Raw(allClubsJson)
 };
 
 // Show success/error messages from server

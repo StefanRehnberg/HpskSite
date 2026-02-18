@@ -1278,10 +1278,30 @@ function initializeCClassValidation() {
 // REGISTRATION TARGET MANAGEMENT
 // ============================================================================
 
+// Track if registration target has been initialized (avoid re-init on every modal open)
+let registrationTargetInitialized = false;
+
 // Initialize registration target dropdowns based on user role
 async function initializeRegistrationTarget() {
+    // Skip re-initialization if already done (instant re-open)
+    if (registrationTargetInitialized) return;
+
     try {
-        // Get current user info and role
+        const config = window.CompetitionConfig;
+
+        // Use server-embedded registration info if available (eliminates API call)
+        if (config && config.registrationInfo && config.registrationInfo.memberId) {
+            const info = config.registrationInfo;
+            currentUserRole = info.role;
+            currentMemberId = info.memberId;
+            currentClubId = info.clubId;
+
+            await setupRegistrationTargetUI(info);
+            registrationTargetInitialized = true;
+            return;
+        }
+
+        // Fallback: fetch from API if not embedded
         const response = await fetch('/umbraco/surface/Competition/GetCurrentUserRegistrationInfo', {
             method: 'GET',
             headers: { 'Content-Type': 'application/json' }
@@ -1289,11 +1309,12 @@ async function initializeRegistrationTarget() {
 
         const data = await response.json();
         if (data.success) {
-            currentUserRole = data.role; // 'admin', 'clubAdmin', 'member'
+            currentUserRole = data.role;
             currentMemberId = data.memberId;
             currentClubId = data.clubId;
 
             await setupRegistrationTargetUI(data);
+            registrationTargetInitialized = true;
         } else {
             console.error('Failed to get user registration info:', data.message);
             showRegistrationTargetError('Failed to load user information');
@@ -1308,56 +1329,22 @@ async function setupRegistrationTargetUI(userInfo) {
     const clubSelect = document.getElementById('clubSelect');
     const memberSelect = document.getElementById('memberSelect');
 
-    if (userInfo.role === 'admin') {
-        // Site Admin: Enable both dropdowns, load all clubs
+    if (userInfo.role === 'admin' || userInfo.role === 'clubAdmin' || userInfo.role === 'skjutledare') {
+        // Admin / Club Admin / Skjutledare: Enable both dropdowns, load all clubs
         await loadAllClubs();
 
         clubSelect.disabled = false;
         memberSelect.disabled = false;
         memberSelect.innerHTML = '<option value="">Välj klubb först...</option>';
 
-        // Pre-select current user's club and member if they have one
-        if (userInfo.clubId && userInfo.clubName) {
-            // Wait a moment for clubs to load, then select current user's club
-            setTimeout(async () => {
-                const clubOption = clubSelect.querySelector(`option[value="${userInfo.clubId}"]`);
-                if (clubOption) {
-                    clubSelect.value = userInfo.clubId;
-                    await loadClubMembers(userInfo.clubId);
-                    // Pre-select current user
-                    if (userInfo.memberId) {
-                        memberSelect.value = userInfo.memberId;
-                        selectedTargetMemberId = userInfo.memberId;
-                        updateRegistrationButton();
-                        showSelectedMemberInfo({
-                            id: userInfo.memberId,
-                            name: userInfo.memberName,
-                            clubName: userInfo.clubName,
-                            email: userInfo.email || ''
-                        });
-
-                        // Query registrations for admin's own member ID to show badges
-                        await queryExistingRegistrations();
-                    }
-                } else {
-                    console.warn('Could not find club option for admin club ID:', userInfo.clubId);
-                }
-            }, 100);
-        }
-
-    } else if (userInfo.role === 'clubAdmin') {
-        // Club Admin: Disable club dropdown (pre-selected), enable member dropdown
-        clubSelect.innerHTML = `<option value="${userInfo.clubId}" selected>${userInfo.clubName}</option>`;
-        clubSelect.disabled = true;
-        memberSelect.disabled = false;
-
-        await loadClubMembers(userInfo.clubId);
-
-        // Pre-select current user if they're in the loaded members
-        if (userInfo.memberId) {
-            setTimeout(() => {
-                const memberOption = memberSelect.querySelector(`option[value="${userInfo.memberId}"]`);
-                if (memberOption) {
+        // Pre-select current user's club and load members
+        if (userInfo.clubId) {
+            const clubOption = clubSelect.querySelector(`option[value="${userInfo.clubId}"]`);
+            if (clubOption) {
+                clubSelect.value = userInfo.clubId;
+                await loadClubMembers(userInfo.clubId);
+                // Pre-select current user
+                if (userInfo.memberId) {
                     memberSelect.value = userInfo.memberId;
                     selectedTargetMemberId = userInfo.memberId;
                     updateRegistrationButton();
@@ -1367,8 +1354,9 @@ async function setupRegistrationTargetUI(userInfo) {
                         clubName: userInfo.clubName,
                         email: userInfo.email || ''
                     });
+                    await queryExistingRegistrations();
                 }
-            }, 100);
+            }
         }
 
     } else {
@@ -1395,7 +1383,29 @@ async function setupRegistrationTargetUI(userInfo) {
     }
 }
 
+function populateClubDropdown(clubs) {
+    const clubSelect = document.getElementById('clubSelect');
+    clubSelect.innerHTML = '<option value="">Välj klubb...</option>';
+
+    clubs.forEach(club => {
+        const option = document.createElement('option');
+        option.value = club.id;
+        option.textContent = club.name;
+        clubSelect.appendChild(option);
+    });
+
+    availableClubs = clubs;
+}
+
 async function loadAllClubs() {
+    // Use server-embedded club list if available (no API call needed)
+    const config = window.CompetitionConfig;
+    if (config && config.clubs && config.clubs.length > 0) {
+        populateClubDropdown(config.clubs);
+        return;
+    }
+
+    // Fallback: fetch from API
     try {
         const response = await fetch('/umbraco/surface/Competition/GetClubsForRegistration', {
             method: 'GET',
@@ -1405,17 +1415,9 @@ async function loadAllClubs() {
         const data = await response.json();
 
         if (data.success) {
-            const clubSelect = document.getElementById('clubSelect');
-            clubSelect.innerHTML = '<option value="">Select club...</option>';
-
-            data.clubs.forEach(club => {
-                const option = document.createElement('option');
-                option.value = club.id;
-                option.textContent = club.name;
-                clubSelect.appendChild(option);
-            });
-
-            availableClubs = data.clubs;
+            // Sort with Swedish locale
+            const sorted = data.clubs.sort((a, b) => a.name.localeCompare(b.name, 'sv'));
+            populateClubDropdown(sorted);
         } else {
             console.error('loadAllClubs: API returned error:', data.message);
             showRegistrationTargetError('Failed to load clubs');
@@ -1446,12 +1448,15 @@ async function loadClubMembers(clubId) {
 
         const data = await response.json();
         if (data.success) {
-            memberSelect.innerHTML = '<option value="">Select member...</option>';
+            memberSelect.innerHTML = '<option value="">Välj medlem...</option>';
 
-            data.members.forEach(member => {
+            // Sort members by name in Swedish locale
+            const sortedMembers = data.members.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'sv'));
+
+            sortedMembers.forEach(member => {
                 const option = document.createElement('option');
                 option.value = member.id;
-                option.textContent = `${member.name} (${member.email || 'No email'})`;
+                option.textContent = `${member.name} (${member.email || 'Ingen e-post'})`;
                 memberSelect.appendChild(option);
             });
 

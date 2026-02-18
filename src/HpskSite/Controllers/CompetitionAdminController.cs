@@ -112,6 +112,119 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// Get clubs filtered by the current user's role for competition organizer selection.
+        /// Site admins see all clubs, regional admins see clubs in their regions,
+        /// club admins see their managed clubs, skjutledare see their clubs.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetClubsForCompetitionAdmin()
+        {
+            try
+            {
+                bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
+                var managedClubIds = await _authorizationService.GetManagedClubIds();
+                var skjutledareClubIds = await _authorizationService.GetSkjutledareClubIds();
+
+                // Determine role
+                string role;
+                if (isSiteAdmin)
+                {
+                    role = "admin";
+                }
+                else if ((await _authorizationService.GetManagedRegions()).Any() && !managedClubIds.Any(id => skjutledareClubIds.Contains(id) == false))
+                {
+                    // Check if user has regional admin groups (not just club admin groups that happen to include regional clubs)
+                    role = "regionalAdmin";
+                }
+                else if (managedClubIds.Any())
+                {
+                    role = "clubAdmin";
+                }
+                else if (skjutledareClubIds.Any())
+                {
+                    role = "skjutledare";
+                }
+                else
+                {
+                    return Ok(new { success = false, message = "Access denied" });
+                }
+
+                // Refine role detection: check actual member roles for regional admin
+                if (!isSiteAdmin)
+                {
+                    var managedRegions = await _authorizationService.GetManagedRegions();
+                    if (managedRegions.Any())
+                    {
+                        role = "regionalAdmin";
+                    }
+                }
+
+                // Union of managedClubIds + skjutledareClubIds = clubs where the user won't lose visibility
+                var allManagedIds = new HashSet<int>(managedClubIds);
+                foreach (var id in skjutledareClubIds)
+                {
+                    allManagedIds.Add(id);
+                }
+
+                // Get club details from published content
+                var clubs = new List<object>();
+                if (UmbracoContext.Content != null)
+                {
+                    var root = UmbracoContext.Content.GetAtRoot().FirstOrDefault();
+                    if (root != null)
+                    {
+                        var clubNodes = new List<Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent>();
+
+                        // NEW STRUCTURE: Find clubs under regional pages
+                        var regionalPages = root.Children.Where(c => c.ContentType.Alias == "regionalPage").ToList();
+                        foreach (var regionalPage in regionalPages)
+                        {
+                            var clubsPage = regionalPage.Children.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+                            if (clubsPage != null)
+                            {
+                                clubNodes.AddRange(clubsPage.Children.Where(c => c.ContentType.Alias == "club"));
+                            }
+                        }
+
+                        // BACKWARDS COMPATIBILITY: Also check root-level clubsPage
+                        var rootClubsHub = root.Children.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+                        if (rootClubsHub != null)
+                        {
+                            clubNodes.AddRange(rootClubsHub.Children.Where(c => c.ContentType.Alias == "club"));
+                        }
+
+                        // Filter to only clubs the user can manage (site admins get all)
+                        var filteredClubs = isSiteAdmin
+                            ? clubNodes
+                            : clubNodes.Where(c => allManagedIds.Contains(c.Id)).ToList();
+
+                        clubs = filteredClubs
+                            .Select(c => new
+                            {
+                                id = c.Id,
+                                name = c.Name ?? ""
+                            })
+                            .OrderBy(c => c.name, StringComparer.Create(System.Globalization.CultureInfo.GetCultureInfo("sv-SE"), false))
+                            .Cast<object>()
+                            .ToList();
+                    }
+                }
+
+                return Ok(new
+                {
+                    success = true,
+                    role = role,
+                    managedClubIds = allManagedIds.ToList(),
+                    clubs = clubs
+                });
+            }
+            catch (Exception ex)
+            {
+                return Ok(new { success = false, message = "Error loading clubs: " + ex.Message });
+            }
+        }
+
+        /// <summary>
         /// Get all competition types (hardcoded) - No auth required as it's just static data
         /// </summary>
         [HttpGet]

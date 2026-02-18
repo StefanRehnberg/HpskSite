@@ -889,11 +889,22 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Member data not found" });
                 }
 
-                // Check if user is site admin
+                // Allow site admins, club admins, and skjutledare to load all clubs
                 bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
-                Console.WriteLine($"GetClubsForRegistration - User {memberData.Name} - isSiteAdmin: {isSiteAdmin}");
+                bool hasAccess = isSiteAdmin;
 
-                if (!isSiteAdmin)
+                if (!hasAccess)
+                {
+                    var managedClubIds = await _authorizationService.GetManagedClubIds();
+                    if (managedClubIds.Count > 0) hasAccess = true;
+                }
+                if (!hasAccess)
+                {
+                    var skjutledareClubIds = await _authorizationService.GetSkjutledareClubIds();
+                    if (skjutledareClubIds.Count > 0) hasAccess = true;
+                }
+
+                if (!hasAccess)
                 {
                     return Json(new { success = false, message = "Access denied" });
                 }
@@ -907,7 +918,7 @@ namespace HpskSite.Controllers
                         id = club.Id,
                         name = club.Name
                     })
-                    .OrderBy(c => c.name)
+                    .OrderBy(c => c.name, StringComparer.Create(new System.Globalization.CultureInfo("sv-SE"), ignoreCase: true))
                     .ToList();
 
                 return Json(new { success = true, clubs = clubs });
@@ -935,20 +946,20 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Member data not found" });
                 }
 
-                // Check if user can access this club's members
+                // Check if user can access club members for registration
+                // Club admins and skjutledare can load members from any club (for cross-club registration)
                 bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
-                bool canAccess = false;
+                bool canAccess = isSiteAdmin;
 
-                if (isSiteAdmin)
+                if (!canAccess)
                 {
-                    canAccess = true;
+                    var managedClubIds = await _authorizationService.GetManagedClubIds();
+                    if (managedClubIds.Count > 0) canAccess = true;
                 }
-                else
+                if (!canAccess)
                 {
-                    // Check if user is club admin or skjutledare for this specific club
-                    canAccess = await _authorizationService.IsClubAdminForClub(clubId);
-                    if (!canAccess)
-                        canAccess = await _authorizationService.IsSkjutledareForClub(clubId);
+                    var skjutledareClubIds = await _authorizationService.GetSkjutledareClubIds();
+                    if (skjutledareClubIds.Count > 0) canAccess = true;
                 }
 
                 if (!canAccess)
@@ -990,7 +1001,7 @@ namespace HpskSite.Controllers
                             name = member.Name,
                             email = member.Email
                         })
-                        .OrderBy(m => m.name)
+                        .OrderBy(m => m.name, StringComparer.Create(new System.Globalization.CultureInfo("sv-SE"), ignoreCase: true))
                         .ToList();
                 }, TimeSpan.FromMinutes(2));
 

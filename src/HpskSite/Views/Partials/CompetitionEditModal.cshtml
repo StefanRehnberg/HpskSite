@@ -390,12 +390,17 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                                 <div class="col-md-6">
                                     <div class="mb-3">
                                         <label for="regionalFederation" class="form-label">Krets (endast om ingen klubb)</label>
-                                        <select class="form-select" id="regionalFederation" name="regionalFederation">
+                                        <select class="form-select" id="regionalFederation" name="regionalFederation" onchange="onEditRegionChange()">
                                             <option value="">-- Ingen krets --</option>
                                         </select>
                                         <small class="form-text text-muted">Laddar kretsar...</small>
                                     </div>
                                 </div>
+                            </div>
+
+                            <div class="alert alert-warning py-2 d-none" id="edit_clubMismatchWarning">
+                                <i class="bi bi-exclamation-triangle me-1"></i>
+                                <span id="edit_clubMismatchText"></span>
                             </div>
 
                             <div class="alert alert-light py-2 mb-0" id="edit_organizerHelpText">
@@ -1025,12 +1030,18 @@ function ensureClubsLoaded() {
     }
 }
 
+// Module-level variables for role-aware club management
+let editManagedClubIds = [];
+let editUserRole = '';
+let editOriginalClubId = '';
+let editOriginalRegion = '';
+
 function loadClubsForSelector() {
     const clubSelect = document.getElementById('clubId');
     const helpText = clubSelect.parentElement.querySelector('small');
 
-    // Use ClubAdmin endpoint which supports both regional and root-level club structures
-    fetch('/umbraco/surface/ClubAdmin/GetClubsForRegistration')
+    // Use role-aware endpoint that returns only clubs the user can manage
+    fetch('/umbraco/surface/CompetitionAdmin/GetClubsForCompetitionAdmin')
         .then(response => {
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}`);
@@ -1038,17 +1049,17 @@ function loadClubsForSelector() {
             return response.json();
         })
         .then(data => {
-            // GetClubsForRegistration returns { success: true, clubs: [...] }
-            const clubs = data.clubs || data.data || [];
+            const clubs = data.clubs || [];
 
-            if (data.success && Array.isArray(clubs) && clubs.length > 0) {
+            if (data.success && Array.isArray(clubs)) {
+                // Store role info for warning logic
+                editManagedClubIds = data.managedClubIds || [];
+                editUserRole = data.role || '';
+
                 // Clear loading message
                 helpText.style.display = 'none';
 
-                // Sort clubs using Swedish locale (handles Ö, Ä, Å correctly)
-                clubs.sort((a, b) => a.name.localeCompare(b.name, 'sv-SE'));
-
-                // Populate clubs
+                // Populate clubs (already sorted by sv-SE on server)
                 clubs.forEach(club => {
                     const option = document.createElement('option');
                     option.value = club.id;
@@ -1057,9 +1068,27 @@ function loadClubsForSelector() {
                 });
 
                 // Set the current club if editing
-                const currentClubId = document.getElementById('clubId').dataset.currentValue;
+                const currentClubId = clubSelect.dataset.currentValue;
                 if (currentClubId && currentClubId !== '0') {
                     clubSelect.value = currentClubId;
+                }
+
+                // Store original values for mismatch warning
+                editOriginalClubId = clubSelect.dataset.currentValue || '';
+                const regionSelect = document.getElementById('regionalFederation');
+                editOriginalRegion = regionSelect.dataset.currentValue || '';
+
+                // Club page context: lock dropdowns for non-admin roles
+                const isClubPage = window.location.pathname.includes('/clubs/');
+                const currentPageClubId = window.currentClubId;
+                if (isClubPage && currentPageClubId && editUserRole !== 'admin') {
+                    clubSelect.disabled = true;
+                    helpText.style.display = '';
+                    helpText.textContent = 'Tävlingen tillhör denna klubb';
+                    helpText.classList.remove('text-danger', 'text-warning');
+                    helpText.classList.add('text-muted');
+                    // Also lock region dropdown
+                    document.getElementById('regionalFederation').disabled = true;
                 }
 
                 // Update organizer UI based on club selection
@@ -1144,6 +1173,54 @@ function onEditClubChange() {
         regionSelect.value = '';
     }
     updateEditOrganizerUI();
+    updateEditMismatchWarning();
+}
+
+// Handle region selection change
+function onEditRegionChange() {
+    updateEditMismatchWarning();
+}
+
+// Show/hide mismatch warning based on club/region changes
+function updateEditMismatchWarning() {
+    const warningDiv = document.getElementById('edit_clubMismatchWarning');
+    const warningText = document.getElementById('edit_clubMismatchText');
+    const clubSelect = document.getElementById('clubId');
+    const regionSelect = document.getElementById('regionalFederation');
+
+    const newClubId = clubSelect.value || '';
+    const newRegion = regionSelect.disabled ? '' : (regionSelect.value || '');
+    const origClub = editOriginalClubId || '';
+    const origRegion = editOriginalRegion || '';
+
+    let message = '';
+
+    if (origClub && origClub !== '0') {
+        // Competition originally had a club
+        if (newClubId && newClubId !== origClub) {
+            // Case 1: Changed to a different club
+            message = '<strong>Obs!</strong> Du ändrar tävlingens klubb. Om du sparar kommer tävlingen att flyttas och visas under den nya klubben istället.';
+        } else if (!newClubId && !newRegion) {
+            // Case 4: Both club and region removed (national)
+            message = '<strong>Obs!</strong> Tävlingen blir nationell utan klubb eller krets. Den kan bara hanteras på den allmänna administrationssidan.';
+        } else if (!newClubId && newRegion) {
+            // Case 3: Club removed but region set
+            message = '<strong>Obs!</strong> Tävlingen flyttas till kretsnivå. Den kommer inte att visas i någon klubbs tävlingslista och kan bara hanteras på den allmänna administrationssidan.';
+        }
+    } else if (origRegion) {
+        // Competition originally had a region but no club
+        if (!newClubId && !newRegion) {
+            // Region removed, now national
+            message = '<strong>Obs!</strong> Tävlingen blir nationell utan klubb eller krets. Den kan bara hanteras på den allmänna administrationssidan.';
+        }
+    }
+
+    if (message) {
+        warningText.innerHTML = message;
+        warningDiv.classList.remove('d-none');
+    } else {
+        warningDiv.classList.add('d-none');
+    }
 }
 
 // Update the organizer help text and region dropdown state
@@ -1152,17 +1229,25 @@ function updateEditOrganizerUI() {
     const regionSelect = document.getElementById('regionalFederation');
     const helpText = document.getElementById('edit_organizerHelpText');
 
+    // Don't re-enable region if dropdown is locked on club page
+    const isClubPage = window.location.pathname.includes('/clubs/');
+    const isLocked = isClubPage && window.currentClubId && editUserRole !== 'admin';
+
     if (clubSelect && clubSelect.value) {
         // Club selected - disable region dropdown
-        regionSelect.disabled = true;
+        if (!isLocked) {
+            regionSelect.disabled = true;
+        }
         if (helpText) {
             helpText.innerHTML = '<i class="bi bi-building me-1"></i>Tävlingen kopplas till vald klubb och dess krets.';
             helpText.classList.remove('alert-light');
             helpText.classList.add('alert-info');
         }
     } else {
-        // No club - enable region dropdown
-        regionSelect.disabled = false;
+        // No club - enable region dropdown (unless locked)
+        if (!isLocked) {
+            regionSelect.disabled = false;
+        }
         if (helpText) {
             helpText.innerHTML = '<i class="bi bi-info-circle me-1"></i>Om varken klubb eller krets väljs syns tävlingen för alla.';
             helpText.classList.remove('alert-info');
@@ -1186,6 +1271,13 @@ window.populateEditModal = function(competition) {
 
         // Set regionalFederation as data attribute for later use
         document.getElementById('regionalFederation').dataset.currentValue = competition.regionalFederation || '';
+
+        // Store original values for mismatch warning
+        editOriginalClubId = String(competition.clubId || '0');
+        editOriginalRegion = competition.regionalFederation || '';
+
+        // Hide any previous mismatch warning
+        document.getElementById('edit_clubMismatchWarning').classList.add('d-none');
 
         // Always ensure clubs and regions are loaded
         ensureClubsLoaded();
