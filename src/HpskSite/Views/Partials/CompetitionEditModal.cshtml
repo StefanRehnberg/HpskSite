@@ -884,7 +884,9 @@ function saveCompetition() {
         }
     }
 
-    // Remove seriesId from fields — it's not a content property, handled via Move after save
+    // Extract seriesId — for existing competitions it's handled via Move after save,
+    // but for new competitions (copy/create) it must be passed to CreateCompetition
+    // so the competition is created as a child of the series
     const newSeriesId = fields.seriesId || '';
     delete fields.seriesId;
 
@@ -933,6 +935,10 @@ function saveCompetition() {
         endpoint = '/umbraco/surface/CompetitionAdmin/CreateCompetition';
         // CreateCompetition expects competitionType in fields
         fields.competitionType = 'Precision';
+        // Include seriesId so CreateCompetition places it under the correct series
+        if (newSeriesId) {
+            fields.seriesId = newSeriesId;
+        }
         requestBody = { fields: fields };
     } else {
         // For existing competitions (edit), use SaveCompetition endpoint
@@ -992,17 +998,20 @@ function saveCompetition() {
                         showNotification('Tävlingen sparades men kunde inte flyttas till serien: ' + (moveData.message || ''), 'warning');
                     }
                     bootstrap.Modal.getInstance(editModal).hide();
-                    if (typeof loadCompetitionsList === 'function') {
-                        setTimeout(() => loadCompetitionsList(), 500);
-                    }
+                    // Refresh both competition list and series list after move
+                    setTimeout(() => {
+                        if (typeof loadCompetitionsList === 'function') loadCompetitionsList();
+                        if (typeof loadSeriesList === 'function') loadSeriesList();
+                    }, 300);
                 })
                 .catch(err => {
                     console.error('Error moving competition to series:', err);
                     showNotification('Tävlingen sparades men serieflyttning misslyckades', 'warning');
                     bootstrap.Modal.getInstance(editModal).hide();
-                    if (typeof loadCompetitionsList === 'function') {
-                        setTimeout(() => loadCompetitionsList(), 500);
-                    }
+                    setTimeout(() => {
+                        if (typeof loadCompetitionsList === 'function') loadCompetitionsList();
+                        if (typeof loadSeriesList === 'function') loadSeriesList();
+                    }, 300);
                 });
                 return; // Don't run the normal success flow below
             }

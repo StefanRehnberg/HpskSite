@@ -822,8 +822,8 @@ namespace HpskSite.Controllers
                 {
                     try
                     {
-                        // Skip fields already handled
-                        if (field.Key == "competitionName" || field.Key == "competitionType")
+                        // Skip fields already handled or not content properties
+                        if (field.Key == "competitionName" || field.Key == "competitionType" || field.Key == "seriesId")
                             continue;
 
                         var value = field.Value;
@@ -1854,6 +1854,9 @@ namespace HpskSite.Controllers
                         message = "Failed to move competition: " + string.Join(", ", moveResult.EventMessages?.GetAll().Select(e => e.Message))
                     });
                 }
+
+                // Invalidate caches so competition list and series list reflect the move
+                InvalidateCompetitionCaches();
 
                 return Ok(new
                 {

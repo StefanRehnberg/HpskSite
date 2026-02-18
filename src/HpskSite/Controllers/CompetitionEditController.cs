@@ -215,6 +215,10 @@ namespace HpskSite.Controllers
                 // Route to type-specific save logic
                 var result = await RouteToTypeSpecificSave(request, content);
 
+                // Invalidate admin competition/series list caches so edits are reflected
+                AppCaches.RuntimeCache.ClearByKey("admin_series_list");
+                AppCaches.RuntimeCache.ClearByRegex("^admin_competitions_list_");
+
                 return Ok(result);
             }
             catch (Exception ex)
