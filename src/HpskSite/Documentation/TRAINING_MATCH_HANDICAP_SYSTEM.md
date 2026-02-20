@@ -213,12 +213,6 @@ using HpskSite.Shared.Services;
 
 // Correct: Use ResultCalculator directly
 int adjustedTotal = ResultCalculator.CalculateAdjustedTotal(seriesList, handicapPerSeries);
-
-// Also correct: Use HandicapCalculator (which delegates to ResultCalculator)
-int adjustedTotal = _handicapCalculator.GetMatchFinalScore(seriesList, handicapPerSeries);
-
-// WRONG: Using deprecated method that assumes average distribution
-decimal adjustedTotal = _handicapCalculator.GetMatchFinalScore(rawTotal, handicapPerSeries, seriesCount);
 ```
 
 ### Client-Side: Use Server-Calculated Values
@@ -269,19 +263,15 @@ Controllers that return this data:
 
 ### Deprecated Methods
 
-The following methods are deprecated and should NOT be used:
+The following method is deprecated and should NOT be used:
 
 ```csharp
 // DEPRECATED - assumes average distribution across series
-[Obsolete("Use overload with series scores for accurate per-series capping")]
-decimal GetMatchFinalScore(decimal rawTotal, decimal handicapPerSeries, int seriesCount);
-
-// DEPRECATED - same issue
 [Obsolete("Use CalculateAdjustedTotal<T> for accurate per-series capping")]
 int CalculateAdjustedMatchTotal(int rawTotal, decimal handicapPerSeries, int seriesCount);
 ```
 
-Always use the generic versions that accept `IEnumerable<ISeriesScore>`.
+Always use the generic `ResultCalculator.CalculateAdjustedTotal<T>()` that accepts `IEnumerable<ISeriesScore>`.
 
 ## Display Format
 

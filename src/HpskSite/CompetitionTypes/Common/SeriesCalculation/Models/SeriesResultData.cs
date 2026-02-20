@@ -31,6 +31,13 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.Models
         public int TotalSeriesScore { get; set; }
         public int TotalXCount { get; set; }
         public List<SeriesCompetitionCell> CompetitionScores { get; set; } = new();
+
+        /// <summary>
+        /// For club rows: the highest individual shooter score across all competitions.
+        /// Used for tie-breaking when two clubs have the same total series score.
+        /// Null for individual rows.
+        /// </summary>
+        public int? BestIndividualScore { get; set; }
     }
 
     public class SeriesCompetitionCell

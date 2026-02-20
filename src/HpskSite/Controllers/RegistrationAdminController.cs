@@ -286,13 +286,11 @@ namespace HpskSite.Controllers
                 registration.SetValue("competitionId", request.CompetitionId);
                 registration.SetValue("memberId", request.MemberId);
                 registration.SetValue("memberName", member.Name);
-                registration.SetValue("memberEmail", member.Email);
 
                 // Get member's club
                 var clubId = member.GetValue<int>("primaryClubId");
                 var clubName = clubId > 0 ? _clubService.GetClubNameById(clubId) : "";
                 registration.SetValue("clubId", clubId);
-                registration.SetValue("memberClub", clubName ?? ""); // Legacy field
 
                 // NEW: Store shooting classes as JSON array (single-class for late registration)
                 var shootingClassEntry = new[]
@@ -308,8 +306,7 @@ namespace HpskSite.Controllers
 
                 registration.SetValue("registrationDate", DateTime.Now);
                 registration.SetValue("registeredBy", "Admin (Late Registration)");
-                // Note: isActive property removed - use Published status instead
-                registration.SetValue("shooterNotes", request.Notes ?? "Late registration after results entry started");
+                registration.SetValue("isActive", true);
 
                 // Save and publish
                 var saveResult = _contentService.Save(registration);

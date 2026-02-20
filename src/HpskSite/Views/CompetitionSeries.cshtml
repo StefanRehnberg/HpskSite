@@ -1,6 +1,7 @@
 @using Umbraco.Cms.Web.Common.PublishedModels;
 @using Umbraco.Extensions;
 @using HpskSite.Extensions
+@inject HpskSite.Services.AdminAuthorizationService AuthService
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
     Layout = "Master.cshtml";
@@ -25,6 +26,17 @@
     var isActive = Model.Value<bool>("isActive", fallback: Fallback.ToDefaultValue, defaultValue: true);
     var seriesCalculationStrategy = Model.Value<string>("seriesCalculationStrategy") ?? "";
     var seriesId = Model.Id;
+
+    bool hasAdminAccess = false;
+    if (User.Identity?.IsAuthenticated == true)
+    {
+        hasAdminAccess = await AuthService.IsCurrentUserAdminAsync();
+        if (!hasAdminAccess)
+        {
+            var managedRegions = await AuthService.GetManagedRegions();
+            hasAdminAccess = managedRegions.Any();
+        }
+    }
 }
 
 <div class="container mt-4">
@@ -256,9 +268,12 @@
                                             </div>
                                             <span class="badge bg-light text-dark">Omg. @roundNumber</span>
                                         </div>
-                                        <div class="card-body">
-                                            <p class="card-text">@description</p>
-                                            <ul class="list-unstyled small">
+                                        <div class="card-body pt-2 pb-2">
+                                            <ul class="list-unstyled small mb-0">
+                                                @if (!string.IsNullOrEmpty(description))
+                                                {
+                                                    <li class="mb-1">@description</li>
+                                                }
                                                 <li>
                                                     @dateIcon @dateDisplay
                                                     <small class="text-muted ms-1">@durationInfo</small>
@@ -270,19 +285,16 @@
                                                 }
                                                 <li><i class="bi bi-bullseye"></i> @shootingClassName</li>
                                             </ul>
-                                            <div class="mt-2">
-                                                <span class="badge bg-@statusClass">@statusText</span>
-                                            </div>
                                         </div>
-                                        <div class="card-footer">
+                                        <div class="card-footer d-flex align-items-center">
                                             <a href="@competition.CompetitionUrl()" class="btn @buttonClass btn-sm">@buttonText</a>
                                             @if (status == "open")
                                             {
-                                                <small class="text-muted d-block mt-1">Stänger: @regCloseDate.ToString("yyyy-MM-dd")</small>
+                                                <small class="text-muted ms-2">Stänger: @regCloseDate.ToString("yyyy-MM-dd")</small>
                                             }
                                             else if (status == "upcoming")
                                             {
-                                                <small class="text-muted d-block mt-1">Öppnar: @regOpenDate.ToString("yyyy-MM-dd")</small>
+                                                <small class="text-muted ms-2">Öppnar: @regOpenDate.ToString("yyyy-MM-dd")</small>
                                             }
                                         </div>
                                     </div>
@@ -438,62 +450,102 @@ function toggleSeriesDescription() {
         const loading = document.getElementById('seriesResultsLoading');
         const errorDiv = document.getElementById('seriesResultsError');
         const errorMsg = document.getElementById('seriesResultsErrorMessage');
+        const isAdmin = @(hasAdminAccess ? "true" : "false");
 
-        fetch('/umbraco/surface/CompetitionAdmin/GetSeriesResults?seriesId=' + seriesId)
-            .then(response => response.json())
-            .then(data => {
-                loading.style.display = 'none';
+        function loadSeriesResults(forceRefresh) {
+            const url = '/umbraco/surface/CompetitionAdmin/GetSeriesResults?seriesId=' + seriesId
+                + (forceRefresh ? '&forceRefresh=true' : '');
 
-                if (!data.success || !data.data) {
-                    // No results or error - hide the whole container silently
-                    document.getElementById('seriesResultsContainer').style.display = 'none';
-                    return;
-                }
+            // Show loading state
+            loading.style.display = 'block';
+            container.style.display = 'none';
+            errorDiv.classList.add('d-none');
 
-                const result = data.data;
-                if (!result.sections || result.sections.length === 0) {
-                    document.getElementById('seriesResultsContainer').style.display = 'none';
-                    return;
-                }
+            fetch(url)
+                .then(response => response.json())
+                .then(data => {
+                    loading.style.display = 'none';
 
-                container.style.display = 'block';
-                let html = '';
-
-                // Header
-                html += '<div class="card border-success mb-4">';
-                html += '<div class="card-header bg-success text-white">';
-                html += '<h3 class="mb-0"><i class="bi bi-bar-chart me-2"></i>Serieresultat</h3>';
-                html += '<small>' + escapeHtmlSeries(result.strategyName) + '</small>';
-                html += '</div>';
-                html += '<div class="card-body p-0">';
-
-                result.sections.forEach(function(section) {
-                    html += '<div class="p-3">';
-                    if (result.sections.length > 1) {
-                        html += '<h4 class="mb-3">' + escapeHtmlSeries(section.title) + '</h4>';
+                    if (!data.success || !data.data) {
+                        document.getElementById('seriesResultsContainer').style.display = 'none';
+                        return;
                     }
 
-                    if (section.sectionType === 'Individual') {
-                        html += renderIndividualSection(section, result.competitions);
-                    } else if (section.sectionType === 'Club') {
-                        html += renderClubSection(section, result.competitions);
+                    const result = data.data;
+                    if (!result.sections || result.sections.length === 0) {
+                        document.getElementById('seriesResultsContainer').style.display = 'none';
+                        return;
+                    }
+
+                    document.getElementById('seriesResultsContainer').style.display = 'block';
+                    container.style.display = 'block';
+                    let html = '';
+
+                    // Header
+                    html += '<div class="card border-success mb-4">';
+                    html += '<div class="card-header bg-success text-white d-flex justify-content-between align-items-start">';
+                    html += '<div>';
+                    html += '<h3 class="mb-0"><i class="bi bi-bar-chart me-2"></i>Serieresultat</h3>';
+                    html += '<small>' + escapeHtmlSeries(result.strategyName) + '</small>';
+                    html += '</div>';
+                    if (isAdmin) {
+                        html += '<button class="btn btn-sm btn-outline-light ms-2 mt-1" id="recalcSeriesBtn" title="Beräkna om serieresultat">';
+                        html += '<i class="bi bi-arrow-clockwise"></i> Beräkna om';
+                        html += '</button>';
                     }
                     html += '</div>';
-                });
+                    html += '<div class="card-body p-0">';
 
-                html += '</div></div>';
-                container.innerHTML = html;
-            })
-            .catch(error => {
-                loading.style.display = 'none';
-                // Silent failure - don't show error for public page
-                document.getElementById('seriesResultsContainer').style.display = 'none';
-                console.error('Error loading series results:', error);
-            });
+                    result.sections.forEach(function(section) {
+                        html += '<div class="p-3">';
+                        if (result.sections.length > 1) {
+                            html += '<h4 class="mb-3">' + escapeHtmlSeries(section.title) + '</h4>';
+                        }
+
+                        if (section.sectionType === 'Individual') {
+                            html += renderIndividualSection(section, result.competitions);
+                        } else if (section.sectionType === 'Club') {
+                            html += renderClubSection(section, result.competitions);
+                        }
+                        html += '</div>';
+                    });
+
+                    html += '</div></div>';
+                    container.innerHTML = html;
+
+                    // Attach recalculate button handler
+                    var recalcBtn = document.getElementById('recalcSeriesBtn');
+                    if (recalcBtn) {
+                        recalcBtn.addEventListener('click', function() {
+                            loadSeriesResults(true);
+                        });
+                    }
+                })
+                .catch(error => {
+                    loading.style.display = 'none';
+                    document.getElementById('seriesResultsContainer').style.display = 'none';
+                    console.error('Error loading series results:', error);
+                });
+        }
+
+        // Initial load
+        loadSeriesResults(false);
 
         function renderIndividualSection(section, competitions) {
             let html = '';
             const currentMemberId = parseInt(document.body.dataset.currentMemberId || '0');
+
+            // Detect if any cell uses points different from score (placement scoring)
+            let usesPoints = false;
+            section.classStandings.forEach(function(classGroup) {
+                classGroup.rows.forEach(function(row) {
+                    row.competitionScores.forEach(function(cell) {
+                        if (cell.points !== null && cell.points !== undefined && cell.score !== null && cell.points !== cell.score) {
+                            usesPoints = true;
+                        }
+                    });
+                });
+            });
 
             section.classStandings.forEach(function(classGroup) {
                 if (classGroup.rows.length === 0) return;
@@ -509,7 +561,7 @@ function toggleSeriesDescription() {
                 competitions.forEach(function(comp, idx) {
                     html += '<th class="text-center" title="' + escapeHtmlSeries(comp.name) + '">Omg.&nbsp;' + (idx + 1) + '</th>';
                 });
-                html += '<th class="text-center"><strong>Totalt</strong></th>';
+                html += '<th class="text-center"><strong>' + (usesPoints ? 'Poäng' : 'Totalt') + '</strong></th>';
                 html += '<th class="text-center">X</th>';
                 html += '</tr></thead>';
                 html += '<tbody>';
@@ -527,7 +579,17 @@ function toggleSeriesDescription() {
                         if (cell.score === null || cell.score === undefined) {
                             html += '<td class="text-center text-muted">-</td>';
                         } else if (!cell.counting) {
-                            html += '<td class="text-center" style="opacity:0.4;text-decoration:line-through;">' + cell.score + '</td>';
+                            // Non-counting cell (bestOf) - dimmed with strikethrough
+                            if (usesPoints && cell.points !== null && cell.points !== undefined) {
+                                html += '<td class="text-center" style="opacity:0.4;text-decoration:line-through;">'
+                                    + cell.score + '<br><small>' + cell.points + 'p</small></td>';
+                            } else {
+                                html += '<td class="text-center" style="opacity:0.4;text-decoration:line-through;">' + cell.score + '</td>';
+                            }
+                        } else if (usesPoints && cell.points !== null && cell.points !== undefined) {
+                            // Placement scoring: show score + points below
+                            html += '<td class="text-center">' + cell.score
+                                + '<br><small class="text-success fw-bold">' + cell.points + 'p</small></td>';
                         } else {
                             html += '<td class="text-center">' + cell.score + '</td>';
                         }
@@ -572,7 +634,7 @@ function toggleSeriesDescription() {
                 competitions.forEach(function(comp, idx) {
                     html += '<th class="text-center" title="' + escapeHtmlSeries(comp.name) + '">Omg.&nbsp;' + (idx + 1) + '</th>';
                 });
-                html += '<th class="text-center"><strong>Totalt</strong></th>';
+                html += '<th class="text-center"><strong>' + (usesPoints ? 'Poäng' : 'Totalt') + '</strong></th>';
                 html += '</tr></thead>';
                 html += '<tbody>';
 
@@ -586,11 +648,16 @@ function toggleSeriesDescription() {
                             html += '<td class="text-center text-muted">-</td>';
                         } else if (!cell.counting) {
                             // Non-counting cell (bestOf) - dimmed with strikethrough
-                            const display = usesPoints && cell.points !== null ? cell.points : cell.score;
-                            html += '<td class="text-center" style="opacity:0.4;text-decoration:line-through;">' + display + '</td>';
+                            if (usesPoints && cell.points !== null && cell.points !== undefined) {
+                                html += '<td class="text-center" style="opacity:0.4;text-decoration:line-through;">'
+                                    + cell.score + '<br><small>' + cell.points + 'p</small></td>';
+                            } else {
+                                html += '<td class="text-center" style="opacity:0.4;text-decoration:line-through;">' + cell.score + '</td>';
+                            }
                         } else if (usesPoints && cell.points !== null && cell.points !== undefined) {
-                            // Placement scoring: show points with raw score as tooltip
-                            html += '<td class="text-center" title="Lagsumma: ' + cell.score + '">' + cell.points + '</td>';
+                            // Placement scoring: show score + points below
+                            html += '<td class="text-center">' + cell.score
+                                + '<br><small class="text-success fw-bold">' + cell.points + 'p</small></td>';
                         } else {
                             html += '<td class="text-center">' + cell.score + '</td>';
                         }

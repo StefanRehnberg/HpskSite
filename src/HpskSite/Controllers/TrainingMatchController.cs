@@ -2268,22 +2268,21 @@ namespace HpskSite.Controllers
                             var equalizedScores = participantData
                                 .Select(p => {
                                     var effectiveSeriesTotals = p.SeriesTotals.Take(effectiveLimit).ToList();
-                                    int rawScore = effectiveSeriesTotals.Sum();
                                     int effectiveSeriesCount = effectiveSeriesTotals.Count;
 
-                                    int adjustedScore = rawScore;
+                                    // Convert to ISeriesScore for ResultCalculator
+                                    var seriesScores = effectiveSeriesTotals
+                                        .Select((total, idx) => new SimpleSeriesScore(idx + 1, total))
+                                        .ToList();
+
+                                    int adjustedScore;
                                     if (hasHandicap && handicapLookup.TryGetValue(p.ParticipantKey, out var hcp))
                                     {
-                                        var roundedHcp = ResultCalculator.RoundToQuarter(hcp);
-                                        decimal decimalTotal = 0;
-                                        foreach (var seriesTotal in effectiveSeriesTotals)
-                                        {
-                                            var rawCapped = Math.Min(seriesTotal, 50);
-                                            var adjusted = rawCapped + roundedHcp;
-                                            var clamped = Math.Clamp(adjusted, 0m, 50m);
-                                            decimalTotal += clamped;
-                                        }
-                                        adjustedScore = (int)Math.Round(decimalTotal, MidpointRounding.AwayFromZero);
+                                        adjustedScore = ResultCalculator.CalculateAdjustedTotal(seriesScores, hcp);
+                                    }
+                                    else
+                                    {
+                                        adjustedScore = ResultCalculator.CalculateRawTotal(seriesScores);
                                     }
 
                                     return new {
@@ -3505,6 +3504,14 @@ namespace HpskSite.Controllers
         }
 
         #endregion
+
+        /// <summary>
+        /// Lightweight ISeriesScore adapter for bridging raw int totals to ResultCalculator.
+        /// </summary>
+        private record SimpleSeriesScore(int SeriesNumber, int Total) : ISeriesScore
+        {
+            public int XCount => 0;
+        }
     }
 
     #region Request Models

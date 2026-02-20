@@ -493,7 +493,7 @@ namespace HpskSite.Controllers
                             clubId = comp.GetValue<int?>("clubId") ?? 0,
                             registrationCount = registrationCounts.TryGetValue(comp.Id, out var count) ? count : 0,
                             seriesId = isInSeries ? parent!.Id : (int?)null,
-                            seriesName = isInSeries ? parent!.Name : null,
+                            seriesName = isInSeries ? (parent!.GetValue<string>("seriesName") ?? parent.Name) : null,
                             status = status
                         };
                     })
@@ -2467,6 +2467,7 @@ namespace HpskSite.Controllers
 
                 // Invalidate caches
                 InvalidateCompetitionCaches();
+                _seriesCalculationService.InvalidateCacheForSeries(request.SeriesId);
 
                 return Ok(new { success = true, message = "Series updated successfully" });
             }
@@ -2749,7 +2750,15 @@ namespace HpskSite.Controllers
                     key = p.Key,
                     label = p.Label,
                     type = p.Type,
-                    defaultValue = p.DefaultValue
+                    defaultValue = p.DefaultValue,
+                    placeholder = p.Placeholder,
+                    dependsOn = p.DependsOn,
+                    dependsOnValue = p.DependsOnValue,
+                    options = p.Options?.Select(o => new
+                    {
+                        value = o.Value,
+                        label = o.Label
+                    })
                 })
             });
 
@@ -2761,10 +2770,15 @@ namespace HpskSite.Controllers
         /// Called by the series page to display standings.
         /// </summary>
         [HttpGet]
-        public async Task<IActionResult> GetSeriesResults(int seriesId)
+        public async Task<IActionResult> GetSeriesResults(int seriesId, bool forceRefresh = false)
         {
             try
             {
+                if (forceRefresh)
+                {
+                    _seriesCalculationService.InvalidateCacheForSeries(seriesId);
+                }
+
                 var result = await _seriesCalculationService.CalculateSeriesResults(seriesId);
                 if (result == null)
                 {

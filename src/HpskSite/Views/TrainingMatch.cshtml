@@ -1233,29 +1233,38 @@
             const headerRow = document.getElementById('historyParticipantHeaderRow');
             headerRow.innerHTML = '';
 
-            // Use maxSeriesCount from match settings for equalized scoring (default to 6)
-            const maxSeriesCount = match.maxSeriesCount || 6;
+            // Determine effective series limit:
+            // If maxSeriesCount is set in match settings, use it.
+            // Otherwise, use the minimum series count across all participants (equalizes scoring).
+            let effectiveSeriesLimit;
+            if (match.maxSeriesCount) {
+                effectiveSeriesLimit = match.maxSeriesCount;
+            } else {
+                const participantsWithScores = match.participants.filter(p => p.scores && p.scores.length > 0);
+                effectiveSeriesLimit = participantsWithScores.length > 0
+                    ? Math.min(...participantsWithScores.map(p => p.scores.length))
+                    : 0;
+            }
 
-            // Helper to get equalized scores (first N series limited by maxSeriesCount, sorted by seriesNumber)
+            // Helper to get equalized scores (first N series limited by effectiveSeriesLimit, sorted by seriesNumber)
             function getEqualizedScores(participant) {
                 if (!participant.scores || participant.scores.length === 0) return [];
                 return [...participant.scores]
                     .sort((a, b) => a.seriesNumber - b.seriesNumber)
-                    .slice(0, maxSeriesCount);
+                    .slice(0, effectiveSeriesLimit);
             }
 
-            // Get final score - use server-calculated value (from ResultCalculator)
-            // This ensures consistent calculations between server and client
+            // Get final score based on equalized series (match series limit applied)
             function getFinalScore(participant) {
-                // Server provides finalScore calculated by ResultCalculator.CalculateAdjustedTotal()
-                if (match.hasHandicap && participant.finalScore !== null && participant.finalScore !== undefined) {
-                    return participant.finalScore;
+                const eqScores = getEqualizedScores(participant);
+                if (match.hasHandicap && participant.handicapPerSeries !== null && participant.handicapPerSeries !== undefined) {
+                    const hcpPerSeries = roundToQuarter(participant.handicapPerSeries);
+                    return calculateAdjustedTotalWithCap(eqScores, hcpPerSeries).total;
                 }
-                // Fallback to totalScore (raw score) if no handicap or no finalScore
-                return participant.totalScore ?? 0;
+                return eqScores.reduce((sum, s) => sum + Math.min(s.total, 50), 0);
             }
 
-            // Sort participants by final score (using server-calculated values)
+            // Sort participants by final score (using equalized series)
             const sortedParticipants = [...match.participants].sort((a, b) => {
                 return getFinalScore(b) - getFinalScore(a);
             });
@@ -1401,9 +1410,9 @@
                 const td = document.createElement('td');
                 td.className = 'total-cell';
 
-                // Use equalized scores (first N series where N = min series count)
+                // Use equalized scores (first N series based on match series limit)
                 const equalizedScores = getEqualizedScores(participant);
-                const totalScore = equalizedScores.reduce((sum, s) => sum + s.total, 0);
+                const rawTotal = equalizedScores.reduce((sum, s) => sum + Math.min(s.total, 50), 0);
                 const totalX = equalizedScores.reduce((sum, s) => sum + (s.xCount || 0), 0);
                 const effectiveSeriesCount = equalizedScores.length;
                 const actualSeriesCount = participant.scores?.length || 0;
@@ -1413,24 +1422,25 @@
                     ? `${effectiveSeriesCount} av ${actualSeriesCount} serier`
                     : `${effectiveSeriesCount} serier`;
 
-                // Check if handicap is enabled and participant has server-calculated finalScore
-                if (match.hasHandicap && participant.finalScore !== null && participant.finalScore !== undefined) {
-                    // Use server-calculated values from ResultCalculator
-                    const finalScore = participant.finalScore;
-                    const effectiveHandicap = participant.handicapTotal ?? 0;
-                    const hcpTotalDisplay = formatHandicap(effectiveHandicap);
+                // Check if handicap is enabled
+                if (match.hasHandicap && participant.handicapPerSeries !== null && participant.handicapPerSeries !== undefined) {
+                    // Recalculate from equalized scores to match the effective series limit
+                    const hcpPerSeries = roundToQuarter(participant.handicapPerSeries);
+                    const result = calculateAdjustedTotalWithCap(equalizedScores, hcpPerSeries);
+                    const finalScore = result.total;
+                    const hcpTotalDisplay = formatHandicap(result.effectiveHandicap);
 
                     td.innerHTML = `
                         <div class="total-score handicap-final">${finalScore}</div>
                         <div class="total-handicap-breakdown">
-                            <span class="raw-score">${totalScore}</span>
+                            <span class="raw-score">${rawTotal}</span>
                             <span class="hcp-addition">${hcpTotalDisplay}</span>
                         </div>
                         <div class="total-details">${seriesDisplay}${totalX > 0 ? ` | ${totalX}x` : ''}</div>
                     `;
                 } else {
                     td.innerHTML = `
-                        <div class="total-score">${totalScore}</div>
+                        <div class="total-score">${rawTotal}</div>
                         <div class="total-details">${seriesDisplay}${totalX > 0 ? ` | ${totalX}x` : ''}</div>
                     `;
                 }

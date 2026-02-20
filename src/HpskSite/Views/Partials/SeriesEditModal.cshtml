@@ -90,17 +90,16 @@
                     <div class="card mb-3 border-info">
                         <div class="card-body">
                             <h6 class="card-title"><i class="bi bi-bar-chart me-1"></i>Serieresultat</h6>
-                            <div class="mb-3">
-                                <label for="seriesStrategySelect" class="form-label">Beräkningsstrategi</label>
-                                <select class="form-select" id="seriesStrategySelect" onchange="onSeriesStrategyChange()">
-                                    <option value="">-- Ingen (visa inga serieresultat) --</option>
-                                </select>
-                                <small class="form-text text-muted" id="seriesStrategyHelpText">
-                                    Välj hur serieresultat ska beräknas. Lämna tomt om serien inte behöver aggregerade resultat.
-                                </small>
+                            <div id="strategySummaryDisplay">
+                                <span class="text-muted"><i class="bi bi-dash-circle me-1"></i>Ingen beräkningsstrategi vald</span>
                             </div>
-                            <div id="seriesStrategyParams" style="display: none;">
-                                <!-- Dynamic parameter fields rendered by JS -->
+                            <div class="mt-2">
+                                <button type="button" class="btn btn-outline-primary btn-sm" onclick="openStrategyModal()">
+                                    <i class="bi bi-gear me-1"></i>Konfigurera strategi
+                                </button>
+                                <button type="button" class="btn btn-link btn-sm text-danger d-none" id="clearStrategyBtn" onclick="clearStrategy()">
+                                    <i class="bi bi-x-circle me-1"></i>Ta bort
+                                </button>
                             </div>
                             <input type="hidden" id="seriesCalculationStrategy" name="seriesCalculationStrategy">
                             <input type="hidden" id="seriesCalculationConfig" name="seriesCalculationConfig">
@@ -317,9 +316,6 @@ function saveSeries() {
         document.getElementById('seriesDescription').value = editorInstance.getData();
     }
 
-    // Sync strategy config before save
-    updateSeriesCalculationConfig();
-
     if (!form.checkValidity()) {
         form.reportValidity();
         return;
@@ -471,114 +467,71 @@ function loadSeriesStrategies() {
         .then(data => {
             if (data.success && data.data) {
                 seriesStrategies = data.data;
-                const select = document.getElementById('seriesStrategySelect');
-                select.innerHTML = '<option value="">-- Ingen (visa inga serieresultat) --</option>';
-                seriesStrategies.forEach(s => {
-                    const option = document.createElement('option');
-                    option.value = s.id;
-                    option.textContent = s.name;
-                    option.title = s.description;
-                    select.appendChild(option);
-                });
             }
         })
         .catch(error => console.error('Error loading series strategies:', error));
 }
 
-// Handle strategy selection change
-function onSeriesStrategyChange() {
-    const select = document.getElementById('seriesStrategySelect');
-    const strategyId = select.value;
-    const paramsContainer = document.getElementById('seriesStrategyParams');
-    const helpText = document.getElementById('seriesStrategyHelpText');
-
-    // Update hidden field
-    document.getElementById('seriesCalculationStrategy').value = strategyId;
-
-    // Find strategy
-    const strategy = seriesStrategies.find(s => s.id === strategyId);
-
-    if (strategy) {
-        helpText.textContent = strategy.description;
-    } else {
-        helpText.textContent = 'Välj hur serieresultat ska beräknas. Lämna tomt om serien inte behöver aggregerade resultat.';
-    }
-
-    // Render dynamic parameters
-    if (strategy && strategy.parameters && strategy.parameters.length > 0) {
-        paramsContainer.style.display = 'block';
-        paramsContainer.innerHTML = strategy.parameters.map(p => {
-            const defaultVal = p.defaultValue ?? '';
-            if (p.type === 'int') {
-                return `<div class="mb-2">
-                    <label for="stratParam_${p.key}" class="form-label">${p.label}</label>
-                    <input type="number" class="form-control" id="stratParam_${p.key}"
-                           data-param-key="${p.key}" value="${defaultVal}" min="1">
-                </div>`;
-            } else if (p.type === 'bool') {
-                const checked = defaultVal === true || defaultVal === 'true' ? 'checked' : '';
-                return `<div class="form-check mb-2">
-                    <input class="form-check-input" type="checkbox" id="stratParam_${p.key}"
-                           data-param-key="${p.key}" ${checked}>
-                    <label class="form-check-label" for="stratParam_${p.key}">${p.label}</label>
-                </div>`;
-            }
-            return '';
-        }).join('');
-    } else {
-        paramsContainer.style.display = 'none';
-        paramsContainer.innerHTML = '';
-    }
-
-    // Update config hidden field
-    updateSeriesCalculationConfig();
-}
-
-// Build JSON config from dynamic parameter inputs
-function updateSeriesCalculationConfig() {
-    const params = {};
-    document.querySelectorAll('#seriesStrategyParams [data-param-key]').forEach(input => {
-        const key = input.dataset.paramKey;
-        if (input.type === 'checkbox') {
-            params[key] = input.checked;
-        } else if (input.type === 'number') {
-            params[key] = parseInt(input.value) || 0;
-        } else {
-            params[key] = input.value;
-        }
-    });
-    document.getElementById('seriesCalculationConfig').value = JSON.stringify(params);
-}
-
 // Populate strategy fields when editing an existing series
 function populateSeriesStrategy(strategyId, configJson) {
-    const select = document.getElementById('seriesStrategySelect');
-    select.value = strategyId || '';
     document.getElementById('seriesCalculationStrategy').value = strategyId || '';
+    document.getElementById('seriesCalculationConfig').value =
+        (configJson && typeof configJson === 'string') ? configJson :
+        (configJson ? JSON.stringify(configJson) : '');
 
-    // Trigger parameter rendering
-    onSeriesStrategyChange();
+    updateStrategySummaryDisplay();
+}
 
-    // If there's config, populate the parameter fields
+// Update the compact strategy summary in the series edit modal
+function updateStrategySummaryDisplay() {
+    const strategyId = document.getElementById('seriesCalculationStrategy').value;
+    const configJson = document.getElementById('seriesCalculationConfig').value;
+    const summaryEl = document.getElementById('strategySummaryDisplay');
+    const clearBtn = document.getElementById('clearStrategyBtn');
+
+    if (!strategyId) {
+        summaryEl.innerHTML = '<span class="text-muted"><i class="bi bi-dash-circle me-1"></i>Ingen beräkningsstrategi vald</span>';
+        clearBtn.classList.add('d-none');
+        return;
+    }
+
+    const strategy = seriesStrategies.find(s => s.id === strategyId);
+    if (!strategy) {
+        summaryEl.innerHTML = '<span class="text-muted"><i class="bi bi-dash-circle me-1"></i>Ingen beräkningsstrategi vald</span>';
+        clearBtn.classList.add('d-none');
+        return;
+    }
+
+    // Build a short param summary
+    let paramSummary = '';
     if (configJson) {
         try {
-            const config = typeof configJson === 'string' ? JSON.parse(configJson) : configJson;
-            Object.entries(config).forEach(([key, value]) => {
-                const input = document.getElementById(`stratParam_${key}`);
-                if (input) {
-                    if (input.type === 'checkbox') {
-                        input.checked = value === true || value === 'true';
-                    } else {
-                        input.value = value;
-                    }
-                }
-            });
-            document.getElementById('seriesCalculationConfig').value =
-                typeof configJson === 'string' ? configJson : JSON.stringify(configJson);
-        } catch (e) {
-            console.warn('Failed to parse strategy config:', e);
-        }
+            const config = JSON.parse(configJson);
+            const parts = [];
+            if (config.bestOf && config.bestOf > 0) parts.push(`Bästa ${config.bestOf} resultat`);
+            if (config.maxShootersPerClub) parts.push(`${config.maxShootersPerClub} skyttar/klubb`);
+            if (config.placementPoints && config.placementPoints !== 'off') parts.push('Placeringspoäng');
+            if (config.groupByClass === true) parts.push('Per klass');
+            if (parts.length > 0) paramSummary = parts.join(' · ');
+        } catch (e) { /* ignore */ }
     }
+
+    const meta = (typeof strategyMeta !== 'undefined') ? strategyMeta[strategyId] : null;
+    const icon = meta?.icon || 'bi-bar-chart';
+
+    summaryEl.innerHTML = `<div>
+        <i class="bi ${icon} text-primary me-1"></i>
+        <strong>${escapeHtml(strategy.name)}</strong>
+        ${paramSummary ? `<br><small class="text-muted">${escapeHtml(paramSummary)}</small>` : ''}
+    </div>`;
+    clearBtn.classList.remove('d-none');
+}
+
+// Clear strategy selection
+function clearStrategy() {
+    document.getElementById('seriesCalculationStrategy').value = '';
+    document.getElementById('seriesCalculationConfig').value = '';
+    updateStrategySummaryDisplay();
 }
 
 // Show notification helper

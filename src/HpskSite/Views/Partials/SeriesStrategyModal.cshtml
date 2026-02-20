@@ -1,0 +1,503 @@
+@*
+ * Series Strategy Configuration Modal
+ * Dedicated two-panel modal for selecting and configuring series calculation strategies.
+ * Opened from SeriesEditModal via "Konfigurera strategi" button.
+ * Writes results back to hidden fields in the series edit form.
+*@
+
+<!-- Dark mode support for strategy modal -->
+<style>
+#strategyModal .strategy-card {
+    cursor: pointer;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+#strategyModal .strategy-card:hover {
+    border-color: var(--bs-primary);
+}
+#strategyModal .strategy-card.active {
+    border-color: var(--bs-primary);
+    box-shadow: 0 0 0 0.2rem rgba(var(--bs-primary-rgb), 0.25);
+}
+#strategyModal .strategy-card .bi {
+    font-size: 1.2rem;
+}
+#strategyModal .strategy-detail-example {
+    background-color: var(--bs-tertiary-bg);
+    border: 1px solid var(--bs-border-color);
+    border-radius: 0.375rem;
+    padding: 0.75rem;
+    font-size: 0.875rem;
+}
+#strategyModal .strategy-detail-example code {
+    font-size: 0.85em;
+}
+#strategyModal .strategy-list-panel {
+    border-right: 1px solid var(--bs-border-color);
+    max-height: 70vh;
+    overflow-y: auto;
+}
+#strategyModal .strategy-detail-panel {
+    max-height: 70vh;
+    overflow-y: auto;
+}
+#strategyModal .strategy-group-header {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--bs-secondary-color);
+    padding: 0.5rem 0;
+    margin-top: 0.5rem;
+}
+#strategyModal .strategy-group-header:first-child {
+    margin-top: 0;
+}
+</style>
+
+<div class="modal fade" id="strategyModal" tabindex="-1" role="dialog" aria-labelledby="strategyModalLabel">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable" role="document">
+        <div class="modal-content">
+            <!-- Header -->
+            <div class="modal-header">
+                <h5 class="modal-title" id="strategyModalLabel">
+                    <i class="bi bi-bar-chart me-2"></i>Konfigurera beräkningsstrategi
+                </h5>
+                <button type="button" class="btn-close" onclick="cancelStrategyModal()"></button>
+            </div>
+
+            <!-- Body: Two-column layout -->
+            <div class="modal-body p-0">
+                <div class="row g-0">
+                    <!-- Left panel: Strategy list -->
+                    <div class="col-md-4 strategy-list-panel p-3">
+                        <div id="strategyListContainer">
+                            <!-- Rendered by JS -->
+                        </div>
+                    </div>
+
+                    <!-- Right panel: Detail / parameters -->
+                    <div class="col-md-8 strategy-detail-panel p-3">
+                        <div id="strategyDetailContainer">
+                            <div class="text-center text-muted py-5">
+                                <i class="bi bi-arrow-left-circle" style="font-size: 2rem;"></i>
+                                <p class="mt-3">Välj en strategi från listan till vänster för att se beskrivning och inställningar.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="cancelStrategyModal()">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="confirmStrategyBtn" onclick="confirmStrategySelection()">
+                    <i class="bi bi-check-circle me-1"></i>Använd strategi
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// ── Rich metadata for each strategy (Swedish descriptions, examples, icons, category) ──
+const strategyMeta = {
+    IndividualSumAll: {
+        icon: 'bi-calculator',
+        category: 'individual',
+        detailedDescription: 'Summerar alla deltävlingsresultat för varje skytt. Alla tävlingar räknas — ingen stryks. ' +
+            'Kan kombineras med placeringspoäng (fasta eller dynamiska) istället för råresultat.',
+        example: 'Exempel: 5 deltävlingar med resultat 245, 238, 251, 240, 247\n' +
+            'Totalsumma: 245 + 238 + 251 + 240 + 247 = 1221 poäng',
+        paramHelp: {
+            placementPoints: 'Bestämmer hur varje deltävlingsresultat omvandlas till seriepoäng:\n' +
+                '• Av — skyttens råpoäng (t.ex. 245) summeras direkt.\n' +
+                '• Dynamisk — skytten får poäng efter placering: 1:a = antal deltagare i klassen, 2:a = antal minus 1, osv. Rättvisare vid varierande deltagarantal.\n' +
+                '• Fast poängtabell — skytten får fasta poäng beroende på placering (t.ex. 25, 20, 16...). Välj en fördefinierad tabell eller ange en egen.',
+            pointsTable: 'Välj en fördefinierad poängtabell, eller "Egen" för att ange egna värden.',
+            customPointsTable: 'Ange poäng per placering, kommaseparerat (t.ex. "25, 20, 16, 13, 11, 10"). Placering utanför listan får 0 poäng.'
+        }
+    },
+    IndividualBestOf: {
+        icon: 'bi-trophy',
+        category: 'individual',
+        detailedDescription: 'Väljer de N bästa resultaten per skytt — resterande visas genomstrukna i resultatlistan. ' +
+            'Bra för serier där inte alla kan delta i varje deltävling.',
+        example: 'Exempel: 6 deltävlingar, bästa 4 räknas\n' +
+            'Resultat: 245, 238, 251, 240, 247, 230\n' +
+            'Bästa 4: 251 + 247 + 245 + 240 = 983 (238, 230 strykresultat)',
+        paramHelp: {
+            bestOf: 'Antal bästa resultat som räknas per skytt.',
+            placementPoints: 'Bestämmer hur varje deltävlingsresultat omvandlas till seriepoäng:\n' +
+                '• Av — skyttens råpoäng (t.ex. 245) summeras direkt.\n' +
+                '• Dynamisk — skytten får poäng efter placering: 1:a = antal deltagare i klassen, 2:a = antal minus 1, osv. Rättvisare vid varierande deltagarantal.\n' +
+                '• Fast poängtabell — skytten får fasta poäng beroende på placering (t.ex. 25, 20, 16...). Välj en fördefinierad tabell eller ange en egen.',
+            pointsTable: 'Välj en fördefinierad poängtabell, eller "Egen" för att ange egna värden.',
+            customPointsTable: 'Ange poäng per placering, kommaseparerat (t.ex. "25, 20, 16, 13, 11, 10"). Placering utanför listan får 0 poäng.'
+        }
+    },
+    IndividualWinsCount: {
+        icon: 'bi-1-circle',
+        category: 'individual',
+        detailedDescription: 'Räknar antal 1:a-platser per skytt i varje skytteklass. ' +
+            'Den skytt med flest segrar vinner serien. Vid lika avgör totala poäng.',
+        example: 'Exempel: 5 deltävlingar\n' +
+            'Skytt A: 1:a, 3:e, 1:a, 2:a, 1:a → 3 segrar\n' +
+            'Skytt B: 2:a, 1:a, 2:a, 1:a, 2:a → 2 segrar\n' +
+            'Skytt A vinner serien.',
+        paramHelp: {}
+    },
+    IndividualFixedPoints: {
+        icon: 'bi-list-ol',
+        category: 'individual',
+        detailedDescription: 'Tilldelar fasta poäng baserat på placering i varje deltävling — samma poängskala oavsett antal deltagare. ' +
+            'Liknande Formel 1-poäng. Välj en fördefinierad tabell eller skapa en egen.',
+        example: 'Exempel med tabell 25-20-16-13-11-10:\n' +
+            'Skytt A: 1:a(25p) + 3:e(16p) + 2:a(20p) = 61p\n' +
+            'Skytt B: 2:a(20p) + 1:a(25p) + 4:e(13p) = 58p',
+        paramHelp: {
+            pointsTable: 'Välj en fördefinierad poängtabell, eller "Egen" för att ange egna värden.',
+            customPointsTable: 'Ange poäng per placering, kommaseparerat (t.ex. "25, 20, 16, 13, 11, 10"). Placering utanför listan får 0 poäng.'
+        }
+    },
+    IndividualDynamicPoints: {
+        icon: 'bi-people',
+        category: 'individual',
+        detailedDescription: 'Poäng baserat på antal deltagare i klassen. 1:a platsen får lika många poäng som det finns deltagare, ' +
+            '2:a platsen ett mindre, och så vidare. Sista platsen får alltid 1 poäng. ' +
+            'Rättvisare vid varierande deltagarantal mellan tävlingar.',
+        example: 'Exempel: 12 deltagare i klassen\n' +
+            '1:a plats → 12p, 2:a → 11p, 3:e → 10p, ..., 12:e → 1p\n\n' +
+            'Nästa tävling med 8 deltagare:\n' +
+            '1:a plats → 8p, 2:a → 7p, ..., 8:e → 1p',
+        paramHelp: {}
+    },
+    ClubTeamBestOf: {
+        icon: 'bi-people-fill',
+        category: 'club',
+        detailedDescription: 'Klubblagstävling där varje klubbs bästa X skyttar räknas per deltävling. ' +
+            'Lagets poäng är summan av de bästa skyttarnas resultat. ' +
+            'Kan kombineras med att räkna bästa N deltävlingar för laget.',
+        example: 'Exempel: 3 bästa skyttar per klubb\n' +
+            'Klubb A: Skytt1(251) + Skytt2(247) + Skytt3(245) = 743\n' +
+            'Klubb B: Skytt1(248) + Skytt2(246) + Skytt3(242) = 736\n' +
+            'Klubb A vinner deltävlingen.',
+        paramHelp: {
+            bestOf: 'Antal bästa deltävlingar som räknas för lagets total (0 = alla räknas).',
+            maxShootersPerClub: 'Antal bästa skyttar per klubb som räknas i varje deltävling.',
+            groupByClass: 'Om aktiverat skapas separata lagresultat per skytteklass. Annars tävlar alla klasser tillsammans.',
+            clubSeriesScoring: 'Bestämmer hur varje klubbs deltävlingsresultat omvandlas till seriepoäng:\n' +
+                '• Summa — lagets råpoäng (summan av skyttarnas resultat) summeras direkt.\n' +
+                '• Dynamisk — laget får poäng efter placering: 1:a = antal lag, 2:a = antal lag minus 1, osv. Rättvisare vid varierande antal lag.\n' +
+                '• Fast poängtabell — laget får fasta poäng beroende på placering (t.ex. 10, 8, 6, 5...). Välj en fördefinierad tabell eller ange en egen.',
+            clubPointsTable: 'Välj en fördefinierad poängtabell, eller "Egen" för att ange egna värden.',
+            customClubPointsTable: 'Ange poäng per lagplacering, kommaseparerat (t.ex. "10, 8, 6, 5, 4, 3, 2, 1"). Placering utanför listan får 0 poäng.'
+        }
+    }
+};
+
+// ── Internal state for the strategy modal ──
+let _strategyModalSelectedId = '';
+let _strategyModalOriginalId = '';
+let _strategyModalOriginalConfig = '';
+
+// ── Open strategy modal (called from series edit modal) ──
+function openStrategyModal() {
+    // Save current values so we can restore on cancel
+    _strategyModalOriginalId = document.getElementById('seriesCalculationStrategy').value || '';
+    _strategyModalOriginalConfig = document.getElementById('seriesCalculationConfig').value || '';
+    _strategyModalSelectedId = _strategyModalOriginalId;
+
+    // Render strategy list
+    renderStrategyList();
+
+    // Pre-select current strategy if any
+    if (_strategyModalSelectedId) {
+        selectStrategyInModal(_strategyModalSelectedId, true);
+    } else {
+        selectNoStrategyInModal();
+    }
+
+    // Hide series modal, show strategy modal
+    const seriesModal = bootstrap.Modal.getInstance(document.getElementById('seriesEditModal'));
+    if (seriesModal) seriesModal.hide();
+
+    // Small delay so the series modal finishes hiding
+    setTimeout(() => {
+        const strategyModalEl = document.getElementById('strategyModal');
+        const strategyModal = bootstrap.Modal.getOrCreateInstance(strategyModalEl);
+        strategyModal.show();
+    }, 300);
+}
+
+// ── Cancel: close strategy modal, re-show series modal ──
+function cancelStrategyModal() {
+    const strategyModal = bootstrap.Modal.getInstance(document.getElementById('strategyModal'));
+    if (strategyModal) strategyModal.hide();
+
+    setTimeout(() => {
+        const seriesModalEl = document.getElementById('seriesEditModal');
+        const seriesModal = bootstrap.Modal.getOrCreateInstance(seriesModalEl);
+        seriesModal.show();
+    }, 300);
+}
+
+// ── Confirm: write selection to hidden fields, update summary, return to series modal ──
+function confirmStrategySelection() {
+    const strategyId = _strategyModalSelectedId;
+
+    // Write strategy ID
+    document.getElementById('seriesCalculationStrategy').value = strategyId;
+
+    // Build and write config JSON
+    if (strategyId) {
+        const config = buildStrategyModalConfig();
+        document.getElementById('seriesCalculationConfig').value = JSON.stringify(config);
+    } else {
+        document.getElementById('seriesCalculationConfig').value = '';
+    }
+
+    // Update summary display in series modal
+    updateStrategySummaryDisplay();
+
+    // Close strategy modal, re-show series modal
+    const strategyModal = bootstrap.Modal.getInstance(document.getElementById('strategyModal'));
+    if (strategyModal) strategyModal.hide();
+
+    setTimeout(() => {
+        const seriesModalEl = document.getElementById('seriesEditModal');
+        const seriesModal = bootstrap.Modal.getOrCreateInstance(seriesModalEl);
+        seriesModal.show();
+    }, 300);
+}
+
+// ── Render the strategy card list in the left panel ──
+function renderStrategyList() {
+    const container = document.getElementById('strategyListContainer');
+
+    // "Ingen strategi" option
+    let html = `<div class="strategy-card card mb-2 p-2" id="strategyCard_none" onclick="selectNoStrategyInModal()">
+        <div class="d-flex align-items-center">
+            <i class="bi bi-x-circle text-muted me-2"></i>
+            <div>
+                <strong>Ingen strategi</strong>
+                <div class="text-muted" style="font-size:0.8rem;">Visa inga serieresultat</div>
+            </div>
+        </div>
+    </div>`;
+
+    // Group strategies
+    const individuals = seriesStrategies.filter(s => (strategyMeta[s.id]?.category || 'individual') === 'individual');
+    const clubs = seriesStrategies.filter(s => (strategyMeta[s.id]?.category) === 'club');
+
+    if (individuals.length > 0) {
+        html += '<div class="strategy-group-header">Individuella strategier</div>';
+        individuals.forEach(s => {
+            const meta = strategyMeta[s.id] || {};
+            html += buildStrategyCardHtml(s, meta);
+        });
+    }
+
+    if (clubs.length > 0) {
+        html += '<div class="strategy-group-header">Lagstrategier</div>';
+        clubs.forEach(s => {
+            const meta = strategyMeta[s.id] || {};
+            html += buildStrategyCardHtml(s, meta);
+        });
+    }
+
+    container.innerHTML = html;
+}
+
+function buildStrategyCardHtml(strategy, meta) {
+    const icon = meta.icon || 'bi-gear';
+    return `<div class="strategy-card card mb-2 p-2" id="strategyCard_${strategy.id}" onclick="selectStrategyInModal('${strategy.id}')">
+        <div class="d-flex align-items-center">
+            <i class="bi ${icon} text-primary me-2"></i>
+            <div>
+                <strong>${escapeHtmlStrategy(strategy.name)}</strong>
+                <div class="text-muted" style="font-size:0.8rem;">${escapeHtmlStrategy(strategy.description)}</div>
+            </div>
+        </div>
+    </div>`;
+}
+
+// ── Select "Ingen strategi" ──
+function selectNoStrategyInModal() {
+    _strategyModalSelectedId = '';
+    highlightStrategyCard('none');
+
+    document.getElementById('strategyDetailContainer').innerHTML = `
+        <div class="text-center text-muted py-5">
+            <i class="bi bi-x-circle" style="font-size: 2rem;"></i>
+            <h5 class="mt-3">Ingen beräkningsstrategi</h5>
+            <p>Serien kommer inte ha aggregerade serieresultat. Enskilda tävlingsresultat visas fortfarande.</p>
+        </div>`;
+}
+
+// ── Select a strategy in the modal ──
+function selectStrategyInModal(strategyId, isInitialLoad) {
+    _strategyModalSelectedId = strategyId;
+    highlightStrategyCard(strategyId);
+
+    const strategy = seriesStrategies.find(s => s.id === strategyId);
+    if (!strategy) return;
+
+    const meta = strategyMeta[strategyId] || {};
+    const icon = meta.icon || 'bi-gear';
+
+    let html = `
+        <h5><i class="bi ${icon} me-2"></i>${escapeHtmlStrategy(strategy.name)}</h5>
+        <p class="text-muted">${escapeHtmlStrategy(strategy.description)}</p>`;
+
+    if (meta.detailedDescription) {
+        html += `<p>${escapeHtmlStrategy(meta.detailedDescription)}</p>`;
+    }
+
+    if (meta.example) {
+        html += `<div class="strategy-detail-example mb-3">
+            <strong><i class="bi bi-lightbulb me-1"></i>Exempel</strong>
+            <pre class="mb-0 mt-1" style="white-space: pre-wrap; font-size: 0.85rem;">${escapeHtmlStrategy(meta.example)}</pre>
+        </div>`;
+    }
+
+    // Parameters section
+    if (strategy.parameters && strategy.parameters.length > 0) {
+        html += `<hr><h6><i class="bi bi-sliders me-1"></i>Inställningar</h6>
+            <div id="strategyModalParams">`;
+        html += renderStrategyModalParams(strategy, meta);
+        html += `</div>`;
+    }
+
+    document.getElementById('strategyDetailContainer').innerHTML = html;
+
+    // If editing (initial load), populate saved config values into param fields
+    if (isInitialLoad && _strategyModalOriginalConfig) {
+        try {
+            const config = JSON.parse(_strategyModalOriginalConfig);
+            Object.entries(config).forEach(([key, value]) => {
+                const input = document.getElementById(`stratModalParam_${key}`);
+                if (input) {
+                    if (input.type === 'checkbox') {
+                        input.checked = value === true || value === 'true';
+                    } else {
+                        input.value = value;
+                    }
+                }
+            });
+        } catch (e) {
+            console.warn('Failed to parse strategy config for modal:', e);
+        }
+    }
+
+    // Apply initial visibility
+    updateStrategyModalParamVisibility();
+}
+
+// ── Render parameter fields for the selected strategy ──
+function renderStrategyModalParams(strategy, meta) {
+    const paramHelp = meta.paramHelp || {};
+
+    return strategy.parameters.map(p => {
+        const defaultVal = p.defaultValue ?? '';
+        const placeholder = p.placeholder ? ` placeholder="${escapeAttr(p.placeholder)}"` : '';
+        const helpText = paramHelp[p.key] ? `<small class="form-text text-muted">${escapeHtmlStrategy(paramHelp[p.key]).replace(/\n/g, '<br>')}</small>` : '';
+        const dependsAttr = p.dependsOn
+            ? ` data-depends-on="${escapeAttr(p.dependsOn)}" data-depends-on-value="${escapeAttr(p.dependsOnValue || '')}"`
+            : '';
+
+        if (p.type === 'int') {
+            return `<div class="mb-3 strategy-modal-param-group"${dependsAttr}>
+                <label for="stratModalParam_${p.key}" class="form-label">${escapeHtmlStrategy(p.label)}</label>
+                <input type="number" class="form-control" id="stratModalParam_${p.key}"
+                       data-param-key="${escapeAttr(p.key)}" value="${defaultVal}" min="0">
+                ${helpText}
+            </div>`;
+        } else if (p.type === 'bool') {
+            const checked = defaultVal === true || defaultVal === 'true' ? 'checked' : '';
+            return `<div class="form-check mb-3 strategy-modal-param-group"${dependsAttr}>
+                <input class="form-check-input" type="checkbox" id="stratModalParam_${p.key}"
+                       data-param-key="${escapeAttr(p.key)}" ${checked}>
+                <label class="form-check-label" for="stratModalParam_${p.key}">${escapeHtmlStrategy(p.label)}</label>
+                ${helpText}
+            </div>`;
+        } else if (p.type === 'select' && p.options) {
+            const optionsHtml = p.options.map(o => {
+                const selected = o.value === String(defaultVal) ? ' selected' : '';
+                return `<option value="${escapeAttr(o.value)}"${selected}>${escapeHtmlStrategy(o.label)}</option>`;
+            }).join('');
+            return `<div class="mb-3 strategy-modal-param-group"${dependsAttr}>
+                <label for="stratModalParam_${p.key}" class="form-label">${escapeHtmlStrategy(p.label)}</label>
+                <select class="form-select" id="stratModalParam_${p.key}"
+                        data-param-key="${escapeAttr(p.key)}" onchange="updateStrategyModalParamVisibility()">${optionsHtml}</select>
+                ${helpText}
+            </div>`;
+        } else if (p.type === 'string') {
+            return `<div class="mb-3 strategy-modal-param-group"${dependsAttr}>
+                <label for="stratModalParam_${p.key}" class="form-label">${escapeHtmlStrategy(p.label)}</label>
+                <input type="text" class="form-control" id="stratModalParam_${p.key}"
+                       data-param-key="${escapeAttr(p.key)}" value="${escapeAttr(String(defaultVal))}"${placeholder}>
+                ${helpText}
+            </div>`;
+        }
+        return '';
+    }).join('');
+}
+
+// ── Show/hide parameter groups based on dependsOn conditions (two-pass for chained deps) ──
+function updateStrategyModalParamVisibility() {
+    for (let pass = 0; pass < 2; pass++) {
+        document.querySelectorAll('#strategyModalParams .strategy-modal-param-group[data-depends-on]').forEach(group => {
+            const dependsOnKey = group.dataset.dependsOn;
+            const dependsOnValue = group.dataset.dependsOnValue;
+            const controlInput = document.getElementById('stratModalParam_' + dependsOnKey);
+            if (!controlInput) return;
+
+            const parentGroup = controlInput.closest('.strategy-modal-param-group');
+            const parentVisible = !parentGroup || parentGroup.style.display !== 'none';
+
+            const conditionMet = controlInput.value === dependsOnValue;
+            group.style.display = (parentVisible && conditionMet) ? '' : 'none';
+        });
+    }
+}
+
+// ── Build JSON config from the modal's parameter inputs ──
+function buildStrategyModalConfig() {
+    const params = {};
+    document.querySelectorAll('#strategyModalParams [data-param-key]').forEach(input => {
+        const key = input.dataset.paramKey;
+        if (input.type === 'checkbox') {
+            params[key] = input.checked;
+        } else if (input.type === 'number') {
+            params[key] = parseInt(input.value) || 0;
+        } else {
+            params[key] = input.value;
+        }
+    });
+    return params;
+}
+
+// ── Highlight the selected card, deselect others ──
+function highlightStrategyCard(idSuffix) {
+    document.querySelectorAll('#strategyListContainer .strategy-card').forEach(card => {
+        card.classList.remove('active');
+    });
+    const target = document.getElementById('strategyCard_' + idSuffix);
+    if (target) {
+        target.classList.add('active');
+        target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+}
+
+// ── HTML escape helper (strategy modal scope) ──
+function escapeHtmlStrategy(str) {
+    if (!str) return '';
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+function escapeAttr(str) {
+    if (!str) return '';
+    return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+</script>

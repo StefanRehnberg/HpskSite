@@ -160,6 +160,59 @@
     </div>
 </div>
 
+<!-- Change Shooter Class Modal -->
+<div class="modal fade" id="changeClassModal" tabindex="-1" aria-labelledby="changeClassModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="changeClassModalLabel">Ändra vapenklass</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="changeClassMemberId" />
+                <input type="hidden" id="changeClassOldClass" />
+
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Skytt</label>
+                    <div id="changeClassShooterName" class="form-control-plaintext"></div>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Nuvarande klass</label>
+                    <div><span id="changeClassCurrentBadge" class="badge bg-secondary fs-6"></span></div>
+                </div>
+
+                <div class="mb-3">
+                    <label for="changeClassNewSelect" class="form-label fw-bold">Ny klass</label>
+                    <select class="form-select" id="changeClassNewSelect">
+                        <option value="">-- Välj ny klass --</option>
+                        @foreach (var sc in HpskSite.Models.ShootingClasses.All)
+                        {
+                            <option value="@sc.Name" data-weapon="@sc.Weapon">@sc.Name - @sc.Description</option>
+                        }
+                    </select>
+                </div>
+
+                <div class="mb-3 form-check">
+                    <input type="checkbox" class="form-check-input" id="changeClassShowAll" onchange="filterChangeClassOptions()">
+                    <label class="form-check-label" for="changeClassShowAll">Visa alla vapenklasser</label>
+                </div>
+
+                <div class="alert alert-info small">
+                    <i class="bi bi-info-circle me-1"></i>
+                    Ändringen uppdaterar resultatrader i databasen, startlistan och anmälan. Resultatlistan omberäknas automatiskt.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-warning" id="btnConfirmChangeClass" onclick="confirmChangeShooterClass()">
+                    <i class="bi bi-pencil-square me-1"></i>Ändra klass
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 // Results Management JavaScript
 
@@ -620,6 +673,16 @@ function changeEntryOrder() {
     loadShooters(orderBy);
 }
 
+// Navigate to first shooter
+function firstShooter() {
+    if (currentShooterIndex !== 0) {
+        currentShooterIndex = 0;
+        updateShooterDisplay();
+        loadCurrentShooterByIndex();
+        saveCurrentSession();
+    }
+}
+
 // Navigate to previous shooter
 function prevShooter() {
     if (currentShooterIndex > 0) {
@@ -951,12 +1014,13 @@ async function loadExistingResults(competitionId, seriesId, teamNumber, position
         if ((data.Success || data.success) && (data.Results || data.results)) {
             const results = data.Results || data.results;
             
-            // Find existing result for this specific shooter/series combination
-            // IDENTITY-BASED: Search by MemberId instead of position to handle late registrations
+            // Find existing result for this specific shooter/series/class combination
+            // Must include shootingClass to distinguish multi-class shooters
             const targetSeries = parseInt(seriesId);
 
             existingResult = results.find(result => {
                 return result.memberId === shooterData.memberId &&
+                       result.shootingClass === shooterData.class &&
                        result.seriesNumber === targetSeries;
             });
         }
@@ -997,10 +1061,13 @@ function generateShooterResultsEntryHtml(shooterData, seriesId, competitionId) {
                     <div class="d-flex justify-content-between align-items-center">
                         <div class="d-flex align-items-center">
                             <div class="shooter-navigation me-3">
-                                <button type="button" class="btn btn-outline-secondary btn-sm prev-shooter-btn" title="Previous Shooter">
+                                <button type="button" class="btn btn-outline-secondary btn-sm first-shooter-btn" title="Första skytt">
+                                    <i class="bi bi-chevron-bar-left"></i>
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm prev-shooter-btn" title="Föregående skytt">
                                     <i class="bi bi-chevron-left"></i>
                                 </button>
-                                <button type="button" class="btn btn-outline-secondary btn-sm next-shooter-btn" title="Next Shooter">
+                                <button type="button" class="btn btn-outline-secondary btn-sm next-shooter-btn" title="Nästa skytt">
                                     <i class="bi bi-chevron-right"></i>
                                 </button>
                             </div>
@@ -1008,6 +1075,11 @@ function generateShooterResultsEntryHtml(shooterData, seriesId, competitionId) {
                                 <div class="fs-5">
                                     <strong>Skytt ${shooterData.position} - ${shooterData.name} - ${shooterData.class}</strong>
                                     <span class="text-muted ms-2">${shooterData.club}</span>
+                                    <button type="button" class="btn btn-outline-warning btn-sm ms-2"
+                                            onclick="openChangeClassModal(${shooterData.memberId}, '${shooterData.name.replace(/'/g, "\\'")}', '${shooterData.class}')"
+                                            title="Ändra vapenklass">
+                                        <i class="bi bi-pencil-square"></i>
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -1360,6 +1432,7 @@ function handleShooterClick(e) {
                         button.classList.contains('enter-btn') ||
                         button.classList.contains('clear-btn') ||
                         button.classList.contains('info-toggle-btn') ||
+                        button.classList.contains('first-shooter-btn') ||
                         button.classList.contains('prev-shooter-btn') ||
                         button.classList.contains('next-shooter-btn') ||
                         button.classList.contains('prev-series-btn') ||
@@ -1386,8 +1459,9 @@ function handleShooterClick(e) {
         navigateToPreviousTeam();
     } else if (button.classList.contains('next-team-btn')) {
         navigateToNextTeam();
+    } else if (button.classList.contains('first-shooter-btn')) {
+        firstShooter();
     } else if (button.classList.contains('prev-shooter-btn')) {
-        // Navigate to previous position (shooter)
         navigateToPreviousPosition();
     } else if (button.classList.contains('next-shooter-btn')) {
         // Navigate to next position (shooter)
@@ -1529,10 +1603,11 @@ async function updateOverallTotals() {
         if ((data.Success || data.success) && data.results) {
             const results = data.results;
 
-            // Filter results for this specific shooter
-            // IDENTITY-BASED: Use MemberId instead of position to handle late registrations
+            // Filter results for this specific shooter and class
+            // Must include shootingClass to distinguish multi-class shooters
             const shooterResults = results.filter(result => {
-                return result.memberId === currentShooterData.memberId;
+                return result.memberId === currentShooterData.memberId &&
+                       result.shootingClass === currentShooterData.class;
             });
             
             // Sum up all series totals by calculating from shots
@@ -1609,9 +1684,10 @@ async function deleteExistingResults() {
     const deleteData = {
         competitionId: competitionData.competitionId,
         seriesNumber: currentSeries,
-        memberId: currentShooterData.memberId,  // Identity field for future use
-        teamNumber: parseInt(currentShooterData.teamNumber),  // Still needed by current controller
-        position: parseInt(currentShooterData.position)  // Still needed by current controller
+        memberId: currentShooterData.memberId,  // Identity field (required)
+        shootingClass: currentShooterData.class, // Required for multi-class shooters
+        teamNumber: parseInt(currentShooterData.teamNumber),  // Informational only
+        position: parseInt(currentShooterData.position)  // Informational only
     };
 
     console.log('Sending delete request:', deleteData);
@@ -2282,6 +2358,112 @@ if (competitionData.hasFinalsRound) {
     setTimeout(() => {
         initializePhaseSelector();
     }, 100);
+}
+
+// --- Change Shooter Class ---
+
+function openChangeClassModal(memberId, name, currentClass) {
+    document.getElementById('changeClassMemberId').value = memberId;
+    document.getElementById('changeClassOldClass').value = currentClass;
+    document.getElementById('changeClassShooterName').textContent = name;
+    document.getElementById('changeClassCurrentBadge').textContent = currentClass;
+    document.getElementById('changeClassShowAll').checked = false;
+
+    // Reset dropdown
+    const select = document.getElementById('changeClassNewSelect');
+    select.value = '';
+
+    // Determine weapon type from current class (first character, e.g. "C2" -> "C")
+    const weaponType = currentClass.length > 0 ? currentClass.charAt(0).toUpperCase() : '';
+    select.dataset.currentWeapon = weaponType;
+
+    filterChangeClassOptions();
+
+    var modal = new bootstrap.Modal(document.getElementById('changeClassModal'));
+    modal.show();
+}
+
+function filterChangeClassOptions() {
+    const select = document.getElementById('changeClassNewSelect');
+    const showAll = document.getElementById('changeClassShowAll').checked;
+    const weaponType = select.dataset.currentWeapon || '';
+    const currentClass = document.getElementById('changeClassOldClass').value;
+
+    const options = select.querySelectorAll('option[data-weapon]');
+    options.forEach(opt => {
+        const optWeapon = opt.getAttribute('data-weapon');
+        // Map enum names to letter prefixes: A, B, C, R, M, L
+        const weaponLetter = optWeapon ? optWeapon.charAt(0).toUpperCase() : '';
+
+        if (showAll) {
+            opt.style.display = '';
+        } else {
+            opt.style.display = (weaponLetter === weaponType) ? '' : 'none';
+        }
+
+        // Disable the current class option
+        opt.disabled = (opt.value === currentClass);
+    });
+}
+
+function confirmChangeShooterClass() {
+    const competitionId = parseInt($('.competition-results-management').data('competition-id'));
+    const memberId = parseInt(document.getElementById('changeClassMemberId').value);
+    const oldClass = document.getElementById('changeClassOldClass').value;
+    const newClass = document.getElementById('changeClassNewSelect').value;
+
+    if (!newClass) {
+        alert('Välj en ny vapenklass.');
+        return;
+    }
+
+    if (newClass === oldClass) {
+        alert('Du har valt samma klass. Välj en annan klass.');
+        return;
+    }
+
+    const btn = document.getElementById('btnConfirmChangeClass');
+    const originalText = btn.innerHTML;
+    btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Ändrar...';
+    btn.disabled = true;
+
+    fetch('/umbraco/surface/CompetitionResults/ChangeShooterClass', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'RequestVerificationToken': $('input[name="__RequestVerificationToken"]').val()
+        },
+        body: JSON.stringify({
+            competitionId: competitionId,
+            memberId: memberId,
+            oldShootingClass: oldClass,
+            newShootingClass: newClass
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Close modal
+            var modal = bootstrap.Modal.getInstance(document.getElementById('changeClassModal'));
+            if (modal) modal.hide();
+
+            showSaveMessage(data.message, 'success');
+
+            // Refresh shooter list and results
+            loadShooters(currentEntryOrder);
+            loadResultsList();
+        } else {
+            alert('Fel: ' + (data.message || 'Okänt fel'));
+        }
+    })
+    .catch(error => {
+        console.error('Error changing class:', error);
+        alert('Ett fel uppstod vid ändring av vapenklass.');
+    })
+    .finally(() => {
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+    });
 }
 
 </script>

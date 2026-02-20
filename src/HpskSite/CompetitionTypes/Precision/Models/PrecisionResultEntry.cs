@@ -11,8 +11,8 @@ namespace HpskSite.CompetitionTypes.Precision.Models
     /// - Late registrations after results entry has started
     /// - Shooters to move between teams/positions
     ///
-    /// UNIQUE CONSTRAINT: (CompetitionId, MemberId, SeriesNumber)
-    /// This ensures one result per shooter per series, regardless of position changes.
+    /// UNIQUE CONSTRAINT: (CompetitionId, MemberId, ShootingClass, SeriesNumber)
+    /// This ensures one result per shooter per class per series (supports multi-class shooters).
     ///
     /// TeamNumber and Position are INFORMATIONAL ONLY - they reflect the shooter's
     /// position at the time of result entry, but results are looked up by MemberId.
@@ -71,33 +71,6 @@ namespace HpskSite.CompetitionTypes.Precision.Models
         // public Member EnteredByMember { get; set; }
     }
 
-    public class PrecisionResultEntrySession
-    {
-        public int Id { get; set; }
-        
-        [Required]
-        public int CompetitionId { get; set; }
-        
-        [Required]
-        public int Position { get; set; }
-        
-        [Required]
-        public int SeriesNumber { get; set; }
-        
-        [Required]
-        public int RangeOfficerId { get; set; }
-        
-        public DateTime SessionStart { get; set; } = DateTime.Now;
-        
-        public DateTime LastActivity { get; set; } = DateTime.Now;
-        
-        public bool IsActive { get; set; } = true;
-        
-        // Navigation properties (if using EF Core)
-        // public Competition Competition { get; set; }
-        // public Member RangeOfficer { get; set; }
-    }
-
     // Request/Response models for API
     public class PrecisionResultEntryRequest
     {
@@ -120,23 +93,6 @@ namespace HpskSite.CompetitionTypes.Precision.Models
         public int XCount { get; set; }
     }
 
-    public class PrecisionSessionRequest
-    {
-        public int CompetitionId { get; set; }
-        public int TeamNumber { get; set; }
-        public int Position { get; set; }
-        public int SeriesNumber { get; set; }
-        public int RangeOfficerId { get; set; }
-    }
-
-    public class PrecisionSessionResponse
-    {
-        public bool Success { get; set; }
-        public string Message { get; set; } = "";
-        public int? SessionId { get; set; }
-        public bool IsAvailable { get; set; }
-    }
-
     public class PrecisionDeleteResultRequest
     {
         public int CompetitionId { get; set; }
@@ -144,6 +100,7 @@ namespace HpskSite.CompetitionTypes.Precision.Models
         public int TeamNumber { get; set; }  // Informational only (for backwards compatibility)
         public int Position { get; set; }     // Informational only (for backwards compatibility)
         public int MemberId { get; set; }     // Identity field for delete (required)
+        public string ShootingClass { get; set; } = "";  // Required for multi-class shooters
     }
 
     public class PrecisionResultUpdate
