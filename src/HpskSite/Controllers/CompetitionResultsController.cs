@@ -18,11 +18,8 @@ using HpskSite.CompetitionTypes.Precision.Controllers;
 using HpskSite.Services;
 using Newtonsoft.Json;
 using PrecisionResultEntry = HpskSite.CompetitionTypes.Precision.Models.PrecisionResultEntry;
-using ResultEntrySession = HpskSite.CompetitionTypes.Precision.Models.PrecisionResultEntrySession;
 using ResultEntryRequest = HpskSite.CompetitionTypes.Precision.Models.PrecisionResultEntryRequest;
 using ResultEntryResponse = HpskSite.CompetitionTypes.Precision.Models.PrecisionResultEntryResponse;
-using SessionRequest = HpskSite.CompetitionTypes.Precision.Models.PrecisionSessionRequest;
-using SessionResponse = HpskSite.CompetitionTypes.Precision.Models.PrecisionSessionResponse;
 using DeleteResultRequest = HpskSite.CompetitionTypes.Precision.Models.PrecisionDeleteResultRequest;
 using ShooterResult = HpskSite.CompetitionTypes.Precision.Models.PrecisionShooterResult;
 using ClassGroup = HpskSite.CompetitionTypes.Precision.Models.PrecisionClassGroup;
@@ -46,6 +43,7 @@ namespace HpskSite.Controllers
         private readonly UmbracoStartListRepository _startListRepository;
         private readonly ClubService _clubService;
         private readonly SeriesCalculationService _seriesCalculationService;
+        private readonly AdminAuthorizationService _adminAuthorizationService;
 
         public CompetitionResultsController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -62,7 +60,8 @@ namespace HpskSite.Controllers
             ILogger<CompetitionResultsController> logger,
             UmbracoStartListRepository startListRepository,
             ClubService clubService,
-            SeriesCalculationService seriesCalculationService)
+            SeriesCalculationService seriesCalculationService,
+            AdminAuthorizationService adminAuthorizationService)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _contentService = contentService;
@@ -76,6 +75,7 @@ namespace HpskSite.Controllers
             _startListRepository = startListRepository;
             _clubService = clubService;
             _seriesCalculationService = seriesCalculationService;
+            _adminAuthorizationService = adminAuthorizationService;
         }
 
         [HttpPost]
@@ -112,17 +112,6 @@ namespace HpskSite.Controllers
                     });
                 }
 
-                // Check if position is available for editing
-                var sessionConflict = await CheckSessionConflict(request);
-                if (sessionConflict != null)
-                {
-                    return Json(new ResultEntryResponse
-                    {
-                        Success = false,
-                        Message = sessionConflict
-                    });
-                }
-
                 // Use shooter info from the request (sent by the UI)
                 _logger.LogInformation("Using shooter info from request: MemberId={MemberId}, Class={Class} for Team={Team}, Position={Position}", 
                     request.ShooterMemberId, request.ShooterClass, request.TeamNumber, request.Position);
@@ -156,9 +145,6 @@ namespace HpskSite.Controllers
                         Message = "Ett fel uppstod vid sparande av resultatet."
                     });
                 }
-
-                // Update or create session
-                await UpdateOrCreateSession(request);
 
                 // Invalidate series results cache (if competition is part of a series)
                 try
@@ -205,58 +191,6 @@ namespace HpskSite.Controllers
                 {
                     Success = false,
                     Message = $"Ett fel uppstod vid sparande av resultatet: {ex.Message}"
-                });
-            }
-        }
-
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> AcquireSession([FromBody] SessionRequest request)
-        {
-            try
-            {
-                // Check if position is already being edited
-                var existingSession = await GetActiveSession(request);
-
-                if (existingSession != null && existingSession.RangeOfficerId != request.RangeOfficerId)
-                {
-                    return Json(new SessionResponse
-                    {
-                        Success = false,
-                        Message = "Positionen redigeras för närvarande av en annan domare.",
-                        IsAvailable = false
-                    });
-                }
-
-                // Update or create session
-                var sessionId = await UpdateOrCreateSession(new ResultEntryRequest
-                {
-                    CompetitionId = request.CompetitionId,
-                    TeamNumber = request.TeamNumber,
-                    Position = request.Position,
-                    SeriesNumber = request.SeriesNumber,
-                    RangeOfficerId = request.RangeOfficerId,
-                    Shots = new string[5]
-                });
-
-                return Json(new SessionResponse
-                {
-                    Success = true,
-                    Message = "Session etablerad framgångsrikt.",
-                    SessionId = sessionId,
-                    IsAvailable = true
-                });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error acquiring session for competition {CompetitionId}, team {TeamNumber}, position {Position}",
-                    request.CompetitionId, request.TeamNumber, request.Position);
-
-                return Json(new SessionResponse
-                {
-                    Success = false,
-                    Message = "Ett fel uppstod vid etablering av session.",
-                    IsAvailable = false
                 });
             }
         }
@@ -703,7 +637,7 @@ namespace HpskSite.Controllers
                 {
                     MemberId = r.MemberId,
                     Name = r.MemberName ?? "Okänd",
-                    Club = r.MemberClub ?? "Okänd klubb",
+                    Club = Helpers.ClubNameHelper.Shorten(r.MemberClub ?? "Okänd klubb"),
                     ShootingClass = ShootingClasses.GetById(r.MemberClass)?.Name ?? r.MemberClass ?? "Okänd klass"
                 })
                 .ToList();
@@ -739,7 +673,7 @@ namespace HpskSite.Controllers
                         {
                             MemberId = registration.MemberId,
                             Name = registration.MemberName ?? shooter.Name ?? "Okänd",
-                            Club = registration.MemberClub ?? shooter.Club ?? "Okänd klubb",
+                            Club = Helpers.ClubNameHelper.Shorten(registration.MemberClub ?? shooter.Club ?? "Okänd klubb"),
                             ShootingClass = ShootingClasses.GetById(classId)?.Name ?? classId ?? "Okänd klass",
                             TeamNumber = team.TeamNumber,
                             Position = shooter.Position,
@@ -762,7 +696,7 @@ namespace HpskSite.Controllers
                     {
                         MemberId = reg.MemberId,
                         Name = reg.MemberName ?? "Okänd",
-                        Club = reg.MemberClub ?? "Okänd klubb",
+                        Club = Helpers.ClubNameHelper.Shorten(reg.MemberClub ?? "Okänd klubb"),
                         ShootingClass = ShootingClasses.GetById(reg.MemberClass)?.Name ?? reg.MemberClass ?? "Okänd klass"
                         // No TeamNumber/Position - not in start list
                     });
@@ -771,33 +705,6 @@ namespace HpskSite.Controllers
             }
 
             return shooters;
-        }
-
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> ClearAllSessions()
-        {
-            try
-            {
-                _logger.LogInformation("Clearing all active sessions");
-
-                using var db = _umbracoDatabaseFactory.CreateDatabase();
-                using var transaction = db.GetTransaction();
-
-                // Clear all active sessions
-                await db.ExecuteAsync("UPDATE ResultEntrySession SET IsActive = 0 WHERE IsActive = 1");
-
-                transaction.Complete();
-
-                _logger.LogInformation("All sessions cleared successfully");
-
-                return Json(new { Success = true, Message = "All sessions cleared successfully" });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error clearing sessions");
-                return Json(new { Success = false, Message = $"Error clearing sessions: {ex.Message}" });
-            }
         }
 
         [HttpPost]
@@ -915,29 +822,6 @@ namespace HpskSite.Controllers
                    request.MemberId > 0;  // Identity-based delete - only require MemberId
         }
 
-        private async Task<string?> CheckSessionConflict(ResultEntryRequest request)
-        {
-            var existingSession = await GetActiveSession(new SessionRequest
-            {
-                CompetitionId = request.CompetitionId,
-                TeamNumber = request.TeamNumber,
-                Position = request.Position,
-                SeriesNumber = request.SeriesNumber,
-                RangeOfficerId = request.RangeOfficerId
-            });
-
-            if (existingSession != null && existingSession.RangeOfficerId != request.RangeOfficerId)
-            {
-                // Get range officer name for better error message
-                var rangeOfficer = _memberService.GetById(existingSession.RangeOfficerId);
-                var officerName = rangeOfficer?.Name ?? "Okänd domare";
-
-                return $"Positionen redigeras för närvarande av {officerName}. Vänligen vänta eller välj en annan position.";
-            }
-
-            return null;
-        }
-
         private (int total, int xCount) CalculateTotalsFromShots(string[] shots)
         {
             var total = 0;
@@ -971,14 +855,14 @@ namespace HpskSite.Controllers
 
                 try
                 {
-                    // IDENTITY-BASED LOOKUP: Query by (CompetitionId, MemberId, SeriesNumber)
-                    // This allows results to follow the shooter even if their position changes
-                    _logger.LogInformation("Checking for existing result with CompetitionId={CompetitionId}, MemberId={MemberId}, SeriesNumber={SeriesNumber}",
-                        request.CompetitionId, request.ShooterMemberId, request.SeriesNumber);
+                    // IDENTITY-BASED LOOKUP: Query by (CompetitionId, MemberId, ShootingClass, SeriesNumber)
+                    // ShootingClass is required to distinguish multi-class shooters (e.g., A1 + C1)
+                    _logger.LogInformation("Checking for existing result with CompetitionId={CompetitionId}, MemberId={MemberId}, ShootingClass={ShootingClass}, SeriesNumber={SeriesNumber}",
+                        request.CompetitionId, request.ShooterMemberId, request.ShooterClass, request.SeriesNumber);
 
                     var existingResult = await db.FirstOrDefaultAsync<PrecisionResultEntry>(
-                        "WHERE CompetitionId = @0 AND MemberId = @1 AND SeriesNumber = @2",
-                        request.CompetitionId, request.ShooterMemberId, request.SeriesNumber);
+                        "WHERE CompetitionId = @0 AND MemberId = @1 AND ShootingClass = @2 AND SeriesNumber = @3",
+                        request.CompetitionId, request.ShooterMemberId, request.ShooterClass, request.SeriesNumber);
 
                     var shotsJson = JsonConvert.SerializeObject(request.Shots);
                     var now = DateTime.Now;
@@ -1049,73 +933,7 @@ namespace HpskSite.Controllers
             }
         }
 
-        private async Task<int> UpdateOrCreateSession(ResultEntryRequest request)
-        {
-            try
-            {
-                using var db = _umbracoDatabaseFactory.CreateDatabase();
-                using var transaction = db.GetTransaction();
 
-                // Note: TeamNumber removed from query - table doesn't have this column after identity-based refactoring
-                var existingSession = await db.FirstOrDefaultAsync<ResultEntrySession>(
-                    "WHERE CompetitionId = @0 AND Position = @1 AND SeriesNumber = @2",
-                    request.CompetitionId, request.Position, request.SeriesNumber);
-
-                var now = DateTime.Now;
-
-                if (existingSession != null)
-                {
-                    existingSession.RangeOfficerId = request.RangeOfficerId;
-                    existingSession.LastActivity = now;
-                    existingSession.IsActive = true;
-
-                    await db.UpdateAsync(existingSession);
-                    transaction.Complete();
-                    return existingSession.Id;
-                }
-                else
-                {
-                    var newSession = new ResultEntrySession
-                    {
-                        CompetitionId = request.CompetitionId,
-                        Position = request.Position,
-                        SeriesNumber = request.SeriesNumber,
-                        RangeOfficerId = request.RangeOfficerId,
-                        SessionStart = now,
-                        LastActivity = now,
-                        IsActive = true
-                    };
-
-                    var sessionId = await db.InsertAsync(newSession);
-                    transaction.Complete();
-                    // Convert decimal to int (SQL Server returns decimal for auto-increment IDs)
-                    return Convert.ToInt32(sessionId);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Database error updating session");
-                return 0;
-            }
-        }
-
-        private async Task<ResultEntrySession?> GetActiveSession(SessionRequest request)
-        {
-            try
-            {
-                using var db = _umbracoDatabaseFactory.CreateDatabase();
-
-                // Note: TeamNumber removed from query - table doesn't have this column after identity-based refactoring
-                return await db.FirstOrDefaultAsync<ResultEntrySession>(
-                    "WHERE CompetitionId = @0 AND Position = @1 AND SeriesNumber = @2 AND IsActive = 1",
-                    request.CompetitionId, request.Position, request.SeriesNumber);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Database error getting active session");
-                return null;
-            }
-        }
 
         private async Task<List<PrecisionResultEntry>> GetCompetitionResultsInternal(int competitionId)
         {
@@ -1159,13 +977,14 @@ namespace HpskSite.Controllers
 
                 try
                 {
-                    // IDENTITY-BASED LOOKUP: Query by (CompetitionId, MemberId, SeriesNumber)
-                    _logger.LogInformation("Checking for existing result to delete with CompetitionId={CompetitionId}, MemberId={MemberId}, SeriesNumber={SeriesNumber}",
-                        request.CompetitionId, memberId, request.SeriesNumber);
+                    // IDENTITY-BASED LOOKUP: Query by (CompetitionId, MemberId, ShootingClass, SeriesNumber)
+                    // ShootingClass is required to distinguish multi-class shooters (e.g., A1 + C1)
+                    _logger.LogInformation("Checking for existing result to delete with CompetitionId={CompetitionId}, MemberId={MemberId}, ShootingClass={ShootingClass}, SeriesNumber={SeriesNumber}",
+                        request.CompetitionId, memberId, request.ShootingClass, request.SeriesNumber);
 
                     var existingResult = await db.FirstOrDefaultAsync<PrecisionResultEntry>(
-                        "WHERE CompetitionId = @0 AND MemberId = @1 AND SeriesNumber = @2",
-                        request.CompetitionId, memberId, request.SeriesNumber);
+                        "WHERE CompetitionId = @0 AND MemberId = @1 AND ShootingClass = @2 AND SeriesNumber = @3",
+                        request.CompetitionId, memberId, request.ShootingClass, request.SeriesNumber);
 
                     if (existingResult != null)
                     {
@@ -1597,13 +1416,13 @@ namespace HpskSite.Controllers
                 return new { Shooters = new List<object>() };
             }
 
-            // Group results by MemberId and calculate totals from shots
+            // Group results by (MemberId, ShootingClass) to separate multi-class shooters
             var shooterTotals = results
-                .GroupBy(r => r.MemberId)
+                .GroupBy(r => new { r.MemberId, r.ShootingClass })
                 .Select(g => {
                     var totalScore = 0;
                     var totalXCount = 0;
-                    
+
                     foreach (var result in g)
                     {
                         var shots = JsonConvert.DeserializeObject<string[]>(result.Shots) ?? new string[0];
@@ -1611,10 +1430,11 @@ namespace HpskSite.Controllers
                         totalScore += total;
                         totalXCount += xCount;
                     }
-                    
+
                     return new
-                {
-                    MemberId = g.Key,
+                    {
+                        MemberId = g.Key.MemberId,
+                        ShootingClass = g.Key.ShootingClass,
                         TotalScore = totalScore,
                         TotalXCount = totalXCount,
                         SeriesCount = g.Count(),
@@ -1633,6 +1453,7 @@ namespace HpskSite.Controllers
                 {
                     Position = index + 1,
                     shooter.MemberId,
+                    shooter.ShootingClass,
                     shooter.TotalScore,
                     shooter.TotalXCount,
                     shooter.SeriesCount,
@@ -1937,7 +1758,7 @@ namespace HpskSite.Controllers
             foreach (var memberId in uniqueMemberIds)
             {
                 var (name, club) = await GetShooterNameAndClub(competitionId, memberId);
-                shooterLookup[memberId] = (name, club);
+                shooterLookup[memberId] = (name, Helpers.ClubNameHelper.Shorten(club));
                 _logger.LogInformation("Cached shooter info for MemberId {MemberId}: {Name} from {Club}", memberId, name, club);
             }
             _logger.LogInformation("Shooter lookup cache built with {Count} entries", shooterLookup.Count);
@@ -2034,6 +1855,330 @@ namespace HpskSite.Controllers
             };
         }
 
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ChangeShooterClass([FromBody] ChangeShooterClassRequest request)
+        {
+            try
+            {
+                // Validate parameters
+                if (request == null || request.CompetitionId <= 0 || request.MemberId <= 0)
+                {
+                    return Json(new { success = false, message = "Ogiltiga parametrar." });
+                }
+
+                if (string.IsNullOrWhiteSpace(request.OldShootingClass) || string.IsNullOrWhiteSpace(request.NewShootingClass))
+                {
+                    return Json(new { success = false, message = "Både gammal och ny vapenklass måste anges." });
+                }
+
+                if (request.OldShootingClass.Equals(request.NewShootingClass, StringComparison.OrdinalIgnoreCase))
+                {
+                    return Json(new { success = false, message = "Ingen ändring behövs - samma vapenklass." });
+                }
+
+                // Validate new class exists
+                var newClass = ShootingClasses.GetByName(request.NewShootingClass);
+                if (newClass == null)
+                {
+                    return Json(new { success = false, message = $"Vapenklassen '{request.NewShootingClass}' finns inte." });
+                }
+
+                // Get competition
+                var competition = _contentService.GetById(request.CompetitionId);
+                if (competition == null)
+                {
+                    return Json(new { success = false, message = "Tävlingen hittades inte." });
+                }
+
+                // Authorization: site admin OR competition manager OR club admin OR Skjutledare
+                bool isSiteAdmin = await _adminAuthorizationService.IsCurrentUserAdminAsync();
+                bool isCompetitionManager = await _adminAuthorizationService.IsCompetitionManager(request.CompetitionId);
+                bool isClubAdmin = false;
+                bool isSkjutledare = false;
+                var competitionClubId = competition.GetValue<int>("clubId");
+                if (competitionClubId > 0)
+                {
+                    isClubAdmin = await _adminAuthorizationService.IsClubAdminForClub(competitionClubId);
+                    isSkjutledare = await _adminAuthorizationService.IsSkjutledareForClub(competitionClubId);
+                }
+
+                if (!isSiteAdmin && !isCompetitionManager && !isClubAdmin && !isSkjutledare)
+                {
+                    return Json(new { success = false, message = "Åtkomst nekad. Du har inte behörighet att ändra vapenklass." });
+                }
+
+                _logger.LogInformation("ChangeShooterClass: CompetitionId={CompetitionId}, MemberId={MemberId}, OldClass={OldClass}, NewClass={NewClass}",
+                    request.CompetitionId, request.MemberId, request.OldShootingClass, request.NewShootingClass);
+
+                // 1. Update database - PrecisionResultEntry rows
+                int rowsUpdated = 0;
+                using (var db = _umbracoDatabaseFactory.CreateDatabase())
+                {
+                    rowsUpdated = await db.ExecuteAsync(
+                        "UPDATE PrecisionResultEntry SET ShootingClass = @0, LastModified = @1 WHERE CompetitionId = @2 AND MemberId = @3 AND ShootingClass = @4",
+                        newClass.Name, DateTime.Now, request.CompetitionId, request.MemberId, request.OldShootingClass);
+                }
+
+                _logger.LogInformation("Updated {RowsUpdated} result rows from '{OldClass}' to '{NewClass}' for member {MemberId}",
+                    rowsUpdated, request.OldShootingClass, newClass.Name, request.MemberId);
+
+                // 2. Update start list
+                bool startListUpdated = false;
+                try
+                {
+                    startListUpdated = UpdateStartListShooterClass(request.CompetitionId, request.MemberId, request.OldShootingClass, newClass.Name);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to update start list for class change, continuing");
+                }
+
+                // 3. Update registration
+                bool registrationUpdated = false;
+                try
+                {
+                    registrationUpdated = UpdateRegistrationShooterClass(request.CompetitionId, request.MemberId, request.OldShootingClass, newClass.Name);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to update registration for class change, continuing");
+                }
+
+                // 4. Recalculate results
+                bool resultsRecalculated = false;
+                try
+                {
+                    var results = await GetCompetitionResultsInternal(request.CompetitionId);
+                    if (results.Any())
+                    {
+                        var finalResults = await CalculateFinalResults(results, request.CompetitionId);
+
+                        var resultPage = _contentService.GetPagedChildren(competition.Id, 0, int.MaxValue, out long total)
+                            .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
+
+                        if (resultPage != null)
+                        {
+                            var existingIsOfficial = resultPage.GetValue<bool>("isOfficial");
+                            resultPage.SetValue("resultData", JsonConvert.SerializeObject(finalResults));
+                            resultPage.SetValue("lastUpdated", DateTime.Now);
+                            resultPage.SetValue("isOfficial", existingIsOfficial);
+                            resultPage.SetValue("resultType", "Final Results");
+
+                            _contentService.Save(resultPage);
+                            _contentService.Publish(resultPage, new[] { "*" }, -1);
+                            resultsRecalculated = true;
+
+                            _logger.LogInformation("Recalculated results after class change for competition {CompetitionId}", request.CompetitionId);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to recalculate results after class change, continuing");
+                }
+
+                // 5. Invalidate series cache
+                try
+                {
+                    _seriesCalculationService.InvalidateCacheForCompetition(request.CompetitionId);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to invalidate series cache after class change, continuing");
+                }
+
+                var message = $"Vapenklass ändrad från '{request.OldShootingClass}' till '{newClass.Name}'. {rowsUpdated} resultatrad(er) uppdaterade.";
+                if (startListUpdated) message += " Startlistan uppdaterad.";
+                if (registrationUpdated) message += " Anmälan uppdaterad.";
+                if (resultsRecalculated) message += " Resultatlistan omberäknad.";
+
+                return Json(new
+                {
+                    success = true,
+                    message,
+                    rowsUpdated,
+                    startListUpdated,
+                    registrationUpdated,
+                    resultsRecalculated
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error changing shooter class for member {MemberId} in competition {CompetitionId}",
+                    request?.MemberId, request?.CompetitionId);
+                return Json(new { success = false, message = "Ett oväntat fel uppstod: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Update the shooter's weapon class in the start list configurationData
+        /// </summary>
+        private bool UpdateStartListShooterClass(int competitionId, int memberId, string oldClass, string newClass)
+        {
+            var children = _contentService.GetPagedChildren(competitionId, 0, int.MaxValue, out long total);
+            var possibleAliases = new[] { "precisionStartList", "PrecisionStartList", "precision-start-list" };
+
+            // Find start list - direct child first
+            var startListContent = children.FirstOrDefault(c => possibleAliases.Contains(c.ContentType.Alias));
+
+            if (startListContent == null)
+            {
+                // Look in start lists hub
+                var startListsHub = children.FirstOrDefault(c => c.ContentType.Alias == "competitionStartListsHub");
+                if (startListsHub != null)
+                {
+                    var hubChildren = _contentService.GetPagedChildren(startListsHub.Id, 0, int.MaxValue, out long hubTotal);
+                    startListContent = hubChildren
+                        .Where(c => possibleAliases.Contains(c.ContentType.Alias))
+                        .FirstOrDefault(c =>
+                        {
+                            try { return c.GetValue<bool>("isOfficialStartList"); }
+                            catch { return false; }
+                        });
+                }
+            }
+
+            if (startListContent == null)
+            {
+                _logger.LogInformation("No start list found for competition {CompetitionId}, skipping start list update", competitionId);
+                return false;
+            }
+
+            var configData = startListContent.GetValue<string>("configurationData");
+            if (string.IsNullOrEmpty(configData))
+            {
+                return false;
+            }
+
+            var configuration = JsonConvert.DeserializeObject<StartListConfiguration>(configData);
+            if (configuration?.Teams == null)
+            {
+                return false;
+            }
+
+            // Find and update all occurrences of this shooter with the old class
+            bool found = false;
+            foreach (var team in configuration.Teams)
+            {
+                if (team.Shooters == null) continue;
+                foreach (var shooter in team.Shooters.Where(s => s.MemberId == memberId &&
+                    (s.WeaponClass ?? "").Equals(oldClass, StringComparison.OrdinalIgnoreCase)))
+                {
+                    shooter.WeaponClass = newClass;
+                    found = true;
+                }
+
+                // Update team weapon classes
+                team.WeaponClasses = team.Shooters.Select(s => s.WeaponClass).Distinct().ToList();
+            }
+
+            if (!found)
+            {
+                _logger.LogWarning("Shooter {MemberId} with class {OldClass} not found in start list for competition {CompetitionId}",
+                    memberId, oldClass, competitionId);
+                return false;
+            }
+
+            var configJson = JsonConvert.SerializeObject(configuration);
+            startListContent.SetValue("configurationData", configJson);
+
+            var result = _contentService.Save(startListContent);
+            if (result.Success)
+            {
+                _contentService.Publish(startListContent, Array.Empty<string>());
+                _logger.LogInformation("Updated start list weapon class for member {MemberId}: {OldClass} -> {NewClass}", memberId, oldClass, newClass);
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Update the shooter's weapon class in the competition registration
+        /// </summary>
+        private bool UpdateRegistrationShooterClass(int competitionId, int memberId, string oldClass, string newClass)
+        {
+            var competition = _contentService.GetById(competitionId);
+            if (competition == null) return false;
+
+            // Find the registrations hub
+            var children = _contentService.GetPagedChildren(competition.Id, 0, 20, out _);
+            var hub = children.FirstOrDefault(c => c.ContentType.Alias == "competitionRegistrationsHub");
+            if (hub == null)
+            {
+                _logger.LogWarning("Registrations hub not found for competition {CompetitionId}", competitionId);
+                return false;
+            }
+
+            // Find the member's registration
+            var registrations = _contentService.GetPagedChildren(hub.Id, 0, int.MaxValue, out _)
+                .Where(c => c.ContentType.Alias == "competitionRegistration")
+                .ToList();
+
+            var memberRegistration = registrations.FirstOrDefault(r => r.GetValue<int>("memberId") == memberId);
+            if (memberRegistration == null)
+            {
+                _logger.LogWarning("Registration not found for member {MemberId} in competition {CompetitionId}", memberId, competitionId);
+                return false;
+            }
+
+            // Get current shooting classes
+            var shootingClassesJson = memberRegistration.GetValue<string>("shootingClasses");
+            var shootingClasses = CompetitionRegistrationDocument.DeserializeShootingClasses(shootingClassesJson);
+
+            if (!shootingClasses.Any())
+            {
+                // Try legacy format
+                var legacyClass = memberRegistration.GetValue<string>("shootingClass");
+                if (!string.IsNullOrWhiteSpace(legacyClass) && legacyClass.Equals(oldClass, StringComparison.OrdinalIgnoreCase))
+                {
+                    memberRegistration.SetValue("shootingClass", newClass);
+                    var legacyResult = _contentService.Save(memberRegistration);
+                    if (legacyResult.Success)
+                    {
+                        _contentService.Publish(memberRegistration, Array.Empty<string>());
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            // Find and update the specific class entry
+            var classEntry = shootingClasses.FirstOrDefault(c =>
+                c.Class.Equals(oldClass, StringComparison.OrdinalIgnoreCase));
+
+            if (classEntry == null)
+            {
+                _logger.LogWarning("Class entry '{OldClass}' not found in registration for member {MemberId}", oldClass, memberId);
+                return false;
+            }
+
+            classEntry.Class = newClass;
+
+            var updatedJson = System.Text.Json.JsonSerializer.Serialize(shootingClasses);
+            memberRegistration.SetValue("shootingClasses", updatedJson);
+
+            var saveResult = _contentService.Save(memberRegistration);
+            if (saveResult.Success)
+            {
+                _contentService.Publish(memberRegistration, Array.Empty<string>());
+                _logger.LogInformation("Updated registration weapon class for member {MemberId}: {OldClass} -> {NewClass}",
+                    memberId, oldClass, newClass);
+                return true;
+            }
+
+            return false;
+        }
+
+    }
+
+    public class ChangeShooterClassRequest
+    {
+        public int CompetitionId { get; set; }
+        public int MemberId { get; set; }
+        public string OldShootingClass { get; set; } = "";
+        public string NewShootingClass { get; set; } = "";
     }
 
     public class CreateResultsListRequest

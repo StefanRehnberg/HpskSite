@@ -40,9 +40,35 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.Strategies
             new StrategyParameter
             {
                 Key = "clubSeriesScoring",
-                Label = "Seriepoäng: sum = summa, placement = placeringspoäng",
+                Label = "Klubbseriepoäng",
+                Type = "select",
+                DefaultValue = "sum",
+                Options = new List<SelectOption>
+                {
+                    new() { Value = "sum", Label = "Summa (råpoäng)" },
+                    new() { Value = "placement", Label = "Dynamisk placering" },
+                    new() { Value = "fixed", Label = "Fast poängtabell" }
+                }
+            },
+            new StrategyParameter
+            {
+                Key = "clubPointsTable",
+                Label = "Klubb-poängtabell",
+                Type = "select",
+                DefaultValue = "10, 8, 6, 5, 4, 3, 2, 1",
+                Options = PointsTablePresets.Club,
+                DependsOn = "clubSeriesScoring",
+                DependsOnValue = "fixed"
+            },
+            new StrategyParameter
+            {
+                Key = "customClubPointsTable",
+                Label = "Egen klubb-poängtabell (1:a, 2:a, 3:a... kommaseparerat)",
                 Type = "string",
-                DefaultValue = "sum"
+                DefaultValue = "5, 3, 1",
+                Placeholder = "t.ex. 5, 3, 1",
+                DependsOn = "clubPointsTable",
+                DependsOnValue = "custom"
             }
         };
 
@@ -52,17 +78,20 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.Strategies
             int maxShootersPerClub = ParseInt(context.Parameters, "maxShootersPerClub", 3);
             bool groupByClass = ParseBool(context.Parameters, "groupByClass", false);
             string clubSeriesScoring = ParseString(context.Parameters, "clubSeriesScoring", "sum");
+            var clubPlacementMode = PlacementPointsCalculator.ParseMode(clubSeriesScoring);
+            var clubPointsTable = PlacementPointsCalculator.ResolvePointsTable(
+                context.Parameters, "clubPointsTable", "customClubPointsTable");
 
             // Section 1: Individual standings (all shooters, sum all)
             var individualSection = BuildIndividualSection(context);
 
             // Section 2: Club standings
-            var clubSection = BuildClubSection(context, bestOf, maxShootersPerClub, groupByClass, clubSeriesScoring);
+            var clubSection = BuildClubSection(context, bestOf, maxShootersPerClub, groupByClass, clubPlacementMode, clubPointsTable);
 
             return new SeriesResultData
             {
                 StrategyId = Id,
-                StrategyName = Name,
+                StrategyName = bestOf > 0 ? $"Klubblag bästa {bestOf}" : "Klubblag alla",
                 CalculatedAt = DateTime.UtcNow,
                 Competitions = context.Competitions,
                 Sections = new List<SeriesResultSection> { individualSection, clubSection }
@@ -127,7 +156,7 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.Strategies
                 standingsByClass[key.ShootingClass].Add(new SeriesStandingRow
                 {
                     Name = shooterInfo.Name,
-                    Club = shooterInfo.Club,
+                    Club = HpskSite.Helpers.ClubNameHelper.Shorten(shooterInfo.Club),
                     EntityId = key.MemberId,
                     TotalSeriesScore = totalScore,
                     TotalXCount = totalXCount,
@@ -150,12 +179,13 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.Strategies
             int bestOf,
             int maxShootersPerClub,
             bool groupByClass,
-            string clubSeriesScoring)
+            PlacementPointsCalculator.Mode placementMode,
+            int[] pointsTable)
         {
             if (groupByClass)
-                return BuildClubSectionByClass(context, bestOf, maxShootersPerClub, clubSeriesScoring);
+                return BuildClubSectionByClass(context, bestOf, maxShootersPerClub, placementMode, pointsTable);
             else
-                return BuildClubSectionCombined(context, bestOf, maxShootersPerClub, clubSeriesScoring);
+                return BuildClubSectionCombined(context, bestOf, maxShootersPerClub, placementMode, pointsTable);
         }
 
         /// <summary>
@@ -166,7 +196,8 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.Strategies
             SeriesCalculationContext context,
             int bestOf,
             int maxShootersPerClub,
-            string clubSeriesScoring)
+            PlacementPointsCalculator.Mode placementMode,
+            int[] pointsTable)
         {
             var standingsByClass = new Dictionary<string, List<SeriesStandingRow>>();
 
@@ -197,6 +228,7 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.Strategies
                 foreach (var clubId in clubsInClass)
                 {
                     var compScoresForClub = new Dictionary<int, int>();
+                    int bestIndividual = 0;
 
                     foreach (var comp in context.Competitions)
                     {
@@ -213,16 +245,19 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.Strategies
                         if (clubShooters.Count > 0)
                         {
                             compScoresForClub[comp.CompetitionId] = clubShooters.Sum(s => s.TotalScore);
+                            var topScore = clubShooters[0].TotalScore;
+                            if (topScore > bestIndividual) bestIndividual = topScore;
                         }
                     }
 
                     var row = BuildClubRow(clubId, clubNameLookup.GetValueOrDefault(clubId, "?"),
                         compScoresForClub, context);
+                    row.BestIndividualScore = bestIndividual;
                     standingsByClass[shootingClass].Add(row);
                 }
 
                 // Apply scoring mode to all rows in this class
-                ApplyClubScoring(standingsByClass[shootingClass], context, bestOf, clubSeriesScoring);
+                ApplyClubScoring(standingsByClass[shootingClass], context, bestOf, placementMode, pointsTable);
             }
 
             var classStandings = IndividualSumAllStrategy.RankAndOrderByClass(standingsByClass, context.Competitions);
@@ -244,7 +279,8 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.Strategies
             SeriesCalculationContext context,
             int bestOf,
             int maxShootersPerClub,
-            string clubSeriesScoring)
+            PlacementPointsCalculator.Mode placementMode,
+            int[] pointsTable)
         {
             var clubNameLookup = new Dictionary<int, string>();
             foreach (var (_, scores) in context.CompetitionResults)
@@ -256,6 +292,7 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.Strategies
             foreach (var (clubId, clubName) in clubNameLookup)
             {
                 var compScoresForClub = new Dictionary<int, int>();
+                int bestIndividual = 0;
 
                 foreach (var comp in context.Competitions)
                 {
@@ -275,15 +312,18 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.Strategies
                     if (bestScorePerMember.Count > 0)
                     {
                         compScoresForClub[comp.CompetitionId] = bestScorePerMember.Sum(s => s.TotalScore);
+                        var topScore = bestScorePerMember[0].TotalScore;
+                        if (topScore > bestIndividual) bestIndividual = topScore;
                     }
                 }
 
                 var row = BuildClubRow(clubId, clubName, compScoresForClub, context);
+                row.BestIndividualScore = bestIndividual;
                 rows.Add(row);
             }
 
             // Apply scoring mode to all rows
-            ApplyClubScoring(rows, context, bestOf, clubSeriesScoring);
+            ApplyClubScoring(rows, context, bestOf, placementMode, pointsTable);
 
             var classStandings = new Dictionary<string, List<SeriesStandingRow>>
             {
@@ -348,56 +388,42 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.Strategies
         }
 
         /// <summary>
-        /// Apply scoring mode (sum or placement) and bestOf to a group of club rows.
+        /// Apply scoring mode (sum, dynamic placement, or fixed placement) and bestOf to a group of club rows.
         /// Must be called after all rows are built so placement scoring can rank across clubs.
         /// </summary>
         private static void ApplyClubScoring(
             List<SeriesStandingRow> rows,
             SeriesCalculationContext context,
             int bestOf,
-            string clubSeriesScoring)
+            PlacementPointsCalculator.Mode placementMode,
+            int[] pointsTable)
         {
-            bool isPlacement = clubSeriesScoring.Equals("placement", StringComparison.OrdinalIgnoreCase);
-
-            if (isPlacement)
+            if (placementMode != PlacementPointsCalculator.Mode.Off)
             {
-                // Placement scoring: rank clubs per competition, assign placement points, then bestOf
+                // Placement scoring: rank clubs per competition, assign placement points
                 foreach (var comp in context.Competitions)
                 {
                     var compId = comp.CompetitionId;
 
-                    var clubCells = rows
-                        .Select(r => new { Row = r, Cell = r.CompetitionScores.FirstOrDefault(c => c.CompetitionId == compId) })
-                        .Where(x => x.Cell?.Score != null)
-                        .OrderByDescending(x => x.Cell!.Score)
-                        .ToList();
+                    // Build entries for the calculator: EntityId = row index, Score = club comp score
+                    var entries = new List<(int EntityId, int Score, int XCount)>();
+                    var cellLookup = new Dictionary<int, SeriesCompetitionCell>();
 
-                    int clubCount = clubCells.Count;
-
-                    // Assign placement points with tie handling
-                    int i = 0;
-                    while (i < clubCells.Count)
+                    for (int idx = 0; idx < rows.Count; idx++)
                     {
-                        int tieStart = i;
-                        while (i + 1 < clubCells.Count
-                               && clubCells[i + 1].Cell!.Score == clubCells[tieStart].Cell!.Score)
+                        var cell = rows[idx].CompetitionScores.FirstOrDefault(c => c.CompetitionId == compId);
+                        if (cell?.Score != null)
                         {
-                            i++;
+                            entries.Add((idx, cell.Score.Value, 0));
+                            cellLookup[idx] = cell;
                         }
+                    }
 
-                        int totalPointsForTie = 0;
-                        for (int p = tieStart; p <= i; p++)
-                        {
-                            totalPointsForTie += Math.Max(clubCount - p, 0);
-                        }
-                        int sharedPoints = totalPointsForTie / (i - tieStart + 1);
+                    var points = PlacementPointsCalculator.Calculate(entries, placementMode, pointsTable);
 
-                        for (int p = tieStart; p <= i; p++)
-                        {
-                            clubCells[p].Cell!.Points = sharedPoints;
-                        }
-
-                        i++;
+                    foreach (var (idx, pts) in points)
+                    {
+                        cellLookup[idx].Points = pts;
                     }
                 }
 

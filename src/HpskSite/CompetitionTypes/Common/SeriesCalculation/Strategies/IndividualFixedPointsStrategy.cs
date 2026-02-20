@@ -14,27 +14,36 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.Strategies
         public string Name => "Individuellt fasta poäng";
         public string Description => "Tilldelar poäng baserat på placering per deltävling (t.ex. 25, 20, 16, 13...). Konfigurerbar poängtabell.";
 
-        private static readonly int[] DefaultPointsTable = { 25, 20, 16, 13, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1 };
-
         public List<StrategyParameter> GetParameters() => new()
         {
             new StrategyParameter
             {
                 Key = "pointsTable",
-                Label = "Poängtabell (JSON-array, t.ex. [25,20,16,13,11,10,9,8,7,6,5,4,3,2,1])",
+                Label = "Poängtabell",
+                Type = "select",
+                DefaultValue = "25, 20, 16, 13, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1",
+                Options = PointsTablePresets.Individual
+            },
+            new StrategyParameter
+            {
+                Key = "customPointsTable",
+                Label = "Egen poängtabell (1:a, 2:a, 3:a... kommaseparerat)",
                 Type = "string",
-                DefaultValue = "[25,20,16,13,11,10,9,8,7,6,5,4,3,2,1]"
+                DefaultValue = "10, 8, 6, 4, 2",
+                Placeholder = "t.ex. 10, 8, 6, 4, 2",
+                DependsOn = "pointsTable",
+                DependsOnValue = "custom"
             }
         };
 
         public SeriesResultData Calculate(SeriesCalculationContext context)
         {
-            var pointsTable = ParsePointsTable(context.Parameters);
+            var pointsTable = PlacementPointsCalculator.ResolvePointsTable(
+                context.Parameters, "pointsTable", "customPointsTable");
 
             var standingsByClass = new Dictionary<string, List<SeriesStandingRow>>();
 
             // For each competition+class, rank shooters and assign points
-            // Key: (compId, shootingClass, memberId) -> points awarded
             var pointsAwarded = new Dictionary<(int CompId, string ShootingClass, int MemberId), int>();
 
             foreach (var comp in context.Competitions)
@@ -42,41 +51,17 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.Strategies
                 var compScores = context.CompetitionResults.GetValueOrDefault(comp.CompetitionId);
                 if (compScores == null || !compScores.Any()) continue;
 
-                var byClass = compScores.GroupBy(s => s.ShootingClass);
-                foreach (var classGroup in byClass)
+                foreach (var classGroup in compScores.GroupBy(s => s.ShootingClass))
                 {
-                    // Rank within this competition+class
-                    var ranked = classGroup
-                        .OrderByDescending(s => s.TotalScore)
-                        .ThenByDescending(s => s.XCount)
+                    var entries = classGroup
+                        .Select(s => (s.MemberId, s.TotalScore, s.XCount))
                         .ToList();
 
-                    // Assign points handling ties: tied shooters share the average
-                    int i = 0;
-                    while (i < ranked.Count)
+                    var points = PlacementPointsCalculator.Calculate(entries, PlacementPointsCalculator.Mode.Fixed, pointsTable);
+
+                    foreach (var (memberId, pts) in points)
                     {
-                        int tieStart = i;
-                        while (i + 1 < ranked.Count
-                               && ranked[i + 1].TotalScore == ranked[tieStart].TotalScore
-                               && ranked[i + 1].XCount == ranked[tieStart].XCount)
-                        {
-                            i++;
-                        }
-
-                        // Positions tieStart..i share points
-                        int totalPointsForTie = 0;
-                        for (int p = tieStart; p <= i; p++)
-                        {
-                            totalPointsForTie += p < pointsTable.Length ? pointsTable[p] : 0;
-                        }
-                        int sharedPoints = totalPointsForTie / (i - tieStart + 1);
-
-                        for (int p = tieStart; p <= i; p++)
-                        {
-                            pointsAwarded[(comp.CompetitionId, classGroup.Key, ranked[p].MemberId)] = sharedPoints;
-                        }
-
-                        i++;
+                        pointsAwarded[(comp.CompetitionId, classGroup.Key, memberId)] = pts;
                     }
                 }
             }
@@ -139,7 +124,7 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.Strategies
                 standingsByClass[key.ShootingClass].Add(new SeriesStandingRow
                 {
                     Name = shooterInfo.Name,
-                    Club = shooterInfo.Club,
+                    Club = HpskSite.Helpers.ClubNameHelper.Shorten(shooterInfo.Club),
                     EntityId = key.MemberId,
                     TotalSeriesScore = totalPoints,
                     TotalXCount = totalXCount,
@@ -165,30 +150,6 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.Strategies
                     }
                 }
             };
-        }
-
-        private static int[] ParsePointsTable(Dictionary<string, object> parameters)
-        {
-            if (parameters.TryGetValue("pointsTable", out var ptObj))
-            {
-                string? jsonStr = null;
-                if (ptObj is string s) jsonStr = s;
-                else if (ptObj is System.Text.Json.JsonElement el && el.ValueKind == System.Text.Json.JsonValueKind.String)
-                    jsonStr = el.GetString();
-                else if (ptObj is System.Text.Json.JsonElement el2 && el2.ValueKind == System.Text.Json.JsonValueKind.Array)
-                    jsonStr = el2.GetRawText();
-
-                if (!string.IsNullOrEmpty(jsonStr))
-                {
-                    try
-                    {
-                        var parsed = System.Text.Json.JsonSerializer.Deserialize<int[]>(jsonStr);
-                        if (parsed != null && parsed.Length > 0) return parsed;
-                    }
-                    catch { /* fall through to default */ }
-                }
-            }
-            return DefaultPointsTable;
         }
     }
 }

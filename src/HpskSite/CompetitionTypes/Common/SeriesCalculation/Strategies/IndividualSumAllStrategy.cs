@@ -8,11 +8,78 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.Strategies
         public string Name => "Individuellt totalsumma";
         public string Description => "Summerar alla tävlingsresultat per skytt. Alla deltävlingar räknas.";
 
-        public List<StrategyParameter> GetParameters() => new();
+        public List<StrategyParameter> GetParameters() => new()
+        {
+            new StrategyParameter
+            {
+                Key = "placementPoints",
+                Label = "Placeringspoäng",
+                Type = "select",
+                DefaultValue = "off",
+                Options = new List<SelectOption>
+                {
+                    new() { Value = "off", Label = "Av (råpoäng)" },
+                    new() { Value = "dynamic", Label = "Dynamisk (1:a = antal deltagare)" },
+                    new() { Value = "fixed", Label = "Fast poängtabell" }
+                }
+            },
+            new StrategyParameter
+            {
+                Key = "pointsTable",
+                Label = "Poängtabell",
+                Type = "select",
+                DefaultValue = "25, 20, 16, 13, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1",
+                Options = PointsTablePresets.Individual,
+                DependsOn = "placementPoints",
+                DependsOnValue = "fixed"
+            },
+            new StrategyParameter
+            {
+                Key = "customPointsTable",
+                Label = "Egen poängtabell (1:a, 2:a, 3:a... kommaseparerat)",
+                Type = "string",
+                DefaultValue = "10, 8, 6, 4, 2",
+                Placeholder = "t.ex. 10, 8, 6, 4, 2",
+                DependsOn = "pointsTable",
+                DependsOnValue = "custom"
+            }
+        };
 
         public SeriesResultData Calculate(SeriesCalculationContext context)
         {
+            var placementMode = PlacementPointsCalculator.ParseMode(
+                PlacementPointsCalculator.ParseString(context.Parameters, "placementPoints", "off"));
+            var pointsTable = PlacementPointsCalculator.ResolvePointsTable(
+                context.Parameters, "pointsTable", "customPointsTable");
+
             var standingsByClass = new Dictionary<string, List<SeriesStandingRow>>();
+
+            // Pre-calculate placement points per competition+class if enabled
+            // Key: (CompId, ShootingClass, MemberId) -> placement points
+            var placementPoints = new Dictionary<(int CompId, string ShootingClass, int MemberId), int>();
+
+            if (placementMode != PlacementPointsCalculator.Mode.Off)
+            {
+                foreach (var comp in context.Competitions)
+                {
+                    var compScores = context.CompetitionResults.GetValueOrDefault(comp.CompetitionId);
+                    if (compScores == null || !compScores.Any()) continue;
+
+                    foreach (var classGroup in compScores.GroupBy(s => s.ShootingClass))
+                    {
+                        var entries = classGroup
+                            .Select(s => (s.MemberId, s.TotalScore, s.XCount))
+                            .ToList();
+
+                        var points = PlacementPointsCalculator.Calculate(entries, placementMode, pointsTable);
+
+                        foreach (var (memberId, pts) in points)
+                        {
+                            placementPoints[(comp.CompetitionId, classGroup.Key, memberId)] = pts;
+                        }
+                    }
+                }
+            }
 
             // Gather all shooters across all competitions, grouped by (MemberId, ShootingClass)
             var shooterKeys = new Dictionary<(int MemberId, string ShootingClass), ShooterCompetitionScore>();
@@ -28,6 +95,8 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.Strategies
                     }
                 }
             }
+
+            bool usePlacement = placementMode != PlacementPointsCalculator.Mode.Off;
 
             // Build rows per class
             foreach (var (key, shooterInfo) in shooterKeys)
@@ -46,15 +115,19 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.Strategies
 
                     if (score != null)
                     {
+                        var cellPoints = usePlacement
+                            ? placementPoints.GetValueOrDefault((comp.CompetitionId, key.ShootingClass, key.MemberId), 0)
+                            : score.TotalScore;
+
                         cells.Add(new SeriesCompetitionCell
                         {
                             CompetitionId = comp.CompetitionId,
                             Score = score.TotalScore,
                             XCount = score.XCount,
-                            Points = score.TotalScore,
+                            Points = cellPoints,
                             Counting = true
                         });
-                        totalScore += score.TotalScore;
+                        totalScore += cellPoints;
                         totalXCount += score.XCount;
                     }
                     else
@@ -73,7 +146,7 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.Strategies
                 standingsByClass[key.ShootingClass].Add(new SeriesStandingRow
                 {
                     Name = shooterInfo.Name,
-                    Club = shooterInfo.Club,
+                    Club = HpskSite.Helpers.ClubNameHelper.Shorten(shooterInfo.Club),
                     EntityId = key.MemberId,
                     TotalSeriesScore = totalScore,
                     TotalXCount = totalXCount,
@@ -115,6 +188,7 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.Strategies
                     var rows = kvp.Value
                         .OrderByDescending(r => r.TotalSeriesScore)
                         .ThenByDescending(r => r.TotalXCount)
+                        .ThenByDescending(r => r.BestIndividualScore ?? 0)
                         .ThenBy(r => r, Comparer<SeriesStandingRow>.Create((a, b) =>
                             SeriesResultTieBreaker.Compare(a, b, competitions)))
                         .ToList();

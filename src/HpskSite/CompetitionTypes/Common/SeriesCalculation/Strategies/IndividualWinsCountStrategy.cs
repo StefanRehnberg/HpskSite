@@ -101,7 +101,7 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.Strategies
                 standingsByClass[key.ShootingClass].Add(new SeriesStandingRow
                 {
                     Name = shooterInfo.Name,
-                    Club = shooterInfo.Club,
+                    Club = HpskSite.Helpers.ClubNameHelper.Shorten(shooterInfo.Club),
                     EntityId = key.MemberId,
                     TotalSeriesScore = totalWins,
                     TotalXCount = totalXCount,

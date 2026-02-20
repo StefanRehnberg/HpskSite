@@ -28,45 +28,17 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.Strategies
                 var compScores = context.CompetitionResults.GetValueOrDefault(comp.CompetitionId);
                 if (compScores == null || !compScores.Any()) continue;
 
-                var byClass = compScores.GroupBy(s => s.ShootingClass);
-                foreach (var classGroup in byClass)
+                foreach (var classGroup in compScores.GroupBy(s => s.ShootingClass))
                 {
-                    var participants = classGroup.ToList();
-                    int participantCount = participants.Count;
-
-                    // Rank within this competition+class
-                    var ranked = participants
-                        .OrderByDescending(s => s.TotalScore)
-                        .ThenByDescending(s => s.XCount)
+                    var entries = classGroup
+                        .Select(s => (s.MemberId, s.TotalScore, s.XCount))
                         .ToList();
 
-                    // Assign dynamic points: 1st = N, 2nd = N-1, ..., last = 1
-                    // Handle ties by sharing the average
-                    int i = 0;
-                    while (i < ranked.Count)
+                    var points = PlacementPointsCalculator.Calculate(entries, PlacementPointsCalculator.Mode.Dynamic);
+
+                    foreach (var (memberId, pts) in points)
                     {
-                        int tieStart = i;
-                        while (i + 1 < ranked.Count
-                               && ranked[i + 1].TotalScore == ranked[tieStart].TotalScore
-                               && ranked[i + 1].XCount == ranked[tieStart].XCount)
-                        {
-                            i++;
-                        }
-
-                        // Positions tieStart..i share points
-                        int totalPointsForTie = 0;
-                        for (int p = tieStart; p <= i; p++)
-                        {
-                            totalPointsForTie += Math.Max(participantCount - p, 0);
-                        }
-                        int sharedPoints = totalPointsForTie / (i - tieStart + 1);
-
-                        for (int p = tieStart; p <= i; p++)
-                        {
-                            pointsAwarded[(comp.CompetitionId, classGroup.Key, ranked[p].MemberId)] = sharedPoints;
-                        }
-
-                        i++;
+                        pointsAwarded[(comp.CompetitionId, classGroup.Key, memberId)] = pts;
                     }
                 }
             }
@@ -129,7 +101,7 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.Strategies
                 standingsByClass[key.ShootingClass].Add(new SeriesStandingRow
                 {
                     Name = shooterInfo.Name,
-                    Club = shooterInfo.Club,
+                    Club = HpskSite.Helpers.ClubNameHelper.Shorten(shooterInfo.Club),
                     EntityId = key.MemberId,
                     TotalSeriesScore = totalPoints,
                     TotalXCount = totalXCount,

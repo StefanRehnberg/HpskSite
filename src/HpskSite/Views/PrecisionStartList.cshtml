@@ -193,7 +193,7 @@
                                                 <tr class="@rowClass">
                                                     <td class="text-center">@shooter.Position</td>
                                                     <td>@shooter.Name</td>
-                                                    <td>@shooter.Club</td>
+                                                    <td>@HpskSite.Helpers.ClubNameHelper.Shorten((string)shooter.Club)</td>
                                                     <td class="text-center">@weaponClassName</td>
                                                 </tr>
                                             }
