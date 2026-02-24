@@ -35,6 +35,28 @@
     </div>
 </div>
 
+<!-- Inactivity Reminder Banner (creator only, hidden by default) -->
+<div class="alert alert-warning align-items-center mb-3" id="inactivityBanner"
+     style="display: none; position: sticky; top: 0; z-index: 1050;">
+    <div class="d-flex flex-column flex-sm-row align-items-start align-items-sm-center gap-2 w-100">
+        <div class="d-flex align-items-center flex-grow-1">
+            <i class="bi bi-clock-history me-2 fs-5"></i>
+            <div>
+                <strong>Ingen aktivitet på 30 minuter</strong>
+                <small class="d-block text-muted">Vill du avsluta eller fortsätta matchen?</small>
+            </div>
+        </div>
+        <div class="d-flex gap-2 ms-sm-auto">
+            <button type="button" class="btn btn-sm btn-danger" onclick="endMatchFromBanner()">
+                <i class="bi bi-stop-circle me-1"></i>Avsluta match
+            </button>
+            <button type="button" class="btn btn-sm btn-success" onclick="extendMatch()">
+                <i class="bi bi-arrow-clockwise me-1"></i>Fortsätt match
+            </button>
+        </div>
+    </div>
+</div>
+
 <!-- Match Header -->
 <div class="card mb-3">
     <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center flex-wrap gap-2">

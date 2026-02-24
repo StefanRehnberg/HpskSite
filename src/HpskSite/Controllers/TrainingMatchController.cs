@@ -107,6 +107,31 @@ namespace HpskSite.Controllers
             }
         }
 
+        /// <summary>
+        /// Safely get LastActivityDate from a dynamic match object.
+        /// Returns null if the property doesn't exist (e.g., migration hasn't run yet).
+        /// </summary>
+        private static DateTime? GetLastActivityDate(dynamic match)
+        {
+            try
+            {
+                if (match is IDictionary<string, object> dict)
+                {
+                    if (dict.TryGetValue("LastActivityDate", out var value) && value != null)
+                    {
+                        return Convert.ToDateTime(value);
+                    }
+                    return null;
+                }
+                var lastActivity = match.LastActivityDate;
+                return lastActivity != null ? (DateTime?)lastActivity : null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         #endregion
 
         #region Match Management
@@ -209,6 +234,10 @@ namespace HpskSite.Controllers
                         IsTeamMatch = isTeamMatch,
                         MaxShootersPerTeam = isTeamMatch ? request.MaxShootersPerTeam : null
                     });
+
+                    // Set LastActivityDate (separate query — column may not exist yet)
+                    try { db.Execute("UPDATE TrainingMatches SET LastActivityDate = @0 WHERE MatchCode = @1", DateTime.Now, matchCode); }
+                    catch { /* Column not yet added — migration pending */ }
 
                     // Get the new match ID
                     var newMatch = db.SingleOrDefault<dynamic>(
@@ -638,6 +667,7 @@ namespace HpskSite.Controllers
                             completedDate = match.CompletedDate != null ? (DateTime?)match.CompletedDate : null,
                             hasHandicap = hasHandicap,
                             maxSeriesCount = GetMaxSeriesCount(match),
+                            lastActivityDate = GetLastActivityDate(match),
                             // Team match fields
                             isTeamMatch = isTeamMatch,
                             maxShootersPerTeam = match.MaxShootersPerTeam != null ? (int?)match.MaxShootersPerTeam : null,
@@ -1462,6 +1492,10 @@ namespace HpskSite.Controllers
                               WHERE Id = @4",
                             updatedSeriesJson, totalScore, totalXCount, DateTime.Now, (int)existingScore.Id);
 
+                        // Touch LastActivityDate for inactivity tracking (column may not exist yet)
+                        try { db.Execute("UPDATE TrainingMatches SET LastActivityDate = @0 WHERE Id = @1", DateTime.Now, (int)match.Id); }
+                        catch { /* migration pending */ }
+
                         // Notify other participants via SignalR
                         await _hubContext.SendScoreUpdated(request.MatchCode ?? "", new
                         {
@@ -1526,6 +1560,10 @@ namespace HpskSite.Controllers
                                 TrainingMatchId = (int)match.Id
                             });
                         }
+
+                        // Touch LastActivityDate for inactivity tracking (column may not exist yet)
+                        try { db.Execute("UPDATE TrainingMatches SET LastActivityDate = @0 WHERE Id = @1", DateTime.Now, (int)match.Id); }
+                        catch { /* migration pending */ }
 
                         // Notify other participants via SignalR
                         await _hubContext.SendScoreUpdated(request.MatchCode ?? "", new
@@ -1686,6 +1724,10 @@ namespace HpskSite.Controllers
                           SET SeriesScores = @0, TotalScore = @1, XCount = @2, UpdatedAt = @3
                           WHERE Id = @4",
                         updatedSeriesJson, totalScore, totalXCount, DateTime.Now, (int)existingScore.Id);
+
+                    // Touch LastActivityDate for inactivity tracking (column may not exist yet)
+                    try { db.Execute("UPDATE TrainingMatches SET LastActivityDate = @0 WHERE Id = @1", DateTime.Now, (int)match.Id); }
+                    catch { /* migration pending */ }
 
                     // Notify other participants via SignalR
                     await _hubContext.SendScoreUpdated(request.MatchCode ?? "", new
@@ -2712,7 +2754,65 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
-        /// Auto-close stale matches that have been active for more than 24 hours after start
+        /// Extend a match by resetting the inactivity timer (LastActivityDate)
+        /// POST /umbraco/surface/TrainingMatch/ExtendMatch
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ExtendMatch([FromBody] ExtendMatchRequest request)
+        {
+            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            if (currentMember == null)
+            {
+                return Json(new { success = false, message = "Du måste vara inloggad" });
+            }
+
+            try
+            {
+                var member = _memberService.GetByEmail(currentMember.Email ?? string.Empty);
+                if (member == null)
+                {
+                    return Json(new { success = false, message = "Medlem hittades inte" });
+                }
+
+                using (var db = _databaseFactory.CreateDatabase())
+                {
+                    var match = db.SingleOrDefault<dynamic>(
+                        "SELECT * FROM TrainingMatches WHERE MatchCode = @0", request.MatchCode);
+
+                    if (match == null)
+                    {
+                        return Json(new { success = false, message = "Match hittades inte" });
+                    }
+
+                    if ((string)match.Status != "Active")
+                    {
+                        return Json(new { success = false, message = "Matchen är redan avslutad" });
+                    }
+
+                    // Only creator or site admin can extend
+                    bool isCreator = (int)match.CreatedByMemberId == member.Id;
+                    bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
+                    if (!isCreator && !isSiteAdmin)
+                    {
+                        return Json(new { success = false, message = "Bara matchskaparen kan förlänga matchen" });
+                    }
+
+                    var now = DateTime.Now;
+                    try { db.Execute("UPDATE TrainingMatches SET LastActivityDate = @0 WHERE Id = @1", now, (int)match.Id); }
+                    catch { /* migration pending */ }
+
+                    return Json(new { success = true, lastActivityDate = now });
+                }
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = "Fel vid förlängning: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Auto-close stale matches that have been inactive for more than 6 hours
         /// GET /umbraco/surface/TrainingMatch/AutoCloseStaleMatches
         /// Called on page load to clean up old matches
         /// </summary>
@@ -2723,11 +2823,25 @@ namespace HpskSite.Controllers
             {
                 using (var db = _databaseFactory.CreateDatabase())
                 {
-                    // Close matches that started more than 24 hours ago
-                    var closedCount = db.Execute(
-                        @"UPDATE TrainingMatches
-                          SET Status = 'Completed', CompletedDate = GETDATE()
-                          WHERE Status = 'Active' AND StartDate < DATEADD(hour, -24, GETDATE())");
+                    // Close matches inactive for more than 6 hours
+                    // Try with LastActivityDate first; fall back to StartDate-only if column missing
+                    int closedCount;
+                    try
+                    {
+                        closedCount = db.Execute(
+                            @"UPDATE TrainingMatches
+                              SET Status = 'Completed', CompletedDate = GETDATE()
+                              WHERE Status = 'Active'
+                                AND COALESCE(LastActivityDate, StartDate) < DATEADD(hour, -6, GETDATE())");
+                    }
+                    catch
+                    {
+                        // LastActivityDate column not yet added — fall back to original logic
+                        closedCount = db.Execute(
+                            @"UPDATE TrainingMatches
+                              SET Status = 'Completed', CompletedDate = GETDATE()
+                              WHERE Status = 'Active' AND StartDate < DATEADD(hour, -6, GETDATE())");
+                    }
 
                     return Json(new
                     {
@@ -3558,6 +3672,11 @@ namespace HpskSite.Controllers
     }
 
     public class CompleteMatchRequest
+    {
+        public string? MatchCode { get; set; }
+    }
+
+    public class ExtendMatchRequest
     {
         public string? MatchCode { get; set; }
     }

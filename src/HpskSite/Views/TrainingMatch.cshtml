@@ -360,6 +360,12 @@
         let guestParticipantId = @(guestSession?.GuestId ?? 0);
         let guestMatchCode = '@(guestSession?.MatchCode ?? "")';
 
+        // Inactivity timer state
+        let inactivityTimerId = null;
+        let lastActivityDate = null;
+        const INACTIVITY_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes
+        const INACTIVITY_CHECK_INTERVAL_MS = 30 * 1000;  // check every 30 seconds
+
         // ===== Connection Status Banner Functions =====
         function showConnectionBanner(message, type, clickable = false) {
             let banner = document.getElementById('connectionBanner');
@@ -625,6 +631,71 @@
             }
         }
 
+        // ===== Inactivity Timer Functions =====
+        function startInactivityTimer() {
+            stopInactivityTimer();
+            inactivityTimerId = setInterval(checkInactivity, INACTIVITY_CHECK_INTERVAL_MS);
+        }
+
+        function stopInactivityTimer() {
+            if (inactivityTimerId) {
+                clearInterval(inactivityTimerId);
+                inactivityTimerId = null;
+            }
+            const banner = document.getElementById('inactivityBanner');
+            if (banner) banner.style.display = 'none';
+        }
+
+        function checkInactivity() {
+            if (!currentMatch || !lastActivityDate) return;
+            if (currentMatch.status !== 'Active') return;
+
+            // Only show banner to the creator
+            const myId = parseInt(document.body.dataset.memberId) || 0;
+            if (currentMatch.createdByMemberId !== myId) return;
+
+            const elapsed = Date.now() - new Date(lastActivityDate).getTime();
+            const banner = document.getElementById('inactivityBanner');
+            if (!banner) return;
+
+            if (elapsed >= INACTIVITY_THRESHOLD_MS) {
+                banner.style.display = 'flex';
+            }
+        }
+
+        async function extendMatch() {
+            if (!currentMatchCode) return;
+            const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value;
+            try {
+                const response = await fetch('/umbraco/surface/TrainingMatch/ExtendMatch', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'RequestVerificationToken': token || ''
+                    },
+                    body: JSON.stringify({ matchCode: currentMatchCode })
+                });
+                const result = await response.json();
+                if (result.success) {
+                    lastActivityDate = result.lastActivityDate;
+                    const banner = document.getElementById('inactivityBanner');
+                    if (banner) banner.style.display = 'none';
+                    showToast('Matchen fortsätter!', 'success');
+                } else {
+                    showToast(result.message || 'Kunde inte förlänga matchen', 'warning');
+                }
+            } catch (error) {
+                console.error('Error extending match:', error);
+                showToast('Något gick fel', 'danger');
+            }
+        }
+
+        function endMatchFromBanner() {
+            if (confirm('Är du säker på att du vill avsluta matchen? Detta kan inte ångras.')) {
+                completeMatch();
+            }
+        }
+
         // Load match data
         function loadMatch(matchCode) {
             showLoading();
@@ -658,6 +729,15 @@
                         currentMatch = result.match;
                         showScoreboardView();
                         renderScoreboard(result.match);
+
+                        // Track inactivity for active matches
+                        lastActivityDate = result.match.lastActivityDate || result.match.createdDate;
+                        const myIdForTimer = parseInt(document.body.dataset.memberId) || 0;
+                        if (result.match.status === 'Active' && result.match.createdByMemberId === myIdForTimer) {
+                            startInactivityTimer();
+                        } else {
+                            stopInactivityTimer();
+                        }
 
                         // Note: We don't update active match card here since sidebar is hidden
                         // It will be updated when user goes back to main view
@@ -1032,6 +1112,7 @@
         // Note: Confirmation is handled by confirmEndMatch() in TrainingMatchScoreboard.cshtml
         function completeMatch() {
             if (!currentMatchCode) return;
+            stopInactivityTimer();
 
             const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value;
 
@@ -1581,12 +1662,17 @@
 
             hubConnection.on("ScoreUpdated", (data) => {
                 if (currentMatchCode) {
+                    // Reset inactivity clock — someone entered a score
+                    lastActivityDate = new Date().toISOString();
+                    const inactBanner = document.getElementById('inactivityBanner');
+                    if (inactBanner) inactBanner.style.display = 'none';
                     refreshMatch();
                 }
             });
 
             hubConnection.on("MatchCompleted", (matchCode) => {
                 if (currentMatchCode === matchCode) {
+                    stopInactivityTimer();
                     showToast('Matchen har avslutats', 'info');
                     refreshMatch();
                 }
