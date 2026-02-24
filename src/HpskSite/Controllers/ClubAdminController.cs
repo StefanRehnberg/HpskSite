@@ -212,10 +212,25 @@ namespace HpskSite.Controllers
 
             try
             {
-                if (!await _authService.IsCurrentUserAdminAsync())
+                bool isSiteAdmin = await _authService.IsCurrentUserAdminAsync();
+
+                // Editing existing club: allow site admin, club admin, or regional admin
+                // Creating new club: site admin only
+                if (id.HasValue && id.Value > 0)
                 {
-                    _logger.LogWarning("SaveClub: Access denied");
-                    return Json(new { success = false, message = "Access denied" });
+                    if (!isSiteAdmin && !await _authService.IsClubAdminForClub(id.Value))
+                    {
+                        _logger.LogWarning("SaveClub: Access denied for club {ClubId}", id.Value);
+                        return Json(new { success = false, message = "Access denied" });
+                    }
+                }
+                else
+                {
+                    if (!isSiteAdmin)
+                    {
+                        _logger.LogWarning("SaveClub: Access denied - only site admins can create clubs");
+                        return Json(new { success = false, message = "Access denied" });
+                    }
                 }
 
                 if (string.IsNullOrEmpty(name))

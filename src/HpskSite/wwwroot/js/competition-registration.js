@@ -1537,14 +1537,10 @@ async function handleMemberSelection() {
 }
 
 function showSelectedMemberInfo(member) {
-    document.getElementById('selectedMemberName').textContent = member.name;
-    document.getElementById('selectedMemberClub').textContent = member.clubName;
-    document.getElementById('selectedMemberEmail').textContent = member.email || 'Not provided';
-    document.getElementById('selectedMemberInfo').classList.remove('d-none');
+    // Info box removed — dropdowns already show name and club
 }
 
 function hideSelectedMemberInfo() {
-    document.getElementById('selectedMemberInfo').classList.add('d-none');
 }
 
 function showRegistrationTargetError(message) {
