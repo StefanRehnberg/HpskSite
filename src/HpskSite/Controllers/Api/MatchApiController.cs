@@ -889,6 +889,49 @@ namespace HpskSite.Controllers.Api
         }
 
         /// <summary>
+        /// Extend a match by resetting the inactivity timer (LastActivityDate)
+        /// </summary>
+        [HttpPost("{code}/extend")]
+        public async Task<IActionResult> ExtendMatch(string code)
+        {
+            var memberId = await GetCurrentMemberIdAsync();
+            if (!memberId.HasValue)
+            {
+                return Unauthorized(ApiResponse.Error("Ej inloggad"));
+            }
+
+            using var scope = _scopeProvider.CreateScope();
+            var db = scope.Database;
+
+            var match = await db.FirstOrDefaultAsync<TrainingMatchDbDto>(
+                "WHERE MatchCode = @0", code.ToUpper());
+
+            if (match == null)
+            {
+                return NotFound(ApiResponse.Error("Matchen hittades inte"));
+            }
+
+            if (match.Status != "Active")
+            {
+                return BadRequest(ApiResponse.Error("Matchen är redan avslutad"));
+            }
+
+            // Only creator can extend
+            if (match.CreatedByMemberId != memberId.Value)
+            {
+                return Forbid();
+            }
+
+            var now = DateTime.UtcNow;
+            try { await db.ExecuteAsync("UPDATE TrainingMatches SET LastActivityDate = @0 WHERE Id = @1", now, match.Id); }
+            catch { /* migration pending */ }
+
+            scope.Complete();
+
+            return Ok(ApiResponse.Ok("Matchen förlängd"));
+        }
+
+        /// <summary>
         /// Save a score for a series
         /// </summary>
         [HttpPost("{code}/score")]
@@ -1019,6 +1062,10 @@ namespace HpskSite.Controllers.Api
                 };
                 await db.InsertAsync(score);
             }
+
+            // Touch LastActivityDate for inactivity tracking (column may not exist yet)
+            try { await db.ExecuteAsync("UPDATE TrainingMatches SET LastActivityDate = @0 WHERE Id = @1", DateTime.UtcNow, match.Id); }
+            catch { /* migration pending */ }
 
             scope.Complete();
 
@@ -2510,7 +2557,8 @@ namespace HpskSite.Controllers.Api
                 IsOpen = match.IsOpen,
                 MaxSeriesCount = match.MaxSeriesCount,
                 IsTeamMatch = match.IsTeamMatch,
-                MaxShootersPerTeam = match.MaxShootersPerTeam
+                MaxShootersPerTeam = match.MaxShootersPerTeam,
+                LastActivityDate = match.LastActivityDate
             };
 
             // Load teams if this is a team match
@@ -2749,6 +2797,7 @@ namespace HpskSite.Controllers.Api
         public int? MaxSeriesCount { get; set; }
         public bool IsTeamMatch { get; set; }
         public int? MaxShootersPerTeam { get; set; }
+        public DateTime? LastActivityDate { get; set; }
     }
 
     [TableName("TrainingMatchTeams")]

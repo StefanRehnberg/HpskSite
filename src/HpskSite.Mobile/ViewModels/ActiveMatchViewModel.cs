@@ -304,6 +304,17 @@ public partial class ActiveMatchViewModel : BaseViewModel
     private bool _isSettingsModalOpen;
 
     /// <summary>
+    /// Whether the inactivity banner is visible (host only, after 30 min idle)
+    /// </summary>
+    [ObservableProperty]
+    private bool _isInactivityBannerVisible;
+
+    private System.Timers.Timer? _inactivityTimer;
+    private DateTime? _lastActivityDate;
+    private const int InactivityThresholdMinutes = 30;
+    private const int InactivityCheckIntervalSeconds = 30;
+
+    /// <summary>
     /// Whether the share modal is open (for non-host participants/spectators)
     /// </summary>
     [ObservableProperty]
@@ -1389,6 +1400,63 @@ public partial class ActiveMatchViewModel : BaseViewModel
         }
     }
 
+    // ===== Inactivity Timer =====
+
+    private void StartInactivityTimer()
+    {
+        StopInactivityTimer();
+        _inactivityTimer = new System.Timers.Timer(InactivityCheckIntervalSeconds * 1000);
+        _inactivityTimer.Elapsed += (s, e) => CheckInactivity();
+        _inactivityTimer.AutoReset = true;
+        _inactivityTimer.Start();
+    }
+
+    private void StopInactivityTimer()
+    {
+        _inactivityTimer?.Stop();
+        _inactivityTimer?.Dispose();
+        _inactivityTimer = null;
+        MainThread.BeginInvokeOnMainThread(() => IsInactivityBannerVisible = false);
+    }
+
+    private void CheckInactivity()
+    {
+        if (Match == null || !_lastActivityDate.HasValue) return;
+        if (!Match.IsActive || !IsMatchHost) return;
+
+        var elapsed = DateTime.UtcNow - _lastActivityDate.Value.ToUniversalTime();
+        MainThread.BeginInvokeOnMainThread(() =>
+        {
+            IsInactivityBannerVisible = elapsed.TotalMinutes >= InactivityThresholdMinutes;
+        });
+    }
+
+    [RelayCommand]
+    private async Task ExtendMatchAsync()
+    {
+        if (IsBusy || string.IsNullOrEmpty(MatchCode)) return;
+
+        try
+        {
+            var result = await _matchService.ExtendMatchAsync(MatchCode);
+            if (result.Success)
+            {
+                _lastActivityDate = DateTime.UtcNow;
+                IsInactivityBannerVisible = false;
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"ExtendMatch failed: {ex.Message}");
+        }
+    }
+
+    [RelayCommand]
+    private async Task EndMatchFromBannerAsync()
+    {
+        await CompleteMatchAsync();
+    }
+
     [RelayCommand]
     private async Task LoadMatchAsync()
     {
@@ -1615,6 +1683,17 @@ public partial class ActiveMatchViewModel : BaseViewModel
 
                 // Update guest participants list (for settings modal)
                 UpdateGuestParticipants();
+
+                // Start inactivity timer for match host on active matches
+                _lastActivityDate = Match.LastActivityDate ?? Match.CreatedDate;
+                if (Match.IsActive && IsMatchHost)
+                {
+                    StartInactivityTimer();
+                }
+                else
+                {
+                    StopInactivityTimer();
+                }
             }
             else
             {
@@ -1976,6 +2055,8 @@ public partial class ActiveMatchViewModel : BaseViewModel
         if (IsBusy || !IsMatchHost)
             return;
 
+        StopInactivityTimer();
+
         try
         {
             IsBusy = true;
@@ -2123,6 +2204,10 @@ public partial class ActiveMatchViewModel : BaseViewModel
     {
         MainThread.BeginInvokeOnMainThread(async () =>
         {
+            // Reset inactivity clock — someone entered a score
+            _lastActivityDate = DateTime.UtcNow;
+            IsInactivityBannerVisible = false;
+
             // Reload match data to get updated scores
             System.Diagnostics.Debug.WriteLine($"SignalR: ScoreUpdated - MemberId={update.MemberId}, Series={update.SeriesNumber}");
             await LoadMatchDataAsync();
@@ -2152,6 +2237,7 @@ public partial class ActiveMatchViewModel : BaseViewModel
         MainThread.BeginInvokeOnMainThread(() =>
         {
             System.Diagnostics.Debug.WriteLine("SignalR: MatchCompleted");
+            StopInactivityTimer();
             IsMatchActive = false;
         });
     }

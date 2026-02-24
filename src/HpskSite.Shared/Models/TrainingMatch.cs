@@ -108,6 +108,12 @@ namespace HpskSite.Shared.Models
         public int? MaxShootersPerTeam { get; set; }
 
         /// <summary>
+        /// Last activity date (score entry or manual extend). Used for inactivity reminders.
+        /// </summary>
+        [JsonPropertyName("lastActivityDate")]
+        public DateTime? LastActivityDate { get; set; }
+
+        /// <summary>
         /// List of teams in this match (only populated for team matches)
         /// </summary>
         [JsonPropertyName("teams")]

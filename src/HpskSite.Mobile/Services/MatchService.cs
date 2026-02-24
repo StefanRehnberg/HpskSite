@@ -53,6 +53,11 @@ public class MatchService : IMatchService
         return await _apiService.PostAsync($"api/match/{matchCode}/complete");
     }
 
+    public async Task<ApiResponse> ExtendMatchAsync(string matchCode)
+    {
+        return await _apiService.PostAsync($"api/match/{matchCode}/extend");
+    }
+
     public async Task<ApiResponse> UpdateMatchSettingsAsync(string matchCode, int? maxSeriesCount)
     {
         return await _apiService.PostAsync($"api/match/{matchCode}/settings", new { MaxSeriesCount = maxSeriesCount });
@@ -235,6 +240,7 @@ public interface IMatchService
     Task<ApiResponse<TrainingMatch>> JoinMatchAsync(string matchCode, int? teamId = null);
     Task<ApiResponse> LeaveMatchAsync(string matchCode);
     Task<ApiResponse> CompleteMatchAsync(string matchCode);
+    Task<ApiResponse> ExtendMatchAsync(string matchCode);
     Task<ApiResponse> UpdateMatchSettingsAsync(string matchCode, int? maxSeriesCount);
     Task<ApiResponse> DeleteMatchAsync(string matchCode);
     Task<ApiResponse> SaveScoreAsync(string matchCode, SaveScoreRequest request);

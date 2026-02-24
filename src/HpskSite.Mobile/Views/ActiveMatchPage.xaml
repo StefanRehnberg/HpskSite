@@ -46,6 +46,34 @@
                 </HorizontalStackLayout>
             </Border>
 
+            <!--  Inactivity Reminder Banner (host only, hidden by default)  -->
+            <Border Padding="10"
+                    BackgroundColor="#fff3cd"
+                    IsVisible="{Binding IsInactivityBannerVisible}"
+                    Stroke="Transparent" StrokeShape="RoundRectangle 8">
+                <VerticalStackLayout Spacing="8">
+                    <HorizontalStackLayout Spacing="6" HorizontalOptions="Center">
+                        <Label FontSize="16" Text="⏰" VerticalOptions="Center" />
+                        <Label FontAttributes="Bold" FontSize="14"
+                               Text="Ingen aktivitet på 30 minuter"
+                               TextColor="#856404" VerticalOptions="Center" />
+                    </HorizontalStackLayout>
+                    <Label FontSize="12" HorizontalTextAlignment="Center"
+                           Text="Vill du avsluta eller fortsätta matchen?"
+                           TextColor="#856404" />
+                    <HorizontalStackLayout Spacing="8" HorizontalOptions="Center">
+                        <Button Padding="12,6" BackgroundColor="{StaticResource Danger}"
+                                Command="{Binding EndMatchFromBannerCommand}"
+                                CornerRadius="6" FontSize="13"
+                                Text="Avsluta match" TextColor="White" />
+                        <Button Padding="12,6" BackgroundColor="{StaticResource Success}"
+                                Command="{Binding ExtendMatchCommand}"
+                                CornerRadius="6" FontSize="13"
+                                Text="Fortsätt match" TextColor="White" />
+                    </HorizontalStackLayout>
+                </VerticalStackLayout>
+            </Border>
+
             <!--  Match Header Card  -->
                 <Border Padding="10,8"
                         BackgroundColor="{StaticResource Primary}"
