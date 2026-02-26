@@ -922,7 +922,7 @@ namespace HpskSite.Controllers.Api
                 return Forbid();
             }
 
-            var now = DateTime.UtcNow;
+            var now = DateTime.Now;
             try { await db.ExecuteAsync("UPDATE TrainingMatches SET LastActivityDate = @0 WHERE Id = @1", now, match.Id); }
             catch { /* migration pending */ }
 
@@ -1064,7 +1064,7 @@ namespace HpskSite.Controllers.Api
             }
 
             // Touch LastActivityDate for inactivity tracking (column may not exist yet)
-            try { await db.ExecuteAsync("UPDATE TrainingMatches SET LastActivityDate = @0 WHERE Id = @1", DateTime.UtcNow, match.Id); }
+            try { await db.ExecuteAsync("UPDATE TrainingMatches SET LastActivityDate = @0 WHERE Id = @1", DateTime.Now, match.Id); }
             catch { /* migration pending */ }
 
             scope.Complete();

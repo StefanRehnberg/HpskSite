@@ -1424,7 +1424,7 @@ public partial class ActiveMatchViewModel : BaseViewModel
         if (Match == null || !_lastActivityDate.HasValue) return;
         if (!Match.IsActive || !IsMatchHost) return;
 
-        var elapsed = DateTime.UtcNow - _lastActivityDate.Value.ToUniversalTime();
+        var elapsed = DateTime.Now - _lastActivityDate.Value;
         MainThread.BeginInvokeOnMainThread(() =>
         {
             IsInactivityBannerVisible = elapsed.TotalMinutes >= InactivityThresholdMinutes;
@@ -1441,7 +1441,7 @@ public partial class ActiveMatchViewModel : BaseViewModel
             var result = await _matchService.ExtendMatchAsync(MatchCode);
             if (result.Success)
             {
-                _lastActivityDate = DateTime.UtcNow;
+                _lastActivityDate = DateTime.Now;
                 IsInactivityBannerVisible = false;
             }
         }
@@ -2205,7 +2205,7 @@ public partial class ActiveMatchViewModel : BaseViewModel
         MainThread.BeginInvokeOnMainThread(async () =>
         {
             // Reset inactivity clock — someone entered a score
-            _lastActivityDate = DateTime.UtcNow;
+            _lastActivityDate = DateTime.Now;
             IsInactivityBannerVisible = false;
 
             // Reload match data to get updated scores

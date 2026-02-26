@@ -244,10 +244,6 @@
         <!--  Row 1: Scoreboard Card (fills remaining space)  -->
         <Border Grid.Row="1" Margin="12" Padding="0" BackgroundColor="#374151" Stroke="Transparent"
                 StrokeShape="RoundRectangle 12">
-            <Border.Shadow>
-                <Shadow Brush="Black" Opacity="0.1" Radius="6"
-                        Offset="0,2" />
-            </Border.Shadow>
 
             <!--  Scoreboard with both vertical and horizontal scroll  -->
             <ScrollView Orientation="Vertical">
@@ -504,10 +500,6 @@
                 CornerRadius="25" FontAttributes="Bold" FontSize="16"
                 HeightRequest="50"
                 IsVisible="{Binding CanJoinFromSpectator}"
-                Shadow="{Shadow Brush=Black,
-                                Offset='0,4',
-                                Radius=8,
-                                Opacity=0.2}"
                 Text="Gå med i matchen" TextColor="White" />
 
         <!--  Score Entry Panel (Slide up from bottom) - only for participants  -->
@@ -529,10 +521,6 @@
                     <Setter Property="IsVisible" Value="False" />
                 </Style>
             </Border.Style>
-            <Border.Shadow>
-                <Shadow Brush="Black" Opacity="0.2" Radius="12"
-                        Offset="0,-4" />
-            </Border.Shadow>
 
             <VerticalStackLayout Spacing="12">
 
@@ -801,10 +789,6 @@
                 BackgroundColor="#374151"
                 IsVisible="{Binding IsSpectatorsModalOpen}"
                 Stroke="Transparent" StrokeShape="RoundRectangle 20,20,0,0" VerticalOptions="End">
-            <Border.Shadow>
-                <Shadow Brush="Black" Opacity="0.2" Radius="12"
-                        Offset="0,-4" />
-            </Border.Shadow>
 
             <VerticalStackLayout Spacing="12">
 
@@ -898,10 +882,6 @@
                     Stroke="Transparent" StrokeShape="RoundRectangle 20,20,0,0"
                     VerticalOptions="End"
                     MaximumHeightRequest="600">
-                <Border.Shadow>
-                    <Shadow Brush="Black" Opacity="0.2" Radius="12"
-                            Offset="0,-4" />
-                </Border.Shadow>
                 <Border.GestureRecognizers>
                     <!--  Prevent tap from closing when tapping inside modal  -->
                     <TapGestureRecognizer />
@@ -1091,10 +1071,6 @@
                     Stroke="Transparent" StrokeShape="RoundRectangle 20,20,0,0"
                     VerticalOptions="End"
                     MaximumHeightRequest="500">
-                <Border.Shadow>
-                    <Shadow Brush="Black" Opacity="0.2" Radius="12"
-                            Offset="0,-4" />
-                </Border.Shadow>
                 <Border.GestureRecognizers>
                     <!--  Prevent tap from closing when tapping inside modal  -->
                     <TapGestureRecognizer />
@@ -1159,10 +1135,6 @@
                     HorizontalOptions="Fill" VerticalOptions="Center"
                     Stroke="Transparent" StrokeShape="RoundRectangle 16"
                     MaximumHeightRequest="600">
-                <Border.Shadow>
-                    <Shadow Brush="Black" Opacity="0.3" Radius="16"
-                            Offset="0,8" />
-                </Border.Shadow>
 
                 <VerticalStackLayout Spacing="0">
 
@@ -1337,10 +1309,6 @@
                     Stroke="Transparent" StrokeShape="RoundRectangle 20,20,0,0"
                     VerticalOptions="End"
                     MaximumHeightRequest="500">
-                <Border.Shadow>
-                    <Shadow Brush="Black" Opacity="0.2" Radius="12"
-                            Offset="0,-4" />
-                </Border.Shadow>
                 <Border.GestureRecognizers>
                     <!--  Prevent tap from closing when tapping inside modal  -->
                     <TapGestureRecognizer />
@@ -1453,10 +1421,6 @@
                     BackgroundColor="#374151"
                     Stroke="#22c55e" StrokeThickness="4" StrokeShape="RoundRectangle 16"
                     HorizontalOptions="Center" VerticalOptions="Center">
-                <Border.Shadow>
-                    <Shadow Brush="Black" Opacity="0.3" Radius="16"
-                            Offset="0,8" />
-                </Border.Shadow>
                 <Border.GestureRecognizers>
                     <TapGestureRecognizer />
                 </Border.GestureRecognizers>
@@ -1523,10 +1487,6 @@
                     Stroke="Transparent" StrokeShape="RoundRectangle 20,20,0,0"
                     VerticalOptions="End"
                     MaximumHeightRequest="600">
-                <Border.Shadow>
-                    <Shadow Brush="Black" Opacity="0.2" Radius="12"
-                            Offset="0,-4" />
-                </Border.Shadow>
                 <Border.GestureRecognizers>
                     <TapGestureRecognizer />
                 </Border.GestureRecognizers>
@@ -1687,10 +1647,6 @@
                     BackgroundColor="#374151"
                     Stroke="{StaticResource Primary}" StrokeThickness="4" StrokeShape="RoundRectangle 16"
                     HorizontalOptions="Center" VerticalOptions="Center">
-                <Border.Shadow>
-                    <Shadow Brush="Black" Opacity="0.3" Radius="16"
-                            Offset="0,8" />
-                </Border.Shadow>
                 <Border.GestureRecognizers>
                     <TapGestureRecognizer />
                 </Border.GestureRecognizers>

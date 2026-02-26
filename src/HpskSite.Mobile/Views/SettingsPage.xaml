@@ -15,9 +15,6 @@
                     Stroke="Transparent"
                     BackgroundColor="{StaticResource CardBackgroundDark}"
                     Padding="0">
-                <Border.Shadow>
-                    <Shadow Brush="Black" Offset="0,2" Radius="8" Opacity="0.1"/>
-                </Border.Shadow>
 
                 <VerticalStackLayout Spacing="0">
                     <!-- Card Header -->
@@ -62,9 +59,6 @@
                     Stroke="Transparent"
                     BackgroundColor="{StaticResource CardBackgroundDark}"
                     Padding="0">
-                <Border.Shadow>
-                    <Shadow Brush="Black" Offset="0,2" Radius="8" Opacity="0.1"/>
-                </Border.Shadow>
 
                 <VerticalStackLayout Spacing="0">
                     <!-- Card Header -->
@@ -149,9 +143,6 @@
                     Stroke="Transparent"
                     BackgroundColor="{StaticResource CardBackgroundDark}"
                     Padding="0">
-                <Border.Shadow>
-                    <Shadow Brush="Black" Offset="0,2" Radius="8" Opacity="0.1"/>
-                </Border.Shadow>
 
                 <VerticalStackLayout Spacing="0">
                     <!-- Card Header -->

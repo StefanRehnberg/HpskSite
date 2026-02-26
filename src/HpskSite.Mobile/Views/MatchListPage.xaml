@@ -96,10 +96,6 @@
                             IsVisible="{Binding HasCurrentMatch}"
                             Stroke="{StaticResource Primary}"
                             StrokeShape="RoundRectangle 12" StrokeThickness="2">
-                        <Border.Shadow>
-                            <Shadow Brush="Black" Opacity="0.1" Radius="8"
-                                    Offset="0,2" />
-                        </Border.Shadow>
 
                         <VerticalStackLayout Spacing="0">
                             <!--  Card Header  -->
@@ -181,10 +177,6 @@
                         <Border Padding="0"
                                 BackgroundColor="{StaticResource CardBackgroundDark}"
                                 Stroke="Transparent" StrokeShape="RoundRectangle 12">
-                            <Border.Shadow>
-                                <Shadow Brush="Black" Opacity="0.1" Radius="8"
-                                        Offset="0,2" />
-                            </Border.Shadow>
                             <Border.GestureRecognizers>
                                 <TapGestureRecognizer Command="{Binding NavigateToCreateMatchCommand}" />
                             </Border.GestureRecognizers>
@@ -215,10 +207,6 @@
                         <Border Padding="0"
                                 BackgroundColor="{StaticResource CardBackgroundDark}"
                                 Stroke="Transparent" StrokeShape="RoundRectangle 12">
-                            <Border.Shadow>
-                                <Shadow Brush="Black" Opacity="0.1" Radius="8"
-                                        Offset="0,2" />
-                            </Border.Shadow>
                             <Border.GestureRecognizers>
                                 <TapGestureRecognizer Command="{Binding NavigateToJoinMatchCommand}" />
                             </Border.GestureRecognizers>
@@ -259,10 +247,6 @@
                     <Border Padding="0"
                             BackgroundColor="{StaticResource CardBackgroundDark}"
                             Stroke="Transparent" StrokeShape="RoundRectangle 12">
-                        <Border.Shadow>
-                            <Shadow Brush="Black" Opacity="0.1" Radius="8"
-                                    Offset="0,2" />
-                        </Border.Shadow>
 
                         <VerticalStackLayout Spacing="0">
                             <!--  Section Header  -->
@@ -374,10 +358,6 @@
                     <Border Padding="0"
                             BackgroundColor="{StaticResource CardBackgroundDark}"
                             Stroke="Transparent" StrokeShape="RoundRectangle 12">
-                        <Border.Shadow>
-                            <Shadow Brush="Black" Opacity="0.1" Radius="8"
-                                    Offset="0,2" />
-                        </Border.Shadow>
 
                         <VerticalStackLayout Spacing="0">
                             <!--  Section Header  -->
@@ -583,10 +563,6 @@
                     <Border Padding="0"
                             BackgroundColor="{StaticResource CardBackgroundDark}"
                             Stroke="Transparent" StrokeShape="RoundRectangle 12">
-                        <Border.Shadow>
-                            <Shadow Brush="Black" Opacity="0.1" Radius="8"
-                                    Offset="0,2" />
-                        </Border.Shadow>
 
                         <VerticalStackLayout Spacing="0">
                             <!--  Card Header  -->

@@ -305,13 +305,6 @@
         </Setter>
     </Style>
 
-    <Style TargetType="Shadow">
-        <Setter Property="Radius" Value="15" />
-        <Setter Property="Opacity" Value="0.5" />
-        <Setter Property="Brush" Value="{AppThemeBinding Light={StaticResource White}, Dark={StaticResource White}}" />
-        <Setter Property="Offset" Value="10,10" />
-    </Style>
-
     <Style TargetType="Slider">
         <Setter Property="MinimumTrackColor" Value="{AppThemeBinding Light={StaticResource Primary}, Dark={StaticResource White}}" />
         <Setter Property="MaximumTrackColor" Value="{AppThemeBinding Light={StaticResource Gray200}, Dark={StaticResource Gray600}}" />
@@ -441,17 +434,12 @@
         <Setter Property="SelectedTabColor" Value="{AppThemeBinding Light={StaticResource Gray950}, Dark={StaticResource Gray200}}" />
     </Style>
 
-    <!-- Card with Shadow -->
+    <!-- Card Style -->
     <Style TargetType="Border" x:Key="CardStyle">
         <Setter Property="Padding" Value="15"/>
         <Setter Property="StrokeShape" Value="RoundRectangle 8"/>
         <Setter Property="Stroke" Value="{AppThemeBinding Light={StaticResource Gray200}, Dark=Transparent}"/>
         <Setter Property="BackgroundColor" Value="{AppThemeBinding Light={StaticResource CardBackground}, Dark={StaticResource CardBackgroundDark}}"/>
-        <Setter Property="Shadow">
-            <Setter.Value>
-                <Shadow Brush="Black" Offset="0,2" Radius="4" Opacity="0.1"/>
-            </Setter.Value>
-        </Setter>
     </Style>
 
     <!-- Secondary Button Style -->

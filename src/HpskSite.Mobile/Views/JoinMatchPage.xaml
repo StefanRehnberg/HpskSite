@@ -30,10 +30,6 @@
                     BackgroundColor="{StaticResource CardBackgroundDark}"
                     Stroke="Transparent" StrokeShape="RoundRectangle 12"
                     IsVisible="{Binding ShowTeamSelection, Converter={StaticResource InverseBoolConverter}}">
-                <Border.Shadow>
-                    <Shadow Brush="Black" Opacity="0.15" Radius="12"
-                            Offset="0,4" />
-                </Border.Shadow>
 
                 <VerticalStackLayout Spacing="0">
 
@@ -146,10 +142,6 @@
                     BackgroundColor="{StaticResource CardBackgroundDark}"
                     Stroke="Transparent" StrokeShape="RoundRectangle 12"
                     IsVisible="{Binding ShowTeamSelection}">
-                <Border.Shadow>
-                    <Shadow Brush="Black" Opacity="0.15" Radius="12"
-                            Offset="0,4" />
-                </Border.Shadow>
 
                 <VerticalStackLayout Spacing="0">
 

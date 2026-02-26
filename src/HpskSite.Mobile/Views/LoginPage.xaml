@@ -42,9 +42,6 @@
                     Stroke="Transparent"
                     BackgroundColor="{StaticResource CardBackgroundDark}"
                     Padding="0">
-                <Border.Shadow>
-                    <Shadow Brush="Black" Offset="0,4" Radius="12" Opacity="0.15"/>
-                </Border.Shadow>
 
                 <VerticalStackLayout Spacing="0">
 
