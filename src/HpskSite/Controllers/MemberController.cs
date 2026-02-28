@@ -324,15 +324,41 @@ namespace HpskSite.Controllers
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> RegisterMember(string firstName, string lastName, string email,
-            string password, string confirmPassword, int? primaryClubId = null)
+            string password, string confirmPassword, int? primaryClubId = null, string? website = null)
         {
             try
             {
+                // Honeypot check — bots fill hidden fields
+                if (!string.IsNullOrEmpty(website))
+                {
+                    return Json(new { success = true, message = "Registrering lyckades!" });
+                }
+
                 // Validate required fields
                 if (string.IsNullOrWhiteSpace(firstName) || string.IsNullOrWhiteSpace(lastName) ||
                     string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
                 {
                     return Json(new { success = false, message = "Förnamn, efternamn, e-post och lösenord är obligatoriska" });
+                }
+
+                // Require a valid club
+                if (!primaryClubId.HasValue || primaryClubId.Value <= 0)
+                {
+                    return Json(new { success = false, message = "Du måste välja en klubb" });
+                }
+
+                var clubName = _clubService.GetClubNameById(primaryClubId.Value);
+                if (clubName == null)
+                {
+                    return Json(new { success = false, message = "Den valda klubben är ogiltig" });
+                }
+
+                // Validate email format
+                var emailRegex = new System.Text.RegularExpressions.Regex(
+                    @"^[^\s@]+@[^\s@]+\.[^\s@]{2,}$");
+                if (!emailRegex.IsMatch(email))
+                {
+                    return Json(new { success = false, message = "Ange en giltig e-postadress" });
                 }
 
                 if (password != confirmPassword)
@@ -386,12 +412,8 @@ namespace HpskSite.Controllers
                     member.IsApproved = false;
                     _memberService.Save(member);
 
-                    // Get club name for email notifications
-                    string clubNameForEmail = "din valda klubb";
-                    if (primaryClubId.HasValue)
-                    {
-                        clubNameForEmail = _clubService.GetClubNameById(primaryClubId.Value) ?? "Okänd klubb";
-                    }
+                    // Use club name already validated above
+                    string clubNameForEmail = clubName ?? "din valda klubb";
 
                     // Send email notifications
                     try

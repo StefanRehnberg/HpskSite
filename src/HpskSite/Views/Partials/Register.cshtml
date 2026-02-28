@@ -19,6 +19,12 @@
 <form id="registrationForm">
     @Html.AntiForgeryToken()
 
+    <!-- Anti-spam honeypot — invisible to humans -->
+    <div style="position:absolute;left:-9999px;opacity:0;height:0;overflow:hidden;" aria-hidden="true">
+        <label for="website">Website</label>
+        <input type="text" id="website" name="website" tabindex="-1" autocomplete="off" />
+    </div>
+
     <div class="mb-3">
         <label for="firstName" class="form-label">Förnamn</label>
         <input type="text" id="firstName" name="firstName" class="form-control" required />
@@ -186,6 +192,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
         if (password.length < 6) {
             showError('Lösenordet måste vara minst 6 tecken långt');
+            return;
+        }
+
+        // Validate email format
+        const email = formData.get('email');
+        const emailRegex = /^[^\s@@]+@@[^\s@@]+\.[^\s@@]{2,}$/;
+        if (!emailRegex.test(email)) {
+            showError('Ange en giltig e-postadress');
             return;
         }
 
