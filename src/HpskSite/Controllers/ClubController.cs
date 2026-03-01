@@ -1141,6 +1141,24 @@ namespace HpskSite.Controllers
                 var today = DateTime.Today;
                 var seriesIdsWithUpcoming = new HashSet<int>();
 
+                // Build club name/region lookup from club nodes
+                var clubNameLookup = new Dictionary<int, string>();
+                var clubRegionLookup = new Dictionary<int, string>();
+                foreach (var root in UmbracoContext.Content.GetAtRoot())
+                {
+                    foreach (var node in root.Descendants())
+                    {
+                        if (node.ContentType.Alias == "club")
+                        {
+                            var cName = node.Value<string>("clubName") ?? node.Name;
+                            clubNameLookup[node.Id] = cName;
+                            var cRegion = node.Value<string>("regionalFederation") ?? "";
+                            if (!string.IsNullOrEmpty(cRegion))
+                                clubRegionLookup[node.Id] = cRegion;
+                        }
+                    }
+                }
+
                 // First pass: find upcoming competitions and track which series have them
                 foreach (var node in competitionsHub.Descendants())
                 {
@@ -1157,6 +1175,13 @@ namespace HpskSite.Controllers
                             seriesIdsWithUpcoming.Add(node.Parent.Id);
                         }
 
+                        // Club and region info
+                        var compClubId = node.Value<int>("clubId");
+                        var compClubName = compClubId > 0 && clubNameLookup.TryGetValue(compClubId, out var cn) ? cn : (string)null;
+                        var compRegion = node.Value<string>("regionalFederation") ?? "";
+                        if (string.IsNullOrEmpty(compRegion) && compClubId > 0)
+                            clubRegionLookup.TryGetValue(compClubId, out compRegion);
+
                         competitionItems.Add(new
                         {
                             id = node.Id,
@@ -1164,7 +1189,10 @@ namespace HpskSite.Controllers
                             name = compName,
                             type = "competition",
                             date = compDate.Value.ToString("yyyy-MM-dd"),
-                            seriesName = parentSeriesName
+                            seriesName = parentSeriesName,
+                            clubId = compClubId > 0 ? compClubId : (int?)null,
+                            clubName = compClubName,
+                            regionCode = compRegion ?? ""
                         });
                     }
                 }
@@ -1175,6 +1203,13 @@ namespace HpskSite.Controllers
                     if (node.ContentType.Alias == "competitionSeries" && seriesIdsWithUpcoming.Contains(node.Id))
                     {
                         var seriesName = node.Value<string>("seriesName") ?? node.Name;
+
+                        var seriesClubId = node.Value<int>("clubId");
+                        var seriesClubName = seriesClubId > 0 && clubNameLookup.TryGetValue(seriesClubId, out var scn) ? scn : (string)null;
+                        var seriesRegion = node.Value<string>("regionalFederation") ?? "";
+                        if (string.IsNullOrEmpty(seriesRegion) && seriesClubId > 0)
+                            clubRegionLookup.TryGetValue(seriesClubId, out seriesRegion);
+
                         seriesItems.Add(new
                         {
                             id = node.Id,
@@ -1182,15 +1217,17 @@ namespace HpskSite.Controllers
                             name = seriesName,
                             type = "series",
                             date = (string)null,
-                            seriesName = (string)null
+                            seriesName = (string)null,
+                            clubId = seriesClubId > 0 ? seriesClubId : (int?)null,
+                            clubName = seriesClubName,
+                            regionCode = seriesRegion ?? ""
                         });
                     }
                 }
 
-                // Sort competitions by date descending
-                competitionItems = competitionItems
-                    .OrderByDescending(i => ((dynamic)i).date ?? "")
-                    .ToList();
+                // Sort competitions by name
+                var svComparer = StringComparer.Create(new System.Globalization.CultureInfo("sv-SE"), false);
+                competitionItems.Sort((a, b) => svComparer.Compare(((dynamic)a).name ?? "", ((dynamic)b).name ?? ""));
 
                 // Series first, then competitions
                 var items = new List<object>();

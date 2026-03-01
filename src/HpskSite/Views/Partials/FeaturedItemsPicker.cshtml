@@ -9,9 +9,21 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
             </div>
             <div class="modal-body">
-                <!-- Search -->
-                <div class="mb-3">
-                    <input type="text" class="form-control" id="featuredPickerSearch" placeholder="Sök tävlingar..." oninput="filterFeaturedItems()">
+                <!-- Filters -->
+                <div class="row g-2 mb-3">
+                    <div class="col">
+                        <input type="text" class="form-control" id="featuredPickerSearch" placeholder="Sök tävlingar..." oninput="filterFeaturedItems()">
+                    </div>
+                    <div class="col-auto">
+                        <select class="form-select" id="featuredPickerRegion" onchange="filterFeaturedItems()" style="min-width: 130px;">
+                            <option value="">Alla regioner</option>
+                        </select>
+                    </div>
+                    <div class="col-auto">
+                        <select class="form-select" id="featuredPickerClub" onchange="filterFeaturedItems()" style="min-width: 130px;">
+                            <option value="">Alla klubbar</option>
+                        </select>
+                    </div>
                 </div>
 
                 <!-- Loading spinner -->
@@ -70,6 +82,8 @@
         document.getElementById('featuredPickerLoading').style.display = '';
         document.getElementById('featuredPickerItems').style.display = 'none';
         document.getElementById('featuredPickerSearch').value = '';
+        document.getElementById('featuredPickerRegion').value = '';
+        document.getElementById('featuredPickerClub').value = '';
 
         // Open modal
         var modalEl = document.getElementById('featuredItemsPickerModal');
@@ -82,6 +96,7 @@
             .then(function (data) {
                 if (data.success) {
                     _allItems = data.items || [];
+                    populateFilterDropdowns();
                     renderFeaturedItems();
                 } else {
                     document.getElementById('featuredPickerLoading').innerHTML =
@@ -95,8 +110,33 @@
             });
     };
 
+    function populateFilterDropdowns() {
+        var regions = {};
+        var clubs = {};
+        _allItems.forEach(function (item) {
+            if (item.regionCode) regions[item.regionCode] = true;
+            if (item.clubId && item.clubName) clubs[item.clubId] = item.clubName;
+        });
+
+        var regionSelect = document.getElementById('featuredPickerRegion');
+        regionSelect.innerHTML = '<option value="">Alla regioner</option>';
+        Object.keys(regions).sort().forEach(function (r) {
+            regionSelect.innerHTML += '<option value="' + escapeHtmlPicker(r) + '">' + escapeHtmlPicker(r) + '</option>';
+        });
+
+        var clubSelect = document.getElementById('featuredPickerClub');
+        clubSelect.innerHTML = '<option value="">Alla klubbar</option>';
+        var clubEntries = Object.keys(clubs).map(function (id) { return { id: id, name: clubs[id] }; });
+        clubEntries.sort(function (a, b) { return a.name.localeCompare(b.name, 'sv'); });
+        clubEntries.forEach(function (c) {
+            clubSelect.innerHTML += '<option value="' + c.id + '">' + escapeHtmlPicker(c.name) + '</option>';
+        });
+    }
+
     function renderFeaturedItems() {
         var search = (document.getElementById('featuredPickerSearch').value || '').toLowerCase();
+        var filterRegion = document.getElementById('featuredPickerRegion').value;
+        var filterClub = document.getElementById('featuredPickerClub').value;
 
         var series = [];
         var competitions = [];
@@ -104,12 +144,14 @@
         _allItems.forEach(function (item) {
             var nameMatch = item.name && item.name.toLowerCase().indexOf(search) !== -1;
             var seriesMatch = item.seriesName && item.seriesName.toLowerCase().indexOf(search) !== -1;
-            if (!search || nameMatch || seriesMatch) {
-                if (item.type === 'series') {
-                    series.push(item);
-                } else {
-                    competitions.push(item);
-                }
+            if (search && !nameMatch && !seriesMatch) return;
+            if (filterRegion && (item.regionCode || '') !== filterRegion) return;
+            if (filterClub && String(item.clubId || '') !== filterClub) return;
+
+            if (item.type === 'series') {
+                series.push(item);
+            } else {
+                competitions.push(item);
             }
         });
 
@@ -120,12 +162,10 @@
             seriesSection.style.display = '';
             seriesContainer.innerHTML = series.map(function (item) {
                 var checked = _currentFeaturedIds.indexOf(item.id) !== -1 ? 'checked' : '';
-                return '<label class="list-group-item list-group-item-action d-flex align-items-center" style="cursor: pointer;">'
+                return '<label class="list-group-item list-group-item-action d-flex align-items-center py-2" style="cursor: pointer;">'
                     + '<input type="checkbox" class="form-check-input me-3 featured-item-check" value="' + item.id + '" ' + checked + ' onchange="updateFeaturedCount()">'
-                    + '<div class="flex-grow-1">'
-                    + '<strong>' + escapeHtmlPicker(item.name) + '</strong>'
-                    + '</div>'
-                    + '<span class="badge" style="background-color: #6f42c1;">Serie</span>'
+                    + '<span class="flex-grow-1 text-truncate"><strong>' + escapeHtmlPicker(item.name) + '</strong></span>'
+                    + '<span class="badge ms-2 flex-shrink-0" style="background-color: #6f42c1;">Serie</span>'
                     + '</label>';
             }).join('');
         } else {
@@ -140,15 +180,11 @@
             compContainer.innerHTML = competitions.map(function (item) {
                 var checked = _currentFeaturedIds.indexOf(item.id) !== -1 ? 'checked' : '';
                 var dateStr = item.date ? new Date(item.date).toLocaleDateString('sv-SE') : '';
-                var seriesInfo = item.seriesName ? '<small class="text-muted d-block">' + escapeHtmlPicker(item.seriesName) + '</small>' : '';
-                return '<label class="list-group-item list-group-item-action d-flex align-items-center" style="cursor: pointer;">'
+                return '<label class="list-group-item list-group-item-action d-flex align-items-center py-2" style="cursor: pointer;">'
                     + '<input type="checkbox" class="form-check-input me-3 featured-item-check" value="' + item.id + '" ' + checked + ' onchange="updateFeaturedCount()">'
-                    + '<div class="flex-grow-1">'
-                    + '<strong>' + escapeHtmlPicker(item.name) + '</strong>'
-                    + seriesInfo
-                    + (dateStr ? '<small class="text-muted"><i class="bi bi-calendar3 me-1"></i>' + dateStr + '</small>' : '')
-                    + '</div>'
-                    + '<span class="badge bg-primary">Tävling</span>'
+                    + '<span class="flex-grow-1 text-truncate">' + escapeHtmlPicker(item.name) + '</span>'
+                    + (dateStr ? '<small class="text-muted ms-2 flex-shrink-0"><i class="bi bi-calendar3 me-1"></i>' + dateStr + '</small>' : '')
+                    + '<span class="badge bg-primary ms-2 flex-shrink-0">Tävling</span>'
                     + '</label>';
             }).join('');
         } else {

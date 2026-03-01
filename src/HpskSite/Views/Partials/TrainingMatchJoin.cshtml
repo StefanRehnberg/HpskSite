@@ -14,40 +14,56 @@
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Stäng"></button>
             </div>
             <div class="modal-body">
-                <p class="text-muted mb-3">Ange matchkoden som du fått från den som skapade matchen.</p>
-
-                <form id="joinMatchForm" onsubmit="handleJoinMatch(event)">
-                    <div class="mb-3">
-                        <label for="joinMatchCode" class="form-label">Matchkod</label>
-                        <input type="text" class="form-control form-control-lg text-center text-uppercase light-placeholder"
-                               id="joinMatchCode" placeholder="ABC123" maxlength="6"
-                               style="letter-spacing: 0.3em; font-weight: bold;"
-                               oninput="this.value = this.value.toUpperCase(); validateJoinButton()">
+                <!-- Loading spinner -->
+                <div id="joinModalLoading" class="text-center py-4">
+                    <div class="spinner-border spinner-border-sm text-primary" role="status">
+                        <span class="visually-hidden">Laddar...</span>
                     </div>
+                    <span class="ms-2 text-muted">Hämtar pågående matcher...</span>
+                </div>
 
-                    <div class="row g-2">
-                        <div class="col-6">
-                            <button type="button" class="btn btn-outline-primary w-100" onclick="openQrScanner()">
-                                <i class="bi bi-qr-code-scan me-1"></i> Skanna QR
-                            </button>
-                        </div>
-                        <div class="col-6">
-                            <button type="submit" class="btn btn-primary w-100" id="joinMatchBtn" disabled>
-                                <i class="bi bi-arrow-right-circle me-1"></i> Gå med
-                            </button>
+                <!-- Empty state -->
+                <div id="joinModalEmpty" class="text-center py-4" style="display: none;">
+                    <i class="bi bi-calendar-x fs-3 text-muted"></i>
+                    <p class="text-muted mt-2 mb-0">Inga pågående matcher just nu</p>
+                </div>
+
+                <!-- Ongoing matches list -->
+                <div id="joinModalMatchList" style="display: none;"></div>
+
+                <!-- Collapsible match code entry -->
+                <div class="mt-3 pt-3 border-top">
+                    <a class="text-decoration-none d-flex align-items-center justify-content-between"
+                       data-bs-toggle="collapse" href="#joinCodeCollapse" role="button"
+                       aria-expanded="false" aria-controls="joinCodeCollapse">
+                        <span class="text-muted"><i class="bi bi-key me-1"></i>Har du en matchkod?</span>
+                        <i class="bi bi-chevron-down text-muted join-code-chevron"></i>
+                    </a>
+                    <div class="collapse" id="joinCodeCollapse">
+                        <div class="pt-3">
+                            <form id="joinMatchForm" onsubmit="handleJoinMatch(event)">
+                                <div class="mb-3">
+                                    <input type="text" class="form-control form-control-lg text-center text-uppercase light-placeholder"
+                                           id="joinMatchCode" placeholder="ABC123" maxlength="6"
+                                           style="letter-spacing: 0.3em; font-weight: bold;"
+                                           oninput="this.value = this.value.toUpperCase(); validateJoinButton()">
+                                </div>
+
+                                <div class="row g-2">
+                                    <div class="col-6">
+                                        <button type="button" class="btn btn-outline-primary w-100" onclick="openQrScanner()">
+                                            <i class="bi bi-qr-code-scan me-1"></i> Skanna QR
+                                        </button>
+                                    </div>
+                                    <div class="col-6">
+                                        <button type="submit" class="btn btn-primary w-100" id="joinMatchBtn" disabled>
+                                            <i class="bi bi-arrow-right-circle me-1"></i> Gå med
+                                        </button>
+                                    </div>
+                                </div>
+                            </form>
                         </div>
                     </div>
-                </form>
-
-                <!-- Divider -->
-                <hr class="my-4">
-
-                <!-- Quick access to open matches -->
-                <div class="text-center">
-                    <p class="text-muted small mb-2">Eller välj från pågående öppna matcher</p>
-                    <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal" onclick="switchToOngoingTab()">
-                        <i class="bi bi-list-ul me-1"></i>Visa pågående matcher
-                    </button>
                 </div>
             </div>
         </div>
@@ -146,16 +162,110 @@ function openJoinMatchModal() {
     // Reset form
     document.getElementById('joinMatchCode').value = '';
     document.getElementById('joinMatchBtn').disabled = true;
+    // Collapse the code section
+    const collapseEl = document.getElementById('joinCodeCollapse');
+    if (collapseEl) {
+        const bsCollapse = bootstrap.Collapse.getInstance(collapseEl);
+        if (bsCollapse) bsCollapse.hide();
+    }
     joinMatchModalInstance.show();
+    // Always re-fetch ongoing matches
+    loadOngoingMatchesInModal();
 }
 
-// Switch to ongoing tab after closing modal
-function switchToOngoingTab() {
-    const ongoingTab = document.getElementById('ongoing-tab');
-    if (ongoingTab) {
-        const bsTab = new bootstrap.Tab(ongoingTab);
-        bsTab.show();
-        loadOngoingMatchesIfNeeded();
+// Load and render ongoing matches inside the join modal
+function loadOngoingMatchesInModal() {
+    const loading = document.getElementById('joinModalLoading');
+    const empty = document.getElementById('joinModalEmpty');
+    const list = document.getElementById('joinModalMatchList');
+
+    if (loading) loading.style.display = 'block';
+    if (empty) empty.style.display = 'none';
+    if (list) list.style.display = 'none';
+
+    fetch('/umbraco/surface/TrainingMatch/GetOngoingMatches')
+        .then(response => response.json())
+        .then(result => {
+            if (loading) loading.style.display = 'none';
+
+            if (result.success && result.matches && result.matches.length > 0) {
+                // Store matches for click handling
+                window.joinModalMatchesData = result.matches;
+                renderJoinModalMatches(result.matches);
+                if (list) list.style.display = 'block';
+            } else {
+                if (empty) empty.style.display = 'block';
+            }
+        })
+        .catch(error => {
+            console.error('Error loading ongoing matches in modal:', error);
+            if (loading) loading.style.display = 'none';
+            if (empty) empty.style.display = 'block';
+        });
+}
+
+// Render match items in the join modal
+function renderJoinModalMatches(matches) {
+    const list = document.getElementById('joinModalMatchList');
+    if (!list) return;
+
+    const weaponColors = { A: 'info', B: 'purple', C: 'success', R: 'warning', P: 'danger', M: 'dark', L: 'secondary' };
+
+    list.innerHTML = '<div class="list-group">' + matches.map((m, index) => {
+        // Compact avatars (max 3)
+        const avatars = m.participants.slice(0, 3).map((p, i) => {
+            if (p.profilePictureUrl) {
+                return `<img src="${p.profilePictureUrl}" alt="${p.firstName}"
+                            class="match-avatar"
+                            style="margin-left: ${i > 0 ? '-8px' : '0'}; z-index: ${3-i};"
+                            title="${p.firstName} ${p.lastName}">`;
+            } else {
+                const initials = (p.firstName?.[0] || '') + (p.lastName?.[0] || '');
+                return `<span class="match-avatar match-avatar-initials"
+                            style="margin-left: ${i > 0 ? '-8px' : '0'}; z-index: ${3-i};"
+                            title="${p.firstName} ${p.lastName}">${initials}</span>`;
+            }
+        }).join('');
+
+        const isOpen = m.isOpen !== false;
+        const weaponColor = weaponColors[m.weaponClass] || 'secondary';
+        const lockIcon = !isOpen ? '<i class="bi bi-lock-fill text-secondary me-1" title="Privat match"></i>' : '';
+        const timeStr = new Date(m.createdDate).toLocaleString('sv-SE', { hour: '2-digit', minute: '2-digit' });
+
+        return `
+            <div class="list-group-item list-group-item-action match-list-item" onclick="onJoinModalMatchClick(${index})">
+                <div class="d-flex align-items-center gap-2">
+                    <span class="weapon-dot bg-${weaponColor}" title="Klass ${m.weaponClass}">${m.weaponClass}</span>
+                    <div class="flex-grow-1 min-width-0">
+                        <div class="d-flex align-items-center gap-1">
+                            ${lockIcon}
+                            <span class="match-name text-truncate">${m.matchName || m.matchCode}</span>
+                        </div>
+                        <div class="match-meta">
+                            <span class="d-inline-flex align-items-center">${avatars}</span>
+                            <span class="text-body-secondary">${m.participantCount}</span>
+                            <span class="text-body-tertiary mx-1">&middot;</span>
+                            <span class="text-body-tertiary">${timeStr}</span>
+                        </div>
+                    </div>
+                    <i class="bi bi-chevron-right text-body-tertiary"></i>
+                </div>
+            </div>
+        `;
+    }).join('') + '</div>';
+}
+
+// Handle click on a match in the join modal
+function onJoinModalMatchClick(index) {
+    const match = window.joinModalMatchesData[index];
+    if (!match) return;
+    // Close join modal
+    if (joinMatchModalInstance) {
+        joinMatchModalInstance.hide();
+    }
+    // Open the match action modal (defined in TrainingMatch.cshtml)
+    if (typeof showMatchActionModal === 'function') {
+        showMatchActionModal(match);
     }
 }
 
@@ -444,10 +554,28 @@ async function createTeamAndJoin() {
     background-color: #000;
 }
 
+/* Chevron rotation for collapsible code section */
+.join-code-chevron {
+    transition: transform 0.2s ease;
+}
+[aria-expanded="true"] .join-code-chevron {
+    transform: rotate(180deg);
+}
+
+/* Join modal match list max height with scroll */
+#joinModalMatchList .list-group {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
 /* Mobile fullscreen adjustments */
 @@media (max-width: 575.98px) {
     .modal-fullscreen-sm-down #qrReaderContainer {
         min-height: 60vh;
+    }
+
+    #joinModalMatchList .list-group {
+        max-height: 250px;
     }
 }
 </style>
