@@ -1,0 +1,621 @@
+@*
+    Distributed Result Entry Modal
+    Mobile-friendly modal for club admins/skjutledare to report results
+    at the range for distributed (self-reporting) competitions.
+*@
+@{
+    var competitionId = (int)(ViewData["CompetitionId"] ?? 0);
+    var competitionName = (string)(ViewData["CompetitionName"] ?? "");
+    var numberOfSeries = (int)(ViewData["NumberOfSeries"] ?? 6);
+}
+
+<div class="modal fade" id="distributedResultModal" tabindex="-1" aria-labelledby="distributedResultModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-fullscreen-sm-down">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title" id="distributedResultModalLabel">
+                    <i class="bi bi-pencil-square me-2"></i>Rapportera resultat
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                @Html.AntiForgeryToken()
+
+                <!-- Loading state -->
+                <div id="dr-loading" class="text-center py-4">
+                    <div class="spinner-border text-success" role="status">
+                        <span class="visually-hidden">Laddar...</span>
+                    </div>
+                    <p class="mt-2 text-muted">Laddar anmälda skyttar...</p>
+                </div>
+
+                <!-- Not active state -->
+                <div id="dr-not-active" class="d-none">
+                    <div class="alert alert-warning">
+                        <i class="bi bi-exclamation-triangle me-2"></i>
+                        Resultatrapportering är inte aktiv just nu. Rapportering är möjlig under tävlingsperioden.
+                    </div>
+                </div>
+
+                <!-- Error state -->
+                <div id="dr-error" class="d-none">
+                    <div class="alert alert-danger">
+                        <i class="bi bi-x-circle me-2"></i>
+                        <span id="dr-error-text"></span>
+                    </div>
+                </div>
+
+                <!-- Main content -->
+                <div id="dr-content" class="d-none">
+                    <!-- Member selector -->
+                    <div class="mb-3">
+                        <label for="dr-member-select" class="form-label fw-bold">
+                            <i class="bi bi-person me-1"></i>Välj skytt
+                        </label>
+                        <select class="form-select form-select-lg" id="dr-member-select">
+                            <option value="">-- Välj skytt --</option>
+                        </select>
+                    </div>
+
+                    <!-- Class selector (shown if member registered in multiple classes) -->
+                    <div class="mb-3 d-none" id="dr-class-container">
+                        <label for="dr-class-select" class="form-label fw-bold">
+                            <i class="bi bi-bullseye me-1"></i>Klass
+                        </label>
+                        <select class="form-select" id="dr-class-select"></select>
+                    </div>
+
+                    <!-- Series status badges -->
+                    <div class="mb-3" id="dr-series-status-container" style="display:none;">
+                        <label class="form-label fw-bold"><i class="bi bi-list-check me-1"></i>Serier</label>
+                        <div id="dr-series-badges" class="d-flex flex-wrap gap-2"></div>
+                    </div>
+
+                    <!-- Running total -->
+                    <div class="mb-3 p-2 rounded d-none" id="dr-running-total" style="background-color: var(--bs-tertiary-bg);">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <span><strong>Totalt:</strong> <span id="dr-grand-total">0</span>p</span>
+                            <span><strong>X:</strong> <span id="dr-grand-x">0</span></span>
+                            <span><strong>Serier:</strong> <span id="dr-series-count">0</span> / @numberOfSeries</span>
+                        </div>
+                    </div>
+
+                    <!-- Shot entry section -->
+                    <div id="dr-shot-entry" style="display:none;">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <label class="form-label mb-0 fw-bold">
+                                <i class="bi bi-crosshair me-1"></i>Serie <span id="dr-current-series-label">1</span>
+                            </label>
+                            <button type="button" class="btn btn-outline-danger btn-sm" onclick="drClearCurrentSeries()">
+                                <i class="bi bi-x-circle"></i> Rensa
+                            </button>
+                        </div>
+
+                        <!-- Shot circles -->
+                        <div class="text-center mb-3">
+                            <div class="dr-shot-circles">
+                                <span class="dr-shot-circle" id="dr-shot-0">_</span>
+                                <span class="dr-shot-circle" id="dr-shot-1">_</span>
+                                <span class="dr-shot-circle" id="dr-shot-2">_</span>
+                                <span class="dr-shot-circle" id="dr-shot-3">_</span>
+                                <span class="dr-shot-circle" id="dr-shot-4">_</span>
+                            </div>
+                            <div class="mt-2">
+                                <strong>Serie: <span id="dr-series-total">0</span>p</strong> |
+                                <strong>X: <span id="dr-series-x">0</span></strong>
+                            </div>
+                        </div>
+
+                        <!-- Button grid -->
+                        <div class="dr-button-grid">
+                            <div class="dr-button-row">
+                                <button type="button" class="btn btn-primary dr-shot-btn" onclick="drAddShot('X')">X</button>
+                                <button type="button" class="btn btn-primary dr-shot-btn" onclick="drAddShot('10')">10</button>
+                                <button type="button" class="btn btn-primary dr-shot-btn" onclick="drAddShot('9')">9</button>
+                                <button type="button" class="btn btn-primary dr-shot-btn" onclick="drAddShot('8')">8</button>
+                            </div>
+                            <div class="dr-button-row">
+                                <button type="button" class="btn btn-primary dr-shot-btn" onclick="drAddShot('7')">7</button>
+                                <button type="button" class="btn btn-primary dr-shot-btn" onclick="drAddShot('6')">6</button>
+                                <button type="button" class="btn btn-primary dr-shot-btn" onclick="drAddShot('5')">5</button>
+                                <button type="button" class="btn btn-primary dr-shot-btn" onclick="drAddShot('4')">4</button>
+                            </div>
+                            <div class="dr-button-row">
+                                <button type="button" class="btn btn-primary dr-shot-btn" onclick="drAddShot('3')">3</button>
+                                <button type="button" class="btn btn-primary dr-shot-btn" onclick="drAddShot('2')">2</button>
+                                <button type="button" class="btn btn-primary dr-shot-btn" onclick="drAddShot('1')">1</button>
+                                <button type="button" class="btn btn-primary dr-shot-btn" onclick="drAddShot('0')">0</button>
+                            </div>
+                            <div class="dr-button-row dr-action-row">
+                                <button type="button" class="btn btn-success dr-enter-btn" id="dr-save-series-btn" onclick="drSaveSeries()" disabled>
+                                    <i class="bi bi-check-circle"></i> SPARA SERIE
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="form-text mt-2 text-center">
+                            <i class="bi bi-keyboard"></i> 0-9, X = skott | Enter = spara | Backspace = ångra
+                        </div>
+                    </div>
+
+                    <!-- Success feedback -->
+                    <div id="dr-save-feedback" class="d-none">
+                        <div class="alert alert-success alert-dismissible fade show" role="alert">
+                            <i class="bi bi-check-circle me-2"></i><span id="dr-save-feedback-text"></span>
+                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    <i class="bi bi-x-circle me-1"></i>Stäng
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+/* Shot circles */
+.dr-shot-circles {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+}
+.dr-shot-circle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    border: 2px solid var(--bs-border-color);
+    font-size: 1.1rem;
+    font-weight: bold;
+    background-color: var(--bs-tertiary-bg);
+    transition: all 0.15s;
+}
+.dr-shot-circle.filled {
+    border-color: var(--bs-primary);
+    background-color: var(--bs-primary-bg-subtle);
+    color: var(--bs-primary);
+}
+.dr-shot-circle.filled-x {
+    border-color: var(--bs-warning);
+    background-color: var(--bs-warning-bg-subtle);
+    color: var(--bs-warning-text-emphasis);
+}
+.dr-shot-circle.filled-ten {
+    border-color: var(--bs-success);
+    background-color: var(--bs-success-bg-subtle);
+    color: var(--bs-success-text-emphasis);
+}
+
+/* Button grid */
+.dr-button-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.dr-button-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+}
+.dr-shot-btn {
+    font-size: 1.3rem;
+    font-weight: bold;
+    padding: 14px 8px;
+    min-height: 56px;
+    border-radius: 8px;
+}
+.dr-action-row {
+    grid-template-columns: 1fr;
+    margin-top: 4px;
+}
+.dr-enter-btn {
+    font-size: 1.2rem;
+    font-weight: bold;
+    padding: 14px 8px;
+    min-height: 56px;
+    border-radius: 8px;
+}
+
+/* Series status badges */
+.dr-series-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    border: 2px solid transparent;
+    transition: all 0.15s;
+}
+.dr-series-badge.completed {
+    background-color: var(--bs-success-bg-subtle);
+    color: var(--bs-success-text-emphasis);
+    border-color: var(--bs-success);
+}
+.dr-series-badge.pending {
+    background-color: var(--bs-tertiary-bg);
+    color: var(--bs-secondary-color);
+    border-color: var(--bs-border-color);
+}
+.dr-series-badge.active {
+    background-color: var(--bs-primary-bg-subtle);
+    color: var(--bs-primary-text-emphasis);
+    border-color: var(--bs-primary);
+}
+
+/* Mobile touch-friendly */
+@@media (max-width: 576px) {
+    .dr-shot-btn {
+        font-size: 1.5rem;
+        padding: 16px 8px;
+        min-height: 64px;
+    }
+    .dr-shot-circle {
+        width: 44px;
+        height: 44px;
+        font-size: 1rem;
+    }
+    .dr-enter-btn {
+        font-size: 1.3rem;
+        padding: 16px 8px;
+    }
+}
+</style>
+
+<script>
+(function() {
+    const DR_COMPETITION_ID = @competitionId;
+    const DR_MAX_SERIES = @numberOfSeries;
+
+    let drMembers = [];
+    let drSelectedMemberId = null;
+    let drSelectedClass = '';
+    let drCurrentSeriesNumber = 1;
+    let drShots = []; // Current 5 shots being entered
+    let drSaving = false;
+
+    // Load status when modal opens
+    const drModal = document.getElementById('distributedResultModal');
+    drModal.addEventListener('show.bs.modal', function() {
+        loadDistributedStatus();
+    });
+
+    // Keyboard handler
+    drModal.addEventListener('keydown', function(e) {
+        const shotEntry = document.getElementById('dr-shot-entry');
+        if (!shotEntry || shotEntry.style.display === 'none') return;
+
+        if (e.key >= '0' && e.key <= '9') {
+            e.preventDefault();
+            drAddShot(e.key);
+        } else if (e.key.toLowerCase() === 'x') {
+            e.preventDefault();
+            drAddShot('X');
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            if (drShots.length === 5) drSaveSeries();
+        } else if (e.key === 'Backspace') {
+            e.preventDefault();
+            drUndoLastShot();
+        }
+    });
+
+    function loadDistributedStatus() {
+        document.getElementById('dr-loading').classList.remove('d-none');
+        document.getElementById('dr-content').classList.add('d-none');
+        document.getElementById('dr-not-active').classList.add('d-none');
+        document.getElementById('dr-error').classList.add('d-none');
+
+        fetch(`/umbraco/surface/CompetitionResults/GetDistributedStatus?competitionId=${DR_COMPETITION_ID}`)
+            .then(r => r.json())
+            .then(data => {
+                document.getElementById('dr-loading').classList.add('d-none');
+
+                if (!data.success) {
+                    document.getElementById('dr-error').classList.remove('d-none');
+                    document.getElementById('dr-error-text').textContent = data.message || 'Ett fel uppstod.';
+                    return;
+                }
+
+                if (!data.isActive) {
+                    document.getElementById('dr-not-active').classList.remove('d-none');
+                    return;
+                }
+
+                drMembers = data.members || [];
+
+                if (drMembers.length === 0) {
+                    document.getElementById('dr-error').classList.remove('d-none');
+                    document.getElementById('dr-error-text').textContent = 'Inga anmälda skyttar hittades som du kan rapportera för.';
+                    return;
+                }
+
+                populateMemberSelect();
+                document.getElementById('dr-content').classList.remove('d-none');
+            })
+            .catch(err => {
+                document.getElementById('dr-loading').classList.add('d-none');
+                document.getElementById('dr-error').classList.remove('d-none');
+                document.getElementById('dr-error-text').textContent = 'Nätverksfel: ' + err.message;
+            });
+    }
+
+    function populateMemberSelect() {
+        const select = document.getElementById('dr-member-select');
+        select.innerHTML = '<option value="">-- Välj skytt --</option>';
+
+        // Group by club
+        const byClub = {};
+        drMembers.forEach(m => {
+            const club = m.club || 'Okänd klubb';
+            if (!byClub[club]) byClub[club] = [];
+            byClub[club].push(m);
+        });
+
+        Object.keys(byClub).sort().forEach(club => {
+            const group = document.createElement('optgroup');
+            group.label = club;
+            byClub[club].forEach(m => {
+                const opt = document.createElement('option');
+                opt.value = m.memberId + '|' + m.shootingClass;
+                opt.textContent = m.name + ' (' + m.shootingClass + ')';
+                group.appendChild(opt);
+            });
+            select.appendChild(group);
+        });
+
+        select.onchange = onMemberSelected;
+    }
+
+    function onMemberSelected() {
+        const val = document.getElementById('dr-member-select').value;
+        if (!val) {
+            drSelectedMemberId = null;
+            drSelectedClass = '';
+            document.getElementById('dr-shot-entry').style.display = 'none';
+            document.getElementById('dr-series-status-container').style.display = 'none';
+            document.getElementById('dr-running-total').classList.add('d-none');
+            return;
+        }
+
+        const parts = val.split('|');
+        drSelectedMemberId = parseInt(parts[0]);
+        drSelectedClass = parts[1];
+
+        // Check if member has multiple class registrations
+        const memberEntries = drMembers.filter(m => m.memberId === drSelectedMemberId);
+        const classContainer = document.getElementById('dr-class-container');
+        if (memberEntries.length > 1) {
+            const classSelect = document.getElementById('dr-class-select');
+            classSelect.innerHTML = '';
+            memberEntries.forEach(m => {
+                const opt = document.createElement('option');
+                opt.value = m.shootingClass;
+                opt.textContent = m.shootingClass;
+                if (m.shootingClass === drSelectedClass) opt.selected = true;
+                classSelect.appendChild(opt);
+            });
+            classSelect.onchange = function() {
+                drSelectedClass = this.value;
+                updateSeriesStatus();
+                startNextSeries();
+            };
+            classContainer.classList.remove('d-none');
+        } else {
+            classContainer.classList.add('d-none');
+        }
+
+        updateSeriesStatus();
+        startNextSeries();
+    }
+
+    function updateSeriesStatus() {
+        const member = drMembers.find(m => m.memberId === drSelectedMemberId && m.shootingClass === drSelectedClass);
+        if (!member) return;
+
+        const container = document.getElementById('dr-series-badges');
+        container.innerHTML = '';
+
+        const completed = member.completedSeries || [];
+        let grandTotal = 0;
+        let grandX = 0;
+
+        for (let i = 1; i <= DR_MAX_SERIES; i++) {
+            const series = completed.find(s => s.seriesNumber === i);
+            const badge = document.createElement('span');
+            badge.className = 'dr-series-badge ' + (series ? 'completed' : 'pending');
+            badge.onclick = function() { selectSeries(i); };
+
+            if (series) {
+                badge.innerHTML = `<i class="bi bi-check-circle-fill"></i> S${i}: ${series.total}p`;
+                grandTotal += series.total;
+                grandX += series.xCount;
+            } else {
+                badge.innerHTML = `S${i}`;
+            }
+            container.appendChild(badge);
+        }
+
+        document.getElementById('dr-series-status-container').style.display = '';
+        document.getElementById('dr-grand-total').textContent = grandTotal;
+        document.getElementById('dr-grand-x').textContent = grandX;
+        document.getElementById('dr-series-count').textContent = completed.length;
+        document.getElementById('dr-running-total').classList.remove('d-none');
+    }
+
+    function startNextSeries() {
+        const member = drMembers.find(m => m.memberId === drSelectedMemberId && m.shootingClass === drSelectedClass);
+        if (!member) return;
+
+        const completed = member.completedSeries || [];
+        const completedNumbers = new Set(completed.map(s => s.seriesNumber));
+
+        // Find first incomplete series
+        let nextSeries = 1;
+        for (let i = 1; i <= DR_MAX_SERIES; i++) {
+            if (!completedNumbers.has(i)) {
+                nextSeries = i;
+                break;
+            }
+        }
+
+        selectSeries(nextSeries);
+    }
+
+    function selectSeries(seriesNum) {
+        drCurrentSeriesNumber = seriesNum;
+        drShots = [];
+        updateShotDisplay();
+        updateSeriesBadgeHighlight();
+
+        document.getElementById('dr-current-series-label').textContent = seriesNum;
+        document.getElementById('dr-shot-entry').style.display = '';
+
+        // If this series already has data, pre-fill
+        const member = drMembers.find(m => m.memberId === drSelectedMemberId && m.shootingClass === drSelectedClass);
+        if (member) {
+            const existing = (member.completedSeries || []).find(s => s.seriesNumber === seriesNum);
+            if (existing && existing.shots && existing.shots.length === 5) {
+                drShots = [...existing.shots];
+                updateShotDisplay();
+            }
+        }
+    }
+
+    function updateSeriesBadgeHighlight() {
+        const badges = document.querySelectorAll('.dr-series-badge');
+        badges.forEach((badge, idx) => {
+            badge.classList.remove('active');
+            if (idx + 1 === drCurrentSeriesNumber) {
+                badge.classList.add('active');
+            }
+        });
+    }
+
+    window.drAddShot = function(value) {
+        if (drShots.length >= 5 || drSaving) return;
+        drShots.push(value);
+        updateShotDisplay();
+    };
+
+    window.drUndoLastShot = function() {
+        if (drShots.length === 0) return;
+        drShots.pop();
+        updateShotDisplay();
+    };
+
+    window.drClearCurrentSeries = function() {
+        drShots = [];
+        updateShotDisplay();
+    };
+
+    function updateShotDisplay() {
+        let total = 0;
+        let xCount = 0;
+
+        for (let i = 0; i < 5; i++) {
+            const circle = document.getElementById('dr-shot-' + i);
+            if (i < drShots.length) {
+                const val = drShots[i];
+                circle.textContent = val;
+                circle.className = 'dr-shot-circle filled';
+                if (val.toUpperCase() === 'X') {
+                    circle.classList.add('filled-x');
+                    total += 10;
+                    xCount++;
+                } else if (val === '10') {
+                    circle.classList.add('filled-ten');
+                    total += 10;
+                } else {
+                    total += parseInt(val) || 0;
+                }
+            } else {
+                circle.textContent = '_';
+                circle.className = 'dr-shot-circle';
+            }
+        }
+
+        document.getElementById('dr-series-total').textContent = total;
+        document.getElementById('dr-series-x').textContent = xCount;
+
+        const saveBtn = document.getElementById('dr-save-series-btn');
+        saveBtn.disabled = drShots.length !== 5;
+    }
+
+    window.drSaveSeries = function() {
+        if (drShots.length !== 5 || !drSelectedMemberId || !drSelectedClass || drSaving) return;
+
+        drSaving = true;
+        const saveBtn = document.getElementById('dr-save-series-btn');
+        const origText = saveBtn.innerHTML;
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Sparar...';
+
+        const token = document.querySelector('input[name="__RequestVerificationToken"]').value;
+
+        fetch('/umbraco/surface/CompetitionResults/ReportDistributedResult', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': token
+            },
+            body: JSON.stringify({
+                competitionId: DR_COMPETITION_ID,
+                seriesNumber: drCurrentSeriesNumber,
+                shots: drShots,
+                shootingClass: drSelectedClass,
+                targetMemberId: drSelectedMemberId
+            })
+        })
+        .then(r => r.json())
+        .then(data => {
+            drSaving = false;
+            saveBtn.innerHTML = origText;
+
+            if (data.success) {
+                // Update local data
+                const member = drMembers.find(m => m.memberId === drSelectedMemberId && m.shootingClass === drSelectedClass);
+                if (member) {
+                    // Remove existing series entry if re-entering
+                    member.completedSeries = (member.completedSeries || []).filter(s => s.seriesNumber !== drCurrentSeriesNumber);
+                    member.completedSeries.push({
+                        seriesNumber: drCurrentSeriesNumber,
+                        total: data.total,
+                        xCount: data.xCount,
+                        shots: [...drShots]
+                    });
+                    member.completedSeries.sort((a, b) => a.seriesNumber - b.seriesNumber);
+                }
+
+                updateSeriesStatus();
+
+                // Show feedback
+                const feedback = document.getElementById('dr-save-feedback');
+                document.getElementById('dr-save-feedback-text').textContent =
+                    `Serie ${drCurrentSeriesNumber} sparad: ${data.total}p (${data.xCount} X)`;
+                feedback.classList.remove('d-none');
+                setTimeout(() => feedback.classList.add('d-none'), 3000);
+
+                // Auto-advance to next incomplete series
+                startNextSeries();
+            } else {
+                saveBtn.disabled = false;
+                alert(data.message || 'Kunde inte spara resultatet.');
+            }
+        })
+        .catch(err => {
+            drSaving = false;
+            saveBtn.innerHTML = origText;
+            saveBtn.disabled = false;
+            alert('Nätverksfel: ' + err.message);
+        });
+    };
+})();
+</script>

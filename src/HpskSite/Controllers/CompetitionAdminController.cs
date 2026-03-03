@@ -501,6 +501,7 @@ namespace HpskSite.Controllers
                             isExternal = comp.GetValue<bool>("isExternal"),
                             clubId = comp.GetValue<int?>("clubId") ?? 0,
                             registrationCount = registrationCounts.TryGetValue(comp.Id, out var count) ? count : 0,
+                            allowSelfReporting = comp.GetValue<bool>("allowSelfReporting"),
                             seriesId = isInSeries ? parent!.Id : (int?)null,
                             seriesName = isInSeries ? (parent!.GetValue<string>("seriesName") ?? parent.Name) : null,
                             status = status
@@ -622,6 +623,21 @@ namespace HpskSite.Controllers
                     externalUrl = competition.GetValue<string>("externalUrl") ?? "",
                     externalRegistrationEmail = competition.GetValue<string>("externalRegistrationEmail") ?? "",
                     isExternal = competition.GetValue<bool>("isExternal"),
+                    allowSelfReporting = competition.GetValue<bool>("allowSelfReporting"),
+                    showLiveResults = competition.GetValue<bool>("showLiveResults"),
+                    isActive = competition.GetValue<bool>("isActive"),
+                    allowDualCClass = competition.GetValue<bool>("allowDualCClass"),
+                    addToMenu = competition.GetValue<bool>("addToMenu"),
+                    isAwardingStandardMedals = competition.GetValue<bool>("isAwardingStandardMedals"),
+                    isClubOnly = competition.GetValue<bool>("isClubOnly"),
+                    maxParticipants = competition.GetValue<int>("maxParticipants"),
+                    registrationFee = competition.GetValue<decimal>("registrationFee"),
+                    competitionDirector = competition.GetValue<string>("competitionDirector") ?? "",
+                    contactEmail = competition.GetValue<string>("contactEmail") ?? "",
+                    contactPhone = competition.GetValue<string>("contactPhone") ?? "",
+                    swishNumber = competition.GetValue<string>("swishNumber") ?? "",
+                    competitionManagers = GetCompetitionManagerIds(competition),
+                    competitionScope = competition.GetValue<string>("competitionScope") ?? "",
                     seriesId = seriesId,
                     clubId = competitionClubId,
                     regionalFederation = competition.GetValue<string>("regionalFederation") ?? ""
@@ -867,7 +883,8 @@ namespace HpskSite.Controllers
                             }
                         }
                         else if ((field.Key == "showLiveResults" || field.Key == "addToMenu" ||
-                                  field.Key == "allowDualCClass" || field.Key == "isActive" || field.Key == "isClubOnly") && value != null)
+                                  field.Key == "allowDualCClass" || field.Key == "isActive" || field.Key == "isClubOnly" ||
+                                  field.Key == "allowSelfReporting") && value != null)
                         {
                             // Handle JsonElement booleans
                             if (value is System.Text.Json.JsonElement jsonElement)
@@ -1995,6 +2012,19 @@ namespace HpskSite.Controllers
         /// Get all descendants of a content item in flat list (OPTIMIZED)
         /// Uses breadth-first iteration instead of recursion for better performance
         /// </summary>
+        private int[] GetCompetitionManagerIds(Umbraco.Cms.Core.Models.IContent competition)
+        {
+            var json = competition.GetValue<string>("competitionManagers") ?? "[]";
+            try
+            {
+                return Newtonsoft.Json.JsonConvert.DeserializeObject<int[]>(json) ?? Array.Empty<int>();
+            }
+            catch
+            {
+                return Array.Empty<int>();
+            }
+        }
+
         private List<Umbraco.Cms.Core.Models.IContent> GetFlatDescendants(Umbraco.Cms.Core.Models.IContent root)
         {
             var result = new List<Umbraco.Cms.Core.Models.IContent>();

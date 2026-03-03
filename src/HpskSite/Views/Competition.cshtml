@@ -104,6 +104,7 @@
     }
 
     var allowDualCClassRegistration = Model.Value<bool>("allowDualCClassRegistration");
+    var allowSelfReporting = Model.Value<bool>("allowSelfReporting");
 
     // Get competition shooting classes using Models.ShootingClasses
     var competitionShootingClasses = new List<ShootingClass>();
@@ -300,6 +301,22 @@
             canManageCompetition = isSiteAdmin || isCompetitionManager || isClubAdminForCompetition;
         }
     }
+
+    // Distributed result reporting authorization
+    // Club admin, skjutledare, competition manager, site admin — any of these can report
+    bool canReportDistributedResults = false;
+    if (allowSelfReporting && !isExternal && currentMember != null)
+    {
+        var memberData2 = MemberService.GetByEmail(currentMember.Email ?? "");
+        if (memberData2 != null)
+        {
+            bool isSiteAdmin2 = await AuthService.IsCurrentUserAdminAsync();
+            bool isCompetitionManager2 = await AuthService.IsCompetitionManager(Model.Id);
+            bool isClubAdmin2 = regRole == "clubAdmin" || regRole == "admin";
+            bool isSkjutledare2 = regRole == "skjutledare";
+            canReportDistributedResults = isSiteAdmin2 || isCompetitionManager2 || isClubAdmin2 || isSkjutledare2;
+        }
+    }
 }
 
 <div class="container mt-4">
@@ -460,6 +477,14 @@
 				{
 				<button class="btn btn-secondary" disabled>
 				  <i class="bi bi-pause-circle"></i> Inte aktiv
+				</button>
+				}
+
+				@* Distributed result reporting button *@
+				@if (canReportDistributedResults)
+				{
+				<button type="button" class="btn btn-outline-success" data-bs-toggle="modal" data-bs-target="#distributedResultModal" title="Rapportera resultat">
+				<i class="bi bi-pencil-square"></i> <span class="d-none d-md-inline">Rapportera resultat</span>
 				</button>
 				}
 
@@ -870,6 +895,17 @@
 
 	@* Replace Confirmation Modal *@
 	@await Html.PartialAsync("CompetitionReplaceConfirmModal")
+
+	@* Distributed Result Entry Modal *@
+	@if (canReportDistributedResults)
+	{
+		@await Html.PartialAsync("DistributedResultEntry", new ViewDataDictionary(ViewData)
+		{
+			{ "CompetitionId", Model.Id },
+			{ "CompetitionName", competitionName },
+			{ "NumberOfSeries", numberOfSeriesOrStations }
+		})
+	}
 }
 
 @* JavaScript Configuration and Script Reference *@

@@ -250,6 +250,16 @@ namespace HpskSite.CompetitionTypes.Precision.Services
                     Section = "Konfiguration",
                     IsRequired = false,
                     Order = 3
+                },
+                new EditableFieldDefinition
+                {
+                    FieldName = "allowSelfReporting",
+                    Label = "Tillåt resultatrapportering",
+                    FieldType = "boolean",
+                    Section = "Konfiguration",
+                    IsRequired = false,
+                    HelpText = "Klubbadmins och skjutledare kan rapportera resultat för sina skyttar",
+                    Order = 4
                 }
             };
         }
@@ -312,6 +322,7 @@ namespace HpskSite.CompetitionTypes.Precision.Services
                 "shootingClassIds" => "shootingClassIds",
                 "competitionScope" => "competitionScope",
                 "isAwardingStandardMedals" => "isAwardingStandardMedals",
+                "allowSelfReporting" => "allowSelfReporting",
                 _ => null
             };
         }
@@ -332,7 +343,7 @@ namespace HpskSite.CompetitionTypes.Precision.Services
                 "registrationFee" =>
                     decimal.TryParse(value.ToString(), out var decVal) && decVal >= 0 ? decVal : (object)null,
 
-                "showLiveResults" or "isActive" or "isClubOnly" or "allowDualCClass" or "addToMenu" or "isAwardingStandardMedals" =>
+                "showLiveResults" or "isActive" or "isClubOnly" or "allowDualCClass" or "addToMenu" or "isAwardingStandardMedals" or "allowSelfReporting" =>
                     bool.TryParse(value.ToString(), out var boolVal) ? boolVal : false,
 
                 "competitionDate" or "competitionEndDate" or "registrationOpenDate" or "registrationCloseDate" =>

@@ -310,9 +310,9 @@
                                         </div>
 
                                         <div class="mb-3 form-check">
-                                            <input type="checkbox" class="form-check-input" id="wizard_addToMenu" name="addToMenu">
-                                            <label class="form-check-label" for="wizard_addToMenu">
-                                                Lägg till genväg till tävlingen i menyn
+                                            <input type="checkbox" class="form-check-input" id="wizard_allowSelfReporting" name="allowSelfReporting">
+                                            <label class="form-check-label" for="wizard_allowSelfReporting">
+                                                Tillåt resultatrapportering
                                             </label>
                                         </div>
                                     </div>
@@ -1249,7 +1249,7 @@ function submitWizard() {
     for (let [key, value] of formData.entries()) {
         // Convert checkbox values
         if (key === 'allowDualCClass' || key === 'showLiveResults' ||
-            key === 'isClubOnly' || key === 'addToMenu' || key === 'isAwardingStandardMedals') {
+            key === 'isClubOnly' || key === 'allowSelfReporting' || key === 'isAwardingStandardMedals') {
             fields[key] = value === 'on';
         } else {
             fields[key] = value;
@@ -1257,7 +1257,7 @@ function submitWizard() {
     }
 
     // Ensure unchecked checkboxes are false
-    ['allowDualCClass', 'showLiveResults', 'isClubOnly', 'addToMenu', 'isAwardingStandardMedals'].forEach(field => {
+    ['allowDualCClass', 'showLiveResults', 'isClubOnly', 'allowSelfReporting', 'isAwardingStandardMedals'].forEach(field => {
         if (!(field in fields)) {
             fields[field] = false;
         }

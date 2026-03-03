@@ -195,6 +195,343 @@ namespace HpskSite.Controllers
             }
         }
 
+        /// <summary>
+        /// Report a result for a distributed (self-reporting) competition.
+        /// Only club admins, skjutledare, competition managers, and site admins can use this.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ReportDistributedResult([FromBody] DistributedResultRequest request)
+        {
+            try
+            {
+                if (request == null || request.CompetitionId <= 0 || request.TargetMemberId <= 0 ||
+                    request.SeriesNumber <= 0 || request.Shots == null || request.Shots.Length != 5 ||
+                    string.IsNullOrEmpty(request.ShootingClass))
+                {
+                    return Json(new ResultEntryResponse { Success = false, Message = "Ogiltig begäran. Kontrollera att alla fält är ifyllda." });
+                }
+
+                // Validate shots
+                foreach (var shot in request.Shots)
+                {
+                    if (string.IsNullOrEmpty(shot)) continue;
+                    var upper = shot.ToUpper();
+                    if (upper != "X" && (!int.TryParse(shot, out int val) || val < 0 || val > 10))
+                    {
+                        return Json(new ResultEntryResponse { Success = false, Message = $"Ogiltigt skottvärde: {shot}" });
+                    }
+                }
+
+                // 1. Competition must exist and have allowSelfReporting enabled
+                var competition = _contentService.GetById(request.CompetitionId);
+                if (competition == null)
+                {
+                    return Json(new ResultEntryResponse { Success = false, Message = "Tävlingen hittades inte." });
+                }
+
+                if (!competition.GetValue<bool>("allowSelfReporting"))
+                {
+                    return Json(new ResultEntryResponse { Success = false, Message = "Denna tävling tillåter inte resultatrapportering." });
+                }
+
+                if (competition.GetValue<bool>("isExternal"))
+                {
+                    return Json(new ResultEntryResponse { Success = false, Message = "Externa tävlingar stöder inte resultatrapportering." });
+                }
+
+                // 2. Check date range: must be within competitionDate → competitionEndDate
+                var compDate = competition.GetValue<DateTime?>("competitionDate");
+                var compEndDate = competition.GetValue<DateTime?>("competitionEndDate");
+                var now = DateTime.Now;
+
+                if (compDate.HasValue)
+                {
+                    var effectiveEnd = (compEndDate.HasValue && compEndDate.Value.Year > 1900)
+                        ? compEndDate.Value.Date.AddDays(1) // Include the end date (end of day)
+                        : compDate.Value.Date.AddDays(1);
+
+                    if (now.Date < compDate.Value.Date || now >= effectiveEnd)
+                    {
+                        return Json(new ResultEntryResponse
+                        {
+                            Success = false,
+                            Message = "Resultatrapportering är bara möjlig under tävlingsperioden."
+                        });
+                    }
+                }
+
+                // 3. Validate series number
+                var maxSeries = competition.GetValue<int>("numberOfSeriesOrStations");
+                if (maxSeries <= 0) maxSeries = 6;
+                if (request.SeriesNumber > maxSeries)
+                {
+                    return Json(new ResultEntryResponse { Success = false, Message = $"Serie {request.SeriesNumber} överskrider max antal serier ({maxSeries})." });
+                }
+
+                // 4. Authorization: caller must be club admin/skjutledare for target's club, or competition manager, or site admin
+                var currentMember = await _memberManager.GetCurrentMemberAsync();
+                if (currentMember == null)
+                {
+                    return Json(new ResultEntryResponse { Success = false, Message = "Du måste vara inloggad." });
+                }
+
+                var memberData = _memberService.GetByEmail(currentMember.Email ?? "");
+                if (memberData == null)
+                {
+                    return Json(new ResultEntryResponse { Success = false, Message = "Kunde inte hitta din profil." });
+                }
+
+                bool isSiteAdmin = await _adminAuthorizationService.IsCurrentUserAdminAsync();
+                bool isCompetitionManager = await _adminAuthorizationService.IsCompetitionManager(request.CompetitionId);
+
+                // Get target member's club
+                var targetMember = _memberService.GetById(request.TargetMemberId);
+                if (targetMember == null)
+                {
+                    return Json(new ResultEntryResponse { Success = false, Message = "Målmedlemmen hittades inte." });
+                }
+
+                bool isAuthorized = isSiteAdmin || isCompetitionManager;
+
+                if (!isAuthorized)
+                {
+                    // Check if caller is club admin or skjutledare for the target member's club
+                    var targetClubIdStr = targetMember.GetValue<string>("primaryClubId");
+                    if (!string.IsNullOrEmpty(targetClubIdStr) && int.TryParse(targetClubIdStr, out int targetClubId) && targetClubId > 0)
+                    {
+                        bool isClubAdmin = await _adminAuthorizationService.IsClubAdminForClub(targetClubId);
+                        bool isSkjutledare = await _adminAuthorizationService.IsSkjutledareForClub(targetClubId);
+                        isAuthorized = isClubAdmin || isSkjutledare;
+                    }
+                }
+
+                if (!isAuthorized)
+                {
+                    return Json(new ResultEntryResponse { Success = false, Message = "Du har inte behörighet att rapportera resultat för denna skytt." });
+                }
+
+                // 5. Target member must be registered in the specified shooting class
+                var registrations = await _startListRepository.GetCompetitionRegistrations(request.CompetitionId);
+                var isRegistered = registrations.Any(r =>
+                    r.MemberId == request.TargetMemberId &&
+                    r.MemberClass == request.ShootingClass &&
+                    r.IsActive);
+
+                if (!isRegistered)
+                {
+                    return Json(new ResultEntryResponse { Success = false, Message = "Skytten är inte anmäld i angiven klass." });
+                }
+
+                // 6. Delegate to existing SaveResultToDatabase
+                var entryRequest = new ResultEntryRequest
+                {
+                    CompetitionId = request.CompetitionId,
+                    SeriesNumber = request.SeriesNumber,
+                    Shots = request.Shots,
+                    ShooterMemberId = request.TargetMemberId,
+                    ShooterClass = request.ShootingClass,
+                    TeamNumber = 0,
+                    Position = 0,
+                    RangeOfficerId = memberData.Id
+                };
+
+                var resultId = await SaveResultToDatabase(entryRequest);
+                if (resultId == 0)
+                {
+                    return Json(new ResultEntryResponse { Success = false, Message = "Kunde inte spara resultatet." });
+                }
+
+                // 7. Invalidate caches + update live leaderboard
+                try { _seriesCalculationService.InvalidateCacheForCompetition(request.CompetitionId); }
+                catch (Exception ex) { _logger.LogWarning(ex, "Failed to invalidate series cache after distributed result save"); }
+
+                try { await UpdateLiveLeaderboard(request.CompetitionId); }
+                catch (Exception ex) { _logger.LogWarning(ex, "Failed to update live leaderboard after distributed result save"); }
+
+                // Calculate totals for response
+                var total = 0;
+                var xCount = 0;
+                foreach (var shot in request.Shots)
+                {
+                    if (shot.ToUpper() == "X") { total += 10; xCount++; }
+                    else if (int.TryParse(shot, out int value) && value >= 0 && value <= 10) { total += value; }
+                }
+
+                return Json(new ResultEntryResponse
+                {
+                    Success = true,
+                    Message = "Resultat sparat!",
+                    ResultId = resultId,
+                    Total = total,
+                    XCount = xCount
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in ReportDistributedResult for competition {CompetitionId}, member {MemberId}",
+                    request?.CompetitionId, request?.TargetMemberId);
+                return Json(new ResultEntryResponse { Success = false, Message = "Ett oväntat fel uppstod: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Get distributed result status — returns members the caller can enter for
+        /// and their already-saved series.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetDistributedStatus(int competitionId)
+        {
+            try
+            {
+                if (competitionId <= 0)
+                {
+                    return Json(new DistributedStatusResponse { Success = false, Message = "Ogiltigt tävlings-ID." });
+                }
+
+                var competition = _contentService.GetById(competitionId);
+                if (competition == null)
+                {
+                    return Json(new DistributedStatusResponse { Success = false, Message = "Tävlingen hittades inte." });
+                }
+
+                if (!competition.GetValue<bool>("allowSelfReporting"))
+                {
+                    return Json(new DistributedStatusResponse { Success = false, Message = "Denna tävling tillåter inte resultatrapportering." });
+                }
+
+                // Check date range
+                var compDate = competition.GetValue<DateTime?>("competitionDate");
+                var compEndDate = competition.GetValue<DateTime?>("competitionEndDate");
+                var now = DateTime.Now;
+                bool isActive = true;
+
+                if (compDate.HasValue)
+                {
+                    var effectiveEnd = (compEndDate.HasValue && compEndDate.Value.Year > 1900)
+                        ? compEndDate.Value.Date.AddDays(1)
+                        : compDate.Value.Date.AddDays(1);
+                    isActive = now.Date >= compDate.Value.Date && now < effectiveEnd;
+                }
+
+                // Authorization
+                var currentMember = await _memberManager.GetCurrentMemberAsync();
+                if (currentMember == null)
+                {
+                    return Json(new DistributedStatusResponse { Success = false, Message = "Du måste vara inloggad." });
+                }
+
+                var memberData = _memberService.GetByEmail(currentMember.Email ?? "");
+                if (memberData == null)
+                {
+                    return Json(new DistributedStatusResponse { Success = false, Message = "Kunde inte hitta din profil." });
+                }
+
+                bool isSiteAdmin = await _adminAuthorizationService.IsCurrentUserAdminAsync();
+                bool isCompetitionManager = await _adminAuthorizationService.IsCompetitionManager(competitionId);
+
+                // Get caller's managed clubs and skjutledare clubs
+                var managedClubIds = await _adminAuthorizationService.GetManagedClubIds();
+                var skjutledareClubIds = await _adminAuthorizationService.GetSkjutledareClubIds();
+                var allAuthorizedClubIds = new HashSet<int>(managedClubIds);
+                foreach (var id in skjutledareClubIds) allAuthorizedClubIds.Add(id);
+
+                if (!isSiteAdmin && !isCompetitionManager && !allAuthorizedClubIds.Any())
+                {
+                    return Json(new DistributedStatusResponse { Success = false, Message = "Du har inte behörighet." });
+                }
+
+                // Get all registrations
+                var registrations = await _startListRepository.GetCompetitionRegistrations(competitionId);
+                if (registrations == null || !registrations.Any())
+                {
+                    return Json(new DistributedStatusResponse { Success = true, IsActive = isActive, MaxSeries = competition.GetValue<int>("numberOfSeriesOrStations"), Members = new List<DistributedMemberStatus>() });
+                }
+
+                // Filter to members the caller can enter for
+                var authorizedRegistrations = registrations
+                    .Where(r => r.IsActive)
+                    .Where(r =>
+                    {
+                        if (isSiteAdmin || isCompetitionManager) return true;
+
+                        // Check if target member's club is in caller's authorized clubs
+                        var targetMember = _memberService.GetById(r.MemberId);
+                        if (targetMember == null) return false;
+                        var clubIdStr = targetMember.GetValue<string>("primaryClubId");
+                        if (int.TryParse(clubIdStr, out int clubId))
+                        {
+                            return allAuthorizedClubIds.Contains(clubId);
+                        }
+                        return false;
+                    })
+                    .ToList();
+
+                // Get existing results from database
+                var existingResults = new List<PrecisionResultEntry>();
+                using (var db = _umbracoDatabaseFactory.CreateDatabase())
+                {
+                    existingResults = await db.FetchAsync<PrecisionResultEntry>(
+                        "WHERE CompetitionId = @0", competitionId);
+                }
+
+                // Build response
+                var maxSeries = competition.GetValue<int>("numberOfSeriesOrStations");
+                if (maxSeries <= 0) maxSeries = 6;
+
+                var members = authorizedRegistrations
+                    .Select(r =>
+                    {
+                        var memberResults = existingResults
+                            .Where(e => e.MemberId == r.MemberId && e.ShootingClass == r.MemberClass)
+                            .OrderBy(e => e.SeriesNumber)
+                            .Select(e =>
+                            {
+                                string[] shots;
+                                try { shots = JsonConvert.DeserializeObject<string[]>(e.Shots) ?? Array.Empty<string>(); }
+                                catch { shots = Array.Empty<string>(); }
+
+                                var total = shots.Sum(s => s.ToUpper() == "X" ? 10 : (int.TryParse(s, out int v) ? v : 0));
+                                var xCount = shots.Count(s => s.ToUpper() == "X");
+
+                                return new DistributedSeriesStatus
+                                {
+                                    SeriesNumber = e.SeriesNumber,
+                                    Total = total,
+                                    XCount = xCount,
+                                    Shots = shots
+                                };
+                            })
+                            .ToList();
+
+                        return new DistributedMemberStatus
+                        {
+                            MemberId = r.MemberId,
+                            Name = r.MemberName ?? "",
+                            Club = r.MemberClub ?? "",
+                            ShootingClass = r.MemberClass,
+                            CompletedSeries = memberResults
+                        };
+                    })
+                    .OrderBy(m => m.Club)
+                    .ThenBy(m => m.Name)
+                    .ToList();
+
+                return Json(new DistributedStatusResponse
+                {
+                    Success = true,
+                    IsActive = isActive,
+                    MaxSeries = maxSeries,
+                    Members = members
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in GetDistributedStatus for competition {CompetitionId}", competitionId);
+                return Json(new DistributedStatusResponse { Success = false, Message = "Ett fel uppstod: " + ex.Message });
+            }
+        }
+
         [HttpGet]
         public async Task<IActionResult> GetLiveLeaderboard(int competitionId)
         {

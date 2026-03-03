@@ -398,6 +398,7 @@ function initializeRegistrationModal() {
 
 function updateSubmitButton() {
     const submitBtn = document.getElementById('modalRegisterBtn');
+    if (!submitBtn) return;
 
     // Check if any radio button is selected from any group
     const radioGroups = ['selectedAClass', 'selectedBClass', 'selectedRClass', 'selectedCRegular', 'selectedCVet', 'selectedCDam', 'selectedCJun', 'selectedLRegular', 'selectedLVet', 'selectedLDam', 'selectedLJun', 'selectedMClass'];
@@ -2087,17 +2088,25 @@ function transformModalToSuccessState(result, competitionId, isAdminRegistration
                     <i class="bi bi-info-circle"></i> Anmälan är nu registrerad för den valda medlemmen.
                 </div>
             `}
+
+            <div class="mt-4">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    <i class="bi bi-x-circle"></i> Stäng
+                </button>
+            </div>
         </div>
     `;
 
     modalBody.innerHTML = successContent;
 
-    // Update footer
-    modalFooter.innerHTML = `
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
-            <i class="bi bi-x-circle"></i> Stäng
-        </button>
-    `;
+    // Update footer if it exists
+    if (modalFooter) {
+        modalFooter.innerHTML = `
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                <i class="bi bi-x-circle"></i> Stäng
+            </button>
+        `;
+    }
 }
 
 // Send Swish QR code via email (wrapper with target member support)

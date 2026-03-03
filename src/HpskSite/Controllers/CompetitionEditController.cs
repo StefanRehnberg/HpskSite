@@ -115,6 +115,10 @@ namespace HpskSite.Controllers
                     shootingClassIds = GetShootingClassIdsString(content),
                     competitionScope = content.GetValue<string>("competitionScope") ?? "",
                     isAwardingStandardMedals = content.GetValue<bool>("isAwardingStandardMedals"),
+                    allowSelfReporting = content.GetValue<bool>("allowSelfReporting"),
+                    isExternal = content.GetValue<bool>("isExternal"),
+                    externalUrl = content.GetValue<string>("externalUrl") ?? "",
+                    externalRegistrationEmail = content.GetValue<string>("externalRegistrationEmail") ?? "",
                     seriesId = isInSeries ? parent!.Id : (int?)null,
                     seriesName = isInSeries ? parent!.Name : null
                 };

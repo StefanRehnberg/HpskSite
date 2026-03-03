@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pistol.nu - Klubb &amp; Kretsstruktur</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #0f172a;
+    overflow: hidden;
+    width: 100vw;
+    height: 100vh;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  #world {
+    position: absolute;
+    top: 0;
+    left: 0;
+    transform-origin: 0 0;
+  }
+
+  #scene {
+    position: absolute;
+    top: 0;
+    left: 0;
+  }
+
+  .node {
+    position: absolute;
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    transition: box-shadow 0.3s;
+  }
+
+  /* Root node */
+  .node-root {
+    background: linear-gradient(135deg, #1e40af, #3b82f6);
+    border: 3px solid #60a5fa;
+    color: white;
+    font-weight: 700;
+    font-size: 28px;
+    padding: 20px 40px;
+    box-shadow: 0 0 40px rgba(59,130,246,0.4);
+  }
+  .node-root .subtitle {
+    font-size: 14px;
+    font-weight: 400;
+    opacity: 0.8;
+    margin-top: 4px;
+  }
+
+  /* Region nodes */
+  .node-region {
+    background: linear-gradient(135deg, #065f46, #059669);
+    border: 2px solid #34d399;
+    color: white;
+    font-weight: 600;
+    font-size: 13px;
+    padding: 10px 14px;
+    min-width: 120px;
+    box-shadow: 0 0 20px rgba(5,150,105,0.3);
+  }
+  .node-region .count {
+    font-size: 10px;
+    font-weight: 400;
+    opacity: 0.8;
+    margin-top: 2px;
+  }
+  .node-region.start-region {
+    box-shadow: 0 0 30px rgba(5,150,105,0.6);
+    z-index: 10;
+  }
+
+  /* Club nodes */
+  .node-club {
+    background: linear-gradient(135deg, #1e293b, #334155);
+    border: 2px solid #64748b;
+    color: #e2e8f0;
+    font-weight: 500;
+    font-size: 11px;
+    padding: 6px 10px;
+    min-width: 90px;
+    white-space: nowrap;
+  }
+
+  /* Connector lines (SVG overlay) */
+  #connectors {
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+  }
+  #connectors line {
+    stroke: #475569;
+    stroke-width: 1.5;
+    opacity: 0.6;
+  }
+
+  /* Visibility control — hidden elements */
+  .hidden {
+    opacity: 0 !important;
+    transition: opacity 0.8s ease;
+  }
+  .visible-anim {
+    opacity: 1;
+    transition: opacity 0.8s ease;
+  }
+  /* SVG lines need separate handling */
+  line.line-hidden {
+    opacity: 0 !important;
+    transition: opacity 0.8s ease;
+  }
+  line.line-visible {
+    transition: opacity 0.8s ease;
+  }
+
+  /* Phase label */
+  #phaseLabel {
+    position: fixed;
+    bottom: 40px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: white;
+    font-size: 22px;
+    font-weight: 600;
+    opacity: 0;
+    transition: opacity 0.8s;
+    text-align: center;
+    text-shadow: 0 2px 8px rgba(0,0,0,0.5);
+    z-index: 100;
+    pointer-events: none;
+    max-width: 80vw;
+  }
+  #phaseLabel.visible {
+    opacity: 1;
+  }
+
+  /* Click hint */
+  #clickHint {
+    position: fixed;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: rgba(255,255,255,0.4);
+    font-size: 13px;
+    z-index: 100;
+    pointer-events: none;
+    transition: opacity 0.5s;
+  }
+  #clickHint.fade-out {
+    opacity: 0;
+  }
+
+  /* Stats counter */
+  #stats {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    color: white;
+    font-size: 14px;
+    opacity: 0;
+    transition: opacity 0.8s;
+    text-align: right;
+    z-index: 100;
+    pointer-events: none;
+  }
+  #stats.visible {
+    opacity: 1;
+  }
+  #stats .big {
+    font-size: 36px;
+    font-weight: 700;
+    color: #60a5fa;
+  }
+  #stats .label {
+    font-size: 12px;
+    opacity: 0.7;
+  }
+
+  /* Restart button */
+  #restartBtn {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    padding: 8px 16px;
+    background: rgba(255,255,255,0.15);
+    border: 1px solid rgba(255,255,255,0.3);
+    border-radius: 8px;
+    color: white;
+    font-size: 13px;
+    cursor: pointer;
+    z-index: 100;
+    opacity: 0;
+    transition: opacity 0.3s;
+    pointer-events: none;
+  }
+  #restartBtn.show {
+    opacity: 0.5;
+    pointer-events: auto;
+  }
+  #restartBtn:hover {
+    opacity: 1;
+    background: rgba(255,255,255,0.25);
+  }
+</style>
+</head>
+<body>
+
+<div id="world">
+  <div id="scene"></div>
+  <svg id="connectors"></svg>
+</div>
+<div id="phaseLabel"></div>
+<div id="clickHint">Klicka var som helst för att fortsätta</div>
+<div id="stats">
+  <div class="big" id="clubCount">0</div>
+  <div class="label">klubbar</div>
+  <div class="big" id="regionCount" style="margin-top:8px">0</div>
+  <div class="label">kretsar</div>
+</div>
+<button id="restartBtn" onclick="location.reload()">Spela om</button>
+
+<script>
+// ===== DATA =====
+const regions = [
+  { code: "Alvsborg", name: "Älvsborg", clubs: ["Alingsås PSK","Borås PSK","Fristad PK","Herrljunga PSK","Kinds PSK","Mark PSK","Sjuhärad PSF","Svenljunga PSK","Tranemo PSK","Ulricehamns PSK","Viskafors PSK","Vårgårda PSK"] },
+  { code: "Blekinge", name: "Blekinge", clubs: ["Blekinge PSK","Karlshamns PSK","Karlskrona PSK","Olofströms PSK","Ronneby PSK","Sölvesborgs PSK","Östra Blekinge PSK"] },
+  { code: "Dalarna", name: "Dalarna", clubs: ["Avesta PSK","Borlänge PSK","Falu PSK","Gagnefs PSK","Hedemora PSK","Leksands PSK","Ludvika PSK","Malungs PSK","Mora PSK","Orsa PSK","Rättviks PSK","Smedjebackens PSK","Säters PSK","Vansbro PSK","Älvdalens PSK","Ludvika-Grangärde PSF","Norbergs PK","Långshyttans PSK","Bjursås-Leksand PSK","Dalarö PSK","Mockfjärds PSK","Nås-Äppelbo PSK","Siljansnäs PSK"] },
+  { code: "Gavleborg", name: "Gävleborg", clubs: ["Bollnäs PSK","Edsbyn PSK","Gävle PSK","Hofors PSK","Hudiksvalls PSK","Järvsö PSK","Ljusdals PSK","Ockelbo PSK","Sandvikens PSK","Skutskärs PSK","Storvik PSK","Söderhamns PSK","Söderhamns SSK","Valbo PSK","Bergby PSK","Forsbacka PSK","Hamrånge PSK","Hedesunda PSK","Mackmyra PSK","Norrsundets PSK","Årsunda PSK","Österfärnebo PSK"] },
+  { code: "Goteborg", name: "Göteborg", clubs: ["Ale PSK","Angered PSK","Askim PSK","Backa PSK","Frölunda PSK","Göteborg PSK","Hisings PSK","Härryda PSK","Kungsbacka PSK","Kungälvs PSK","Lerum PSK","Lilla Edet PSK","Lysekils PSK","Munkedal PSK","Mölndals PSK","Orust PSK","Partille PSK","Sotenäs PSK","Stenungsunds PSK","Strömstads PSK","Tanums PSK","Tjörn PSK","Trollhättans PSK","Uddevalla PSK","Vänersborgs PSK","Öckerö PSK"] },
+  { code: "Gotland", name: "Gotland", clubs: ["Fårösunds PSK","Gotlands PSK","Hemse PSK","Klintehamns PSK","Roma PSK","Slite PSK","Tingstäde PSK","Visby PSK"] },
+  { code: "Halland", name: "Halland", clubs: ["Broaryds PK","Falkenbergs PSK","Halmstad Snöstorp PSF","Halmstads SSK","Harplinge PK","Kungsbacka-Wiske SS","Laholms PSK","Simlångsdalens PSK","Singeshults PSK","Torups PK","Varbergs PK"] },
+  { code: "Jamtland", name: "Jämtland", clubs: ["Bergs PSK","Bräcke PSK","Hammerdals PSK","Hoting PSK","Krokoms PSK","Lit-Häggenås PSK","Strömsunds PSK","Svenstaviks PSK","Sveg PSK","Torvalla PSK","Ytterhogdals PSK","Åre PSK","Ånge PSK","Östersunds PSK","Brunflo PSK"] },
+  { code: "Jonkoping", name: "Jönköping", clubs: ["Aneby PSK","Eksjö PSK","Gislaved PSK","Gnosjö PSK","Huskvarna PSK","Jönköpings PSK","Mullsjö PSK","Nässjö PSK","Sävsjö PSK","Tranås PSK","Vaggeryds PSK","Vetlanda PSK","Värnamo PSK","Bankeryd PSK","Bodafors PSK","Forsheda PSK","Habo PSK","Klevshults PSK","Landsbro PSK","Skillingaryds PSK"] },
+  { code: "KalmarNorra", name: "Kalmar N.", clubs: ["Hultsfreds PSK","Mönsterås PSK","Oskarshamns PSK","Vimmerby PSK","Västervik PSK","Högsby PSK"] },
+  { code: "KalmarSodra", name: "Kalmar S.", clubs: ["Borgholms PSK","Emmaboda PSK","Färjestaden PSK","Kalmar PSK","Mörbylånga PSK","Nybro PSK","Torsås PSK","Alvesta PSK","Lessebo PSK","Nybro PK","Smedby PSK","Ölands PSK"] },
+  { code: "Kristianstad", name: "Kristianstad", clubs: ["Bjäre PSK","Bromölla PSK","Båstad PSK","Hässleholms PSK","Hörby PSK","Klippans PSK","Kristianstads PSK","Osby PSK","Perstorps PSK","Simrishamns PSK","Sjöbo PSK","Svalövs PSK","Tomelilla PSK","Vinslövs PSK","Ystads PSK","Ängelholms PSK","Åhus PSK","Åstorps PSK","Örkelljunga PSK","Östra Göinge PSK","Degeberga PSK","Vittsjö PSK","Sösdala PSK","Tyringe PSK"] },
+  { code: "Kronoberg", name: "Kronoberg", clubs: ["Alvesta PSK","Lessebo PSK","Ljungby PSK","Markaryds PSK","Tingsryds PSK","Uppvidinge PSK","Växjö PSK","Älmhults PSK","Åseda PSK","Lenhovda PSK"] },
+  { code: "Malmohus", name: "Malmöhus", clubs: ["Bara PSK","Burlövs PSK","Dalby PSK","Eslövs PSK","Helsingborgs PSK","Höörs PSK","Kävlinge PSK","Landskrona PSK","Lomma PSK","Lunds PSK","Malmö PSK","Staffanstorps PSK","Svedala PSK","Trelleborgs PSK","Vellinge PSK","Arlövs PSK","Bjärred PSK","Bunkeflostrand PSK","Furulunds PSK","Genarp PSK","Hyllie PSK","Höllvikens PSK","Klagshamns PSK","Kulladals PSK","Limhamns PSK","Ljungbyhed PSK","Löddeköpinge PSK","Marieholm PSK","Munka-Ljungby PSK","Oxie PSK","Rosengård PSK","Saxtorp PSK","Skurup PSK","Södra Sandby PSK","Södra Sallerup PSK","Tollarp PSK","Veberöd PSK","Åkarp PSK"] },
+  { code: "Norrbotten", name: "Norrbotten", clubs: ["Arjeplogs PSK","Arvidsjaurs PSK","Bodens PSK","Gällivare PSK","Haparanda PSK","Jokkmokks PSK","Kalix PSK","Kiruna PSK","Luleå PSK","Pajala PSK","Piteå PSK","Porjus PSK","Råneå PSK","Älvsbyns PSK","Överkalix PSK","Övertorneå PSK","Bergnäsets PSK","Gammelstads PSK","Malmbergets PSK","Notvikens PSK","Rosvik PSK","Seskarö PSK","Sävast PSK","Töre PSK"] },
+  { code: "Orebro", name: "Örebro", clubs: ["Askersunds PSK","Degerfors PSK","Hallsbergs PSK","Hällefors PSK","Karlskoga PSK","Kumla PSK","Laxå PSK","Lindesbergs PSK","Ljusnarsbergs PSK","Nora PSK","Pålsboda PSK","Stora PSK","Örebro PSK","Fjugesta PSK","Garphyttans PSK"] },
+  { code: "Skaraborg", name: "Skaraborg", clubs: ["Falköpings PSK","Grästorps PSK","Gullspångs PSK","Götene PSK","Hjo PSK","Karlsborgs PSK","Lidköpings PSK","Mariestads PSK","Skara PSK","Skövde PSK","Tibro PSK","Tidaholms PSK","Töreboda PSK","Vara PSK","Åmåls PSK","Trollhättans-Vänersborg PSK"] },
+  { code: "Sodermanland", name: "Södermanland", clubs: ["Eskilstuna PSK","Flens PSK","Gnesta PSK","Katrineholms PSK","Malmköpings PSK","Nyköpings PSK","Oxelösunds PSK","Strängnäs PSK","Torshälla PSK","Vingåkers PSK","Åkers PSK","Enhörna PSK","Hälleforsnäs PSK","Stallarholmens PSK","Trosa PSK"] },
+  { code: "Stockholm", name: "Stockholm", clubs: ["Botkyrka PSK","Bromma PSK","Danderyds PSK","Enskede PSK","Färgklämman PSF","Gustavsbergs PSK","Haninge PSK","Huddinge PSK","Hägersten PSK","Jakobsbergs PSK","Kista PSK","Kungsholmens PSK","Lidingö PSK","Nacka PSK","Norrtälje PSK","Nynäshamns PSK","Salem PSK","Sigtuna PSK","Sollentuna PSK","Solna PSK","Stockholms PSK","Sundbyberg PSK","Södertälje PSK","Tyresö PSK","Täby PSK","Upplands Väsby PSK","Vallentuna PSK","Vaxholms PSK","Värmdö PSK","Västerhaninge PSK","Östermalms PSK","Akademiska PK","Alfa Laval PSK","Bagarmossen PSK","Bandhagens PSK","Blackeberg PSK","Dalarö PSK","Ekerö PSK","Enebybergs PSK","Eriksdalens PSK","Farsta PSK","Fisksätra PSK","Globen PSK","Gröndalens PSK","Gubbängens PSK","Hammarby PSK","Hässelby PSK","Högdalen PSK","Kallhäll PSK","Kärrtorp PSK","Liljeholmen PSK","Marieberg PSK","Midsommarkransen PSK","Mälarhöjdens PSK","Märsta PSK","Nockeby PSK","Norberg PSK","Norsborg PSK","Odenplan PSK","Riksby PSK","Rinkeby PSK","Rotebro PSK","Rönninge PSK","Saltsjöbaden PSK","Segeltorp PSK","Sjöstaden PSK","Skarholmen PSK","Skogås PSK","Skärholmen PSK","Sköndal PSK","Spånga PSK","Svedmyra PSK","Sätra PSK","Telefonplan PSK","Traneberg PSK","Tullinge PSK","Tumba PSK","Ulvsunda PSK","Upplands-Bro PSK","Vasastan PSK","Vendelsö PSK","Viby PSK","Vårberg PSK","Vällingby PSK","Årsta PSK","Älvsjö PSK","Ösmo PSK","Österåkers PSK","Östra Södermalm PSK","Ältadalen PSK"] },
+  { code: "Uppsala", name: "Uppsala", clubs: ["Bålsta PSK","Enköpings PSK","Heby PSK","Håbo PSK","Knivsta PSK","Morgongåva PSK","Storvreta PSK","Tierps PSK","Uppsala PSK","Älvkarleby PSK","Örbyhus PSK","Österbybruk PSK","Östhammars PSK","Gimo PSK","Skutskärs PSK"] },
+  { code: "Varmland", name: "Värmland", clubs: ["Arvika PSK","Charlottenbergs PSK","Eda PSK","Filipstads PSK","Forshaga PSK","Grums PSK","Hagfors PSK","Hammarö PSK","Karlstads PSK","Kristinehamns PSK","Munkfors PSK","Skoghall PSK","Storfors PSK","Sunne PSK","Säffle PSK","Torsby PSK","Årjängs PSK","Deje PSK","Kils PSK"] },
+  { code: "Vasterbotten", name: "Västerbotten", clubs: ["Bjurholms PSK","Burträsk PSK","Bureå PSK","Dorotea PSK","Holmsunds PSK","Lycksele PSK","Nordmalings PSK","Norsjö PSK","Robertsfors PSK","Skellefteå PSK","Sorsele PSK","Storumans PSK","Umeå PSK","Vilhelmina PSK","Vindeln PSK","Vännäs PSK","Åsele PSK","Boliden PSK","Byske PSK","Jörn PSK","Kåge PSK","Lövånger PSK"] },
+  { code: "Vasternorrland", name: "Västernorrland", clubs: ["Härnösands PSK","Kramfors PSK","Njurunda PSK","Sollefteå PSK","Sundsvalls PSK","Timrå PSK","Ånge PSK","Örnsköldsviks PSK","Bispgården PSK","Bredbyn PSK","Domsjö PSK","Fränsta PSK","Matfors PSK","Nordingrå PSK","Stöde PSK","Strömsund PSK"] },
+  { code: "VastgotaDal", name: "Västgöta-Dal", clubs: ["Bengtsfors PSK","Dals-Eds PSK","Melleruds PSK","Strömstads PSK","Tanums PSK","Trollhättans PSK","Uddevalla PSK","Vänersborgs PSK","Åmåls PSK","Färgelanda PSK","Lilla Edets PSK","Munkedals PSK","Nossebro PSK"] },
+  { code: "Vastmanland", name: "Västmanland", clubs: ["Arboga PSK","Fagersta PSK","Hallstahammars PSK","Kolbäcks PSK","Kungsörs PSK","Köpings PSK","Norbergs PSK","Sala PSK","Skinnskattebergs PSK","Surahammars PSK","Västerås PSK","Irsta PSK","Dingtuna PSK","Tillberga PSK","Skultuna PSK"] },
+  { code: "Ostergotland", name: "Östergötland", clubs: ["Boxholms PSK","Finspångs PSK","Kinda PSK","Linköpings PSK","Mjölby PSK","Motala PSK","Norrköpings PSK","Söderköpings PSK","Vadstena PSK","Valdemarsvik PSK","Ydre PSK","Åtvidabergs PSK","Ödeshögs PSK","Berg PSK","Borens PSK","Bråvikens PSK"] }
+];
+
+const TOTAL_CLUBS = regions.reduce((sum, r) => sum + r.clubs.length, 0);
+const TOTAL_REGIONS = regions.length;
+
+// ===== LAYOUT =====
+const ROOT_X = 0, ROOT_Y = 0;
+const REGION_RADIUS_X = 1800;
+const REGION_RADIUS_Y = 1400;
+const CLUB_RADIUS = 280;
+
+// Determine starting region from URL param (default: Halland)
+const urlParams = new URLSearchParams(window.location.search);
+const startRegionCode = urlParams.get('region') || 'Halland';
+
+const layout = { root: { x: ROOT_X, y: ROOT_Y }, regions: [] };
+
+regions.forEach((region, i) => {
+  const angle = (i / TOTAL_REGIONS) * Math.PI * 2 - Math.PI / 2;
+  const rx = ROOT_X + Math.cos(angle) * REGION_RADIUS_X;
+  const ry = ROOT_Y + Math.sin(angle) * REGION_RADIUS_Y;
+
+  const clubPositions = region.clubs.map((club, ci) => {
+    const ca = (ci / region.clubs.length) * Math.PI * 2 - Math.PI / 2;
+    const cr = CLUB_RADIUS * Math.max(0.6, Math.min(1.5, region.clubs.length / 12));
+    return {
+      name: club,
+      x: rx + Math.cos(ca) * cr,
+      y: ry + Math.sin(ca) * cr
+    };
+  });
+
+  layout.regions.push({
+    ...region,
+    x: rx,
+    y: ry,
+    clubPositions,
+    isStart: region.code === startRegionCode
+  });
+});
+
+// ===== RENDER =====
+const scene = document.getElementById('scene');
+const svg = document.getElementById('connectors');
+
+svg.setAttribute('viewBox', '-4000 -3500 8000 7000');
+svg.style.width = '8000px';
+svg.style.height = '7000px';
+svg.style.left = '-4000px';
+svg.style.top = '-3500px';
+
+// Track elements by group for show/hide
+const groups = {
+  startRegion: [],    // Initial: starting region + its clubs + lines
+  rootAndLine: [],    // Step 2: Root node + line from root to start region
+  otherRegions: [],   // Step 3: All other region nodes + root-to-region lines
+  otherClubs: []      // Step 4: All other club nodes + region-to-club lines
+};
+
+function createNode(className, text, x, y, group) {
+  const div = document.createElement('div');
+  div.className = `node ${className}`;
+  div.innerHTML = text;
+  div.style.left = x + 'px';
+  div.style.top = y + 'px';
+  div.style.transform = 'translate(-50%, -50%)';
+  if (group !== 'startRegion') {
+    div.classList.add('hidden');
+  }
+  scene.appendChild(div);
+  if (group) groups[group].push(div);
+  return div;
+}
+
+function createLine(x1, y1, x2, y2, cls, group) {
+  const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  line.setAttribute('x1', x1);
+  line.setAttribute('y1', y1);
+  line.setAttribute('x2', x2);
+  line.setAttribute('y2', y2);
+  if (cls) line.setAttribute('class', cls);
+  if (group !== 'startRegion') {
+    line.classList.add('line-hidden');
+  }
+  svg.appendChild(line);
+  if (group) groups[group].push(line);
+  return line;
+}
+
+// Draw root (shown in step 2)
+createNode('node-root', 'Pistol.nu', ROOT_X, ROOT_Y, 'rootAndLine');
+
+// Draw regions and clubs
+layout.regions.forEach(region => {
+  const isStart = region.isStart;
+
+  // Line from root to region
+  const lineGroup = isStart ? 'rootAndLine' : 'otherRegions';
+  createLine(ROOT_X, ROOT_Y, region.x, region.y, '', lineGroup);
+
+  // Region node
+  const regionCls = isStart ? 'node-region start-region' : 'node-region';
+  const regionGroup = isStart ? 'startRegion' : 'otherRegions';
+  createNode(regionCls, `${region.name}<div class="count">${region.clubs.length} klubbar</div>`, region.x, region.y, regionGroup);
+
+  // Clubs
+  const clubGroup = isStart ? 'startRegion' : 'otherClubs';
+  region.clubPositions.forEach(club => {
+    createLine(region.x, region.y, club.x, club.y, '', clubGroup);
+    createNode('node-club', club.name, club.x, club.y, clubGroup);
+  });
+});
+
+// ===== ANIMATION =====
+const label = document.getElementById('phaseLabel');
+const clickHint = document.getElementById('clickHint');
+const stats = document.getElementById('stats');
+const clubCountEl = document.getElementById('clubCount');
+const regionCountEl = document.getElementById('regionCount');
+const restartBtn = document.getElementById('restartBtn');
+const world = document.getElementById('world');
+
+const startRegion = layout.regions.find(r => r.isStart) || layout.regions[0];
+
+let currentScale, currentTargetX, currentTargetY;
+let step = 0;
+let isAnimating = false;
+
+function easeInOutCubic(t) {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+function applyTransform(tx, ty, s) {
+  const cx = window.innerWidth / 2;
+  const cy = window.innerHeight / 2;
+  world.style.transform = `translate(${cx - tx * s}px, ${cy - ty * s}px) scale(${s})`;
+}
+
+function showGroup(groupName) {
+  groups[groupName].forEach(el => {
+    if (el instanceof SVGElement) {
+      el.classList.remove('line-hidden');
+      el.classList.add('line-visible');
+    } else {
+      el.classList.remove('hidden');
+      el.classList.add('visible-anim');
+    }
+  });
+}
+
+function animateTo(toX, toY, toScale, duration, callback) {
+  const fromX = currentTargetX;
+  const fromY = currentTargetY;
+  const fromScale = currentScale;
+  const startTime = performance.now();
+
+  function tick(now) {
+    const t = Math.min(1, (now - startTime) / duration);
+    const e = easeInOutCubic(t);
+    currentTargetX = fromX + (toX - fromX) * e;
+    currentTargetY = fromY + (toY - fromY) * e;
+    currentScale = fromScale + (toScale - fromScale) * e;
+    applyTransform(currentTargetX, currentTargetY, currentScale);
+    if (t < 1) {
+      requestAnimationFrame(tick);
+    } else if (callback) {
+      callback();
+    }
+  }
+  requestAnimationFrame(tick);
+}
+
+function animateCountUp(el, target, duration) {
+  const start = parseInt(el.textContent) || 0;
+  const startTime = performance.now();
+  function tick(now) {
+    const t = Math.min(1, (now - startTime) / duration);
+    el.textContent = Math.round(start + (target - start) * easeInOutCubic(t));
+    if (t < 1) requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+
+function setLabel(text) {
+  if (text) {
+    label.textContent = text;
+    label.classList.add('visible');
+  } else {
+    label.classList.remove('visible');
+  }
+}
+
+// ===== STEP HANDLERS =====
+
+// Step 1 (initial): Centered on starting region with all its clubs visible
+function initStep1() {
+  currentTargetX = startRegion.x;
+  currentTargetY = startRegion.y;
+  currentScale = 1.1;
+  applyTransform(currentTargetX, currentTargetY, currentScale);
+  setLabel(startRegion.name + ' \u2014 ' + startRegion.clubs.length + ' klubbar');
+}
+
+// Step 2: Slide along line to root, reveal Pistol.nu hub
+function goStep2() {
+  isAnimating = true;
+  clickHint.classList.add('fade-out');
+  setLabel('');
+  showGroup('rootAndLine');
+  animateTo(ROOT_X, ROOT_Y, 0.7, 3000, () => {
+    setLabel('Pistol.nu');
+    isAnimating = false;
+  });
+}
+
+// Step 3: Zoom out to show all regions around Pistol.nu
+function goStep3() {
+  isAnimating = true;
+  setLabel('');
+  showGroup('otherRegions');
+  stats.classList.add('visible');
+  animateCountUp(regionCountEl, TOTAL_REGIONS, 2000);
+  animateTo(ROOT_X, ROOT_Y, 0.35, 3500, () => {
+    setLabel(TOTAL_REGIONS + ' kretsar');
+    isAnimating = false;
+  });
+}
+
+// Step 4: Expand out to show all clubs around each region
+function goStep4() {
+  isAnimating = true;
+  setLabel('');
+  showGroup('otherClubs');
+  animateCountUp(clubCountEl, TOTAL_CLUBS, 3000);
+  animateTo(ROOT_X, ROOT_Y, 0.22, 4000, () => {
+    setLabel(TOTAL_REGIONS + ' kretsar \u2014 ' + TOTAL_CLUBS + ' klubbar \u00f6ver hela Sverige');
+    restartBtn.classList.add('show');
+    isAnimating = false;
+  });
+}
+
+// ===== CLICK HANDLER =====
+document.addEventListener('click', (e) => {
+  if (e.target.id === 'restartBtn') return;
+  if (isAnimating) return;
+
+  step++;
+  switch (step) {
+    case 1: goStep2(); break;
+    case 2: goStep3(); break;
+    case 3: goStep4(); break;
+  }
+});
+
+// Also allow spacebar / arrow right / Enter
+document.addEventListener('keydown', (e) => {
+  if (['Space', 'ArrowRight', 'Enter'].includes(e.code)) {
+    e.preventDefault();
+    document.dispatchEvent(new MouseEvent('click'));
+  }
+});
+
+// Initialize — show starting region
+initStep1();
+</script>
+</body>
+</html>

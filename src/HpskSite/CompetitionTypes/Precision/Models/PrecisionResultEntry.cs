@@ -203,4 +203,47 @@ namespace HpskSite.CompetitionTypes.Precision.Models
         public string OrderBy { get; set; } = "registration";
         public List<ShooterEntryInfo> Shooters { get; set; } = new();
     }
+
+    /// <summary>
+    /// Request model for distributed (self-reporting) result entry.
+    /// Used by club admins/skjutledare at the range to report results for their shooters.
+    /// </summary>
+    public class DistributedResultRequest
+    {
+        public int CompetitionId { get; set; }
+        public int SeriesNumber { get; set; }
+        public string[] Shots { get; set; } = new string[5];
+        public string ShootingClass { get; set; } = "";
+        public int TargetMemberId { get; set; }
+    }
+
+    /// <summary>
+    /// Response for GetDistributedStatus — returns members the caller can enter for
+    /// and their already-saved series.
+    /// </summary>
+    public class DistributedStatusResponse
+    {
+        public bool Success { get; set; }
+        public string? Message { get; set; }
+        public bool IsActive { get; set; }
+        public int MaxSeries { get; set; }
+        public List<DistributedMemberStatus> Members { get; set; } = new();
+    }
+
+    public class DistributedMemberStatus
+    {
+        public int MemberId { get; set; }
+        public string Name { get; set; } = "";
+        public string Club { get; set; } = "";
+        public string ShootingClass { get; set; } = "";
+        public List<DistributedSeriesStatus> CompletedSeries { get; set; } = new();
+    }
+
+    public class DistributedSeriesStatus
+    {
+        public int SeriesNumber { get; set; }
+        public int Total { get; set; }
+        public int XCount { get; set; }
+        public string[] Shots { get; set; } = Array.Empty<string>();
+    }
 }

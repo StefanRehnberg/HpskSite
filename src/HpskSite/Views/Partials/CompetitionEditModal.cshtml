@@ -16,10 +16,10 @@
     var contactEmail = competition?.Value<string>("contactEmail") ?? "";
     var contactPhone = competition?.Value<string>("contactPhone") ?? "";
     var numSeries = competition?.Value<int>("numberOfSeriesOrStations") ?? 0;
-    var isActive = competition?.Value<bool>("isActive");
     var showLiveResults = competition?.Value<bool>("showLiveResults");
     var competitionScope = competition?.Value<string>("competitionScope") ?? "";
     var isAwardingStandardMedals = competition?.Value<bool>("isAwardingStandardMedals");
+    var allowSelfReporting = competition?.Value<bool>("allowSelfReporting");
     
     // Handle shootingClassIds - convert to comma-separated string
     var shootingClassIds = "";
@@ -291,6 +291,10 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                                 <label for="numberOfSeriesOrStations" class="form-label">Antal serier/stationer <span class="text-danger">*</span></label>
                                 <input type="number" class="form-control" id="numberOfSeriesOrStations" name="numberOfSeriesOrStations" value="@numSeries" min="1" required>
                             </div>
+                            <div class="mb-3">
+                                <label for="numberOfFinalSeries" class="form-label">Varav finalserier</label>
+                                <input type="number" class="form-control" id="numberOfFinalSeries" name="numberOfFinalSeries" value="@numberOfFinalSeries" min="0">
+                            </div>
                         </div>
                         <div class="col-md-6">
                             <div class="mb-3">
@@ -317,31 +321,14 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                                     </label>
                                 </div>
                             </div>
-                        </div>
-                    </div>
-
-                    <div class="row">
-                        <div class="col-md-6">
                             <div class="mb-3">
-                                <label for="numberOfFinalSeries" class="form-label">Varav finalserier</label>
-                                <input type="number" class="form-control" id="numberOfFinalSeries" name="numberOfFinalSeries" value="@numberOfFinalSeries" min="0">
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="comp_isActive" class="form-label">Status</label>
-                                <select class="form-select" id="comp_isActive" name="isActive">
-                                    @if (isActive == true)
-                                    {
-                                        <option value="true" selected>Aktiv</option>
-                                        <option value="false">Inaktiv</option>
-                                    }
-                                    else
-                                    {
-                                        <option value="true">Aktiv</option>
-                                        <option value="false" selected>Inaktiv</option>
-                                    }
-                                </select>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="allowSelfReporting" name="allowSelfReporting" @(allowSelfReporting == true ? "checked" : "")>
+                                    <label class="form-check-label" for="allowSelfReporting">
+                                        Tillåt resultatrapportering
+                                    </label>
+                                </div>
+                                <small class="form-text text-muted d-block mt-1">Klubbadmins och skjutledare kan rapportera resultat från sina skyttar under tävlingsperioden</small>
                             </div>
                         </div>
                     </div>
@@ -825,6 +812,7 @@ window.populateEditModal = function(competition) {
     setCheckboxValue('showLiveResults', competition.showLiveResults || false);
     setCheckboxValue('addToMenu', competition.addToMenu || false);
     setCheckboxValue('isAwardingStandardMedals', competition.isAwardingStandardMedals || false);
+    setCheckboxValue('allowSelfReporting', competition.allowSelfReporting || false);
 
     // Competition scope dropdown
     setFieldValue('competitionScope', competition.competitionScope || '');
@@ -838,8 +826,6 @@ window.populateEditModal = function(competition) {
         seriesDropdown.dataset.originalSeriesId = seriesId;
     }
 
-    // Status dropdown
-    setFieldValue('comp_isActive', competition.isActive ? 'true' : 'false');
 }
 
 // Load shooting classes for edit modal
@@ -931,10 +917,8 @@ function saveCompetition() {
             continue;
         }
 
-        if (key === 'showLiveResults' || key === 'addToMenu' || key === 'allowDualCClass' || key === 'isClubOnly' || key === 'isAwardingStandardMedals') {
+        if (key === 'showLiveResults' || key === 'addToMenu' || key === 'allowDualCClass' || key === 'isClubOnly' || key === 'isAwardingStandardMedals' || key === 'allowSelfReporting') {
             fields[key] = value === 'on';
-        } else if (key === 'isActive') {
-            fields[key] = value === 'true';
         } else {
             fields[key] = value;
         }
@@ -960,7 +944,7 @@ function saveCompetition() {
     fields.regionalFederation = regionSelect.disabled ? '' : (regionSelect.value || '');
 
     // Ensure unchecked checkboxes are explicitly set to false
-    const checkboxFields = ['showLiveResults', 'addToMenu', 'allowDualCClass', 'isClubOnly', 'isActive', 'isAwardingStandardMedals', 'isExternal'];
+    const checkboxFields = ['showLiveResults', 'addToMenu', 'allowDualCClass', 'isClubOnly', 'isAwardingStandardMedals', 'isExternal', 'allowSelfReporting'];
     checkboxFields.forEach(field => {
         if (!(field in fields)) {
             fields[field] = false;
