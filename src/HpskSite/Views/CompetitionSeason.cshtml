@@ -290,6 +290,9 @@
                     : "Inga klasser";
                 var allShootingClassIds = string.Join(",", competitionShootingClasses.Select(sc => sc.Id));
                 var isActive = competition.Value<bool>("isActive");
+                var compEndDate = competition.Value<DateTime?>("competitionEndDate");
+                var hasValidEnd = compEndDate.HasValue && compEndDate.Value.Year > 1900 && compEndDate.Value.Date >= compDate.Date;
+                var effectiveEnd = hasValidEnd ? compEndDate!.Value.Date : compDate.Date;
 
                 // Calculate status
                 var status = "completed";
@@ -298,7 +301,7 @@
                 var buttonText = "Visa Tävling";
                 var buttonClass = "btn-secondary";
 
-                if (isActive && compDate.Date >= now.Date)
+                if (isActive && effectiveEnd >= now.Date)
                 {
                     if (regOpenDate <= now && regCloseDate >= now)
                     {
@@ -314,7 +317,7 @@
                         statusClass = "warning";
                         buttonClass = "btn-warning";
                     }
-                    else if (compDate.Date == now.Date)
+                    else if (now.Date >= compDate.Date && now.Date <= effectiveEnd)
                     {
                         status = "active";
                         statusText = "?? Pågående tävling";

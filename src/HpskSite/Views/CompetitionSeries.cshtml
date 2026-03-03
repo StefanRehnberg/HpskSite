@@ -224,6 +224,7 @@
                                 var isCompetitionActive = competition.Value<bool>("isActive");
 
                                 // Calculate status (same logic as competitions hub)
+                                var effectiveEnd = hasValidEndDate ? compEndDate!.Value.Date : compDate.Date;
                                 var status = "completed";
                                 var statusIcon = "bi-check-circle";
                                 var statusText = "Avslutad";
@@ -231,7 +232,7 @@
                                 var buttonText = "Visa Tävling";
                                 var buttonClass = "btn-secondary";
 
-                                if (isCompetitionActive && compDate.Date >= now.Date)
+                                if (isCompetitionActive && effectiveEnd >= now.Date)
                                 {
                                     if (regOpenDate <= now && regCloseDate >= now)
                                     {

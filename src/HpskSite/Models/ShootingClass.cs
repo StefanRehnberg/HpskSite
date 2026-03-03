@@ -23,6 +23,7 @@
             new ShootingClass("A1", "A1", "Vapenklass A för nybörjare", WeaponClass.A),
             new ShootingClass("A2", "A2", "Vapenklass A för Guldmärkesskyttar", WeaponClass.A),
             new ShootingClass("A3", "A3", "Vapenklass A för Riksmästare", WeaponClass.A),
+            new ShootingClass("A_opt", "A Opt", "Vapenklass A med optiskt riktmedel", WeaponClass.A),
             new ShootingClass("B1", "B1", "Vapenklass B för nybörjare", WeaponClass.B),
             new ShootingClass("B2", "B2", "Vapenklass B för Guldmärkesskyttar", WeaponClass.B),
             new ShootingClass("B3", "B3", "Vapenklass B för Riksmästare", WeaponClass.B),

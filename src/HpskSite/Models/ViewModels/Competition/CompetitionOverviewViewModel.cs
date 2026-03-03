@@ -40,6 +40,7 @@ namespace HpskSite.Models.ViewModels.Competition
         public string Name { get; set; } = "";
         public string CompetitionType { get; set; } = "";
         public DateTime CompetitionDate { get; set; }
+        public DateTime? CompetitionEndDate { get; set; }
         public string? Description { get; set; }
         public bool IsActive { get; set; }
 
@@ -60,8 +61,9 @@ namespace HpskSite.Models.ViewModels.Competition
 
         public string GetStatusDisplay()
         {
-            if (CompetitionDate < DateTime.Now.Date) return "Avslutad";
-            if (CompetitionDate == DateTime.Now.Date) return "Pågår idag";
+            var effectiveEnd = (CompetitionEndDate.HasValue && CompetitionEndDate.Value.Year > 1900) ? CompetitionEndDate.Value.Date : CompetitionDate.Date;
+            if (effectiveEnd < DateTime.Now.Date) return "Avslutad";
+            if (CompetitionDate == DateTime.Now.Date || (CompetitionDate < DateTime.Now.Date && effectiveEnd >= DateTime.Now.Date)) return "Pågår";
             if (!IsActive) return "Inaktiv";
             if (IsFull) return "Fullbokad";
             if (IsRegistrationOpen) return "Öppen för anmälan";

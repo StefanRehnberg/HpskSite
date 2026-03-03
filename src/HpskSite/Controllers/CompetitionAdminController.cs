@@ -370,7 +370,9 @@ namespace HpskSite.Controllers
                         // Status filter - exclude completed unless requested
                         if (!includeCompleted && compDate.HasValue)
                         {
-                            var isCompleted = compDate.Value.Date < today;
+                            var compEndDate = comp.GetValue<DateTime?>("competitionEndDate");
+                            var effectiveEnd = (compEndDate.HasValue && compEndDate.Value.Year > 1900) ? compEndDate.Value.Date : compDate.Value.Date;
+                            var isCompleted = effectiveEnd < today;
                             if (isCompleted) return false;
                         }
 
@@ -451,6 +453,8 @@ namespace HpskSite.Controllers
                         // Get competition properties
                         var isActive = comp.GetValue<bool>("isActive");
                         var compDate = comp.GetValue<DateTime?>("competitionDate");
+                        var compEndDate = comp.GetValue<DateTime?>("competitionEndDate");
+                        var effectiveEndDate = (compEndDate.HasValue && compEndDate.Value.Year > 1900) ? compEndDate.Value.Date : compDate?.Date;
 
                         // Calculate status: Draft, Scheduled, Active, Completed
                         string status;
@@ -463,6 +467,10 @@ namespace HpskSite.Controllers
                             if (compDate.Value.Date > today)
                             {
                                 status = "Scheduled";
+                            }
+                            else if (effectiveEndDate.HasValue && effectiveEndDate.Value >= today)
+                            {
+                                status = "Active";
                             }
                             else if (compDate.Value.Date >= today.AddDays(-7))
                             {
@@ -485,6 +493,7 @@ namespace HpskSite.Controllers
                             description = comp.GetValue<string>("description") ?? "",
                             type = comp.GetValue<string>("competitionType") ?? "Unknown",
                             startDate = compDate,
+                            endDate = compEndDate,
                             registrationOpenDate = comp.GetValue<DateTime?>("registrationOpenDate"),
                             registrationCloseDate = comp.GetValue<DateTime?>("registrationCloseDate"),
                             isActive = isActive,

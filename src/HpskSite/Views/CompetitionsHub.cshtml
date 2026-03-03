@@ -95,7 +95,9 @@
     var completedCompetitions = allCompetitions.Where(c =>
     {
         var compDate = c.Value<DateTime>("competitionDate");
-        return compDate < now;
+        var compEndDate = c.Value<DateTime?>("competitionEndDate");
+        var effectiveEnd = (compEndDate.HasValue && compEndDate.Value.Year > 1900) ? compEndDate.Value.Date : compDate.Date;
+        return effectiveEnd < now.Date;
     }).OrderByDescending(c =>
     {
         return c.Value<DateTime>("competitionDate");
@@ -527,13 +529,14 @@
                 }
 
                 // Calculate status
+                var effectiveEnd = hasValidEndDate ? compEndDate!.Value.Date : compDate.Date;
                 var status = "completed";
                 var statusText = "<i class=\"bi bi-check-circle me-1\"></i> Avslutad";
                 var statusClass = "secondary";
                 var buttonText = "Visa Tävling";
                 var buttonClass = "btn-secondary";
 
-                if (isActive && compDate.Date >= now.Date)
+                if (isActive && effectiveEnd >= now.Date)
                 {
                     if (regOpenDate <= now && regCloseDate >= now)
                     {
@@ -934,13 +937,14 @@
                         }
 
                         // Calculate status (same logic as card view)
+                        var effectiveEnd = hasValidEndDate ? compEndDate!.Value.Date : compDate.Date;
                         var status = "completed";
                         var statusText = "<i class=\"bi bi-check-circle me-1\"></i> Avslutad";
                         var statusClass = "secondary";
                         var buttonText = "Visa Tävling";
                         var buttonClass = "btn-secondary";
 
-                        if (isActive && compDate.Date >= now.Date)
+                        if (isActive && effectiveEnd >= now.Date)
                         {
                             if (regOpenDate <= now && regCloseDate >= now)
                             {

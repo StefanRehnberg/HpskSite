@@ -200,7 +200,7 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
 
                     <div class="mb-3">
                         <label for="description" class="form-label">Beskrivning</label>
-                        <textarea class="form-control" id="description" name="description" rows="2">@compDesc</textarea>
+                        <textarea class="form-control" id="description" name="description" rows="4">@compDesc</textarea>
                     </div>
 
                     <div class="mb-3">
@@ -477,9 +477,32 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
     </div>
 </div>
 
+<style>
+[data-bs-theme="dark"] #competitionEditModal .ck.ck-editor__main > .ck-editor__editable {
+    background-color: var(--bs-body-bg);
+    color: var(--bs-body-color);
+    border-color: var(--bs-border-color);
+}
+[data-bs-theme="dark"] #competitionEditModal .ck.ck-toolbar {
+    background-color: var(--bs-tertiary-bg);
+    border-color: var(--bs-border-color);
+}
+[data-bs-theme="dark"] #competitionEditModal .ck.ck-toolbar .ck-button {
+    color: var(--bs-body-color);
+}
+[data-bs-theme="dark"] #competitionEditModal .ck.ck-toolbar .ck-button:hover {
+    background-color: var(--bs-secondary-bg);
+}
+#competitionEditModal .ck-editor__editable {
+    min-height: 120px;
+}
+</style>
+
 <script>
 // Parse shooting class IDs - handle comma-separated format (may contain spaces)
 let editModalCurrentSelectedClasses = "@shootingClassIds".split(',').map(c => c.trim()).filter(c => c);
+
+let compDescriptionEditor = null; // CKEditor instance for competition description
 
 const editModal = document.getElementById('competitionEditModal');
 
@@ -516,6 +539,27 @@ editModal.addEventListener('show.bs.modal', function() {
             console.error('Error initializing date pickers:', e);
         }
 
+        // Initialize CKEditor 5 for description field
+        if (!compDescriptionEditor) {
+            ClassicEditor
+                .create(document.getElementById('description'), {
+                    toolbar: [
+                        'heading', '|',
+                        'bold', 'italic', 'underline', '|',
+                        'link', 'blockQuote', '|',
+                        'bulletedList', 'numberedList', '|',
+                        'undo', 'redo'
+                    ],
+                    language: 'sv'
+                })
+                .then(editor => {
+                    compDescriptionEditor = editor;
+                })
+                .catch(error => {
+                    console.error('CKEditor initialization error:', error);
+                });
+        }
+
         // Load shooting classes
         loadShootingClasses();
 
@@ -532,6 +576,9 @@ editModal.addEventListener('hidden.bs.modal', function() {
     document.getElementById('competitionEditForm').reset();
     editModalCurrentSelectedClasses = [];
     document.getElementById('shootingClassesContainer').innerHTML = '<div class="text-center text-muted"><small>Laddar klasser...</small></div>';
+    if (compDescriptionEditor) {
+        compDescriptionEditor.setData('');
+    }
 });
 
 function loadShootingClasses() {
@@ -610,6 +657,10 @@ function renderShootingClassCheckboxes(classes) {
 
 // Helper functions for populating the modal
 window.setFieldValue = function(fieldId, value) {
+    // Sync CKEditor for description field
+    if (fieldId === 'description' && compDescriptionEditor) {
+        compDescriptionEditor.setData(value || '');
+    }
     const element = document.getElementById(fieldId);
     if (element) {
         element.value = value;
@@ -851,6 +902,11 @@ function updateShootingClassIds() {
 }
 
 function saveCompetition() {
+    // Sync CKEditor content to textarea before reading form
+    if (compDescriptionEditor) {
+        document.getElementById('description').value = compDescriptionEditor.getData();
+    }
+
     const form = document.getElementById('competitionEditForm');
     if (!form.checkValidity()) {
         form.reportValidity();

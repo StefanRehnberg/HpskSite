@@ -286,6 +286,8 @@ window.currentClubId = clubId;
 
                                                 // Determine status
                                                 var now = DateTime.Now;
+                                                var hasValidEnd = compEndDate.HasValue && compEndDate.Value.Year > 1900 && compEndDate.Value.Date >= compDate.Date;
+                                                var effectiveEnd = hasValidEnd ? compEndDate!.Value.Date : compDate.Date;
                                                 string statusText;
                                                 string statusBadgeClass;
 
@@ -309,12 +311,12 @@ window.currentClubId = clubId;
                                                     statusText = "Anmälan stängd";
                                                     statusBadgeClass = "bg-warning text-dark";
                                                 }
-                                                else if (now.Date == compDate.Date)
+                                                else if (now.Date >= compDate.Date && now.Date <= effectiveEnd)
                                                 {
-                                                    statusText = "Pågår idag";
+                                                    statusText = "Pågår";
                                                     statusBadgeClass = "bg-primary";
                                                 }
-                                                else if (now.Date > compDate.Date)
+                                                else if (now.Date > effectiveEnd)
                                                 {
                                                     statusText = "Avslutad";
                                                     statusBadgeClass = "bg-secondary";

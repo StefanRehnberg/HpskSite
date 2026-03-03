@@ -523,12 +523,17 @@ function calculateStatus(comp) {
     const compDate = comp.startDate ? new Date(comp.startDate) : null;
     const compDateOnly = compDate ? new Date(compDate.getFullYear(), compDate.getMonth(), compDate.getDate()) : null;
 
+    // Calculate effective end date (use endDate if valid, otherwise fall back to compDate)
+    const compEndDate = comp.endDate ? new Date(comp.endDate) : null;
+    const compEndDateOnly = compEndDate ? new Date(compEndDate.getFullYear(), compEndDate.getMonth(), compEndDate.getDate()) : null;
+    const hasValidEnd = compEndDateOnly && compEndDateOnly.getFullYear() > 1900 && compDateOnly && compEndDateOnly >= compDateOnly;
+    const effectiveEnd = hasValidEnd ? compEndDateOnly : compDateOnly;
+
     const regOpen = comp.registrationOpenDate ? new Date(comp.registrationOpenDate) : null;
     const regClose = comp.registrationCloseDate ? new Date(comp.registrationCloseDate) : null;
 
-    // Match logic from CompetitionsHub.cshtml lines 487-521
-    // If isActive AND compDate >= today
-    if (comp.isActive && compDateOnly && compDateOnly >= today) {
+    // If isActive AND effective end date >= today (competition not yet finished)
+    if (comp.isActive && effectiveEnd && effectiveEnd >= today) {
         // Check if registration is currently open
         if (regOpen && regClose && regOpen <= now && regClose >= now) {
             return 'open'; // Anmälan öppen
@@ -537,12 +542,12 @@ function calculateStatus(comp) {
         else if (regOpen && regOpen > now) {
             return 'upcoming'; // Anmälan öppnar snart
         }
-        // Check if competition is today
-        else if (compDateOnly.getTime() === today.getTime()) {
+        // Check if competition is ongoing (between start and end date)
+        else if (compDateOnly && today >= compDateOnly && today <= effectiveEnd) {
             return 'ongoing'; // Pågående tävling
         }
         // Check if registration closed but competition is in future
-        else if (regClose && regClose < now && compDateOnly > today) {
+        else if (regClose && regClose < now && compDateOnly && compDateOnly > today) {
             return 'ongoing'; // Pågående tävling
         }
     }

@@ -276,20 +276,26 @@
                                 statusText = "Anmälan stängd";
                                 statusBadgeClass = "bg-warning text-dark";
                             }
-                            else if (now.Date == compDate.Date)
-                            {
-                                statusText = "Pågår idag";
-                                statusBadgeClass = "bg-primary";
-                            }
-                            else if (now.Date > compDate.Date)
-                            {
-                                statusText = "Avslutad";
-                                statusBadgeClass = "bg-secondary";
-                            }
                             else
                             {
-                                statusText = "Kommande";
-                                statusBadgeClass = "bg-info";
+                                var hasValidEnd = compEndDate.HasValue && compEndDate.Value.Year > 1900 && compEndDate.Value.Date >= compDate.Date;
+                                var effectiveEnd = hasValidEnd ? compEndDate!.Value.Date : compDate.Date;
+
+                                if (now.Date >= compDate.Date && now.Date <= effectiveEnd)
+                                {
+                                    statusText = "Pågår";
+                                    statusBadgeClass = "bg-primary";
+                                }
+                                else if (now.Date > effectiveEnd)
+                                {
+                                    statusText = "Avslutad";
+                                    statusBadgeClass = "bg-secondary";
+                                }
+                                else
+                                {
+                                    statusText = "Kommande";
+                                    statusBadgeClass = "bg-info";
+                                }
                             }
 
                             // Check if multi-day
