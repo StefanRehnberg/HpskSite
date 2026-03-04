@@ -2185,50 +2185,73 @@ namespace HpskSite.Controllers
                 var resultPage = _contentService.GetPagedChildren(competition.Id, 0, int.MaxValue, out long total)
                     .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
 
-                if (resultPage == null)
+                var showLiveResults = competition.GetValue<bool>("showLiveResults");
+
+                if (resultPage == null && !showLiveResults)
                 {
                     return Json(new { Success = false, Message = "Ingen resultatsida hittades.", Exists = false });
                 }
 
-                var finalResultsList = resultPage;
-
-                var isOfficial = finalResultsList.GetValue<bool>("isOfficial");
-                var resultDataJson = finalResultsList.GetValue<string>("resultData");
-                
                 FinalResults resultData;
                 DateTime lastUpdated;
+                bool isOfficial = false;
 
-                // OPTION 2: Single page approach
-                if (isOfficial)
+                if (resultPage != null)
                 {
-                    // Official results: Use saved JSON snapshot (frozen final version)
-                    _logger.LogInformation("Loading official (frozen) results for competition {CompetitionId}", competitionId);
-                    
-                    if (string.IsNullOrEmpty(resultDataJson))
+                    var finalResultsList = resultPage;
+                    isOfficial = finalResultsList.GetValue<bool>("isOfficial");
+                    var resultDataJson = finalResultsList.GetValue<string>("resultData");
+
+                    if (isOfficial)
                     {
-                        return Json(new { Success = false, Message = "Officiella resultat saknar data.", Exists = false });
+                        // Official results: Use saved JSON snapshot (frozen final version)
+                        _logger.LogInformation("Loading official (frozen) results for competition {CompetitionId}", competitionId);
+
+                        if (string.IsNullOrEmpty(resultDataJson))
+                        {
+                            return Json(new { Success = false, Message = "Officiella resultat saknar data.", Exists = false });
+                        }
+
+                        resultData = JsonConvert.DeserializeObject<FinalResults>(resultDataJson);
+                        lastUpdated = finalResultsList.GetValue<DateTime>("lastUpdated");
                     }
-                    
-                    resultData = JsonConvert.DeserializeObject<FinalResults>(resultDataJson);
-                    lastUpdated = finalResultsList.GetValue<DateTime>("lastUpdated");
+                    else
+                    {
+                        // Preliminary results: Always generate fresh from database
+                        _logger.LogInformation("Loading preliminary (live) results from database for competition {CompetitionId}", competitionId);
+
+                        var dbResults = await GetCompetitionResultsInternal(competitionId);
+
+                        if (!dbResults.Any())
+                        {
+                            return Json(new { Success = false, Message = "Inga resultat finns i databasen ännu.", Exists = false });
+                        }
+
+                        // Generate fresh results from database
+                        resultData = await CalculateFinalResults(dbResults, competitionId);
+                        lastUpdated = DateTime.Now;
+
+                        _logger.LogInformation("Generated fresh preliminary results with {Count} shooters",
+                            resultData.ClassGroups.Sum(g => g.Shooters.Count));
+                    }
                 }
                 else
                 {
-                    // Preliminary results: Always generate fresh from database
-                    _logger.LogInformation("Loading preliminary (live) results from database for competition {CompetitionId}", competitionId);
-                    
+                    // No result page but showLiveResults is enabled — generate live from database
+                    _logger.LogInformation("No result page, generating live results from database for competition {CompetitionId}", competitionId);
+
                     var dbResults = await GetCompetitionResultsInternal(competitionId);
-                    
+
                     if (!dbResults.Any())
                     {
                         return Json(new { Success = false, Message = "Inga resultat finns i databasen ännu.", Exists = false });
                     }
-                    
-                    // Generate fresh results from database
+
                     resultData = await CalculateFinalResults(dbResults, competitionId);
                     lastUpdated = DateTime.Now;
-                    
-                    _logger.LogInformation("Generated fresh preliminary results with {Count} shooters", 
+                    isOfficial = false;
+
+                    _logger.LogInformation("Generated live results with {Count} shooters (no result page)",
                         resultData.ClassGroups.Sum(g => g.Shooters.Count));
                 }
 
@@ -2264,6 +2287,7 @@ namespace HpskSite.Controllers
                 LastUpdated = lastUpdated,
                 Results = resultData,
                 ResultPageUrl = resultPageUrl,
+                HasResultPage = resultPage != null,
                 NumberOfSeries = numberOfSeriesOrStations,
                 NumberOfFinalSeries = numberOfFinalSeries,
                 IsAwardingStandardMedals = isAwardingStandardMedals
