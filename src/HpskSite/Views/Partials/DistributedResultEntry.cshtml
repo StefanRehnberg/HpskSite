@@ -57,6 +57,44 @@
                         </select>
                     </div>
 
+                    <!-- Quick-register new shooter (collapsed by default) -->
+                    <div class="mb-3" id="dr-quickreg-section" style="display:none;">
+                        <button type="button" class="btn btn-outline-primary btn-sm" id="dr-quickreg-toggle" onclick="drToggleQuickReg()">
+                            <i class="bi bi-person-plus me-1"></i>Registrera ny skytt
+                        </button>
+                        <div id="dr-quickreg-form" class="d-none mt-2 p-3 border rounded" style="background-color: var(--bs-tertiary-bg);">
+                            <h6 class="mb-3"><i class="bi bi-person-plus me-1"></i>Snabbregistrering</h6>
+                            <div class="row g-2">
+                                <div class="col-6">
+                                    <input type="text" class="form-control" id="dr-qr-firstname" placeholder="Förnamn" required>
+                                </div>
+                                <div class="col-6">
+                                    <input type="text" class="form-control" id="dr-qr-lastname" placeholder="Efternamn" required>
+                                </div>
+                            </div>
+                            <div class="mt-2">
+                                <input type="email" class="form-control" id="dr-qr-email" placeholder="E-postadress" required>
+                            </div>
+                            <div class="mt-2">
+                                <select class="form-select" id="dr-qr-club">
+                                    <option value="">-- Välj klubb --</option>
+                                </select>
+                            </div>
+                            <div class="mt-2">
+                                <select class="form-select" id="dr-qr-class">
+                                    <option value="">-- Välj klass --</option>
+                                </select>
+                            </div>
+                            <div class="mt-2 d-flex gap-2">
+                                <button type="button" class="btn btn-success btn-sm flex-grow-1" id="dr-qr-submit" onclick="drQuickRegister()">
+                                    <i class="bi bi-check-circle me-1"></i>Registrera & lägg till
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="drToggleQuickReg()">Avbryt</button>
+                            </div>
+                            <div id="dr-qr-error" class="alert alert-danger mt-2 d-none" role="alert"></div>
+                        </div>
+                    </div>
+
                     <!-- Class selector (shown if member registered in multiple classes) -->
                     <div class="mb-3 d-none" id="dr-class-container">
                         <label for="dr-class-select" class="form-label fw-bold">
@@ -275,6 +313,9 @@
     const DR_MAX_SERIES = @numberOfSeries;
 
     let drMembers = [];
+    let drAvailableClasses = [];
+    let drAuthorizedClubs = [];
+    let drCallerClubId = 0;
     let drSelectedMemberId = null;
     let drSelectedClass = '';
     let drCurrentSeriesNumber = 1;
@@ -330,8 +371,18 @@
                 }
 
                 drMembers = data.members || [];
+                drAvailableClasses = data.availableClasses || [];
+                drAuthorizedClubs = data.authorizedClubs || [];
+                drCallerClubId = data.callerClubId || 0;
 
-                if (drMembers.length === 0) {
+                // Show quick-register section if user has authorized clubs and classes available
+                if (drAuthorizedClubs.length > 0 && drAvailableClasses.length > 0) {
+                    document.getElementById('dr-quickreg-section').style.display = '';
+                    drPopulateQuickRegDropdowns();
+                }
+
+                var canQuickReg = drAuthorizedClubs.length > 0 && drAvailableClasses.length > 0;
+                if (drMembers.length === 0 && !canQuickReg) {
                     document.getElementById('dr-error').classList.remove('d-none');
                     document.getElementById('dr-error-text').textContent = 'Inga anmälda skyttar hittades som du kan rapportera för.';
                     return;
@@ -615,6 +666,134 @@
             saveBtn.innerHTML = origText;
             saveBtn.disabled = false;
             alert('Nätverksfel: ' + err.message);
+        });
+    };
+    // --- Quick Register ---
+
+    function drPopulateQuickRegDropdowns() {
+        const clubSelect = document.getElementById('dr-qr-club');
+        clubSelect.innerHTML = '';
+        if (drAuthorizedClubs.length === 1) {
+            const opt = document.createElement('option');
+            opt.value = drAuthorizedClubs[0].id;
+            opt.textContent = drAuthorizedClubs[0].name;
+            opt.selected = true;
+            clubSelect.appendChild(opt);
+        } else {
+            // Sort caller's club first, then alphabetical
+            const sorted = [...drAuthorizedClubs].sort((a, b) => {
+                if (a.id === drCallerClubId) return -1;
+                if (b.id === drCallerClubId) return 1;
+                return a.name.localeCompare(b.name);
+            });
+            clubSelect.innerHTML = '<option value="">-- Välj klubb --</option>';
+            sorted.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c.id;
+                opt.textContent = c.name;
+                if (c.id === drCallerClubId) opt.selected = true;
+                clubSelect.appendChild(opt);
+            });
+        }
+
+        const classSelect = document.getElementById('dr-qr-class');
+        classSelect.innerHTML = '';
+        if (drAvailableClasses.length === 1) {
+            const opt = document.createElement('option');
+            opt.value = drAvailableClasses[0].id;
+            opt.textContent = drAvailableClasses[0].name;
+            opt.selected = true;
+            classSelect.appendChild(opt);
+        } else {
+            classSelect.innerHTML = '<option value="">-- Välj klass --</option>';
+            drAvailableClasses.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c.id;
+                opt.textContent = c.name;
+                classSelect.appendChild(opt);
+            });
+        }
+    }
+
+    window.drToggleQuickReg = function() {
+        const form = document.getElementById('dr-quickreg-form');
+        form.classList.toggle('d-none');
+        document.getElementById('dr-qr-error').classList.add('d-none');
+    };
+
+    window.drQuickRegister = function() {
+        const firstName = document.getElementById('dr-qr-firstname').value.trim();
+        const lastName = document.getElementById('dr-qr-lastname').value.trim();
+        const email = document.getElementById('dr-qr-email').value.trim();
+        const clubId = parseInt(document.getElementById('dr-qr-club').value);
+        const shootingClass = document.getElementById('dr-qr-class').value;
+        const errorEl = document.getElementById('dr-qr-error');
+
+        errorEl.classList.add('d-none');
+
+        if (!firstName || !lastName || !email || !clubId || !shootingClass) {
+            errorEl.textContent = 'Alla fält måste fyllas i.';
+            errorEl.classList.remove('d-none');
+            return;
+        }
+
+        const submitBtn = document.getElementById('dr-qr-submit');
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Registrerar...';
+
+        const token = document.querySelector('input[name="__RequestVerificationToken"]').value;
+
+        fetch('/umbraco/surface/CompetitionResults/QuickRegisterShooter', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': token
+            },
+            body: JSON.stringify({
+                competitionId: DR_COMPETITION_ID,
+                firstName: firstName,
+                lastName: lastName,
+                email: email,
+                clubId: clubId,
+                shootingClass: shootingClass
+            })
+        })
+        .then(r => r.json())
+        .then(data => {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Registrera & lägg till';
+
+            if (data.success && data.member) {
+                // Add new member to drMembers
+                drMembers.push(data.member);
+                populateMemberSelect();
+
+                // Auto-select the new member
+                const selectVal = data.member.memberId + '|' + data.member.shootingClass;
+                document.getElementById('dr-member-select').value = selectVal;
+                onMemberSelected();
+
+                // Collapse form and clear inputs
+                document.getElementById('dr-quickreg-form').classList.add('d-none');
+                document.getElementById('dr-qr-firstname').value = '';
+                document.getElementById('dr-qr-lastname').value = '';
+                document.getElementById('dr-qr-email').value = '';
+
+                // Show success feedback
+                const feedback = document.getElementById('dr-save-feedback');
+                document.getElementById('dr-save-feedback-text').textContent = data.message;
+                feedback.classList.remove('d-none');
+                setTimeout(() => feedback.classList.add('d-none'), 4000);
+            } else {
+                errorEl.textContent = data.message || 'Registreringen misslyckades.';
+                errorEl.classList.remove('d-none');
+            }
+        })
+        .catch(err => {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Registrera & lägg till';
+            errorEl.textContent = 'Nätverksfel: ' + err.message;
+            errorEl.classList.remove('d-none');
         });
     };
 })();

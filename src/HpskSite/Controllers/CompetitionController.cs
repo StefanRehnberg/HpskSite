@@ -148,11 +148,12 @@ namespace HpskSite.Controllers
                     }
                     else
                     {
-                        // Club admin can register members from their clubs
+                        // Club admin or skjutledare can register members from their clubs
                         var targetMemberClubId = targetMember.GetValue<string>("primaryClubId");
                         if (!string.IsNullOrEmpty(targetMemberClubId) && int.TryParse(targetMemberClubId, out int targetClubId))
                         {
-                            canRegisterTargetMember = await _authorizationService.IsClubAdminForClub(targetClubId);
+                            canRegisterTargetMember = await _authorizationService.IsClubAdminForClub(targetClubId)
+                                                   || await _authorizationService.IsSkjutledareForClub(targetClubId);
                         }
 
                         // Users can register themselves

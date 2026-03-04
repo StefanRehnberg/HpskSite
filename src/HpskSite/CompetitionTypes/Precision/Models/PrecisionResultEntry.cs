@@ -228,6 +228,21 @@ namespace HpskSite.CompetitionTypes.Precision.Models
         public bool IsActive { get; set; }
         public int MaxSeries { get; set; }
         public List<DistributedMemberStatus> Members { get; set; } = new();
+        public List<AvailableClass> AvailableClasses { get; set; } = new();
+        public List<AuthorizedClub> AuthorizedClubs { get; set; } = new();
+        public int CallerClubId { get; set; }
+    }
+
+    public class AvailableClass
+    {
+        public string Id { get; set; } = "";
+        public string Name { get; set; } = "";
+    }
+
+    public class AuthorizedClub
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = "";
     }
 
     public class DistributedMemberStatus
@@ -245,5 +260,18 @@ namespace HpskSite.CompetitionTypes.Precision.Models
         public int Total { get; set; }
         public int XCount { get; set; }
         public string[] Shots { get; set; } = Array.Empty<string>();
+    }
+
+    /// <summary>
+    /// Request model for quick-registering a new shooter from the distributed result entry modal.
+    /// </summary>
+    public class QuickRegisterRequest
+    {
+        public int CompetitionId { get; set; }
+        public string FirstName { get; set; } = "";
+        public string LastName { get; set; } = "";
+        public string Email { get; set; } = "";
+        public int ClubId { get; set; }
+        public string ShootingClass { get; set; } = "";
     }
 }

@@ -569,70 +569,6 @@
 				</div>
 			</div>
 
-			@* ======================================== INTERNAL COMPETITION ONLY: Contact Information ======================================== *@
-			@if (!isExternal)
-			{
-				<div class="card mb-4">
-					<div class="card-header">
-						<h3 class="card-title h5 mb-0">Kontaktinformation</h3>
-					</div>
-					<div class="card-body">
-						<div class="row">
-							<div class="col-md-4">
-								<p><strong>Tävlingsledare:</strong></p>
-								<p>@competitionDirector</p>
-							</div>
-							<div class="col-md-4">
-								<p><strong>E-post:</strong></p>
-								<p><a href="mailto:@contactEmail">@contactEmail</a></p>
-							</div>
-							<div class="col-md-4">
-								<p><strong>Telefon:</strong></p>
-								<p><a href="tel:@contactPhone">@contactPhone</a></p>
-							</div>
-						</div>
-
-						@if (managerIds.Any())
-						{
-							<div class="row mt-3">
-								<div class="col-12">
-									<p><strong>Tävlingsansvariga:</strong></p>
-									<div class="d-flex flex-wrap gap-2">
-										@foreach (var managerId in managerIds)
-										{
-											var manager = MemberService.GetById(managerId);
-											if (manager != null)
-											{
-												var managerEmail = manager.GetValue<string>("email") ?? manager.Email;
-												<div class="badge bg-primary d-flex align-items-center">
-													<i class="bi bi-person-gear me-1"></i>
-													@if (!string.IsNullOrEmpty(managerEmail))
-													{
-														<a href="mailto:@managerEmail" class="text-white text-decoration-none">@manager.Name</a>
-													}
-													else
-													{
-														<span>@manager.Name</span>
-													}
-												</div>
-											}
-											else
-											{
-												@* Show ID if member not found (debugging aid) *@
-												<div class="badge bg-secondary d-flex align-items-center">
-													<i class="bi bi-person-gear me-1"></i>
-													<span>Medlem-ID: @managerId (hittades inte)</span>
-												</div>
-											}
-										}
-									</div>
-								</div>
-							</div>
-						}
-					</div>
-				</div>
-			}
-
 			@* Beskrivning Card *@
 			@if (!string.IsNullOrWhiteSpace(description))
 			{
@@ -641,7 +577,7 @@
 						<h3 class="card-title h5 mb-0"><i class="bi bi-text-paragraph me-2"></i>Beskrivning</h3>
 					</div>
 					<div class="card-body">
-						@Html.Raw(description)
+						@Html.Raw(System.Net.WebUtility.HtmlDecode(description))
 					</div>
 				</div>
 			}
@@ -852,6 +788,66 @@
 								</a>
 							</div>
 						}
+					}
+				</div>
+			</div>
+
+			@* Contact Information Card *@
+			<div class="card mt-4">
+				<div class="card-header">
+					<h5 class="mb-0"><i class="bi bi-person-lines-fill me-2"></i>Kontaktinformation</h5>
+				</div>
+				<div class="card-body">
+					@if (!string.IsNullOrEmpty(competitionDirector))
+					{
+						<div class="mb-2">
+							<i class="bi bi-person me-1 text-primary"></i>
+							<strong>Tävlingsledare:</strong><br/>
+							<span class="ms-3">@competitionDirector</span>
+						</div>
+					}
+					@if (!string.IsNullOrEmpty(contactEmail))
+					{
+						<div class="mb-2">
+							<i class="bi bi-envelope me-1 text-primary"></i>
+							<strong>E-post:</strong><br/>
+							<span class="ms-3"><a href="mailto:@contactEmail">@contactEmail</a></span>
+						</div>
+					}
+					@if (!string.IsNullOrEmpty(contactPhone))
+					{
+						<div class="mb-2">
+							<i class="bi bi-telephone me-1 text-primary"></i>
+							<strong>Telefon:</strong><br/>
+							<span class="ms-3"><a href="tel:@contactPhone">@contactPhone</a></span>
+						</div>
+					}
+					@if (managerIds.Any())
+					{
+						<div class="mt-2">
+							<strong>Tävlingsansvariga:</strong>
+							<div class="d-flex flex-wrap gap-2 mt-1">
+								@foreach (var managerId in managerIds)
+								{
+									var manager = MemberService.GetById(managerId);
+									if (manager != null)
+									{
+										var managerEmail = manager.GetValue<string>("email") ?? manager.Email;
+										<div class="badge bg-primary d-flex align-items-center">
+											<i class="bi bi-person-gear me-1"></i>
+											@if (!string.IsNullOrEmpty(managerEmail))
+											{
+												<a href="mailto:@managerEmail" class="text-white text-decoration-none">@manager.Name</a>
+											}
+											else
+											{
+												<span>@manager.Name</span>
+											}
+										</div>
+									}
+								}
+							</div>
+						</div>
 					}
 				</div>
 			</div>

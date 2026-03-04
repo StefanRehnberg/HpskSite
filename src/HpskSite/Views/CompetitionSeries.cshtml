@@ -100,10 +100,10 @@
                                 <!-- Expandable Description -->
                                 <div class="series-description-container">
                                     <div class="series-description-preview" id="seriesDescriptionPreview">
-                                        @Html.Raw(seriesDescription)
+                                        @Html.Raw(System.Net.WebUtility.HtmlDecode(seriesDescription))
                                     </div>
                                     <div class="series-description-full" id="seriesDescriptionFull" style="display: none;">
-                                        @Html.Raw(seriesDescription)
+                                        @Html.Raw(System.Net.WebUtility.HtmlDecode(seriesDescription))
                                     </div>
                                     <button type="button" class="btn btn-link btn-sm p-0 mt-2 text-decoration-none"
                                             id="toggleDescription"
@@ -161,7 +161,7 @@
                                 var registrationFee = competition.Value<string>("registrationFee");
                                 var competitionTypeId = competition.Value<string>("competitionType") ?? "";
                                 var competitionTypeObj = HpskSite.Models.CompetitionTypes.GetById(competitionTypeId);
-                                var competitionTypeName = competitionTypeObj?.Name ?? "Okänd typ";
+                                var competitionTypeName = competitionTypeObj?.Name ?? (!string.IsNullOrEmpty(competitionTypeId) ? competitionTypeId : "Okänd typ");
                                 var numberOfSeriesOrStations = competition.Value<int>("numberOfSeriesOrStations");
                                 var numberOfFinalSeries = competition.Value<int>("numberOfFinalSeries");
 
@@ -273,14 +273,14 @@
                                             <ul class="list-unstyled small mb-0">
                                                 @if (!string.IsNullOrEmpty(description))
                                                 {
-                                                    <li class="mb-1">@description</li>
+                                                    <li class="mb-1">@Html.Raw(System.Net.WebUtility.HtmlDecode(description))</li>
                                                 }
                                                 <li>
                                                     @dateIcon @dateDisplay
                                                     <small class="text-muted ms-1">@durationInfo</small>
                                                 </li>
                                                 <li><i class="bi bi-geo-alt"></i> @venue</li>
-                                                @if (competitionTypeObj != null)
+                                                @if (!string.IsNullOrEmpty(competitionTypeId))
                                                 {
                                                     <li><i class="bi bi-trophy"></i> @competitionTypeDisplayName</li>
                                                 }

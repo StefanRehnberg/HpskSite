@@ -44,6 +44,7 @@ namespace HpskSite.Controllers
         private readonly ClubService _clubService;
         private readonly SeriesCalculationService _seriesCalculationService;
         private readonly AdminAuthorizationService _adminAuthorizationService;
+        private readonly EmailService _emailService;
 
         public CompetitionResultsController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -61,7 +62,8 @@ namespace HpskSite.Controllers
             UmbracoStartListRepository startListRepository,
             ClubService clubService,
             SeriesCalculationService seriesCalculationService,
-            AdminAuthorizationService adminAuthorizationService)
+            AdminAuthorizationService adminAuthorizationService,
+            EmailService emailService)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _contentService = contentService;
@@ -76,6 +78,7 @@ namespace HpskSite.Controllers
             _clubService = clubService;
             _seriesCalculationService = seriesCalculationService;
             _adminAuthorizationService = adminAuthorizationService;
+            _emailService = emailService;
         }
 
         [HttpPost]
@@ -441,11 +444,60 @@ namespace HpskSite.Controllers
                     return Json(new DistributedStatusResponse { Success = false, Message = "Du har inte behörighet." });
                 }
 
+                // Build available classes from competition's shootingClassIds
+                var availableClasses = new List<AvailableClass>();
+                var classIdsRaw = competition.GetValue<string>("shootingClassIds");
+                if (!string.IsNullOrEmpty(classIdsRaw))
+                {
+                    string[] classIdArray;
+                    if (classIdsRaw.TrimStart().StartsWith("["))
+                    {
+                        try { classIdArray = System.Text.Json.JsonSerializer.Deserialize<string[]>(classIdsRaw) ?? Array.Empty<string>(); }
+                        catch { classIdArray = Array.Empty<string>(); }
+                    }
+                    else
+                    {
+                        classIdArray = classIdsRaw.Split(',').Select(s => s.Trim()).Where(s => !string.IsNullOrEmpty(s)).ToArray();
+                    }
+
+                    foreach (var classId in classIdArray)
+                    {
+                        var sc = HpskSite.Models.ShootingClasses.GetById(classId);
+                        availableClasses.Add(new AvailableClass
+                        {
+                            Id = classId,
+                            Name = sc?.Name ?? classId
+                        });
+                    }
+                }
+
+                // Build authorized clubs — anyone who can access distributed entry
+                // can quick-register shooters from any club (open competitions)
+                var authorizedClubs = new List<AuthorizedClub>();
+                foreach (var club in _clubService.GetAllClubs())
+                {
+                    authorizedClubs.Add(new AuthorizedClub { Id = club.Id, Name = club.Name });
+                }
+
+                var callerPrimaryClubId = int.TryParse(memberData.GetValue<string>("primaryClubId"), out int cpId) ? cpId : 0;
+
                 // Get all registrations
+                var maxSeries = competition.GetValue<int>("numberOfSeriesOrStations");
+                if (maxSeries <= 0) maxSeries = 6;
+
                 var registrations = await _startListRepository.GetCompetitionRegistrations(competitionId);
                 if (registrations == null || !registrations.Any())
                 {
-                    return Json(new DistributedStatusResponse { Success = true, IsActive = isActive, MaxSeries = competition.GetValue<int>("numberOfSeriesOrStations"), Members = new List<DistributedMemberStatus>() });
+                    return Json(new DistributedStatusResponse
+                    {
+                        Success = true,
+                        IsActive = isActive,
+                        MaxSeries = maxSeries,
+                        Members = new List<DistributedMemberStatus>(),
+                        AvailableClasses = availableClasses,
+                        AuthorizedClubs = authorizedClubs.OrderBy(c => c.Name).ToList(),
+                        CallerClubId = callerPrimaryClubId
+                    });
                 }
 
                 // Filter to members the caller can enter for
@@ -474,10 +526,6 @@ namespace HpskSite.Controllers
                     existingResults = await db.FetchAsync<PrecisionResultEntry>(
                         "WHERE CompetitionId = @0", competitionId);
                 }
-
-                // Build response
-                var maxSeries = competition.GetValue<int>("numberOfSeriesOrStations");
-                if (maxSeries <= 0) maxSeries = 6;
 
                 var members = authorizedRegistrations
                     .Select(r =>
@@ -522,13 +570,250 @@ namespace HpskSite.Controllers
                     Success = true,
                     IsActive = isActive,
                     MaxSeries = maxSeries,
-                    Members = members
+                    Members = members,
+                    AvailableClasses = availableClasses,
+                    AuthorizedClubs = authorizedClubs.OrderBy(c => c.Name).ToList(),
+                    CallerClubId = callerPrimaryClubId
                 });
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error in GetDistributedStatus for competition {CompetitionId}", competitionId);
                 return Json(new DistributedStatusResponse { Success = false, Message = "Ett fel uppstod: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Quick-register a brand new shooter: creates member account + registers for competition.
+        /// For use by club admins / skjutledare / competition managers at the range.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> QuickRegisterShooter([FromBody] QuickRegisterRequest request)
+        {
+            try
+            {
+                // Basic validation
+                if (request == null || request.CompetitionId <= 0 ||
+                    string.IsNullOrWhiteSpace(request.FirstName) ||
+                    string.IsNullOrWhiteSpace(request.LastName) ||
+                    string.IsNullOrWhiteSpace(request.Email) ||
+                    request.ClubId <= 0 ||
+                    string.IsNullOrWhiteSpace(request.ShootingClass))
+                {
+                    return Json(new { success = false, message = "Alla fält måste fyllas i." });
+                }
+
+                var email = request.Email.Trim().ToLowerInvariant();
+                var firstName = request.FirstName.Trim();
+                var lastName = request.LastName.Trim();
+                var fullName = $"{firstName} {lastName}";
+
+                // Validate email format
+                try { var addr = new System.Net.Mail.MailAddress(email); }
+                catch { return Json(new { success = false, message = "Ogiltig e-postadress." }); }
+
+                // 1. Competition validation
+                var competition = _contentService.GetById(request.CompetitionId);
+                if (competition == null)
+                    return Json(new { success = false, message = "Tävlingen hittades inte." });
+
+                if (!competition.GetValue<bool>("allowSelfReporting"))
+                    return Json(new { success = false, message = "Denna tävling tillåter inte resultatrapportering." });
+
+                if (competition.GetValue<bool>("isExternal"))
+                    return Json(new { success = false, message = "Externa tävlingar stöder inte denna funktion." });
+
+                // Check date range
+                var compDate = competition.GetValue<DateTime?>("competitionDate");
+                var compEndDate = competition.GetValue<DateTime?>("competitionEndDate");
+                var now = DateTime.Now;
+                if (compDate.HasValue)
+                {
+                    var effectiveEnd = (compEndDate.HasValue && compEndDate.Value.Year > 1900)
+                        ? compEndDate.Value.Date.AddDays(1)
+                        : compDate.Value.Date.AddDays(1);
+                    if (now.Date < compDate.Value.Date || now >= effectiveEnd)
+                        return Json(new { success = false, message = "Registrering är bara möjlig under tävlingsperioden." });
+                }
+
+                // 2. Validate shooting class is valid for this competition
+                var classIdsRaw = competition.GetValue<string>("shootingClassIds");
+                var validClassIds = new List<string>();
+                if (!string.IsNullOrEmpty(classIdsRaw))
+                {
+                    if (classIdsRaw.TrimStart().StartsWith("["))
+                    {
+                        try { validClassIds = System.Text.Json.JsonSerializer.Deserialize<List<string>>(classIdsRaw) ?? new List<string>(); }
+                        catch { /* empty */ }
+                    }
+                    else
+                    {
+                        validClassIds = classIdsRaw.Split(',').Select(s => s.Trim()).Where(s => !string.IsNullOrEmpty(s)).ToList();
+                    }
+                }
+                if (!validClassIds.Contains(request.ShootingClass))
+                    return Json(new { success = false, message = "Ogiltigt val av skytteklass." });
+
+                // 3. Authorization
+                var currentMember = await _memberManager.GetCurrentMemberAsync();
+                if (currentMember == null)
+                    return Json(new { success = false, message = "Du måste vara inloggad." });
+
+                var callerData = _memberService.GetByEmail(currentMember.Email ?? "");
+                if (callerData == null)
+                    return Json(new { success = false, message = "Kunde inte hitta din profil." });
+
+                bool isSiteAdmin = await _adminAuthorizationService.IsCurrentUserAdminAsync();
+                bool isCompetitionManager = await _adminAuthorizationService.IsCompetitionManager(request.CompetitionId);
+
+                // Auth: caller must have distributed entry access (club admin or skjutledare for ANY of their clubs)
+                // This allows open competitions where a skjutledare registers shooters from other clubs
+                var managedClubIds = await _adminAuthorizationService.GetManagedClubIds();
+                var skjutledareClubIds = await _adminAuthorizationService.GetSkjutledareClubIds();
+                bool isClubAdmin = managedClubIds.Contains(request.ClubId);
+                bool hasAnyClubRole = managedClubIds.Any() || skjutledareClubIds.Any();
+
+                if (!isSiteAdmin && !isCompetitionManager && !hasAnyClubRole)
+                    return Json(new { success = false, message = "Du har inte behörighet att registrera skyttar." });
+
+                // 4. Check email uniqueness
+                var existingMember = _memberService.GetByEmail(email);
+                if (existingMember != null)
+                    return Json(new { success = false, message = "Det finns redan en medlem med denna e-postadress." });
+
+                // 5. Create member (include invitation token in the single save)
+                var invitationToken = Guid.NewGuid().ToString("N");
+                var tokenExpiry = DateTime.UtcNow.AddDays(7);
+
+                var newMember = _memberService.CreateMember(email, email, fullName, "hpskMember");
+                newMember.SetValue("firstName", firstName);
+                newMember.SetValue("lastName", lastName);
+                newMember.SetValue("primaryClubId", request.ClubId.ToString());
+                newMember.SetValue("invitationToken", invitationToken);
+                newMember.SetValue("invitationTokenExpiry", tokenExpiry.ToString("o"));
+                newMember.IsApproved = true;
+                _memberService.Save(newMember);
+                _memberService.AssignRole(newMember.Id, "Users");
+
+                _logger.LogInformation("QuickRegisterShooter: Created member {MemberId} ({Name}) for club {ClubId}",
+                    newMember.Id, fullName, request.ClubId);
+
+                // 6. Register for competition (create registration document)
+                IContent registrationsHub;
+                var children = _contentService.GetPagedChildren(competition.Id, 0, 100, out _);
+                var existingHub = children.FirstOrDefault(c =>
+                    c.ContentType.Alias == "competitionRegistrationsHub" ||
+                    c.Name.Contains("Anmälningar") ||
+                    c.Name.Contains("Registration"));
+
+                if (existingHub != null)
+                {
+                    registrationsHub = existingHub;
+                }
+                else
+                {
+                    var hubContentType = _contentTypeService.Get("competitionRegistrationsHub")
+                                      ?? _contentTypeService.Get("contentPage");
+                    var newHub = _contentService.Create("Anmälningar", competition, hubContentType.Alias);
+                    if (hubContentType.Alias == "contentPage")
+                    {
+                        newHub.SetValue("pageTitle", "Anmälningar");
+                        newHub.SetValue("bodyText", "<p>Alla anmälningar för denna tävling.</p>");
+                    }
+                    _contentService.Save(newHub);
+                    _contentService.Publish(newHub, Array.Empty<string>());
+                    registrationsHub = newHub;
+                }
+
+                var shootingClassesArray = new[] { new { @class = request.ShootingClass, startPreference = "Inget" } };
+                var shootingClassesJson = System.Text.Json.JsonSerializer.Serialize(shootingClassesArray);
+
+                var registrationName = $"{fullName} - {DateTime.Now:yyyy-MM-dd}";
+                var registration = _contentService.Create(registrationName, registrationsHub, "competitionRegistration");
+                registration.SetValue("competitionId", request.CompetitionId);
+                registration.SetValue("memberId", newMember.Id);
+                registration.SetValue("memberName", fullName);
+                registration.SetValue("isActive", true);
+                registration.SetValue("clubId", request.ClubId);
+                registration.SetValue("shootingClasses", shootingClassesJson);
+                registration.SetValue("registrationDate", DateTime.Now);
+                registration.SetValue("registeredBy", $"{callerData.Name} (snabbregistrering)");
+                _contentService.Save(registration);
+                _contentService.Publish(registration, new[] { "*" });
+
+                _logger.LogInformation("QuickRegisterShooter: Created registration {RegId} for member {MemberId} in competition {CompId}",
+                    registration.Id, newMember.Id, request.CompetitionId);
+
+                // 7. Send invitation email (all DB work is done, only SMTP remains)
+                var invitationClubName = _clubService.GetClubNameById(request.ClubId) ?? "din klubb";
+                try
+                {
+                    await _emailService.SendMemberInvitationAsync(email, fullName, invitationToken, invitationClubName);
+                    _logger.LogInformation("QuickRegisterShooter: Invitation email sent to {Email}", email);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "QuickRegisterShooter: Failed to send invitation email to {Email}", email);
+                }
+
+                // 8. If caller is NOT a club admin, notify club admins
+                if (!isClubAdmin && !isSiteAdmin)
+                {
+                    try
+                    {
+                        var clubAdminGroupName = $"ClubAdmin_{request.ClubId}";
+
+                        // Direct SQL instead of GetAll + N+1 GetAllRoles (which causes SQL timeout)
+                        List<string> clubAdminEmails;
+                        using (var db = _umbracoDatabaseFactory.CreateDatabase())
+                        {
+                            clubAdminEmails = await db.FetchAsync<string>(@"
+                                SELECT DISTINCT cm.Email
+                                FROM cmsMember2MemberGroup m2g
+                                INNER JOIN cmsMember cm ON m2g.Member = cm.nodeId
+                                INNER JOIN umbracoNode grp ON m2g.MemberGroup = grp.id
+                                WHERE grp.text = @0
+                                  AND cm.Email IS NOT NULL AND cm.Email <> ''",
+                                clubAdminGroupName);
+                        }
+
+                        if (clubAdminEmails.Any())
+                        {
+                            var callerName = $"{callerData.GetValue<string>("firstName")} {callerData.GetValue<string>("lastName")}".Trim();
+                            if (string.IsNullOrEmpty(callerName)) callerName = callerData.Name;
+                            var clubName = _clubService.GetClubNameById(request.ClubId) ?? "Okänd klubb";
+                            await _emailService.SendMemberAddedByNonAdminAsync(clubAdminEmails, fullName, callerName, clubName);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "QuickRegisterShooter: Failed to send club admin notification");
+                    }
+                }
+
+                // 9. Return the new member in distributed status format
+                var clubDisplayName = _clubService.GetClubNameById(request.ClubId) ?? "";
+                var sc = HpskSite.Models.ShootingClasses.GetById(request.ShootingClass);
+
+                return Json(new
+                {
+                    success = true,
+                    message = $"{fullName} har registrerats och anmälts till tävlingen.",
+                    member = new DistributedMemberStatus
+                    {
+                        MemberId = newMember.Id,
+                        Name = fullName,
+                        Club = clubDisplayName,
+                        ShootingClass = request.ShootingClass,
+                        CompletedSeries = new List<DistributedSeriesStatus>()
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in QuickRegisterShooter");
+                return Json(new { success = false, message = "Ett oväntat fel uppstod: " + ex.Message });
             }
         }
 

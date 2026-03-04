@@ -441,6 +441,46 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// Send notification to club admins when a non-admin (skjutledare/competition manager)
+        /// quick-registers a new member in their club.
+        /// </summary>
+        public async Task SendMemberAddedByNonAdminAsync(
+            List<string> clubAdminEmails,
+            string newMemberName,
+            string addedByName,
+            string clubName)
+        {
+            if (clubAdminEmails == null || !clubAdminEmails.Any())
+            {
+                _logger.LogWarning("No club admin emails provided for SendMemberAddedByNonAdminAsync");
+                return;
+            }
+
+            var subject = $"Ny medlem tillagd i {clubName}: {newMemberName}";
+            var body = $@"
+<html>
+<body>
+    <h2>Ny medlem tillagd i {clubName}</h2>
+    <p><strong>{addedByName}</strong> har lagt till en ny medlem (<strong>{newMemberName}</strong>) i <strong>{clubName}</strong> via snabbregistrering vid en tävling.</p>
+    <p>Gå till klubbadmin-sidan för att granska medlemmen.</p>
+    <p>Med vänliga hälsningar,<br/>Pistol.nu</p>
+</body>
+</html>";
+
+            foreach (var email in clubAdminEmails)
+            {
+                try
+                {
+                    await SendEmailAsync(email, subject, body);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to send member-added notification to {Email}", email);
+                }
+            }
+        }
+
+        /// <summary>
         /// Send confirmation email to admin when an invitation is sent to a member
         /// Notifies both the sending admin and the general admin email
         /// </summary>

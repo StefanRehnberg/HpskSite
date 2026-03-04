@@ -366,7 +366,7 @@
                             </div>
                         </div>
                         <div class="card-body">
-                            <p class="card-text">@seriesShortDescription</p>
+                            <p class="card-text">@Html.Raw(System.Net.WebUtility.HtmlDecode(seriesShortDescription))</p>
                             <ul class="list-unstyled small">
                                 @if (seriesStartDate != DateTime.MinValue && seriesEndDate != DateTime.MinValue)
                                 {
@@ -630,7 +630,7 @@
                                             <small class="text-muted ms-1">@durationInfo</small>
                                         </li>
                                         <li><i class="bi bi-geo-alt"></i> @venue</li>
-                                        @if (competitionTypeObj != null)
+                                        @if (!string.IsNullOrEmpty(competitionTypeId))
                                         {
                                             <li><i class="bi bi-trophy"></i> @competitionTypeDisplayName</li>
                                         }
@@ -764,7 +764,7 @@
                                 <div class="fw-bold"><i class="bi bi-trophy"></i> @seriesName</div>
                                 @if (!string.IsNullOrEmpty(seriesShortDescription))
                                 {
-                                    <small class="text-muted">@seriesShortDescription</small>
+                                    <small class="text-muted">@Html.Raw(System.Net.WebUtility.HtmlDecode(seriesShortDescription))</small>
                                 }
                             </td>
 
