@@ -1165,7 +1165,10 @@ namespace HpskSite.Controllers
                     if (node.ContentType.Alias == "competition")
                     {
                         var compDate = node.Value<DateTime?>("competitionDate");
-                        if (!compDate.HasValue || compDate.Value.Date < today) continue;
+                        var compEndDate = node.Value<DateTime?>("competitionEndDate");
+                        // Include if start date is today or future, OR if end date is today or future (ongoing multi-day)
+                        var effectiveEndDate = compEndDate.HasValue && compEndDate.Value.Date >= compDate?.Date ? compEndDate.Value.Date : compDate?.Date;
+                        if (!compDate.HasValue || (effectiveEndDate.HasValue && effectiveEndDate.Value < today)) continue;
 
                         var compName = node.Value<string>("competitionName") ?? node.Name;
                         var parentSeriesName = (string)null;
