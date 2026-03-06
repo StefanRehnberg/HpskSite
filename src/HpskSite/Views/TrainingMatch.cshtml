@@ -114,6 +114,7 @@
                 <div class="card-body">
                     <h6 class="mb-2" id="activeMatchNameMobile">-</h6>
                     <div class="d-flex align-items-center mb-2">
+                        <span id="activeMatchDisciplineIconMobile" class="me-1"></span>
                         <span class="badge bg-info text-dark me-2" id="activeMatchWeaponBadgeMobile">-</span>
                         <small class="text-muted" id="activeMatchParticipantsMobile">- deltagare</small>
                     </div>
@@ -138,6 +139,7 @@
                         <div class="card-body">
                             <h6 class="mb-2" id="activeMatchNameDesktop">-</h6>
                             <div class="d-flex align-items-center mb-2">
+                                <span id="activeMatchDisciplineIconDesktop" class="me-1"></span>
                                 <span class="badge bg-info text-dark me-2" id="activeMatchWeaponBadgeDesktop">-</span>
                                 <small class="text-muted" id="activeMatchParticipantsDesktop">- deltagare</small>
                             </div>
@@ -516,6 +518,7 @@
 
         // Store pending match code for after shooter class is set
         let pendingJoinMatchCode = null;
+        let pendingJoinDiscipline = 'Precision';
 
         // Join match by code
         async function joinMatchByCode(code, teamId = null) {
@@ -556,6 +559,7 @@
                 } else if (result.needsShooterClass) {
                     // User needs to set their shooter class before joining handicap match
                     pendingJoinMatchCode = code;
+                    pendingJoinDiscipline = result.discipline || 'Precision';
                     showShooterClassModal();
                 } else {
                     alert(result.message || 'Kunde inte gå med i matchen');
@@ -602,7 +606,7 @@
                         'Content-Type': 'application/json',
                         'RequestVerificationToken': token || ''
                     },
-                    body: JSON.stringify({ shooterClass: selectedClass })
+                    body: JSON.stringify({ shooterClass: selectedClass, discipline: pendingJoinDiscipline || 'Precision' })
                 });
                 const result = await response.json();
 
@@ -879,6 +883,10 @@
             const matchName = match.matchName || match.matchCode;
             const weaponBadge = 'Klass ' + match.weaponClass;
             const participantCount = (match.participants?.length || 0) + ' deltagare';
+            const discipline = match.discipline || 'Precision';
+            const disciplineIconHtml = (discipline !== 'Precision')
+                ? `<img src="/images/competition-types/${discipline}.png" alt="${discipline}" style="height: 18px; width: auto;" title="${discipline}">`
+                : '';
 
             // Update mobile card
             if (mobileCard) {
@@ -887,6 +895,8 @@
                 document.getElementById('activeMatchWeaponBadgeMobile').textContent = weaponBadge;
                 document.getElementById('activeMatchParticipantsMobile').textContent = participantCount;
                 document.getElementById('activeMatchScoreMobile').textContent = scoreText;
+                const mobileDiscipline = document.getElementById('activeMatchDisciplineIconMobile');
+                if (mobileDiscipline) mobileDiscipline.innerHTML = disciplineIconHtml;
             }
 
             // Update desktop card
@@ -896,6 +906,8 @@
                 document.getElementById('activeMatchWeaponBadgeDesktop').textContent = weaponBadge;
                 document.getElementById('activeMatchParticipantsDesktop').textContent = participantCount;
                 document.getElementById('activeMatchScoreDesktop').textContent = scoreText;
+                const desktopDiscipline = document.getElementById('activeMatchDisciplineIconDesktop');
+                if (desktopDiscipline) desktopDiscipline.innerHTML = disciplineIconHtml;
             }
         }
 
@@ -910,8 +922,8 @@
         // Store pending create match data for after shooter class is set
         let pendingCreateMatchData = null;
 
-        function createMatch(matchName, weaponClass, startDate, isOpen = true, hasHandicap = false, isTeamMatch = false, maxShootersPerTeam = null, teams = null) {
-            console.log('createMatch called:', { matchName, weaponClass, startDate, isOpen, hasHandicap, isTeamMatch, maxShootersPerTeam, teams });
+        function createMatch(matchName, weaponClass, startDate, isOpen = true, hasHandicap = false, isTeamMatch = false, maxShootersPerTeam = null, teams = null, discipline = 'Precision') {
+            console.log('createMatch called:', { matchName, weaponClass, startDate, isOpen, hasHandicap, isTeamMatch, maxShootersPerTeam, teams, discipline });
             const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value;
             console.log('Token:', token ? 'present' : 'MISSING');
 
@@ -921,7 +933,8 @@
                 startDate: startDate,
                 isOpen: isOpen,
                 hasHandicap: hasHandicap,
-                isTeamMatch: isTeamMatch
+                isTeamMatch: isTeamMatch,
+                discipline: discipline
             };
 
             if (isTeamMatch) {
@@ -950,8 +963,8 @@
                     loadMatch(result.matchCode);
                 } else if (result.needsShooterClass) {
                     // User needs to set their shooter class before creating handicap match
-                    pendingCreateMatchData = { matchName, weaponClass, startDate, isOpen, hasHandicap, isTeamMatch, maxShootersPerTeam, teams };
-                    showShooterClassModalForCreate();
+                    pendingCreateMatchData = { matchName, weaponClass, startDate, isOpen, hasHandicap, isTeamMatch, maxShootersPerTeam, teams, discipline };
+                    showShooterClassModalForCreate(result.discipline || discipline);
                 } else {
                     alert(result.message || 'Kunde inte skapa matchen');
                 }
@@ -963,15 +976,15 @@
         }
 
         // Show shooter class modal for creating a match
-        function showShooterClassModalForCreate() {
+        function showShooterClassModalForCreate(discipline) {
             // Update modal to use create handler
             const saveBtn = document.getElementById('saveShooterClassBtn');
-            saveBtn.onclick = saveShooterClassAndCreate;
+            saveBtn.onclick = () => saveShooterClassAndCreate(discipline);
             showShooterClassModal();
         }
 
         // Save shooter class and retry creating match
-        async function saveShooterClassAndCreate() {
+        async function saveShooterClassAndCreate(discipline) {
             const selectedClass = document.querySelector('input[name="shooterClassRadio"]:checked')?.value;
             if (!selectedClass) {
                 alert('Välj en skytteklass');
@@ -991,7 +1004,7 @@
                         'Content-Type': 'application/json',
                         'RequestVerificationToken': token || ''
                     },
-                    body: JSON.stringify({ shooterClass: selectedClass })
+                    body: JSON.stringify({ shooterClass: selectedClass, discipline: discipline || 'Precision' })
                 });
                 const result = await response.json();
 
@@ -1015,7 +1028,8 @@
                                 pendingCreateMatchData.hasHandicap,
                                 pendingCreateMatchData.isTeamMatch,
                                 pendingCreateMatchData.maxShootersPerTeam,
-                                pendingCreateMatchData.teams
+                                pendingCreateMatchData.teams,
+                                pendingCreateMatchData.discipline
                             );
                             pendingCreateMatchData = null;
                         }, 500);
@@ -1919,6 +1933,10 @@
                 // Chevron indicator to show it's tappable
                 const chevron = '<i class="bi bi-chevron-right text-body-tertiary"></i>';
 
+                const disciplineIcon = (m.discipline && m.discipline !== 'Precision')
+                    ? `<img src="/images/competition-types/${m.discipline}.png" alt="${m.discipline}" style="height: 18px; width: auto;" class="me-1" title="${m.discipline}">`
+                    : '';
+
                 return `
                     <div class="list-group-item list-group-item-action match-list-item" onclick="showMatchActionModal(window.ongoingMatchesData[${index}])">
                         <div class="d-flex align-items-center gap-2">
@@ -1928,7 +1946,7 @@
                             <!-- Match info -->
                             <div class="flex-grow-1 min-width-0">
                                 <div class="d-flex align-items-center gap-1">
-                                    ${lockIcon}
+                                    ${disciplineIcon}${lockIcon}
                                     <span class="match-name text-truncate">${m.matchName || m.matchCode}</span>
                                     ${myMatchDot}
                                 </div>
@@ -1964,6 +1982,16 @@
             const badge = document.getElementById('matchActionWeaponBadge');
             badge.textContent = match.weaponClass;
             badge.className = `badge bg-${weaponColor} me-2`;
+
+            // Discipline icon
+            const disciplineContainer = document.getElementById('matchActionDisciplineIcon');
+            if (disciplineContainer) {
+                if (match.discipline && match.discipline !== 'Precision') {
+                    disciplineContainer.innerHTML = `<img src="/images/competition-types/${match.discipline}.png" alt="${match.discipline}" style="height: 20px; width: auto;" class="me-1" title="${match.discipline}">`;
+                } else {
+                    disciplineContainer.innerHTML = '';
+                }
+            }
 
             // Participant avatars (show up to 5)
             const avatarsContainer = document.getElementById('matchActionParticipants');
@@ -2162,6 +2190,10 @@
                        </button>`
                     : '';
 
+                const upcomingDisciplineIcon = (m.discipline && m.discipline !== 'Precision')
+                    ? `<img src="/images/competition-types/${m.discipline}.png" alt="${m.discipline}" style="height: 18px; width: auto;" class="me-1" title="${m.discipline}">`
+                    : '';
+
                 return `
                     <div class="list-group-item list-group-item-action match-list-item" onclick="viewMatchAsSpectator('${m.matchCode}')">
                         <div class="d-flex align-items-center gap-2">
@@ -2171,7 +2203,7 @@
                             <!-- Match info -->
                             <div class="flex-grow-1 min-width-0">
                                 <div class="d-flex align-items-center gap-1">
-                                    ${lockIcon}
+                                    ${upcomingDisciplineIcon}${lockIcon}
                                     <span class="match-name text-truncate">${m.matchName || m.matchCode}</span>
                                     ${myMatchDot}
                                 </div>
@@ -2963,6 +2995,7 @@
         <div class="modal-content">
             <div class="modal-header bg-primary text-white">
                 <h5 class="modal-title">
+                    <span id="matchActionDisciplineIcon"></span>
                     <span id="matchActionWeaponBadge" class="badge me-2">C</span>
                     <span id="matchActionMatchName">Match</span>
                 </h5>

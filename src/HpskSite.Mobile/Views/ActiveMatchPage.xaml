@@ -86,6 +86,18 @@
                                    TextColor="White" VerticalOptions="Center"
                                    LineBreakMode="TailTruncation" />
                             <HorizontalStackLayout Spacing="6">
+                                <!--  Discipline badge (non-Precision only)  -->
+                                <Border Padding="5,1" BackgroundColor="#fff3cd"
+                                        StrokeShape="RoundRectangle 3" StrokeThickness="0" VerticalOptions="Center">
+                                    <Border.Triggers>
+                                        <DataTrigger Binding="{Binding Match.Discipline}" TargetType="Border" Value="Precision">
+                                            <Setter Property="IsVisible" Value="False" />
+                                        </DataTrigger>
+                                    </Border.Triggers>
+                                    <Label FontAttributes="Bold" FontSize="10"
+                                           Text="{Binding Match.Discipline}"
+                                           TextColor="#856404" />
+                                </Border>
                                 <Label FontSize="11" Opacity="0.9"
                                        Text="{Binding Match.WeaponClass, StringFormat='Klass {0}'}"
                                        TextColor="White" VerticalOptions="Center" />

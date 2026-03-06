@@ -72,6 +72,26 @@
                             </Border>
                         </VerticalStackLayout>
 
+                        <!--  Discipline Field  -->
+                        <VerticalStackLayout Spacing="6">
+                            <HorizontalStackLayout Spacing="6">
+                                <Label FontSize="14" Text="🏅" VerticalOptions="Center" />
+                                <Label FontAttributes="Bold" FontSize="14" Text="Disciplin"
+                                       TextColor="{StaticResource Gray200}"
+                                       VerticalOptions="Center" />
+                            </HorizontalStackLayout>
+                            <Border Padding="12,0"
+                                    BackgroundColor="{StaticResource Gray600}"
+                                    HeightRequest="48"
+                                    Stroke="{StaticResource Gray500}"
+                                    StrokeShape="RoundRectangle 8">
+                                <Picker Title="Välj disciplin"
+                                        ItemsSource="{Binding Disciplines}"
+                                        SelectedItem="{Binding SelectedDiscipline}"
+                                        VerticalOptions="Center" />
+                            </Border>
+                        </VerticalStackLayout>
+
                         <!--  Weapon Class Field  -->
                         <VerticalStackLayout Spacing="6">
                             <HorizontalStackLayout Spacing="6">

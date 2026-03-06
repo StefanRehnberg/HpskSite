@@ -28,6 +28,14 @@
                     </div>
 
                     <div class="mb-3">
+                        <label for="createDiscipline" class="form-label fw-semibold">Disciplin</label>
+                        <select class="form-select" id="createDiscipline">
+                            <option value="Precision" selected>Precisionsskytte</option>
+                            <option value="Milsnabb">Milsnabb</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
                         <label for="createWeaponClass" class="form-label">Vapenklass</label>
                         <select class="form-select" id="createWeaponClass" required>
                             <option value="C" selected>C - Kal. 22</option>
@@ -371,6 +379,7 @@ function handleCreateMatch(e) {
     console.log('handleCreateMatch called');
 
     const matchName = document.getElementById('createMatchName').value.trim();
+    const discipline = document.getElementById('createDiscipline').value;
     const weaponClass = document.getElementById('createWeaponClass').value;
     const startDateStr = document.getElementById('createStartDate').value.trim();
     const isOpen = document.getElementById('createIsOpen').checked;
@@ -413,6 +422,6 @@ function handleCreateMatch(e) {
         createMatchModalInstance.hide();
     }
 
-    createMatch(matchName || null, weaponClass, startDate, isOpen, hasHandicap, isTeamMatch, maxShootersPerTeam, teams);
+    createMatch(matchName || null, weaponClass, startDate, isOpen, hasHandicap, isTeamMatch, maxShootersPerTeam, teams, discipline);
 }
 </script>

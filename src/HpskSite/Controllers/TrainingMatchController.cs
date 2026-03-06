@@ -164,17 +164,23 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Medlem hittades inte" });
                 }
 
+                var discipline = request.Discipline ?? "Precision";
+
                 // If creating a handicap match, require shooter class to be set
                 if (request.HasHandicap)
                 {
-                    var shooterClass = member.GetValue<string>("precisionShooterClass");
+                    var shooterClassProp = discipline == "Milsnabb" ? "milsnabbShooterClass" : "precisionShooterClass";
+                    var shooterClass = member.HasProperty(shooterClassProp) ? member.GetValue<string>(shooterClassProp) : null;
                     if (string.IsNullOrEmpty(shooterClass))
                     {
                         return Json(new
                         {
                             success = false,
                             needsShooterClass = true,
-                            message = "Du måste välja din skytteklass för att kunna skapa en handicapmatch"
+                            discipline = discipline,
+                            message = discipline == "Milsnabb"
+                                ? "Du måste välja din skytteklass för Milsnabb (under Handikapp-fliken) för att kunna skapa en handicapmatch"
+                                : "Du måste välja din skytteklass för att kunna skapa en handicapmatch"
                         });
                     }
                 }
@@ -188,7 +194,7 @@ namespace HpskSite.Controllers
                     int attempts = 0;
                     while (attempts < 10)
                     {
-                        var existing = db.SingleOrDefault<dynamic>(
+                        var existing = db.FirstOrDefault<dynamic>(
                             "SELECT Id FROM TrainingMatches WHERE MatchCode = @0", matchCode);
                         if (existing == null) break;
                         matchCode = TrainingMatch.GenerateMatchCode();
@@ -232,7 +238,8 @@ namespace HpskSite.Controllers
                         IsOpen = request.IsOpen,
                         HasHandicap = hasHandicap,
                         IsTeamMatch = isTeamMatch,
-                        MaxShootersPerTeam = isTeamMatch ? request.MaxShootersPerTeam : null
+                        MaxShootersPerTeam = isTeamMatch ? request.MaxShootersPerTeam : null,
+                        Discipline = discipline
                     });
 
                     // Set LastActivityDate (separate query — column may not exist yet)
@@ -240,7 +247,7 @@ namespace HpskSite.Controllers
                     catch { /* Column not yet added — migration pending */ }
 
                     // Get the new match ID
-                    var newMatch = db.SingleOrDefault<dynamic>(
+                    var newMatch = db.FirstOrDefault<dynamic>(
                         "SELECT Id FROM TrainingMatches WHERE MatchCode = @0", matchCode);
 
                     if (newMatch != null)
@@ -268,7 +275,7 @@ namespace HpskSite.Controllers
                             if (creatorClubId > 0)
                             {
                                 // Try to find team with matching club
-                                var matchingTeam = db.SingleOrDefault<dynamic>(
+                                var matchingTeam = db.FirstOrDefault<dynamic>(
                                     "SELECT Id FROM TrainingMatchTeams WHERE TrainingMatchId = @0 AND ClubId = @1",
                                     matchId, creatorClubId);
                                 if (matchingTeam != null)
@@ -280,7 +287,7 @@ namespace HpskSite.Controllers
                             // If no matching club team, assign to first team
                             if (!creatorTeamId.HasValue)
                             {
-                                var firstTeam = db.SingleOrDefault<dynamic>(
+                                var firstTeam = db.FirstOrDefault<dynamic>(
                                     "SELECT Id FROM TrainingMatchTeams WHERE TrainingMatchId = @0 ORDER BY TeamNumber",
                                     matchId);
                                 if (firstTeam != null)
@@ -297,10 +304,11 @@ namespace HpskSite.Controllers
                         if (hasHandicap)
                         {
                             // Recalculate statistics before getting handicap to ensure it's up-to-date
-                            await _statisticsService.RecalculateFromHistoryAsync(member.Id, weaponClass);
+                            await _statisticsService.RecalculateFromHistoryAsync(member.Id, weaponClass, discipline);
 
                             var stats = await _statisticsService.GetStatisticsAsync(member.Id, weaponClass);
-                            var shooterClass = member.GetValue<string>("precisionShooterClass");
+                            var shooterClassPropCreate = discipline == "Milsnabb" ? "milsnabbShooterClass" : "precisionShooterClass";
+                            var shooterClass = member.HasProperty(shooterClassPropCreate) ? member.GetValue<string>(shooterClassPropCreate) : null;
                             var profile = _handicapCalculator.CalculateHandicap(stats, shooterClass);
                             frozenHandicap = profile.HandicapPerSeries;
                             frozenIsProvisional = profile.IsProvisional;
@@ -380,7 +388,7 @@ namespace HpskSite.Controllers
                 using (var db = _databaseFactory.CreateDatabase())
                 {
                     // Get match
-                    var match = db.SingleOrDefault<dynamic>(
+                    var match = db.FirstOrDefault<dynamic>(
                         "SELECT * FROM TrainingMatches WHERE MatchCode = @0", matchCode);
 
                     if (match == null)
@@ -425,7 +433,7 @@ namespace HpskSite.Controllers
                             profilePictureUrl = "";
                             if (p.GuestParticipantId != null)
                             {
-                                var guest = db.SingleOrDefault<dynamic>(
+                                var guest = db.FirstOrDefault<dynamic>(
                                     "SELECT DisplayName FROM TrainingMatchGuests WHERE Id = @0",
                                     (int)p.GuestParticipantId);
                                 if (guest != null)
@@ -443,7 +451,7 @@ namespace HpskSite.Controllers
                         dynamic? scoreRow = null;
                         if (memberId.HasValue)
                         {
-                            scoreRow = db.SingleOrDefault<dynamic>(
+                            scoreRow = db.FirstOrDefault<dynamic>(
                                 @"SELECT ts.Id, ts.SeriesScores, ts.TotalScore, ts.XCount
                                   FROM TrainingScores ts
                                   WHERE ts.MemberId = @0 AND ts.TrainingMatchId = @1",
@@ -451,7 +459,7 @@ namespace HpskSite.Controllers
                         }
                         else if (p.GuestParticipantId != null)
                         {
-                            scoreRow = db.SingleOrDefault<dynamic>(
+                            scoreRow = db.FirstOrDefault<dynamic>(
                                 @"SELECT ts.Id, ts.SeriesScores, ts.TotalScore, ts.XCount
                                   FROM TrainingScores ts
                                   WHERE ts.GuestParticipantId = @0 AND ts.TrainingMatchId = @1",
@@ -660,6 +668,7 @@ namespace HpskSite.Controllers
                             createdByMemberId = (int)match.CreatedByMemberId,
                             createdByName = creatorName,
                             weaponClass = (string)match.WeaponClass,
+                            discipline = (string)(match.Discipline ?? "Precision"),
                             createdDate = (DateTime)match.CreatedDate,
                             startDate = startDate,
                             hasStarted = hasStarted,
@@ -708,7 +717,7 @@ namespace HpskSite.Controllers
                 using (var db = _databaseFactory.CreateDatabase())
                 {
                     // Get match
-                    var match = db.SingleOrDefault<dynamic>(
+                    var match = db.FirstOrDefault<dynamic>(
                         "SELECT * FROM TrainingMatches WHERE MatchCode = @0", request.MatchCode?.ToUpper());
 
                     if (match == null)
@@ -724,7 +733,7 @@ namespace HpskSite.Controllers
                     // NOTE: Users CAN join before start time, they just can't enter scores until it starts
 
                     // Check if already a participant
-                    var existing = db.SingleOrDefault<dynamic>(
+                    var existing = db.FirstOrDefault<dynamic>(
                         @"SELECT Id FROM TrainingMatchParticipants
                           WHERE TrainingMatchId = @0 AND MemberId = @1",
                         (int)match.Id, member.Id);
@@ -771,7 +780,7 @@ namespace HpskSite.Controllers
                         }
 
                         // Validate the selected team
-                        var selectedTeam = db.SingleOrDefault<dynamic>(
+                        var selectedTeam = db.FirstOrDefault<dynamic>(
                             "SELECT * FROM TrainingMatchTeams WHERE Id = @0 AND TrainingMatchId = @1",
                             request.TeamId.Value, (int)match.Id);
 
@@ -806,7 +815,9 @@ namespace HpskSite.Controllers
 
                     if (hasHandicap)
                     {
-                        var shooterClass = member.GetValue<string>("precisionShooterClass");
+                        var joinDiscipline = (string)(match.Discipline ?? "Precision");
+                        var shooterClassPropJoin = joinDiscipline == "Milsnabb" ? "milsnabbShooterClass" : "precisionShooterClass";
+                        var shooterClass = member.HasProperty(shooterClassPropJoin) ? member.GetValue<string>(shooterClassPropJoin) : null;
 
                         // If handicap is enabled but user has no shooter class, require them to set it first
                         if (string.IsNullOrEmpty(shooterClass))
@@ -815,14 +826,17 @@ namespace HpskSite.Controllers
                             {
                                 success = false,
                                 needsShooterClass = true,
-                                message = "Du måste välja din skytteklass för att kunna gå med i en handicapmatch"
+                                discipline = joinDiscipline,
+                                message = joinDiscipline == "Milsnabb"
+                                    ? "Du måste välja din skytteklass för Milsnabb (under Handikapp-fliken) för att kunna gå med i en handicapmatch"
+                                    : "Du måste välja din skytteklass för att kunna gå med i en handicapmatch"
                             });
                         }
 
                         var weaponClass = (string)match.WeaponClass;
 
                         // Recalculate statistics before getting handicap to ensure it's up-to-date
-                        await _statisticsService.RecalculateFromHistoryAsync(member.Id, weaponClass);
+                        await _statisticsService.RecalculateFromHistoryAsync(member.Id, weaponClass, joinDiscipline);
 
                         var stats = await _statisticsService.GetStatisticsAsync(member.Id, weaponClass);
                         var profile = _handicapCalculator.CalculateHandicap(stats, shooterClass);
@@ -846,7 +860,7 @@ namespace HpskSite.Controllers
                     string? teamName = null;
                     if (teamId.HasValue)
                     {
-                        var team = db.SingleOrDefault<dynamic>(
+                        var team = db.FirstOrDefault<dynamic>(
                             "SELECT TeamName FROM TrainingMatchTeams WHERE Id = @0", teamId.Value);
                         teamName = team?.TeamName;
                     }
@@ -903,7 +917,7 @@ namespace HpskSite.Controllers
                 using (var db = _databaseFactory.CreateDatabase())
                 {
                     // Get match
-                    var match = db.SingleOrDefault<dynamic>(
+                    var match = db.FirstOrDefault<dynamic>(
                         "SELECT * FROM TrainingMatches WHERE MatchCode = @0", request.MatchCode);
 
                     if (match == null)
@@ -971,7 +985,7 @@ namespace HpskSite.Controllers
                 using (var db = _databaseFactory.CreateDatabase())
                 {
                     // Get match
-                    var match = db.SingleOrDefault<dynamic>(
+                    var match = db.FirstOrDefault<dynamic>(
                         "SELECT * FROM TrainingMatches WHERE MatchCode = @0", request.MatchCode?.ToUpper());
 
                     if (match == null)
@@ -991,7 +1005,7 @@ namespace HpskSite.Controllers
                     }
 
                     // Check for duplicate team name
-                    var existingTeam = db.SingleOrDefault<dynamic>(
+                    var existingTeam = db.FirstOrDefault<dynamic>(
                         "SELECT Id FROM TrainingMatchTeams WHERE TrainingMatchId = @0 AND TeamName = @1",
                         (int)match.Id, request.TeamName.Trim());
 
@@ -1015,7 +1029,7 @@ namespace HpskSite.Controllers
                         DisplayOrder = maxTeamNumber
                     });
 
-                    var newTeam = db.SingleOrDefault<dynamic>(
+                    var newTeam = db.FirstOrDefault<dynamic>(
                         "SELECT * FROM TrainingMatchTeams WHERE TrainingMatchId = @0 AND TeamNumber = @1",
                         (int)match.Id, maxTeamNumber + 1);
 
@@ -1061,7 +1075,7 @@ namespace HpskSite.Controllers
                 using (var db = _databaseFactory.CreateDatabase())
                 {
                     // Get match
-                    var match = db.SingleOrDefault<dynamic>(
+                    var match = db.FirstOrDefault<dynamic>(
                         "SELECT * FROM TrainingMatches WHERE MatchCode = @0", request.MatchCode?.ToUpper());
 
                     if (match == null)
@@ -1081,7 +1095,7 @@ namespace HpskSite.Controllers
                     }
 
                     // Get participant
-                    var participant = db.SingleOrDefault<dynamic>(
+                    var participant = db.FirstOrDefault<dynamic>(
                         "SELECT * FROM TrainingMatchParticipants WHERE TrainingMatchId = @0 AND MemberId = @1",
                         (int)match.Id, member.Id);
 
@@ -1093,7 +1107,7 @@ namespace HpskSite.Controllers
                     // Validate new team
                     if (request.NewTeamId.HasValue)
                     {
-                        var newTeam = db.SingleOrDefault<dynamic>(
+                        var newTeam = db.FirstOrDefault<dynamic>(
                             "SELECT * FROM TrainingMatchTeams WHERE Id = @0 AND TrainingMatchId = @1",
                             request.NewTeamId.Value, (int)match.Id);
 
@@ -1143,7 +1157,7 @@ namespace HpskSite.Controllers
                 using (var db = _databaseFactory.CreateDatabase())
                 {
                     // Get match
-                    var match = db.SingleOrDefault<dynamic>(
+                    var match = db.FirstOrDefault<dynamic>(
                         "SELECT * FROM TrainingMatches WHERE MatchCode = @0", matchCode?.ToUpper());
 
                     if (match == null)
@@ -1215,7 +1229,7 @@ namespace HpskSite.Controllers
                 using (var db = _databaseFactory.CreateDatabase())
                 {
                     // Get match
-                    var match = db.SingleOrDefault<dynamic>(
+                    var match = db.FirstOrDefault<dynamic>(
                         "SELECT * FROM TrainingMatches WHERE MatchCode = @0", request.MatchCode);
 
                     if (match == null)
@@ -1242,6 +1256,7 @@ namespace HpskSite.Controllers
                     // Recalculate statistics for all participants who have scores in this match
                     string weaponClass = (string)match.WeaponClass;
                     int matchId = (int)match.Id;
+                    string completeDiscipline = (string)(match.Discipline ?? "Precision");
 
                     var participants = db.Fetch<dynamic>(
                         @"SELECT DISTINCT MemberId,
@@ -1269,7 +1284,8 @@ namespace HpskSite.Controllers
                             participantMemberId,
                             weaponClass,
                             seriesCount,
-                            totalScore);
+                            totalScore,
+                            completeDiscipline);
                     }
 
                     // Notify all viewers via SignalR
@@ -1309,7 +1325,7 @@ namespace HpskSite.Controllers
                 using (var db = _databaseFactory.CreateDatabase())
                 {
                     // Get match
-                    var match = db.SingleOrDefault<dynamic>(
+                    var match = db.FirstOrDefault<dynamic>(
                         "SELECT * FROM TrainingMatches WHERE MatchCode = @0", request.MatchCode);
 
                     if (match == null)
@@ -1392,7 +1408,7 @@ namespace HpskSite.Controllers
                 using (var db = _databaseFactory.CreateDatabase())
                 {
                     // Get match
-                    var match = db.SingleOrDefault<dynamic>(
+                    var match = db.FirstOrDefault<dynamic>(
                         "SELECT * FROM TrainingMatches WHERE MatchCode = @0", request.MatchCode);
 
                     if (match == null)
@@ -1409,14 +1425,14 @@ namespace HpskSite.Controllers
                     dynamic? participant = null;
                     if (memberId.HasValue)
                     {
-                        participant = db.SingleOrDefault<dynamic>(
+                        participant = db.FirstOrDefault<dynamic>(
                             @"SELECT Id FROM TrainingMatchParticipants
                               WHERE TrainingMatchId = @0 AND MemberId = @1",
                             (int)match.Id, memberId.Value);
                     }
                     else if (guestParticipantId.HasValue)
                     {
-                        participant = db.SingleOrDefault<dynamic>(
+                        participant = db.FirstOrDefault<dynamic>(
                             @"SELECT Id FROM TrainingMatchParticipants
                               WHERE TrainingMatchId = @0 AND GuestParticipantId = @1",
                             (int)match.Id, guestParticipantId.Value);
@@ -1456,14 +1472,14 @@ namespace HpskSite.Controllers
                     dynamic? existingScore = null;
                     if (memberId.HasValue)
                     {
-                        existingScore = db.SingleOrDefault<dynamic>(
+                        existingScore = db.FirstOrDefault<dynamic>(
                             @"SELECT * FROM TrainingScores
                               WHERE MemberId = @0 AND TrainingMatchId = @1",
                             memberId.Value, (int)match.Id);
                     }
                     else if (guestParticipantId.HasValue)
                     {
-                        existingScore = db.SingleOrDefault<dynamic>(
+                        existingScore = db.FirstOrDefault<dynamic>(
                             @"SELECT * FROM TrainingScores
                               WHERE GuestParticipantId = @0 AND TrainingMatchId = @1",
                             guestParticipantId.Value, (int)match.Id);
@@ -1525,6 +1541,9 @@ namespace HpskSite.Controllers
                         newSeries.SeriesNumber = 1;
                         var seriesJson = JsonSerializer.Serialize(new List<TrainingSeries> { newSeries });
 
+                        // Get discipline from match
+                        var saveDiscipline = (string)(match.Discipline ?? "Precision");
+
                         // Insert with either MemberId or GuestParticipantId
                         if (memberId.HasValue)
                         {
@@ -1538,6 +1557,7 @@ namespace HpskSite.Controllers
                                 TotalScore = newSeries.Total,
                                 XCount = newSeries.XCount,
                                 Notes = $"Träningsmatch: {match.MatchName}",
+                                Discipline = saveDiscipline,
                                 CreatedAt = DateTime.Now,
                                 UpdatedAt = DateTime.Now,
                                 TrainingMatchId = (int)match.Id
@@ -1555,6 +1575,7 @@ namespace HpskSite.Controllers
                                 TotalScore = newSeries.Total,
                                 XCount = newSeries.XCount,
                                 Notes = $"Träningsmatch: {match.MatchName}",
+                                Discipline = saveDiscipline,
                                 CreatedAt = DateTime.Now,
                                 UpdatedAt = DateTime.Now,
                                 TrainingMatchId = (int)match.Id
@@ -1639,7 +1660,7 @@ namespace HpskSite.Controllers
                 using (var db = _databaseFactory.CreateDatabase())
                 {
                     // Get match
-                    var match = db.SingleOrDefault<dynamic>(
+                    var match = db.FirstOrDefault<dynamic>(
                         "SELECT * FROM TrainingMatches WHERE MatchCode = @0", request.MatchCode);
 
                     if (match == null)
@@ -1664,14 +1685,14 @@ namespace HpskSite.Controllers
                     dynamic? existingScore = null;
                     if (memberId.HasValue)
                     {
-                        existingScore = db.SingleOrDefault<dynamic>(
+                        existingScore = db.FirstOrDefault<dynamic>(
                             @"SELECT * FROM TrainingScores
                               WHERE MemberId = @0 AND TrainingMatchId = @1",
                             memberId.Value, (int)match.Id);
                     }
                     else if (guestParticipantId.HasValue)
                     {
-                        existingScore = db.SingleOrDefault<dynamic>(
+                        existingScore = db.FirstOrDefault<dynamic>(
                             @"SELECT * FROM TrainingScores
                               WHERE GuestParticipantId = @0 AND TrainingMatchId = @1",
                             guestParticipantId.Value, (int)match.Id);
@@ -1802,7 +1823,7 @@ namespace HpskSite.Controllers
                 using (var db = _databaseFactory.CreateDatabase())
                 {
                     // Get match
-                    var match = db.SingleOrDefault<dynamic>(
+                    var match = db.FirstOrDefault<dynamic>(
                         "SELECT * FROM TrainingMatches WHERE MatchCode = @0", request.MatchCode);
 
                     if (match == null)
@@ -1819,14 +1840,14 @@ namespace HpskSite.Controllers
                     dynamic? existingScore = null;
                     if (memberId.HasValue)
                     {
-                        existingScore = db.SingleOrDefault<dynamic>(
+                        existingScore = db.FirstOrDefault<dynamic>(
                             @"SELECT * FROM TrainingScores
                               WHERE MemberId = @0 AND TrainingMatchId = @1",
                             memberId.Value, (int)match.Id);
                     }
                     else if (guestParticipantId.HasValue)
                     {
-                        existingScore = db.SingleOrDefault<dynamic>(
+                        existingScore = db.FirstOrDefault<dynamic>(
                             @"SELECT * FROM TrainingScores
                               WHERE GuestParticipantId = @0 AND TrainingMatchId = @1",
                             guestParticipantId.Value, (int)match.Id);
@@ -1925,7 +1946,7 @@ namespace HpskSite.Controllers
                 using (var db = _databaseFactory.CreateDatabase())
                 {
                     // Verify the score belongs to current user
-                    var score = db.SingleOrDefault<dynamic>(
+                    var score = db.FirstOrDefault<dynamic>(
                         "SELECT * FROM TrainingScores WHERE Id = @0 AND MemberId = @1",
                         request.ScoreId, member.Id);
 
@@ -1984,8 +2005,10 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Ogiltig skytteklass" });
                 }
 
-                // Save to member profile
-                member.SetValue("precisionShooterClass", request.ShooterClass);
+                // Save to correct member property based on discipline
+                var setDiscipline = request.Discipline ?? "Precision";
+                var propertyAlias = setDiscipline == "Milsnabb" ? "milsnabbShooterClass" : "precisionShooterClass";
+                member.SetValue(propertyAlias, request.ShooterClass);
                 _memberService.Save(member);
 
                 return Json(new
@@ -2293,6 +2316,12 @@ namespace HpskSite.Controllers
                                 participantData.Add((participantKey, seriesTotals.Count, seriesTotals));
                             }
 
+                            // Deduplicate: if multiple score rows exist for same participant, keep the one with most series
+                            participantData = participantData
+                                .GroupBy(p => p.ParticipantKey)
+                                .Select(g => g.OrderByDescending(p => p.SeriesCount).First())
+                                .ToList();
+
                             // Calculate effective limit
                             int effectiveLimit;
                             if (m.MaxSeriesCount != null && (int)m.MaxSeriesCount > 0)
@@ -2351,6 +2380,7 @@ namespace HpskSite.Controllers
                             matchCode = (string)m.MatchCode,
                             matchName = (string?)m.MatchName,
                             weaponClass = (string)m.WeaponClass,
+                            discipline = (string)(m.Discipline ?? "Precision"),
                             createdDate = (DateTime)m.CreatedDate,
                             completedDate = m.CompletedDate != null ? (DateTime?)m.CompletedDate : null,
                             participantCount = (int)m.ParticipantCount,
@@ -2405,7 +2435,7 @@ namespace HpskSite.Controllers
                 using (var db = _databaseFactory.CreateDatabase())
                 {
                     // Get match
-                    var match = db.SingleOrDefault<dynamic>(
+                    var match = db.FirstOrDefault<dynamic>(
                         "SELECT * FROM TrainingMatches WHERE MatchCode = @0", request.MatchCode);
 
                     if (match == null)
@@ -2484,6 +2514,7 @@ namespace HpskSite.Controllers
                         matchCode = (string)m.MatchCode,
                         matchName = (string?)m.MatchName,
                         weaponClass = (string)m.WeaponClass,
+                        discipline = (string)(m.Discipline ?? "Precision"),
                         createdDate = (DateTime)m.CreatedDate,
                         participantCount = (int)m.ParticipantCount,
                         isCreator = (int)m.CreatedByMemberId == member.Id
@@ -2587,6 +2618,7 @@ namespace HpskSite.Controllers
                             matchCode = (string)m.MatchCode,
                             matchName = (string?)m.MatchName,
                             weaponClass = (string)m.WeaponClass,
+                            discipline = (string)(m.Discipline ?? "Precision"),
                             createdDate = (DateTime)m.CreatedDate,
                             startDate = startDate,
                             hasStarted = hasStarted,
@@ -2693,6 +2725,7 @@ namespace HpskSite.Controllers
                             matchCode = (string)m.MatchCode,
                             matchName = (string?)m.MatchName,
                             weaponClass = (string)m.WeaponClass,
+                            discipline = (string)(m.Discipline ?? "Precision"),
                             createdDate = (DateTime)m.CreatedDate,
                             startDate = startDate,
                             hasStarted = false, // All upcoming matches haven't started
@@ -2777,7 +2810,7 @@ namespace HpskSite.Controllers
 
                 using (var db = _databaseFactory.CreateDatabase())
                 {
-                    var match = db.SingleOrDefault<dynamic>(
+                    var match = db.FirstOrDefault<dynamic>(
                         "SELECT * FROM TrainingMatches WHERE MatchCode = @0", request.MatchCode);
 
                     if (match == null)
@@ -2882,7 +2915,7 @@ namespace HpskSite.Controllers
                 using (var db = _databaseFactory.CreateDatabase())
                 {
                     // Get match
-                    var match = db.SingleOrDefault<dynamic>(
+                    var match = db.FirstOrDefault<dynamic>(
                         "SELECT * FROM TrainingMatches WHERE MatchCode = @0", request.MatchCode?.ToUpper());
 
                     if (match == null)
@@ -2898,7 +2931,7 @@ namespace HpskSite.Controllers
                     // NOTE: Users CAN request to join before start time, they just can't enter scores until it starts
 
                     // Check if already a participant
-                    var existingParticipant = db.SingleOrDefault<dynamic>(
+                    var existingParticipant = db.FirstOrDefault<dynamic>(
                         @"SELECT Id FROM TrainingMatchParticipants
                           WHERE TrainingMatchId = @0 AND MemberId = @1",
                         (int)match.Id, member.Id);
@@ -2988,7 +3021,7 @@ namespace HpskSite.Controllers
                     // Continue with existing code for closed matches - requires approval
 
                     // Check for existing request
-                    var existingRequest = db.SingleOrDefault<dynamic>(
+                    var existingRequest = db.FirstOrDefault<dynamic>(
                         @"SELECT * FROM TrainingMatchJoinRequests
                           WHERE TrainingMatchId = @0 AND MemberId = @1",
                         (int)match.Id, member.Id);
@@ -3094,7 +3127,7 @@ namespace HpskSite.Controllers
                 using (var db = _databaseFactory.CreateDatabase())
                 {
                     // Get the join request
-                    var joinRequest = db.SingleOrDefault<dynamic>(
+                    var joinRequest = db.FirstOrDefault<dynamic>(
                         "SELECT * FROM TrainingMatchJoinRequests WHERE Id = @0", request.RequestId);
 
                     if (joinRequest == null)
@@ -3103,7 +3136,7 @@ namespace HpskSite.Controllers
                     }
 
                     // Get match to verify organizer
-                    var match = db.SingleOrDefault<dynamic>(
+                    var match = db.FirstOrDefault<dynamic>(
                         "SELECT * FROM TrainingMatches WHERE Id = @0", (int)joinRequest.TrainingMatchId);
 
                     if (match == null)
@@ -3234,7 +3267,7 @@ namespace HpskSite.Controllers
                 using (var db = _databaseFactory.CreateDatabase())
                 {
                     // Get match
-                    var match = db.SingleOrDefault<dynamic>(
+                    var match = db.FirstOrDefault<dynamic>(
                         "SELECT * FROM TrainingMatches WHERE MatchCode = @0", matchCode?.ToUpper());
 
                     if (match == null)
@@ -3295,7 +3328,7 @@ namespace HpskSite.Controllers
                 using (var db = _databaseFactory.CreateDatabase())
                 {
                     // Get match
-                    var match = db.SingleOrDefault<dynamic>(
+                    var match = db.FirstOrDefault<dynamic>(
                         "SELECT * FROM TrainingMatches WHERE MatchCode = @0", matchCode?.ToUpper());
 
                     if (match == null)
@@ -3339,7 +3372,7 @@ namespace HpskSite.Controllers
                             profilePictureUrl = "";
                             if (p.GuestParticipantId != null)
                             {
-                                var guest = db.SingleOrDefault<dynamic>(
+                                var guest = db.FirstOrDefault<dynamic>(
                                     "SELECT DisplayName FROM TrainingMatchGuests WHERE Id = @0",
                                     (int)p.GuestParticipantId);
                                 if (guest != null)
@@ -3365,7 +3398,7 @@ namespace HpskSite.Controllers
                         dynamic? scoreRow = null;
                         if (memberId.HasValue)
                         {
-                            scoreRow = db.SingleOrDefault<dynamic>(
+                            scoreRow = db.FirstOrDefault<dynamic>(
                                 @"SELECT ts.Id, ts.SeriesScores, ts.TotalScore, ts.XCount
                                   FROM TrainingScores ts
                                   WHERE ts.MemberId = @0 AND ts.TrainingMatchId = @1",
@@ -3373,7 +3406,7 @@ namespace HpskSite.Controllers
                         }
                         else if (p.GuestParticipantId != null)
                         {
-                            scoreRow = db.SingleOrDefault<dynamic>(
+                            scoreRow = db.FirstOrDefault<dynamic>(
                                 @"SELECT ts.Id, ts.SeriesScores, ts.TotalScore, ts.XCount
                                   FROM TrainingScores ts
                                   WHERE ts.GuestParticipantId = @0 AND ts.TrainingMatchId = @1",
@@ -3640,6 +3673,7 @@ namespace HpskSite.Controllers
         public bool IsTeamMatch { get; set; } = false;  // Enable team-based competition
         public int? MaxShootersPerTeam { get; set; }  // Required when IsTeamMatch=true
         public List<HpskSite.Shared.Models.TeamDefinition>? Teams { get; set; }  // Team definitions for closed team matches
+        public string? Discipline { get; set; }  // "Precision" (default) or "Milsnabb"
     }
 
     public class JoinMatchRequest
@@ -3664,6 +3698,7 @@ namespace HpskSite.Controllers
     public class SetShooterClassRequest
     {
         public string? ShooterClass { get; set; }
+        public string? Discipline { get; set; }
     }
 
     public class LeaveMatchRequest

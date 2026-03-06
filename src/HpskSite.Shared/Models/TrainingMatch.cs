@@ -114,6 +114,12 @@ namespace HpskSite.Shared.Models
         public DateTime? LastActivityDate { get; set; }
 
         /// <summary>
+        /// Discipline for this match (e.g., "Precision", "Milsnabb")
+        /// </summary>
+        [JsonPropertyName("discipline")]
+        public string Discipline { get; set; } = "Precision";
+
+        /// <summary>
         /// List of teams in this match (only populated for team matches)
         /// </summary>
         [JsonPropertyName("teams")]

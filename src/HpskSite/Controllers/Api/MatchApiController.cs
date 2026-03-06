@@ -186,6 +186,9 @@ namespace HpskSite.Controllers.Api
                 return BadRequest(ApiResponse<TrainingMatch>.Error("Ange max antal skyttar per lag för lagmatcher"));
             }
 
+            // Determine discipline
+            var discipline = request.Discipline ?? "Precision";
+
             // Create match
             var match = new TrainingMatchDbDto
             {
@@ -199,7 +202,8 @@ namespace HpskSite.Controllers.Api
                 IsOpen = request.IsOpen,
                 HasHandicap = request.HasHandicap,
                 IsTeamMatch = request.IsTeamMatch,
-                MaxShootersPerTeam = request.IsTeamMatch ? request.MaxShootersPerTeam : null
+                MaxShootersPerTeam = request.IsTeamMatch ? request.MaxShootersPerTeam : null,
+                Discipline = discipline
             };
 
             await db.InsertAsync(match);
@@ -255,8 +259,11 @@ namespace HpskSite.Controllers.Api
                 try
                 {
                     var member = _memberService.GetById(memberId.Value);
-                    var shooterClass = member?.GetValue<string>("precisionShooterClass");
-                    var stats = await _statisticsService.GetStatisticsAsync(memberId.Value, request.WeaponClass?.ToUpper() ?? "A");
+                    var shooterClassProp = discipline == "Milsnabb" ? "milsnabbShooterClass" : "precisionShooterClass";
+                    var shooterClass = member?.HasProperty(shooterClassProp) == true ? member.GetValue<string>(shooterClassProp) : null;
+                    var weaponClass = request.WeaponClass?.ToUpper() ?? "A";
+                    await _statisticsService.RecalculateFromHistoryAsync(memberId.Value, weaponClass, discipline);
+                    var stats = await _statisticsService.GetStatisticsAsync(memberId.Value, weaponClass);
                     var profile = _handicapCalculator.CalculateHandicap(stats, shooterClass);
                     frozenHandicap = profile.HandicapPerSeries;
                     frozenIsProvisional = profile.IsProvisional;
@@ -433,7 +440,9 @@ namespace HpskSite.Controllers.Api
             if (match.HasHandicap)
             {
                 var member = _memberService.GetById(memberId.Value);
-                var shooterClass = member?.GetValue<string>("precisionShooterClass");
+                var discipline = match.Discipline ?? "Precision";
+                var shooterClassProp = discipline == "Milsnabb" ? "milsnabbShooterClass" : "precisionShooterClass";
+                var shooterClass = member?.HasProperty(shooterClassProp) == true ? member.GetValue<string>(shooterClassProp) : null;
 
                 // If handicap is enabled but user has no shooter class, require them to set it first
                 if (string.IsNullOrEmpty(shooterClass))
@@ -441,13 +450,16 @@ namespace HpskSite.Controllers.Api
                     return BadRequest(new ApiResponse<TrainingMatch>
                     {
                         Success = false,
-                        Message = "Du måste välja din skytteklass för att kunna gå med i en handicapmatch",
+                        Message = discipline == "Milsnabb"
+                            ? "Du måste välja din skytteklass för Milsnabb (under Handikapp-fliken) för att kunna gå med i en handicapmatch"
+                            : "Du måste välja din skytteklass för att kunna gå med i en handicapmatch",
                         NeedsShooterClass = true
                     });
                 }
 
                 try
                 {
+                    await _statisticsService.RecalculateFromHistoryAsync(memberId.Value, match.WeaponClass, discipline);
                     var stats = await _statisticsService.GetStatisticsAsync(memberId.Value, match.WeaponClass);
                     var profile = _handicapCalculator.CalculateHandicap(stats, shooterClass);
                     frozenHandicap = profile.HandicapPerSeries;
@@ -879,6 +891,34 @@ namespace HpskSite.Controllers.Api
             match.CompletedDate = DateTime.UtcNow;
             await db.UpdateAsync(match);
 
+            // Recalculate statistics for all participants who have scores
+            var discipline = match.Discipline ?? "Precision";
+            var participantScores = await db.FetchAsync<TrainingScoreDbDto>(
+                "WHERE TrainingMatchId = @0 AND MemberId IS NOT NULL", match.Id);
+
+            foreach (var score in participantScores)
+            {
+                if (!score.MemberId.HasValue) continue;
+
+                int seriesCount = 0;
+                if (!string.IsNullOrEmpty(score.SeriesScores))
+                {
+                    try
+                    {
+                        var series = JsonSerializer.Deserialize<JsonElement>(score.SeriesScores);
+                        seriesCount = series.GetArrayLength();
+                    }
+                    catch { }
+                }
+
+                await _statisticsService.UpdateAfterMatchAsync(
+                    score.MemberId.Value,
+                    match.WeaponClass,
+                    seriesCount,
+                    score.TotalScore,
+                    discipline);
+            }
+
             scope.Complete();
 
             // Notify via SignalR (use match_{code} group format)
@@ -1057,6 +1097,7 @@ namespace HpskSite.Controllers.Api
                     TotalScore = request.Total,
                     XCount = request.XCount,
                     Notes = $"Träningsmatch: {match.MatchName}",
+                    Discipline = match.Discipline ?? "Precision",
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow
                 };
@@ -1499,6 +1540,7 @@ namespace HpskSite.Controllers.Api
                     MatchCode = match.MatchCode,
                     MatchName = match.MatchName,
                     WeaponClass = match.WeaponClass,
+                    Discipline = match.Discipline ?? "Precision",
                     CreatedDate = match.CreatedDate,
                     CompletedDate = match.CompletedDate,
                     IsCreator = match.CreatedByMemberId == currentMemberId
@@ -1541,6 +1583,12 @@ namespace HpskSite.Controllers.Api
                     // Fetch ALL scores for this match (both members and guests)
                     var allScoresWithSeries = await db.FetchAsync<TrainingScoreDbDto>(
                         "WHERE TrainingMatchId = @0", match.Id);
+
+                    // Deduplicate: if multiple score rows exist for same participant, keep the one with most series data
+                    allScoresWithSeries = allScoresWithSeries
+                        .GroupBy(s => s.MemberId.HasValue ? s.MemberId.Value : -(s.GuestParticipantId ?? 0))
+                        .Select(g => g.OrderByDescending(s => (s.SeriesScores ?? "").Length).First())
+                        .ToList();
 
                     // First, calculate series counts for all participants to determine effective limit
                     var participantSeriesCounts = new List<int>();
@@ -1860,7 +1908,10 @@ namespace HpskSite.Controllers.Api
                     try
                     {
                         var member = _memberService.GetById(joinRequest.MemberId);
-                        var shooterClass = member?.GetValue<string>("precisionShooterClass");
+                        var joinDiscipline = match.Discipline ?? "Precision";
+                        var shooterClassProp = joinDiscipline == "Milsnabb" ? "milsnabbShooterClass" : "precisionShooterClass";
+                        var shooterClass = member?.HasProperty(shooterClassProp) == true ? member.GetValue<string>(shooterClassProp) : null;
+                        await _statisticsService.RecalculateFromHistoryAsync(joinRequest.MemberId, match.WeaponClass, joinDiscipline);
                         var stats = await _statisticsService.GetStatisticsAsync(joinRequest.MemberId, match.WeaponClass);
                         var profile = _handicapCalculator.CalculateHandicap(stats, shooterClass);
                         frozenHandicap = profile.HandicapPerSeries;
@@ -1935,8 +1986,10 @@ namespace HpskSite.Controllers.Api
                     return BadRequest(ApiResponse.Error("Ogiltig skytteklass"));
                 }
 
-                // Save to member profile
-                member.SetValue("precisionShooterClass", request.ShooterClass);
+                // Save to correct member property based on discipline
+                var discipline = request.Discipline ?? "Precision";
+                var propertyAlias = discipline == "Milsnabb" ? "milsnabbShooterClass" : "precisionShooterClass";
+                member.SetValue(propertyAlias, request.ShooterClass);
                 _memberService.Save(member);
 
                 return Ok(new SetShooterClassResponse
@@ -1956,7 +2009,7 @@ namespace HpskSite.Controllers.Api
         /// Get the current member's shooter class
         /// </summary>
         [HttpGet("shooter-class")]
-        public async Task<IActionResult> GetShooterClass()
+        public async Task<IActionResult> GetShooterClass([FromQuery] string? discipline = null)
         {
             var memberId = await GetCurrentMemberIdAsync();
             if (!memberId.HasValue)
@@ -1970,7 +2023,9 @@ namespace HpskSite.Controllers.Api
                 return NotFound(ApiResponse.Error("Medlem hittades inte"));
             }
 
-            var shooterClass = member.GetValue<string>("precisionShooterClass");
+            var effectiveDiscipline = discipline ?? "Precision";
+            var propertyAlias = effectiveDiscipline == "Milsnabb" ? "milsnabbShooterClass" : "precisionShooterClass";
+            var shooterClass = member.HasProperty(propertyAlias) ? member.GetValue<string>(propertyAlias) : null;
 
             return Ok(new SetShooterClassResponse
             {
@@ -2558,7 +2613,8 @@ namespace HpskSite.Controllers.Api
                 MaxSeriesCount = match.MaxSeriesCount,
                 IsTeamMatch = match.IsTeamMatch,
                 MaxShootersPerTeam = match.MaxShootersPerTeam,
-                LastActivityDate = match.LastActivityDate
+                LastActivityDate = match.LastActivityDate,
+                Discipline = match.Discipline ?? "Precision"
             };
 
             // Load teams if this is a team match
@@ -2798,6 +2854,7 @@ namespace HpskSite.Controllers.Api
         public bool IsTeamMatch { get; set; }
         public int? MaxShootersPerTeam { get; set; }
         public DateTime? LastActivityDate { get; set; }
+        public string Discipline { get; set; } = "Precision";
     }
 
     [TableName("TrainingMatchTeams")]
@@ -2843,6 +2900,7 @@ namespace HpskSite.Controllers.Api
         public int TotalScore { get; set; }
         public int XCount { get; set; }
         public string? Notes { get; set; }
+        public string? Discipline { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
     }
@@ -2874,6 +2932,7 @@ namespace HpskSite.Controllers.Api
         public bool IsTeamMatch { get; set; }
         public int? MaxShootersPerTeam { get; set; }
         public List<HpskSite.Shared.Models.TeamDefinition>? Teams { get; set; }
+        public string? Discipline { get; set; }
     }
 
     public class JoinMatchRequest
@@ -2945,6 +3004,7 @@ namespace HpskSite.Controllers.Api
         public string MatchCode { get; set; } = string.Empty;
         public string? MatchName { get; set; }
         public string WeaponClass { get; set; } = string.Empty;
+        public string Discipline { get; set; } = "Precision";
         public DateTime CreatedDate { get; set; }
         public DateTime? CompletedDate { get; set; }
         public int ParticipantCount { get; set; }
@@ -2979,6 +3039,7 @@ namespace HpskSite.Controllers.Api
     public class SetShooterClassRequest
     {
         public string? ShooterClass { get; set; }
+        public string? Discipline { get; set; }
     }
 
     /// <summary>

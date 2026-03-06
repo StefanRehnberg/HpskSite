@@ -17,6 +17,10 @@ public partial class CreateMatchViewModel : BaseViewModel
         _matchService = matchService;
         Title = "Skapa match";
 
+        // Initialize disciplines
+        Disciplines = new ObservableCollection<string> { "Precision", "Milsnabb" };
+        SelectedDiscipline = "Precision";
+
         // Initialize weapon classes
         WeaponClasses = new ObservableCollection<string> { "A", "B", "C", "R", "M", "L" };
         SelectedWeaponClass = "C";
@@ -68,6 +72,12 @@ public partial class CreateMatchViewModel : BaseViewModel
 
     [ObservableProperty]
     private string? _matchName;
+
+    [ObservableProperty]
+    private ObservableCollection<string> _disciplines;
+
+    [ObservableProperty]
+    private string _selectedDiscipline;
 
     [ObservableProperty]
     private ObservableCollection<string> _weaponClasses;
@@ -159,6 +169,7 @@ public partial class CreateMatchViewModel : BaseViewModel
             {
                 MatchName = MatchName,
                 WeaponClass = SelectedWeaponClass,
+                Discipline = SelectedDiscipline,
                 StartDate = combinedStartDate,
                 IsOpen = IsOpen,
                 HasHandicap = HasHandicap,

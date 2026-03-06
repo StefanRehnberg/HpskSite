@@ -67,6 +67,7 @@
             </button>
             <div>
                 <h5 class="mb-0" id="matchTitle">
+                    <span id="matchDisciplineIcon"></span>
                     <i class="bi bi-people-fill me-2"></i><span id="matchNameDisplay">Match</span>
                 </h5>
                 <small>
@@ -659,6 +660,16 @@ function renderScoreboard(match) {
     document.getElementById('matchNameDisplay').textContent = match.matchName || 'Träningsmatch';
     document.getElementById('matchCodeDisplay').textContent = match.matchCode;
     document.getElementById('matchWeaponClass').textContent = 'Klass ' + match.weaponClass;
+
+    // Show discipline icon for non-Precision disciplines
+    const disciplineIconEl = document.getElementById('matchDisciplineIcon');
+    if (disciplineIconEl) {
+        if (match.discipline && match.discipline !== 'Precision') {
+            disciplineIconEl.innerHTML = `<img src="/images/competition-types/${match.discipline}.png" alt="${match.discipline}" style="height: 22px; width: auto;" class="me-1">`;
+        } else {
+            disciplineIconEl.innerHTML = '';
+        }
+    }
 
     // Store match status for spectators display (hide for completed matches)
     window.currentMatchStatus = match.status || 'Active';

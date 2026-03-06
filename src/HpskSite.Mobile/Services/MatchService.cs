@@ -119,14 +119,15 @@ public class MatchService : IMatchService
         return await _apiService.PostAsync("api/match/respond-join", new { RequestId = requestId, Action = action });
     }
 
-    public async Task<ApiResponse<SetShooterClassResponse>> SetShooterClassAsync(string shooterClass)
+    public async Task<ApiResponse<SetShooterClassResponse>> SetShooterClassAsync(string shooterClass, string? discipline = null)
     {
-        return await _apiService.PostAsync<SetShooterClassResponse>("api/match/set-shooter-class", new { ShooterClass = shooterClass });
+        return await _apiService.PostAsync<SetShooterClassResponse>("api/match/set-shooter-class", new { ShooterClass = shooterClass, Discipline = discipline });
     }
 
-    public async Task<ApiResponse<SetShooterClassResponse>> GetShooterClassAsync()
+    public async Task<ApiResponse<SetShooterClassResponse>> GetShooterClassAsync(string? discipline = null)
     {
-        return await _apiService.GetAsync<SetShooterClassResponse>("api/match/shooter-class");
+        var query = !string.IsNullOrEmpty(discipline) ? $"?discipline={discipline}" : "";
+        return await _apiService.GetAsync<SetShooterClassResponse>($"api/match/shooter-class{query}");
     }
 
     public async Task<ApiResponse<UploadPhotoResponse>> UploadSeriesPhotoAsync(string matchCode, int seriesNumber, byte[] photoData)
@@ -202,6 +203,7 @@ public class CreateMatchRequest
 {
     public string? MatchName { get; set; }
     public string WeaponClass { get; set; } = string.Empty;
+    public string? Discipline { get; set; }
     public DateTime? StartDate { get; set; }
     public bool IsOpen { get; set; } = true;
     public bool HasHandicap { get; set; }
@@ -256,8 +258,8 @@ public interface IMatchService
     Task<ApiResponse<SpectatorMatchResponse>> ViewMatchAsSpectatorAsync(string matchCode);
     Task<ApiResponse> RequestJoinMatchAsync(string matchCode);
     Task<ApiResponse> RespondToJoinRequestAsync(int requestId, string action);
-    Task<ApiResponse<SetShooterClassResponse>> SetShooterClassAsync(string shooterClass);
-    Task<ApiResponse<SetShooterClassResponse>> GetShooterClassAsync();
+    Task<ApiResponse<SetShooterClassResponse>> SetShooterClassAsync(string shooterClass, string? discipline = null);
+    Task<ApiResponse<SetShooterClassResponse>> GetShooterClassAsync(string? discipline = null);
     Task<ApiResponse<UploadPhotoResponse>> UploadSeriesPhotoAsync(string matchCode, int seriesNumber, byte[] photoData);
     Task<ApiResponse<List<PhotoReaction>>> AddReactionAsync(string matchCode, int seriesNumber, int targetMemberId, string emoji);
     Task<ApiResponse<AddGuestResponse>> AddGuestAsync(string matchCode, AddGuestRequest request);
@@ -299,6 +301,7 @@ public class MatchHistoryItem
     public string MatchCode { get; set; } = string.Empty;
     public string? MatchName { get; set; }
     public string WeaponClass { get; set; } = string.Empty;
+    public string Discipline { get; set; } = "Precision";
     public DateTime CreatedDate { get; set; }
     public DateTime? CompletedDate { get; set; }
     public int ParticipantCount { get; set; }
