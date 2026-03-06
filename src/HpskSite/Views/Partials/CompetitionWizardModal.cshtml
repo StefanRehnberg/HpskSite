@@ -50,7 +50,7 @@
                                 <option value="Precision" selected>Precision</option>
                                 <option value="Milsnabb">Milsnabb</option>
                                 <option value="Duell">Duell</option>
-                                <option value="Nationell_Helmatch">Nationell Helmatch</option>
+                                <option value="NationellHelmatch">Nationell Helmatch</option>
                                 <option value="Springskytte">Springskytte</option>
                                 <option value="Faltkytte">Fältskytte</option>
                                 <option value="MagnumPrecision">Magnum Precision</option>
@@ -199,7 +199,7 @@
 
                         <div class="alert alert-info d-none" id="wizard_milsnabbSeriesNote">
                             <i class="bi bi-info-circle me-1"></i>
-                            Milsnabb har alltid 12 serier (3 tidsgrupper om 4 serier) och inga finalserier.
+                            Milsnabb och Nationell Helmatch har alltid 12 serier (3 grupper om 4 serier) och inga finalserier.
                         </div>
 
                         <hr class="my-4">
@@ -697,10 +697,10 @@ function applySeriesDefaults() {
     const seriesButtons = document.getElementById('wizard_seriesButtons');
     const finalsGroup = document.getElementById('wizard_finalsGroup');
     const milsnabbNote = document.getElementById('wizard_milsnabbSeriesNote');
-    const isMilsnabb = typeId === 'Milsnabb';
+    const isLocked = (typeId === 'Milsnabb' || typeId === 'NationellHelmatch');
 
-    if (isMilsnabb) {
-        // Milsnabb: always 12 series, no finals
+    if (isLocked) {
+        // Milsnabb / Nationell Helmatch: always 12 series, no finals
         seriesInput.value = 12;
         seriesInput.readOnly = true;
         finalsInput.value = 0;

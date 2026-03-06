@@ -169,7 +169,7 @@ namespace HpskSite.Controllers
                 // If creating a handicap match, require shooter class to be set
                 if (request.HasHandicap)
                 {
-                    var shooterClassProp = discipline switch { "Milsnabb" => "milsnabbShooterClass", "Duell" => "duellShooterClass", _ => "precisionShooterClass" };
+                    var shooterClassProp = discipline switch { "Milsnabb" => "milsnabbShooterClass", "Duell" => "duellShooterClass", "NationellHelmatch" => "nationellHelmatchShooterClass", _ => "precisionShooterClass" };
                     var shooterClass = member.HasProperty(shooterClassProp) ? member.GetValue<string>(shooterClassProp) : null;
                     if (string.IsNullOrEmpty(shooterClass))
                     {
@@ -178,7 +178,7 @@ namespace HpskSite.Controllers
                             success = false,
                             needsShooterClass = true,
                             discipline = discipline,
-                            message = (discipline == "Milsnabb" || discipline == "Duell")
+                            message = (discipline == "Milsnabb" || discipline == "Duell" || discipline == "NationellHelmatch")
                                 ? $"Du måste välja din skytteklass för {discipline} (under Handikapp-fliken) för att kunna skapa en handicapmatch"
                                 : "Du måste välja din skytteklass för att kunna skapa en handicapmatch"
                         });
@@ -307,7 +307,7 @@ namespace HpskSite.Controllers
                             await _statisticsService.RecalculateFromHistoryAsync(member.Id, weaponClass, discipline);
 
                             var stats = await _statisticsService.GetStatisticsAsync(member.Id, weaponClass, discipline);
-                            var shooterClassPropCreate = discipline switch { "Milsnabb" => "milsnabbShooterClass", "Duell" => "duellShooterClass", _ => "precisionShooterClass" };
+                            var shooterClassPropCreate = discipline switch { "Milsnabb" => "milsnabbShooterClass", "Duell" => "duellShooterClass", "NationellHelmatch" => "nationellHelmatchShooterClass", _ => "precisionShooterClass" };
                             var shooterClass = member.HasProperty(shooterClassPropCreate) ? member.GetValue<string>(shooterClassPropCreate) : null;
                             var profile = _handicapCalculator.CalculateHandicap(stats, shooterClass);
                             frozenHandicap = profile.HandicapPerSeries;
@@ -816,7 +816,7 @@ namespace HpskSite.Controllers
                     if (hasHandicap)
                     {
                         var joinDiscipline = (string)(match.Discipline ?? "Precision");
-                        var shooterClassPropJoin = joinDiscipline switch { "Milsnabb" => "milsnabbShooterClass", "Duell" => "duellShooterClass", _ => "precisionShooterClass" };
+                        var shooterClassPropJoin = joinDiscipline switch { "Milsnabb" => "milsnabbShooterClass", "Duell" => "duellShooterClass", "NationellHelmatch" => "nationellHelmatchShooterClass", _ => "precisionShooterClass" };
                         var shooterClass = member.HasProperty(shooterClassPropJoin) ? member.GetValue<string>(shooterClassPropJoin) : null;
 
                         // If handicap is enabled but user has no shooter class, require them to set it first
@@ -1246,18 +1246,10 @@ namespace HpskSite.Controllers
                         return Json(new { success = false, message = "Endast matchskaparen eller administratör kan avsluta matchen" });
                     }
 
-                    // Update match status
-                    db.Execute(
-                        @"UPDATE TrainingMatches
-                          SET Status = 'Completed', CompletedDate = @0
-                          WHERE Id = @1",
-                        DateTime.Now, (int)match.Id);
-
-                    // Recalculate statistics for all participants who have scores in this match
-                    string weaponClass = (string)match.WeaponClass;
                     int matchId = (int)match.Id;
                     string completeDiscipline = (string)(match.Discipline ?? "Precision");
 
+                    // Check if any participant has scores
                     var participants = db.Fetch<dynamic>(
                         @"SELECT DISTINCT MemberId,
                           CASE
@@ -1270,6 +1262,30 @@ namespace HpskSite.Controllers
                           WHERE TrainingMatchId = @0",
                         matchId);
 
+                    bool hasAnyScores = participants.Any(p => p.MemberId != null && (p.SeriesCount ?? 0) > 0);
+
+                    if (!hasAnyScores)
+                    {
+                        // No scores at all — discard the match entirely
+                        db.Execute("DELETE FROM TrainingMatchJoinRequests WHERE TrainingMatchId = @0", matchId);
+                        db.Execute("DELETE FROM TrainingMatchParticipants WHERE TrainingMatchId = @0", matchId);
+                        db.Execute("DELETE FROM TrainingMatches WHERE Id = @0", matchId);
+
+                        await _hubContext.SendMatchCompleted(request.MatchCode ?? "");
+
+                        return Json(new { success = true, message = "Matchen hade inga resultat och har tagits bort" });
+                    }
+
+                    // Update match status
+                    db.Execute(
+                        @"UPDATE TrainingMatches
+                          SET Status = 'Completed', CompletedDate = @0
+                          WHERE Id = @1",
+                        DateTime.Now, matchId);
+
+                    // Recalculate statistics for participants with enough series (min 4)
+                    string weaponClass = (string)match.WeaponClass;
+
                     foreach (var participant in participants)
                     {
                         // Skip guest participants (they don't have a MemberId)
@@ -1278,6 +1294,11 @@ namespace HpskSite.Controllers
 
                         int participantMemberId = (int)participant.MemberId;
                         int seriesCount = participant.SeriesCount ?? 0;
+
+                        // Skip participants with fewer than 4 series — not enough data for statistics
+                        if (seriesCount < 4)
+                            continue;
+
                         decimal totalScore = participant.TotalScore != null ? Convert.ToDecimal(participant.TotalScore) : 0m;
 
                         await _statisticsService.UpdateAfterMatchAsync(
@@ -2007,7 +2028,7 @@ namespace HpskSite.Controllers
 
                 // Save to correct member property based on discipline
                 var setDiscipline = request.Discipline ?? "Precision";
-                var propertyAlias = setDiscipline switch { "Milsnabb" => "milsnabbShooterClass", "Duell" => "duellShooterClass", _ => "precisionShooterClass" };
+                var propertyAlias = setDiscipline switch { "Milsnabb" => "milsnabbShooterClass", "Duell" => "duellShooterClass", "NationellHelmatch" => "nationellHelmatchShooterClass", _ => "precisionShooterClass" };
                 member.SetValue(propertyAlias, request.ShooterClass);
                 _memberService.Save(member);
 
@@ -2960,7 +2981,7 @@ namespace HpskSite.Controllers
                         if (hasHandicap)
                         {
                             var reqDiscipline = (string)(match.Discipline ?? "Precision");
-                            var shooterClassPropReq = reqDiscipline switch { "Milsnabb" => "milsnabbShooterClass", "Duell" => "duellShooterClass", _ => "precisionShooterClass" };
+                            var shooterClassPropReq = reqDiscipline switch { "Milsnabb" => "milsnabbShooterClass", "Duell" => "duellShooterClass", "NationellHelmatch" => "nationellHelmatchShooterClass", _ => "precisionShooterClass" };
                             var shooterClass = member.HasProperty(shooterClassPropReq) ? member.GetValue<string>(shooterClassPropReq) : null;
                             if (string.IsNullOrEmpty(shooterClass))
                             {
@@ -3181,7 +3202,7 @@ namespace HpskSite.Controllers
                         if (hasHandicap && requestedMember != null)
                         {
                             var approveDiscipline = (string)(match.Discipline ?? "Precision");
-                            var shooterClassPropApprove = approveDiscipline switch { "Milsnabb" => "milsnabbShooterClass", "Duell" => "duellShooterClass", _ => "precisionShooterClass" };
+                            var shooterClassPropApprove = approveDiscipline switch { "Milsnabb" => "milsnabbShooterClass", "Duell" => "duellShooterClass", "NationellHelmatch" => "nationellHelmatchShooterClass", _ => "precisionShooterClass" };
                             var shooterClass = requestedMember.HasProperty(shooterClassPropApprove) ? requestedMember.GetValue<string>(shooterClassPropApprove) : null;
                             var weaponClass = (string)match.WeaponClass;
 

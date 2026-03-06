@@ -500,7 +500,7 @@ namespace HpskSite.Controllers
                 // Calculate personal bests by series count (total score grouped by weapon class, series count, and training/competition)
                 // Milsnabb uses 12 series for all weapon classes; Precision uses 6/7/10 (L: 6/8/12)
                 int[] GetSeriesCountsForWeapon(string wc, string discipline) {
-                    if (discipline == "Milsnabb")
+                    if (discipline == "Milsnabb" || discipline == "NationellHelmatch")
                         return new[] { 12 };
                     // Duell and Precision use same series counts
                     return wc == "L" ? new[] { 6, 8, 12 } : new[] { 6, 7, 10 };
@@ -831,7 +831,7 @@ namespace HpskSite.Controllers
                     }
 
                     // Source 2: Competition Results - get competitions the member participated in
-                    var resultTable = competitionType switch { "Milsnabb" => "MilsnabbResultEntry", "Duell" => "DuellResultEntry", _ => "PrecisionResultEntry" };
+                    var resultTable = competitionType switch { "Milsnabb" => "MilsnabbResultEntry", "Duell" => "DuellResultEntry", "NationellHelmatch" => "NationellHelmatchResultEntry", _ => "PrecisionResultEntry" };
                     var competitionIds = db.Fetch<int>($@"
                         SELECT DISTINCT CompetitionId
                         FROM {resultTable}
@@ -960,7 +960,7 @@ namespace HpskSite.Controllers
                     }
 
                     // Source 2: Competition results — single batch load, grouped by year
-                    var resultTable = competitionType switch { "Milsnabb" => "MilsnabbResultEntry", "Duell" => "DuellResultEntry", _ => "PrecisionResultEntry" };
+                    var resultTable = competitionType switch { "Milsnabb" => "MilsnabbResultEntry", "Duell" => "DuellResultEntry", "NationellHelmatch" => "NationellHelmatchResultEntry", _ => "PrecisionResultEntry" };
                     var competitionIds = db.Fetch<int>($@"
                         SELECT DISTINCT CompetitionId FROM {resultTable} WHERE MemberId = @0",
                         memberId);
@@ -1035,8 +1035,8 @@ namespace HpskSite.Controllers
         private List<HpskSite.Shared.Models.UnifiedResultEntry> LoadDisciplineResults(int memberId, string discipline)
         {
             var results = new List<HpskSite.Shared.Models.UnifiedResultEntry>();
-            var resultTable = discipline switch { "Milsnabb" => "MilsnabbResultEntry", "Duell" => "DuellResultEntry", _ => "PrecisionResultEntry" };
-            int defaultSeriesCount = discipline == "Milsnabb" ? 12 : 0;
+            var resultTable = discipline switch { "Milsnabb" => "MilsnabbResultEntry", "Duell" => "DuellResultEntry", "NationellHelmatch" => "NationellHelmatchResultEntry", _ => "PrecisionResultEntry" };
+            int defaultSeriesCount = (discipline == "Milsnabb" || discipline == "NationellHelmatch") ? 12 : 0;
 
             using (var db = _databaseFactory.CreateDatabase())
             {

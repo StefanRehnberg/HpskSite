@@ -21,7 +21,7 @@
             new CompetitionType("Precision", "Precision", "Precisions skytte på standard 10-ringad precisionstavla"),
             new CompetitionType("Milsnabb", "Milsnabb", "Militärt Snabbskytte på 10-ringad snabbskjutningstavla"),
             new CompetitionType("Duell", "Duell", "Snabbskytte på 10-ringad snabbskjutningstavla"),
-            new CompetitionType("Nationell_Helmatch", "Nationell Helmatch", "Precision, Snabbskytte och Fält "),
+            new CompetitionType("NationellHelmatch", "Nationell Helmatch", "Precision, Snabbskytte och Fält"),
             new CompetitionType("Springskytte", "Springskytte", "Springskytte med Springskytte mål"),
             new CompetitionType("Faltkytte", "Fältskytte", "Fältskytte"),
             new CompetitionType("MagnumPrecision", "Magnum Precision", "Magnum Precision 50 m"),

@@ -114,6 +114,7 @@
                                         <option value="Precision" selected>Precision</option>
                                         <option value="Milsnabb">Milsnabb</option>
                                         <option value="Duell">Duell</option>
+                                        <option value="NationellHelmatch">Nationell Helmatch</option>
                                     </select>
                                     <select id="yearFilter" class="form-select form-select-sm" style="width: auto;" onchange="loadResults()">
                                         @* Options populated by JavaScript *@
@@ -332,6 +333,57 @@
                                                 </button>
                                             </div>
                                             <div id="duellHandicapInfoContainer">
+                                                <div class="text-center py-3">
+                                                    <div class="spinner-border spinner-border-sm text-primary" role="status">
+                                                        <span class="visually-hidden">Laddar...</span>
+                                                    </div>
+                                                    <span class="ms-2 text-muted">Laddar handikappinformation...</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Nationell Helmatch Shooting Settings Section -->
+                            <div class="mb-4">
+                                <h5 class="mb-3" role="button" data-bs-toggle="collapse" data-bs-target="#nationellHelmatchSection" aria-expanded="true">
+                                    <img src="/images/competition-types/NationellHelmatch.png" alt="Nationell Helmatch" style="height: 20px; width: auto;" class="me-2">Nationell Helmatch
+                                    <i class="bi bi-chevron-down float-end small"></i>
+                                </h5>
+                                <div class="collapse show" id="nationellHelmatchSection">
+                                    <div class="card border-light">
+                                        <div class="card-body">
+                                            <!-- Shooter Class Selection -->
+                                            <label class="form-label fw-semibold">Skytteklass</label>
+                                            <div class="mb-3">
+                                                @{
+                                                    var currentNationellHelmatchShooterClass = memberData?.GetValue("nationellHelmatchShooterClass")?.ToString() ?? "";
+                                                }
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="radio" name="nationellHelmatchShooterClass" id="nationellHelmatchClass1" value="Klass 1 - Nybörjare" @(currentNationellHelmatchShooterClass == "Klass 1 - Nybörjare" ? "checked" : "")>
+                                                    <label class="form-check-label" for="nationellHelmatchClass1">Klass 1 - Nybörjare</label>
+                                                </div>
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="radio" name="nationellHelmatchShooterClass" id="nationellHelmatchClass2" value="Klass 2 - Guldmärkesskytt" @(currentNationellHelmatchShooterClass == "Klass 2 - Guldmärkesskytt" ? "checked" : "")>
+                                                    <label class="form-check-label" for="nationellHelmatchClass2">Klass 2 - Guldmärkesskytt</label>
+                                                </div>
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="radio" name="nationellHelmatchShooterClass" id="nationellHelmatchClass3" value="Klass 3 - Riksmästare" @(currentNationellHelmatchShooterClass == "Klass 3 - Riksmästare" ? "checked" : "")>
+                                                    <label class="form-check-label" for="nationellHelmatchClass3">Klass 3 - Riksmästare</label>
+                                                </div>
+                                            </div>
+
+                                            <hr class="my-3">
+
+                                            <!-- Handicap Info Section -->
+                                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                                <label class="form-label fw-semibold mb-0">Ditt Handikappindex</label>
+                                                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="recalculateMyHandicap('NationellHelmatch')" id="recalculateNationellHelmatchHandicapBtn" title="Omberäkna handikapp från alla resultat">
+                                                    <i class="bi bi-arrow-clockwise"></i> Omberäkna
+                                                </button>
+                                            </div>
+                                            <div id="nationellHelmatchHandicapInfoContainer">
                                                 <div class="text-center py-3">
                                                     <div class="spinner-border spinner-border-sm text-primary" role="status">
                                                         <span class="visually-hidden">Laddar...</span>
@@ -636,6 +688,7 @@ document.addEventListener('DOMContentLoaded', function() {
     loadHandicapProfile('Precision'); // Load Precision handicap info for profile tab
     loadHandicapProfile('Milsnabb'); // Load Milsnabb handicap info for profile tab
     loadHandicapProfile('Duell'); // Load Duell handicap info for profile tab
+    loadHandicapProfile('NationellHelmatch'); // Load Nationell Helmatch handicap info for profile tab
     loadTrainingGroupInfo(); // Load training group membership
 
     // Handle tab switching
@@ -654,7 +707,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Auto-save shooter class on change
-    document.querySelectorAll('input[name="shooterClass"], input[name="milsnabbShooterClass"], input[name="duellShooterClass"]').forEach(radio => {
+    document.querySelectorAll('input[name="shooterClass"], input[name="milsnabbShooterClass"], input[name="duellShooterClass"], input[name="nationellHelmatchShooterClass"]').forEach(radio => {
         radio.addEventListener('change', function() {
             autoSaveShooterClass(this.name, this.value);
         });
@@ -744,7 +797,7 @@ async function loadTrainingGroupInfo() {
 }
 
 function loadHandicapProfile(discipline = 'Precision') {
-    const containerId = discipline === 'Milsnabb' ? 'milsnabbHandicapInfoContainer' : discipline === 'Duell' ? 'duellHandicapInfoContainer' : 'handicapInfoContainer';
+    const containerId = discipline === 'Milsnabb' ? 'milsnabbHandicapInfoContainer' : discipline === 'Duell' ? 'duellHandicapInfoContainer' : discipline === 'NationellHelmatch' ? 'nationellHelmatchHandicapInfoContainer' : 'handicapInfoContainer';
     fetch(`/umbraco/surface/Member/GetHandicapProfile?discipline=${discipline}`)
         .then(response => response.json())
         .then(response => {
@@ -752,7 +805,7 @@ function loadHandicapProfile(discipline = 'Precision') {
                 const data = response.data;
                 // Pre-select shooter class radio (if not already set by server-side rendering)
                 if (data.shooterClass) {
-                    const radioName = discipline === 'Milsnabb' ? 'milsnabbShooterClass' : discipline === 'Duell' ? 'duellShooterClass' : 'shooterClass';
+                    const radioName = discipline === 'Milsnabb' ? 'milsnabbShooterClass' : discipline === 'Duell' ? 'duellShooterClass' : discipline === 'NationellHelmatch' ? 'nationellHelmatchShooterClass' : 'shooterClass';
                     const radio = document.querySelector(`input[name="${radioName}"][value="${data.shooterClass}"]`);
                     if (radio) radio.checked = true;
                 }
@@ -772,7 +825,7 @@ function loadHandicapProfile(discipline = 'Precision') {
 
 // Recalculate handicap for current user
 function recalculateMyHandicap(discipline = 'Precision') {
-    const btnId = discipline === 'Milsnabb' ? 'recalculateMilsnabbHandicapBtn' : 'recalculateHandicapBtn';
+    const btnId = discipline === 'Milsnabb' ? 'recalculateMilsnabbHandicapBtn' : discipline === 'Duell' ? 'recalculateDuellHandicapBtn' : discipline === 'NationellHelmatch' ? 'recalculateNationellHelmatchHandicapBtn' : 'recalculateHandicapBtn';
     const btn = document.getElementById(btnId);
     const originalContent = btn.innerHTML;
     btn.disabled = true;
@@ -821,11 +874,13 @@ function autoSaveShooterClass(radioName, value) {
         formData.append('milsnabbShooterClass', value);
     } else if (radioName === 'duellShooterClass') {
         formData.append('duellShooterClass', value);
+    } else if (radioName === 'nationellHelmatchShooterClass') {
+        formData.append('nationellHelmatchShooterClass', value);
     } else {
         formData.append('precisionShooterClass', value);
     }
 
-    const discipline = radioName === 'milsnabbShooterClass' ? 'Milsnabb' : radioName === 'duellShooterClass' ? 'Duell' : 'Precision';
+    const discipline = radioName === 'milsnabbShooterClass' ? 'Milsnabb' : radioName === 'duellShooterClass' ? 'Duell' : radioName === 'nationellHelmatchShooterClass' ? 'NationellHelmatch' : 'Precision';
 
     fetch('/umbraco/surface/Member/UpdateProfile', {
         method: 'POST',
@@ -1591,7 +1646,7 @@ function calculateStatsFromData(entries) {
 
 // Render personal best rows for a table (training or competition)
 function getSeriesCountsForWeapon(wc, discipline) {
-    if (discipline === 'Milsnabb')
+    if (discipline === 'Milsnabb' || discipline === 'NationellHelmatch')
         return [12];
     // Duell and Precision use same series counts
     return wc === 'L' ? [6, 8, 12] : [6, 7, 10];
@@ -1779,6 +1834,7 @@ function renderDashboard(data, selectedYears = null) {
                             <option value="Precision" ${data.competitionType === 'Precision' || !data.competitionType ? 'selected' : ''}>Precision</option>
                             <option value="Milsnabb" ${data.competitionType === 'Milsnabb' ? 'selected' : ''}>Milsnabb</option>
                             <option value="Duell" ${data.competitionType === 'Duell' ? 'selected' : ''}>Duell</option>
+                            <option value="NationellHelmatch" ${data.competitionType === 'NationellHelmatch' ? 'selected' : ''}>Nationell Helmatch</option>
                         </select>
                         <select id="dashboardYearFilter" class="form-select form-select-sm" style="width: auto;" onchange="onDashboardYearChange(this)">
                             <option value="all" ${selectedYears === null ? 'selected' : ''}>Alla</option>

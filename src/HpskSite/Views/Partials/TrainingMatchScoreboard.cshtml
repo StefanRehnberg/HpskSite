@@ -902,8 +902,9 @@ function renderScoreboard(match) {
         }
     });
 
-    // Always show at least 6 rows, or more if there are more series
-    const displayRows = Math.max(6, maxSeries);
+    // Always show at least 6 rows (or 12 for Milsnabb/NationellHelmatch), or more if there are more series
+    const defaultRows = (match.discipline === 'Milsnabb' || match.discipline === 'NationellHelmatch') ? 12 : 6;
+    const displayRows = Math.max(defaultRows, maxSeries);
 
     // Build score rows
     const tbody = document.getElementById('scoreboardBody');
@@ -986,23 +987,42 @@ function renderScoreboard(match) {
 
         tbody.appendChild(tr);
 
-        // Add summary row after series 6, 7, 10, and 12
-        if (seriesNum === 6 || seriesNum === 7 || seriesNum === 10 || seriesNum === 12) {
+        // Add summary row at group boundaries
+        // Milsnabb/NationellHelmatch: groups of 4 (after 4, 8, 12)
+        // Precision/Duell: after 6, 7, 10, 12
+        const isGrouped = (match.discipline === 'Milsnabb' || match.discipline === 'NationellHelmatch');
+        const showSummary = isGrouped
+            ? (seriesNum % 4 === 0)
+            : (seriesNum === 6 || seriesNum === 7 || seriesNum === 10 || seriesNum === 12);
+
+        if (showSummary) {
             const summaryRow = document.createElement('tr');
             summaryRow.className = 'summary-row';
+
+            // For grouped disciplines, show group subtotal (just this group of 4)
+            // For others, show cumulative total
+            const groupStart = isGrouped ? seriesNum - 3 : 1;
 
             match.participants.forEach((participant, pIndex) => {
                 const td = document.createElement('td');
                 td.className = 'summary-cell';
 
-                // Calculate total up to this point (cap each series at 50)
-                let totalToHere = 0;
-                for (let s = 1; s <= seriesNum; s++) {
+                let groupTotal = 0;
+                for (let s = groupStart; s <= seriesNum; s++) {
                     const score = participant.scores?.find(sc => sc.seriesNumber === s);
-                    if (score) totalToHere += Math.min(score.total, 50);
+                    if (score) groupTotal += Math.min(score.total, 50);
                 }
 
-                td.innerHTML = `<strong>${totalToHere}</strong> <small class="text-muted">(${seriesNum})</small>`;
+                if (isGrouped) {
+                    const groupNum = seriesNum / 4;
+                    const groupLabels = match.discipline === 'NationellHelmatch'
+                        ? ['Precision', 'Duell', 'Fält']
+                        : ['10 sek.', '8 sek.', '6 sek.'];
+                    const label = groupLabels[groupNum - 1] || `Grupp ${groupNum}`;
+                    td.innerHTML = `<strong>${groupTotal}</strong> <small class="text-muted">(${label})</small>`;
+                } else {
+                    td.innerHTML = `<strong>${groupTotal}</strong> <small class="text-muted">(${seriesNum})</small>`;
+                }
                 summaryRow.appendChild(td);
             });
 
