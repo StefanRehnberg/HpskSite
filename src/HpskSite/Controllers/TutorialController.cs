@@ -8,6 +8,7 @@ using Umbraco.Cms.Core.Web;
 using Umbraco.Cms.Infrastructure.Persistence;
 using Umbraco.Cms.Web.Website.Controllers;
 using System.Text.Json;
+using Umbraco.Extensions;
 
 namespace HpskSite.Controllers
 {
@@ -20,6 +21,7 @@ namespace HpskSite.Controllers
         private readonly IMemberManager _memberManager;
         private readonly IMemberService _memberService;
         private readonly IContentService _contentService;
+        private readonly IUmbracoContextAccessor _umbracoContextAccessor;
 
         public TutorialController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -36,6 +38,7 @@ namespace HpskSite.Controllers
             _memberManager = memberManager;
             _memberService = memberService;
             _contentService = contentService;
+            _umbracoContextAccessor = umbracoContextAccessor;
         }
 
         #region Public Endpoints
@@ -49,17 +52,20 @@ namespace HpskSite.Controllers
         {
             try
             {
-                // Find the tutorialPage (should be under Home)
-                var allContent = _contentService.GetRootContent();
-                var homeNode = allContent.FirstOrDefault();
+                // Use published content cache (in-memory) instead of _contentService (DB queries)
+                if (!_umbracoContextAccessor.TryGetUmbracoContext(out var umbracoContext) || umbracoContext.Content == null)
+                {
+                    return Json(new { success = false, message = "Content cache not available" });
+                }
 
-                if (homeNode == null)
+                var root = umbracoContext.Content.GetAtRoot().FirstOrDefault();
+                if (root == null)
                 {
                     return Json(new { success = false, message = "Home node not found" });
                 }
 
                 // Find tutorialPage under Home
-                var tutorialsRoot = _contentService.GetPagedChildren(homeNode.Id, 0, 100, out _)
+                var tutorialsRoot = root.Children
                     .FirstOrDefault(x => x.ContentType.Alias == "tutorialPage");
 
                 if (tutorialsRoot == null)
@@ -67,17 +73,17 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Tutorials page not found. Make sure you have created a tutorialPage under Home." });
                 }
 
-                // Get all tutorial children
-                var tutorials = _contentService.GetPagedChildren(tutorialsRoot.Id, 0, 100, out _)
-                    .Where(x => x.ContentType.Alias == "tutorial" && x.Published)
+                // Get all tutorial children from published cache
+                var tutorials = tutorialsRoot.Children
+                    .Where(x => x.ContentType.Alias == "tutorial")
                     .Select(t => new
                     {
-                        tutorialId = t.GetValue<string>("tutorialId"),
-                        tutorialTitle = t.GetValue<string>("tutorialTitle"),
-                        youtubeId = t.GetValue<string>("youtubeId"),
-                        tutorialDescription = t.GetValue<string>("tutorialDescription"),
-                        duration = t.GetValue<string>("duration"),
-                        targetRole = t.GetValue<string>("targetRole")
+                        tutorialId = t.Value<string>("tutorialId"),
+                        tutorialTitle = t.Value<string>("tutorialTitle"),
+                        youtubeId = t.Value<string>("youtubeId"),
+                        tutorialDescription = t.Value<string>("tutorialDescription"),
+                        duration = t.Value<string>("duration"),
+                        targetRole = t.Value<string>("targetRole")
                     })
                     .ToList();
 

@@ -33,6 +33,7 @@ namespace HpskSite.Controllers
         private readonly MediaFileManager _mediaFileManager;
         private readonly AppCaches _appCaches;
         private readonly SeriesCalculationService _seriesCalculationService;
+        private readonly IUmbracoContextAccessor _umbracoContextAccessor;
 
         // Cache configuration
         private const string SeriesListCacheKey = "admin_series_list";
@@ -63,6 +64,7 @@ namespace HpskSite.Controllers
             _mediaFileManager = mediaFileManager;
             _seriesCalculationService = seriesCalculationService;
             _appCaches = appCaches;
+            _umbracoContextAccessor = umbracoContextAccessor;
         }
 
 
@@ -262,13 +264,80 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetCompetitionsList(int? year = null, bool includeCompleted = false, string? type = null, string? region = null)
         {
-            // Check if user is site admin, club admin, skjutledare, or regional admin
-            bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
-            var managedClubIds = await _authorizationService.GetManagedClubIds();
+            // --- AUTH: fetch member + roles ONCE (instead of ~12 redundant DB calls) ---
+            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            if (currentMember == null)
+                return Ok(new { success = false, message = "Access denied" });
+
+            var memberData = _memberService.GetByEmail(currentMember.Email ?? string.Empty);
+            if (memberData == null)
+                return Ok(new { success = false, message = "Access denied" });
+
+            var memberRoles = _memberService.GetAllRoles(memberData.Id);
+            bool isSiteAdmin = memberRoles.Contains("Administrators");
+
+            var managedClubIds = new HashSet<int>();
+            var managedRegions = new List<string>();
+            var skjutledareClubIds = new HashSet<int>();
+
+            if (!isSiteAdmin)
+            {
+                // Extract ClubAdmin club IDs from roles
+                foreach (var role in memberRoles.Where(r => r.StartsWith("ClubAdmin_")))
+                {
+                    if (int.TryParse(role.Replace("ClubAdmin_", ""), out int clubId))
+                        managedClubIds.Add(clubId);
+                }
+
+                // Extract RegionalAdmin regions from roles
+                foreach (var role in memberRoles.Where(r => r.StartsWith("RegionalAdmin_")))
+                {
+                    managedRegions.Add(role.Replace("RegionalAdmin_", ""));
+                }
+
+                // If regional admin, add clubs in managed regions
+                if (managedRegions.Any() && _umbracoContextAccessor.TryGetUmbracoContext(out var regionCtx) && regionCtx.Content != null)
+                {
+                    var regionRoot = regionCtx.Content.GetAtRoot().FirstOrDefault();
+                    if (regionRoot != null)
+                    {
+                        foreach (var rp in regionRoot.Children.Where(c => c.ContentType.Alias == "regionalPage"))
+                        {
+                            var regionCode = rp.Value<string>("regionCode") ?? "";
+                            if (managedRegions.Contains(regionCode))
+                            {
+                                var clubsPage = rp.Children.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+                                if (clubsPage != null)
+                                {
+                                    foreach (var club in clubsPage.Children.Where(c => c.ContentType.Alias == "club"))
+                                        managedClubIds.Add(club.Id);
+                                }
+                            }
+                        }
+
+                        var rootClubsPage = regionRoot.Children.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+                        if (rootClubsPage != null)
+                        {
+                            foreach (var club in rootClubsPage.Children.Where(c => c.ContentType.Alias == "club"))
+                            {
+                                var clubRegion = club.Value<string>("regionalFederation") ?? "";
+                                if (managedRegions.Contains(clubRegion))
+                                    managedClubIds.Add(club.Id);
+                            }
+                        }
+                    }
+                }
+
+                // Extract Skjutledare club IDs from roles
+                foreach (var role in memberRoles.Where(r => r.StartsWith("Skjutledare_")))
+                {
+                    if (int.TryParse(role.Replace("Skjutledare_", ""), out int clubId))
+                        skjutledareClubIds.Add(clubId);
+                }
+            }
+
             bool isClubAdmin = managedClubIds.Any();
-            var managedRegions = await _authorizationService.GetManagedRegions();
             bool isRegionalAdmin = !isSiteAdmin && managedRegions.Any();
-            var skjutledareClubIds = await _authorizationService.GetSkjutledareClubIds();
             bool isSkjutledare = skjutledareClubIds.Any();
 
             if (!isSiteAdmin && !isClubAdmin && !isRegionalAdmin && !isSkjutledare)
@@ -300,7 +369,7 @@ namespace HpskSite.Controllers
             try
             {
                 var today = DateTime.Today;
-                var filterYear = year ?? today.Year; // Default to current year
+                var filterYear = year ?? today.Year;
 
                 // Check cache (include type and region in cache key)
                 string? cacheKey = null;
@@ -316,102 +385,106 @@ namespace HpskSite.Controllers
                     }
                 }
 
-                // OPTIMIZED: Use GetPagedDescendants for single database query instead of tree traversal
-                var allCompetitions = new List<Umbraco.Cms.Core.Models.IContent>();
-                var registrationCounts = new Dictionary<int, int>();
-                var clubRegionLookup = new Dictionary<int, string>(); // clubId -> regionalFederation
-
-                var rootContent = _contentService.GetRootContent();
-                foreach (var root in rootContent)
+                // --- Use published content cache (in-memory) instead of _contentService.GetPagedDescendants (DB) ---
+                if (!_umbracoContextAccessor.TryGetUmbracoContext(out var umbracoContext) || umbracoContext.Content == null)
                 {
-                    // Single query to get all descendants (much faster than node-by-node traversal)
-                    var descendants = _contentService.GetPagedDescendants(root.Id, 0, int.MaxValue, out _);
+                    return Ok(new { success = false, message = "Content cache not available" });
+                }
 
-                    // Filter by content type in memory (still faster than multiple DB calls)
-                    foreach (var item in descendants)
+                var root = umbracoContext.Content.GetAtRoot().FirstOrDefault();
+                if (root == null)
+                {
+                    return Ok(new { success = true, data = new List<object>() });
+                }
+
+                // Find competitions hub
+                var competitionsHub = root.Children.FirstOrDefault(c => c.ContentType.Alias == "competitionsHub");
+                if (competitionsHub == null)
+                {
+                    return Ok(new { success = true, data = new List<object>() });
+                }
+
+                // Collect all competitions from competitionsHub subtree (published cache)
+                // Structure: competitionsHub → year folder (contentPage) or competitionSeries → competition
+                var allCompetitions = competitionsHub.Descendants()
+                    .Where(c => c.ContentType.Alias == "competition")
+                    .ToList();
+
+                // Build club -> region lookup from published cache (only if needed for region filtering)
+                var clubRegionLookup = new Dictionary<int, string>();
+                if (!string.IsNullOrEmpty(effectiveRegion) || (effectiveRegions != null && effectiveRegions.Any()))
+                {
+                    foreach (var rp in root.Children.Where(c => c.ContentType.Alias == "regionalPage"))
                     {
-                        if (item.ContentType.Alias == "competition")
+                        var clubsPage = rp.Children.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+                        if (clubsPage != null)
                         {
-                            allCompetitions.Add(item);
+                            foreach (var club in clubsPage.Children.Where(c => c.ContentType.Alias == "club"))
+                                clubRegionLookup[club.Id] = club.Value<string>("regionalFederation") ?? "";
                         }
-                        else if (item.ContentType.Alias == "competitionRegistration")
+                    }
+
+                    var rootClubsPage = root.Children.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+                    if (rootClubsPage != null)
+                    {
+                        foreach (var club in rootClubsPage.Children.Where(c => c.ContentType.Alias == "club"))
                         {
-                            // Count registrations directly without storing full objects
-                            var compId = item.GetValue<int>("competitionId");
-                            if (compId > 0)
-                            {
-                                registrationCounts.TryGetValue(compId, out var count);
-                                registrationCounts[compId] = count + 1;
-                            }
-                        }
-                        else if (item.ContentType.Alias == "club")
-                        {
-                            // Build club -> region lookup for region filtering
-                            var clubRegion = item.GetValue<string>("regionalFederation") ?? "";
-                            if (!clubRegionLookup.ContainsKey(item.Id))
-                            {
-                                clubRegionLookup[item.Id] = clubRegion;
-                            }
+                            if (!clubRegionLookup.ContainsKey(club.Id))
+                                clubRegionLookup[club.Id] = club.Value<string>("regionalFederation") ?? "";
                         }
                     }
                 }
 
                 // Apply server-side filters
                 var filteredCompetitions = allCompetitions
-                    .Where(comp => isSiteAdmin || isRegionalAdmin || managedClubIds.Contains(comp.GetValue<int?>("clubId") ?? 0) || skjutledareClubIds.Contains(comp.GetValue<int?>("clubId") ?? 0))
+                    .Where(comp => isSiteAdmin || isRegionalAdmin || managedClubIds.Contains(comp.Value<int?>("clubId") ?? 0) || skjutledareClubIds.Contains(comp.Value<int?>("clubId") ?? 0))
                     .Where(comp =>
                     {
-                        var compDate = comp.GetValue<DateTime?>("competitionDate");
+                        var compDate = comp.Value<DateTime?>("competitionDate");
 
-                        // Year filter (if year specified, filter; otherwise include all)
+                        // Year filter
                         if (year.HasValue && compDate.HasValue && compDate.Value.Year != filterYear)
                             return false;
 
                         // Status filter - exclude completed unless requested
                         if (!includeCompleted && compDate.HasValue)
                         {
-                            var compEndDate = comp.GetValue<DateTime?>("competitionEndDate");
+                            var compEndDate = comp.Value<DateTime?>("competitionEndDate");
                             var effectiveEnd = (compEndDate.HasValue && compEndDate.Value.Year > 1900) ? compEndDate.Value.Date : compDate.Value.Date;
                             var isCompleted = effectiveEnd < today;
                             if (isCompleted) return false;
                         }
 
-                        // Type filter (server-side)
+                        // Type filter
                         if (!string.IsNullOrEmpty(type))
                         {
-                            var compType = comp.GetValue<string>("competitionType") ?? "";
+                            var compType = comp.Value<string>("competitionType") ?? "";
                             if (!compType.Equals(type, StringComparison.OrdinalIgnoreCase))
                                 return false;
                         }
 
-                        // Region filter - filter by club's regional federation OR competition's direct regionalFederation
-                        // For regional admins, always enforce region filtering
+                        // Region filter
                         if (!string.IsNullOrEmpty(effectiveRegion))
                         {
-                            var compClubId = comp.GetValue<int?>("clubId") ?? 0;
-                            var compRegion = comp.GetValue<string>("regionalFederation") ?? "";
+                            var compClubId = comp.Value<int?>("clubId") ?? 0;
+                            var compRegion = comp.Value<string>("regionalFederation") ?? "";
 
-                            // If competition has a club, use the club's region
                             if (compClubId > 0)
                             {
                                 if (!clubRegionLookup.TryGetValue(compClubId, out var clubRegion) ||
                                     !clubRegion.Equals(effectiveRegion, StringComparison.OrdinalIgnoreCase))
                                     return false;
                             }
-                            // If competition has no club but has a direct region, use that
                             else if (!string.IsNullOrEmpty(compRegion))
                             {
                                 if (!compRegion.Equals(effectiveRegion, StringComparison.OrdinalIgnoreCase))
                                     return false;
                             }
-                            // If competition has neither club nor region, it's national - show in all regions
-                            // (no filter applied, competition matches)
                         }
                         else if (effectiveRegions != null && effectiveRegions.Any())
                         {
-                            // Multi-region filter for regional admins
-                            var compClubId = comp.GetValue<int?>("clubId") ?? 0;
-                            var compRegion = comp.GetValue<string>("regionalFederation") ?? "";
+                            var compClubId = comp.Value<int?>("clubId") ?? 0;
+                            var compRegion = comp.Value<string>("regionalFederation") ?? "";
 
                             if (compClubId > 0)
                             {
@@ -424,39 +497,25 @@ namespace HpskSite.Controllers
                                 if (!effectiveRegions.Contains(compRegion))
                                     return false;
                             }
-                            // National competitions (no club, no region) - include them
                         }
 
                         return true;
                     })
                     .ToList();
 
-                // Batch lookup for parent nodes (optimize N+1 pattern)
-                var parentIds = filteredCompetitions
-                    .Where(c => c.ParentId > 0)
-                    .Select(c => c.ParentId)
-                    .Distinct()
-                    .ToList();
-                var parentLookup = parentIds.ToDictionary(
-                    id => id,
-                    id => _contentService.GetById(id)
-                );
-
-                // Build competition list with pre-calculated counts
+                // Build competition list — parent lookup via .Parent (no DB calls needed)
                 var competitions = filteredCompetitions
                     .Select(comp =>
                     {
-                        // Check if parent is a series (using cached lookup)
-                        parentLookup.TryGetValue(comp.ParentId, out var parent);
+                        var parent = comp.Parent;
                         var isInSeries = parent != null && parent.ContentType.Alias == "competitionSeries";
 
-                        // Get competition properties
-                        var isActive = comp.GetValue<bool>("isActive");
-                        var compDate = comp.GetValue<DateTime?>("competitionDate");
-                        var compEndDate = comp.GetValue<DateTime?>("competitionEndDate");
+                        var isActive = comp.Value<bool>("isActive");
+                        var compDate = comp.Value<DateTime?>("competitionDate");
+                        var compEndDate = comp.Value<DateTime?>("competitionEndDate");
                         var effectiveEndDate = (compEndDate.HasValue && compEndDate.Value.Year > 1900) ? compEndDate.Value.Date : compDate?.Date;
 
-                        // Calculate status: Draft, Scheduled, Active, Completed
+                        // Calculate status
                         string status;
                         if (!isActive)
                         {
@@ -483,27 +542,30 @@ namespace HpskSite.Controllers
                         }
                         else
                         {
-                            status = "Scheduled"; // Active but no date
+                            status = "Scheduled";
                         }
+
+                        // Count registrations from children (published cache)
+                        var regCount = comp.Children.Count(c => c.ContentType.Alias == "competitionRegistration");
 
                         return new
                         {
                             id = comp.Id,
                             name = comp.Name,
-                            description = comp.GetValue<string>("description") ?? "",
-                            type = comp.GetValue<string>("competitionType") ?? "Unknown",
+                            description = comp.Value<string>("description") ?? "",
+                            type = comp.Value<string>("competitionType") ?? "Unknown",
                             startDate = compDate,
                             endDate = compEndDate,
-                            registrationOpenDate = comp.GetValue<DateTime?>("registrationOpenDate"),
-                            registrationCloseDate = comp.GetValue<DateTime?>("registrationCloseDate"),
+                            registrationOpenDate = comp.Value<DateTime?>("registrationOpenDate"),
+                            registrationCloseDate = comp.Value<DateTime?>("registrationCloseDate"),
                             isActive = isActive,
-                            isClubOnly = comp.GetValue<bool>("isClubOnly"),
-                            isExternal = comp.GetValue<bool>("isExternal"),
-                            clubId = comp.GetValue<int?>("clubId") ?? 0,
-                            registrationCount = registrationCounts.TryGetValue(comp.Id, out var count) ? count : 0,
-                            allowSelfReporting = comp.GetValue<bool>("allowSelfReporting"),
+                            isClubOnly = comp.Value<bool>("isClubOnly"),
+                            isExternal = comp.Value<bool>("isExternal"),
+                            clubId = comp.Value<int?>("clubId") ?? 0,
+                            registrationCount = regCount,
+                            allowSelfReporting = comp.Value<bool>("allowSelfReporting"),
                             seriesId = isInSeries ? parent!.Id : (int?)null,
-                            seriesName = isInSeries ? (parent!.GetValue<string>("seriesName") ?? parent.Name) : null,
+                            seriesName = isInSeries ? (parent!.Value<string>("seriesName") ?? parent.Name) : null,
                             status = status
                         };
                     })
