@@ -380,7 +380,7 @@
     </div>
     <div class="wizard-overlay-body">
         <!-- A-klasser -->
-        <div class="class-section mb-3">
+        <div class="class-section mb-3" id="classSection_A">
             <div class="d-flex justify-content-between align-items-center mb-2">
                 <h6 class="mb-0">A-klasser</h6>
                 <button type="button" class="btn btn-sm btn-outline-primary" onclick="toggleClassSection('A')">
@@ -396,7 +396,7 @@
         </div>
 
         <!-- B-klasser -->
-        <div class="class-section mb-3">
+        <div class="class-section mb-3" id="classSection_B">
             <div class="d-flex justify-content-between align-items-center mb-2">
                 <h6 class="mb-0">B-klasser</h6>
                 <button type="button" class="btn btn-sm btn-outline-primary" onclick="toggleClassSection('B')">
@@ -411,7 +411,7 @@
         </div>
 
         <!-- C-klasser -->
-        <div class="class-section mb-3">
+        <div class="class-section mb-3" id="classSection_C">
             <div class="d-flex justify-content-between align-items-center mb-2">
                 <h6 class="mb-0">C-klasser</h6>
                 <button type="button" class="btn btn-sm btn-outline-primary" onclick="toggleClassSection('C')">
@@ -432,7 +432,7 @@
         </div>
 
         <!-- R-klasser -->
-        <div class="class-section mb-3">
+        <div class="class-section mb-3" id="classSection_R">
             <div class="d-flex justify-content-between align-items-center mb-2">
                 <h6 class="mb-0">R-klasser</h6>
                 <button type="button" class="btn btn-sm btn-outline-primary" onclick="toggleClassSection('R')">
@@ -447,7 +447,7 @@
         </div>
 
         <!-- L-klasser -->
-        <div class="class-section mb-3">
+        <div class="class-section mb-3" id="classSection_L">
             <div class="d-flex justify-content-between align-items-center mb-2">
                 <h6 class="mb-0">L-klasser</h6>
                 <button type="button" class="btn btn-sm btn-outline-primary" onclick="toggleClassSection('L')">
@@ -468,7 +468,7 @@
         </div>
 
         <!-- M-klasser -->
-        <div class="class-section mb-3">
+        <div class="class-section mb-3" id="classSection_M">
             <div class="d-flex justify-content-between align-items-center mb-2">
                 <h6 class="mb-0">M-klasser</h6>
                 <button type="button" class="btn btn-sm btn-outline-primary" onclick="toggleClassSection('M')">
@@ -687,6 +687,37 @@ function onCompetitionTypeChange() {
 
     // Apply type-specific series defaults
     applySeriesDefaults();
+
+    // Filter visible class sections and clear incompatible selections
+    filterClassSections();
+}
+
+// Show/hide class sections in the overlay based on competition type.
+// MagnumPrecision only allows M-classes; other types show all sections.
+function filterClassSections() {
+    const typeId = document.getElementById('wizard_competitionType').value;
+    const allSections = ['A', 'B', 'C', 'R', 'L', 'M'];
+
+    // Define which sections are allowed per type (default: all)
+    const allowedSections = typeId === 'MagnumPrecision' ? ['M'] : allSections;
+
+    allSections.forEach(section => {
+        const el = document.getElementById('classSection_' + section);
+        if (!el) return;
+        const isAllowed = allowedSections.includes(section);
+        el.style.display = isAllowed ? '' : 'none';
+
+        // Uncheck hidden checkboxes so they aren't included in the selection
+        if (!isAllowed) {
+            el.querySelectorAll('.class-checkbox:checked').forEach(cb => { cb.checked = false; });
+        }
+    });
+
+    // Update the stored selection to remove any unchecked classes
+    const stillChecked = Array.from(document.querySelectorAll('.class-checkbox:checked')).map(cb => cb.value);
+    document.getElementById('wizard_shootingClassIds').value = stillChecked.join(',');
+    updateClassSelectionDisplay();
+    updateOverlayClassCount();
 }
 
 // Apply series/finals defaults based on selected competition type
@@ -1159,6 +1190,9 @@ function validateCurrentStep() {
 function openClassSelectionOverlay() {
     const overlay = document.getElementById('classSelectionOverlay');
     overlay.classList.add('active');
+
+    // Filter sections based on competition type before restoring selections
+    filterClassSections();
 
     // Restore current selections
     restoreClassSelections();

@@ -115,6 +115,7 @@
                                         <option value="Milsnabb">Milsnabb</option>
                                         <option value="Duell">Duell</option>
                                         <option value="NationellHelmatch">Nationell Helmatch</option>
+                                        <option value="MagnumPrecision">Magnum Precision</option>
                                     </select>
                                     <select id="yearFilter" class="form-select form-select-sm" style="width: auto;" onchange="loadResults()">
                                         @* Options populated by JavaScript *@
@@ -384,6 +385,57 @@
                                                 </button>
                                             </div>
                                             <div id="nationellHelmatchHandicapInfoContainer">
+                                                <div class="text-center py-3">
+                                                    <div class="spinner-border spinner-border-sm text-primary" role="status">
+                                                        <span class="visually-hidden">Laddar...</span>
+                                                    </div>
+                                                    <span class="ms-2 text-muted">Laddar handikappinformation...</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Magnum Precision Shooting Settings Section -->
+                            <div class="mb-4">
+                                <h5 class="mb-3" role="button" data-bs-toggle="collapse" data-bs-target="#magnumPrecisionSection" aria-expanded="true">
+                                    <img src="/images/competition-types/MagnumPrecision.png" alt="Magnum Precision" style="height: 20px; width: auto;" class="me-2">Magnum Precision
+                                    <i class="bi bi-chevron-down float-end small"></i>
+                                </h5>
+                                <div class="collapse show" id="magnumPrecisionSection">
+                                    <div class="card border-light">
+                                        <div class="card-body">
+                                            <!-- Shooter Class Selection -->
+                                            <label class="form-label fw-semibold">Skytteklass</label>
+                                            <div class="mb-3">
+                                                @{
+                                                    var currentMagnumPrecisionShooterClass = memberData?.GetValue("magnumPrecisionShooterClass")?.ToString() ?? "";
+                                                }
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="radio" name="magnumPrecisionShooterClass" id="magnumPrecisionClass1" value="Klass 1 - Nybörjare" @(currentMagnumPrecisionShooterClass == "Klass 1 - Nybörjare" ? "checked" : "")>
+                                                    <label class="form-check-label" for="magnumPrecisionClass1">Klass 1 - Nybörjare</label>
+                                                </div>
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="radio" name="magnumPrecisionShooterClass" id="magnumPrecisionClass2" value="Klass 2 - Guldmärkesskytt" @(currentMagnumPrecisionShooterClass == "Klass 2 - Guldmärkesskytt" ? "checked" : "")>
+                                                    <label class="form-check-label" for="magnumPrecisionClass2">Klass 2 - Guldmärkesskytt</label>
+                                                </div>
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="radio" name="magnumPrecisionShooterClass" id="magnumPrecisionClass3" value="Klass 3 - Riksmästare" @(currentMagnumPrecisionShooterClass == "Klass 3 - Riksmästare" ? "checked" : "")>
+                                                    <label class="form-check-label" for="magnumPrecisionClass3">Klass 3 - Riksmästare</label>
+                                                </div>
+                                            </div>
+
+                                            <hr class="my-3">
+
+                                            <!-- Handicap Info Section -->
+                                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                                <label class="form-label fw-semibold mb-0">Ditt Handikappindex</label>
+                                                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="recalculateMyHandicap('MagnumPrecision')" id="recalculateMagnumPrecisionHandicapBtn" title="Omberäkna handikapp från alla resultat">
+                                                    <i class="bi bi-arrow-clockwise"></i> Omberäkna
+                                                </button>
+                                            </div>
+                                            <div id="magnumPrecisionHandicapInfoContainer">
                                                 <div class="text-center py-3">
                                                     <div class="spinner-border spinner-border-sm text-primary" role="status">
                                                         <span class="visually-hidden">Laddar...</span>
@@ -689,6 +741,7 @@ document.addEventListener('DOMContentLoaded', function() {
     loadHandicapProfile('Milsnabb'); // Load Milsnabb handicap info for profile tab
     loadHandicapProfile('Duell'); // Load Duell handicap info for profile tab
     loadHandicapProfile('NationellHelmatch'); // Load Nationell Helmatch handicap info for profile tab
+    loadHandicapProfile('MagnumPrecision'); // Load Magnum Precision handicap info for profile tab
     loadTrainingGroupInfo(); // Load training group membership
 
     // Handle tab switching
@@ -707,7 +760,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Auto-save shooter class on change
-    document.querySelectorAll('input[name="shooterClass"], input[name="milsnabbShooterClass"], input[name="duellShooterClass"], input[name="nationellHelmatchShooterClass"]').forEach(radio => {
+    document.querySelectorAll('input[name="shooterClass"], input[name="milsnabbShooterClass"], input[name="duellShooterClass"], input[name="nationellHelmatchShooterClass"], input[name="magnumPrecisionShooterClass"]').forEach(radio => {
         radio.addEventListener('change', function() {
             autoSaveShooterClass(this.name, this.value);
         });
@@ -797,7 +850,7 @@ async function loadTrainingGroupInfo() {
 }
 
 function loadHandicapProfile(discipline = 'Precision') {
-    const containerId = discipline === 'Milsnabb' ? 'milsnabbHandicapInfoContainer' : discipline === 'Duell' ? 'duellHandicapInfoContainer' : discipline === 'NationellHelmatch' ? 'nationellHelmatchHandicapInfoContainer' : 'handicapInfoContainer';
+    const containerId = discipline === 'Milsnabb' ? 'milsnabbHandicapInfoContainer' : discipline === 'Duell' ? 'duellHandicapInfoContainer' : discipline === 'NationellHelmatch' ? 'nationellHelmatchHandicapInfoContainer' : discipline === 'MagnumPrecision' ? 'magnumPrecisionHandicapInfoContainer' : 'handicapInfoContainer';
     fetch(`/umbraco/surface/Member/GetHandicapProfile?discipline=${discipline}`)
         .then(response => response.json())
         .then(response => {
@@ -805,7 +858,7 @@ function loadHandicapProfile(discipline = 'Precision') {
                 const data = response.data;
                 // Pre-select shooter class radio (if not already set by server-side rendering)
                 if (data.shooterClass) {
-                    const radioName = discipline === 'Milsnabb' ? 'milsnabbShooterClass' : discipline === 'Duell' ? 'duellShooterClass' : discipline === 'NationellHelmatch' ? 'nationellHelmatchShooterClass' : 'shooterClass';
+                    const radioName = discipline === 'Milsnabb' ? 'milsnabbShooterClass' : discipline === 'Duell' ? 'duellShooterClass' : discipline === 'NationellHelmatch' ? 'nationellHelmatchShooterClass' : discipline === 'MagnumPrecision' ? 'magnumPrecisionShooterClass' : 'shooterClass';
                     const radio = document.querySelector(`input[name="${radioName}"][value="${data.shooterClass}"]`);
                     if (radio) radio.checked = true;
                 }
@@ -825,7 +878,7 @@ function loadHandicapProfile(discipline = 'Precision') {
 
 // Recalculate handicap for current user
 function recalculateMyHandicap(discipline = 'Precision') {
-    const btnId = discipline === 'Milsnabb' ? 'recalculateMilsnabbHandicapBtn' : discipline === 'Duell' ? 'recalculateDuellHandicapBtn' : discipline === 'NationellHelmatch' ? 'recalculateNationellHelmatchHandicapBtn' : 'recalculateHandicapBtn';
+    const btnId = discipline === 'Milsnabb' ? 'recalculateMilsnabbHandicapBtn' : discipline === 'Duell' ? 'recalculateDuellHandicapBtn' : discipline === 'NationellHelmatch' ? 'recalculateNationellHelmatchHandicapBtn' : discipline === 'MagnumPrecision' ? 'recalculateMagnumPrecisionHandicapBtn' : 'recalculateHandicapBtn';
     const btn = document.getElementById(btnId);
     const originalContent = btn.innerHTML;
     btn.disabled = true;
@@ -876,11 +929,13 @@ function autoSaveShooterClass(radioName, value) {
         formData.append('duellShooterClass', value);
     } else if (radioName === 'nationellHelmatchShooterClass') {
         formData.append('nationellHelmatchShooterClass', value);
+    } else if (radioName === 'magnumPrecisionShooterClass') {
+        formData.append('magnumPrecisionShooterClass', value);
     } else {
         formData.append('precisionShooterClass', value);
     }
 
-    const discipline = radioName === 'milsnabbShooterClass' ? 'Milsnabb' : radioName === 'duellShooterClass' ? 'Duell' : radioName === 'nationellHelmatchShooterClass' ? 'NationellHelmatch' : 'Precision';
+    const discipline = radioName === 'milsnabbShooterClass' ? 'Milsnabb' : radioName === 'duellShooterClass' ? 'Duell' : radioName === 'nationellHelmatchShooterClass' ? 'NationellHelmatch' : radioName === 'magnumPrecisionShooterClass' ? 'MagnumPrecision' : 'Precision';
 
     fetch('/umbraco/surface/Member/UpdateProfile', {
         method: 'POST',
@@ -1646,6 +1701,8 @@ function calculateStatsFromData(entries) {
 
 // Render personal best rows for a table (training or competition)
 function getSeriesCountsForWeapon(wc, discipline) {
+    if (discipline === 'MagnumPrecision')
+        return [6];
     if (discipline === 'Milsnabb' || discipline === 'NationellHelmatch')
         return [12];
     // Duell and Precision use same series counts
@@ -1835,6 +1892,7 @@ function renderDashboard(data, selectedYears = null) {
                             <option value="Milsnabb" ${data.competitionType === 'Milsnabb' ? 'selected' : ''}>Milsnabb</option>
                             <option value="Duell" ${data.competitionType === 'Duell' ? 'selected' : ''}>Duell</option>
                             <option value="NationellHelmatch" ${data.competitionType === 'NationellHelmatch' ? 'selected' : ''}>Nationell Helmatch</option>
+                            <option value="MagnumPrecision" ${data.competitionType === 'MagnumPrecision' ? 'selected' : ''}>Magnum Precision</option>
                         </select>
                         <select id="dashboardYearFilter" class="form-select form-select-sm" style="width: auto;" onchange="onDashboardYearChange(this)">
                             <option value="all" ${selectedYears === null ? 'selected' : ''}>Alla</option>

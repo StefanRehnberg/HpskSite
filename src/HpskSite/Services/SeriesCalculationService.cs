@@ -234,6 +234,7 @@ namespace HpskSite.Services
                     "Milsnabb" => "MilsnabbResultEntry",
                     "Duell" => "DuellResultEntry",
                     "NationellHelmatch" => "NationellHelmatchResultEntry",
+                    "MagnumPrecision" => "MagnumPrecisionResultEntry",
                     _ => "PrecisionResultEntry"
                 };
 

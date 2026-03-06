@@ -161,7 +161,8 @@ namespace HpskSite.Controllers
             string precisionShooterClass = null,
             string milsnabbShooterClass = null,
             string duellShooterClass = null,
-            string nationellHelmatchShooterClass = null)
+            string nationellHelmatchShooterClass = null,
+            string magnumPrecisionShooterClass = null)
         {
             try
             {
@@ -209,6 +210,10 @@ namespace HpskSite.Controllers
                 if (!string.IsNullOrEmpty(nationellHelmatchShooterClass) && member.HasProperty("nationellHelmatchShooterClass"))
                 {
                     member.SetValue("nationellHelmatchShooterClass", nationellHelmatchShooterClass);
+                }
+                if (!string.IsNullOrEmpty(magnumPrecisionShooterClass) && member.HasProperty("magnumPrecisionShooterClass"))
+                {
+                    member.SetValue("magnumPrecisionShooterClass", magnumPrecisionShooterClass);
                 }
                 member.Email = email;
                 member.Name = $"{firstName} {lastName}";
@@ -661,6 +666,7 @@ namespace HpskSite.Controllers
                         "Milsnabb" => "MilsnabbResultEntry",
                         "Duell" => "DuellResultEntry",
                         "NationellHelmatch" => "NationellHelmatchResultEntry",
+                        "MagnumPrecision" => "MagnumPrecisionResultEntry",
                         _ => "PrecisionResultEntry"
                     };
                     var competitionResults = db.Fetch<dynamic>($@"
@@ -2116,7 +2122,7 @@ namespace HpskSite.Controllers
                 }
 
                 // Get shooter class from member profile based on discipline
-                var shooterClassProperty = discipline switch { "Milsnabb" => "milsnabbShooterClass", "Duell" => "duellShooterClass", "NationellHelmatch" => "nationellHelmatchShooterClass", _ => "precisionShooterClass" };
+                var shooterClassProperty = discipline switch { "Milsnabb" => "milsnabbShooterClass", "Duell" => "duellShooterClass", "NationellHelmatch" => "nationellHelmatchShooterClass", "MagnumPrecision" => "magnumPrecisionShooterClass", _ => "precisionShooterClass" };
                 string shooterClass = "";
                 if (member.HasProperty(shooterClassProperty))
                 {
@@ -2204,7 +2210,7 @@ namespace HpskSite.Controllers
                 }
 
                 // Get shooter class from member profile based on discipline
-                var shooterClassProperty = discipline switch { "Milsnabb" => "milsnabbShooterClass", "Duell" => "duellShooterClass", "NationellHelmatch" => "nationellHelmatchShooterClass", _ => "precisionShooterClass" };
+                var shooterClassProperty = discipline switch { "Milsnabb" => "milsnabbShooterClass", "Duell" => "duellShooterClass", "NationellHelmatch" => "nationellHelmatchShooterClass", "MagnumPrecision" => "magnumPrecisionShooterClass", _ => "precisionShooterClass" };
                 string shooterClass = "";
                 if (member.HasProperty(shooterClassProperty))
                 {
@@ -2612,6 +2618,7 @@ namespace HpskSite.Controllers
                 // Calculate personal bests by series count (discipline-aware)
                 int[] GetSeriesCountsForWeapon(string wc)
                 {
+                    if (competitionType == "MagnumPrecision") return new[] { 6 };
                     if (competitionType == "Milsnabb" || competitionType == "NationellHelmatch") return new[] { 12 };
                     // Duell uses same series counts as Precision
                     return wc == "L" ? new[] { 6, 8, 12 } : new[] { 6, 7, 10 };
@@ -2641,7 +2648,7 @@ namespace HpskSite.Controllers
                 var medalStats = GetMemberMedalStats(memberId, selectedYear, competitionType);
 
                 // Calculate handicap profiles (discipline-aware)
-                var shooterClassProperty = competitionType switch { "Milsnabb" => "milsnabbShooterClass", "Duell" => "duellShooterClass", "NationellHelmatch" => "nationellHelmatchShooterClass", _ => "precisionShooterClass" };
+                var shooterClassProperty = competitionType switch { "Milsnabb" => "milsnabbShooterClass", "Duell" => "duellShooterClass", "NationellHelmatch" => "nationellHelmatchShooterClass", "MagnumPrecision" => "magnumPrecisionShooterClass", _ => "precisionShooterClass" };
                 string shooterClass = "";
                 if (targetMember.HasProperty(shooterClassProperty))
                 {
@@ -2707,9 +2714,10 @@ namespace HpskSite.Controllers
                 "Milsnabb" => "MilsnabbResultEntry",
                 "Duell" => "DuellResultEntry",
                 "NationellHelmatch" => "NationellHelmatchResultEntry",
+                "MagnumPrecision" => "MagnumPrecisionResultEntry",
                 _ => "PrecisionResultEntry"
             };
-            int defaultSeriesCount = (discipline == "Milsnabb" || discipline == "NationellHelmatch") ? 12 : 0;
+            int defaultSeriesCount = discipline switch { "Milsnabb" or "NationellHelmatch" => 12, "MagnumPrecision" => 6, _ => 0 };
 
             using (var db = _databaseFactory.CreateDatabase())
             {
@@ -2904,6 +2912,7 @@ namespace HpskSite.Controllers
                         "Milsnabb" => "MilsnabbResultEntry",
                         "Duell" => "DuellResultEntry",
                         "NationellHelmatch" => "NationellHelmatchResultEntry",
+                        "MagnumPrecision" => "MagnumPrecisionResultEntry",
                         _ => "PrecisionResultEntry"
                     };
                     var competitionIds = db.Fetch<int>($@"

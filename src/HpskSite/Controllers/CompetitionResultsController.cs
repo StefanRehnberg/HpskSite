@@ -22,6 +22,8 @@ using HpskSite.CompetitionTypes.Duell.Services;
 using HpskSite.CompetitionTypes.Duell.Models;
 using HpskSite.CompetitionTypes.NationellHelmatch.Services;
 using HpskSite.CompetitionTypes.NationellHelmatch.Models;
+using HpskSite.CompetitionTypes.MagnumPrecision.Services;
+using HpskSite.CompetitionTypes.MagnumPrecision.Models;
 using Newtonsoft.Json;
 using PrecisionResultEntry = HpskSite.CompetitionTypes.Precision.Models.PrecisionResultEntry;
 using ResultEntryRequest = HpskSite.CompetitionTypes.Precision.Models.PrecisionResultEntryRequest;
@@ -547,6 +549,12 @@ namespace HpskSite.Controllers
                         var nhResults = await db.FetchAsync<NationellHelmatchResultEntry>(
                             "WHERE CompetitionId = @0", competitionId);
                         existingResults = nhResults.Cast<PrecisionResultEntry>().ToList();
+                    }
+                    else if (compTypeId == "MagnumPrecision")
+                    {
+                        var mpResults = await db.FetchAsync<MagnumPrecisionResultEntry>(
+                            "WHERE CompetitionId = @0", competitionId);
+                        existingResults = mpResults.Cast<PrecisionResultEntry>().ToList();
                     }
                     else
                     {
@@ -1523,6 +1531,9 @@ namespace HpskSite.Controllers
                         "NationellHelmatch" => await db.FirstOrDefaultAsync<NationellHelmatchResultEntry>(
                             "WHERE CompetitionId = @0 AND MemberId = @1 AND ShootingClass = @2 AND SeriesNumber = @3",
                             request.CompetitionId, request.ShooterMemberId, request.ShooterClass, request.SeriesNumber),
+                        "MagnumPrecision" => await db.FirstOrDefaultAsync<MagnumPrecisionResultEntry>(
+                            "WHERE CompetitionId = @0 AND MemberId = @1 AND ShootingClass = @2 AND SeriesNumber = @3",
+                            request.CompetitionId, request.ShooterMemberId, request.ShooterClass, request.SeriesNumber),
                         _ => await db.FirstOrDefaultAsync<PrecisionResultEntry>(
                             "WHERE CompetitionId = @0 AND MemberId = @1 AND ShootingClass = @2 AND SeriesNumber = @3",
                             request.CompetitionId, request.ShooterMemberId, request.ShooterClass, request.SeriesNumber)
@@ -1562,6 +1573,7 @@ namespace HpskSite.Controllers
                             "Milsnabb" => new MilsnabbResultEntry(),
                             "Duell" => new DuellResultEntry(),
                             "NationellHelmatch" => new NationellHelmatchResultEntry(),
+                            "MagnumPrecision" => new MagnumPrecisionResultEntry(),
                             _ => new PrecisionResultEntry()
                         };
 
@@ -1627,6 +1639,7 @@ namespace HpskSite.Controllers
             "Milsnabb" => "MilsnabbResultEntry",
             "Duell" => "DuellResultEntry",
             "NationellHelmatch" => "NationellHelmatchResultEntry",
+            "MagnumPrecision" => "MagnumPrecisionResultEntry",
             _ => "PrecisionResultEntry"
         };
 
@@ -1659,6 +1672,14 @@ namespace HpskSite.Controllers
                         "WHERE CompetitionId = @0 ORDER BY TeamNumber, Position, SeriesNumber",
                         competitionId);
                     return nhResults.Cast<PrecisionResultEntry>().ToList();
+                }
+
+                if (compTypeId == "MagnumPrecision")
+                {
+                    var mpResults = await db.FetchAsync<MagnumPrecisionResultEntry>(
+                        "WHERE CompetitionId = @0 ORDER BY TeamNumber, Position, SeriesNumber",
+                        competitionId);
+                    return mpResults.Cast<PrecisionResultEntry>().ToList();
                 }
 
                 return await db.FetchAsync<PrecisionResultEntry>(
@@ -1713,6 +1734,9 @@ namespace HpskSite.Controllers
                             "WHERE CompetitionId = @0 AND MemberId = @1 AND ShootingClass = @2 AND SeriesNumber = @3",
                             request.CompetitionId, memberId, request.ShootingClass, request.SeriesNumber),
                         "NationellHelmatch" => await db.FirstOrDefaultAsync<NationellHelmatchResultEntry>(
+                            "WHERE CompetitionId = @0 AND MemberId = @1 AND ShootingClass = @2 AND SeriesNumber = @3",
+                            request.CompetitionId, memberId, request.ShootingClass, request.SeriesNumber),
+                        "MagnumPrecision" => await db.FirstOrDefaultAsync<MagnumPrecisionResultEntry>(
                             "WHERE CompetitionId = @0 AND MemberId = @1 AND ShootingClass = @2 AND SeriesNumber = @3",
                             request.CompetitionId, memberId, request.ShootingClass, request.SeriesNumber),
                         _ => await db.FirstOrDefaultAsync<PrecisionResultEntry>(
@@ -2572,6 +2596,7 @@ namespace HpskSite.Controllers
             var isMilsnabb = competitionTypeId.Equals("Milsnabb", StringComparison.OrdinalIgnoreCase);
             var isDuell = competitionTypeId.Equals("Duell", StringComparison.OrdinalIgnoreCase);
             var isNationellHelmatch = competitionTypeId.Equals("NationellHelmatch", StringComparison.OrdinalIgnoreCase);
+            var isMagnumPrecision = competitionTypeId.Equals("MagnumPrecision", StringComparison.OrdinalIgnoreCase);
 
             // Select tiebreaker based on competition type
             // Duell uses the same tiebreaker as Precision (series count back)
@@ -2637,6 +2662,17 @@ namespace HpskSite.Controllers
                         ShouldSplitGroupC = shouldSplitGroupC
                     };
                     nhMedalService.CalculateStandardMedals(allShooters, config);
+                }
+                else if (isMagnumPrecision)
+                {
+                    // Magnum Precision uses percentage + fixed-score medals with M-class thresholds
+                    var mpMedalService = new MagnumPrecisionStandardMedalService();
+                    var config = new StandardMedalConfig
+                    {
+                        SeriesCount = qualificationSeriesCount,
+                        ShouldSplitGroupC = shouldSplitGroupC
+                    };
+                    mpMedalService.CalculateStandardMedals(allShooters, config);
                 }
                 else
                 {
