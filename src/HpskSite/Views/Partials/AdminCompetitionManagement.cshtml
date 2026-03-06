@@ -24,6 +24,7 @@
     if (competition != null)
     {
         ViewData["NumberOfSeriesOrStations"] = competition.Value<int>("numberOfSeriesOrStations");
+        ViewData["CompetitionType"] = competition.Value<string>("competitionType") ?? "Precision";
     }
 
     // Simplified approach - just check if user is logged in

@@ -54,6 +54,7 @@
                                 <option value="Springskytte">Springskytte</option>
                                 <option value="Faltkytte">Fältskytte</option>
                                 <option value="MagnumPrecision">Magnum Precision</option>
+                                <option value="MagnumFalt">Magnum Fältskytte</option>
                                 <option value="__other__">Annat...</option>
                             </select>
                         </div>
@@ -177,9 +178,9 @@
                     <div class="wizard-step d-none" data-step="4">
                         <h6 class="mb-3 text-primary"><i class="bi bi-list-ol me-1"></i>Serier & Kontakt</h6>
 
-                        <div class="mb-3">
+                        <div class="mb-3" id="wizard_seriesGroup">
                             <label for="wizard_numberOfSeries" class="form-label">Antal serier/stationer <span class="text-danger">*</span></label>
-                            <div class="btn-group mb-2" role="group">
+                            <div class="btn-group mb-2" role="group" id="wizard_seriesButtons">
                                 <button type="button" class="btn btn-outline-primary" onclick="setSeriesCount(6)">6</button>
                                 <button type="button" class="btn btn-outline-primary" onclick="setSeriesCount(7)">7</button>
                                 <button type="button" class="btn btn-outline-primary" onclick="setSeriesCount(10)">10</button>
@@ -187,13 +188,18 @@
                             <input type="number" class="form-control" id="wizard_numberOfSeries" name="numberOfSeriesOrStations" min="1" max="50" value="6" required>
                         </div>
 
-                        <div class="mb-3">
+                        <div class="mb-3" id="wizard_finalsGroup">
                             <label for="wizard_finalSeries" class="form-label">Varav finalserier</label>
                             <div class="btn-group mb-2" role="group">
                                 <button type="button" class="btn btn-outline-secondary" onclick="setFinalSeries(0)">0</button>
                                 <button type="button" class="btn btn-outline-secondary" onclick="setFinalSeries(3)">3</button>
                             </div>
                             <input type="number" class="form-control" id="wizard_finalSeries" name="numberOfFinalSeries" min="0" max="10" value="0">
+                        </div>
+
+                        <div class="alert alert-info d-none" id="wizard_milsnabbSeriesNote">
+                            <i class="bi bi-info-circle me-1"></i>
+                            Milsnabb har alltid 12 serier (3 tidsgrupper om 4 serier) och inga finalserier.
                         </div>
 
                         <hr class="my-4">
@@ -663,7 +669,7 @@ let wizardContext = {
     clubName: null
 };
 
-// Handle competition type dropdown change - show/hide custom input
+// Handle competition type dropdown change - show/hide custom input + apply type-specific defaults
 function onCompetitionTypeChange() {
     const typeSelect = document.getElementById('wizard_competitionType');
     const customContainer = document.getElementById('wizard_customTypeContainer');
@@ -677,6 +683,40 @@ function onCompetitionTypeChange() {
         customContainer.classList.add('d-none');
         customInput.required = false;
         customInput.value = '';
+    }
+
+    // Apply type-specific series defaults
+    applySeriesDefaults();
+}
+
+// Apply series/finals defaults based on selected competition type
+function applySeriesDefaults() {
+    const typeId = document.getElementById('wizard_competitionType').value;
+    const seriesInput = document.getElementById('wizard_numberOfSeries');
+    const finalsInput = document.getElementById('wizard_finalSeries');
+    const seriesButtons = document.getElementById('wizard_seriesButtons');
+    const finalsGroup = document.getElementById('wizard_finalsGroup');
+    const milsnabbNote = document.getElementById('wizard_milsnabbSeriesNote');
+    const isMilsnabb = typeId === 'Milsnabb';
+
+    if (isMilsnabb) {
+        // Milsnabb: always 12 series, no finals
+        seriesInput.value = 12;
+        seriesInput.readOnly = true;
+        finalsInput.value = 0;
+        finalsInput.readOnly = true;
+        seriesButtons.classList.add('d-none');
+        finalsGroup.style.opacity = '0.5';
+        finalsGroup.querySelectorAll('button').forEach(b => b.disabled = true);
+        milsnabbNote.classList.remove('d-none');
+    } else {
+        // Other types: restore interactive controls
+        seriesInput.readOnly = false;
+        finalsInput.readOnly = false;
+        seriesButtons.classList.remove('d-none');
+        finalsGroup.style.opacity = '';
+        finalsGroup.querySelectorAll('button').forEach(b => b.disabled = false);
+        milsnabbNote.classList.add('d-none');
     }
 }
 
@@ -720,6 +760,9 @@ function resetWizard() {
             step.classList.add('d-none');
         }
     });
+
+    // Reset type-specific UI state (readOnly, disabled, etc.)
+    applySeriesDefaults();
 }
 
 // Initialize Flatpickr date pickers
@@ -1037,6 +1080,11 @@ function updateWizardUI() {
             step.classList.add('d-none');
         }
     });
+
+    // Apply type-specific series constraints when entering step 4 (Serier & Kontakt)
+    if (wizardCurrentStep === 4) {
+        applySeriesDefaults();
+    }
 
     // Update progress dots
     document.querySelectorAll('.wizard-dot').forEach((dot, index) => {

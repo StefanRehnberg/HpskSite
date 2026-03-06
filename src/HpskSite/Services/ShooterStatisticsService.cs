@@ -26,7 +26,8 @@ namespace HpskSite.Services
         /// <param name="weaponClass">Weapon class</param>
         /// <param name="seriesCount">Number of series in the match (ignored with rolling window)</param>
         /// <param name="rawTotalPoints">Total RAW points scored (ignored with rolling window)</param>
-        Task UpdateAfterMatchAsync(int memberId, string weaponClass, int seriesCount, decimal rawTotalPoints);
+        /// <param name="discipline">Discipline (e.g., "Precision", "Milsnabb")</param>
+        Task UpdateAfterMatchAsync(int memberId, string weaponClass, int seriesCount, decimal rawTotalPoints, string discipline = "Precision");
 
         /// <summary>
         /// Recalculate all statistics from historical data using rolling window.
@@ -34,14 +35,16 @@ namespace HpskSite.Services
         /// </summary>
         /// <param name="memberId">Member ID</param>
         /// <param name="weaponClass">Weapon class</param>
-        Task RecalculateFromHistoryAsync(int memberId, string weaponClass);
+        /// <param name="discipline">Discipline (e.g., "Precision", "Milsnabb")</param>
+        Task RecalculateFromHistoryAsync(int memberId, string weaponClass, string discipline = "Precision");
 
         /// <summary>
         /// Get all statistics for a member across all weapon classes.
         /// </summary>
         /// <param name="memberId">Member ID</param>
+        /// <param name="discipline">Discipline (e.g., "Precision", "Milsnabb")</param>
         /// <returns>List of statistics for each weapon class</returns>
-        Task<List<ShooterStatistics>> GetAllStatisticsAsync(int memberId);
+        Task<List<ShooterStatistics>> GetAllStatisticsAsync(int memberId, string discipline = "Precision");
     }
 
     /// <summary>
@@ -115,11 +118,12 @@ namespace HpskSite.Services
         /// <summary>
         /// Get all statistics for a member across all weapon classes.
         /// </summary>
-        public async Task<List<ShooterStatistics>> GetAllStatisticsAsync(int memberId)
+        public async Task<List<ShooterStatistics>> GetAllStatisticsAsync(int memberId, string discipline = "Precision")
         {
             return await Task.Run(() =>
             {
                 var stats = new List<ShooterStatistics>();
+                var effectiveDiscipline = string.IsNullOrEmpty(discipline) ? DISCIPLINE : discipline;
 
                 try
                 {
@@ -131,7 +135,7 @@ namespace HpskSite.Services
                           FROM ShooterStatistics
                           WHERE MemberId = @0 AND Discipline = @1
                           ORDER BY WeaponClass",
-                        memberId, DISCIPLINE);
+                        memberId, effectiveDiscipline);
 
                     foreach (var result in results)
                     {
@@ -162,31 +166,36 @@ namespace HpskSite.Services
         /// Update statistics after a match is completed.
         /// With rolling window, this triggers a full recalculation from history.
         /// </summary>
-        public async Task UpdateAfterMatchAsync(int memberId, string weaponClass, int seriesCount, decimal rawTotalPoints)
+        public async Task UpdateAfterMatchAsync(int memberId, string weaponClass, int seriesCount, decimal rawTotalPoints, string discipline = "Precision")
         {
             // With rolling window, we must recalculate from source data
             // to ensure only the most recent N matches are included
-            await RecalculateFromHistoryAsync(memberId, weaponClass);
+            var effectiveDiscipline = string.IsNullOrEmpty(discipline) ? DISCIPLINE : discipline;
+            await RecalculateFromHistoryAsync(memberId, weaponClass, effectiveDiscipline);
         }
 
         /// <summary>
         /// Recalculate all statistics from historical data using rolling window.
         /// Only the most recent N matches (from all sources combined) are included.
         /// </summary>
-        public async Task RecalculateFromHistoryAsync(int memberId, string weaponClass)
+        public async Task RecalculateFromHistoryAsync(int memberId, string weaponClass, string discipline = "Precision")
         {
             await Task.Run(() =>
             {
                 try
                 {
                     using var db = _databaseFactory.CreateDatabase();
+                    var effectiveDiscipline = string.IsNullOrEmpty(discipline) ? DISCIPLINE : discipline;
 
                     int windowSize = _settings.RollingWindowMatchCount;
+
+                    // Choose the correct result entry table based on discipline
+                    var resultTable = effectiveDiscipline == "Milsnabb" ? "MilsnabbResultEntry" : "PrecisionResultEntry";
 
                     // Use a CTE to combine all match sources, then take the most recent N
                     // This ensures we use the N most recent matches regardless of source
                     var result = db.SingleOrDefault<dynamic>(
-                        @";WITH AllMatches AS (
+                        $@";WITH AllMatches AS (
                             -- Training matches
                             SELECT
                                 'TrainingMatch' AS Source,
@@ -204,6 +213,7 @@ namespace HpskSite.Services
                               AND tm.WeaponClass = @1
                               AND tm.Status = 'Completed'
                               AND ts.TrainingMatchId IS NOT NULL
+                              AND (ts.Discipline = @3 OR ts.Discipline IS NULL)
 
                             UNION ALL
 
@@ -228,6 +238,7 @@ namespace HpskSite.Services
                               AND ts.TrainingMatchId IS NULL
                               AND ts.SeriesScores IS NOT NULL
                               AND ISJSON(ts.SeriesScores) = 1
+                              AND (ts.Discipline = @3 OR ts.Discipline IS NULL)
                         ),
                         -- Competition results: first calculate per-series scores using CROSS APPLY
                         CompetitionSeriesScores AS (
@@ -235,7 +246,7 @@ namespace HpskSite.Services
                                 pre.CompetitionId,
                                 pre.EnteredAt,
                                 ShotScores.SeriesTotal
-                            FROM PrecisionResultEntry pre
+                            FROM {resultTable} pre
                             CROSS APPLY (
                                 SELECT SUM(
                                     CASE
@@ -277,7 +288,7 @@ namespace HpskSite.Services
                             COALESCE(SUM(SeriesCount), 0) AS SeriesCount,
                             COALESCE(SUM(TotalPoints), 0) AS TotalPoints
                         FROM RecentMatches",
-                        memberId, weaponClass, windowSize);
+                        memberId, weaponClass, windowSize, effectiveDiscipline);
 
                     int totalMatches = result?.MatchCount ?? 0;
                     int totalSeries = result?.SeriesCount ?? 0;
@@ -287,7 +298,7 @@ namespace HpskSite.Services
                     var existing = db.SingleOrDefault<dynamic>(
                         @"SELECT Id FROM ShooterStatistics
                           WHERE MemberId = @0 AND WeaponClass = @1 AND Discipline = @2",
-                        memberId, weaponClass, DISCIPLINE);
+                        memberId, weaponClass, effectiveDiscipline);
 
                     if (existing != null)
                     {
@@ -305,7 +316,7 @@ namespace HpskSite.Services
                         db.Insert("ShooterStatistics", "Id", true, new
                         {
                             MemberId = memberId,
-                            Discipline = DISCIPLINE,
+                            Discipline = effectiveDiscipline,
                             WeaponClass = weaponClass,
                             CompletedMatches = totalMatches,
                             TotalSeriesCount = totalSeries,
@@ -315,8 +326,8 @@ namespace HpskSite.Services
                     }
 
                     _logger.LogInformation(
-                        "Recalculated statistics for member {MemberId} ({WeaponClass}): {Matches} matches (window: {Window}), {Series} series, {Points} points",
-                        memberId, weaponClass, totalMatches, windowSize, totalSeries, totalPoints);
+                        "Recalculated statistics for member {MemberId} ({Discipline}/{WeaponClass}): {Matches} matches (window: {Window}), {Series} series, {Points} points",
+                        memberId, effectiveDiscipline, weaponClass, totalMatches, windowSize, totalSeries, totalPoints);
                 }
                 catch (Exception ex)
                 {

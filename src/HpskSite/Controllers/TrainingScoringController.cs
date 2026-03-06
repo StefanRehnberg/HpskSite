@@ -95,6 +95,7 @@ namespace HpskSite.Controllers
                         MemberId = entry.MemberId,
                         TrainingDate = entry.TrainingDate,
                         WeaponClass = entry.WeaponClass, // Save weapon class (A, B, C, R, P)
+                        Discipline = entry.Discipline ?? "Precision", // Discipline (Precision, Milsnabb)
                         IsCompetition = entry.IsCompetition, // External competition flag
                         CompetitionPlace = entry.CompetitionPlace, // Competition placement
                         CompetitionShootingClass = entry.CompetitionShootingClass, // Competition shooting class
@@ -115,7 +116,8 @@ namespace HpskSite.Controllers
                         entry.MemberId,
                         entry.WeaponClass,
                         entry.SeriesCount,
-                        entry.TotalScore);
+                        entry.TotalScore,
+                        entry.Discipline ?? "Precision");
                 }
 
                 return Json(new
@@ -380,7 +382,7 @@ namespace HpskSite.Controllers
         /// All statistics use SERIES AVERAGE (Medelresultat) for meaningful comparisons
         /// </summary>
         [HttpGet]
-        public async Task<IActionResult> GetDashboardStatistics()
+        public async Task<IActionResult> GetDashboardStatistics(string competitionType = "Precision")
         {
             var currentMember = await _memberManager.GetCurrentMemberAsync();
             if (currentMember == null)
@@ -396,8 +398,18 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Member not found" });
                 }
 
-                // Get all results from unified service (all 3 data sources)
-                var allResults = _unifiedResultsService.GetMemberResults(member.Id);
+                // Get all results — use UnifiedResultsService for Precision only.
+                // For non-Precision disciplines, load directly from discipline-specific sources
+                // to avoid loading + discarding all Precision data.
+                List<HpskSite.Shared.Models.UnifiedResultEntry> allResults;
+                if (competitionType == "Precision")
+                {
+                    allResults = _unifiedResultsService.GetMemberResults(member.Id);
+                }
+                else
+                {
+                    allResults = LoadDisciplineResults(member.Id, competitionType);
+                }
 
                 // Separate training and competition results
                 // TrainingMatch = from mobile app training matches, Training = manually entered training
@@ -486,12 +498,18 @@ namespace HpskSite.Controllers
                 }).ToList();
 
                 // Calculate personal bests by series count (total score grouped by weapon class, series count, and training/competition)
-                var standardSeriesCounts = new[] { 6, 7, 10 };
-                var lWeaponSeriesCounts = new[] { 6, 8, 12 };
+                // Milsnabb uses 12 series for all weapon classes; Precision uses 6/7/10 (L: 6/8/12)
+                int[] GetSeriesCountsForWeapon(string wc, string discipline) {
+                    if (discipline == "Milsnabb")
+                        return new[] { 12 };
+                    if (discipline != "Precision")
+                        return new[] { 6, 10, 12 };
+                    return wc == "L" ? new[] { 6, 8, 12 } : new[] { 6, 7, 10 };
+                }
 
                 var personalBestsBySeriesCount = allResults
                     .Where(r => {
-                        var seriesCounts = r.WeaponClass == "L" ? lWeaponSeriesCounts : standardSeriesCounts;
+                        var seriesCounts = GetSeriesCountsForWeapon(r.WeaponClass, competitionType);
                         return seriesCounts.Contains(r.SeriesCount);
                     })
                     .GroupBy(r => new { r.WeaponClass, r.SeriesCount, IsCompetition = r.SourceType == "Competition" || r.SourceType == "Official" })
@@ -510,20 +528,21 @@ namespace HpskSite.Controllers
                 var allDates = allResults.Select(r => r.Date.Year).Distinct().OrderByDescending(y => y).ToList();
                 var availableYears = allDates.Any() ? allDates : new List<int> { DateTime.Now.Year };
 
-                // Calculate medal statistics for all available years
-                var medalStatsByYear = new Dictionary<int, object>();
-                foreach (var year in availableYears)
-                {
-                    medalStatsByYear[year] = GetMemberMedalStats(member.Id, year);
-                }
+                // Calculate medal statistics for all years in a single batch
+                var medalStatsByYear = GetAllYearMedalStats(member.Id, availableYears, competitionType);
                 // Default medalStats is for current year (or most recent year with data)
                 var currentYear = DateTime.Now.Year;
                 var medalStats = medalStatsByYear.ContainsKey(currentYear)
                     ? medalStatsByYear[currentYear]
-                    : (availableYears.Any() ? medalStatsByYear[availableYears.First()] : new { silverCount = 0, bronzeCount = 0, totalPoints = 0 });
+                    : (availableYears.Any() && medalStatsByYear.ContainsKey(availableYears.First())
+                        ? medalStatsByYear[availableYears.First()]
+                        : (object)new { silverCount = 0, bronzeCount = 0, totalPoints = 0 });
 
                 var stats = new
                 {
+                    // Discipline context
+                    competitionType,
+
                     // Overall metrics
                     totalSessions,
                     totalTrainingSessions,
@@ -775,7 +794,7 @@ namespace HpskSite.Controllers
         /// Get medal statistics for a member for a specific year.
         /// Sources: TrainingScores (external competitions) and Competition Results documents.
         /// </summary>
-        private object GetMemberMedalStats(int memberId, int year)
+        private object GetMemberMedalStats(int memberId, int year, string competitionType = "Precision")
         {
             int silverCount = 0;
             int bronzeCount = 0;
@@ -785,7 +804,11 @@ namespace HpskSite.Controllers
                 using (var db = _databaseFactory.CreateDatabase())
                 {
                     // Source 1: TrainingScores table - external competitions with medals
-                    var trainingMedals = db.Fetch<dynamic>(@"
+                    // Filter by discipline so medals are counted per competition type
+                    var disciplineFilter = competitionType == "Precision"
+                        ? "AND (Discipline = 'Precision' OR Discipline IS NULL)"
+                        : $"AND Discipline = @2";
+                    var trainingMedals = db.Fetch<dynamic>($@"
                         SELECT CompetitionStdMedal, COUNT(*) as MedalCount
                         FROM TrainingScores
                         WHERE MemberId = @0
@@ -793,8 +816,9 @@ namespace HpskSite.Controllers
                           AND CompetitionStdMedal IS NOT NULL
                           AND CompetitionStdMedal != ''
                           AND YEAR(TrainingDate) = @1
+                          {disciplineFilter}
                         GROUP BY CompetitionStdMedal",
-                        memberId, year);
+                        memberId, year, competitionType);
 
                     foreach (var medal in trainingMedals)
                     {
@@ -808,9 +832,10 @@ namespace HpskSite.Controllers
                     }
 
                     // Source 2: Competition Results - get competitions the member participated in
-                    var competitionIds = db.Fetch<int>(@"
+                    var resultTable = competitionType == "Milsnabb" ? "MilsnabbResultEntry" : "PrecisionResultEntry";
+                    var competitionIds = db.Fetch<int>($@"
                         SELECT DISTINCT CompetitionId
-                        FROM PrecisionResultEntry
+                        FROM {resultTable}
                         WHERE MemberId = @0",
                         memberId);
 
@@ -889,6 +914,262 @@ namespace HpskSite.Controllers
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// Get medal statistics for all years in a single batch instead of per-year queries.
+        /// </summary>
+        private Dictionary<int, object> GetAllYearMedalStats(int memberId, List<int> years, string competitionType = "Precision")
+        {
+            var result = new Dictionary<int, object>();
+            // Initialize all years with zero counts
+            foreach (var y in years)
+                result[y] = new { silverCount = 0, bronzeCount = 0, totalPoints = 0 };
+
+            var medalsByYear = new Dictionary<int, (int silver, int bronze)>();
+            foreach (var y in years)
+                medalsByYear[y] = (0, 0);
+
+            try
+            {
+                using (var db = _databaseFactory.CreateDatabase())
+                {
+                    // Source 1: TrainingScores — single query grouped by year
+                    var disciplineFilter = competitionType == "Precision"
+                        ? "AND (Discipline = 'Precision' OR Discipline IS NULL)"
+                        : $"AND Discipline = @1";
+                    var trainingMedals = db.Fetch<dynamic>($@"
+                        SELECT YEAR(TrainingDate) as MedalYear, CompetitionStdMedal, COUNT(*) as MedalCount
+                        FROM TrainingScores
+                        WHERE MemberId = @0
+                          AND IsCompetition = 1
+                          AND CompetitionStdMedal IS NOT NULL
+                          AND CompetitionStdMedal != ''
+                          {disciplineFilter}
+                        GROUP BY YEAR(TrainingDate), CompetitionStdMedal",
+                        memberId, competitionType);
+
+                    foreach (var medal in trainingMedals)
+                    {
+                        int medalYear = (int)medal.MedalYear;
+                        if (!medalsByYear.ContainsKey(medalYear)) continue;
+                        string medalType = medal.CompetitionStdMedal?.ToString()?.ToUpper() ?? "";
+                        int count = (int)(medal.MedalCount ?? 0);
+                        var (s, b) = medalsByYear[medalYear];
+                        if (medalType == "S") medalsByYear[medalYear] = (s + count, b);
+                        else if (medalType == "B") medalsByYear[medalYear] = (s, b + count);
+                    }
+
+                    // Source 2: Competition results — single batch load, grouped by year
+                    var resultTable = competitionType == "Milsnabb" ? "MilsnabbResultEntry" : "PrecisionResultEntry";
+                    var competitionIds = db.Fetch<int>($@"
+                        SELECT DISTINCT CompetitionId FROM {resultTable} WHERE MemberId = @0",
+                        memberId);
+
+                    if (competitionIds.Any())
+                    {
+                        // Batch load all competitions once, group by year
+                        var competitions = _contentService.GetByIds(competitionIds);
+                        var competitionsByYear = new Dictionary<int, List<int>>();
+                        foreach (var comp in competitions)
+                        {
+                            var compDate = comp.GetValue<DateTime>("competitionDate");
+                            if (compDate != default && medalsByYear.ContainsKey(compDate.Year))
+                            {
+                                if (!competitionsByYear.ContainsKey(compDate.Year))
+                                    competitionsByYear[compDate.Year] = new List<int>();
+                                competitionsByYear[compDate.Year].Add(comp.Id);
+                            }
+                        }
+
+                        // Load result pages for all competitions at once
+                        foreach (var (compYear, compIds) in competitionsByYear)
+                        {
+                            foreach (var competitionId in compIds)
+                            {
+                                var resultPage = _contentService.GetPagedChildren(competitionId, 0, 50, out _)
+                                    .FirstOrDefault(n => n.ContentType.Alias == "competitionResult" && n.Name == "Resultat");
+                                if (resultPage == null) continue;
+
+                                var resultDataJson = resultPage.GetValue<string>("resultData");
+                                if (string.IsNullOrEmpty(resultDataJson)) continue;
+
+                                try
+                                {
+                                    var finalResults = Newtonsoft.Json.JsonConvert.DeserializeObject<HpskSite.CompetitionTypes.Precision.Models.PrecisionFinalResults>(resultDataJson);
+                                    if (finalResults?.ClassGroups == null) continue;
+
+                                    foreach (var classGroup in finalResults.ClassGroups)
+                                    {
+                                        var shooter = classGroup.Shooters?.FirstOrDefault(s => s.MemberId == memberId);
+                                        if (shooter != null && !string.IsNullOrEmpty(shooter.StandardMedal))
+                                        {
+                                            var (s, b) = medalsByYear[compYear];
+                                            if (shooter.StandardMedal.ToUpper() == "S")
+                                                medalsByYear[compYear] = (s + 1, b);
+                                            else if (shooter.StandardMedal.ToUpper() == "B")
+                                                medalsByYear[compYear] = (s, b + 1);
+                                        }
+                                    }
+                                }
+                                catch { }
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            // Build result dictionary
+            foreach (var (y, (s, b)) in medalsByYear)
+            {
+                result[y] = new { silverCount = s, bronzeCount = b, totalPoints = (s * 2) + b };
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Load results for a non-Precision discipline directly from discipline-specific sources,
+        /// avoiding the overhead of loading all Precision data from UnifiedResultsService.
+        /// </summary>
+        private List<HpskSite.Shared.Models.UnifiedResultEntry> LoadDisciplineResults(int memberId, string discipline)
+        {
+            var results = new List<HpskSite.Shared.Models.UnifiedResultEntry>();
+            var resultTable = discipline == "Milsnabb" ? "MilsnabbResultEntry" : "PrecisionResultEntry";
+            int defaultSeriesCount = discipline == "Milsnabb" ? 12 : 0;
+
+            using (var db = _databaseFactory.CreateDatabase())
+            {
+                // Source 1: TrainingScores filtered by discipline
+                var trainingScores = db.Fetch<dynamic>(@"
+                    SELECT Id, TrainingDate, WeaponClass, SeriesScores, TotalScore, XCount, IsCompetition, TrainingMatchId
+                    FROM TrainingScores
+                    WHERE MemberId = @0 AND Discipline = @1
+                    ORDER BY TrainingDate DESC",
+                    memberId, discipline);
+
+                foreach (var score in trainingScores)
+                {
+                    int seriesCount = 0;
+                    try
+                    {
+                        var seriesJson = score.SeriesScores?.ToString();
+                        if (!string.IsNullOrEmpty(seriesJson))
+                        {
+                            var trainingSeries = System.Text.Json.JsonSerializer.Deserialize<List<HpskSite.Shared.Models.TrainingSeries>>(seriesJson);
+                            if (trainingSeries != null && trainingSeries.Count > 0)
+                            {
+                                if (trainingSeries.Count == 1 && trainingSeries[0].EntryMethod == "TotalOnly" && trainingSeries[0].SeriesCount.HasValue)
+                                    seriesCount = trainingSeries[0].SeriesCount.Value;
+                                else
+                                    seriesCount = trainingSeries.Count;
+                            }
+                        }
+                    }
+                    catch { }
+                    if (seriesCount == 0 && defaultSeriesCount > 0) seriesCount = defaultSeriesCount;
+
+                    int totalScore = (int)(score.TotalScore ?? 0);
+                    bool isCompetition = (bool)(score.IsCompetition ?? false);
+                    int? trainingMatchId = (int?)score.TrainingMatchId;
+                    string sourceType = isCompetition ? "Competition" : (trainingMatchId != null ? "TrainingMatch" : "Training");
+
+                    results.Add(new HpskSite.Shared.Models.UnifiedResultEntry
+                    {
+                        Id = (int)score.Id,
+                        Date = score.TrainingDate,
+                        SourceType = sourceType,
+                        WeaponClass = score.WeaponClass?.ToString() ?? "",
+                        TotalScore = totalScore,
+                        XCount = score.XCount ?? 0,
+                        SeriesCount = seriesCount,
+                        AverageScore = seriesCount > 0 ? Math.Round((double)totalScore / seriesCount, 1) : 0,
+                        CanEdit = true,
+                        CanDelete = true
+                    });
+                }
+
+                // Source 2: Competition results from discipline-specific table
+                var competitionResults = db.Fetch<dynamic>($@"
+                    SELECT CompetitionId, ShootingClass, Shots, SeriesNumber, EnteredAt
+                    FROM {resultTable}
+                    WHERE MemberId = @0
+                    ORDER BY EnteredAt DESC",
+                    memberId);
+
+                // Group by competition + shooting class, batch-load competition names
+                var competitionIds = competitionResults.Select(r => (int)r.CompetitionId).Distinct().ToList();
+                var competitionNames = new Dictionary<int, string>();
+                var competitionDates = new Dictionary<int, DateTime>();
+                if (competitionIds.Any())
+                {
+                    var competitions = _contentService.GetByIds(competitionIds);
+                    foreach (var comp in competitions)
+                    {
+                        competitionNames[comp.Id] = comp.Name ?? $"Tävling #{comp.Id}";
+                        var compDate = comp.GetValue<DateTime>("competitionDate");
+                        if (compDate != default) competitionDates[comp.Id] = compDate;
+                    }
+                }
+
+                var byCompetition = competitionResults.GroupBy(r => (int)r.CompetitionId);
+                foreach (var group in byCompetition)
+                {
+                    int competitionId = group.Key;
+                    string weaponClass = "";
+                    int totalScore = 0;
+                    int xCount = 0;
+                    int seriesCount = group.Count();
+
+                    foreach (var entry in group)
+                    {
+                        string shootingClass = entry.ShootingClass?.ToString() ?? "";
+                        if (string.IsNullOrEmpty(weaponClass) && shootingClass.Length > 0)
+                            weaponClass = shootingClass.Substring(0, 1);
+
+                        try
+                        {
+                            var shotsJson = entry.Shots?.ToString();
+                            if (!string.IsNullOrEmpty(shotsJson))
+                            {
+                                var shots = System.Text.Json.JsonSerializer.Deserialize<List<string>>(shotsJson);
+                                if (shots != null)
+                                {
+                                    foreach (var shot in shots)
+                                    {
+                                        if (shot.Equals("X", StringComparison.OrdinalIgnoreCase)) { totalScore += 10; xCount++; }
+                                        else if (int.TryParse(shot, out int v)) totalScore += v;
+                                    }
+                                }
+                            }
+                        }
+                        catch { }
+                    }
+
+                    competitionNames.TryGetValue(competitionId, out var compName);
+                    competitionDates.TryGetValue(competitionId, out var compDate);
+                    if (compDate == default) compDate = group.Max(e => (DateTime)e.EnteredAt);
+
+                    results.Add(new HpskSite.Shared.Models.UnifiedResultEntry
+                    {
+                        Id = competitionId,
+                        Date = compDate,
+                        SourceType = "Official",
+                        WeaponClass = weaponClass,
+                        TotalScore = totalScore,
+                        XCount = xCount,
+                        SeriesCount = seriesCount,
+                        AverageScore = seriesCount > 0 ? Math.Round((double)totalScore / seriesCount, 1) : 0,
+                        CompetitionName = compName,
+                        CompetitionId = competitionId,
+                        CanEdit = false,
+                        CanDelete = false
+                    });
+                }
+            }
+
+            return results.OrderByDescending(r => r.Date).ToList();
         }
 
         #endregion

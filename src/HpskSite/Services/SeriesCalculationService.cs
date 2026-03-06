@@ -5,6 +5,7 @@ using Umbraco.Cms.Infrastructure.Persistence;
 using HpskSite.CompetitionTypes.Common.SeriesCalculation;
 using HpskSite.CompetitionTypes.Common.SeriesCalculation.Models;
 using HpskSite.CompetitionTypes.Precision.Models;
+using HpskSite.CompetitionTypes.Milsnabb.Models;
 
 namespace HpskSite.Services
 {
@@ -225,10 +226,17 @@ namespace HpskSite.Services
             {
                 using var db = _umbracoDatabaseFactory.CreateDatabase();
 
+                // Determine table based on competition type (all competitions in a series should be same type)
+                var firstComp = _contentService.GetById(competitionIds.First());
+                var compType = firstComp?.GetValue<string>("competitionType") ?? "Precision";
+                var tableName = compType.Equals("Milsnabb", StringComparison.OrdinalIgnoreCase)
+                    ? "MilsnabbResultEntry"
+                    : "PrecisionResultEntry";
+
                 // Build parameterized IN clause
                 var paramNames = competitionIds.Select((id, i) => $"@{i}").ToArray();
                 var inClause = string.Join(",", paramNames);
-                var sql = $"SELECT * FROM PrecisionResultEntry WHERE CompetitionId IN ({inClause}) ORDER BY CompetitionId, MemberId, SeriesNumber";
+                var sql = $"SELECT * FROM [{tableName}] WHERE CompetitionId IN ({inClause}) ORDER BY CompetitionId, MemberId, SeriesNumber";
 
                 var allResults = await db.FetchAsync<PrecisionResultEntry>(sql, competitionIds.Cast<object>().ToArray());
 

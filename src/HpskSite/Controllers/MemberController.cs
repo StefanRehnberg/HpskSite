@@ -158,7 +158,8 @@ namespace HpskSite.Controllers
             string phoneNumber = null, string shooterIdNumber = null,
             string address = null, string postalCode = null, string city = null, string personNumber = null,
             string currentPassword = null, string newPassword = null,
-            string precisionShooterClass = null)
+            string precisionShooterClass = null,
+            string milsnabbShooterClass = null)
         {
             try
             {
@@ -190,10 +191,14 @@ namespace HpskSite.Controllers
                 member.SetValue("postalCode", postalCode ?? "");
                 member.SetValue("city", city ?? "");
                 member.SetValue("personNumber", personNumber ?? "");
-                // Only update shooter class if explicitly provided (prevents clearing on general profile updates)
+                // Only update shooter classes if explicitly provided (prevents clearing on general profile updates)
                 if (!string.IsNullOrEmpty(precisionShooterClass))
                 {
                     member.SetValue("precisionShooterClass", precisionShooterClass);
+                }
+                if (!string.IsNullOrEmpty(milsnabbShooterClass) && member.HasProperty("milsnabbShooterClass"))
+                {
+                    member.SetValue("milsnabbShooterClass", milsnabbShooterClass);
                 }
                 member.Email = email;
                 member.Name = $"{firstName} {lastName}";
@@ -640,14 +645,15 @@ namespace HpskSite.Controllers
 
                 using (var db = _databaseFactory.CreateDatabase())
                 {
-                    // Query 1: Get competition results
-                    var competitionResults = db.Fetch<dynamic>(@"
+                    // Query 1: Get competition results from the correct table based on type
+                    var resultTable = competitionType == "Milsnabb" ? "MilsnabbResultEntry" : "PrecisionResultEntry";
+                    var competitionResults = db.Fetch<dynamic>($@"
                         SELECT
                             CompetitionId,
                             ShootingClass,
                             SeriesNumber,
                             Shots
-                        FROM PrecisionResultEntry
+                        FROM {resultTable}
                         WHERE MemberId = @0
                         ORDER BY CompetitionId, SeriesNumber",
                         memberId);
@@ -714,8 +720,16 @@ namespace HpskSite.Controllers
                         });
                     }
 
-                    // Query 2: Get training scores from TrainingScores
-                    var trainingScores = db.Fetch<dynamic>(@"
+                    // Query 2: Get training scores from TrainingScores, filtered by discipline
+                    // For Precision: include entries with Discipline = 'Precision' or NULL (backward compat)
+                    // For other types: include only entries with matching Discipline
+                    var disciplineFilter = competitionType == "Precision"
+                        ? "AND (Discipline = 'Precision' OR Discipline IS NULL)"
+                        : $"AND Discipline = @2";
+                    var trainingScoreParams = competitionType == "Precision"
+                        ? new object[] { memberId, filterYear }
+                        : new object[] { memberId, filterYear, competitionType };
+                    var trainingScores = db.Fetch<dynamic>($@"
                         SELECT
                             Id,
                             TrainingDate,
@@ -728,9 +742,9 @@ namespace HpskSite.Controllers
                         FROM TrainingScores
                         WHERE MemberId = @0
                         AND YEAR(TrainingDate) = @1
+                        {disciplineFilter}
                         ORDER BY TrainingDate DESC",
-                        memberId,
-                        filterYear);
+                        trainingScoreParams);
 
                     foreach (var score in trainingScores)
                     {
@@ -1557,6 +1571,7 @@ namespace HpskSite.Controllers
                             competitionId = competitionId,
                             competitionName = competition.Name ?? "Unknown",
                             competitionDate = competitionDate,
+                            competitionType = competition.GetValue<string>("competitionType") ?? "Precision",
                             shootingClasses = classes,
                             competitionStatus = status,
                             paymentStatus = paymentInfo.Item1,
@@ -2067,7 +2082,7 @@ namespace HpskSite.Controllers
         /// GET: /umbraco/surface/Member/GetHandicapProfile
         /// </summary>
         [HttpGet]
-        public async Task<IActionResult> GetHandicapProfile()
+        public async Task<IActionResult> GetHandicapProfile(string discipline = "Precision")
         {
             try
             {
@@ -2084,30 +2099,38 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Member not found" });
                 }
 
-                // Get shooter class from member profile
-                var shooterClass = member.GetValue<string>("precisionShooterClass") ?? "";
-
-                // Get all statistics for this member
-                var allStats = await _statisticsService.GetAllStatisticsAsync(member.Id);
-
-                // Calculate handicap for each weapon class
-                var weaponClassProfiles = new List<object>();
-                foreach (var stats in allStats)
+                // Get shooter class from member profile based on discipline
+                var shooterClassProperty = discipline == "Milsnabb" ? "milsnabbShooterClass" : "precisionShooterClass";
+                string shooterClass = "";
+                if (member.HasProperty(shooterClassProperty))
                 {
-                    var profile = _handicapCalculator.CalculateHandicap(stats, shooterClass);
+                    shooterClass = member.GetValue<string>(shooterClassProperty) ?? "";
+                }
 
-                    weaponClassProfiles.Add(new
+                // Get all statistics for this member filtered by discipline
+                var allStats = await _statisticsService.GetAllStatisticsAsync(member.Id, discipline);
+
+                // Calculate handicap for each weapon class (only if shooter class is set)
+                var weaponClassProfiles = new List<object>();
+                if (!string.IsNullOrEmpty(shooterClass))
+                {
+                    foreach (var stats in allStats)
                     {
-                        weaponClass = stats.WeaponClass,
-                        weaponClassName = GetWeaponClassName(stats.WeaponClass),
-                        handicapPerSeries = profile.HandicapPerSeries,  // Keep decimal for quarter-point precision
-                        isProvisional = profile.IsProvisional,
-                        completedMatches = profile.CompletedMatches,
-                        requiredMatches = _handicapCalculator.Settings.RequiredMatches,
-                        effectiveAverage = profile.EffectiveAverage,
-                        actualAverage = profile.ActualAverage,
-                        referenceScore = _handicapCalculator.Settings.ReferenceSeriesScore
-                    });
+                        var profile = _handicapCalculator.CalculateHandicap(stats, shooterClass);
+
+                        weaponClassProfiles.Add(new
+                        {
+                            weaponClass = stats.WeaponClass,
+                            weaponClassName = GetWeaponClassName(stats.WeaponClass),
+                            handicapPerSeries = profile.HandicapPerSeries,
+                            isProvisional = profile.IsProvisional,
+                            completedMatches = profile.CompletedMatches,
+                            requiredMatches = _handicapCalculator.Settings.RequiredMatches,
+                            effectiveAverage = profile.EffectiveAverage,
+                            actualAverage = profile.ActualAverage,
+                            referenceScore = _handicapCalculator.Settings.ReferenceSeriesScore
+                        });
+                    }
                 }
 
                 // Include all settings for the explanatory text
@@ -2147,7 +2170,7 @@ namespace HpskSite.Controllers
         /// GET: /umbraco/surface/Member/GetHandicapProfileForMember?memberId=123
         /// </summary>
         [HttpGet]
-        public async Task<IActionResult> GetHandicapProfileForMember(int memberId)
+        public async Task<IActionResult> GetHandicapProfileForMember(int memberId, string discipline = "Precision")
         {
             try
             {
@@ -2164,30 +2187,38 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Member not found" });
                 }
 
-                // Get shooter class from member profile
-                var shooterClass = member.GetValue<string>("precisionShooterClass") ?? "";
-
-                // Get all statistics for this member
-                var allStats = await _statisticsService.GetAllStatisticsAsync(memberId);
-
-                // Calculate handicap for each weapon class
-                var weaponClassProfiles = new List<object>();
-                foreach (var stats in allStats)
+                // Get shooter class from member profile based on discipline
+                var shooterClassProperty = discipline == "Milsnabb" ? "milsnabbShooterClass" : "precisionShooterClass";
+                string shooterClass = "";
+                if (member.HasProperty(shooterClassProperty))
                 {
-                    var profile = _handicapCalculator.CalculateHandicap(stats, shooterClass);
+                    shooterClass = member.GetValue<string>(shooterClassProperty) ?? "";
+                }
 
-                    weaponClassProfiles.Add(new
+                // Get all statistics for this member filtered by discipline
+                var allStats = await _statisticsService.GetAllStatisticsAsync(memberId, discipline);
+
+                // Calculate handicap for each weapon class (only if shooter class is set)
+                var weaponClassProfiles = new List<object>();
+                if (!string.IsNullOrEmpty(shooterClass))
+                {
+                    foreach (var stats in allStats)
                     {
-                        weaponClass = stats.WeaponClass,
-                        weaponClassName = GetWeaponClassName(stats.WeaponClass),
-                        handicapPerSeries = profile.HandicapPerSeries,  // Keep decimal for quarter-point precision
-                        isProvisional = profile.IsProvisional,
-                        completedMatches = profile.CompletedMatches,
-                        requiredMatches = _handicapCalculator.Settings.RequiredMatches,
-                        effectiveAverage = profile.EffectiveAverage,
-                        actualAverage = profile.ActualAverage,
-                        referenceScore = _handicapCalculator.Settings.ReferenceSeriesScore
-                    });
+                        var profile = _handicapCalculator.CalculateHandicap(stats, shooterClass);
+
+                        weaponClassProfiles.Add(new
+                        {
+                            weaponClass = stats.WeaponClass,
+                            weaponClassName = GetWeaponClassName(stats.WeaponClass),
+                            handicapPerSeries = profile.HandicapPerSeries,
+                            isProvisional = profile.IsProvisional,
+                            completedMatches = profile.CompletedMatches,
+                            requiredMatches = _handicapCalculator.Settings.RequiredMatches,
+                            effectiveAverage = profile.EffectiveAverage,
+                            actualAverage = profile.ActualAverage,
+                            referenceScore = _handicapCalculator.Settings.ReferenceSeriesScore
+                        });
+                    }
                 }
 
                 // Include all settings for the explanatory text
@@ -2228,7 +2259,7 @@ namespace HpskSite.Controllers
         /// </summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> RecalculateMyHandicap()
+        public async Task<IActionResult> RecalculateMyHandicap(string discipline = "Precision")
         {
             try
             {
@@ -2249,7 +2280,7 @@ namespace HpskSite.Controllers
                 var weaponClasses = new[] { "A", "B", "C", "R", "M", "L" };
                 foreach (var wc in weaponClasses)
                 {
-                    await _statisticsService.RecalculateFromHistoryAsync(member.Id, wc);
+                    await _statisticsService.RecalculateFromHistoryAsync(member.Id, wc, discipline);
                 }
 
                 return Json(new { success = true, message = "Handicap omberäknat" });
@@ -2407,7 +2438,7 @@ namespace HpskSite.Controllers
         /// GET /umbraco/surface/Member/GetMemberDashboard?memberId={id}&year={year}
         /// </summary>
         [HttpGet]
-        public async Task<IActionResult> GetMemberDashboard(int memberId, int? year = null)
+        public async Task<IActionResult> GetMemberDashboard(int memberId, int? year = null, string competitionType = "Precision")
         {
             var currentMember = await _memberManager.GetCurrentMemberAsync();
             if (currentMember == null)
@@ -2477,7 +2508,15 @@ namespace HpskSite.Controllers
                 }
 
                 // Get dashboard statistics for target member
-                var allResultsUnfiltered = _unifiedResultsService.GetMemberResults(memberId);
+                List<HpskSite.Shared.Models.UnifiedResultEntry> allResultsUnfiltered;
+                if (competitionType == "Precision")
+                {
+                    allResultsUnfiltered = _unifiedResultsService.GetMemberResults(memberId);
+                }
+                else
+                {
+                    allResultsUnfiltered = GetMemberResultsForDiscipline(memberId, competitionType);
+                }
 
                 // Calculate available years from all data (before filtering)
                 var availableYears = allResultsUnfiltered
@@ -2554,13 +2593,16 @@ namespace HpskSite.Controllers
                     .OrderBy(x => x.weaponClass)
                     .ToList();
 
-                // Calculate personal bests by series count
-                var standardSeriesCounts = new[] { 6, 7, 10 };
-                var lWeaponSeriesCounts = new[] { 6, 8, 12 };
+                // Calculate personal bests by series count (discipline-aware)
+                int[] GetSeriesCountsForWeapon(string wc)
+                {
+                    if (competitionType == "Milsnabb") return new[] { 12 };
+                    return wc == "L" ? new[] { 6, 8, 12 } : new[] { 6, 7, 10 };
+                }
 
                 var personalBestsBySeriesCount = allResults
                     .Where(r => {
-                        var seriesCounts = r.WeaponClass == "L" ? lWeaponSeriesCounts : standardSeriesCounts;
+                        var seriesCounts = GetSeriesCountsForWeapon(r.WeaponClass);
                         return seriesCounts.Contains(r.SeriesCount);
                     })
                     .GroupBy(r => new { r.WeaponClass, r.SeriesCount, IsCompetition = r.SourceType == "Competition" || r.SourceType == "Official" })
@@ -2578,30 +2620,39 @@ namespace HpskSite.Controllers
                 // Get member name for display
                 var memberName = targetMember.Name ?? "Unknown";
 
-                // Calculate medal statistics for the selected year
-                var medalStats = GetMemberMedalStats(memberId, selectedYear);
+                // Calculate medal statistics for the selected year (discipline-aware)
+                var medalStats = GetMemberMedalStats(memberId, selectedYear, competitionType);
 
-                // Calculate handicap profiles for precision shooting
-                var shooterClass = targetMember.GetValue<string>("precisionShooterClass") ?? "";
-                var allHandicapStats = await _statisticsService.GetAllStatisticsAsync(memberId);
-                var handicapProfiles = new List<object>();
-                foreach (var handicapStats in allHandicapStats)
+                // Calculate handicap profiles (discipline-aware)
+                var shooterClassProperty = competitionType == "Milsnabb" ? "milsnabbShooterClass" : "precisionShooterClass";
+                string shooterClass = "";
+                if (targetMember.HasProperty(shooterClassProperty))
                 {
-                    var profile = _handicapCalculator.CalculateHandicap(handicapStats, shooterClass);
-                    handicapProfiles.Add(new
+                    shooterClass = targetMember.GetValue<string>(shooterClassProperty) ?? "";
+                }
+                var allHandicapStats = await _statisticsService.GetAllStatisticsAsync(memberId, competitionType);
+                var handicapProfiles = new List<object>();
+                if (!string.IsNullOrEmpty(shooterClass))
+                {
+                    foreach (var handicapStats in allHandicapStats)
                     {
-                        weaponClass = handicapStats.WeaponClass,
-                        handicapPerSeries = profile.HandicapPerSeries,
-                        isProvisional = profile.IsProvisional,
-                        completedMatches = profile.CompletedMatches,
-                        requiredMatches = _handicapCalculator.Settings.RequiredMatches
-                    });
+                        var profile = _handicapCalculator.CalculateHandicap(handicapStats, shooterClass);
+                        handicapProfiles.Add(new
+                        {
+                            weaponClass = handicapStats.WeaponClass,
+                            handicapPerSeries = profile.HandicapPerSeries,
+                            isProvisional = profile.IsProvisional,
+                            completedMatches = profile.CompletedMatches,
+                            requiredMatches = _handicapCalculator.Settings.RequiredMatches
+                        });
+                    }
                 }
 
                 var stats = new
                 {
                     memberName,
                     memberId,
+                    competitionType,
                     totalSessions,
                     totalTrainingSessions,
                     totalCompetitions,
@@ -2628,6 +2679,155 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// Get unified results for a non-Precision discipline by querying
+        /// the discipline-specific result entry table and TrainingScores.
+        /// </summary>
+        private List<HpskSite.Shared.Models.UnifiedResultEntry> GetMemberResultsForDiscipline(int memberId, string discipline)
+        {
+            var results = new List<HpskSite.Shared.Models.UnifiedResultEntry>();
+            var resultTable = discipline == "Milsnabb" ? "MilsnabbResultEntry" : "PrecisionResultEntry";
+            int defaultSeriesCount = discipline == "Milsnabb" ? 12 : 0;
+
+            using (var db = _databaseFactory.CreateDatabase())
+            {
+                // Source 1: TrainingScores filtered by discipline
+                var trainingScores = db.Fetch<dynamic>(@"
+                    SELECT Id, MemberId, TrainingDate, WeaponClass, SeriesScores,
+                           TotalScore, XCount, Notes, IsCompetition, TrainingMatchId
+                    FROM TrainingScores
+                    WHERE MemberId = @0 AND Discipline = @1
+                    ORDER BY TrainingDate DESC",
+                    memberId, discipline);
+
+                foreach (var score in trainingScores)
+                {
+                    int seriesCount = 0;
+                    try
+                    {
+                        var seriesJson = score.SeriesScores?.ToString();
+                        if (!string.IsNullOrEmpty(seriesJson))
+                        {
+                            var trainingSeries = System.Text.Json.JsonSerializer.Deserialize<List<TrainingSeries>>(seriesJson);
+                            if (trainingSeries != null && trainingSeries.Count > 0)
+                            {
+                                if (trainingSeries.Count == 1 && trainingSeries[0].EntryMethod == "TotalOnly")
+                                    seriesCount = trainingSeries[0].SeriesCount ?? 0;
+                                else
+                                    seriesCount = trainingSeries.Count;
+                            }
+                        }
+                    }
+                    catch { }
+                    if (seriesCount == 0 && defaultSeriesCount > 0) seriesCount = defaultSeriesCount;
+
+                    int totalScore = (int)(score.TotalScore ?? 0);
+                    bool isCompetition = score.IsCompetition is bool b ? b : false;
+                    bool isTrainingMatch = score.TrainingMatchId != null;
+                    string sourceType = isCompetition ? "Competition" : (isTrainingMatch ? "TrainingMatch" : "Training");
+
+                    results.Add(new HpskSite.Shared.Models.UnifiedResultEntry
+                    {
+                        Id = (int)score.Id,
+                        Date = (DateTime)score.TrainingDate,
+                        SourceType = sourceType,
+                        WeaponClass = score.WeaponClass?.ToString() ?? "",
+                        TotalScore = totalScore,
+                        XCount = (int)(score.XCount ?? 0),
+                        SeriesCount = seriesCount,
+                        AverageScore = seriesCount > 0 ? Math.Round((double)totalScore / seriesCount, 1) : 0,
+                        Notes = score.Notes?.ToString(),
+                        CanEdit = true,
+                        CanDelete = true
+                    });
+                }
+
+                // Source 2: Competition results from discipline-specific table
+                var competitionResults = db.Fetch<dynamic>($@"
+                    SELECT CompetitionId, MemberId, ShootingClass, Shots, SeriesNumber, EnteredAt
+                    FROM {resultTable}
+                    WHERE MemberId = @0
+                    ORDER BY EnteredAt DESC",
+                    memberId);
+
+                // Group by competition to build unified entries
+                var byCompetition = competitionResults.GroupBy(r => (int)r.CompetitionId);
+                foreach (var group in byCompetition)
+                {
+                    int competitionId = group.Key;
+                    var competition = _contentService.GetById(competitionId);
+                    string competitionName = competition?.Name ?? $"Tävling #{competitionId}";
+                    string weaponClass = "";
+                    int totalScore = 0;
+                    int xCount = 0;
+                    int seriesCount = group.Count();
+                    DateTime enteredAt = DateTime.MinValue;
+
+                    foreach (var entry in group)
+                    {
+                        string shootingClass = entry.ShootingClass?.ToString() ?? "";
+                        if (string.IsNullOrEmpty(weaponClass) && shootingClass.Length > 0)
+                            weaponClass = shootingClass.Substring(0, 1);
+
+                        if (entry.EnteredAt != null && (DateTime)entry.EnteredAt > enteredAt)
+                            enteredAt = (DateTime)entry.EnteredAt;
+
+                        // Parse shots JSON to calculate score
+                        try
+                        {
+                            var shotsJson = entry.Shots?.ToString();
+                            if (!string.IsNullOrEmpty(shotsJson))
+                            {
+                                var shots = System.Text.Json.JsonSerializer.Deserialize<List<string>>(shotsJson);
+                                if (shots != null)
+                                {
+                                    foreach (var shot in shots)
+                                    {
+                                        if (shot.Equals("X", StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            totalScore += 10;
+                                            xCount++;
+                                        }
+                                        else if (int.TryParse(shot, out int shotValue))
+                                        {
+                                            totalScore += shotValue;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        catch { }
+                    }
+
+                    // Use competition date if available
+                    DateTime competitionDate = enteredAt;
+                    if (competition != null)
+                    {
+                        var compDate = competition.GetValue<DateTime>("competitionDate");
+                        if (compDate != default) competitionDate = compDate;
+                    }
+
+                    results.Add(new HpskSite.Shared.Models.UnifiedResultEntry
+                    {
+                        Id = competitionId,
+                        Date = competitionDate,
+                        SourceType = "Official",
+                        WeaponClass = weaponClass,
+                        TotalScore = totalScore,
+                        XCount = xCount,
+                        SeriesCount = seriesCount,
+                        AverageScore = seriesCount > 0 ? Math.Round((double)totalScore / seriesCount, 1) : 0,
+                        CompetitionName = competitionName,
+                        CompetitionId = competitionId,
+                        CanEdit = false,
+                        CanDelete = false
+                    });
+                }
+            }
+
+            return results.OrderByDescending(r => r.Date).ToList();
+        }
+
+        /// <summary>
         /// Request model for updating dashboard sharing preferences.
         /// </summary>
         public class DashboardSharingRequest
@@ -2639,19 +2839,20 @@ namespace HpskSite.Controllers
         /// Get medal statistics for a member for a specific year.
         /// Sources: TrainingScores (external competitions) and Competition Results documents.
         /// </summary>
-        private object GetMemberMedalStats(int memberId, int year)
+        private object GetMemberMedalStats(int memberId, int year, string competitionType = "Precision")
         {
             int silverCount = 0;
             int bronzeCount = 0;
-
-            System.Diagnostics.Debug.WriteLine($"[MedalStats] Getting medals for MemberId={memberId}, Year={year}");
 
             try
             {
                 using (var db = _databaseFactory.CreateDatabase())
                 {
-                    // Source 1: TrainingScores table - external competitions with medals
-                    var trainingMedals = db.Fetch<dynamic>(@"
+                    // Source 1: TrainingScores table - external competitions with medals (discipline-filtered)
+                    var disciplineFilter = competitionType == "Precision"
+                        ? "AND (Discipline = 'Precision' OR Discipline IS NULL)"
+                        : $"AND Discipline = @2";
+                    var trainingMedals = db.Fetch<dynamic>($@"
                         SELECT CompetitionStdMedal, COUNT(*) as MedalCount
                         FROM TrainingScores
                         WHERE MemberId = @0
@@ -2659,16 +2860,14 @@ namespace HpskSite.Controllers
                           AND CompetitionStdMedal IS NOT NULL
                           AND CompetitionStdMedal != ''
                           AND YEAR(TrainingDate) = @1
+                          {disciplineFilter}
                         GROUP BY CompetitionStdMedal",
-                        memberId, year);
-
-                    System.Diagnostics.Debug.WriteLine($"[MedalStats] TrainingScores query returned {trainingMedals?.Count ?? 0} rows");
+                        memberId, year, competitionType);
 
                     foreach (var medal in trainingMedals)
                     {
                         string medalType = medal.CompetitionStdMedal?.ToString()?.ToUpper() ?? "";
                         int count = (int)(medal.MedalCount ?? 0);
-                        System.Diagnostics.Debug.WriteLine($"[MedalStats] Found medal: Type={medalType}, Count={count}");
 
                         if (medalType == "S")
                             silverCount += count;
@@ -2677,9 +2876,10 @@ namespace HpskSite.Controllers
                     }
 
                     // Source 2: Competition Results - get competitions the member participated in
-                    var competitionIds = db.Fetch<int>(@"
+                    var resultTable = competitionType == "Milsnabb" ? "MilsnabbResultEntry" : "PrecisionResultEntry";
+                    var competitionIds = db.Fetch<int>($@"
                         SELECT DISTINCT CompetitionId
-                        FROM PrecisionResultEntry
+                        FROM {resultTable}
                         WHERE MemberId = @0",
                         memberId);
 

@@ -570,7 +570,7 @@ function declineMember(memberId, memberName) {
 let currentDashboardMemberId = null;
 let currentDashboardMemberName = null;
 
-async function viewMemberDashboard(memberId, memberName, year = null) {
+async function viewMemberDashboard(memberId, memberName, year = null, competitionType = null) {
     currentDashboardMemberId = memberId;
     currentDashboardMemberName = memberName;
 
@@ -579,6 +579,10 @@ async function viewMemberDashboard(memberId, memberName, year = null) {
     const titleEl = document.getElementById('memberDashboardTitle');
     const contentEl = document.getElementById('memberDashboardContent');
     const yearFilter = document.getElementById('memberDashboardYearFilter');
+    const disciplineFilter = document.getElementById('memberDashboardDisciplineFilter');
+
+    // Use selected discipline or default
+    const discipline = competitionType || disciplineFilter.value || 'Precision';
 
     // Set title and show loading
     titleEl.innerHTML = `<i class="bi bi-speedometer2 me-2"></i>Dashboard - ${memberName}`;
@@ -593,7 +597,7 @@ async function viewMemberDashboard(memberId, memberName, year = null) {
     modal.show();
 
     try {
-        let url = `/umbraco/surface/Member/GetMemberDashboard?memberId=${memberId}`;
+        let url = `/umbraco/surface/Member/GetMemberDashboard?memberId=${memberId}&competitionType=${discipline}`;
         if (year) {
             url += `&year=${year}`;
         }
@@ -625,10 +629,12 @@ async function viewMemberDashboard(memberId, memberName, year = null) {
     }
 }
 
-// Handle year filter change (called from onchange attribute)
-function onMemberDashboardYearChange(selectElement) {
+// Handle year or discipline filter change
+function onMemberDashboardFilterChange() {
     if (currentDashboardMemberId && currentDashboardMemberName) {
-        viewMemberDashboard(currentDashboardMemberId, currentDashboardMemberName, selectElement.value);
+        const year = document.getElementById('memberDashboardYearFilter').value;
+        const discipline = document.getElementById('memberDashboardDisciplineFilter').value;
+        viewMemberDashboard(currentDashboardMemberId, currentDashboardMemberName, year || null, discipline);
     }
 }
 
@@ -767,7 +773,7 @@ function renderMemberDashboard(data, container) {
             <div class="col-12">
                 <div class="card">
                     <div class="card-body py-2">
-                        <h6 class="text-muted mb-2"><i class="bi bi-sliders me-1"></i>Handicap (Precisionsskytte)</h6>
+                        <h6 class="text-muted mb-2"><i class="bi bi-sliders me-1"></i>Handicap (${data.competitionType || 'Precision'})</h6>
                         ${renderHandicapSummary(data.handicapProfiles || [], data.shooterClass)}
                     </div>
                 </div>
@@ -886,8 +892,12 @@ function renderHandicapSummary(handicapProfiles, shooterClass) {
                 <h5 class="modal-title" id="memberDashboardTitle">
                     <i class="bi bi-speedometer2 me-2"></i>Dashboard
                 </h5>
-                <div class="ms-auto me-3">
-                    <select class="form-select form-select-sm" id="memberDashboardYearFilter" style="width: auto;" onchange="onMemberDashboardYearChange(this)">
+                <div class="ms-auto me-3 d-flex gap-2">
+                    <select class="form-select form-select-sm" id="memberDashboardDisciplineFilter" style="width: auto;" onchange="onMemberDashboardFilterChange()">
+                        <option value="Precision" selected>Precision</option>
+                        <option value="Milsnabb">Milsnabb</option>
+                    </select>
+                    <select class="form-select form-select-sm" id="memberDashboardYearFilter" style="width: auto;" onchange="onMemberDashboardFilterChange()">
                         <!-- Years populated dynamically -->
                     </select>
                 </div>

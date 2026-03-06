@@ -131,9 +131,10 @@
 
 @{
     var competitionId = ViewData["CompetitionId"]?.ToString() ?? "";
+    var competitionType = ViewData["CompetitionType"]?.ToString() ?? "Precision";
 }
 
-<div class="competition-startlist-management" data-competition-id="@competitionId">
+<div class="competition-startlist-management" data-competition-id="@competitionId" data-competition-type="@competitionType">
     <!-- Header Section -->
     <div class="mb-4">
         <button id="generateStartListBtn" class="btn btn-success" onclick="openGenerateStartListModal()">
@@ -317,6 +318,7 @@
                     <select class="form-select" id="teamFormat">
                         <option value="Mixade Skjutlag">Mixade vapengrupper per skjutlag</option>
                         <option value="En vapengrupp per Skjutlag">En vapengrupp per skjutlag</option>
+                        <option value="A+R och B+C" class="milsnabb-option d-none">A+R och B+C i samma skjutlag</option>
                     </select>
                 </div>
                 <!-- Weapon Class Order (shown only for "En vapengrupp per Skjutlag") -->
@@ -640,6 +642,21 @@ function openGenerateStartListModal() {
         defaultHour: 9,
         defaultMinute: 0
     });
+
+    // Show/hide Milsnabb-specific team format option
+    const compType = document.querySelector('.competition-startlist-management').dataset.competitionType;
+    const milsnabbOption = document.querySelector('#teamFormat .milsnabb-option');
+    if (milsnabbOption) {
+        if (compType === 'Milsnabb') {
+            milsnabbOption.classList.remove('d-none');
+        } else {
+            milsnabbOption.classList.add('d-none');
+            // Reset to default if Milsnabb option was selected but type changed
+            if (document.getElementById('teamFormat').value === 'A+R och B+C') {
+                document.getElementById('teamFormat').value = 'Mixade Skjutlag';
+            }
+        }
+    }
 
     // Add event listener for team format change
     const teamFormatSelect = document.getElementById('teamFormat');

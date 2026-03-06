@@ -37,10 +37,11 @@
     else
     {
         ViewBag.Title = $"Tävlingshantering - {competition.Value<string>("competitionName")}";
-        
+
         // Pass competition properties to ViewData for partial views
         ViewData["NumberOfSeriesOrStations"] = competition.Value<int>("numberOfSeriesOrStations");
         ViewData["NumberOfFinalSeries"] = competition.Value<int>("numberOfFinalSeries");
+        ViewData["CompetitionType"] = competition.Value<string>("competitionType") ?? "Precision";
     }
 
     // Check authorization

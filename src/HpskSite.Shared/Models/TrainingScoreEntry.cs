@@ -35,6 +35,12 @@ namespace HpskSite.Shared.Models
         public string WeaponClass { get; set; } = string.Empty;
 
         /// <summary>
+        /// Discipline for this entry (e.g., "Precision", "Milsnabb").
+        /// Defaults to "Precision" for backward compatibility.
+        /// </summary>
+        public string Discipline { get; set; } = "Precision";
+
+        /// <summary>
         /// Indicates if this is a result from an external competition
         /// (competitions in other regions/countries not tracked in main system)
         /// </summary>

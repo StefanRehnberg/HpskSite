@@ -1274,6 +1274,7 @@ function openResultBoard() {
     var qualSeriesCount = @(numberOfFinalSeries > 0 ? numberOfSeriesOrStations - numberOfFinalSeries : numberOfSeriesOrStations);
     var numFinalSeries = @numberOfFinalSeries;
     var totalSeriesCount = @numberOfSeriesOrStations;
+    var compTypeId = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.Value<string>("competitionType") ?? "Precision"));
     var configuredWCs = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(
         competitionShootingClasses
             .Select(sc => sc.Weapon.ToString())
@@ -1306,6 +1307,7 @@ function openResultBoard() {
 +'.rb-pos-3{color:#cd7f32;font-weight:700}'
 +'.rb-medal-s{color:#c0c0c0;font-weight:700}'
 +'.rb-medal-b{color:#cd7f32;font-weight:700}'
++'.rb-subtotal{border-left:2px solid rgba(78,204,163,.4);font-weight:700;color:#4ecca3}'
 +'@@media(max-width:767.98px){.rb-table{font-size:.95rem}.rb-table .rb-series-col{display:none}.rb-header{padding:.4rem .75rem}}'
 +'@@media(min-width:768px) and (max-width:991.98px){.rb-table{font-size:.95rem}}'
 +'@@media(max-height:500px){.rb-header{padding:.25rem .75rem}.rb-header h1{font-size:.9rem}.rb-table td,.rb-table th{padding:.25rem .4rem}}';
@@ -1327,17 +1329,19 @@ function openResultBoard() {
 
     // Inject script into the new window after document is ready
     var s = w.document.createElement('script');
-    s.textContent = '(' + rbBoardScript.toString() + ')(' + compId + ',' + hasFinalsRound + ',' + qualSeriesCount + ',' + numFinalSeries + ',' + totalSeriesCount + ',' + JSON.stringify(configuredWCs) + ');';
+    s.textContent = '(' + rbBoardScript.toString() + ')(' + compId + ',' + hasFinalsRound + ',' + qualSeriesCount + ',' + numFinalSeries + ',' + totalSeriesCount + ',' + JSON.stringify(configuredWCs) + ',' + JSON.stringify(compTypeId) + ');';
     w.document.body.appendChild(s);
 }
 
 // Result board logic — passed as a function to avoid script-tag-in-string issues
-function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, totalSeriesCount, configuredWCs) {
+function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, totalSeriesCount, configuredWCs, compTypeId) {
     var refreshTimer=null;
     var allGroups=[],isOfficial=false,isMedals=false;
     var selectedWC='Alla';
     var REFRESH=15000;
     configuredWCs=configuredWCs||[];
+    compTypeId=compTypeId||'Precision';
+    var isMilsnabb=compTypeId==='Milsnabb';
 
     function getWC(n){return(n||'').trim().charAt(0).toUpperCase()||'?'}
 
@@ -1405,7 +1409,14 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
         var useFinals=hasFinalsRound&&maxSeries>=totalSeriesCount;
         // Build table
         var h='<table class="rb-table"><thead><tr><th>#</th><th>Namn</th><th>Klass</th><th>Förening</th>';
-        if(useFinals){for(var i=1;i<=qualSeriesCount;i++)h+='<th class="rb-series-col">'+i+'</th>';h+='<th class="rb-series-col">Tot</th>';for(var i=1;i<=numFinalSeries;i++)h+='<th class="rb-series-col">F'+i+'</th>'}
+        if(isMilsnabb){
+            for(var i=1;i<=4;i++)h+='<th class="rb-series-col">'+i+'</th>';
+            h+='<th class="rb-subtotal">10s</th>';
+            for(var i=5;i<=8;i++)h+='<th class="rb-series-col">'+i+'</th>';
+            h+='<th class="rb-subtotal">8s</th>';
+            for(var i=9;i<=12;i++)h+='<th class="rb-series-col">'+i+'</th>';
+            h+='<th class="rb-subtotal">6s</th>';
+        } else if(useFinals){for(var i=1;i<=qualSeriesCount;i++)h+='<th class="rb-series-col">'+i+'</th>';h+='<th class="rb-series-col">Tot</th>';for(var i=1;i<=numFinalSeries;i++)h+='<th class="rb-series-col">F'+i+'</th>'}
         else{for(var i=1;i<=maxSeries;i++)h+='<th class="rb-series-col">'+i+'</th>'}
         h+='<th>Tot</th><th>X</th>';if(isMedals)h+='<th>S</th>';h+='</tr></thead><tbody>';
         all.forEach(function(sh,pos0){
@@ -1413,7 +1424,10 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
             if(useFinals)qs=sr.slice(0,qualSeriesCount).reduce(function(a,v){return a+v.s},0);
             var pc=pos<=3?' rb-pos-'+pos:'';
             h+='<tr><td class="'+pc.trim()+'">'+pos+'</td><td>'+sh.nm+'</td><td>'+sh.sc+'</td><td>'+sh.cl+'</td>';
-            if(useFinals){
+            if(isMilsnabb){
+                var grps=[[0,4],[4,8],[8,12]];
+                grps.forEach(function(g){var gt=0;for(var i=g[0];i<g[1];i++){var v=i<sr.length?sr[i].s:0;gt+=v;h+='<td class="rb-series-col">'+(i<sr.length?v:'-')+'</td>'}h+='<td class="rb-subtotal">'+gt+'</td>'});
+            } else if(useFinals){
                 for(var i=0;i<qualSeriesCount;i++)h+='<td class="rb-series-col">'+(i<sr.length?sr[i].s:'-')+'</td>';
                 h+='<td class="rb-series-col"><strong>'+qs+'</strong></td>';
                 for(var i=qualSeriesCount;i<totalSeriesCount;i++)h+='<td class="rb-series-col">'+(i<sr.length?sr[i].s:'-')+'</td>';

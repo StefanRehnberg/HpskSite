@@ -88,6 +88,7 @@ namespace HpskSite.CompetitionTypes.Precision.ViewModels
             {
                 Position = position++,
                 Name = reg.MemberName ?? "Okänd deltagare",
+                Club = reg.MemberClub ?? "",
                 WeaponClass = reg.MemberClass,
                 MemberId = reg.MemberId
             }).ToList();

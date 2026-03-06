@@ -25,6 +25,7 @@
             new CompetitionType("Springskytte", "Springskytte", "Springskytte med Springskytte mål"),
             new CompetitionType("Faltkytte", "Fältskytte", "Fältskytte"),
             new CompetitionType("MagnumPrecision", "Magnum Precision", "Magnum Precision 50 m"),
+            new CompetitionType("MagnumFalt", "Magnum Fältskytte", "Magnum Fältskytte"),
         };
 
         public static CompetitionType? GetById(string id)

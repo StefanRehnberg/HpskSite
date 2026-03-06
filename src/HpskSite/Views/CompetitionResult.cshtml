@@ -113,7 +113,24 @@
         .same-club { background-color: #f0f8ff !important; } /* Very light blue for same club */
         
         .x-count { color: #dc3545; font-size: 9px; }
-        
+
+        /* Milsnabb time-group sub-total columns */
+        .results-table .subtotal-col {
+            border-left: 2px solid #999;
+            font-weight: bold;
+        }
+        .results-table th.subtotal-col {
+            background-color: #e8e8e8;
+        }
+
+        /* Milsnabb series columns - hide on mobile */
+        .results-table .milsnabb-series {
+            /* visible by default on desktop */
+        }
+        @@media (max-width: 767.98px) {
+            .results-table .milsnabb-series { display: none; }
+        }
+
         @@media print {
             .no-print { display: none !important; }
             .print-only { display: block !important; }
@@ -201,10 +218,12 @@
                 isOfficialResults = data.isOfficial;
                 const results = data.results;
                 const isAwardingStandardMedals = data.isAwardingStandardMedals || false;
-                
+                const competitionTypeId = data.competitionTypeId || 'Precision';
+                const isMilsnabb = competitionTypeId === 'Milsnabb';
+
                 // Build HTML for results
                 let html = '';
-                
+
                 if (results.classGroups && results.classGroups.length > 0) {
                     results.classGroups.forEach(classGroup => {
                         // Class header
@@ -219,38 +238,41 @@
                                             <th>Plats</th>
                                             <th>Namn</th>
                                             <th>Förening</th>
-                                            <th>Vapengrupp</th>
+                                            <th>Klass</th>
                         `;
 
-                        html += ``;
-
-                        // Add series columns (numbered)
-                        if (classGroup.shooters.length > 0 && classGroup.shooters[0].results) {
+                        // Add series columns based on competition type
+                        if (isMilsnabb) {
+                            // Milsnabb: S1-S4 | 10s | S5-S8 | 8s | S9-S12 | 6s
+                            for (let i = 1; i <= 4; i++) html += `<th class="milsnabb-series">${i}</th>`;
+                            html += `<th class="subtotal-col">10s</th>`;
+                            for (let i = 5; i <= 8; i++) html += `<th class="milsnabb-series">${i}</th>`;
+                            html += `<th class="subtotal-col">8s</th>`;
+                            for (let i = 9; i <= 12; i++) html += `<th class="milsnabb-series">${i}</th>`;
+                            html += `<th class="subtotal-col">6s</th>`;
+                        } else if (classGroup.shooters.length > 0 && classGroup.shooters[0].results) {
                             const seriesCount = classGroup.shooters[0].results.length;
-                            
+
                             if (hasFinalsRound && seriesCount >= totalSeriesCount) {
-                                // Competition with finals: show qualification series, qual total, final series, final total
                                 for (let i = 1; i <= qualificationSeriesCount; i++) {
                                     html += `<th>${i}</th>`;
                                 }
-                                html += `<th>Tot</th>`; // Qualification total
+                                html += `<th>Tot</th>`;
                                 for (let i = 1; i <= numberOfFinalSeries; i++) {
                                     html += `<th>F${i}</th>`;
                                 }
                             } else {
-                                // Regular competition: just number the series
                                 for (let i = 1; i <= seriesCount; i++) {
                                     html += `<th>${i}</th>`;
                                 }
                             }
                         }
-                        
+
                         html += `
                                             <th>Tot</th>
                                             <th>X</th>
                         `;
 
-                        // Add Standard Medal column header if enabled (at the end)
                         if (isAwardingStandardMedals) {
                             html += `<th>S</th>`;
                         }
@@ -260,15 +282,14 @@
                                     </thead>
                                     <tbody>
                         `;
-                        
+
                         // Add shooters
                         classGroup.shooters.forEach((shooter, index) => {
                             const position = index + 1;
                             let totalScore = 0;
                             let totalXCount = 0;
                             let qualificationScore = 0;
-                            let finalsScore = 0;
-                            
+
                             // Calculate series scores
                             const seriesScores = [];
                             shooter.results.forEach(result => {
@@ -283,21 +304,15 @@
                                 totalScore += score;
                                 totalXCount += xCount;
                             });
-                            
-                            // Calculate qualification and finals scores if applicable
-                            if (hasFinalsRound && seriesScores.length >= totalSeriesCount) {
-                                qualificationScore = seriesScores.slice(0, qualificationSeriesCount).reduce((sum, s) => sum + s.score, 0);
-                                finalsScore = seriesScores.slice(qualificationSeriesCount, totalSeriesCount).reduce((sum, s) => sum + s.score, 0);
-                            }
-                            
-                            // Row styling - prioritize user highlighting over position
+
+                            // Row styling
                             let rowClass = '';
                             if (currentUserName && shooter.name === currentUserName) {
                                 rowClass = 'current-user';
                             } else if (currentUserClub && shooter.club === currentUserClub) {
                                 rowClass = 'same-club';
                             }
-                            
+
                             html += `
                                 <tr class="${rowClass}">
                                     <td class="text-center">${position}</td>
@@ -306,39 +321,39 @@
                                     <td class="text-center">${shooter.shootingClass || classGroup.className}</td>
                             `;
 
-                            // Add series scores
-                            if (hasFinalsRound && seriesScores.length >= totalSeriesCount) {
-                                // Show qualification series
+                            // Add series scores based on competition type
+                            if (isMilsnabb) {
+                                // Milsnabb: series 1-4 + 10s sub-total, 5-8 + 8s sub-total, 9-12 + 6s sub-total
+                                const groups = [[0,4],[4,8],[8,12]];
+                                groups.forEach(([start, end]) => {
+                                    let groupTotal = 0;
+                                    for (let i = start; i < end; i++) {
+                                        const s = i < seriesScores.length ? seriesScores[i].score : 0;
+                                        groupTotal += s;
+                                        html += `<td class="text-center milsnabb-series">${i < seriesScores.length ? s : '-'}</td>`;
+                                    }
+                                    html += `<td class="text-center subtotal-col">${groupTotal}</td>`;
+                                });
+                            } else if (hasFinalsRound && seriesScores.length >= totalSeriesCount) {
                                 for (let i = 0; i < qualificationSeriesCount; i++) {
-                                    if (i < seriesScores.length) {
-                                        html += `<td class="text-center">${seriesScores[i].score}</td>`;
-                                    } else {
-                                        html += `<td class="text-center">-</td>`;
-                                    }
+                                    html += `<td class="text-center">${i < seriesScores.length ? seriesScores[i].score : '-'}</td>`;
                                 }
-                                // Show qualification total
+                                qualificationScore = seriesScores.slice(0, qualificationSeriesCount).reduce((sum, s) => sum + s.score, 0);
                                 html += `<td class="text-center"><strong>${qualificationScore}</strong></td>`;
-                                // Show finals series
                                 for (let i = qualificationSeriesCount; i < totalSeriesCount; i++) {
-                                    if (i < seriesScores.length) {
-                                        html += `<td class="text-center">${seriesScores[i].score}</td>`;
-                                    } else {
-                                        html += `<td class="text-center">-</td>`;
-                                    }
+                                    html += `<td class="text-center">${i < seriesScores.length ? seriesScores[i].score : '-'}</td>`;
                                 }
                             } else {
-                                // Regular competition: show all series
                                 seriesScores.forEach(s => {
                                     html += `<td class="text-center">${s.score}</td>`;
                                 });
                             }
-                            
+
                             html += `
                                     <td class="text-center"><strong>${totalScore}</strong></td>
                                     <td class="text-center">${totalXCount}</td>
                             `;
 
-                            // Add Standard Medal cell if enabled (at the end)
                             if (isAwardingStandardMedals) {
                                 const medal = shooter.standardMedal || '';
                                 html += `<td class="text-center"><strong>${medal}</strong></td>`;
@@ -348,7 +363,7 @@
                                 </tr>
                             `;
                         });
-                        
+
                         html += `
                                     </tbody>
                                 </table>

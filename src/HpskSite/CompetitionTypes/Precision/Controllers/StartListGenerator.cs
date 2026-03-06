@@ -1,4 +1,5 @@
-﻿using HpskSite.CompetitionTypes.Precision.Models;
+﻿using HpskSite.CompetitionTypes.Milsnabb.Services;
+using HpskSite.CompetitionTypes.Precision.Models;
 using HpskSite.CompetitionTypes.Precision.ViewModels;
 using HpskSite.Models.ViewModels.Competition;
 
@@ -34,6 +35,10 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     break;
                 case "B och C i samma skjutlag":
                     teams = GenerateBCCombinedTeamsWithClassOrder(registrations, request.MaxShootersPerTeam, currentTime, intervalMinutes, request.ClassStartOrder, request.MemberSortOrder);
+                    break;
+                case "A+R och B+C":
+                    var milsnabbGenerator = new MilsnabbStartListGenerator(_repository);
+                    teams = milsnabbGenerator.Generate(registrations, request.MaxShootersPerTeam, currentTime, intervalMinutes, request.MemberSortOrder);
                     break;
                 default:
                     teams = GenerateMixedTeams(registrations, request.MaxShootersPerTeam, currentTime, intervalMinutes, request.MemberSortOrder);

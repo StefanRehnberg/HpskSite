@@ -24,11 +24,11 @@
 
                     @* Basic Information *@
                     <div class="row mb-3">
-                        <div class="col-md-6">
+                        <div class="col-md-4">
                             <label for="trainingDate" class="form-label">Träningsdatum <span class="text-danger">*</span></label>
                             <input type="text" class="form-control" id="trainingDate" name="trainingDate" required>
                         </div>
-                        <div class="col-md-6">
+                        <div class="col-md-4">
                             <label for="shootingClass" class="form-label">Vapenklass <span class="text-danger">*</span></label>
                             <select class="form-select" id="shootingClass" name="shootingClass" required>
                                 <option value="">Välj klass...</option>
@@ -37,6 +37,13 @@
                                 <option value="C">C - Kal. 22</option>
                                 <option value="R">R - Revolver</option>
                                 <option value="L">L - Luftpistol</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="modalDiscipline" class="form-label">Disciplin <span class="text-danger">*</span></label>
+                            <select class="form-select" id="modalDiscipline" name="modalDiscipline" required>
+                                <option value="Precision" selected>Precision</option>
+                                <option value="Milsnabb">Milsnabb</option>
                             </select>
                         </div>
                     </div>
@@ -695,9 +702,12 @@ function submitTrainingScore() {
     }
 
     // Build final payload
+    // Read discipline from the in-modal dropdown
+    const discipline = document.getElementById('modalDiscipline')?.value || 'Precision';
     const data = {
         trainingDate: document.getElementById('trainingDate').value,
         weaponClass: document.getElementById('shootingClass').value,
+        discipline: discipline,
         isCompetition: document.getElementById('isCompetitionCheckbox').checked,
         competitionPlace: document.getElementById('competitionPlace').value ? parseInt(document.getElementById('competitionPlace').value) : null,
         competitionShootingClass: document.getElementById('competitionShootingClass').value || null,

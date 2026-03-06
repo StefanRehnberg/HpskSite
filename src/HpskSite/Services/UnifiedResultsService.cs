@@ -221,6 +221,21 @@ namespace HpskSite.Services
 
                 var competitionRecords = db.Fetch<dynamic>(query, memberId);
 
+                // Batch load all competition names at once (instead of N+1 calls)
+                var competitionIds = competitionRecords
+                    .Select(r => (int)(r.CompetitionId ?? 0))
+                    .Where(id => id > 0)
+                    .Distinct()
+                    .ToList();
+                var competitionNameMap = new Dictionary<int, string>();
+                if (competitionIds.Any())
+                {
+                    foreach (var comp in _contentService.GetByIds(competitionIds))
+                    {
+                        competitionNameMap[comp.Id] = comp.Name ?? $"Tävling #{comp.Id}";
+                    }
+                }
+
                 foreach (var compRecord in competitionRecords)
                 {
                     int competitionId = compRecord.CompetitionId ?? 0;
@@ -231,13 +246,8 @@ namespace HpskSite.Services
                         ? shootingClass.Substring(0, 1).ToUpper()
                         : "A";
 
-                    // Get competition name
-                    string? competitionName = null;
-                    var competitionNode = _contentService.GetById(competitionId);
-                    if (competitionNode != null)
-                    {
-                        competitionName = competitionNode.Name;
-                    }
+                    // Get competition name from batch-loaded map
+                    competitionNameMap.TryGetValue(competitionId, out string? competitionName);
 
                     // Parse all shots and calculate total score and X-count
                     string allShotsStr = compRecord.AllShots ?? "";
