@@ -229,9 +229,12 @@ namespace HpskSite.Services
                 // Determine table based on competition type (all competitions in a series should be same type)
                 var firstComp = _contentService.GetById(competitionIds.First());
                 var compType = firstComp?.GetValue<string>("competitionType") ?? "Precision";
-                var tableName = compType.Equals("Milsnabb", StringComparison.OrdinalIgnoreCase)
-                    ? "MilsnabbResultEntry"
-                    : "PrecisionResultEntry";
+                var tableName = compType switch
+                {
+                    "Milsnabb" => "MilsnabbResultEntry",
+                    "Duell" => "DuellResultEntry",
+                    _ => "PrecisionResultEntry"
+                };
 
                 // Build parameterized IN clause
                 var paramNames = competitionIds.Select((id, i) => $"@{i}").ToArray();

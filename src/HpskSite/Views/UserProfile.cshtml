@@ -104,45 +104,28 @@
 
                         @* Training Results Tab *@
                         <div class="tab-pane fade" id="results-pane" role="tabpanel">
-                            @* Action Bar *@
-                            <div class="d-flex justify-content-between align-items-center mb-3">
+                            @* Action Bar + Filters *@
+                            <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
                                 <button class="btn btn-primary" onclick="openTrainingScoreModal()">
                                     <i class="bi bi-plus-circle"></i> Lägg in Resultat
                                 </button>
-                                <button class="btn btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#filterSection" aria-expanded="false" aria-controls="filterSection">
-                                    <i class="bi bi-funnel"></i> Filter
-                                </button>
-                            </div>
-
-                            @* Collapsible Filter Section *@
-                            <div class="collapse mb-4" id="filterSection">
-                                <div class="card card-body">
-                                    <div class="row">
-                                        <div class="col-md-4">
-                                            <label for="competitionTypeFilter" class="form-label">Tävlingstyp</label>
-                                            <select id="competitionTypeFilter" class="form-select" onchange="loadResults()">
-                                                <option value="Precision" selected>Precision</option>
-                                                <option value="Milsnabb">Milsnabb</option>
-                                            </select>
-                                        </div>
-                                        <div class="col-md-4">
-                                            <label for="yearFilter" class="form-label">År</label>
-                                            <select id="yearFilter" class="form-select" onchange="loadResults()">
-                                                @* Options populated by JavaScript *@
-                                            </select>
-                                        </div>
-                                        <div class="col-md-4">
-                                            <label for="weaponClassFilter" class="form-label">Vapenklass</label>
-                                            <select id="weaponClassFilter" class="form-select" onchange="loadResults()">
-                                                <option value="Alla" selected>Alla</option>
-                                                <option value="A">A - Tjänstevapen</option>
-                                                <option value="B">B - Kal. 32-45</option>
-                                                <option value="C">C - Kal. 22</option>
-                                                <option value="R">R - Revolver</option>
-                                                <option value="L">L - Luftpistol</option>
-                                            </select>
-                                        </div>
-                                    </div>
+                                <div class="d-flex gap-2 flex-wrap">
+                                    <select id="competitionTypeFilter" class="form-select form-select-sm" style="width: auto;" onchange="loadResults()">
+                                        <option value="Precision" selected>Precision</option>
+                                        <option value="Milsnabb">Milsnabb</option>
+                                        <option value="Duell">Duell</option>
+                                    </select>
+                                    <select id="yearFilter" class="form-select form-select-sm" style="width: auto;" onchange="loadResults()">
+                                        @* Options populated by JavaScript *@
+                                    </select>
+                                    <select id="weaponClassFilter" class="form-select form-select-sm" style="width: auto;" onchange="loadResults()">
+                                        <option value="Alla" selected>Alla</option>
+                                        <option value="A">A - Tjänstevapen</option>
+                                        <option value="B">B - Kal. 32-45</option>
+                                        <option value="C">C - Kal. 22</option>
+                                        <option value="R">R - Revolver</option>
+                                        <option value="L">L - Luftpistol</option>
+                                    </select>
                                 </div>
                             </div>
 
@@ -298,6 +281,57 @@
                                                 </button>
                                             </div>
                                             <div id="milsnabbHandicapInfoContainer">
+                                                <div class="text-center py-3">
+                                                    <div class="spinner-border spinner-border-sm text-primary" role="status">
+                                                        <span class="visually-hidden">Laddar...</span>
+                                                    </div>
+                                                    <span class="ms-2 text-muted">Laddar handikappinformation...</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Duell Shooting Settings Section -->
+                            <div class="mb-4">
+                                <h5 class="mb-3" role="button" data-bs-toggle="collapse" data-bs-target="#duellSection" aria-expanded="true">
+                                    <img src="/images/competition-types/Duell.png" alt="Duell" style="height: 20px; width: auto;" class="me-2">Duell
+                                    <i class="bi bi-chevron-down float-end small"></i>
+                                </h5>
+                                <div class="collapse show" id="duellSection">
+                                    <div class="card border-light">
+                                        <div class="card-body">
+                                            <!-- Shooter Class Selection -->
+                                            <label class="form-label fw-semibold">Skytteklass</label>
+                                            <div class="mb-3">
+                                                @{
+                                                    var currentDuellShooterClass = memberData?.GetValue("duellShooterClass")?.ToString() ?? "";
+                                                }
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="radio" name="duellShooterClass" id="duellClass1" value="Klass 1 - Nybörjare" @(currentDuellShooterClass == "Klass 1 - Nybörjare" ? "checked" : "")>
+                                                    <label class="form-check-label" for="duellClass1">Klass 1 - Nybörjare</label>
+                                                </div>
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="radio" name="duellShooterClass" id="duellClass2" value="Klass 2 - Guldmärkesskytt" @(currentDuellShooterClass == "Klass 2 - Guldmärkesskytt" ? "checked" : "")>
+                                                    <label class="form-check-label" for="duellClass2">Klass 2 - Guldmärkesskytt</label>
+                                                </div>
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="radio" name="duellShooterClass" id="duellClass3" value="Klass 3 - Riksmästare" @(currentDuellShooterClass == "Klass 3 - Riksmästare" ? "checked" : "")>
+                                                    <label class="form-check-label" for="duellClass3">Klass 3 - Riksmästare</label>
+                                                </div>
+                                            </div>
+
+                                            <hr class="my-3">
+
+                                            <!-- Handicap Info Section -->
+                                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                                <label class="form-label fw-semibold mb-0">Ditt Handikappindex</label>
+                                                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="recalculateMyHandicap('Duell')" id="recalculateDuellHandicapBtn" title="Omberäkna handikapp från alla resultat">
+                                                    <i class="bi bi-arrow-clockwise"></i> Omberäkna
+                                                </button>
+                                            </div>
+                                            <div id="duellHandicapInfoContainer">
                                                 <div class="text-center py-3">
                                                     <div class="spinner-border spinner-border-sm text-primary" role="status">
                                                         <span class="visually-hidden">Laddar...</span>
@@ -601,6 +635,7 @@ document.addEventListener('DOMContentLoaded', function() {
     loadPrimaryClubButton(); // Load club navigation button
     loadHandicapProfile('Precision'); // Load Precision handicap info for profile tab
     loadHandicapProfile('Milsnabb'); // Load Milsnabb handicap info for profile tab
+    loadHandicapProfile('Duell'); // Load Duell handicap info for profile tab
     loadTrainingGroupInfo(); // Load training group membership
 
     // Handle tab switching
@@ -619,7 +654,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Auto-save shooter class on change
-    document.querySelectorAll('input[name="shooterClass"], input[name="milsnabbShooterClass"]').forEach(radio => {
+    document.querySelectorAll('input[name="shooterClass"], input[name="milsnabbShooterClass"], input[name="duellShooterClass"]').forEach(radio => {
         radio.addEventListener('change', function() {
             autoSaveShooterClass(this.name, this.value);
         });
@@ -709,7 +744,7 @@ async function loadTrainingGroupInfo() {
 }
 
 function loadHandicapProfile(discipline = 'Precision') {
-    const containerId = discipline === 'Milsnabb' ? 'milsnabbHandicapInfoContainer' : 'handicapInfoContainer';
+    const containerId = discipline === 'Milsnabb' ? 'milsnabbHandicapInfoContainer' : discipline === 'Duell' ? 'duellHandicapInfoContainer' : 'handicapInfoContainer';
     fetch(`/umbraco/surface/Member/GetHandicapProfile?discipline=${discipline}`)
         .then(response => response.json())
         .then(response => {
@@ -717,7 +752,7 @@ function loadHandicapProfile(discipline = 'Precision') {
                 const data = response.data;
                 // Pre-select shooter class radio (if not already set by server-side rendering)
                 if (data.shooterClass) {
-                    const radioName = discipline === 'Milsnabb' ? 'milsnabbShooterClass' : 'shooterClass';
+                    const radioName = discipline === 'Milsnabb' ? 'milsnabbShooterClass' : discipline === 'Duell' ? 'duellShooterClass' : 'shooterClass';
                     const radio = document.querySelector(`input[name="${radioName}"][value="${data.shooterClass}"]`);
                     if (radio) radio.checked = true;
                 }
@@ -784,11 +819,13 @@ function autoSaveShooterClass(radioName, value) {
     // Send the updated shooter class
     if (radioName === 'milsnabbShooterClass') {
         formData.append('milsnabbShooterClass', value);
+    } else if (radioName === 'duellShooterClass') {
+        formData.append('duellShooterClass', value);
     } else {
         formData.append('precisionShooterClass', value);
     }
 
-    const discipline = radioName === 'milsnabbShooterClass' ? 'Milsnabb' : 'Precision';
+    const discipline = radioName === 'milsnabbShooterClass' ? 'Milsnabb' : radioName === 'duellShooterClass' ? 'Duell' : 'Precision';
 
     fetch('/umbraco/surface/Member/UpdateProfile', {
         method: 'POST',
@@ -1556,8 +1593,7 @@ function calculateStatsFromData(entries) {
 function getSeriesCountsForWeapon(wc, discipline) {
     if (discipline === 'Milsnabb')
         return [12];
-    if (discipline && discipline !== 'Precision')
-        return [6, 10, 12];
+    // Duell and Precision use same series counts
     return wc === 'L' ? [6, 8, 12] : [6, 7, 10];
 }
 
@@ -1742,6 +1778,7 @@ function renderDashboard(data, selectedYears = null) {
                         <select id="dashboardTypeFilter" class="form-select form-select-sm" style="width: auto;" onchange="loadDashboard()">
                             <option value="Precision" ${data.competitionType === 'Precision' || !data.competitionType ? 'selected' : ''}>Precision</option>
                             <option value="Milsnabb" ${data.competitionType === 'Milsnabb' ? 'selected' : ''}>Milsnabb</option>
+                            <option value="Duell" ${data.competitionType === 'Duell' ? 'selected' : ''}>Duell</option>
                         </select>
                         <select id="dashboardYearFilter" class="form-select form-select-sm" style="width: auto;" onchange="onDashboardYearChange(this)">
                             <option value="all" ${selectedYears === null ? 'selected' : ''}>Alla</option>

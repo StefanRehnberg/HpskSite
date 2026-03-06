@@ -18,6 +18,8 @@ using HpskSite.CompetitionTypes.Precision.Controllers;
 using HpskSite.Services;
 using HpskSite.CompetitionTypes.Milsnabb.Services;
 using HpskSite.CompetitionTypes.Milsnabb.Models;
+using HpskSite.CompetitionTypes.Duell.Services;
+using HpskSite.CompetitionTypes.Duell.Models;
 using Newtonsoft.Json;
 using PrecisionResultEntry = HpskSite.CompetitionTypes.Precision.Models.PrecisionResultEntry;
 using ResultEntryRequest = HpskSite.CompetitionTypes.Precision.Models.PrecisionResultEntryRequest;
@@ -525,11 +527,18 @@ namespace HpskSite.Controllers
                 var existingResults = new List<PrecisionResultEntry>();
                 using (var db = _umbracoDatabaseFactory.CreateDatabase())
                 {
-                    if (IsMilsnabbCompetition(competitionId))
+                    var compTypeId = GetCompetitionTypeId(competitionId);
+                    if (compTypeId == "Milsnabb")
                     {
                         var milsnabbResults = await db.FetchAsync<MilsnabbResultEntry>(
                             "WHERE CompetitionId = @0", competitionId);
                         existingResults = milsnabbResults.Cast<PrecisionResultEntry>().ToList();
+                    }
+                    else if (compTypeId == "Duell")
+                    {
+                        var duellResults = await db.FetchAsync<DuellResultEntry>(
+                            "WHERE CompetitionId = @0", competitionId);
+                        existingResults = duellResults.Cast<PrecisionResultEntry>().ToList();
                     }
                     else
                     {
@@ -886,8 +895,7 @@ namespace HpskSite.Controllers
                 // Query database for this member's results (don't filter by shootingClass - get all their results)
                 // Route to correct table based on competition type
                 using var database = _umbracoDatabaseFactory.CreateDatabase();
-                var isMilsnabb = IsMilsnabbCompetition(competitionId);
-                var resultTable = isMilsnabb ? "MilsnabbResultEntry" : "PrecisionResultEntry";
+                var resultTable = GetResultTableName(GetCompetitionTypeId(competitionId));
                 var query = $"SELECT * FROM [{resultTable}] WHERE CompetitionId = @0 AND MemberId = @1 ORDER BY SeriesNumber";
 
                 var results = await database.FetchAsync<PrecisionResultEntry>(query, competitionId, memberId);
@@ -1495,14 +1503,19 @@ namespace HpskSite.Controllers
                         request.CompetitionId, request.ShooterMemberId, request.ShooterClass, request.SeriesNumber);
 
                     // Route to correct table based on competition type
-                    var isMilsnabb = IsMilsnabbCompetition(request.CompetitionId);
-                    PrecisionResultEntry existingResult = isMilsnabb
-                        ? await db.FirstOrDefaultAsync<MilsnabbResultEntry>(
+                    var compTypeId = GetCompetitionTypeId(request.CompetitionId);
+                    PrecisionResultEntry existingResult = compTypeId switch
+                    {
+                        "Milsnabb" => await db.FirstOrDefaultAsync<MilsnabbResultEntry>(
+                            "WHERE CompetitionId = @0 AND MemberId = @1 AND ShootingClass = @2 AND SeriesNumber = @3",
+                            request.CompetitionId, request.ShooterMemberId, request.ShooterClass, request.SeriesNumber),
+                        "Duell" => await db.FirstOrDefaultAsync<DuellResultEntry>(
+                            "WHERE CompetitionId = @0 AND MemberId = @1 AND ShootingClass = @2 AND SeriesNumber = @3",
+                            request.CompetitionId, request.ShooterMemberId, request.ShooterClass, request.SeriesNumber),
+                        _ => await db.FirstOrDefaultAsync<PrecisionResultEntry>(
                             "WHERE CompetitionId = @0 AND MemberId = @1 AND ShootingClass = @2 AND SeriesNumber = @3",
                             request.CompetitionId, request.ShooterMemberId, request.ShooterClass, request.SeriesNumber)
-                        : await db.FirstOrDefaultAsync<PrecisionResultEntry>(
-                            "WHERE CompetitionId = @0 AND MemberId = @1 AND ShootingClass = @2 AND SeriesNumber = @3",
-                            request.CompetitionId, request.ShooterMemberId, request.ShooterClass, request.SeriesNumber);
+                    };
 
                     var shotsJson = JsonConvert.SerializeObject(request.Shots);
                     var now = DateTime.Now;
@@ -1533,9 +1546,12 @@ namespace HpskSite.Controllers
                         _logger.LogInformation("Creating new result for MemberId {MemberId} (Team {Team}, Position {Position})",
                             request.ShooterMemberId, request.TeamNumber, request.Position);
 
-                        PrecisionResultEntry newResult = isMilsnabb
-                            ? new MilsnabbResultEntry()
-                            : new PrecisionResultEntry();
+                        PrecisionResultEntry newResult = compTypeId switch
+                        {
+                            "Milsnabb" => new MilsnabbResultEntry(),
+                            "Duell" => new DuellResultEntry(),
+                            _ => new PrecisionResultEntry()
+                        };
 
                         newResult.CompetitionId = request.CompetitionId;
                         newResult.SeriesNumber = request.SeriesNumber;
@@ -1548,7 +1564,7 @@ namespace HpskSite.Controllers
                         newResult.EnteredAt = now;
                         newResult.LastModified = now;
 
-                        _logger.LogInformation("Attempting to insert result to database (table: {Table})", isMilsnabb ? "MilsnabbResultEntry" : "PrecisionResultEntry");
+                        _logger.LogInformation("Attempting to insert result to database (table: {Table})", GetResultTableName(compTypeId));
                         var resultId = await db.InsertAsync(newResult);
                         _logger.LogInformation("Successfully inserted result with ID: {ResultId} for MemberId {MemberId}", resultId, request.ShooterMemberId);
 
@@ -1575,27 +1591,53 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// Get the competition type identifier (e.g. "Precision", "Milsnabb", "Duell").
+        /// </summary>
+        private string GetCompetitionTypeId(int competitionId)
+        {
+            var competition = _contentService.GetById(competitionId);
+            return competition?.GetValue<string>("competitionType") ?? "Precision";
+        }
+
+        /// <summary>
         /// Check if a competition uses the Milsnabb result table.
         /// </summary>
         private bool IsMilsnabbCompetition(int competitionId)
         {
-            var competition = _contentService.GetById(competitionId);
-            var typeId = competition?.GetValue<string>("competitionType") ?? "Precision";
-            return typeId.Equals("Milsnabb", StringComparison.OrdinalIgnoreCase);
+            return GetCompetitionTypeId(competitionId).Equals("Milsnabb", StringComparison.OrdinalIgnoreCase);
         }
+
+        /// <summary>
+        /// Get the result table name for a competition type.
+        /// </summary>
+        private static string GetResultTableName(string typeId) => typeId switch
+        {
+            "Milsnabb" => "MilsnabbResultEntry",
+            "Duell" => "DuellResultEntry",
+            _ => "PrecisionResultEntry"
+        };
 
         private async Task<List<PrecisionResultEntry>> GetCompetitionResultsInternal(int competitionId)
         {
             try
             {
                 using var db = _umbracoDatabaseFactory.CreateDatabase();
+                var compTypeId = GetCompetitionTypeId(competitionId);
 
-                if (IsMilsnabbCompetition(competitionId))
+                if (compTypeId == "Milsnabb")
                 {
                     var milsnabbResults = await db.FetchAsync<MilsnabbResultEntry>(
                         "WHERE CompetitionId = @0 ORDER BY TeamNumber, Position, SeriesNumber",
                         competitionId);
                     return milsnabbResults.Cast<PrecisionResultEntry>().ToList();
+                }
+
+                if (compTypeId == "Duell")
+                {
+                    var duellResults = await db.FetchAsync<DuellResultEntry>(
+                        "WHERE CompetitionId = @0 ORDER BY TeamNumber, Position, SeriesNumber",
+                        competitionId);
+                    return duellResults.Cast<PrecisionResultEntry>().ToList();
                 }
 
                 return await db.FetchAsync<PrecisionResultEntry>(
@@ -1640,14 +1682,19 @@ namespace HpskSite.Controllers
                         request.CompetitionId, memberId, request.ShootingClass, request.SeriesNumber);
 
                     // Route to correct table based on competition type (NPoco uses runtime type for delete)
-                    var isMilsnabb = IsMilsnabbCompetition(request.CompetitionId);
-                    PrecisionResultEntry existingResult = isMilsnabb
-                        ? await db.FirstOrDefaultAsync<MilsnabbResultEntry>(
+                    var deleteCompTypeId = GetCompetitionTypeId(request.CompetitionId);
+                    PrecisionResultEntry existingResult = deleteCompTypeId switch
+                    {
+                        "Milsnabb" => await db.FirstOrDefaultAsync<MilsnabbResultEntry>(
+                            "WHERE CompetitionId = @0 AND MemberId = @1 AND ShootingClass = @2 AND SeriesNumber = @3",
+                            request.CompetitionId, memberId, request.ShootingClass, request.SeriesNumber),
+                        "Duell" => await db.FirstOrDefaultAsync<DuellResultEntry>(
+                            "WHERE CompetitionId = @0 AND MemberId = @1 AND ShootingClass = @2 AND SeriesNumber = @3",
+                            request.CompetitionId, memberId, request.ShootingClass, request.SeriesNumber),
+                        _ => await db.FirstOrDefaultAsync<PrecisionResultEntry>(
                             "WHERE CompetitionId = @0 AND MemberId = @1 AND ShootingClass = @2 AND SeriesNumber = @3",
                             request.CompetitionId, memberId, request.ShootingClass, request.SeriesNumber)
-                        : await db.FirstOrDefaultAsync<PrecisionResultEntry>(
-                            "WHERE CompetitionId = @0 AND MemberId = @1 AND ShootingClass = @2 AND SeriesNumber = @3",
-                            request.CompetitionId, memberId, request.ShootingClass, request.SeriesNumber);
+                    };
 
                     if (existingResult != null)
                     {
@@ -2499,8 +2546,10 @@ namespace HpskSite.Controllers
             // Determine competition type for type-specific logic
             var competitionTypeId = competition?.GetValue<string>("competitionType") ?? "Precision";
             var isMilsnabb = competitionTypeId.Equals("Milsnabb", StringComparison.OrdinalIgnoreCase);
+            var isDuell = competitionTypeId.Equals("Duell", StringComparison.OrdinalIgnoreCase);
 
             // Select tiebreaker based on competition type
+            // Duell uses the same tiebreaker as Precision (series count back)
             IComparer<ShooterResult> comparer = isMilsnabb
                 ? new MilsnabbTieBreaker()
                 : new SeriesCountBackComparer(hasFinalsRound, qualificationSeriesCount, numberOfFinalSeries);
@@ -2528,6 +2577,7 @@ namespace HpskSite.Controllers
             if (isAwardingStandardMedals && competitionScope != "Klubbmästerskap")
             {
                 var allShooters = classGroups.SelectMany(g => g.Shooters).ToList();
+                var shouldSplitGroupC = new StandardMedalCalculationService().ShouldSplitGroupC(competitionScope);
 
                 if (isMilsnabb)
                 {
@@ -2536,15 +2586,25 @@ namespace HpskSite.Controllers
                     var config = new StandardMedalConfig
                     {
                         SeriesCount = qualificationSeriesCount,
-                        ShouldSplitGroupC = new StandardMedalCalculationService().ShouldSplitGroupC(competitionScope)
+                        ShouldSplitGroupC = shouldSplitGroupC
                     };
                     milsnabbMedalService.CalculateStandardMedals(allShooters, config);
+                }
+                else if (isDuell)
+                {
+                    // Duell uses placement-only medals (no fixed-score thresholds)
+                    var duellMedalService = new DuellStandardMedalService();
+                    var config = new StandardMedalConfig
+                    {
+                        SeriesCount = qualificationSeriesCount,
+                        ShouldSplitGroupC = shouldSplitGroupC
+                    };
+                    duellMedalService.CalculateStandardMedals(allShooters, config);
                 }
                 else
                 {
                     // Precision and other types use standard medal service
                     var medalService = new StandardMedalCalculationService();
-                    var shouldSplitGroupC = medalService.ShouldSplitGroupC(competitionScope);
                     var config = new StandardMedalConfig
                     {
                         SeriesCount = qualificationSeriesCount,
@@ -2623,7 +2683,7 @@ namespace HpskSite.Controllers
                     request.CompetitionId, request.MemberId, request.OldShootingClass, request.NewShootingClass);
 
                 // 1. Update database result rows (route to correct table)
-                var resultTable = IsMilsnabbCompetition(request.CompetitionId) ? "MilsnabbResultEntry" : "PrecisionResultEntry";
+                var resultTable = GetResultTableName(GetCompetitionTypeId(request.CompetitionId));
                 int rowsUpdated = 0;
                 using (var db = _umbracoDatabaseFactory.CreateDatabase())
                 {

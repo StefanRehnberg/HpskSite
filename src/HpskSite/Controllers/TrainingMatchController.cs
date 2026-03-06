@@ -169,7 +169,7 @@ namespace HpskSite.Controllers
                 // If creating a handicap match, require shooter class to be set
                 if (request.HasHandicap)
                 {
-                    var shooterClassProp = discipline == "Milsnabb" ? "milsnabbShooterClass" : "precisionShooterClass";
+                    var shooterClassProp = discipline switch { "Milsnabb" => "milsnabbShooterClass", "Duell" => "duellShooterClass", _ => "precisionShooterClass" };
                     var shooterClass = member.HasProperty(shooterClassProp) ? member.GetValue<string>(shooterClassProp) : null;
                     if (string.IsNullOrEmpty(shooterClass))
                     {
@@ -178,8 +178,8 @@ namespace HpskSite.Controllers
                             success = false,
                             needsShooterClass = true,
                             discipline = discipline,
-                            message = discipline == "Milsnabb"
-                                ? "Du måste välja din skytteklass för Milsnabb (under Handikapp-fliken) för att kunna skapa en handicapmatch"
+                            message = (discipline == "Milsnabb" || discipline == "Duell")
+                                ? $"Du måste välja din skytteklass för {discipline} (under Handikapp-fliken) för att kunna skapa en handicapmatch"
                                 : "Du måste välja din skytteklass för att kunna skapa en handicapmatch"
                         });
                     }
@@ -306,8 +306,8 @@ namespace HpskSite.Controllers
                             // Recalculate statistics before getting handicap to ensure it's up-to-date
                             await _statisticsService.RecalculateFromHistoryAsync(member.Id, weaponClass, discipline);
 
-                            var stats = await _statisticsService.GetStatisticsAsync(member.Id, weaponClass);
-                            var shooterClassPropCreate = discipline == "Milsnabb" ? "milsnabbShooterClass" : "precisionShooterClass";
+                            var stats = await _statisticsService.GetStatisticsAsync(member.Id, weaponClass, discipline);
+                            var shooterClassPropCreate = discipline switch { "Milsnabb" => "milsnabbShooterClass", "Duell" => "duellShooterClass", _ => "precisionShooterClass" };
                             var shooterClass = member.HasProperty(shooterClassPropCreate) ? member.GetValue<string>(shooterClassPropCreate) : null;
                             var profile = _handicapCalculator.CalculateHandicap(stats, shooterClass);
                             frozenHandicap = profile.HandicapPerSeries;
@@ -816,7 +816,7 @@ namespace HpskSite.Controllers
                     if (hasHandicap)
                     {
                         var joinDiscipline = (string)(match.Discipline ?? "Precision");
-                        var shooterClassPropJoin = joinDiscipline == "Milsnabb" ? "milsnabbShooterClass" : "precisionShooterClass";
+                        var shooterClassPropJoin = joinDiscipline switch { "Milsnabb" => "milsnabbShooterClass", "Duell" => "duellShooterClass", _ => "precisionShooterClass" };
                         var shooterClass = member.HasProperty(shooterClassPropJoin) ? member.GetValue<string>(shooterClassPropJoin) : null;
 
                         // If handicap is enabled but user has no shooter class, require them to set it first
@@ -827,8 +827,8 @@ namespace HpskSite.Controllers
                                 success = false,
                                 needsShooterClass = true,
                                 discipline = joinDiscipline,
-                                message = joinDiscipline == "Milsnabb"
-                                    ? "Du måste välja din skytteklass för Milsnabb (under Handikapp-fliken) för att kunna gå med i en handicapmatch"
+                                message = (joinDiscipline == "Milsnabb" || joinDiscipline == "Duell")
+                                    ? $"Du måste välja din skytteklass för {joinDiscipline} (under Handikapp-fliken) för att kunna gå med i en handicapmatch"
                                     : "Du måste välja din skytteklass för att kunna gå med i en handicapmatch"
                             });
                         }
@@ -838,7 +838,7 @@ namespace HpskSite.Controllers
                         // Recalculate statistics before getting handicap to ensure it's up-to-date
                         await _statisticsService.RecalculateFromHistoryAsync(member.Id, weaponClass, joinDiscipline);
 
-                        var stats = await _statisticsService.GetStatisticsAsync(member.Id, weaponClass);
+                        var stats = await _statisticsService.GetStatisticsAsync(member.Id, weaponClass, joinDiscipline);
                         var profile = _handicapCalculator.CalculateHandicap(stats, shooterClass);
                         frozenHandicap = profile.HandicapPerSeries;
                         frozenIsProvisional = profile.IsProvisional;
@@ -2007,7 +2007,7 @@ namespace HpskSite.Controllers
 
                 // Save to correct member property based on discipline
                 var setDiscipline = request.Discipline ?? "Precision";
-                var propertyAlias = setDiscipline == "Milsnabb" ? "milsnabbShooterClass" : "precisionShooterClass";
+                var propertyAlias = setDiscipline switch { "Milsnabb" => "milsnabbShooterClass", "Duell" => "duellShooterClass", _ => "precisionShooterClass" };
                 member.SetValue(propertyAlias, request.ShooterClass);
                 _memberService.Save(member);
 
@@ -2959,22 +2959,27 @@ namespace HpskSite.Controllers
 
                         if (hasHandicap)
                         {
-                            var shooterClass = member.GetValue<string>("precisionShooterClass");
+                            var reqDiscipline = (string)(match.Discipline ?? "Precision");
+                            var shooterClassPropReq = reqDiscipline switch { "Milsnabb" => "milsnabbShooterClass", "Duell" => "duellShooterClass", _ => "precisionShooterClass" };
+                            var shooterClass = member.HasProperty(shooterClassPropReq) ? member.GetValue<string>(shooterClassPropReq) : null;
                             if (string.IsNullOrEmpty(shooterClass))
                             {
                                 return Json(new
                                 {
                                     success = false,
                                     needsShooterClass = true,
-                                    message = "Du måste välja din skytteklass för att kunna gå med i en handicapmatch"
+                                    discipline = reqDiscipline,
+                                    message = (reqDiscipline == "Milsnabb" || reqDiscipline == "Duell")
+                                        ? $"Du måste välja din skytteklass för {reqDiscipline} (under Handikapp-fliken) för att kunna gå med i en handicapmatch"
+                                        : "Du måste välja din skytteklass för att kunna gå med i en handicapmatch"
                                 });
                             }
 
                             try
                             {
                                 var weaponClass = (string)match.WeaponClass;
-                                await _statisticsService.RecalculateFromHistoryAsync(member.Id, weaponClass);
-                                var stats = await _statisticsService.GetStatisticsAsync(member.Id, weaponClass);
+                                await _statisticsService.RecalculateFromHistoryAsync(member.Id, weaponClass, reqDiscipline);
+                                var stats = await _statisticsService.GetStatisticsAsync(member.Id, weaponClass, reqDiscipline);
                                 var profile = _handicapCalculator.CalculateHandicap(stats, shooterClass);
                                 frozenHandicap = profile.HandicapPerSeries;
                                 frozenIsProvisional = profile.IsProvisional;
@@ -3175,15 +3180,17 @@ namespace HpskSite.Controllers
 
                         if (hasHandicap && requestedMember != null)
                         {
-                            var shooterClass = requestedMember.GetValue<string>("precisionShooterClass");
+                            var approveDiscipline = (string)(match.Discipline ?? "Precision");
+                            var shooterClassPropApprove = approveDiscipline switch { "Milsnabb" => "milsnabbShooterClass", "Duell" => "duellShooterClass", _ => "precisionShooterClass" };
+                            var shooterClass = requestedMember.HasProperty(shooterClassPropApprove) ? requestedMember.GetValue<string>(shooterClassPropApprove) : null;
                             var weaponClass = (string)match.WeaponClass;
 
                             if (!string.IsNullOrEmpty(shooterClass))
                             {
                                 // Recalculate statistics before getting handicap to ensure it's up-to-date
-                                await _statisticsService.RecalculateFromHistoryAsync(requestedMemberId, weaponClass);
+                                await _statisticsService.RecalculateFromHistoryAsync(requestedMemberId, weaponClass, approveDiscipline);
 
-                                var stats = await _statisticsService.GetStatisticsAsync(requestedMemberId, weaponClass);
+                                var stats = await _statisticsService.GetStatisticsAsync(requestedMemberId, weaponClass, approveDiscipline);
                                 var profile = _handicapCalculator.CalculateHandicap(stats, shooterClass);
                                 frozenHandicap = profile.HandicapPerSeries;
                                 frozenIsProvisional = profile.IsProvisional;
@@ -3673,7 +3680,7 @@ namespace HpskSite.Controllers
         public bool IsTeamMatch { get; set; } = false;  // Enable team-based competition
         public int? MaxShootersPerTeam { get; set; }  // Required when IsTeamMatch=true
         public List<HpskSite.Shared.Models.TeamDefinition>? Teams { get; set; }  // Team definitions for closed team matches
-        public string? Discipline { get; set; }  // "Precision" (default) or "Milsnabb"
+        public string? Discipline { get; set; }  // "Precision" (default), "Milsnabb", or "Duell"
     }
 
     public class JoinMatchRequest

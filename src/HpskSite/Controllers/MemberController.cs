@@ -159,7 +159,8 @@ namespace HpskSite.Controllers
             string address = null, string postalCode = null, string city = null, string personNumber = null,
             string currentPassword = null, string newPassword = null,
             string precisionShooterClass = null,
-            string milsnabbShooterClass = null)
+            string milsnabbShooterClass = null,
+            string duellShooterClass = null)
         {
             try
             {
@@ -199,6 +200,10 @@ namespace HpskSite.Controllers
                 if (!string.IsNullOrEmpty(milsnabbShooterClass) && member.HasProperty("milsnabbShooterClass"))
                 {
                     member.SetValue("milsnabbShooterClass", milsnabbShooterClass);
+                }
+                if (!string.IsNullOrEmpty(duellShooterClass) && member.HasProperty("duellShooterClass"))
+                {
+                    member.SetValue("duellShooterClass", duellShooterClass);
                 }
                 member.Email = email;
                 member.Name = $"{firstName} {lastName}";
@@ -646,7 +651,12 @@ namespace HpskSite.Controllers
                 using (var db = _databaseFactory.CreateDatabase())
                 {
                     // Query 1: Get competition results from the correct table based on type
-                    var resultTable = competitionType == "Milsnabb" ? "MilsnabbResultEntry" : "PrecisionResultEntry";
+                    var resultTable = competitionType switch
+                    {
+                        "Milsnabb" => "MilsnabbResultEntry",
+                        "Duell" => "DuellResultEntry",
+                        _ => "PrecisionResultEntry"
+                    };
                     var competitionResults = db.Fetch<dynamic>($@"
                         SELECT
                             CompetitionId,
@@ -2100,7 +2110,7 @@ namespace HpskSite.Controllers
                 }
 
                 // Get shooter class from member profile based on discipline
-                var shooterClassProperty = discipline == "Milsnabb" ? "milsnabbShooterClass" : "precisionShooterClass";
+                var shooterClassProperty = discipline switch { "Milsnabb" => "milsnabbShooterClass", "Duell" => "duellShooterClass", _ => "precisionShooterClass" };
                 string shooterClass = "";
                 if (member.HasProperty(shooterClassProperty))
                 {
@@ -2188,7 +2198,7 @@ namespace HpskSite.Controllers
                 }
 
                 // Get shooter class from member profile based on discipline
-                var shooterClassProperty = discipline == "Milsnabb" ? "milsnabbShooterClass" : "precisionShooterClass";
+                var shooterClassProperty = discipline switch { "Milsnabb" => "milsnabbShooterClass", "Duell" => "duellShooterClass", _ => "precisionShooterClass" };
                 string shooterClass = "";
                 if (member.HasProperty(shooterClassProperty))
                 {
@@ -2597,6 +2607,7 @@ namespace HpskSite.Controllers
                 int[] GetSeriesCountsForWeapon(string wc)
                 {
                     if (competitionType == "Milsnabb") return new[] { 12 };
+                    // Duell uses same series counts as Precision
                     return wc == "L" ? new[] { 6, 8, 12 } : new[] { 6, 7, 10 };
                 }
 
@@ -2624,7 +2635,7 @@ namespace HpskSite.Controllers
                 var medalStats = GetMemberMedalStats(memberId, selectedYear, competitionType);
 
                 // Calculate handicap profiles (discipline-aware)
-                var shooterClassProperty = competitionType == "Milsnabb" ? "milsnabbShooterClass" : "precisionShooterClass";
+                var shooterClassProperty = competitionType switch { "Milsnabb" => "milsnabbShooterClass", "Duell" => "duellShooterClass", _ => "precisionShooterClass" };
                 string shooterClass = "";
                 if (targetMember.HasProperty(shooterClassProperty))
                 {
@@ -2685,7 +2696,12 @@ namespace HpskSite.Controllers
         private List<HpskSite.Shared.Models.UnifiedResultEntry> GetMemberResultsForDiscipline(int memberId, string discipline)
         {
             var results = new List<HpskSite.Shared.Models.UnifiedResultEntry>();
-            var resultTable = discipline == "Milsnabb" ? "MilsnabbResultEntry" : "PrecisionResultEntry";
+            var resultTable = discipline switch
+            {
+                "Milsnabb" => "MilsnabbResultEntry",
+                "Duell" => "DuellResultEntry",
+                _ => "PrecisionResultEntry"
+            };
             int defaultSeriesCount = discipline == "Milsnabb" ? 12 : 0;
 
             using (var db = _databaseFactory.CreateDatabase())
@@ -2876,7 +2892,12 @@ namespace HpskSite.Controllers
                     }
 
                     // Source 2: Competition Results - get competitions the member participated in
-                    var resultTable = competitionType == "Milsnabb" ? "MilsnabbResultEntry" : "PrecisionResultEntry";
+                    var resultTable = competitionType switch
+                    {
+                        "Milsnabb" => "MilsnabbResultEntry",
+                        "Duell" => "DuellResultEntry",
+                        _ => "PrecisionResultEntry"
+                    };
                     var competitionIds = db.Fetch<int>($@"
                         SELECT DISTINCT CompetitionId
                         FROM {resultTable}

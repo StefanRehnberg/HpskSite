@@ -18,7 +18,7 @@ public partial class CreateMatchViewModel : BaseViewModel
         Title = "Skapa match";
 
         // Initialize disciplines
-        Disciplines = new ObservableCollection<string> { "Precision", "Milsnabb" };
+        Disciplines = new ObservableCollection<string> { "Precision", "Milsnabb", "Duell" };
         SelectedDiscipline = "Precision";
 
         // Initialize weapon classes

@@ -16,7 +16,7 @@ namespace HpskSite.Services
         /// <param name="memberId">Member ID</param>
         /// <param name="weaponClass">Weapon class (A, B, C, etc.)</param>
         /// <returns>Statistics or null if none exist</returns>
-        Task<ShooterStatistics?> GetStatisticsAsync(int memberId, string weaponClass);
+        Task<ShooterStatistics?> GetStatisticsAsync(int memberId, string weaponClass, string discipline = "Precision");
 
         /// <summary>
         /// Update statistics after a match is completed.
@@ -73,7 +73,7 @@ namespace HpskSite.Services
         /// <summary>
         /// Get statistics for a shooter in a specific weapon class.
         /// </summary>
-        public async Task<ShooterStatistics?> GetStatisticsAsync(int memberId, string weaponClass)
+        public async Task<ShooterStatistics?> GetStatisticsAsync(int memberId, string weaponClass, string discipline = "Precision")
         {
             return await Task.Run(() =>
             {
@@ -81,12 +81,13 @@ namespace HpskSite.Services
                 {
                     using var db = _databaseFactory.CreateDatabase();
 
+                    var effectiveDiscipline = string.IsNullOrEmpty(discipline) ? DISCIPLINE : discipline;
                     var result = db.SingleOrDefault<dynamic>(
                         @"SELECT Id, MemberId, Discipline, WeaponClass, CompletedMatches,
                           TotalSeriesCount, TotalSeriesPoints, AveragePerSeries, LastCalculated
                           FROM ShooterStatistics
                           WHERE MemberId = @0 AND WeaponClass = @1 AND Discipline = @2",
-                        memberId, weaponClass, DISCIPLINE);
+                        memberId, weaponClass, effectiveDiscipline);
 
                     if (result == null)
                     {
@@ -190,7 +191,12 @@ namespace HpskSite.Services
                     int windowSize = _settings.RollingWindowMatchCount;
 
                     // Choose the correct result entry table based on discipline
-                    var resultTable = effectiveDiscipline == "Milsnabb" ? "MilsnabbResultEntry" : "PrecisionResultEntry";
+                    var resultTable = effectiveDiscipline switch
+                    {
+                        "Milsnabb" => "MilsnabbResultEntry",
+                        "Duell" => "DuellResultEntry",
+                        _ => "PrecisionResultEntry"
+                    };
 
                     // Use a CTE to combine all match sources, then take the most recent N
                     // This ensures we use the N most recent matches regardless of source
