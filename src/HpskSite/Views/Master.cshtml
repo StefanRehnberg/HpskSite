@@ -394,18 +394,22 @@
 
                                 @* Add competitions and series with addToMenu/showInMenu = true *@
                                 @{
-                                    var menuCompetitions = Model.Root().DescendantsOrSelf()
+                                    // Single tree traversal for menu items (was 2 separate scans on every page load)
+                                    var menuContent = Model.Root().DescendantsOrSelf()
+                                        .Where(x => (x.ContentType.Alias == "competition" || x.ContentType.Alias == "competitionSeries") &&
+                                                   x.Value<bool>("isActive", fallback: Fallback.ToDefaultValue, defaultValue: true))
+                                        .ToList();
+
+                                    var menuCompetitions = menuContent
                                         .Where(x => x.ContentType.Alias == "competition" &&
                                                    x.Value<bool>("addToMenu") &&
-                                                   x.Value<bool>("isActive", fallback: Fallback.ToDefaultValue, defaultValue: true) &&
                                                    x.Parent()?.ContentType.Alias != "competitionSeries")
                                         .OrderBy(x => x.Value<DateTime>("competitionDate"))
                                         .Take(5); // Limit to 5 standalone competitions to avoid menu overflow
 
-                                    var menuSeries = Model.Root().DescendantsOrSelf()
+                                    var menuSeries = menuContent
                                         .Where(x => x.ContentType.Alias == "competitionSeries" &&
-                                                   x.Value<bool>("showInMenu") &&
-                                                   x.Value<bool>("isActive", fallback: Fallback.ToDefaultValue, defaultValue: true))
+                                                   x.Value<bool>("showInMenu"))
                                         .OrderBy(x => x.Value<DateTime>("seriesStartDate"))
                                         .Take(3); // Limit to 3 series to avoid menu overflow
 

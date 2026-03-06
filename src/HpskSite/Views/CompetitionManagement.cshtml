@@ -16,13 +16,15 @@
     int competitionId = 0;
     int.TryParse(competitionIdStr, out competitionId);
 
-    // Find the competition content
+    // Find the competition content via direct cache lookup (O(1) instead of full tree scan)
     IPublishedContent? competition = null;
     if (competitionId > 0)
     {
-        var root = Model.Root();
-        competition = root.DescendantsOrSelf()
-                         .FirstOrDefault(x => x.ContentType.Alias == "competition" && x.Id == competitionId);
+        var node = Umbraco.Content(competitionId);
+        if (node != null && node.ContentType.Alias == "competition")
+        {
+            competition = node;
+        }
     }
 
     // Set page title based on competition
@@ -51,28 +53,46 @@
 
     if (currentMember != null)
     {
-        // Check if user is site admin (using centralized service)
-        isSiteAdmin = await AuthService.IsCurrentUserAdminAsync();
-
-        if (competition != null)
+        // Load member data and roles once — derive all auth from this (avoids ~15 redundant service calls)
+        var memberData = MemberService.GetByEmail(currentMember.Email ?? "");
+        if (memberData != null)
         {
-            // Check if user is competition manager (using ID-based check)
-            bool isCompetitionManager = await AuthService.IsCompetitionManager(competitionId);
+            var roles = MemberService.GetAllRoles(memberData.Id)?.ToList() ?? new List<string>();
+            isSiteAdmin = roles.Contains("Administrators");
 
-            // Check if user is club admin for this competition's club
-            bool isClubAdminForCompetition = false;
-            var competitionClubId = competition.Value<int>("clubId");
-            if (competitionClubId > 0)
+            if (competition != null)
             {
-                isClubAdminForCompetition = await AuthService.IsClubAdminForClub(competitionClubId);
-            }
+                // Check competition manager from the competition's managerIds JSON
+                var cmJson = competition.Value<string>("competitionManagers") ?? "[]";
+                int[] cmIds;
+                try { cmIds = Newtonsoft.Json.JsonConvert.DeserializeObject<int[]>(cmJson) ?? Array.Empty<int>(); }
+                catch { cmIds = Array.Empty<int>(); }
+                bool isCompetitionManager = cmIds.Contains(memberData.Id);
 
-            canManageCompetition = isSiteAdmin || isCompetitionManager || isClubAdminForCompetition;
-        }
-        else if (competitionId == 0)
-        {
-            // Allow access to competition selection if user is admin (they can manage any competition)
-            canManageCompetition = isSiteAdmin;
+                // Check club admin from roles + regional admin from club's region
+                bool isClubAdminForCompetition = false;
+                var competitionClubId = competition.Value<int>("clubId");
+                if (competitionClubId > 0)
+                {
+                    isClubAdminForCompetition = isSiteAdmin
+                        || roles.Contains($"ClubAdmin_{competitionClubId}")
+                        || roles.Any(r =>
+                        {
+                            if (!r.StartsWith("RegionalAdmin_")) return false;
+                            var clubNode = Umbraco.Content(competitionClubId);
+                            if (clubNode == null || clubNode.ContentType.Alias != "club") return false;
+                            var clubRegion = clubNode.Value<string>("regionalFederation") ?? "";
+                            return r == $"RegionalAdmin_{clubRegion}";
+                        });
+                }
+
+                canManageCompetition = isSiteAdmin || isCompetitionManager || isClubAdminForCompetition;
+            }
+            else if (competitionId == 0)
+            {
+                // Allow access to competition selection if user is admin (they can manage any competition)
+                canManageCompetition = isSiteAdmin;
+            }
         }
     }
 

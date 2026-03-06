@@ -63,12 +63,8 @@ namespace HpskSite.CompetitionTypes.Precision.Services
                     }
                 }
 
-                // Save the content
-                _contentService.Save(content);
-
-                // Publish the content to make it visible on the frontend
-                // For invariant content, use wildcard culture
-                _contentService.Publish(content, new[] { "*" });
+                // Publish (which implicitly saves) — avoids acquiring write lock twice
+                _contentService.Publish(content, Array.Empty<string>());
 
                 return CompetitionEditResult.SuccessResult(
                     "Competition updated successfully",

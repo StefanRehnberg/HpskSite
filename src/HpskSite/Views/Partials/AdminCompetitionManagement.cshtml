@@ -15,9 +15,12 @@
     IPublishedContent? competition = null;
     if (competitionId > 0)
     {
-        var root = Model.Root();
-        competition = root.DescendantsOrSelf()
-                         .FirstOrDefault((Func<IPublishedContent, bool>)(x => x.ContentType.Alias == "competition" && x.Id == competitionId));
+        // Direct cache lookup (O(1) instead of full tree scan)
+        var node = Umbraco.Content(competitionId);
+        if (node != null && node.ContentType.Alias == "competition")
+        {
+            competition = node;
+        }
     }
 
     // Pass competition properties to ViewData for partial views

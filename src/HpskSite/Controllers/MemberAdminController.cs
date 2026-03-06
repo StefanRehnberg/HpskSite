@@ -140,24 +140,26 @@ namespace HpskSite.Controllers
 
                 var allMembers = _memberService.GetAll(0, int.MaxValue, out var totalRecords);
 
-                // Filter out club member types
-                var regularMembers = allMembers.Where(m => m.ContentType.Alias != ClubMemberTypeAlias);
+                // Materialize filtered members to avoid lazy re-evaluation
+                var filteredMembers = allMembers
+                    .Where(m => m.ContentType.Alias != ClubMemberTypeAlias)
+                    .ToList();
 
                 // Apply search filter
                 if (!string.IsNullOrWhiteSpace(search))
                 {
                     var searchLower = search.ToLowerInvariant();
-                    regularMembers = regularMembers.Where(m =>
+                    filteredMembers = filteredMembers.Where(m =>
                         (m.GetValue("firstName")?.ToString()?.ToLowerInvariant().Contains(searchLower) ?? false) ||
                         (m.GetValue("lastName")?.ToString()?.ToLowerInvariant().Contains(searchLower) ?? false) ||
                         (m.Email?.ToLowerInvariant().Contains(searchLower) ?? false)
-                    );
+                    ).ToList();
                 }
 
                 // Apply region filter (always enforced for regional admins)
                 if (clubsInRegion.Any())
                 {
-                    regularMembers = regularMembers.Where(m =>
+                    filteredMembers = filteredMembers.Where(m =>
                     {
                         var memberClubIdStr = m.GetValue("primaryClubId")?.ToString();
                         if (int.TryParse(memberClubIdStr, out var memberClubId))
@@ -165,13 +167,13 @@ namespace HpskSite.Controllers
                             return clubsInRegion.Contains(memberClubId);
                         }
                         return false;
-                    });
+                    }).ToList();
                 }
 
                 // Apply club filter
                 if (clubId.HasValue)
                 {
-                    regularMembers = regularMembers.Where(m =>
+                    filteredMembers = filteredMembers.Where(m =>
                     {
                         var memberClubIdStr = m.GetValue("primaryClubId")?.ToString();
                         if (int.TryParse(memberClubIdStr, out var memberClubId))
@@ -179,15 +181,22 @@ namespace HpskSite.Controllers
                             return memberClubId == clubId.Value;
                         }
                         return false;
-                    });
+                    }).ToList();
                 }
 
-                // Apply role filter
+                // Pre-load all roles once into a dictionary (avoids N+1: was called per-member
+                // in role filter AND again per-member in view model creation)
+                var memberRolesDict = filteredMembers.ToDictionary(
+                    m => m.Id,
+                    m => _memberService.GetAllRoles(m.Id).ToArray()
+                );
+
+                // Apply role filter using pre-loaded roles
                 if (!string.IsNullOrEmpty(role))
                 {
-                    regularMembers = regularMembers.Where(m =>
+                    filteredMembers = filteredMembers.Where(m =>
                     {
-                        var memberRoles = _memberService.GetAllRoles(m.Id);
+                        var memberRoles = memberRolesDict[m.Id];
 
                         // Handle special cases for ClubAdmin and RegionalAdmin which have suffixes like ClubAdmin_1234
                         if (role.Equals("ClubAdmin", StringComparison.OrdinalIgnoreCase))
@@ -200,11 +209,11 @@ namespace HpskSite.Controllers
                         }
 
                         return memberRoles.Contains(role, StringComparer.OrdinalIgnoreCase);
-                    });
+                    }).ToList();
                 }
 
-                // Transform to view models
-                var memberList = regularMembers.Select(m => {
+                // Transform to view models using pre-loaded roles
+                var memberList = filteredMembers.Select(m => {
                     var primaryClubIdStr = m.GetValue("primaryClubId")?.ToString();
                     var primaryClubName = "No Club";
                     var hasInvalidClubReference = false;
@@ -230,7 +239,7 @@ namespace HpskSite.Controllers
                     var lastActive = m.GetValue<DateTime?>("lastActiveDate");
                     var lastMobileActive = m.GetValue<DateTime?>("lastMobileActiveDate");
                     var phoneNumber = m.GetValue("phoneNumber")?.ToString() ?? "";
-                    var memberRoles = _memberService.GetAllRoles(m.Id).ToArray();
+                    var memberRoles = memberRolesDict[m.Id];
 
                     return new MemberListItem
                     {

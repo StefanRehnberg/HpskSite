@@ -13,38 +13,37 @@
 
     ViewBag.Title = pageTitle;
 
-    // Helper function to check if user is registered for a competition
-    async Task<bool> IsUserRegisteredForCompetition(int competitionId)
-    {
-        var currentMember = await _memberManager.GetCurrentMemberAsync();
-        if (currentMember == null) return false;
-        
-        var registrations = Model.Root().DescendantsOrSelf()
-            .Where(x => x.ContentType.Alias == "competitionRegistration")
-            .Where(x => x.Value<int>("competitionId") == competitionId)
-            .Where(x => x.Value<string>("memberId") == currentMember.Id.ToString())
-            .Where(x => x.Value<bool>("isActive", fallback: Fallback.ToDefaultValue, defaultValue: true))
-            .Any();
-        
-        return registrations;
-    }
+    // Single content tree traversal for all lookups (avoids ~107 separate tree scans)
+    var allContent = Model.Root().DescendantsOrSelf().ToList();
 
-    // Get all competitions, competition series, and competition types
+    // Get all competitions, competition series, and competition types from cached tree
     // Only include standalone competitions (not part of any series) and exclude club-only competitions
-    var allCompetitions = Model.Root().DescendantsOrSelf()
+    var allCompetitions = allContent
         .Where(x => x.ContentType.Alias == "competition" &&
                    x.Parent()?.ContentType.Alias != "competitionSeries" &&
                    !x.Value<bool>("isClubOnly"))
         .ToList();
-    var allCompetitionSeries = Model.Root().DescendantsOrSelf().Where(x => x.ContentType.Alias == "competitionSeries").ToList();
-    var competitionTypes = Model.Root().DescendantsOrSelf().Where(x => x.ContentType.Alias == "competitionType").ToList();
+    var allCompetitionSeries = allContent.Where(x => x.ContentType.Alias == "competitionSeries").ToList();
+    var competitionTypes = allContent.Where(x => x.ContentType.Alias == "competitionType").ToList();
     // Use centralized shooting classes model (includes R, L, M classes)
     var shootingClasses = HpskSite.Models.ShootingClasses.All;
-    var competitionSeasons = Model.Root().DescendantsOrSelf().Where(x => x.ContentType.Alias == "competitionSeason").ToList();
-    var competitionSeries = Model.Root().DescendantsOrSelf().Where(x => x.ContentType.Alias == "competitionSeries").ToList();
+    var competitionSeasons = allContent.Where(x => x.ContentType.Alias == "competitionSeason").ToList();
+
+    // Batch registration check — load all user registrations into a HashSet for O(1) lookups
+    var currentMember = await _memberManager.GetCurrentMemberAsync();
+    var userRegisteredCompetitionIds = new HashSet<int>();
+    if (currentMember != null)
+    {
+        userRegisteredCompetitionIds = allContent
+            .Where(x => x.ContentType.Alias == "competitionRegistration"
+                && x.Value<string>("memberId") == currentMember.Id.ToString()
+                && x.Value<bool>("isActive", fallback: Fallback.ToDefaultValue, defaultValue: true))
+            .Select(x => x.Value<int>("competitionId"))
+            .ToHashSet();
+    }
 
     // Build club-to-region lookup for determining effective region
-    var allClubs = Model.Root().DescendantsOrSelf().Where(x => x.ContentType.Alias == "club").ToList();
+    var allClubs = allContent.Where(x => x.ContentType.Alias == "club").ToList();
     var clubRegionLookup = allClubs.ToDictionary(
         c => c.Id,
         c => c.Value<string>("regionalFederation") ?? ""
@@ -611,10 +610,7 @@
                                              onerror="this.style.display='none'"
                                              style="width:30px;height:30px;object-fit:contain;opacity:0.9;border-radius:4px;">
                                     }
-                                    @{
-                                        var isUserRegisteredCard = await IsUserRegisteredForCompetition(competition.Id);
-                                    }
-                                    @if (isUserRegisteredCard)
+                                    @if (userRegisteredCompetitionIds.Contains(competition.Id))
                                     {
                                         <span class="badge bg-light text-success ms-1" title="Du är anmäld till denna tävling">
                                             <i class="bi bi-check-circle-fill"></i>
@@ -991,10 +987,7 @@
                             </td>
 
                             <td>
-                                @{
-                                    var isUserRegistered = await IsUserRegisteredForCompetition(competition.Id);
-                                }
-                                @if (isUserRegistered)
+                                @if (userRegisteredCompetitionIds.Contains(competition.Id))
                                 {
                                     <span class="badge bg-success" title="Du är anmäld till denna tävling">
                                         <i class="bi bi-check-circle-fill"></i> Ja

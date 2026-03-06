@@ -228,6 +228,9 @@
     var svComparer = StringComparer.Create(new CultureInfo("sv-SE"), ignoreCase: true);
     var allClubsJson = "[]";
 
+    // Distributed result reporting authorization (computed below alongside other auth)
+    bool canReportDistributedResults = false;
+
     if (currentMember != null)
     {
         var memberData = MemberService.GetByEmail(currentMember.Email ?? "");
@@ -243,9 +246,9 @@
                 currentMemberClub = regClubName;
             }
 
-            // Determine role
+            // Load roles once — derive all authorization from this (avoids ~24 redundant service calls)
             var roles = MemberService.GetAllRoles(memberData.Id)?.ToList() ?? new List<string>();
-            bool isSiteAdmin = await AuthService.IsCurrentUserAdminAsync();
+            bool isSiteAdmin = roles.Contains("Administrators");
             bool isClubAdmin = roles.Any(r => r.StartsWith("ClubAdmin_"));
             bool isSkjutledare = roles.Any(r => r.StartsWith("Skjutledare_"));
 
@@ -290,33 +293,75 @@
                 allClubsJson = System.Text.Json.JsonSerializer.Serialize(ownClub);
             }
 
-            // Competition management check
-            bool isCompetitionManager = await AuthService.IsCompetitionManager(Model.Id);
+            // Competition management — compute from already-loaded roles and managerIds
+            bool isCompetitionManager = managerIds.Contains(memberData.Id);
             bool isClubAdminForCompetition = false;
             var competitionClubId = Model.Value<int>("clubId");
             if (competitionClubId > 0)
             {
-                isClubAdminForCompetition = await AuthService.IsClubAdminForClub(competitionClubId);
+                // Check direct club admin, site admin, or regional admin for the club's region
+                isClubAdminForCompetition = isSiteAdmin
+                    || roles.Contains($"ClubAdmin_{competitionClubId}")
+                    || roles.Any(r =>
+                    {
+                        if (!r.StartsWith("RegionalAdmin_")) return false;
+                        var clubNode = Umbraco.Content(competitionClubId);
+                        if (clubNode == null || clubNode.ContentType.Alias != "club") return false;
+                        var clubRegion = clubNode.Value<string>("regionalFederation") ?? "";
+                        return r == $"RegionalAdmin_{clubRegion}";
+                    });
             }
             canManageCompetition = isSiteAdmin || isCompetitionManager || isClubAdminForCompetition;
+
+            // Distributed result reporting — uses same auth values (no duplicate service calls)
+            if (allowSelfReporting && !isExternal)
+            {
+                canReportDistributedResults = isSiteAdmin || isCompetitionManager || isClubAdmin || isSkjutledare;
+            }
         }
     }
 
-    // Distributed result reporting authorization
-    // Club admin, skjutledare, competition manager, site admin — any of these can report
-    bool canReportDistributedResults = false;
-    if (allowSelfReporting && !isExternal && currentMember != null)
+    // Server-side sidebar data (replaces 3 slow AJAX calls with in-memory published content cache lookups)
+    var competitionChildren = Model.Children()?.ToList() ?? new List<IPublishedContent>();
+
+    // 1. Registration counts from published content
+    var registrationsHub = competitionChildren.FirstOrDefault(c => c.ContentType.Alias == "competitionRegistrationsHub");
+    var registrationNodes = registrationsHub?.Children()?
+        .Where(c => c.ContentType.Alias == "competitionRegistration")
+        .ToList() ?? new List<IPublishedContent>();
+    var uniqueShooterCount = registrationNodes
+        .Select(r => r.Value<int>("memberId"))
+        .Where(id => id > 0)
+        .Distinct()
+        .Count();
+    var totalStartsCount = 0;
+    foreach (var reg in registrationNodes)
     {
-        var memberData2 = MemberService.GetByEmail(currentMember.Email ?? "");
-        if (memberData2 != null)
+        var classesJson = reg.Value<string>("shootingClasses") ?? "";
+        if (!string.IsNullOrEmpty(classesJson))
         {
-            bool isSiteAdmin2 = await AuthService.IsCurrentUserAdminAsync();
-            bool isCompetitionManager2 = await AuthService.IsCompetitionManager(Model.Id);
-            bool isClubAdmin2 = regRole == "clubAdmin" || regRole == "admin";
-            bool isSkjutledare2 = regRole == "skjutledare";
-            canReportDistributedResults = isSiteAdmin2 || isCompetitionManager2 || isClubAdmin2 || isSkjutledare2;
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(classesJson);
+                totalStartsCount += doc.RootElement.GetArrayLength();
+            }
+            catch { totalStartsCount += 1; }
         }
     }
+
+    // 2. Start list availability from published content
+    var startListsHub = competitionChildren.FirstOrDefault(c => c.ContentType.Alias == "competitionStartListsHub");
+    var officialStartList = startListsHub?.Children()?.FirstOrDefault(sl => sl.Value<bool>("isOfficialStartList"));
+    var hasOfficialStartList = officialStartList != null;
+    var startListPageUrl = hasOfficialStartList ? officialStartList.Url() : "";
+
+    // 3. Result page availability from published content
+    var resultPageNode = competitionChildren.FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
+    var hasResultPage = resultPageNode != null;
+    var isResultsOfficial = resultPageNode?.Value<bool>("isOfficial") ?? false;
+
+    // Results URL (used in sidebar and JavaScript)
+    var resultsUrl = Model.Url().TrimEnd('/') + "/resultat/";
 }
 
 <div class="container mt-4">
@@ -701,7 +746,7 @@
 					<div class="mb-3">
 						<div class="d-flex justify-content-between align-items-center">
 							<span><i class="bi bi-people me-1 text-primary"></i> Antal skyttar:</span>
-							<span class="badge bg-primary" id="totalShooters">Laddar...</span>
+							<span class="badge bg-primary">@uniqueShooterCount</span>
 						</div>
 					</div>
 
@@ -709,7 +754,7 @@
 					<div class="mb-3">
 						<div class="d-flex justify-content-between align-items-center">
 							<span><i class="bi bi-flag me-1 text-info"></i> Antal starter:</span>
-							<span class="badge bg-info" id="totalStarts">Laddar...</span>
+							<span class="badge bg-info">@totalStartsCount</span>
 						</div>
 					</div>
 
@@ -731,12 +776,6 @@
 
 					<hr>
 
-					@{
-						// Build URL for results (start list URL comes from API)
-						var competitionUrl = Model.Url();
-						var resultsUrl = competitionUrl.TrimEnd('/') + "/resultat/";
-					}
-
 					@if (!isExternal)
 					{
 						<!-- Registered Shooters Button -->
@@ -747,30 +786,55 @@
 						</div>
 
 						<!-- Start List Section -->
-						<div class="mb-2" id="startListSection">
-							<a href="#" class="btn btn-info w-100 d-none" id="startListButton" target="_blank">
-								<i class="bi bi-list-ol me-1"></i> Visa startlista
-							</a>
-							<p class="text-muted small mb-0" id="noStartListText">
-								<i class="bi bi-hourglass-split me-1"></i> Startlista har inte publicerats än.
-							</p>
+						<div class="mb-2">
+							@if (hasOfficialStartList)
+							{
+								<a href="@startListPageUrl" class="btn btn-info w-100" target="_blank">
+									<i class="bi bi-list-ol me-1"></i> Visa startlista
+								</a>
+							}
+							else
+							{
+								<p class="text-muted small mb-0">
+									<i class="bi bi-hourglass-split me-1"></i> Startlista har inte publicerats än.
+								</p>
+							}
 						</div>
 
 						<!-- Results Section -->
-						<div class="mt-2" id="resultsSection">
-							<a href="@resultsUrl" class="btn btn-warning w-100 d-none" id="resultsButton" target="_blank">
-								<i class="bi bi-trophy me-1"></i> Visa resultat
-							</a>
-							<a href="@resultsUrl" class="btn btn-success w-100 d-none" id="liveResultsButton" target="_blank">
-								<i class="bi bi-broadcast me-1"></i> Visa live-resultat
-							</a>
-							<button class="btn btn-outline-light w-100 mt-2 d-none" id="liveResultBoardButton"
-									onclick="openResultBoard()">
-								<i class="bi bi-tv me-1"></i> Resultattavla
-							</button>
-							<p class="text-muted small mb-0" id="noResultsText">
-								<i class="bi bi-hourglass-split me-1"></i> Resultat har inte publicerats än.
-							</p>
+						<div class="mt-2">
+							@if (hasResultPage && isResultsOfficial)
+							{
+								<a href="@resultsUrl" class="btn btn-warning w-100" target="_blank">
+									<i class="bi bi-trophy me-1"></i> Visa resultat
+								</a>
+							}
+
+							@if (showLiveResults)
+							{
+								@if (hasResultPage)
+								{
+									@* Results exist in DB — show Resultattavla directly *@
+									<button class="btn btn-outline-light w-100 mt-2" onclick="openResultBoard()">
+										<i class="bi bi-tv me-1"></i> Resultattavla
+									</button>
+								}
+								else
+								{
+									@* No result page — lightweight AJAX check for DB results *@
+									<div id="liveResultsCheck">
+										<p class="text-muted small mb-0" id="noResultsText">
+											<i class="bi bi-hourglass-split me-1"></i> Resultat har inte publicerats än.
+										</p>
+									</div>
+								}
+							}
+							else if (!hasResultPage || !isResultsOfficial)
+							{
+								<p class="text-muted small mb-0">
+									<i class="bi bi-hourglass-split me-1"></i> Resultat har inte publicerats än.
+								</p>
+							}
 						</div>
 					}
 					else
@@ -831,12 +895,15 @@
 						<div class="mt-2">
 							<strong>Tävlingsansvariga:</strong>
 							<div class="d-flex flex-wrap gap-2 mt-1">
-								@foreach (var managerId in managerIds)
+								@{
+								var managerLookup = managerIds
+									.Select(id => MemberService.GetById(id))
+									.Where(m => m != null)
+									.ToList();
+							}
+							@foreach (var manager in managerLookup)
 								{
-									var manager = MemberService.GetById(managerId);
-									if (manager != null)
-									{
-										var managerEmail = manager.GetValue<string>("email") ?? manager.Email;
+									var managerEmail = manager.GetValue<string>("email") ?? manager.Email;
 										<div class="badge bg-primary d-flex align-items-center">
 											<i class="bi bi-person-gear me-1"></i>
 											@if (!string.IsNullOrEmpty(managerEmail))
@@ -848,7 +915,6 @@
 												<span>@manager.Name</span>
 											}
 										</div>
-									}
 								}
 							</div>
 						</div>
@@ -1059,131 +1125,22 @@ const currentUserClub = '@Html.Raw(currentMemberClub.Replace("'", "\\'"))';
 document.addEventListener('DOMContentLoaded', function() {
     const competitionId = @Model.Id;
 
-    // Fetch registration count
-    fetch(`/umbraco/surface/Competition/GetCompetitionRegistrations?competitionId=${competitionId}`)
+    @if (showLiveResults && !hasResultPage)
+    {
+        @* Only AJAX call needed: showLiveResults enabled but no result page — lightweight DB check *@
+        <text>
+    fetch(`/umbraco/surface/CompetitionResults/GetResultsStats?competitionId=${competitionId}`)
         .then(response => response.json())
         .then(data => {
-            const shootersEl = document.getElementById('totalShooters');
-            const startsEl = document.getElementById('totalStarts');
-
-            if (data.statistics) {
-                // Use statistics from API (already calculated correctly)
-                const uniqueShooters = data.statistics.uniqueMembers || 0;
-                const totalStarts = data.statistics.totalRegistrations || 0;  // Total class entries (starts)
-
-                if (shootersEl) shootersEl.textContent = uniqueShooters;
-                if (startsEl) startsEl.textContent = totalStarts;
-            } else if (data.registrations) {
-                // Fallback: calculate from registrations if statistics not available
-                const uniqueShooters = new Set(data.registrations.map(r => r.memberId)).size;
-
-                // Count total class entries across all registrations
-                const totalStarts = data.registrations.reduce((sum, r) => {
-                    return sum + (r.shootingClasses ? r.shootingClasses.length : 0);
-                }, 0);
-
-                if (shootersEl) shootersEl.textContent = uniqueShooters;
-                if (startsEl) startsEl.textContent = totalStarts;
-            } else {
-                if (shootersEl) shootersEl.textContent = '0';
-                if (startsEl) startsEl.textContent = '0';
+            if (data.Success && data.Count > 0) {
+                var container = document.getElementById('liveResultsCheck');
+                if (container) {
+                    container.innerHTML = '<button class="btn btn-outline-light w-100 mt-2" onclick="openResultBoard()"><i class="bi bi-tv me-1"></i> Resultattavla</button>';
+                }
             }
         })
-        .catch(error => {
-            console.error('Error fetching registrations:', error);
-            const shootersEl = document.getElementById('totalShooters');
-            const startsEl = document.getElementById('totalStarts');
-            if (shootersEl) shootersEl.textContent = '-';
-            if (startsEl) startsEl.textContent = '-';
-        });
-
-    // Check if published start list exists via API
-    const startListButton = document.getElementById('startListButton');
-    const noStartListText = document.getElementById('noStartListText');
-
-    if (startListButton && noStartListText) {
-        fetch(`/umbraco/surface/PrecisionStartList/GetOfficialStartList?competitionId=${competitionId}`)
-            .then(response => response.json())
-            .then(data => {
-                // Check if start list exists and is published (isOfficialStartList = true)
-                if (data.success && data.startList) {
-                    const isOfficial = data.startList.IsOfficial || data.startList.isOfficial || data.startList.isOfficialStartList;
-                    const startListUrl = data.startList.Url || data.startList.url;
-                    if (isOfficial && startListUrl) {
-                        // Published start list exists - show button with actual URL from API
-                        startListButton.href = startListUrl;
-                        startListButton.classList.remove('d-none');
-                        noStartListText.classList.add('d-none');
-                    } else {
-                        // Start list exists but not published yet
-                        startListButton.classList.add('d-none');
-                        noStartListText.classList.remove('d-none');
-                    }
-                } else {
-                    // No start list - show text
-                    startListButton.classList.add('d-none');
-                    noStartListText.classList.remove('d-none');
-                }
-            })
-            .catch(error => {
-                console.error('Error checking start list:', error);
-                // On error, keep showing "not published" text
-                startListButton.classList.add('d-none');
-                noStartListText.classList.remove('d-none');
-            });
-    }
-
-    // Check if published results exist via API
-    const resultsButton = document.getElementById('resultsButton');
-    const liveResultsButton = document.getElementById('liveResultsButton');
-    const liveResultBoardButton = document.getElementById('liveResultBoardButton');
-    const noResultsText = document.getElementById('noResultsText');
-    const showLiveResults = @(showLiveResults.ToString().ToLower());
-
-    if (resultsButton && noResultsText) {
-        fetch(`/umbraco/surface/CompetitionResults/GetResultsList?competitionId=${competitionId}`)
-            .then(response => response.json())
-            .then(data => {
-                if (data.success && data.exists) {
-                    const isOfficial = data.isOfficial || data.IsOfficial;
-                    const hasResultPage = data.hasResultPage || data.HasResultPage || false;
-
-                    if (hasResultPage) {
-                        // Result page exists - show appropriate link
-                        if (isOfficial) {
-                            resultsButton.classList.remove('d-none');
-                            liveResultsButton.classList.add('d-none');
-                        } else {
-                            liveResultsButton.classList.remove('d-none');
-                            resultsButton.classList.add('d-none');
-                        }
-                    } else {
-                        // No result page - hide both link buttons
-                        resultsButton.classList.add('d-none');
-                        liveResultsButton.classList.add('d-none');
-                    }
-                    noResultsText.classList.add('d-none');
-
-                    // Show resultattavla button when showLiveResults is enabled and results exist
-                    if (showLiveResults && liveResultBoardButton) {
-                        liveResultBoardButton.classList.remove('d-none');
-                    }
-                } else {
-                    // No results - show text
-                    resultsButton.classList.add('d-none');
-                    liveResultsButton.classList.add('d-none');
-                    noResultsText.classList.remove('d-none');
-                    if (liveResultBoardButton) liveResultBoardButton.classList.add('d-none');
-                }
-            })
-            .catch(error => {
-                console.error('Error checking results:', error);
-                // On error, keep showing "not published" text
-                resultsButton.classList.add('d-none');
-                liveResultsButton.classList.add('d-none');
-                noResultsText.classList.remove('d-none');
-                if (liveResultBoardButton) liveResultBoardButton.classList.add('d-none');
-            });
+        .catch(error => console.error('Error checking results:', error));
+        </text>
     }
 
     // Handle registered shooters modal
@@ -1342,6 +1299,8 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
     configuredWCs=configuredWCs||[];
     compTypeId=compTypeId||'Precision';
     var isMilsnabb=compTypeId==='Milsnabb';
+    var isNH=compTypeId==='NationellHelmatch';
+    var isGrouped12=isMilsnabb||isNH;
 
     function getWC(n){return(n||'').trim().charAt(0).toUpperCase()||'?'}
 
@@ -1409,13 +1368,9 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
         var useFinals=hasFinalsRound&&maxSeries>=totalSeriesCount;
         // Build table
         var h='<table class="rb-table"><thead><tr><th>#</th><th>Namn</th><th>Klass</th><th>Förening</th>';
-        if(isMilsnabb){
-            for(var i=1;i<=4;i++)h+='<th class="rb-series-col">'+i+'</th>';
-            h+='<th class="rb-subtotal">10s</th>';
-            for(var i=5;i<=8;i++)h+='<th class="rb-series-col">'+i+'</th>';
-            h+='<th class="rb-subtotal">8s</th>';
-            for(var i=9;i<=12;i++)h+='<th class="rb-series-col">'+i+'</th>';
-            h+='<th class="rb-subtotal">6s</th>';
+        if(isGrouped12){
+            var gLabels=isNH?['Prec','Duell','Fält']:['10s','8s','6s'];
+            for(var g=0;g<3;g++){for(var i=g*4+1;i<=g*4+4;i++)h+='<th class="rb-series-col">'+i+'</th>';h+='<th class="rb-subtotal">'+gLabels[g]+'</th>'}
         } else if(useFinals){for(var i=1;i<=qualSeriesCount;i++)h+='<th class="rb-series-col">'+i+'</th>';h+='<th class="rb-series-col">Tot</th>';for(var i=1;i<=numFinalSeries;i++)h+='<th class="rb-series-col">F'+i+'</th>'}
         else{for(var i=1;i<=maxSeries;i++)h+='<th class="rb-series-col">'+i+'</th>'}
         h+='<th>Tot</th><th>X</th>';if(isMedals)h+='<th>S</th>';h+='</tr></thead><tbody>';
@@ -1424,7 +1379,7 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
             if(useFinals)qs=sr.slice(0,qualSeriesCount).reduce(function(a,v){return a+v.s},0);
             var pc=pos<=3?' rb-pos-'+pos:'';
             h+='<tr><td class="'+pc.trim()+'">'+pos+'</td><td>'+sh.nm+'</td><td>'+sh.sc+'</td><td>'+sh.cl+'</td>';
-            if(isMilsnabb){
+            if(isGrouped12){
                 var grps=[[0,4],[4,8],[8,12]];
                 grps.forEach(function(g){var gt=0;for(var i=g[0];i<g[1];i++){var v=i<sr.length?sr[i].s:0;gt+=v;h+='<td class="rb-series-col">'+(i<sr.length?v:'-')+'</td>'}h+='<td class="rb-subtotal">'+gt+'</td>'});
             } else if(useFinals){

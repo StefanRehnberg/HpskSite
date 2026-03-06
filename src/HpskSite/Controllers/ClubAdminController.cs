@@ -146,12 +146,10 @@ namespace HpskSite.Controllers
                 // Get club data from content node
                 var clubName = clubNode.Value<string>("clubName") ?? clubNode.Name ?? "";
 
-                // Get all members for counting
-                var allMembers = _memberService.GetAll(0, int.MaxValue, out var totalRecords);
-                var regularMembers = allMembers.Where(m => m.ContentType.Alias != ClubMemberTypeAlias).ToList();
-
                 // Get club members for contact person dropdown
-                var clubMembersFromContent = regularMembers
+                var contentClubMembers = _memberService.GetAll(0, int.MaxValue, out _);
+                var clubMembersFromContent = contentClubMembers
+                    .Where(m => m.ContentType.Alias != ClubMemberTypeAlias)
                     .Where(m => m.GetValue("primaryClubId")?.ToString() == id.ToString() ||
                                 (m.GetValue("memberClubIds")?.ToString() ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries)
                                 .Contains(id.ToString()))
@@ -161,7 +159,6 @@ namespace HpskSite.Controllers
                         email = m.Email
                     }).ToArray();
 
-                // Count members for this club
                 var memberCount = clubMembersFromContent.Length;
 
                 var clubDataFromContent = new

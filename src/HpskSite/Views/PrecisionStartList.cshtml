@@ -35,8 +35,9 @@
 	}
 
 	// Get competition name
-	var competition = Model.Root().DescendantsOrSelf()
-		.FirstOrDefault(x => x.ContentType.Alias == "competition" && x.Id == competitionId);
+	// Direct cache lookup (O(1) instead of full tree scan)
+	var competitionNode = Umbraco.Content(competitionId);
+	var competition = (competitionNode?.ContentType.Alias == "competition") ? competitionNode : null;
 	var competitionName = competition?.Name ?? "Okänd tävling";
 }
 

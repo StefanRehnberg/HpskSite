@@ -114,7 +114,7 @@
         
         .x-count { color: #dc3545; font-size: 9px; }
 
-        /* Milsnabb time-group sub-total columns */
+        /* Grouped sub-total columns (Milsnabb, Nationell Helmatch) */
         .results-table .subtotal-col {
             border-left: 2px solid #999;
             font-weight: bold;
@@ -123,7 +123,7 @@
             background-color: #e8e8e8;
         }
 
-        /* Milsnabb series columns - hide on mobile */
+        /* Individual series columns (Milsnabb, Nationell Helmatch) - hide on mobile */
         .results-table .milsnabb-series {
             /* visible by default on desktop */
         }
@@ -220,6 +220,8 @@
                 const isAwardingStandardMedals = data.isAwardingStandardMedals || false;
                 const competitionTypeId = data.competitionTypeId || 'Precision';
                 const isMilsnabb = competitionTypeId === 'Milsnabb';
+                const isNationellHelmatch = competitionTypeId === 'NationellHelmatch';
+                const isGrouped12 = isMilsnabb || isNationellHelmatch;
 
                 // Build HTML for results
                 let html = '';
@@ -242,14 +244,15 @@
                         `;
 
                         // Add series columns based on competition type
-                        if (isMilsnabb) {
-                            // Milsnabb: S1-S4 | 10s | S5-S8 | 8s | S9-S12 | 6s
-                            for (let i = 1; i <= 4; i++) html += `<th class="milsnabb-series">${i}</th>`;
-                            html += `<th class="subtotal-col">10s</th>`;
-                            for (let i = 5; i <= 8; i++) html += `<th class="milsnabb-series">${i}</th>`;
-                            html += `<th class="subtotal-col">8s</th>`;
-                            for (let i = 9; i <= 12; i++) html += `<th class="milsnabb-series">${i}</th>`;
-                            html += `<th class="subtotal-col">6s</th>`;
+                        if (isGrouped12) {
+                            // 12 series in 3 groups of 4 with subtotals
+                            const groupHeaders = isNationellHelmatch
+                                ? ['Prec', 'Duell', 'Fält']
+                                : ['10s', '8s', '6s'];
+                            for (let g = 0; g < 3; g++) {
+                                for (let i = g*4+1; i <= g*4+4; i++) html += `<th class="milsnabb-series">${i}</th>`;
+                                html += `<th class="subtotal-col">${groupHeaders[g]}</th>`;
+                            }
                         } else if (classGroup.shooters.length > 0 && classGroup.shooters[0].results) {
                             const seriesCount = classGroup.shooters[0].results.length;
 
@@ -322,8 +325,8 @@
                             `;
 
                             // Add series scores based on competition type
-                            if (isMilsnabb) {
-                                // Milsnabb: series 1-4 + 10s sub-total, 5-8 + 8s sub-total, 9-12 + 6s sub-total
+                            if (isGrouped12) {
+                                // 12 series in 3 groups of 4 with subtotals
                                 const groups = [[0,4],[4,8],[8,12]];
                                 groups.forEach(([start, end]) => {
                                     let groupTotal = 0;
