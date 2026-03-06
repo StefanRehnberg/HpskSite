@@ -64,6 +64,11 @@
                             </button>
                         </li>
                         <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="handicap-tab" data-bs-toggle="tab" data-bs-target="#handicap-pane" type="button" role="tab">
+                                <i class="bi bi-calculator"></i> Handikapp
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
                             <button class="nav-link" id="profile-tab" data-bs-toggle="tab" data-bs-target="#profile-pane" type="button" role="tab">
                                 <i class="bi bi-person-circle"></i> Profil
                             </button>
@@ -199,6 +204,114 @@
                             </div>
                         </div>
                         @* End Competitions Tab *@
+
+                        @* Handikapp Tab *@
+                        <div class="tab-pane fade" id="handicap-pane" role="tabpanel">
+
+                            <!-- Precision Shooting Settings Section -->
+                            <div class="mb-4">
+                                <h5 class="mb-3" role="button" data-bs-toggle="collapse" data-bs-target="#precisionSection" aria-expanded="true">
+                                    <img src="/images/competition-types/Precision.png" alt="Precision" style="height: 20px; width: auto;" class="me-2">Precisionsskytte
+                                    <i class="bi bi-chevron-down float-end small"></i>
+                                </h5>
+                                <div class="collapse show" id="precisionSection">
+                                    <div class="card border-light">
+                                        <div class="card-body">
+                                            <!-- Shooter Class Selection -->
+                                            <label class="form-label fw-semibold">Skytteklass</label>
+                                            <div class="mb-3">
+                                                @{
+                                                    var currentShooterClass = memberData?.GetValue("precisionShooterClass")?.ToString() ?? "";
+                                                }
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="radio" name="shooterClass" id="class1" value="Klass 1 - Nybörjare" @(currentShooterClass == "Klass 1 - Nybörjare" ? "checked" : "")>
+                                                    <label class="form-check-label" for="class1">Klass 1 - Nybörjare</label>
+                                                </div>
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="radio" name="shooterClass" id="class2" value="Klass 2 - Guldmärkesskytt" @(currentShooterClass == "Klass 2 - Guldmärkesskytt" ? "checked" : "")>
+                                                    <label class="form-check-label" for="class2">Klass 2 - Guldmärkesskytt</label>
+                                                </div>
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="radio" name="shooterClass" id="class3" value="Klass 3 - Riksmästare" @(currentShooterClass == "Klass 3 - Riksmästare" ? "checked" : "")>
+                                                    <label class="form-check-label" for="class3">Klass 3 - Riksmästare</label>
+                                                </div>
+                                            </div>
+
+                                            <hr class="my-3">
+
+                                            <!-- Handicap Info Section -->
+                                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                                <label class="form-label fw-semibold mb-0">Ditt Handikappindex</label>
+                                                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="recalculateMyHandicap('Precision')" id="recalculateHandicapBtn" title="Omberäkna handikapp från alla resultat">
+                                                    <i class="bi bi-arrow-clockwise"></i> Omberäkna
+                                                </button>
+                                            </div>
+                                            <div id="handicapInfoContainer">
+                                                <div class="text-center py-3">
+                                                    <div class="spinner-border spinner-border-sm text-primary" role="status">
+                                                        <span class="visually-hidden">Laddar...</span>
+                                                    </div>
+                                                    <span class="ms-2 text-muted">Laddar handikappinformation...</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Milsnabb Shooting Settings Section -->
+                            <div class="mb-4">
+                                <h5 class="mb-3" role="button" data-bs-toggle="collapse" data-bs-target="#milsnabbSection" aria-expanded="true">
+                                    <img src="/images/competition-types/Milsnabb.png" alt="Milsnabb" style="height: 20px; width: auto;" class="me-2">Milsnabb
+                                    <i class="bi bi-chevron-down float-end small"></i>
+                                </h5>
+                                <div class="collapse show" id="milsnabbSection">
+                                    <div class="card border-light">
+                                        <div class="card-body">
+                                            <!-- Shooter Class Selection -->
+                                            <label class="form-label fw-semibold">Skytteklass</label>
+                                            <div class="mb-3">
+                                                @{
+                                                    var currentMilsnabbShooterClass = memberData?.GetValue("milsnabbShooterClass")?.ToString() ?? "";
+                                                }
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="radio" name="milsnabbShooterClass" id="milsnabbClass1" value="Klass 1 - Nybörjare" @(currentMilsnabbShooterClass == "Klass 1 - Nybörjare" ? "checked" : "")>
+                                                    <label class="form-check-label" for="milsnabbClass1">Klass 1 - Nybörjare</label>
+                                                </div>
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="radio" name="milsnabbShooterClass" id="milsnabbClass2" value="Klass 2 - Guldmärkesskytt" @(currentMilsnabbShooterClass == "Klass 2 - Guldmärkesskytt" ? "checked" : "")>
+                                                    <label class="form-check-label" for="milsnabbClass2">Klass 2 - Guldmärkesskytt</label>
+                                                </div>
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="radio" name="milsnabbShooterClass" id="milsnabbClass3" value="Klass 3 - Riksmästare" @(currentMilsnabbShooterClass == "Klass 3 - Riksmästare" ? "checked" : "")>
+                                                    <label class="form-check-label" for="milsnabbClass3">Klass 3 - Riksmästare</label>
+                                                </div>
+                                            </div>
+
+                                            <hr class="my-3">
+
+                                            <!-- Handicap Info Section -->
+                                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                                <label class="form-label fw-semibold mb-0">Ditt Handikappindex</label>
+                                                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="recalculateMyHandicap('Milsnabb')" id="recalculateMilsnabbHandicapBtn" title="Omberäkna handikapp från alla resultat">
+                                                    <i class="bi bi-arrow-clockwise"></i> Omberäkna
+                                                </button>
+                                            </div>
+                                            <div id="milsnabbHandicapInfoContainer">
+                                                <div class="text-center py-3">
+                                                    <div class="spinner-border spinner-border-sm text-primary" role="status">
+                                                        <span class="visually-hidden">Laddar...</span>
+                                                    </div>
+                                                    <span class="ms-2 text-muted">Laddar handikappinformation...</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                        </div>
+                        @* End Handikapp Tab *@
 
                         @* Profile Tab *@
                         <div class="tab-pane fade" id="profile-pane" role="tabpanel">
@@ -354,110 +467,6 @@
 
                                 <hr class="my-4">
 
-                                <!-- Precision Shooting Settings Section -->
-                                <div class="mb-4">
-                                    <h5 class="mb-3" role="button" data-bs-toggle="collapse" data-bs-target="#precisionSection" aria-expanded="true">
-                                        <i class="bi bi-bullseye me-2"></i>Precisionsskytte
-                                        <i class="bi bi-chevron-down float-end small"></i>
-                                    </h5>
-                                    <div class="collapse show" id="precisionSection">
-                                        <div class="card border-light">
-                                            <div class="card-body">
-                                                <!-- Shooter Class Selection -->
-                                                <label class="form-label fw-semibold">Skytteklass</label>
-                                                <div class="mb-3">
-                                                    @{
-                                                        var currentShooterClass = memberData?.GetValue("precisionShooterClass")?.ToString() ?? "";
-                                                    }
-                                                    <div class="form-check">
-                                                        <input class="form-check-input" type="radio" name="shooterClass" id="class1" value="Klass 1 - Nybörjare" @(currentShooterClass == "Klass 1 - Nybörjare" ? "checked" : "")>
-                                                        <label class="form-check-label" for="class1">Klass 1 - Nybörjare</label>
-                                                    </div>
-                                                    <div class="form-check">
-                                                        <input class="form-check-input" type="radio" name="shooterClass" id="class2" value="Klass 2 - Guldmärkesskytt" @(currentShooterClass == "Klass 2 - Guldmärkesskytt" ? "checked" : "")>
-                                                        <label class="form-check-label" for="class2">Klass 2 - Guldmärkesskytt</label>
-                                                    </div>
-                                                    <div class="form-check">
-                                                        <input class="form-check-input" type="radio" name="shooterClass" id="class3" value="Klass 3 - Riksmästare" @(currentShooterClass == "Klass 3 - Riksmästare" ? "checked" : "")>
-                                                        <label class="form-check-label" for="class3">Klass 3 - Riksmästare</label>
-                                                    </div>
-                                                </div>
-
-                                                <hr class="my-3">
-
-                                                <!-- Handicap Info Section -->
-                                                <div class="d-flex justify-content-between align-items-center mb-2">
-                                                    <label class="form-label fw-semibold mb-0">Ditt Handicapindex</label>
-                                                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="recalculateMyHandicap('Precision')" id="recalculateHandicapBtn" title="Omberäkna handicap från alla resultat">
-                                                        <i class="bi bi-arrow-clockwise"></i> Omberäkna
-                                                    </button>
-                                                </div>
-                                                <div id="handicapInfoContainer">
-                                                    <div class="text-center py-3">
-                                                        <div class="spinner-border spinner-border-sm text-primary" role="status">
-                                                            <span class="visually-hidden">Laddar...</span>
-                                                        </div>
-                                                        <span class="ms-2 text-muted">Laddar handicapinformation...</span>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <!-- Milsnabb Shooting Settings Section -->
-                                <div class="mb-4">
-                                    <h5 class="mb-3" role="button" data-bs-toggle="collapse" data-bs-target="#milsnabbSection" aria-expanded="true">
-                                        <i class="bi bi-stopwatch me-2"></i>Milsnabb
-                                        <i class="bi bi-chevron-down float-end small"></i>
-                                    </h5>
-                                    <div class="collapse show" id="milsnabbSection">
-                                        <div class="card border-light">
-                                            <div class="card-body">
-                                                <!-- Shooter Class Selection -->
-                                                <label class="form-label fw-semibold">Skytteklass</label>
-                                                <div class="mb-3">
-                                                    @{
-                                                        var currentMilsnabbShooterClass = memberData?.GetValue("milsnabbShooterClass")?.ToString() ?? "";
-                                                    }
-                                                    <div class="form-check">
-                                                        <input class="form-check-input" type="radio" name="milsnabbShooterClass" id="milsnabbClass1" value="Klass 1 - Nybörjare" @(currentMilsnabbShooterClass == "Klass 1 - Nybörjare" ? "checked" : "")>
-                                                        <label class="form-check-label" for="milsnabbClass1">Klass 1 - Nybörjare</label>
-                                                    </div>
-                                                    <div class="form-check">
-                                                        <input class="form-check-input" type="radio" name="milsnabbShooterClass" id="milsnabbClass2" value="Klass 2 - Guldmärkesskytt" @(currentMilsnabbShooterClass == "Klass 2 - Guldmärkesskytt" ? "checked" : "")>
-                                                        <label class="form-check-label" for="milsnabbClass2">Klass 2 - Guldmärkesskytt</label>
-                                                    </div>
-                                                    <div class="form-check">
-                                                        <input class="form-check-input" type="radio" name="milsnabbShooterClass" id="milsnabbClass3" value="Klass 3 - Riksmästare" @(currentMilsnabbShooterClass == "Klass 3 - Riksmästare" ? "checked" : "")>
-                                                        <label class="form-check-label" for="milsnabbClass3">Klass 3 - Riksmästare</label>
-                                                    </div>
-                                                </div>
-
-                                                <hr class="my-3">
-
-                                                <!-- Handicap Info Section -->
-                                                <div class="d-flex justify-content-between align-items-center mb-2">
-                                                    <label class="form-label fw-semibold mb-0">Ditt Handicapindex</label>
-                                                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="recalculateMyHandicap('Milsnabb')" id="recalculateMilsnabbHandicapBtn" title="Omberäkna handicap från alla resultat">
-                                                        <i class="bi bi-arrow-clockwise"></i> Omberäkna
-                                                    </button>
-                                                </div>
-                                                <div id="milsnabbHandicapInfoContainer">
-                                                    <div class="text-center py-3">
-                                                        <div class="spinner-border spinner-border-sm text-primary" role="status">
-                                                            <span class="visually-hidden">Laddar...</span>
-                                                        </div>
-                                                        <span class="ms-2 text-muted">Laddar handicapinformation...</span>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <hr class="my-4">
-
                                 <h5>Ändra Lösenord</h5>
                                 <div class="row">
                                     <div class="col-md-6">
@@ -608,6 +617,13 @@ document.addEventListener('DOMContentLoaded', function() {
             initializeCompetitionsTab();
         });
     }
+
+    // Auto-save shooter class on change
+    document.querySelectorAll('input[name="shooterClass"], input[name="milsnabbShooterClass"]').forEach(radio => {
+        radio.addEventListener('change', function() {
+            autoSaveShooterClass(this.name, this.value);
+        });
+    });
 });
 
 function loadUserProfile() {
@@ -709,13 +725,13 @@ function loadHandicapProfile(discipline = 'Precision') {
                 renderHandicapInfo(data.weaponClasses, data.shooterClass, data.settings, containerId);
             } else {
                 document.getElementById(containerId).innerHTML =
-                    '<p class="text-muted">Kunde inte ladda handicapinformation.</p>';
+                    '<p class="text-muted">Kunde inte ladda handikappinformation.</p>';
             }
         })
         .catch(error => {
             console.error(`Error loading handicap profile (${discipline}):`, error);
             document.getElementById(containerId).innerHTML =
-                '<p class="text-muted">Fel vid laddning av handicapinformation.</p>';
+                '<p class="text-muted">Fel vid laddning av handikappinformation.</p>';
         });
 }
 
@@ -743,15 +759,50 @@ function recalculateMyHandicap(discipline = 'Precision') {
             // Reload handicap profile to show updated values
             loadHandicapProfile(discipline);
         } else {
-            alert('Kunde inte omberäkna handicap: ' + (data.message || 'Okänt fel'));
+            alert('Kunde inte omberäkna handikapp: ' + (data.message || 'Okänt fel'));
         }
     })
     .catch(error => {
         console.error('Error recalculating handicap:', error);
         btn.disabled = false;
         btn.innerHTML = originalContent;
-        alert('Fel vid omberäkning av handicap');
+        alert('Fel vid omberäkning av handikapp');
     });
+}
+
+// Auto-save shooter class when radio button changes
+function autoSaveShooterClass(radioName, value) {
+    const formData = new FormData();
+    const token = document.querySelector('input[name="__RequestVerificationToken"]');
+    if (token) formData.append('__RequestVerificationToken', token.value);
+
+    // Send current profile values to satisfy required fields
+    formData.append('firstName', document.getElementById('firstName').value);
+    formData.append('lastName', document.getElementById('lastName').value);
+    formData.append('email', document.getElementById('email').value);
+
+    // Send the updated shooter class
+    if (radioName === 'milsnabbShooterClass') {
+        formData.append('milsnabbShooterClass', value);
+    } else {
+        formData.append('precisionShooterClass', value);
+    }
+
+    const discipline = radioName === 'milsnabbShooterClass' ? 'Milsnabb' : 'Precision';
+
+    fetch('/umbraco/surface/Member/UpdateProfile', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            loadHandicapProfile(discipline);
+        } else {
+            console.error('Failed to save shooter class:', data.message);
+        }
+    })
+    .catch(error => console.error('Error saving shooter class:', error));
 }
 
 // Helper functions for quarter-point handicap display
@@ -775,8 +826,8 @@ function renderHandicapInfo(weaponClasses, shooterClass, settings, containerId =
         container.innerHTML = `
             <div class="alert alert-danger mb-0">
                 <i class="bi bi-exclamation-circle me-2"></i>
-                <strong>Skytteklass krävs!</strong> Du måste välja din skytteklass ovan för att kunna beräkna handicap
-                och delta i handicapmatcher. Skytteklassen avgör ditt provisoriska handicap tills du har genomfört tillräckligt många matcher.
+                <strong>Skytteklass krävs!</strong> Du måste välja din skytteklass ovan för att kunna beräkna handikapp
+                och delta i handikappsmatcher. Skytteklassen avgör ditt provisoriska handikapp tills du har genomfört tillräckligt många matcher.
             </div>`;
         return;
     }
@@ -785,7 +836,7 @@ function renderHandicapInfo(weaponClasses, shooterClass, settings, containerId =
         container.innerHTML = `
             <div class="alert alert-info mb-0">
                 <i class="bi bi-info-circle me-2"></i>
-                Ingen statistik tillgänglig än. Delta i träningsmatcher eller tävlingar för att få ett handicapindex.
+                Ingen statistik tillgänglig än. Delta i träningsmatcher eller tävlingar för att få ett handikappindex.
             </div>`;
         return;
     }
@@ -804,20 +855,20 @@ function renderHandicapInfo(weaponClasses, shooterClass, settings, containerId =
     let html = `
         <div class="small text-body-secondary mb-3 p-2 rounded" style="background-color: var(--bs-tertiary-bg);">
             <p class="mb-2">
-                <strong class="text-body">Så beräknas ditt handicap:</strong> Referenspoängen (${settings.referenceScore}) minus ditt genomsnittliga serieresultat
+                <strong class="text-body">Så beräknas ditt handikapp:</strong> Referenspoängen (${settings.referenceScore}) minus ditt genomsnittliga serieresultat
                 från dina <strong>senaste ${settings.rollingWindowMatchCount} matcher</strong>.
-                Handicap kan vara max +${settings.maxHandicap} och avrundas till närmaste kvarts poäng (0.25).
+                Handikapp kan vara max +${settings.maxHandicap} och avrundas till närmaste kvarts poäng (0.25).
             </p>
             <p class="mb-0">
-                <strong class="text-body">Provisoriskt handicap (P):</strong> Innan du har ${settings.requiredMatches} resultat, viktas ditt snitt
-                med din skytteklass: ${provisionalText}. Efter ${settings.requiredMatches} matcher baseras handicap helt på ditt faktiska snitt.
+                <strong class="text-body">Provisoriskt handikapp (P):</strong> Innan du har ${settings.requiredMatches} resultat, viktas ditt snitt
+                med din skytteklass: ${provisionalText}. Efter ${settings.requiredMatches} matcher baseras handikapp helt på ditt faktiska snitt.
             </p>
         </div>
     `;
 
     for (const wc of weaponClasses) {
         const provBadge = wc.isProvisional
-            ? '<span class="badge bg-warning text-dark ms-2" title="Provisoriskt handicap">(P)</span>'
+            ? '<span class="badge bg-warning text-dark ms-2" title="Provisoriskt handikapp">(P)</span>'
             : '';
         const handicapDisplay = formatHandicapProfile(wc.handicapPerSeries);
         const progress = Math.min((wc.completedMatches / wc.requiredMatches) * 100, 100);
@@ -830,7 +881,7 @@ function renderHandicapInfo(weaponClasses, shooterClass, settings, containerId =
             <div class="card-body py-2 px-3">
                 <div class="d-flex justify-content-between align-items-center mb-1">
                     <strong>Vapenklass ${wc.weaponClass} <span class="text-muted fw-normal">(${wc.weaponClassName})</span></strong>
-                    <span class="fs-5">Handicap: <strong>${handicapDisplay}</strong>${provBadge}</span>
+                    <span class="fs-5">Handikapp: <strong>${handicapDisplay}</strong>${provBadge}</span>
                 </div>
                 <div class="small text-muted mt-2">
                     <div class="mb-1">
@@ -849,7 +900,7 @@ function renderHandicapInfo(weaponClasses, shooterClass, settings, containerId =
                     <small class="text-muted">${wc.completedMatches} av ${wc.requiredMatches} matcher genomförda</small>
                 </div>
                 ` : `
-                <small class="text-success d-block mt-2"><i class="bi bi-check-circle me-1"></i>Fullständigt handicap baserat på ditt faktiska snitt</small>
+                <small class="text-success d-block mt-2"><i class="bi bi-check-circle me-1"></i>Fullständigt handikapp baserat på ditt faktiska snitt</small>
                 `}
             </div>
         </div>`;
@@ -1337,28 +1388,59 @@ function updateChartsTheme(theme) {
 }
 
 // Toggle Personal Bests card expand/collapse
-function togglePersonalBests() {
-    const preview = document.getElementById('personalBestsPreview');
-    const full = document.getElementById('personalBestsFull');
-    const toggle = document.getElementById('personalBestsToggle');
-
-    if (!preview || !full || !toggle) return;
-
-    const isExpanded = full.style.display !== 'none';
-
-    if (isExpanded) {
-        // Collapse
-        full.style.display = 'none';
-        preview.style.display = 'block';
-        toggle.innerHTML = '<i class="bi bi-chevron-down"></i>';
-        toggle.title = 'Visa mer';
-    } else {
-        // Expand
-        preview.style.display = 'none';
-        full.style.display = 'block';
-        toggle.innerHTML = '<i class="bi bi-chevron-up"></i>';
-        toggle.title = 'Visa mindre';
+function renderPersonalBestsBadges(personalBests) {
+    if (!personalBests || personalBests.length === 0) {
+        return '<div class="text-center text-muted py-3"><i class="bi bi-info-circle"></i><p class="mb-0 small">Inga rekord ännu</p></div>';
     }
+
+    // Group by weapon class
+    const byWeapon = {};
+    personalBests.forEach(pb => {
+        if (!byWeapon[pb.weaponClass]) {
+            byWeapon[pb.weaponClass] = { training: {}, competition: {} };
+        }
+        const type = pb.isCompetition ? 'competition' : 'training';
+        byWeapon[pb.weaponClass][type][pb.seriesCount] = pb.bestTotalScore;
+    });
+
+    let html = '<div class="small">';
+
+    // Training bests
+    const hasTraining = Object.keys(byWeapon).some(wc => Object.keys(byWeapon[wc].training).length > 0);
+    if (hasTraining) {
+        html += '<strong class="d-block mb-1"><i class="bi bi-bullseye text-primary me-1"></i>Träning</strong>';
+        html += '<div class="mb-2">';
+        Object.keys(byWeapon).sort().forEach(wc => {
+            const scores = byWeapon[wc].training;
+            if (Object.keys(scores).length > 0) {
+                const scoreText = Object.keys(scores).sort((a,b) => a-b).map(s => `${s}s:${scores[s]}`).join(' ');
+                html += `<span class="badge bg-light text-dark me-1 mb-1">${wc}: ${scoreText}</span>`;
+            }
+        });
+        html += '</div>';
+    }
+
+    // Competition bests
+    const hasCompetition = Object.keys(byWeapon).some(wc => Object.keys(byWeapon[wc].competition).length > 0);
+    if (hasCompetition) {
+        html += '<strong class="d-block mb-1"><i class="bi bi-trophy text-success me-1"></i>Tävling</strong>';
+        html += '<div>';
+        Object.keys(byWeapon).sort().forEach(wc => {
+            const scores = byWeapon[wc].competition;
+            if (Object.keys(scores).length > 0) {
+                const scoreText = Object.keys(scores).sort((a,b) => a-b).map(s => `${s}s:${scores[s]}`).join(' ');
+                html += `<span class="badge bg-light text-dark me-1 mb-1">${wc}: ${scoreText}</span>`;
+            }
+        });
+        html += '</div>';
+    }
+
+    if (!hasTraining && !hasCompetition) {
+        html += '<div class="text-center text-muted py-3"><i class="bi bi-info-circle"></i><p class="mb-0 small">Inga rekord ännu</p></div>';
+    }
+
+    html += '</div>';
+    return html;
 }
 
 // Calculate statistics from filtered data entries
@@ -1481,52 +1563,6 @@ function getSeriesCountsForWeapon(wc, discipline) {
 
 function getDashboardDiscipline() {
     return window.dashboardData?.competitionType || 'Precision';
-}
-
-function renderSeriesCountHeaders() {
-    const discipline = getDashboardDiscipline();
-    if (discipline === 'Milsnabb')
-        return '<th class="text-center">12 ser</th>';
-    const sc = discipline !== 'Precision' ? [6, 10, 12] : [6, 7, 10];
-    return sc.map(s => `<th class="text-center">${s} ser</th>`).join('');
-}
-
-function renderPersonalBestRows(bests, isCompetition) {
-    const weaponClasses = ['A', 'B', 'C', 'R', 'M', 'L'];
-    const discipline = getDashboardDiscipline();
-
-    // Helper to get score for a specific weapon class and series count
-    const getScore = (wc, sc) => {
-        const entry = bests.find(b =>
-            b.weaponClass === wc &&
-            b.isCompetition === isCompetition &&
-            b.seriesCount === sc
-        );
-        return entry ? entry.bestTotalScore : '-';
-    };
-
-    // Only show weapon classes that have at least one result
-    const activeWeaponClasses = weaponClasses.filter(wc => {
-        const seriesCounts = getSeriesCountsForWeapon(wc, discipline);
-        return seriesCounts.some(sc =>
-            bests.some(b => b.weaponClass === wc && b.isCompetition === isCompetition && b.seriesCount === sc)
-        );
-    });
-
-    if (activeWeaponClasses.length === 0) {
-        return '<tr><td colspan="4" class="text-center text-muted">-</td></tr>';
-    }
-
-    return activeWeaponClasses.map(wc => {
-        const seriesCounts = getSeriesCountsForWeapon(wc, discipline);
-
-        return `
-            <tr>
-                <td><strong>${wc}</strong></td>
-                ${seriesCounts.map(sc => `<td class="text-center">${getScore(wc, sc)}</td>`).join('')}
-            </tr>
-        `;
-    }).join('');
 }
 
 // Render sessions per weapon class (training + competition combined)
@@ -1800,73 +1836,12 @@ function renderDashboard(data, selectedYears = null) {
                 </div>
             </div>
 
-            @* Card 4: Personal Bests (Total Scores by Series Count) - Collapsible *@
+            @* Card 4: Personal Bests (Badge Style) *@
             <div class="col-md-4 mb-3">
                 <div class="card stats-card" id="personalBestsCard">
                     <div class="card-body">
-                        <div class="d-flex justify-content-between align-items-center mb-3">
-                            <h6 class="text-muted mb-0"><i class="bi bi-trophy-fill"></i> Personliga Rekord</h6>
-                            <button class="btn btn-sm btn-link text-muted p-0" onclick="togglePersonalBests()" id="personalBestsToggle" title="Visa mer">
-                                <i class="bi bi-chevron-down"></i>
-                            </button>
-                        </div>
-
-                        @* Collapsed Preview - Training Bests Only (first few rows) *@
-                        <div id="personalBestsPreview">
-                            <strong class="d-block mb-2 small"><i class="bi bi-bullseye text-primary"></i> Träning</strong>
-                            <div class="table-responsive">
-                                <table class="table table-sm table-borderless mb-0" style="font-size: 0.85rem;">
-                                    <thead>
-                                        <tr class="text-muted">
-                                            <th style="width: 50px;"></th>
-                                            ${renderSeriesCountHeaders()}
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        ${renderPersonalBestRows(filteredData.personalBestsBySeriesCount || [], false)}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-
-                        @* Full Content - Both Tables (hidden by default) *@
-                        <div id="personalBestsFull" style="display: none;">
-                            @* Training Bests Table *@
-                            <div class="mb-3">
-                                <strong class="d-block mb-2 small"><i class="bi bi-bullseye text-primary"></i> Träning</strong>
-                                <div class="table-responsive">
-                                    <table class="table table-sm table-borderless mb-0" style="font-size: 0.85rem;">
-                                        <thead>
-                                            <tr class="text-muted">
-                                                <th style="width: 50px;"></th>
-                                                ${renderSeriesCountHeaders()}
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            ${renderPersonalBestRows(filteredData.personalBestsBySeriesCount || [], false)}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </div>
-
-                            @* Competition Bests Table *@
-                            <div>
-                                <strong class="d-block mb-2 small"><i class="bi bi-trophy text-success"></i> Tävling</strong>
-                                <div class="table-responsive">
-                                    <table class="table table-sm table-borderless mb-0" style="font-size: 0.85rem;">
-                                        <thead>
-                                            <tr class="text-muted">
-                                                <th style="width: 50px;"></th>
-                                                ${renderSeriesCountHeaders()}
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            ${renderPersonalBestRows(filteredData.personalBestsBySeriesCount || [], true)}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </div>
-                        </div>
+                        <h6 class="text-muted mb-3"><i class="bi bi-trophy-fill"></i> Personliga Rekord</h6>
+                        ${renderPersonalBestsBadges(filteredData.personalBestsBySeriesCount || [])}
                     </div>
                 </div>
             </div>

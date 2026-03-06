@@ -733,13 +733,13 @@ function renderMemberDashboard(data, container) {
                         <h6 class="text-muted mb-2" style="font-size: 0.8rem;"><i class="bi bi-award me-1"></i>Standardmedaljer</h6>
                         ${data.medalStats && (data.medalStats.silverCount > 0 || data.medalStats.bronzeCount > 0) ? `
                             <div class="d-flex justify-content-around mb-2">
-                                <div>
-                                    <i class="bi bi-circle-fill" style="font-size: 1.3rem; color: #C0C0C0;"></i>
-                                    <div class="fw-bold">${data.medalStats.silverCount}</div>
+                                <div class="text-center">
+                                    <img src="/images/StdMedS.png" alt="Silver" style="height: 32px; width: auto;">
+                                    <div class="fw-bold">${data.medalStats.silverCount} st</div>
                                 </div>
-                                <div>
-                                    <i class="bi bi-circle-fill" style="font-size: 1.3rem; color: #CD7F32;"></i>
-                                    <div class="fw-bold">${data.medalStats.bronzeCount}</div>
+                                <div class="text-center">
+                                    <img src="/images/StdMedB.png" alt="Brons" style="height: 32px; width: auto;">
+                                    <div class="fw-bold">${data.medalStats.bronzeCount} st</div>
                                 </div>
                             </div>
                             <hr class="my-2">
