@@ -16,6 +16,11 @@
     var lastUpdated = Model.Value<DateTime>("lastUpdated", fallback: Fallback.ToDefaultValue, defaultValue: DateTime.Now);
     var isOfficial = Model.Value<bool>("isOfficial", fallback: Fallback.ToDefaultValue, defaultValue: false);
     
+    // Get competition type
+    var competitionTypeId = "";
+    try { competitionTypeId = competition.Value<string>("competitionType") ?? "Precision"; } catch { competitionTypeId = "Precision"; }
+    var isSpringskytte = competitionTypeId == "Springskytte";
+
     // Get competition configuration for finals
     var numberOfSeriesOrStations = 0;
     var numberOfFinalSeries = 0;
@@ -193,6 +198,9 @@
     const numberOfFinalSeries = @numberOfFinalSeries;
     const totalSeriesCount = @numberOfSeriesOrStations;
     
+    // Competition type
+    const isSpringskytte = @(isSpringskytte.ToString().ToLower());
+
     // Current user info for highlighting
     const currentUserName = '@Html.Raw(currentMemberName.Replace("'", "\\'"))';
     const currentUserClub = '@Html.Raw(currentMemberClub.Replace("'", "\\'"))';
@@ -200,7 +208,13 @@
         // Fetch and display results
         async function loadResults() {
             const container = document.getElementById('resultsContent');
-            
+
+            // Springskytte uses its own endpoint and rendering
+            if (isSpringskytte) {
+                await loadSpringskytteResults(container);
+                return;
+            }
+
             try {
                 const response = await fetch(`/umbraco/surface/CompetitionResults/GetResultsList?competitionId=${competitionId}`);
                 const data = await response.json();
@@ -403,6 +417,86 @@
         // Load results when page loads
         document.addEventListener('DOMContentLoaded', loadResults);
         
+        // Springskytte results rendering
+        async function loadSpringskytteResults(container) {
+            try {
+                const response = await fetch(`/umbraco/surface/Springskytte/GetSpringskytteResults?competitionId=${competitionId}`);
+                const data = await response.json();
+
+                if (!data.success || !data.classGroups?.length) {
+                    container.innerHTML = `
+                        <div class="alert alert-info">
+                            <h4 class="alert-heading">Inga resultat ännu</h4>
+                            <p class="mb-0">Det finns inga registrerade resultat för denna tävling ännu.</p>
+                        </div>`;
+                    return;
+                }
+
+                let html = '';
+                data.classGroups.forEach(group => {
+                    html += `
+                        <div class="class-results-section">
+                            <div class="class-header">
+                                ${group.className} (${group.shooters.length} deltagare)
+                            </div>
+                            <table class="results-table">
+                                <thead>
+                                    <tr>
+                                        <th>Plats</th>
+                                        <th>Namn</th>
+                                        <th>Förening</th>
+                                        <th>Löptid</th>
+                                        <th>Skjutp.</th>
+                                        <th>Tillägg</th>
+                                        <th>Sluttid</th>
+                                        <th>Medalj</th>
+                                    </tr>
+                                </thead>
+                                <tbody>`;
+
+                    group.shooters.forEach(s => {
+                        let rowClass = '';
+                        if (currentUserName && s.name === currentUserName) rowClass = 'current-user';
+                        else if (currentUserClub && s.club === currentUserClub) rowClass = 'same-club';
+
+                        const medal = s.standardMedal === 'S' ? '<strong>S</strong>'
+                            : s.standardMedal === 'B' ? '<strong>B</strong>' : '';
+
+                        html += `
+                                    <tr class="${rowClass}">
+                                        <td class="text-center">${s.status || s.rank || '-'}</td>
+                                        <td>${s.name}</td>
+                                        <td>${s.club}</td>
+                                        <td class="text-center">${s.sprintTimeDisplay || '-'}</td>
+                                        <td class="text-center">${s.shootingScore ?? '-'}</td>
+                                        <td class="text-center">${s.penaltyTimeDisplay || '-'}</td>
+                                        <td class="text-center"><strong>${s.totalTimeDisplay || '-'}</strong></td>
+                                        <td class="text-center">${medal}</td>
+                                    </tr>`;
+                    });
+
+                    html += `
+                                </tbody>
+                            </table>
+                        </div>`;
+                });
+
+                container.innerHTML = html;
+
+                // Auto-refresh for live results
+                if (!autoRefreshTimer) {
+                    autoRefreshTimer = setInterval(loadResults, refreshInterval);
+                }
+            } catch (error) {
+                console.error('Error loading Springskytte results:', error);
+                container.innerHTML = `
+                    <div class="alert alert-danger">
+                        <h4>Fel vid laddning av resultat</h4>
+                        <p>${error.message}</p>
+                    </div>`;
+            }
+        }
+
         // Stop auto-refresh when page is hidden
         document.addEventListener('visibilitychange', () => {
             if (document.hidden && autoRefreshTimer) {

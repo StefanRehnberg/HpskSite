@@ -165,9 +165,9 @@
                                 var numberOfSeriesOrStations = competition.Value<int>("numberOfSeriesOrStations");
                                 var numberOfFinalSeries = competition.Value<int>("numberOfFinalSeries");
 
-                                // Build competition type display name with series info
+                                // Build competition type display name with series info (skip for Springskytte)
                                 var competitionTypeDisplayName = competitionTypeName;
-                                if (numberOfSeriesOrStations > 0)
+                                if (competitionTypeId != "Springskytte" && numberOfSeriesOrStations > 0)
                                 {
                                     if (numberOfFinalSeries > 0)
                                     {
@@ -218,9 +218,12 @@
                                     competitionShootingClasses = shootingClasses.Where(sc => classIdArray.Contains((string)sc.Id)).ToList<dynamic>();
                                 }
 
-                                var shootingClassName = competitionShootingClasses.Any()
-                                    ? string.Join(", ", competitionShootingClasses.Select(sc => sc.Name))
-                                    : "Inga klasser";
+                                var isSpringskytteComp = competitionTypeId == "Springskytte";
+                                var shootingClassName = isSpringskytteComp && classIdArray.Length > 0
+                                    ? string.Join(", ", classIdArray)
+                                    : competitionShootingClasses.Any()
+                                        ? string.Join(", ", competitionShootingClasses.Select(sc => sc.Name))
+                                        : "Inga klasser";
                                 var isCompetitionActive = competition.Value<bool>("isActive");
 
                                 // Calculate status (same logic as competitions hub)

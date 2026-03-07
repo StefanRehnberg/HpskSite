@@ -426,9 +426,9 @@
                 var numberOfSeriesOrStations = competition.Value<int>("numberOfSeriesOrStations");
                 var numberOfFinalSeries = competition.Value<int>("numberOfFinalSeries");
 
-                // Build competition type display name with series info
+                // Build competition type display name with series info (skip for Springskytte)
                 var competitionTypeDisplayName = competitionTypeName;
-                if (numberOfSeriesOrStations > 0)
+                if (competitionTypeId != "Springskytte" && numberOfSeriesOrStations > 0)
                 {
                     if (numberOfFinalSeries > 0)
                     {
@@ -478,9 +478,14 @@
                     competitionShootingClasses = shootingClasses.Where(sc => classIdArray.Contains((string)sc.Id)).ToList<dynamic>();
                 }
 
-                var shootingClassName = competitionShootingClasses.Any()
-                    ? string.Join(", ", competitionShootingClasses.Select(sc => sc.Name))
-                    : "Inga klasser";
+                // For Springskytte, use raw class IDs directly (they won't match standard ShootingClasses)
+                var isSpringskytteComp = competitionTypeId == "Springskytte";
+                var shootingClassName = isSpringskytteComp && classIdArray.Length > 0
+                    ? string.Join(", ", classIdArray)
+                    : competitionShootingClasses.Any()
+                        ? string.Join(", ", competitionShootingClasses.Select(sc => sc.Name))
+                        : "Inga klasser";
+                var hasClassesForDisplay = isSpringskytteComp ? classIdArray.Length > 0 : competitionShootingClasses.Any();
                 var allShootingClassIds = string.Join(",", competitionShootingClasses.Select(sc => sc.Id));
                 var allWeaponClasses = string.Join(",", competitionShootingClasses.Select(sc => sc.Weapon.ToString()).Distinct());
                 var isActive = competition.Value<bool>("isActive");
@@ -630,7 +635,7 @@
                                         {
                                             <li><i class="bi bi-trophy"></i> @competitionTypeDisplayName</li>
                                         }
-                                        @if (competitionShootingClasses.Any())
+                                        @if (hasClassesForDisplay)
                                         {
                                             <li><i class="bi bi-target"></i> @shootingClassName</li>
                                         }
@@ -843,9 +848,9 @@
                         var numberOfSeriesOrStations = competition.Value<int>("numberOfSeriesOrStations");
                         var numberOfFinalSeries = competition.Value<int>("numberOfFinalSeries");
 
-                        // Build competition type display name with series info
+                        // Build competition type display name with series info (skip for Springskytte)
                         var competitionTypeDisplayName = competitionTypeName;
-                        if (numberOfSeriesOrStations > 0)
+                        if (competitionTypeId != "Springskytte" && numberOfSeriesOrStations > 0)
                         {
                             if (numberOfFinalSeries > 0)
                             {
@@ -898,9 +903,13 @@
                             competitionShootingClasses = listShootingClasses.Where(sc => listClassIdArray.Contains((string)sc.Id)).ToList<dynamic>();
                         }
 
-                        var shootingClassName = competitionShootingClasses.Any()
-                            ? string.Join(", ", competitionShootingClasses.Select(sc => sc.Name))
-                            : "Inga klasser";
+                        var isSpringskytteComp = competitionTypeId == "Springskytte";
+                        var shootingClassName = isSpringskytteComp && listClassIdArray.Length > 0
+                            ? string.Join(", ", listClassIdArray)
+                            : competitionShootingClasses.Any()
+                                ? string.Join(", ", competitionShootingClasses.Select(sc => sc.Name))
+                                : "Inga klasser";
+                        var hasClassesForDisplay = isSpringskytteComp ? listClassIdArray.Length > 0 : competitionShootingClasses.Any();
                         var allShootingClassIds = string.Join(",", competitionShootingClasses.Select(sc => sc.Id));
                         var allWeaponClasses = string.Join(",", competitionShootingClasses.Select(sc => sc.Weapon.ToString()).Distinct());
                         var isActive = competition.Value<bool>("isActive");
@@ -1013,9 +1022,14 @@
                             </td>
 
                             <td>
-                                @if (competitionShootingClasses.Any())
+                                @if (hasClassesForDisplay)
                                 {
-                                    if (competitionShootingClasses.Count == 1)
+                                    if (isSpringskytteComp)
+                                    {
+                                        var classCount = listClassIdArray.Length;
+                                        <span class="badge bg-light text-dark" title="@shootingClassName">@classCount klasser</span>
+                                    }
+                                    else if (competitionShootingClasses.Count == 1)
                                     {
                                         <span class="badge bg-light text-dark">@competitionShootingClasses.First().Name</span>
                                     }

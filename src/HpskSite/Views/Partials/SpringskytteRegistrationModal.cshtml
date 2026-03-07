@@ -1,0 +1,524 @@
+@*
+ * Springskytte Registration Modal
+ * Replaces the standard CompetitionRegistrationModal for Springskytte competitions.
+ * Instead of shooting classes (C1, C2, etc.), users select:
+ *   - Weapon class: A or C
+ *   - Age/gender class: D 15, H 21, D 50, etc.
+ * The combined value "A-D 21" or "C-H 35" is submitted as the class.
+ *@
+
+@{
+    var competitionId = ViewData["CompetitionId"];
+    var competitionName = ViewData["CompetitionName"]?.ToString() ?? "";
+    var rawClassIds = ViewData["ShootingClassIds"]?.ToString() ?? "";
+    var regRole = ViewData["RegRole"]?.ToString() ?? "member";
+    var regMemberId = ViewData["RegMemberId"] ?? 0;
+    var regMemberName = ViewData["RegMemberName"]?.ToString() ?? "";
+    var regClubId = ViewData["RegClubId"];
+    var regClubName = ViewData["RegClubName"]?.ToString() ?? "";
+    var allClubsJson = ViewData["AllClubsJson"]?.ToString() ?? "[]";
+    var canSelectTarget = regRole != "member";
+    var hasSwish = ViewData["HasSwish"] is true;
+    var registrationFee = ViewData["RegistrationFee"] ?? 0m;
+
+    // Parse available classes from "A-D 21,C-H 35,..." format
+    var availableClasses = new List<string>();
+    if (!string.IsNullOrEmpty(rawClassIds))
+    {
+        if (rawClassIds.TrimStart().StartsWith("["))
+        {
+            try { availableClasses.AddRange(System.Text.Json.JsonSerializer.Deserialize<string[]>(rawClassIds) ?? Array.Empty<string>()); }
+            catch { availableClasses.AddRange(rawClassIds.Split(',').Select(s => s.Trim()).Where(s => !string.IsNullOrEmpty(s))); }
+        }
+        else
+        {
+            availableClasses.AddRange(rawClassIds.Split(',').Select(s => s.Trim()).Where(s => !string.IsNullOrEmpty(s)));
+        }
+    }
+
+    // Extract available weapon classes and age classes
+    var availableWeapons = availableClasses.Select(c => c.Split('-')[0]).Distinct().ToHashSet();
+    var availableAgeClasses = availableClasses.Select(c => c.Contains('-') ? c.Substring(c.IndexOf('-') + 1) : c).Distinct().ToHashSet();
+    var hasWeaponA = availableWeapons.Contains("A");
+    var hasWeaponC = availableWeapons.Contains("C");
+}
+
+<div class="modal fade" id="registrationModal" tabindex="-1" aria-labelledby="springRegModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title" id="springRegModalLabel">
+                    <i class="bi bi-person-plus me-2"></i>Anmälan - Springskytte
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="springRegFormBody">
+                <p class="mb-3"><strong>@competitionName</strong></p>
+
+                <!-- Registration Target (who to register) -->
+                @if (canSelectTarget)
+                {
+                    <div class="mb-3 p-3 border rounded" style="background-color: var(--bs-tertiary-bg);">
+                        <label class="form-label fw-bold"><i class="bi bi-person-check me-1"></i>Anmäl för</label>
+                        <div class="mb-2">
+                            <select class="form-select form-select-sm" id="springRegClubSelect" onchange="springRegLoadMembers()">
+                                <option value="">Välj klubb...</option>
+                            </select>
+                        </div>
+                        <div>
+                            <select class="form-select form-select-sm" id="springRegMemberSelect" onchange="springRegOnMemberSelected()" disabled>
+                                <option value="">Välj klubb först...</option>
+                            </select>
+                        </div>
+                        <div id="springRegTargetInfo" class="mt-2 small text-muted" style="display:none;"></div>
+                    </div>
+                }
+                else
+                {
+                    <p class="text-muted small mb-2"><i class="bi bi-person me-1"></i>Anmäler: <strong>@regMemberName</strong> (@regClubName)</p>
+                }
+
+                <!-- Weapon Class -->
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Vapengrupp <span class="text-danger">*</span></label>
+                    <div class="d-flex gap-2">
+                        @if (hasWeaponA)
+                        {
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="checkbox" id="springRegWeaponA" value="A" onchange="springRegUpdateSummary()">
+                                <label class="form-check-label" for="springRegWeaponA">
+                                    <span class="badge bg-primary fs-6 px-3 py-2">A</span>
+                                    <small class="d-block text-muted mt-1">Tavla (ring 1-4)</small>
+                                </label>
+                            </div>
+                        }
+                        @if (hasWeaponC)
+                        {
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="checkbox" id="springRegWeaponC" value="C" onchange="springRegUpdateSummary()">
+                                <label class="form-check-label" for="springRegWeaponC">
+                                    <span class="badge bg-primary fs-6 px-3 py-2">C</span>
+                                    <small class="d-block text-muted mt-1">Fallmål</small>
+                                </label>
+                            </div>
+                        }
+                    </div>
+                </div>
+
+                <!-- Age/Gender Class -->
+                <div class="mb-3">
+                    <label for="springRegAgeClass" class="form-label fw-bold">Ålders-/könsklass <span class="text-danger">*</span></label>
+                    <select class="form-select" id="springRegAgeClass" onchange="springRegUpdateSummary()">
+                        <option value="">-- Välj klass --</option>
+                        @{
+                            var juniorClasses = new (string val, string label)[] {
+                                ("D 15", "D 15 (Dam –15 år)"), ("H 15", "H 15 (Herr –15 år)"),
+                                ("D 18", "D 18 (Dam 16–18 år)"), ("H 18", "H 18 (Herr 16–18 år)"),
+                                ("D jun", "D jun (Dam junior 15–20 år)"), ("H jun", "H jun (Herr junior 15–20 år)")
+                            };
+                            var seniorClasses = new (string val, string label)[] {
+                                ("D 21", "D 21 (Dam 21–34 år)"), ("H 21", "H 21 (Herr 21–34 år)"),
+                                ("D 35", "D 35 (Dam 35–49 år)"), ("H 35", "H 35 (Herr 35–49 år)")
+                            };
+                            var veteranClasses = new (string val, string label)[] {
+                                ("D 50", "D 50 (Dam 50–59 år)"), ("H 50", "H 50 (Herr 50–59 år)"),
+                                ("D 60", "D 60 (Dam 60–64 år)"), ("H 60", "H 60 (Herr 60–64 år)"),
+                                ("D 65", "D 65 (Dam 65–69 år)"), ("H 65", "H 65 (Herr 65–69 år)"),
+                                ("D 70", "D 70 (Dam 70+ år)"), ("H 70", "H 70 (Herr 70+ år)")
+                            };
+                            var filteredJunior = juniorClasses.Where(c => availableAgeClasses.Contains(c.val)).ToArray();
+                            var filteredSenior = seniorClasses.Where(c => availableAgeClasses.Contains(c.val)).ToArray();
+                            var filteredVeteran = veteranClasses.Where(c => availableAgeClasses.Contains(c.val)).ToArray();
+                        }
+                        @if (filteredJunior.Any())
+                        {
+                            <optgroup label="Junior">
+                                @foreach (var c in filteredJunior)
+                                {
+                                    <option value="@c.val">@c.label</option>
+                                }
+                            </optgroup>
+                        }
+                        @if (filteredSenior.Any())
+                        {
+                            <optgroup label="Senior">
+                                @foreach (var c in filteredSenior)
+                                {
+                                    <option value="@c.val">@c.label</option>
+                                }
+                            </optgroup>
+                        }
+                        @if (filteredVeteran.Any())
+                        {
+                            <optgroup label="Veteran">
+                                @foreach (var c in filteredVeteran)
+                                {
+                                    <option value="@c.val">@c.label</option>
+                                }
+                            </optgroup>
+                        }
+                    </select>
+                </div>
+
+                <!-- Summary of selected classes -->
+                <div id="springRegSummary" class="mb-3" style="display: none;">
+                    <label class="form-label fw-bold">Du anmäler dig i:</label>
+                    <div id="springRegSummaryBadges" class="d-flex flex-wrap gap-2"></div>
+                </div>
+
+                <!-- Start Preference -->
+                <div class="mb-3">
+                    <label for="springRegStartPref" class="form-label">Startönskemål</label>
+                    <select class="form-select" id="springRegStartPref">
+                        <option value="Inget">Inget önskemål</option>
+                        <option value="Tidig">Tidig start</option>
+                        <option value="Sen">Sen start</option>
+                    </select>
+                </div>
+
+                </div><!-- /springRegFormBody -->
+
+                <!-- Error message -->
+                <div id="springRegError" class="alert alert-danger" style="display: none;"></div>
+                <div id="springRegSuccess" style="display: none;"></div>
+            </div>
+            <div class="modal-footer" id="springRegFooter">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-success" id="springRegSubmitBtn" onclick="springRegSubmit()" disabled>
+                    <i class="bi bi-check-circle me-1"></i>Anmäl
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// --- Registration target state ---
+const springRegConfig = {
+    role: '@regRole',
+    memberId: @regMemberId,
+    memberName: '@Html.Raw(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(regMemberName))',
+    clubId: @(regClubId != null ? regClubId.ToString() : "null"),
+    clubName: '@Html.Raw(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(regClubName))',
+    clubs: @Html.Raw(allClubsJson)
+};
+let springRegSelectedTargetMemberId = springRegConfig.memberId || null;
+
+// --- Init: populate club dropdown for admins ---
+(function() {
+    const clubSelect = document.getElementById('springRegClubSelect');
+    if (!clubSelect) return; // regular member, no dropdowns
+
+    springRegConfig.clubs.forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c.id;
+        opt.textContent = c.name;
+        clubSelect.appendChild(opt);
+    });
+
+    // Pre-select current user's club and load members
+    if (springRegConfig.clubId) {
+        clubSelect.value = springRegConfig.clubId;
+        springRegLoadMembers().then(() => {
+            const memberSelect = document.getElementById('springRegMemberSelect');
+            if (springRegConfig.memberId) {
+                memberSelect.value = springRegConfig.memberId;
+                springRegSelectedTargetMemberId = springRegConfig.memberId;
+                springRegShowTargetInfo(springRegConfig.memberName, springRegConfig.clubName);
+            }
+        });
+    }
+})();
+
+async function springRegLoadMembers() {
+    const clubSelect = document.getElementById('springRegClubSelect');
+    const memberSelect = document.getElementById('springRegMemberSelect');
+    const clubId = clubSelect.value;
+
+    springRegSelectedTargetMemberId = null;
+    const infoDiv = document.getElementById('springRegTargetInfo');
+    if (infoDiv) infoDiv.style.display = 'none';
+
+    if (!clubId) {
+        memberSelect.innerHTML = '<option value="">Välj klubb först...</option>';
+        memberSelect.disabled = true;
+        return;
+    }
+
+    memberSelect.innerHTML = '<option value="">Laddar medlemmar...</option>';
+    memberSelect.disabled = true;
+
+    try {
+        const response = await fetch(`/umbraco/surface/Competition/GetClubMembers?clubId=${clubId}`, {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        });
+        const data = await response.json();
+        if (data.success) {
+            const sorted = data.members.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'sv'));
+            memberSelect.innerHTML = '<option value="">Välj medlem...</option>';
+            sorted.forEach(m => {
+                const opt = document.createElement('option');
+                opt.value = m.id;
+                opt.textContent = `${m.name} (${m.email || 'Ingen e-post'})`;
+                memberSelect.appendChild(opt);
+            });
+            memberSelect.disabled = false;
+        } else {
+            memberSelect.innerHTML = '<option value="">Kunde inte ladda medlemmar</option>';
+        }
+    } catch (err) {
+        console.error('Error loading members:', err);
+        memberSelect.innerHTML = '<option value="">Fel vid laddning</option>';
+    }
+}
+
+function springRegOnMemberSelected() {
+    const memberSelect = document.getElementById('springRegMemberSelect');
+    const clubSelect = document.getElementById('springRegClubSelect');
+    springRegSelectedTargetMemberId = memberSelect.value ? parseInt(memberSelect.value) : null;
+
+    if (springRegSelectedTargetMemberId) {
+        const name = memberSelect.options[memberSelect.selectedIndex].textContent.split(' (')[0];
+        const clubName = clubSelect.options[clubSelect.selectedIndex].textContent;
+        springRegShowTargetInfo(name, clubName);
+    } else {
+        const infoDiv = document.getElementById('springRegTargetInfo');
+        if (infoDiv) infoDiv.style.display = 'none';
+    }
+    springRegUpdateSummary();
+}
+
+function springRegShowTargetInfo(name, clubName) {
+    const infoDiv = document.getElementById('springRegTargetInfo');
+    if (infoDiv) {
+        infoDiv.innerHTML = `<i class="bi bi-person-check text-success me-1"></i><strong>${name}</strong> – ${clubName}`;
+        infoDiv.style.display = 'block';
+    }
+}
+
+// --- Class selection ---
+function springRegGetSelectedClasses() {
+    const ageClass = document.getElementById('springRegAgeClass').value;
+    if (!ageClass) return [];
+
+    const classes = [];
+    const weaponA = document.getElementById('springRegWeaponA');
+    const weaponC = document.getElementById('springRegWeaponC');
+    if (weaponA && weaponA.checked) classes.push(`A-${ageClass}`);
+    if (weaponC && weaponC.checked) classes.push(`C-${ageClass}`);
+    return classes;
+}
+
+function springRegUpdateSummary() {
+    const classes = springRegGetSelectedClasses();
+    const summaryDiv = document.getElementById('springRegSummary');
+    const badgesDiv = document.getElementById('springRegSummaryBadges');
+    const submitBtn = document.getElementById('springRegSubmitBtn');
+
+    // Need classes AND a target member
+    const hasTarget = springRegSelectedTargetMemberId || !document.getElementById('springRegClubSelect');
+    const canSubmit = classes.length > 0 && hasTarget;
+
+    if (classes.length > 0) {
+        summaryDiv.style.display = 'block';
+        badgesDiv.innerHTML = classes.map(c =>
+            `<span class="badge bg-success fs-6 px-3 py-2">${c}</span>`
+        ).join('');
+    } else {
+        summaryDiv.style.display = 'none';
+        badgesDiv.innerHTML = '';
+    }
+    submitBtn.disabled = !canSubmit;
+}
+
+// --- Submit ---
+async function springRegSubmit() {
+    const classes = springRegGetSelectedClasses();
+    if (!classes.length) {
+        springRegShowError('Välj minst en vapengrupp och en ålders-/könsklass.');
+        return;
+    }
+
+    const submitBtn = document.getElementById('springRegSubmitBtn');
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Anmäler...';
+
+    const errorDiv = document.getElementById('springRegError');
+    const successDiv = document.getElementById('springRegSuccess');
+    errorDiv.style.display = 'none';
+    successDiv.style.display = 'none';
+
+    const selectedClasses = classes.join(',');
+    const startPreference = document.getElementById('springRegStartPref').value;
+    const competitionId = @competitionId;
+
+    try {
+        const formData = new FormData();
+        formData.append('competitionId', competitionId);
+        formData.append('selectedClasses', selectedClasses);
+        formData.append('startPreference', startPreference);
+
+        // Pass target member if registering someone else
+        if (springRegSelectedTargetMemberId && springRegSelectedTargetMemberId !== springRegConfig.memberId) {
+            formData.append('targetMemberId', springRegSelectedTargetMemberId);
+        }
+
+        const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value;
+
+        const response = await fetch('/umbraco/surface/Competition/RegisterForCompetition', {
+            method: 'POST',
+            headers: {
+                'RequestVerificationToken': token,
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: formData
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            const hasSwish = @(hasSwish ? "true" : "false");
+            const targetId = springRegSelectedTargetMemberId || '';
+
+            // Hide the form and footer, show success state
+            document.getElementById('springRegFormBody').style.display = 'none';
+            document.getElementById('springRegFooter').style.display = 'none';
+
+            if (hasSwish) {
+                // Show success + Swish payment option
+                successDiv.innerHTML = `
+                    <div class="text-center py-3">
+                        <div class="text-success mb-3"><i class="bi bi-check-circle" style="font-size: 3rem;"></i></div>
+                        <h5 class="mb-2">Anmälan registrerad!</h5>
+                        <p class="text-muted mb-3">${data.message || ''}</p>
+                        <hr>
+                        <p class="mb-2"><strong><i class="bi bi-wallet2 me-1"></i>Betala tävlingsavgift</strong></p>
+                        <div class="d-flex flex-column gap-2 align-items-center">
+                            <button type="button" class="btn btn-primary w-75" onclick="springRegShowSwish(${@competitionId}, '${targetId}')">
+                                <i class="bi bi-qr-code me-1"></i>Betala nu med Swish
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary w-75" onclick="springRegCloseAndReload()">
+                                <i class="bi bi-clock me-1"></i>Betala senare
+                            </button>
+                        </div>
+                    </div>`;
+                successDiv.style.display = 'block';
+            } else {
+                // No Swish — show success with close button
+                successDiv.innerHTML = `
+                    <div class="text-center py-3">
+                        <div class="text-success mb-3"><i class="bi bi-check-circle" style="font-size: 3rem;"></i></div>
+                        <h5 class="mb-2">Anmälan registrerad!</h5>
+                        <p class="text-muted mb-3">${data.message || ''}</p>
+                        <button type="button" class="btn btn-secondary" onclick="springRegCloseAndReload()">
+                            <i class="bi bi-x-circle me-1"></i>Stäng
+                        </button>
+                    </div>`;
+                successDiv.style.display = 'block';
+            }
+        } else {
+            springRegShowError(data.message || 'Ett fel uppstod vid anmälan.');
+        }
+    } catch (err) {
+        console.error('Registration error:', err);
+        springRegShowError('Ett nätverksfel uppstod. Försök igen.');
+    } finally {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Anmäl';
+    }
+}
+
+function springRegShowError(msg) {
+    const errorDiv = document.getElementById('springRegError');
+    errorDiv.textContent = msg;
+    errorDiv.style.display = 'block';
+}
+
+function springRegCloseAndReload() {
+    const modalEl = document.getElementById('registrationModal');
+    if (modalEl) {
+        const modal = bootstrap.Modal.getInstance(modalEl);
+        if (modal) modal.hide();
+    }
+    location.reload();
+}
+
+function springRegShowSwish(competitionId, targetMemberId) {
+    // Close registration modal
+    const regModalEl = document.getElementById('registrationModal');
+    if (regModalEl) {
+        const regModal = bootstrap.Modal.getInstance(regModalEl);
+        if (regModal) regModal.hide();
+    }
+
+    // Open the Swish payment modal
+    const swishModalEl = document.getElementById('swishPaymentModal');
+    if (!swishModalEl) {
+        alert('Swish-betalning är inte tillgänglig just nu.');
+        return;
+    }
+
+    const modal = new bootstrap.Modal(swishModalEl);
+    const modalBody = document.getElementById('swishPaymentModalBody');
+
+    if (modalBody) {
+        modalBody.innerHTML = `
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Laddar QR-kod...</span>
+            </div>
+            <p class="mt-2">Laddar betalningsinformation...</p>
+        `;
+    }
+
+    modal.show();
+
+    let url = `/umbraco/surface/Swish/GeneratePaymentQR?competitionId=${competitionId}`;
+    if (targetMemberId) {
+        url += `&targetMemberId=${encodeURIComponent(targetMemberId)}`;
+    }
+
+    fetch(url)
+        .then(response => response.text())
+        .then(html => {
+            if (modalBody) modalBody.innerHTML = html;
+        })
+        .catch(err => {
+            console.error('Swish QR error:', err);
+            if (modalBody) {
+                modalBody.innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="bi bi-exclamation-triangle"></i> Kunde inte ladda betalningsinformation. Försök igen senare.
+                    </div>
+                `;
+            }
+        });
+}
+
+// Reset form when modal is closed
+document.getElementById('registrationModal')?.addEventListener('hidden.bs.modal', () => {
+    const weaponA = document.getElementById('springRegWeaponA');
+    const weaponC = document.getElementById('springRegWeaponC');
+    if (weaponA) weaponA.checked = false;
+    if (weaponC) weaponC.checked = false;
+    document.getElementById('springRegAgeClass').value = '';
+    document.getElementById('springRegStartPref').value = 'Inget';
+    document.getElementById('springRegError').style.display = 'none';
+    document.getElementById('springRegSuccess').style.display = 'none';
+    document.getElementById('springRegFormBody').style.display = '';
+    document.getElementById('springRegFooter').style.display = '';
+
+    // Reset target to self
+    springRegSelectedTargetMemberId = springRegConfig.memberId || null;
+    const clubSelect = document.getElementById('springRegClubSelect');
+    if (clubSelect && springRegConfig.clubId) {
+        clubSelect.value = springRegConfig.clubId;
+        springRegLoadMembers().then(() => {
+            const memberSelect = document.getElementById('springRegMemberSelect');
+            if (springRegConfig.memberId) memberSelect.value = springRegConfig.memberId;
+        });
+    }
+
+    springRegUpdateSummary();
+});
+</script>

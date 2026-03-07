@@ -68,7 +68,6 @@ namespace HpskSite.Controllers
         {
             try
             {
-                _logger.LogInformation("REGISTRATION: Starting registration for competitionId {CompetitionId}", competitionId);
                 // Get current member (always required for authentication)
                 var currentMember = await _memberManager.GetCurrentMemberAsync();
                 if (currentMember == null)
@@ -213,35 +212,25 @@ namespace HpskSite.Controllers
                     .Where(c => !string.IsNullOrEmpty(c))
                     .ToList();
 
-                // Force create a registrations hub (don't use fallback to competition)
-                _logger.LogInformation("REGISTRATION: About to FORCE create registrations hub for competition {CompetitionId}", competition.Id);
-
                 IContent registrationsHub;
-                try
+                var competitionChildren = _contentService.GetPagedChildren(competition.Id, 0, 100, out _).ToList();
+                var existingHub = competitionChildren.FirstOrDefault(c =>
+                    c.ContentType.Alias == "competitionRegistrationsHub" ||
+                    c.Name.Contains("Anmälningar") ||
+                    c.Name.Contains("Registration"));
+
+                if (existingHub != null)
                 {
-                    // Try to get existing hub first
-                    var children = _contentService.GetPagedChildren(competition.Id, 0, 100, out _);
-                    var existingHub = children.FirstOrDefault(c =>
-                        c.ContentType.Alias == "competitionRegistrationsHub" ||
-                        c.Name.Contains("Anmälningar") ||
-                        c.Name.Contains("Registration"));
-
-                    if (existingHub != null)
+                    registrationsHub = existingHub;
+                }
+                else
+                {
+                    try
                     {
-                        registrationsHub = existingHub;
-                        _logger.LogInformation("REGISTRATION: Found existing hub: {HubName} (ID: {HubId})", existingHub.Name, existingHub.Id);
-                    }
-                    else
-                    {
-                        // Force create new hub
-                        var hubContentType = _contentTypeService.Get("competitionRegistrationsHub");
-                        if (hubContentType == null)
-                        {
-                            hubContentType = _contentTypeService.Get("contentPage");
-                        }
+                        var hubContentType = _contentTypeService.Get("competitionRegistrationsHub")
+                                          ?? _contentTypeService.Get("contentPage");
 
-                        var hubName = "Anmälningar";
-                        var newHub = _contentService.Create(hubName, competition, hubContentType.Alias);
+                        var newHub = _contentService.Create("Anmälningar", competition, hubContentType.Alias);
 
                         if (hubContentType.Alias == "contentPage")
                         {
@@ -249,28 +238,31 @@ namespace HpskSite.Controllers
                             newHub.SetValue("bodyText", "<p>Alla anmälningar för denna tävling.</p>");
                         }
 
-                        var hubSaveResult = _contentService.Save(newHub);
-                        if (hubSaveResult.Success)
+                        try { _contentService.Save(newHub); }
+                        catch (Exception ex) when (IsDocumentUrlTimeout(ex))
                         {
-                            _contentService.Publish(newHub, Array.Empty<string>());
-                            registrationsHub = newHub;
-                            _logger.LogInformation("REGISTRATION: FORCE created new hub: {HubName} (ID: {HubId})", newHub.Name, newHub.Id);
+                            _logger.LogWarning("Hub saved but URL segment rebuild timed out (non-critical)");
                         }
-                        else
+                        registrationsHub = newHub;
+                        // Publish hub in background
+                        var hubId = newHub.Id;
+                        _ = Task.Run(async () =>
                         {
-                            _logger.LogError("REGISTRATION: Failed to create hub, falling back to competition");
-                            registrationsHub = competition;
-                        }
+                            try
+                            {
+                                await Task.Delay(10000);
+                                var hub = _contentService.GetById(hubId);
+                                if (hub != null) _contentService.Publish(hub, Array.Empty<string>());
+                            }
+                            catch { /* hub publish is non-critical */ }
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "REGISTRATION: Exception during hub creation, falling back to competition");
+                        registrationsHub = competition;
                     }
                 }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "REGISTRATION: Exception during hub creation, falling back to competition");
-                    registrationsHub = competition;
-                }
-
-                var isActualHub = registrationsHub.Id != competition.Id;
-                TempData["Success"] = $"Registration will be created under: {registrationsHub.Name} (IsHub: {isActualHub})";
 
                 // Parse start preferences (support both single preference and per-class preferences)
                 var startPreferencesDict = new Dictionary<string, string>();
@@ -296,8 +288,16 @@ namespace HpskSite.Controllers
 
                 var shootingClassesJson = System.Text.Json.JsonSerializer.Serialize(shootingClassesArray);
 
-                // Check if registration already exists for this member+competition
-                var existingRegistration = FindExistingRegistration(competitionId, targetMember.Id, null);
+                // Check if registration already exists — reuse the hub we already found
+                IContent existingRegistration = null;
+                if (registrationsHub.Id != competition.Id)
+                {
+                    var hubRegistrations = _contentService.GetPagedChildren(registrationsHub.Id, 0, 500, out _);
+                    existingRegistration = hubRegistrations.FirstOrDefault(r =>
+                        r.ContentType.Alias == "competitionRegistration" &&
+                        r.GetValue<int>("memberId") == targetMember.Id &&
+                        r.GetValue<int>("competitionId") == competitionId);
+                }
 
                 IContent registration;
                 bool isUpdate = false;
@@ -390,58 +390,63 @@ namespace HpskSite.Controllers
                 registration.SetValue("registrationDate", DateTime.Now); // Update to current timestamp
                 registration.SetValue("registeredBy", currentMemberData.Name); // Track who performed the registration/update
 
-                var saveResult = _contentService.Save(registration);
-                if (!saveResult.Success)
+                // Save content — the DB transaction commits before notifications fire,
+                // so even if DocumentUrlService times out, the data IS persisted.
+                try
                 {
-                    var errorMsg = "Failed to save registration.";
-                    _logger.LogError("REGISTRATION: Save failed for member {MemberId}", targetMember.Id);
-                    if (IsAjaxRequest())
-                    {
-                        return Json(new { success = false, message = errorMsg });
-                    }
-                    TempData["Error"] = errorMsg;
-                    return RedirectToCurrentUmbracoPage();
+                    _contentService.Save(registration);
                 }
-
-                var publishResult = _contentService.Publish(registration, new[] { "*" });
-                if (!publishResult.Success)
+                catch (Exception ex) when (IsDocumentUrlTimeout(ex))
                 {
-                    var errorMsg = "Failed to publish registration.";
-                    _logger.LogError("REGISTRATION: Publish failed for member {MemberId}", targetMember.Id);
-                    if (IsAjaxRequest())
-                    {
-                        return Json(new { success = false, message = errorMsg });
-                    }
-                    TempData["Error"] = errorMsg;
-                    return RedirectToCurrentUmbracoPage();
+                    // SqlBulkCopy timeout in DocumentUrlService — data was saved, URL rebuild is non-critical
+                    _logger.LogWarning("Registration saved but URL segment rebuild timed out (non-critical) for regId={RegId}", registration.Id);
                 }
+                // Delayed fire-and-forget publish
+                var registrationId_forPublish = registration.Id;
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await Task.Delay(10000);
+                        var content = _contentService.GetById(registrationId_forPublish);
+                        if (content != null)
+                        {
+                            _contentService.Publish(content, Array.Empty<string>());
+                            _logger.LogInformation("Background publish completed for registration {RegId}", registrationId_forPublish);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Background publish failed for registration {RegId}", registrationId_forPublish);
+                    }
+                });
 
-                // AFTER successful registration update: Cancel old invoice if fee changed
+                // Cancel old invoice in background if fee changed
                 if (isUpdate && oldInvoiceId.HasValue && oldFee != newFee)
                 {
-                    var oldInvoice = _contentService.GetById(oldInvoiceId.Value);
-                    if (oldInvoice != null)
+                    var invoiceIdToCancel = oldInvoiceId.Value;
+                    var feeInfo = $"{oldFee:F2} to {newFee:F2}";
+                    _ = Task.Run(async () =>
                     {
-                        oldInvoice.SetValue("paymentStatus", "Cancelled");
-                        // Note: isActive property removed - paymentStatus "Cancelled" is sufficient
-                        var notes = oldInvoice.GetValue<string>("notes") ?? "";
-                        notes += $"\n[{DateTime.Now:yyyy-MM-dd HH:mm}] Cancelled - Registration updated with fee change from {oldFee:F2} to {newFee:F2} SEK";
-                        oldInvoice.SetValue("notes", notes);
-                        var invoiceSaveResult = _contentService.Save(oldInvoice);
-                        if (invoiceSaveResult.Success)
+                        try
                         {
-                            _contentService.Publish(oldInvoice, new[] { "*" });
+                            await Task.Delay(10000); // Wait for registration publish to finish first
+                            var oldInvoice = _contentService.GetById(invoiceIdToCancel);
+                            if (oldInvoice != null)
+                            {
+                                oldInvoice.SetValue("paymentStatus", "Cancelled");
+                                var notes = oldInvoice.GetValue<string>("notes") ?? "";
+                                notes += $"\n[{DateTime.Now:yyyy-MM-dd HH:mm}] Cancelled - Fee change from {feeInfo} SEK";
+                                oldInvoice.SetValue("notes", notes);
+                                _contentService.Save(oldInvoice);
+                                _contentService.Publish(oldInvoice, Array.Empty<string>());
+                            }
                         }
-                        _logger.LogInformation("Cancelled old invoice {InvoiceId} due to fee change", oldInvoiceId.Value);
-
-                        // Clear the invoice link from the registration since it was cancelled
-                        registration.SetValue("invoiceId", 0);
-                        var regSaveResult = _contentService.Save(registration);
-                        if (regSaveResult.Success)
+                        catch (Exception ex)
                         {
-                            _contentService.Publish(registration, new[] { "*" });
+                            _logger.LogWarning(ex, "Failed to cancel old invoice {InvoiceId}", invoiceIdToCancel);
                         }
-                    }
+                    });
                 }
 
                 int registrationId = registration.Id;
@@ -1627,6 +1632,22 @@ namespace HpskSite.Controllers
                 _logger.LogError(ex, "Error creating registrations hub for competition {CompetitionId} - RETURNING COMPETITION AS FALLBACK", competition.Id);
                 return competition; // Fall back to creating directly under competition
             }
+        }
+
+        /// <summary>
+        /// Checks if an exception is a SqlBulkCopy timeout from DocumentUrlService.
+        /// This occurs during Save() but the content data IS committed (transaction commits before notifications).
+        /// </summary>
+        private static bool IsDocumentUrlTimeout(Exception ex)
+        {
+            // AggregateException wrapping SqlException with error -2 (timeout)
+            var inner = ex is AggregateException agg ? agg.InnerException : ex;
+            if (inner is Microsoft.Data.SqlClient.SqlException sqlEx && sqlEx.Number == -2)
+            {
+                // Verify it's from DocumentUrlService by checking stack trace
+                return ex.ToString().Contains("DocumentUrlRepository") || ex.ToString().Contains("DocumentUrlService");
+            }
+            return false;
         }
 
         /// <summary>

@@ -51,6 +51,8 @@
     var isActive = Model.Value<bool>("isActive");
     var showLiveResults = Model.Value<bool>("showLiveResults");
     var competitionType = Model.Value<IPublishedContent>("competitionType");
+    var competitionTypeStr = Model.Value<string>("competitionType") ?? "Precision";
+    var isSpringskytte = competitionTypeStr == "Springskytte";
     var numberOfSeriesOrStations = Model.Value<int>("numberOfSeriesOrStations");
     var numberOfFinalSeries = Model.Value<int>("numberOfFinalSeries");
 
@@ -156,6 +158,21 @@
     var shootingClassNames = hasShootingClasses
         ? string.Join(", ", competitionShootingClasses.Select(sc => sc.Name))
         : "Inga klasser angivna";
+
+    // Parse Springskytte class IDs directly (they don't map to standard ShootingClasses)
+    var springClassIds = new List<string>();
+    if (isSpringskytte && !string.IsNullOrEmpty(shootingClassIds))
+    {
+        if (shootingClassIds.StartsWith("[") && shootingClassIds.EndsWith("]"))
+        {
+            try { springClassIds.AddRange(System.Text.Json.JsonSerializer.Deserialize<string[]>(shootingClassIds) ?? Array.Empty<string>()); }
+            catch { springClassIds.AddRange(shootingClassIds.Split(',').Select(s => s.Trim()).Where(s => !string.IsNullOrEmpty(s))); }
+        }
+        else
+        {
+            springClassIds.AddRange(shootingClassIds.Split(',').Select(s => s.Trim()).Where(s => !string.IsNullOrEmpty(s)));
+        }
+    }
 
     // Group available shooting classes by category for smart registration
     var aClasses = competitionShootingClasses.Where(sc => sc.Id.StartsWith("A")).ToList();
@@ -506,7 +523,7 @@
 			else
 			{
 				@* Registration buttons *@
-				@if (isActive && now >= registrationOpenDate && now <= registrationCloseDate && hasShootingClasses)
+				@if (isActive && now >= registrationOpenDate && now <= registrationCloseDate && (hasShootingClasses || isSpringskytte))
 				{
 				<button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#registrationModal">
 				<i class="bi bi-person-plus"></i> Anmäl
@@ -565,24 +582,46 @@
 								<li><i class="bi bi-geo-alt"></i> @venue</li>
 							</ul>
 
-							<p><strong>Skjutklasser:</strong></p>
-							@if (hasShootingClasses)
+							@if (isSpringskytte)
 							{
-								<div class="mb-2">
-									@foreach (var shootingClass in competitionShootingClasses)
-									{
-										<span class="badge bg-primary me-2"
-											  data-bs-toggle="tooltip"
-											  data-bs-placement="top"
-											  title="@shootingClass.Description">@shootingClass.Name</span>
-									}
-								</div>
+								<p><strong>Klasser:</strong></p>
+								if (springClassIds.Any())
+								{
+									<div class="mb-2 d-flex flex-wrap gap-1">
+										@foreach (var cls in springClassIds)
+										{
+											<span class="badge bg-primary">@cls</span>
+										}
+									</div>
+								}
+								else
+								{
+									<div class="alert alert-warning mb-2">
+										<i class="bi bi-exclamation-triangle"></i> Inga klasser har angivits för denna tävling.
+									</div>
+								}
 							}
 							else
 							{
-								<div class="alert alert-warning mb-2">
-									<i class="bi bi-exclamation-triangle"></i> Inga skytteklasser har angivits för denna tävling.
-								</div>
+								<p><strong>Skjutklasser:</strong></p>
+								@if (hasShootingClasses)
+								{
+									<div class="mb-2">
+										@foreach (var shootingClass in competitionShootingClasses)
+										{
+											<span class="badge bg-primary me-2"
+												  data-bs-toggle="tooltip"
+												  data-bs-placement="top"
+												  title="@shootingClass.Description">@shootingClass.Name</span>
+										}
+									</div>
+								}
+								else
+								{
+									<div class="alert alert-warning mb-2">
+										<i class="bi bi-exclamation-triangle"></i> Inga skytteklasser har angivits för denna tävling.
+									</div>
+								}
 							}
 						</div>
 						<div class="col-md-6">
@@ -603,7 +642,10 @@
 								{
 									<li><i class="bi bi-trophy"></i> Typ: <strong>@competitionType.Name</strong></li>
 								}
-								<li><i class="bi bi-list-ol"></i> Antal serier: <strong>@(numberOfFinalSeries > 0 ? $"{numberOfSeriesOrStations - numberOfFinalSeries} + {numberOfFinalSeries}" : $"{numberOfSeriesOrStations}")</strong></li>
+								@if (!isSpringskytte)
+								{
+									<li><i class="bi bi-list-ol"></i> Antal serier: <strong>@(numberOfFinalSeries > 0 ? $"{numberOfSeriesOrStations - numberOfFinalSeries} + {numberOfFinalSeries}" : $"{numberOfSeriesOrStations}")</strong></li>
+								}
 								@if (!isExternal)
 								{
 									<li><i class="bi bi-broadcast@(showLiveResults ? "" : "-off")"></i> Live-resultat: <strong>@(showLiveResults ? "Ja" : "Nej")</strong></li>
@@ -931,26 +973,46 @@
 @* Registration Modal (hidden for external competitions) *@
 @if (!isExternal)
 {
-	@await Html.PartialAsync("CompetitionRegistrationModal", new ViewDataDictionary(ViewData)
+	@if (isSpringskytte)
 	{
-		{ "CompetitionId", Model.Id },
-		{ "CompetitionName", competitionName },
-		{ "AClasses", aClasses },
-		{ "BClasses", bClasses },
-		{ "CClasses", cClasses },
-		{ "CRegularClasses", cRegularClasses },
-		{ "CVetClasses", cVetClasses },
-		{ "CJuniorClasses", cJuniorClasses },
-		{ "CDamClasses", cDamClasses },
-		{ "RClasses", rClasses },
-		{ "LClasses", lClasses },
-		{ "LRegularClasses", lRegularClasses },
-		{ "LVetClasses", lVetClasses },
-		{ "LJuniorClasses", lJuniorClasses },
-		{ "LDamClasses", lDamClasses },
-		{ "MClasses", mClasses },
-		{ "AllowDualCClassRegistration", allowDualCClassRegistration }
-	})
+		@await Html.PartialAsync("SpringskytteRegistrationModal", new ViewDataDictionary(ViewData)
+		{
+			{ "CompetitionId", Model.Id },
+			{ "CompetitionName", competitionName },
+			{ "ShootingClassIds", shootingClassIds },
+			{ "RegRole", regRole },
+			{ "RegMemberId", regMemberId },
+			{ "RegMemberName", currentMemberName },
+			{ "RegClubId", regClubId },
+			{ "RegClubName", regClubName },
+			{ "AllClubsJson", allClubsJson },
+			{ "HasSwish", !string.IsNullOrWhiteSpace(Model.Value<string>("swishNumber")) && (Model.Value<decimal?>("registrationFee") ?? 0) > 0 },
+			{ "RegistrationFee", Model.Value<decimal?>("registrationFee") ?? 0 }
+		})
+	}
+	else
+	{
+		@await Html.PartialAsync("CompetitionRegistrationModal", new ViewDataDictionary(ViewData)
+		{
+			{ "CompetitionId", Model.Id },
+			{ "CompetitionName", competitionName },
+			{ "AClasses", aClasses },
+			{ "BClasses", bClasses },
+			{ "CClasses", cClasses },
+			{ "CRegularClasses", cRegularClasses },
+			{ "CVetClasses", cVetClasses },
+			{ "CJuniorClasses", cJuniorClasses },
+			{ "CDamClasses", cDamClasses },
+			{ "RClasses", rClasses },
+			{ "LClasses", lClasses },
+			{ "LRegularClasses", lRegularClasses },
+			{ "LVetClasses", lVetClasses },
+			{ "LJuniorClasses", lJuniorClasses },
+			{ "LDamClasses", lDamClasses },
+			{ "MClasses", mClasses },
+			{ "AllowDualCClassRegistration", allowDualCClassRegistration }
+		})
+	}
 
 
 	@* Preference Modal *@
@@ -980,6 +1042,8 @@
     var hasSwishNumberValue = !string.IsNullOrWhiteSpace(swishNumber);
 }
 @* DEBUG: swishNumber = "@swishNumber", hasSwishNumber = @hasSwishNumberValue *@
+@if (!isSpringskytte)
+{
 <script>
 // Configuration object for competition-registration.js
 window.CompetitionConfig = {
@@ -1031,6 +1095,7 @@ window.CompetitionConfig = {
     </text>
 }
 </script>
+} @* end !isSpringskytte config block *@
 
 @* Registered Shooters Modal *@
 <div class="modal fade" id="registeredShootersModal" tabindex="-1" aria-labelledby="registeredShootersModalLabel" aria-hidden="true">
@@ -1082,8 +1147,11 @@ window.CompetitionConfig = {
     </div>
 </div>
 
-@* Load external JavaScript file *@
-<script src="/js/competition-registration.js?v=@DateTime.Now.Ticks"></script>
+@* Load external JavaScript file (not for Springskytte - it has its own registration modal) *@
+@if (!isSpringskytte)
+{
+    <script src="/js/competition-registration.js?v=@DateTime.Now.Ticks"></script>
+}
 
 @* Styles for Information Sidebar *@
 <style>

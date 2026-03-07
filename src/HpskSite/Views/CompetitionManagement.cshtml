@@ -433,7 +433,14 @@
         <!-- Start Lists Tab -->
         <div class="tab-pane fade" id="startlists" role="tabpanel">
             <div class="mt-3">
-                @await Html.PartialAsync("CompetitionStartListManagement", new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId } })
+                @if ((ViewData["CompetitionType"]?.ToString() ?? "Precision") == "Springskytte")
+                {
+                    @await Html.PartialAsync("SpringskytteStartListManagement", new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId } })
+                }
+                else
+                {
+                    @await Html.PartialAsync("CompetitionStartListManagement", new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId } })
+                }
             </div>
         </div>
 
@@ -445,7 +452,14 @@
                     resultsViewData["CompetitionId"] = competitionId;
                     // NumberOfSeriesOrStations is already in ViewData from line 39
                 }
-                @await Html.PartialAsync("CompetitionResultsManagement", resultsViewData)
+                @if ((ViewData["CompetitionType"]?.ToString() ?? "Precision") == "Springskytte")
+                {
+                    @await Html.PartialAsync("SpringskytteResultsManagement", resultsViewData)
+                }
+                else
+                {
+                    @await Html.PartialAsync("CompetitionResultsManagement", resultsViewData)
+                }
             </div>
         </div>
 

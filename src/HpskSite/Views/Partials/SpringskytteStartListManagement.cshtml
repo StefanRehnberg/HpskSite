@@ -1,0 +1,235 @@
+@*
+ * Springskytte Start List Management Partial View
+ * Time-interval based start list (not team-based like other competition types).
+ * Each shooter gets an individual start time with configurable intervals and breaks.
+ *@
+
+@{
+    var competitionId = ViewData["CompetitionId"]?.ToString() ?? "";
+}
+
+<div class="springskytte-startlist-management" data-competition-id="@competitionId">
+    <!-- Current Start List Display -->
+    <div class="card">
+        <div class="card-header">
+            <div class="d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-list-ol me-2"></i>Startlista (Springskytte)</h5>
+                <div class="d-flex gap-2">
+                    <button class="btn btn-primary btn-sm" onclick="springOpenGenerateModal()">
+                        <i class="bi bi-arrow-clockwise me-1"></i>Generera startlista
+                    </button>
+                </div>
+            </div>
+        </div>
+        <div class="card-body">
+            <div id="springStartListContent">
+                <div class="text-center py-4">
+                    <div class="spinner-border spinner-border-sm" role="status"><span class="visually-hidden">Laddar...</span></div>
+                    <p class="mt-2 text-muted">Laddar startlista...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Generate Start List Modal -->
+<div class="modal fade" id="springGenerateModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-gear me-2"></i>Generera Startlista</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label for="springFirstStart" class="form-label fw-bold">Första starttid</label>
+                    <input type="text" class="form-control" id="springFirstStart" value="10:00" placeholder="HH:MM">
+                </div>
+                <div class="mb-3">
+                    <label for="springInterval" class="form-label fw-bold">Intervall mellan starter</label>
+                    <input type="text" class="form-control" id="springInterval" value="01:00" placeholder="MM:SS">
+                    <div class="form-text">Tid mellan varje start (MM:SS)</div>
+                </div>
+                <div class="mb-3">
+                    <label for="springBreakAfter" class="form-label fw-bold">Paus efter antal starter</label>
+                    <input type="number" class="form-control" id="springBreakAfter" value="10" min="3" max="30">
+                </div>
+                <div class="mb-3">
+                    <label for="springBreakDuration" class="form-label fw-bold">Pauslängd</label>
+                    <input type="text" class="form-control" id="springBreakDuration" value="05:00" placeholder="MM:SS">
+                    <div class="form-text">Längden på paus (MM:SS)</div>
+                </div>
+
+                <div class="alert alert-info small">
+                    <i class="bi bi-info-circle me-1"></i>
+                    Startlistan genereras utifrån anmälda skyttar, sorterade per vapengrupp. Varje skytt får en individuell starttid.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="springGenerateBtn" onclick="springGenerateStartList()">
+                    <i class="bi bi-arrow-clockwise me-1"></i>Generera
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Flatpickr for time picker -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
+
+<script>
+const springSlCompetitionId = parseInt('@competitionId');
+
+document.addEventListener('DOMContentLoaded', () => {
+    springSlLoadStartList();
+
+    // Initialize Flatpickr for first start time
+    flatpickr('#springFirstStart', {
+        locale: 'sv',
+        enableTime: true,
+        noCalendar: true,
+        dateFormat: 'H:i',
+        time_24hr: true,
+        defaultHour: 10,
+        defaultMinute: 0
+    });
+});
+
+function springOpenGenerateModal() {
+    const modal = new bootstrap.Modal(document.getElementById('springGenerateModal'));
+    modal.show();
+}
+
+async function springSlLoadStartList() {
+    try {
+        const response = await fetch(`/umbraco/surface/Springskytte/GetSpringskytteStartList?competitionId=${springSlCompetitionId}`);
+        const data = await response.json();
+
+        const container = document.getElementById('springStartListContent');
+
+        if (data.success && data.hasStartList && data.starters?.length > 0) {
+            let html = `
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <small class="text-muted">
+                        <i class="bi bi-people me-1"></i>${data.starters.length} startande |
+                        Start: ${data.firstStartTime || '-'} |
+                        Intervall: ${data.defaultInterval || '-'} |
+                        Paus var ${data.breakAfterEvery || '-'}:e start
+                    </small>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-sm table-striped table-hover">
+                        <thead>
+                            <tr>
+                                <th style="width:50px">#</th>
+                                <th style="width:80px">Starttid</th>
+                                <th>Namn</th>
+                                <th>Klubb</th>
+                                <th style="width:60px">Vapen</th>
+                                <th>Klass</th>
+                            </tr>
+                        </thead>
+                        <tbody>`;
+
+            let prevTime = null;
+            for (const s of data.starters) {
+                // Detect breaks (gap > normal interval)
+                if (prevTime && s.startTime) {
+                    const gap = parseTimeDiff(prevTime, s.startTime);
+                    const normalInterval = parseTimeMM(data.defaultInterval);
+                    if (gap > normalInterval * 1.5) {
+                        html += `<tr class="table-warning"><td colspan="6" class="text-center small fw-bold py-1">
+                            <i class="bi bi-pause-circle me-1"></i>Paus</td></tr>`;
+                    }
+                }
+
+                html += `
+                            <tr>
+                                <td>${s.startOrder}</td>
+                                <td class="fw-bold" style="font-family:monospace">${s.startTime}</td>
+                                <td>${s.name}</td>
+                                <td>${s.club}</td>
+                                <td><span class="badge bg-secondary">${s.weaponClass}</span></td>
+                                <td>${s.ageGenderClass}</td>
+                            </tr>`;
+                prevTime = s.startTime;
+            }
+
+            html += `
+                        </tbody>
+                    </table>
+                </div>`;
+            container.innerHTML = html;
+        } else {
+            container.innerHTML = `
+                <div class="text-center py-4">
+                    <i class="bi bi-list-ol display-4 text-muted"></i>
+                    <p class="mt-2 text-muted">Ingen startlista genererad. Klicka "Generera startlista" för att skapa en.</p>
+                </div>`;
+        }
+    } catch (err) {
+        console.error('Error loading start list:', err);
+        document.getElementById('springStartListContent').innerHTML =
+            '<div class="alert alert-danger">Kunde inte ladda startlista.</div>';
+    }
+}
+
+async function springGenerateStartList() {
+    const btn = document.getElementById('springGenerateBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Genererar...';
+
+    try {
+        const requestData = {
+            competitionId: springSlCompetitionId,
+            firstStartTime: document.getElementById('springFirstStart').value,
+            defaultInterval: document.getElementById('springInterval').value,
+            breakAfterEvery: parseInt(document.getElementById('springBreakAfter').value) || 10,
+            breakDuration: document.getElementById('springBreakDuration').value
+        };
+
+        const response = await fetch('/umbraco/surface/Springskytte/GenerateSpringskytteStartList', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]')?.value
+            },
+            body: JSON.stringify(requestData)
+        });
+        const data = await response.json();
+
+        if (data.success) {
+            bootstrap.Modal.getInstance(document.getElementById('springGenerateModal'))?.hide();
+            springSlLoadStartList();
+            alert(data.message);
+        } else {
+            alert(data.message || 'Fel vid generering.');
+        }
+    } catch (err) {
+        console.error('Error generating start list:', err);
+        alert('Ett fel uppstod vid generering av startlista.');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Generera';
+    }
+}
+
+// Helper: parse HH:MM:SS time difference in seconds
+function parseTimeDiff(t1, t2) {
+    const toSec = t => {
+        const p = t.split(':').map(Number);
+        return p.length === 3 ? p[0]*3600+p[1]*60+p[2] : p[0]*3600+p[1]*60;
+    };
+    return toSec(t2) - toSec(t1);
+}
+
+// Helper: parse MM:SS to seconds
+function parseTimeMM(mmss) {
+    if (!mmss) return 60;
+    const p = mmss.split(':').map(Number);
+    return p.length === 2 ? p[0]*60+p[1] : p[0]*60;
+}
+</script>

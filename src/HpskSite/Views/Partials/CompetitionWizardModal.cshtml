@@ -150,56 +150,159 @@
 
                     <!-- Step 3: Skytteklasser -->
                     <div class="wizard-step d-none" data-step="3">
-                        <h6 class="mb-3 text-primary"><i class="bi bi-bullseye me-1"></i>Skytteklasser</h6>
+                        <!-- Standard shooting class selection (non-Springskytte) -->
+                        <div id="wizard_standardClassSelection">
+                            <h6 class="mb-3 text-primary"><i class="bi bi-bullseye me-1"></i>Skytteklasser</h6>
 
-                        <div class="mb-3">
-                            <label class="form-label">Vilka klasser ska tävlingen ha? <span class="text-danger">*</span></label>
+                            <div class="mb-3">
+                                <label class="form-label">Vilka klasser ska tävlingen ha? <span class="text-danger">*</span></label>
 
-                            <!-- Class Selection Display -->
-                            <div class="card" id="wizard_classSelectionCard">
-                                <div class="card-body text-center">
-                                    <p class="text-muted mb-3" id="wizard_noClassesText">Inga klasser valda ännu</p>
-                                    <div class="d-none" id="wizard_selectedClassesDisplay">
-                                        <p class="mb-2"><strong>Valda klasser: <span id="wizard_classCount">0</span></strong></p>
-                                        <p class="mb-3" id="wizard_classList"></p>
+                                <!-- Class Selection Display -->
+                                <div class="card" id="wizard_classSelectionCard">
+                                    <div class="card-body text-center">
+                                        <p class="text-muted mb-3" id="wizard_noClassesText">Inga klasser valda ännu</p>
+                                        <div class="d-none" id="wizard_selectedClassesDisplay">
+                                            <p class="mb-2"><strong>Valda klasser: <span id="wizard_classCount">0</span></strong></p>
+                                            <p class="mb-3" id="wizard_classList"></p>
+                                        </div>
+                                        <button type="button" class="btn btn-primary" onclick="openClassSelectionOverlay()">
+                                            <i class="bi bi-ui-checks me-1"></i><span id="wizard_selectClassesButtonText">Välj skytteklasser</span>
+                                        </button>
                                     </div>
-                                    <button type="button" class="btn btn-primary" onclick="openClassSelectionOverlay()">
-                                        <i class="bi bi-ui-checks me-1"></i><span id="wizard_selectClassesButtonText">Välj skytteklasser</span>
-                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Springskytte class selection -->
+                        <div id="wizard_springskytteClassSelection" style="display: none;">
+                            <h6 class="mb-3 text-primary"><i class="bi bi-bullseye me-1"></i>Vapengrupper & Åldersklasser</h6>
+
+                            <!-- Weapon Classes -->
+                            <div class="mb-3">
+                                <label class="form-label fw-bold">Vapengrupper <span class="text-danger">*</span></label>
+                                <div class="d-flex gap-3">
+                                    <div class="form-check">
+                                        <input class="form-check-input spring-weapon-cb" type="checkbox" value="A" id="springWeapon_A" onchange="springClassUpdateSelection()">
+                                        <label class="form-check-label" for="springWeapon_A">
+                                            <span class="badge bg-primary fs-6 px-3 py-2">A</span>
+                                            <small class="d-block text-muted mt-1">Tavla (ring 1-4)</small>
+                                        </label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input spring-weapon-cb" type="checkbox" value="C" id="springWeapon_C" onchange="springClassUpdateSelection()">
+                                        <label class="form-check-label" for="springWeapon_C">
+                                            <span class="badge bg-primary fs-6 px-3 py-2">C</span>
+                                            <small class="d-block text-muted mt-1">Fallmål</small>
+                                        </label>
+                                    </div>
                                 </div>
                             </div>
 
-                            <!-- Hidden input to store selected classes -->
-                            <input type="hidden" id="wizard_shootingClassIds" name="shootingClassIds">
+                            <!-- Age/Gender Classes -->
+                            <div class="mb-3">
+                                <label class="form-label fw-bold">Ålders-/könsklasser <span class="text-danger">*</span></label>
+                                <div class="mb-2">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="springClassToggleAll(true)">Välj alla</button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="springClassToggleAll(false)">Avmarkera alla</button>
+                                </div>
+
+                                <div class="card">
+                                    <div class="card-body py-2">
+                                        <small class="text-muted fw-bold">Junior</small>
+                                        <div class="row g-1 mb-2">
+                                            <div class="col-6"><div class="form-check"><input class="form-check-input spring-age-cb" type="checkbox" value="D 15" id="springAge_D15" onchange="springClassUpdateSelection()"><label class="form-check-label" for="springAge_D15">D 15 <small class="text-muted">(–15 år)</small></label></div></div>
+                                            <div class="col-6"><div class="form-check"><input class="form-check-input spring-age-cb" type="checkbox" value="H 15" id="springAge_H15" onchange="springClassUpdateSelection()"><label class="form-check-label" for="springAge_H15">H 15 <small class="text-muted">(–15 år)</small></label></div></div>
+                                            <div class="col-6"><div class="form-check"><input class="form-check-input spring-age-cb" type="checkbox" value="D 18" id="springAge_D18" onchange="springClassUpdateSelection()"><label class="form-check-label" for="springAge_D18">D 18 <small class="text-muted">(16–18 år)</small></label></div></div>
+                                            <div class="col-6"><div class="form-check"><input class="form-check-input spring-age-cb" type="checkbox" value="H 18" id="springAge_H18" onchange="springClassUpdateSelection()"><label class="form-check-label" for="springAge_H18">H 18 <small class="text-muted">(16–18 år)</small></label></div></div>
+                                            <div class="col-6"><div class="form-check"><input class="form-check-input spring-age-cb" type="checkbox" value="D jun" id="springAge_Djun" onchange="springClassUpdateSelection()"><label class="form-check-label" for="springAge_Djun">D jun <small class="text-muted">(15–20 år)</small></label></div></div>
+                                            <div class="col-6"><div class="form-check"><input class="form-check-input spring-age-cb" type="checkbox" value="H jun" id="springAge_Hjun" onchange="springClassUpdateSelection()"><label class="form-check-label" for="springAge_Hjun">H jun <small class="text-muted">(15–20 år)</small></label></div></div>
+                                        </div>
+
+                                        <small class="text-muted fw-bold">Senior</small>
+                                        <div class="row g-1 mb-2">
+                                            <div class="col-6"><div class="form-check"><input class="form-check-input spring-age-cb" type="checkbox" value="D 21" id="springAge_D21" onchange="springClassUpdateSelection()"><label class="form-check-label" for="springAge_D21">D 21 <small class="text-muted">(21–34 år)</small></label></div></div>
+                                            <div class="col-6"><div class="form-check"><input class="form-check-input spring-age-cb" type="checkbox" value="H 21" id="springAge_H21" onchange="springClassUpdateSelection()"><label class="form-check-label" for="springAge_H21">H 21 <small class="text-muted">(21–34 år)</small></label></div></div>
+                                            <div class="col-6"><div class="form-check"><input class="form-check-input spring-age-cb" type="checkbox" value="D 35" id="springAge_D35" onchange="springClassUpdateSelection()"><label class="form-check-label" for="springAge_D35">D 35 <small class="text-muted">(35–49 år)</small></label></div></div>
+                                            <div class="col-6"><div class="form-check"><input class="form-check-input spring-age-cb" type="checkbox" value="H 35" id="springAge_H35" onchange="springClassUpdateSelection()"><label class="form-check-label" for="springAge_H35">H 35 <small class="text-muted">(35–49 år)</small></label></div></div>
+                                        </div>
+
+                                        <small class="text-muted fw-bold">Veteran</small>
+                                        <div class="row g-1">
+                                            <div class="col-6"><div class="form-check"><input class="form-check-input spring-age-cb" type="checkbox" value="D 50" id="springAge_D50" onchange="springClassUpdateSelection()"><label class="form-check-label" for="springAge_D50">D 50 <small class="text-muted">(50–59 år)</small></label></div></div>
+                                            <div class="col-6"><div class="form-check"><input class="form-check-input spring-age-cb" type="checkbox" value="H 50" id="springAge_H50" onchange="springClassUpdateSelection()"><label class="form-check-label" for="springAge_H50">H 50 <small class="text-muted">(50–59 år)</small></label></div></div>
+                                            <div class="col-6"><div class="form-check"><input class="form-check-input spring-age-cb" type="checkbox" value="D 60" id="springAge_D60" onchange="springClassUpdateSelection()"><label class="form-check-label" for="springAge_D60">D 60 <small class="text-muted">(60–64 år)</small></label></div></div>
+                                            <div class="col-6"><div class="form-check"><input class="form-check-input spring-age-cb" type="checkbox" value="H 60" id="springAge_H60" onchange="springClassUpdateSelection()"><label class="form-check-label" for="springAge_H60">H 60 <small class="text-muted">(60–64 år)</small></label></div></div>
+                                            <div class="col-6"><div class="form-check"><input class="form-check-input spring-age-cb" type="checkbox" value="D 65" id="springAge_D65" onchange="springClassUpdateSelection()"><label class="form-check-label" for="springAge_D65">D 65 <small class="text-muted">(65–69 år)</small></label></div></div>
+                                            <div class="col-6"><div class="form-check"><input class="form-check-input spring-age-cb" type="checkbox" value="H 65" id="springAge_H65" onchange="springClassUpdateSelection()"><label class="form-check-label" for="springAge_H65">H 65 <small class="text-muted">(65–69 år)</small></label></div></div>
+                                            <div class="col-6"><div class="form-check"><input class="form-check-input spring-age-cb" type="checkbox" value="D 70" id="springAge_D70" onchange="springClassUpdateSelection()"><label class="form-check-label" for="springAge_D70">D 70 <small class="text-muted">(70+ år)</small></label></div></div>
+                                            <div class="col-6"><div class="form-check"><input class="form-check-input spring-age-cb" type="checkbox" value="H 70" id="springAge_H70" onchange="springClassUpdateSelection()"><label class="form-check-label" for="springAge_H70">H 70 <small class="text-muted">(70+ år)</small></label></div></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Summary -->
+                            <div id="springClassSummary" class="mb-3" style="display: none;">
+                                <label class="form-label fw-bold">Valda klasser:</label>
+                                <div id="springClassSummaryBadges" class="d-flex flex-wrap gap-1"></div>
+                            </div>
                         </div>
+
+                        <!-- Hidden input to store selected classes -->
+                        <input type="hidden" id="wizard_shootingClassIds" name="shootingClassIds">
                     </div>
 
                     <!-- Step 4: Serier & Kontakt -->
                     <div class="wizard-step d-none" data-step="4">
                         <h6 class="mb-3 text-primary"><i class="bi bi-list-ol me-1"></i>Serier & Kontakt</h6>
 
-                        <div class="mb-3" id="wizard_seriesGroup">
-                            <label for="wizard_numberOfSeries" class="form-label">Antal serier/stationer <span class="text-danger">*</span></label>
-                            <div class="btn-group mb-2" role="group" id="wizard_seriesButtons">
-                                <button type="button" class="btn btn-outline-primary" onclick="setSeriesCount(6)">6</button>
-                                <button type="button" class="btn btn-outline-primary" onclick="setSeriesCount(7)">7</button>
-                                <button type="button" class="btn btn-outline-primary" onclick="setSeriesCount(10)">10</button>
+                        <!-- Standard series selection (non-Springskytte) -->
+                        <div id="wizard_standardSeriesSection">
+                            <div class="mb-3" id="wizard_seriesGroup">
+                                <label for="wizard_numberOfSeries" class="form-label">Antal serier/stationer <span class="text-danger">*</span></label>
+                                <div class="btn-group mb-2" role="group" id="wizard_seriesButtons">
+                                    <button type="button" class="btn btn-outline-primary" onclick="setSeriesCount(6)">6</button>
+                                    <button type="button" class="btn btn-outline-primary" onclick="setSeriesCount(7)">7</button>
+                                    <button type="button" class="btn btn-outline-primary" onclick="setSeriesCount(10)">10</button>
+                                </div>
+                                <input type="number" class="form-control" id="wizard_numberOfSeries" name="numberOfSeriesOrStations" min="1" max="50" value="6" required>
                             </div>
-                            <input type="number" class="form-control" id="wizard_numberOfSeries" name="numberOfSeriesOrStations" min="1" max="50" value="6" required>
+
+                            <div class="mb-3" id="wizard_finalsGroup">
+                                <label for="wizard_finalSeries" class="form-label">Varav finalserier</label>
+                                <div class="btn-group mb-2" role="group">
+                                    <button type="button" class="btn btn-outline-secondary" onclick="setFinalSeries(0)">0</button>
+                                    <button type="button" class="btn btn-outline-secondary" onclick="setFinalSeries(3)">3</button>
+                                </div>
+                                <input type="number" class="form-control" id="wizard_finalSeries" name="numberOfFinalSeries" min="0" max="10" value="0">
+                            </div>
+
+                            <div class="alert alert-info d-none" id="wizard_milsnabbSeriesNote">
+                                <i class="bi bi-info-circle me-1"></i>
+                                Milsnabb och Nationell Helmatch har alltid 12 serier (3 grupper om 4 serier) och inga finalserier.
+                            </div>
                         </div>
 
-                        <div class="mb-3" id="wizard_finalsGroup">
-                            <label for="wizard_finalSeries" class="form-label">Varav finalserier</label>
-                            <div class="btn-group mb-2" role="group">
-                                <button type="button" class="btn btn-outline-secondary" onclick="setFinalSeries(0)">0</button>
-                                <button type="button" class="btn btn-outline-secondary" onclick="setFinalSeries(3)">3</button>
+                        <!-- Springskytte series section -->
+                        <div id="wizard_springskytteSeriesSection" style="display: none;">
+                            <div class="mb-3">
+                                <label class="form-label fw-bold">Klass C – Stationer (fallmål)</label>
+                                <p class="text-muted mb-1">Klass C har alltid 6 stationer.</p>
+                                <input type="number" class="form-control" value="6" disabled style="max-width: 100px;">
                             </div>
-                            <input type="number" class="form-control" id="wizard_finalSeries" name="numberOfFinalSeries" min="0" max="10" value="0">
-                        </div>
 
-                        <div class="alert alert-info d-none" id="wizard_milsnabbSeriesNote">
-                            <i class="bi bi-info-circle me-1"></i>
-                            Milsnabb och Nationell Helmatch har alltid 12 serier (3 grupper om 4 serier) och inga finalserier.
+                            <div class="mb-3" id="wizard_springskytteClassASeriesGroup" style="display: none;">
+                                <label for="wizard_springskytteClassASeries" class="form-label fw-bold">Klass A – Antal serier (tavla)</label>
+                                <p class="text-muted mb-1">Välj antal serier för klass A (1–6).</p>
+                                <select class="form-select" id="wizard_springskytteClassASeries" style="max-width: 100px;" onchange="springSeriesChanged()">
+                                    <option value="1">1</option>
+                                    <option value="2" selected>2</option>
+                                    <option value="3">3</option>
+                                    <option value="4">4</option>
+                                    <option value="5">5</option>
+                                    <option value="6">6</option>
+                                </select>
+                            </div>
                         </div>
 
                         <hr class="my-4">
@@ -294,7 +397,7 @@
                                 </h2>
                                 <div id="collapseFeatures" class="accordion-collapse collapse" data-bs-parent="#wizardAccordionFeatures">
                                     <div class="accordion-body">
-                                        <div class="mb-3 form-check">
+                                        <div class="mb-3 form-check" id="wizard_dualCClassGroup">
                                             <input type="checkbox" class="form-check-input" id="wizard_allowDualCClass" name="allowDualCClass">
                                             <label class="form-check-label" for="wizard_allowDualCClass">
                                                 Tillåt dubbel C-klassregistrering
@@ -315,7 +418,7 @@
                                             </label>
                                         </div>
 
-                                        <div class="mb-3 form-check">
+                                        <div class="mb-3 form-check" id="wizard_selfReportingGroup">
                                             <input type="checkbox" class="form-check-input" id="wizard_allowSelfReporting" name="allowSelfReporting">
                                             <label class="form-check-label" for="wizard_allowSelfReporting">
                                                 Tillåt resultatrapportering
@@ -696,9 +799,23 @@ function onCompetitionTypeChange() {
 // MagnumPrecision only allows M-classes; other types show all sections.
 function filterClassSections() {
     const typeId = document.getElementById('wizard_competitionType').value;
-    const allSections = ['A', 'B', 'C', 'R', 'L', 'M'];
+    const isSpringskytte = (typeId === 'Springskytte');
 
-    // Define which sections are allowed per type (default: all)
+    // Toggle between standard and Springskytte class selection panels
+    document.getElementById('wizard_standardClassSelection').style.display = isSpringskytte ? 'none' : '';
+    document.getElementById('wizard_springskytteClassSelection').style.display = isSpringskytte ? '' : 'none';
+
+    if (isSpringskytte) {
+        // Clear standard class selections when switching to Springskytte
+        document.querySelectorAll('.class-checkbox:checked').forEach(cb => { cb.checked = false; });
+        springClassUpdateSelection();
+        return;
+    }
+
+    // Clear Springskytte selections when switching away
+    document.querySelectorAll('.spring-weapon-cb:checked, .spring-age-cb:checked').forEach(cb => { cb.checked = false; });
+
+    const allSections = ['A', 'B', 'C', 'R', 'L', 'M'];
     const allowedSections = typeId === 'MagnumPrecision' ? ['M'] : allSections;
 
     allSections.forEach(section => {
@@ -707,13 +824,11 @@ function filterClassSections() {
         const isAllowed = allowedSections.includes(section);
         el.style.display = isAllowed ? '' : 'none';
 
-        // Uncheck hidden checkboxes so they aren't included in the selection
         if (!isAllowed) {
             el.querySelectorAll('.class-checkbox:checked').forEach(cb => { cb.checked = false; });
         }
     });
 
-    // Update the stored selection to remove any unchecked classes
     const stillChecked = Array.from(document.querySelectorAll('.class-checkbox:checked')).map(cb => cb.value);
     document.getElementById('wizard_shootingClassIds').value = stillChecked.join(',');
     updateClassSelectionDisplay();
@@ -728,10 +843,28 @@ function applySeriesDefaults() {
     const seriesButtons = document.getElementById('wizard_seriesButtons');
     const finalsGroup = document.getElementById('wizard_finalsGroup');
     const milsnabbNote = document.getElementById('wizard_milsnabbSeriesNote');
+    const standardSection = document.getElementById('wizard_standardSeriesSection');
+    const springSection = document.getElementById('wizard_springskytteSeriesSection');
     const isLocked = (typeId === 'Milsnabb' || typeId === 'NationellHelmatch');
+    const isSpringskytte = (typeId === 'Springskytte');
 
-    if (isLocked) {
-        // Milsnabb / Nationell Helmatch: always 12 series, no finals
+    // Toggle standard vs Springskytte series sections
+    standardSection.style.display = isSpringskytte ? 'none' : '';
+    springSection.style.display = isSpringskytte ? '' : 'none';
+
+    // Toggle special feature checkboxes irrelevant for Springskytte
+    document.getElementById('wizard_dualCClassGroup').style.display = isSpringskytte ? 'none' : '';
+    document.getElementById('wizard_selfReportingGroup').style.display = isSpringskytte ? 'none' : '';
+
+    if (isSpringskytte) {
+        // Show/hide class A series dropdown based on whether A is selected
+        const hasA = document.getElementById('springWeapon_A')?.checked;
+        document.getElementById('wizard_springskytteClassASeriesGroup').style.display = hasA ? '' : 'none';
+        // Set series value: use class A series if A selected, otherwise 6 (class C default)
+        const aSeries = document.getElementById('wizard_springskytteClassASeries').value;
+        seriesInput.value = hasA ? aSeries : 6;
+        finalsInput.value = 0;
+    } else if (isLocked) {
         seriesInput.value = 12;
         seriesInput.readOnly = true;
         finalsInput.value = 0;
@@ -741,7 +874,6 @@ function applySeriesDefaults() {
         finalsGroup.querySelectorAll('button').forEach(b => b.disabled = true);
         milsnabbNote.classList.remove('d-none');
     } else {
-        // Other types: restore interactive controls
         seriesInput.readOnly = false;
         finalsInput.readOnly = false;
         seriesButtons.classList.remove('d-none');
@@ -749,6 +881,11 @@ function applySeriesDefaults() {
         finalsGroup.querySelectorAll('button').forEach(b => b.disabled = false);
         milsnabbNote.classList.add('d-none');
     }
+}
+
+function springSeriesChanged() {
+    const seriesInput = document.getElementById('wizard_numberOfSeries');
+    seriesInput.value = document.getElementById('wizard_springskytteClassASeries').value;
 }
 
 // Initialize wizard when modal opens
@@ -1131,7 +1268,9 @@ function updateWizardUI() {
         'Steg 1 av 6: Tävlingstyp',
         'Steg 2 av 6: Arrangör',
         'Steg 3 av 6: Anmälan',
-        'Steg 4 av 6: Skytteklasser',
+        document.getElementById('wizard_competitionType').value === 'Springskytte'
+            ? 'Steg 4 av 6: Vapengrupper & Åldersklasser'
+            : 'Steg 4 av 6: Skytteklasser',
         'Steg 5 av 6: Serier & Kontakt',
         'Steg 6 av 6: Avancerat'
     ];
@@ -1170,11 +1309,16 @@ function validateCurrentStep() {
         }
     });
 
-    // Special validation for Step 3 (shooting classes)
+    // Special validation for Step 3 (classes)
     if (wizardCurrentStep === 3) {
         const classIds = document.getElementById('wizard_shootingClassIds').value;
         if (!classIds || classIds.trim() === '') {
-            alert('Vänligen välj minst en skytteklass');
+            const typeId = document.getElementById('wizard_competitionType').value;
+            if (typeId === 'Springskytte') {
+                alert('Välj minst en vapengrupp och minst en åldersklass');
+            } else {
+                alert('Vänligen välj minst en skytteklass');
+            }
             return false;
         }
     }
@@ -1287,6 +1431,40 @@ function updateOverlayClassCount() {
         btnConfirm.classList.remove('btn-primary');
         btnConfirm.classList.add('btn-secondary');
     }
+}
+
+// Springskytte class selection: build weapon×age combinations and store in shootingClassIds
+function springClassUpdateSelection() {
+    const weapons = Array.from(document.querySelectorAll('.spring-weapon-cb:checked')).map(cb => cb.value);
+    const ages = Array.from(document.querySelectorAll('.spring-age-cb:checked')).map(cb => cb.value);
+
+    const combinations = [];
+    weapons.forEach(w => ages.forEach(a => combinations.push(`${w}-${a}`)));
+
+    document.getElementById('wizard_shootingClassIds').value = combinations.join(',');
+
+    // Update summary
+    const summaryDiv = document.getElementById('springClassSummary');
+    const badgesDiv = document.getElementById('springClassSummaryBadges');
+    if (combinations.length > 0) {
+        summaryDiv.style.display = '';
+        badgesDiv.innerHTML = combinations.map(c =>
+            `<span class="badge bg-success px-2 py-1">${c}</span>`
+        ).join('');
+    } else {
+        summaryDiv.style.display = 'none';
+        badgesDiv.innerHTML = '';
+    }
+
+    // Update class A series visibility on step 5
+    const hasA = weapons.includes('A');
+    const classAGroup = document.getElementById('wizard_springskytteClassASeriesGroup');
+    if (classAGroup) classAGroup.style.display = hasA ? '' : 'none';
+}
+
+function springClassToggleAll(checked) {
+    document.querySelectorAll('.spring-age-cb').forEach(cb => { cb.checked = checked; });
+    springClassUpdateSelection();
 }
 
 // Add event listeners to all class checkboxes
@@ -1454,6 +1632,18 @@ window.resetWizard = function() {
         checkbox.checked = false;
     });
     updateOverlayClassCount();
+
+    // Clear Springskytte class selections and reset series
+    document.querySelectorAll('.spring-weapon-cb, .spring-age-cb').forEach(cb => { cb.checked = false; });
+    document.getElementById('springClassSummary').style.display = 'none';
+    document.getElementById('springClassSummaryBadges').innerHTML = '';
+    document.getElementById('wizard_standardClassSelection').style.display = '';
+    document.getElementById('wizard_springskytteClassSelection').style.display = 'none';
+    document.getElementById('wizard_standardSeriesSection').style.display = '';
+    document.getElementById('wizard_springskytteSeriesSection').style.display = 'none';
+    document.getElementById('wizard_springskytteClassASeries').value = '2';
+    document.getElementById('wizard_dualCClassGroup').style.display = '';
+    document.getElementById('wizard_selfReportingGroup').style.display = '';
 
     // Remove validation errors
     document.querySelectorAll('.is-invalid').forEach(field => {

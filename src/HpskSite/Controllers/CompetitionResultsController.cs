@@ -1640,6 +1640,7 @@ namespace HpskSite.Controllers
             "Duell" => "DuellResultEntry",
             "NationellHelmatch" => "NationellHelmatchResultEntry",
             "MagnumPrecision" => "MagnumPrecisionResultEntry",
+            "Springskytte" => "SpringskytteResultEntry",
             _ => "PrecisionResultEntry"
         };
 

@@ -1,0 +1,741 @@
+@*
+ * Springskytte Results Management Partial View
+ * Completely isolated from standard competition results entry.
+ * Handles time-based results with stop-by-stop shot recording.
+ *
+ * Class C: 6 stops x 5 shots, each Hit (H) or Miss (B)
+ * Class A: Configurable series (1-6), 30 shots total, zone values 0-3
+ *@
+
+@{
+    var competitionId = ViewData["CompetitionId"]?.ToString() ?? "";
+    var competitionType = ViewData["CompetitionType"]?.ToString() ?? "Springskytte";
+    var numberOfSeries = ViewData["NumberOfSeriesOrStations"] as int? ?? 6;
+}
+
+<div class="springskytte-results-management" data-competition-id="@competitionId" data-number-of-series="@numberOfSeries">
+    <!-- Results Entry Section -->
+    <div class="card">
+        <div class="card-header" style="cursor: pointer;" onclick="toggleSpringskytteEntry(event)">
+            <div class="d-flex justify-content-between align-items-center">
+                <div class="d-flex align-items-center">
+                    <i class="bi bi-chevron-down me-2" id="springEntryChevron"></i>
+                    <h5 class="mb-0"><i class="bi bi-stopwatch me-2"></i>Registrera Resultat</h5>
+                </div>
+                <span class="text-muted small">
+                    <i class="bi bi-info-circle me-1"></i>Ange löptid och skjutresultat per skytt
+                </span>
+            </div>
+        </div>
+        <div class="card-body" id="springEntryBody">
+            <!-- Shooter Navigation -->
+            <div class="d-flex flex-wrap align-items-center gap-2 mb-3 sticky-top bg-body py-2" style="z-index: 10;">
+                <button class="btn btn-sm btn-outline-secondary" onclick="springFirstShooter()" title="Första skytten">
+                    <i class="bi bi-skip-backward-fill"></i>
+                </button>
+                <button class="btn btn-sm btn-outline-secondary" onclick="springPrevShooter()" title="Föregående skytt">
+                    <i class="bi bi-caret-left-fill"></i>
+                </button>
+                <span class="fw-bold" id="springCurrentShooterInfo">Laddar...</span>
+                <button class="btn btn-sm btn-outline-secondary" onclick="springNextShooter()" title="Nästa skytt">
+                    <i class="bi bi-caret-right-fill"></i>
+                </button>
+                <button class="btn btn-sm btn-outline-secondary" onclick="springLastShooter()" title="Sista skytten">
+                    <i class="bi bi-skip-forward-fill"></i>
+                </button>
+                <div class="ms-auto">
+                    <select class="form-select form-select-sm" id="springShooterFilter" onchange="springFilterShooters()" style="width: auto;">
+                        <option value="all">Alla skyttar</option>
+                        <option value="noresult">Utan resultat</option>
+                        <option value="A">Vapengrupp A</option>
+                        <option value="C">Vapengrupp C</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Entry Form Container -->
+            <div id="springEntryContainer">
+                <div class="text-center py-4">
+                    <div class="spinner-border" role="status"><span class="visually-hidden">Laddar...</span></div>
+                    <p class="mt-2 text-muted">Laddar skyttar...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Results List Section -->
+    <div class="card mt-4">
+        <div class="card-header" style="cursor: pointer;" onclick="toggleSpringskytteResultsList(event)">
+            <div class="d-flex justify-content-between align-items-center">
+                <div class="d-flex align-items-center">
+                    <i class="bi bi-chevron-right me-2" id="springResultsChevron"></i>
+                    <h5 class="mb-0"><i class="bi bi-trophy me-2"></i>Resultatlista</h5>
+                </div>
+                <div class="d-flex align-items-center gap-2" onclick="event.stopPropagation()">
+                    <button class="btn btn-outline-primary btn-sm" onclick="springCreateResultsList(event)">
+                        <i class="bi bi-arrow-clockwise me-1"></i>Uppdatera
+                    </button>
+                    <span class="badge bg-secondary" id="springResultsStatusBadge" style="display:none;"></span>
+                </div>
+            </div>
+        </div>
+        <div class="card-body" id="springResultsBody" style="display: none;">
+            <div id="springResultsContent">
+                <div class="text-center py-4 text-muted">
+                    <i class="bi bi-file-earmark-text display-4"></i>
+                    <p class="mt-2">Klicka "Uppdatera" för att skapa resultatlista</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .shot-btn { width: 42px; height: 36px; font-size: 0.85rem; font-weight: 600; padding: 0; }
+    .shot-btn.active-hit { background-color: var(--bs-success); border-color: var(--bs-success); color: #fff; }
+    .shot-btn.active-miss { background-color: var(--bs-danger); border-color: var(--bs-danger); color: #fff; }
+    .zone-input { width: 42px; text-align: center; font-weight: 600; }
+    .stop-group { border: 1px solid var(--bs-border-color); border-radius: 0.375rem; padding: 0.5rem; margin-bottom: 0.5rem; }
+    .stop-header { font-weight: 600; font-size: 0.85rem; color: var(--bs-secondary-color); }
+    .time-display { font-family: monospace; font-size: 1.1rem; font-weight: 700; }
+    .result-summary { font-size: 0.9rem; }
+    .result-summary .label { color: var(--bs-secondary-color); }
+    .shooter-result-badge { font-size: 0.75rem; }
+    .springskytte-results-table th { white-space: nowrap; font-size: 0.85rem; }
+    .springskytte-results-table td { font-size: 0.85rem; }
+    .springskytte-results-table .time-col { font-family: monospace; }
+</style>
+
+<script>
+// ===== Springskytte Results Management =====
+let springShooters = [];
+let springFilteredShooters = [];
+let springCurrentIndex = 0;
+const springCompetitionId = parseInt('@competitionId');
+const springNumberOfSeries = parseInt('@numberOfSeries') || 6;
+
+document.addEventListener('DOMContentLoaded', () => {
+    springLoadShooters();
+});
+
+// ===== DATA LOADING =====
+
+async function springLoadShooters() {
+    try {
+        const response = await fetch(`/umbraco/surface/Springskytte/GetShootersForSpringskytteResults?competitionId=${springCompetitionId}`);
+        const data = await response.json();
+        if (data.success) {
+            springShooters = data.shooters || [];
+            springFilterShooters();
+            if (springFilteredShooters.length > 0) {
+                springCurrentIndex = 0;
+                springUpdateNav();
+                springRenderEntry();
+            } else {
+                document.getElementById('springEntryContainer').innerHTML =
+                    '<div class="alert alert-info"><i class="bi bi-info-circle me-2"></i>Inga anmälda skyttar hittades.</div>';
+            }
+        } else {
+            document.getElementById('springEntryContainer').innerHTML =
+                `<div class="alert alert-warning">${data.message || 'Kunde inte ladda skyttar.'}</div>`;
+        }
+    } catch (err) {
+        console.error('Error loading shooters:', err);
+        document.getElementById('springEntryContainer').innerHTML =
+            '<div class="alert alert-danger">Ett fel uppstod vid laddning av skyttar.</div>';
+    }
+}
+
+function springFilterShooters() {
+    const filter = document.getElementById('springShooterFilter')?.value || 'all';
+    springFilteredShooters = springShooters.filter(s => {
+        if (filter === 'noresult') return !s.hasResult;
+        if (filter === 'A') return s.weaponClass === 'A';
+        if (filter === 'C') return s.weaponClass === 'C';
+        return true;
+    });
+    springCurrentIndex = 0;
+    springUpdateNav();
+    if (springFilteredShooters.length > 0) {
+        springRenderEntry();
+    } else {
+        document.getElementById('springEntryContainer').innerHTML =
+            '<div class="text-center py-3 text-muted">Inga skyttar matchar filtret.</div>';
+    }
+}
+
+// ===== NAVIGATION =====
+
+function springFirstShooter() { springCurrentIndex = 0; springUpdateNav(); springRenderEntry(); }
+function springPrevShooter() { if (springCurrentIndex > 0) { springCurrentIndex--; springUpdateNav(); springRenderEntry(); } }
+function springNextShooter() { if (springCurrentIndex < springFilteredShooters.length - 1) { springCurrentIndex++; springUpdateNav(); springRenderEntry(); } }
+function springLastShooter() { springCurrentIndex = springFilteredShooters.length - 1; springUpdateNav(); springRenderEntry(); }
+
+function springUpdateNav() {
+    const el = document.getElementById('springCurrentShooterInfo');
+    if (!springFilteredShooters.length) { el.textContent = 'Inga skyttar'; return; }
+    const s = springFilteredShooters[springCurrentIndex];
+    el.textContent = `${springCurrentIndex + 1}/${springFilteredShooters.length}: ${s.memberName} (${s.weaponClass} - ${s.ageGenderClass})`;
+}
+
+// ===== ENTRY FORM RENDERING =====
+
+function springRenderEntry() {
+    const container = document.getElementById('springEntryContainer');
+    const shooter = springFilteredShooters[springCurrentIndex];
+    if (!shooter) { container.innerHTML = ''; return; }
+
+    const existing = shooter.existingResult;
+    const isClassC = shooter.weaponClass === 'C';
+    const statusValue = existing?.status || '';
+
+    // Parse existing shots
+    let existingShots = [];
+    if (existing && shooter.hasResult) {
+        try {
+            // Fetch full result data from DB if needed
+        } catch(e) {}
+    }
+
+    let html = `
+        <div class="border rounded p-3">
+            <!-- Shooter Header -->
+            <div class="d-flex flex-wrap justify-content-between align-items-center mb-3">
+                <div>
+                    <h5 class="mb-0">${shooter.memberName}</h5>
+                    <small class="text-muted">${shooter.memberClub} | Vapengrupp ${shooter.weaponClass} | Klass ${shooter.ageGenderClass}</small>
+                </div>
+                <div class="d-flex gap-2 align-items-center">
+                    ${shooter.hasResult ? '<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Har resultat</span>' : '<span class="badge bg-secondary">Inget resultat</span>'}
+                    <select class="form-select form-select-sm" id="springStatus" style="width: auto;" onchange="springStatusChanged()">
+                        <option value="" ${!statusValue ? 'selected' : ''}>Normal</option>
+                        <option value="DNS" ${statusValue === 'DNS' ? 'selected' : ''}>DNS (Ej start)</option>
+                        <option value="DNF" ${statusValue === 'DNF' ? 'selected' : ''}>DNF (Ej fullföljt)</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Sprint Time -->
+            <div id="springResultFields">
+                <div class="row g-3 mb-3">
+                    <div class="col-md-4">
+                        <label class="form-label fw-bold"><i class="bi bi-stopwatch me-1"></i>Löptid</label>
+                        <input type="text" class="form-control" id="springSprintTime" placeholder="MM:SS"
+                            value="${existing?.sprintTimeSeconds ? formatSecondsToTime(existing.sprintTimeSeconds) : ''}">
+                        <div class="form-text">Ange som MM:SS eller H:MM:SS</div>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label fw-bold"><i class="bi bi-crosshair me-1"></i>Skjutpoäng</label>
+                        <div class="time-display text-danger" id="springShootingScore">
+                            ${existing?.shootingScore ?? 0}
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label fw-bold"><i class="bi bi-clock me-1"></i>Sluttid</label>
+                        <div class="time-display text-primary" id="springTotalTime">
+                            ${existing?.totalTimeDisplay || '-'}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Penalty Multiplier -->
+                ${isClassC ? `
+                <div class="mb-3">
+                    <label class="form-label small">Poäng per bom</label>
+                    <div class="btn-group btn-group-sm" role="group">
+                        <input type="radio" class="btn-check" name="springMultiplier" id="springMult1" value="1" checked>
+                        <label class="btn btn-outline-secondary" for="springMult1">1 (Normal)</label>
+                        <input type="radio" class="btn-check" name="springMultiplier" id="springMult2" value="2">
+                        <label class="btn btn-outline-secondary" for="springMult2">2 (Märkestagning)</label>
+                    </div>
+                </div>` : ''}
+
+                <!-- Shots -->
+                <h6 class="mb-2"><i class="bi bi-bullseye me-1"></i>Skjutresultat</h6>
+                ${isClassC ? springRenderClassCShots() : springRenderClassAShots()}
+            </div>
+
+            <!-- Save / Delete -->
+            <div class="d-flex justify-content-between mt-3">
+                <button class="btn btn-danger btn-sm" onclick="springDeleteResult()" ${!shooter.hasResult ? 'disabled' : ''}>
+                    <i class="bi bi-trash me-1"></i>Ta bort
+                </button>
+                <div class="d-flex gap-2">
+                    <button class="btn btn-outline-secondary" onclick="springNextShooter()">
+                        Hoppa över <i class="bi bi-skip-forward ms-1"></i>
+                    </button>
+                    <button class="btn btn-primary" onclick="springSaveResult()">
+                        <i class="bi bi-floppy me-1"></i>Spara
+                    </button>
+                </div>
+            </div>
+        </div>`;
+
+    container.innerHTML = html;
+    springStatusChanged(); // Show/hide fields based on status
+}
+
+function springRenderClassCShots() {
+    let html = '<div class="row g-2">';
+    for (let stop = 1; stop <= 6; stop++) {
+        html += `
+        <div class="col-md-6 col-lg-4">
+            <div class="stop-group">
+                <div class="stop-header mb-1">Station ${stop}</div>
+                <div class="d-flex gap-1">`;
+        for (let shot = 1; shot <= 5; shot++) {
+            const id = `shot_${stop}_${shot}`;
+            html += `
+                    <button type="button" class="btn btn-outline-secondary shot-btn" id="${id}"
+                        onclick="springToggleClassCShot(this)" data-stop="${stop}" data-shot="${shot}" data-value="">
+                        -
+                    </button>`;
+        }
+        html += `
+                    <span class="align-self-center ms-1 small fw-bold" id="stop${stop}Count">0/5</span>
+                </div>
+            </div>
+        </div>`;
+    }
+    html += '</div>';
+    return html;
+}
+
+function springRenderClassAShots() {
+    // Class A: configurable number of series, always 30 shots total
+    const numSeries = springNumberOfSeries || 2;
+    const shotsPerSeries = Math.floor(30 / numSeries);
+    const extraShots = 30 - (shotsPerSeries * numSeries); // Handle uneven splits
+
+    let html = `<div class="mb-2 small text-muted">${numSeries} serie(r), ${shotsPerSeries} skott/serie, Zon 0-3 (0=träff ring 1-2, 1=ring 3, 2=ring 4, 3=utanför)</div>`;
+    html += '<div class="row g-2">';
+
+    for (let series = 1; series <= numSeries; series++) {
+        const shotsInThisSeries = series === numSeries ? shotsPerSeries + extraShots : shotsPerSeries;
+        html += `
+        <div class="col-12">
+            <div class="stop-group">
+                <div class="stop-header mb-1">Serie ${series} (${shotsInThisSeries} skott)</div>
+                <div class="d-flex flex-wrap gap-1">`;
+        for (let shot = 1; shot <= shotsInThisSeries; shot++) {
+            const id = `zona_${series}_${shot}`;
+            html += `
+                    <input type="number" class="form-control zone-input" id="${id}" min="0" max="3"
+                        data-series="${series}" data-shot="${shot}" placeholder="-"
+                        onchange="springRecalcClassA()" oninput="springRecalcClassA()">`;
+        }
+        html += `
+                    <span class="align-self-center ms-2 small fw-bold" id="seriesA${series}Score">0p</span>
+                </div>
+            </div>
+        </div>`;
+    }
+    html += '</div>';
+    return html;
+}
+
+// ===== SHOT INTERACTION =====
+
+function springToggleClassCShot(btn) {
+    const current = btn.dataset.value;
+    if (current === '' || current === undefined) {
+        // First click: Hit
+        btn.dataset.value = 'H';
+        btn.textContent = 'T';
+        btn.classList.remove('btn-outline-secondary', 'active-miss');
+        btn.classList.add('active-hit');
+    } else if (current === 'H') {
+        // Second click: Miss
+        btn.dataset.value = 'B';
+        btn.textContent = 'B';
+        btn.classList.remove('active-hit');
+        btn.classList.add('active-miss');
+    } else {
+        // Third click: Reset
+        btn.dataset.value = '';
+        btn.textContent = '-';
+        btn.classList.remove('active-hit', 'active-miss');
+        btn.classList.add('btn-outline-secondary');
+    }
+    springRecalcClassC();
+}
+
+function springRecalcClassC() {
+    let totalMisses = 0;
+    for (let stop = 1; stop <= 6; stop++) {
+        let hits = 0, misses = 0;
+        for (let shot = 1; shot <= 5; shot++) {
+            const btn = document.getElementById(`shot_${stop}_${shot}`);
+            if (btn?.dataset.value === 'H') hits++;
+            if (btn?.dataset.value === 'B') misses++;
+        }
+        totalMisses += misses;
+        const countEl = document.getElementById(`stop${stop}Count`);
+        if (countEl) countEl.textContent = `${hits}/5`;
+    }
+
+    const multiplier = parseInt(document.querySelector('input[name="springMultiplier"]:checked')?.value || '1');
+    const shootingScore = totalMisses * multiplier;
+    document.getElementById('springShootingScore').textContent = shootingScore;
+    springUpdateTotalTime(shootingScore, multiplier);
+}
+
+function springRecalcClassA() {
+    let totalScore = 0;
+    const numSeries = springNumberOfSeries || 2;
+    const shotsPerSeries = Math.floor(30 / numSeries);
+    const extraShots = 30 - (shotsPerSeries * numSeries);
+
+    for (let series = 1; series <= numSeries; series++) {
+        let seriesScore = 0;
+        const shotsInThisSeries = series === numSeries ? shotsPerSeries + extraShots : shotsPerSeries;
+        for (let shot = 1; shot <= shotsInThisSeries; shot++) {
+            const input = document.getElementById(`zona_${series}_${shot}`);
+            if (input && input.value !== '') {
+                const val = parseInt(input.value);
+                if (!isNaN(val) && val >= 0 && val <= 3) seriesScore += val;
+            }
+        }
+        totalScore += seriesScore;
+        const scoreEl = document.getElementById(`seriesA${series}Score`);
+        if (scoreEl) scoreEl.textContent = `${seriesScore}p`;
+    }
+
+    document.getElementById('springShootingScore').textContent = totalScore;
+    springUpdateTotalTime(totalScore, 1);
+}
+
+function springUpdateTotalTime(shootingScore, multiplier) {
+    const sprintInput = document.getElementById('springSprintTime')?.value;
+    const sprintSeconds = parseTimeToSeconds(sprintInput);
+    if (sprintSeconds !== null) {
+        const penaltySeconds = shootingScore * multiplier * 60;
+        const totalSeconds = sprintSeconds + penaltySeconds;
+        document.getElementById('springTotalTime').textContent = formatSecondsToTime(totalSeconds);
+    } else {
+        document.getElementById('springTotalTime').textContent = '-';
+    }
+}
+
+// Listen for sprint time changes
+document.addEventListener('input', function(e) {
+    if (e.target.id === 'springSprintTime') {
+        const shooter = springFilteredShooters[springCurrentIndex];
+        if (shooter?.weaponClass === 'C') springRecalcClassC();
+        else springRecalcClassA();
+    }
+});
+
+// Listen for multiplier changes
+document.addEventListener('change', function(e) {
+    if (e.target.name === 'springMultiplier') springRecalcClassC();
+});
+
+function springStatusChanged() {
+    const status = document.getElementById('springStatus')?.value;
+    const fields = document.getElementById('springResultFields');
+    if (fields) {
+        fields.style.opacity = status ? '0.4' : '1';
+        fields.style.pointerEvents = status ? 'none' : 'auto';
+    }
+}
+
+// ===== SAVE / DELETE =====
+
+async function springSaveResult() {
+    const shooter = springFilteredShooters[springCurrentIndex];
+    if (!shooter) return;
+
+    const status = document.getElementById('springStatus')?.value || null;
+    const sprintTimeInput = document.getElementById('springSprintTime')?.value || null;
+    const isClassC = shooter.weaponClass === 'C';
+
+    // Validate sprint time (required unless DNS/DNF)
+    if (!status && !sprintTimeInput) {
+        alert('Ange löptid eller välj DNS/DNF.');
+        return;
+    }
+
+    // Collect shots
+    let shotSeries = [];
+    if (!status) {
+        if (isClassC) {
+            shotSeries = springCollectClassCShots();
+        } else {
+            shotSeries = springCollectClassAShots();
+        }
+    }
+
+    const multiplier = isClassC
+        ? parseInt(document.querySelector('input[name="springMultiplier"]:checked')?.value || '1')
+        : 1;
+
+    const requestData = {
+        competitionId: springCompetitionId,
+        memberId: shooter.memberId,
+        weaponClass: shooter.weaponClass,
+        ageGenderClass: shooter.ageGenderClass,
+        sprintTimeInput: sprintTimeInput,
+        shotSeries: shotSeries,
+        penaltyMultiplier: multiplier,
+        status: status
+    };
+
+    try {
+        const response = await fetch('/umbraco/surface/Springskytte/SaveSpringskytteResult', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]')?.value
+            },
+            body: JSON.stringify(requestData)
+        });
+        const data = await response.json();
+
+        if (data.success) {
+            // Update shooter status
+            shooter.hasResult = true;
+            shooter.existingResult = {
+                sprintTimeSeconds: parseTimeToSeconds(sprintTimeInput),
+                shootingScore: data.shootingScore,
+                totalTimeSeconds: data.totalTimeSeconds,
+                totalTimeDisplay: data.totalTimeDisplay,
+                status: status
+            };
+
+            showSpringMessage(`Resultat sparat: ${data.totalTimeDisplay || status || '-'}`, 'success');
+
+            // Auto-advance to next shooter
+            if (springCurrentIndex < springFilteredShooters.length - 1) {
+                setTimeout(() => { springNextShooter(); }, 500);
+            }
+        } else {
+            showSpringMessage(data.message || 'Fel vid sparning.', 'danger');
+        }
+    } catch (err) {
+        console.error('Error saving result:', err);
+        showSpringMessage('Ett fel uppstod vid sparning.', 'danger');
+    }
+}
+
+async function springDeleteResult() {
+    const shooter = springFilteredShooters[springCurrentIndex];
+    if (!shooter || !confirm(`Ta bort resultat för ${shooter.memberName}?`)) return;
+
+    try {
+        const response = await fetch('/umbraco/surface/Springskytte/DeleteSpringskytteResult', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]')?.value
+            },
+            body: JSON.stringify({
+                competitionId: springCompetitionId,
+                memberId: shooter.memberId,
+                weaponClass: shooter.weaponClass
+            })
+        });
+        const data = await response.json();
+        if (data.success) {
+            shooter.hasResult = false;
+            shooter.existingResult = null;
+            showSpringMessage('Resultat borttaget.', 'success');
+            springRenderEntry();
+        } else {
+            showSpringMessage(data.message || 'Fel vid borttagning.', 'danger');
+        }
+    } catch (err) {
+        showSpringMessage('Ett fel uppstod.', 'danger');
+    }
+}
+
+function springCollectClassCShots() {
+    const series = [];
+    for (let stop = 1; stop <= 6; stop++) {
+        const stopShots = [];
+        for (let shot = 1; shot <= 5; shot++) {
+            const btn = document.getElementById(`shot_${stop}_${shot}`);
+            stopShots.push(btn?.dataset.value || '');
+        }
+        series.push(stopShots);
+    }
+    return series;
+}
+
+function springCollectClassAShots() {
+    const series = [];
+    const numSeries = springNumberOfSeries || 2;
+    const shotsPerSeries = Math.floor(30 / numSeries);
+    const extraShots = 30 - (shotsPerSeries * numSeries);
+
+    for (let s = 1; s <= numSeries; s++) {
+        const seriesShots = [];
+        const shotsInThisSeries = s === numSeries ? shotsPerSeries + extraShots : shotsPerSeries;
+        for (let shot = 1; shot <= shotsInThisSeries; shot++) {
+            const input = document.getElementById(`zona_${s}_${shot}`);
+            seriesShots.push(input?.value || '0');
+        }
+        series.push(seriesShots);
+    }
+    return series;
+}
+
+// ===== RESULTS LIST =====
+
+async function springCreateResultsList(event) {
+    if (event) event.stopPropagation();
+    if (!confirm('Vill du skapa/uppdatera resultatlistan?')) return;
+
+    const btn = event?.target?.closest('button');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Beräknar...'; }
+
+    try {
+        const response = await fetch('/umbraco/surface/Springskytte/CalculateSpringskytteFinalResults', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]')?.value
+            },
+            body: JSON.stringify(springCompetitionId)
+        });
+        const data = await response.json();
+
+        if (data.success) {
+            showSpringMessage(data.message, 'success');
+            springLoadResultsList();
+        } else {
+            alert(data.message || 'Fel vid beräkning.');
+        }
+    } catch (err) {
+        alert('Ett fel uppstod.');
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Uppdatera'; }
+    }
+}
+
+async function springLoadResultsList() {
+    try {
+        const response = await fetch(`/umbraco/surface/Springskytte/GetSpringskytteResults?competitionId=${springCompetitionId}`);
+        const data = await response.json();
+
+        const body = document.getElementById('springResultsBody');
+        const chevron = document.getElementById('springResultsChevron');
+        const content = document.getElementById('springResultsContent');
+
+        if (data.success && data.classGroups?.length > 0) {
+            body.style.display = 'block';
+            chevron.classList.remove('bi-chevron-right');
+            chevron.classList.add('bi-chevron-down');
+
+            let html = '';
+            for (const group of data.classGroups) {
+                html += `
+                <div class="mb-4">
+                    <h6 class="border-bottom pb-1">${group.className}</h6>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-striped springskytte-results-table">
+                            <thead>
+                                <tr>
+                                    <th>Plats</th>
+                                    <th>Namn</th>
+                                    <th>Förening</th>
+                                    <th class="time-col">Löptid</th>
+                                    <th>Skjutp.</th>
+                                    <th class="time-col">Tillägg</th>
+                                    <th class="time-col fw-bold">Sluttid</th>
+                                    <th>Medalj</th>
+                                </tr>
+                            </thead>
+                            <tbody>`;
+                for (const s of group.shooters) {
+                    const medal = s.standardMedal === 'S' ? '<span class="badge bg-secondary">S</span>'
+                        : s.standardMedal === 'B' ? '<span class="badge" style="background:#cd7f32;color:#fff;">B</span>'
+                        : '';
+                    html += `
+                                <tr>
+                                    <td>${s.status ? s.status : (s.rank || '-')}</td>
+                                    <td>${s.name}</td>
+                                    <td>${s.club}</td>
+                                    <td class="time-col">${s.sprintTimeDisplay}</td>
+                                    <td>${s.shootingScore ?? '-'}</td>
+                                    <td class="time-col">${s.penaltyTimeDisplay}</td>
+                                    <td class="time-col fw-bold">${s.totalTimeDisplay}</td>
+                                    <td>${medal}</td>
+                                </tr>`;
+                }
+                html += `
+                            </tbody>
+                        </table>
+                    </div>
+                </div>`;
+            }
+            content.innerHTML = html;
+        }
+    } catch (err) {
+        console.error('Error loading results:', err);
+    }
+}
+
+function toggleSpringskytteEntry(event) {
+    const body = document.getElementById('springEntryBody');
+    const chevron = document.getElementById('springEntryChevron');
+    if (body.style.display === 'none') {
+        body.style.display = 'block';
+        chevron.classList.remove('bi-chevron-right');
+        chevron.classList.add('bi-chevron-down');
+    } else {
+        body.style.display = 'none';
+        chevron.classList.remove('bi-chevron-down');
+        chevron.classList.add('bi-chevron-right');
+    }
+}
+
+function toggleSpringskytteResultsList(event) {
+    const body = document.getElementById('springResultsBody');
+    const chevron = document.getElementById('springResultsChevron');
+    if (body.style.display === 'none') {
+        body.style.display = 'block';
+        chevron.classList.remove('bi-chevron-right');
+        chevron.classList.add('bi-chevron-down');
+    } else {
+        body.style.display = 'none';
+        chevron.classList.remove('bi-chevron-down');
+        chevron.classList.add('bi-chevron-right');
+    }
+}
+
+// ===== UTILITIES =====
+
+function parseTimeToSeconds(input) {
+    if (!input) return null;
+    const parts = input.trim().split(':');
+    if (parts.length === 2) {
+        const m = parseInt(parts[0]), s = parseInt(parts[1]);
+        if (!isNaN(m) && !isNaN(s)) return m * 60 + s;
+    }
+    if (parts.length === 3) {
+        const h = parseInt(parts[0]), m = parseInt(parts[1]), s = parseInt(parts[2]);
+        if (!isNaN(h) && !isNaN(m) && !isNaN(s)) return h * 3600 + m * 60 + s;
+    }
+    return null;
+}
+
+function formatSecondsToTime(totalSeconds) {
+    if (totalSeconds === null || totalSeconds === undefined) return '-';
+    const s = Math.round(totalSeconds);
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    if (h > 0) return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+    return `${m}:${String(sec).padStart(2,'0')}`;
+}
+
+function showSpringMessage(msg, type) {
+    const container = document.getElementById('springEntryContainer');
+    const alertDiv = document.createElement('div');
+    alertDiv.className = `alert alert-${type} alert-dismissible fade show mt-2`;
+    alertDiv.innerHTML = `${msg}<button type="button" class="btn-close" data-bs-dismiss="alert"></button>`;
+    container.prepend(alertDiv);
+    setTimeout(() => alertDiv.remove(), 3000);
+}
+</script>
