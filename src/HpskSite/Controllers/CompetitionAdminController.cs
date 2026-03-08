@@ -551,7 +551,7 @@ namespace HpskSite.Controllers
                         return new
                         {
                             id = comp.Id,
-                            name = comp.Name,
+                            name = comp.Value<string>("competitionName") ?? comp.Name,
                             description = comp.Value<string>("description") ?? "",
                             type = comp.Value<string>("competitionType") ?? "Unknown",
                             startDate = compDate,
@@ -923,8 +923,28 @@ namespace HpskSite.Controllers
                                 value = dateValue;
                             }
                         }
+                        else if (field.Key == "registrationFee" && value != null)
+                        {
+                            // registrationFee must be stored as decimal (not int) for Model.Value<decimal?> to work
+                            if (value is System.Text.Json.JsonElement jsonElementDec)
+                            {
+                                if (jsonElementDec.ValueKind == System.Text.Json.JsonValueKind.Number)
+                                {
+                                    value = jsonElementDec.GetDecimal();
+                                }
+                                else if (jsonElementDec.ValueKind == System.Text.Json.JsonValueKind.String &&
+                                         decimal.TryParse(jsonElementDec.GetString(), out decimal parsedDec))
+                                {
+                                    value = parsedDec;
+                                }
+                            }
+                            else if (decimal.TryParse(value.ToString(), out decimal decValue))
+                            {
+                                value = decValue;
+                            }
+                        }
                         else if ((field.Key == "maxParticipants" || field.Key == "numberOfSeriesOrStations" ||
-                                  field.Key == "numberOfFinalSeries" || field.Key == "registrationFee" || field.Key == "clubId") && value != null)
+                                  field.Key == "numberOfFinalSeries" || field.Key == "clubId") && value != null)
                         {
                             // Handle JsonElement numbers
                             if (value is System.Text.Json.JsonElement jsonElement)
@@ -1588,7 +1608,7 @@ namespace HpskSite.Controllers
                     data = new
                     {
                         id = competition.Id,
-                        name = competition.Name,
+                        name = competition.GetValue<string>("competitionName") ?? competition.Name,
                         type = competition.GetValue<string>("competitionType"),
                         startDate = competition.GetValue<DateTime?>("competitionDate"),
                         isExternal = true

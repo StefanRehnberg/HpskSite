@@ -8,6 +8,7 @@
 @inject Umbraco.Cms.Core.Security.IMemberManager MemberManager
 @inject HpskSite.Services.AdminAuthorizationService AuthService
 @inject HpskSite.Services.ClubService ClubService
+@inject Umbraco.Cms.Core.Services.IContentService ContentService
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
 	Layout = "Master.cshtml";
@@ -341,20 +342,27 @@
     // Server-side sidebar data (replaces 3 slow AJAX calls with in-memory published content cache lookups)
     var competitionChildren = Model.Children()?.ToList() ?? new List<IPublishedContent>();
 
-    // 1. Registration counts from published content
-    var registrationsHub = competitionChildren.FirstOrDefault(c => c.ContentType.Alias == "competitionRegistrationsHub");
-    var registrationNodes = registrationsHub?.Children()?
-        .Where(c => c.ContentType.Alias == "competitionRegistration")
-        .ToList() ?? new List<IPublishedContent>();
-    var uniqueShooterCount = registrationNodes
-        .Select(r => r.Value<int>("memberId"))
-        .Where(id => id > 0)
+    // 1. Registration counts — use IContentService to include saved-but-unpublished registrations
+    long _regHubTotal;
+    var competitionContentChildren = ContentService.GetPagedChildren(Model.Id, 0, 100, out _regHubTotal);
+    var regHub = competitionContentChildren.FirstOrDefault(c => c.ContentType.Alias == "competitionRegistrationsHub");
+    var registrationContents = new List<Umbraco.Cms.Core.Models.IContent>();
+    if (regHub != null)
+    {
+        long totalRegs;
+        registrationContents = ContentService.GetPagedChildren(regHub.Id, 0, 1000, out totalRegs)
+            .Where(c => c.ContentType.Alias == "competitionRegistration")
+            .ToList();
+    }
+    var uniqueShooterCount = registrationContents
+        .Select(r => r.GetValue<string>("memberId") ?? "")
+        .Where(id => !string.IsNullOrEmpty(id))
         .Distinct()
         .Count();
     var totalStartsCount = 0;
-    foreach (var reg in registrationNodes)
+    foreach (var reg in registrationContents)
     {
-        var classesJson = reg.Value<string>("shootingClasses") ?? "";
+        var classesJson = reg.GetValue<string>("shootingClasses") ?? "";
         if (!string.IsNullOrEmpty(classesJson))
         {
             try
@@ -363,6 +371,10 @@
                 totalStartsCount += doc.RootElement.GetArrayLength();
             }
             catch { totalStartsCount += 1; }
+        }
+        else
+        {
+            totalStartsCount += 1;
         }
     }
 
@@ -1022,8 +1034,8 @@
 			{ "RegClubId", regClubId },
 			{ "RegClubName", regClubName },
 			{ "AllClubsJson", allClubsJson },
-			{ "HasSwish", !string.IsNullOrWhiteSpace(Model.Value<string>("swishNumber")) && (Model.Value<decimal?>("registrationFee") ?? 0) > 0 },
-			{ "RegistrationFee", Model.Value<decimal?>("registrationFee") ?? 0 }
+			{ "HasSwish", !string.IsNullOrWhiteSpace(Model.Value<string>("swishNumber")) && decimal.TryParse(registrationFee, out var _springFee) && _springFee > 0 },
+			{ "RegistrationFee", decimal.TryParse(registrationFee, out var _springFeeVal) ? _springFeeVal : 0m }
 		})
 	}
 	else
@@ -1085,7 +1097,7 @@
 window.CompetitionConfig = {
     competitionId: @Model.Id,
     allowDualCClassRegistration: @(allowDualCClassRegistration.ToString().ToLower()),
-    registrationFee: @(Model.Value<decimal?>("registrationFee") ?? 0),
+    registrationFee: @(decimal.TryParse(registrationFee, out var _configFee) ? _configFee : 0m),
     hasSwishNumber: @(hasSwishNumberValue.ToString().ToLower()),
     registrationInfo: {
         role: '@regRole',
@@ -1233,10 +1245,18 @@ document.addEventListener('DOMContentLoaded', function() {
     {
         @* Only AJAX call needed: showLiveResults enabled but no result page — lightweight DB check *@
         <text>
-    fetch(`/umbraco/surface/CompetitionResults/GetResultsStats?competitionId=${competitionId}`)
+    @if (isSpringskytte)
+    {
+        @:fetch(`/umbraco/surface/Springskytte/GetSpringskytteResults?competitionId=${competitionId}`)
+    }
+    else
+    {
+        @:fetch(`/umbraco/surface/CompetitionResults/GetResultsStats?competitionId=${competitionId}`)
+    }
         .then(response => response.json())
         .then(data => {
-            if (data.Success && data.Count > 0) {
+            var hasResults = @(isSpringskytte ? "data.success && data.classGroups && data.classGroups.length > 0" : "data.Success && data.Count > 0");
+            if (hasResults) {
                 var container = document.getElementById('liveResultsCheck');
                 if (container) {
                     container.innerHTML = '<button class="btn btn-outline-light w-100 mt-2" onclick="openResultBoard()"><i class="bi bi-tv me-1"></i> Resultattavla</button>';
@@ -1388,6 +1408,8 @@ function openResultBoard() {
     d.write('<div class="rb-table-wrap" id="rbTableWrap"><div style="text-align:center;padding:3rem 0"><div class="spinner-border text-light" role="status"></div></div></div>');
     d.close();
 
+    var isSpringskytte = compTypeId === 'Springskytte';
+
     // Inject script into the new window after document is ready
     var s = w.document.createElement('script');
     s.textContent = '(' + rbBoardScript.toString() + ')(' + compId + ',' + hasFinalsRound + ',' + qualSeriesCount + ',' + numFinalSeries + ',' + totalSeriesCount + ',' + JSON.stringify(configuredWCs) + ',' + JSON.stringify(compTypeId) + ');';
@@ -1405,15 +1427,26 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
     var isMilsnabb=compTypeId==='Milsnabb';
     var isNH=compTypeId==='NationellHelmatch';
     var isGrouped12=isMilsnabb||isNH;
+    var isSpringskytte=compTypeId==='Springskytte';
 
-    function getWC(n){return(n||'').trim().charAt(0).toUpperCase()||'?'}
+    function getWC(n){
+        if(isSpringskytte){
+            // Extract weapon class letter from "Vapengrupp A - D 21" or weaponClass field
+            var m=(n||'').match(/Vapengrupp\s+([AC])/i);
+            return m?m[1].toUpperCase():((n||'').trim().charAt(0).toUpperCase()||'?');
+        }
+        return(n||'').trim().charAt(0).toUpperCase()||'?';
+    }
+    function getSpringWC(g){return g.weaponClass||getWC(g.className||g.ClassName||'')}
 
     // Populate the weapon-class dropdown from configured classes
     function populateWcSelect(){
         var sel=document.getElementById('rbWcSelect');
         var wcs=configuredWCs.length>0?configuredWCs:[];
         if(!wcs.length){
-            var s=new Set();allGroups.forEach(function(g){s.add(getWC(g.className||g.ClassName||''))});
+            var s=new Set();allGroups.forEach(function(g){
+                s.add(isSpringskytte?getSpringWC(g):getWC(g.className||g.ClassName||''));
+            });
             var o=['C','B','A','R','L','M'];
             wcs=Array.from(s).sort(function(a,b){var ai=o.indexOf(a),bi=o.indexOf(b);return(ai<0?99:ai)-(bi<0?99:bi)});
         }
@@ -1428,17 +1461,28 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
     }
 
     function getFiltered(){
-        return selectedWC==='Alla'?allGroups:allGroups.filter(function(g){return getWC(g.className||g.ClassName||'')===selectedWC});
+        return selectedWC==='Alla'?allGroups:allGroups.filter(function(g){
+            return(isSpringskytte?getSpringWC(g):getWC(g.className||g.ClassName||''))===selectedWC;
+        });
     }
 
     function fetchResults(){
-        fetch('/umbraco/surface/CompetitionResults/GetResultsList?competitionId='+compId)
+        var url=isSpringskytte
+            ?'/umbraco/surface/Springskytte/GetSpringskytteResults?competitionId='+compId
+            :'/umbraco/surface/CompetitionResults/GetResultsList?competitionId='+compId;
+        fetch(url)
         .then(function(r){return r.json()})
         .then(function(d){
-            if(!d.success||!d.exists)return;
-            isOfficial=d.isOfficial||d.IsOfficial||false;
-            isMedals=d.isAwardingStandardMedals||d.IsAwardingStandardMedals||false;
-            allGroups=(d.results||d.Results).classGroups||(d.results||d.Results).ClassGroups||[];
+            if(!d.success)return;
+            if(isSpringskytte){
+                allGroups=d.classGroups||[];
+                isOfficial=false;isMedals=false;
+            } else {
+                if(!d.exists)return;
+                isOfficial=d.isOfficial||d.IsOfficial||false;
+                isMedals=d.isAwardingStandardMedals||d.IsAwardingStandardMedals||false;
+                allGroups=(d.results||d.Results).classGroups||(d.results||d.Results).ClassGroups||[];
+            }
             populateWcSelect();updateStatus();renderAll();
         }).catch(function(e){console.error(e)});
     }
@@ -1448,10 +1492,11 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
         else{b.className='rb-badge-live';b.innerHTML='<i class="bi bi-broadcast me-1 rb-pulse"></i>LIVE'}
         if(ts)ts.textContent='Uppdaterad '+new Date().toLocaleTimeString('sv-SE',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
     }
-    // Render a flat list of all filtered shooters sorted by total score
+    // Render a flat list of all filtered shooters sorted by total score (or time for Springskytte)
     function renderAll(){
         var wr=document.getElementById('rbTableWrap');
         var groups=getFiltered();
+        if(isSpringskytte){renderSpringskytte(wr,groups);return}
         // Flatten all shooters into one list with calculated scores
         var all=[];
         groups.forEach(function(cg){
@@ -1498,6 +1543,150 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
             h+='</tr>';
         });
         h+='</tbody></table>';wr.innerHTML=h;
+    }
+    // Springskytte result board — with shot visualization for Class C
+    function renderSpringskytte(wr,groups){
+        if(!groups.length){wr.innerHTML='<div style="text-align:center;padding:3rem 0;opacity:.5"><i class="bi bi-inbox" style="font-size:2rem"></i><p>Inga resultat</p></div>';return}
+
+        // Find most recently entered result (highest totalTimeSeconds among completed, or just last in list)
+        var latest=null,latestGroup='';
+        groups.forEach(function(cg){
+            var cn=cg.className||cg.ClassName||'';
+            (cg.shooters||[]).forEach(function(sh){
+                if(!sh.status&&sh.totalTimeSeconds)latest={sh:sh,cn:cn};
+            });
+        });
+
+        var h='';
+        // "Senast in" banner for latest result
+        if(latest){
+            var sh=latest.sh,wc=sh.weaponClass||'C';
+            h+='<div style="background:linear-gradient(135deg,#16213e,#1a1a2e);border:1px solid #4ecca3;border-radius:.5rem;padding:.75rem 1rem;margin:0 .5rem .75rem">';
+            h+='<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.5rem"><span style="color:#4ecca3;font-size:.8rem;font-weight:600;letter-spacing:.05em">SENAST IN</span>';
+            h+='<span style="font-size:1.1rem;font-weight:700">'+sh.name+'</span>';
+            h+='<span style="opacity:.5;font-size:.85rem">'+latest.cn+'</span></div>';
+            h+=renderShotCard(sh,wc);
+            h+='<div style="display:flex;gap:1.5rem;margin-top:.5rem;font-size:.9rem">';
+            h+='<span><span style="opacity:.5">Löptid</span> '+(sh.sprintTimeDisplay||'-')+'</span>';
+            h+='<span><span style="opacity:.5">Bom</span> '+(sh.shootingScore||0)+'</span>';
+            h+='<span><span style="opacity:.5">Tillägg</span> '+(sh.penaltyTimeDisplay||'-')+'</span>';
+            h+='<span style="color:#4ecca3;font-weight:700"><span style="opacity:.7">Totaltid</span> '+(sh.totalTimeDisplay||'-')+'</span>';
+            h+='</div></div>';
+        }
+
+        // Ranked table per group
+        h+='<table class="rb-table">';
+        h+='<colgroup><col style="width:2.5rem"><col style="width:2.5rem"><col><col>';
+        h+='<col><col style="width:5rem"><col style="width:3rem"><col style="width:4.5rem"><col style="width:5.5rem"></colgroup>';
+        h+='<thead><tr><th>#</th><th>Nr</th><th style="text-align:left">Namn</th><th style="text-align:left">Förening</th>';
+        h+='<th>Skytte</th><th>Löptid</th><th>Bom</th><th>Tillägg</th><th>Totaltid</th></tr></thead><tbody>';
+        groups.forEach(function(cg,gi){
+            var cn=cg.className||cg.ClassName||'';
+            var wc=cg.weaponClass||'C';
+            var shooters=cg.shooters||[];
+            if(!shooters.length)return;
+            h+='<tr><td colspan="9" style="background:#0f3460;color:#4ecca3;font-weight:700;padding:.6rem .5rem;font-size:.95rem;border-bottom:2px solid #4ecca3'+(gi>0?';border-top:4px solid #1a1a2e':'')+'">'+cn+'</td></tr>';
+            shooters.forEach(function(sh){
+                var rank=sh.rank||0;
+                var status=sh.status||null;
+                var pc=rank>=1&&rank<=3&&!status?' rb-pos-'+rank:'';
+                var nm=sh.name||'';
+                var cl=sh.club||'';
+                var so=sh.startOrder||'';
+                if(status){
+                    h+='<tr><td>-</td><td>'+so+'</td><td style="text-align:left">'+nm+'</td><td style="text-align:left">'+cl+'</td>';
+                    h+='<td colspan="5" style="text-align:center;opacity:.6">'+status+'</td></tr>';
+                } else {
+                    h+='<tr><td class="'+pc.trim()+'">'+(rank||'-')+'</td><td>'+so+'</td><td style="text-align:left">'+nm+'</td><td style="text-align:left">'+cl+'</td>';
+                    h+='<td>'+renderShotDots(sh,wc)+'</td>';
+                    h+='<td>'+(sh.sprintTimeDisplay||'-')+'</td>';
+                    h+='<td>'+(sh.shootingScore||0)+'</td>';
+                    h+='<td>'+(sh.penaltyTimeDisplay||'-')+'</td>';
+                    h+='<td><strong>'+(sh.totalTimeDisplay||'-')+'</strong></td></tr>';
+                }
+            });
+        });
+        h+='</tbody></table>';
+        wr.innerHTML=h;
+    }
+
+    function isUnshot(shot){return !shot||shot===''||shot==='-'}
+
+    // Render compact shot dots for table row — Class C: green/red dots, Class A: zone numbers
+    function renderShotDots(sh,wc){
+        var series=sh.shotSeries||sh.ShotSeries||[];
+        if(!series.length)return'<span style="opacity:.3">-</span>';
+        var h='<span style="display:inline-flex;gap:3px;flex-wrap:nowrap">';
+        if(wc==='C'){
+            series.forEach(function(station,si){
+                var allEmpty=(station||[]).every(isUnshot);
+                if(allEmpty)return; // skip unshot stations entirely in compact view
+                if(si>0)h+='<span style="width:1px;background:rgba(255,255,255,.15);margin:0 1px"></span>';
+                (station||[]).forEach(function(shot){
+                    if(isUnshot(shot)){h+='<span style="display:inline-block;width:8px;height:8px;border-radius:50%;border:1px solid rgba(255,255,255,.2)"></span>';return}
+                    var isHit=shot==='H'||shot==='h';
+                    h+='<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:'+(isHit?'#27ae60':'#e74c3c')+'"></span>';
+                });
+            });
+        } else {
+            // Class A — zone numbers 0-3, color by value
+            series.forEach(function(station,si){
+                var allEmpty=(station||[]).every(isUnshot);
+                if(allEmpty)return;
+                if(si>0)h+='<span style="width:1px;background:rgba(255,255,255,.15);margin:0 1px"></span>';
+                (station||[]).forEach(function(shot){
+                    if(isUnshot(shot)){h+='<span style="display:inline-block;width:8px;height:8px;border-radius:50%;border:1px solid rgba(255,255,255,.2)"></span>';return}
+                    var v=parseInt(shot)||0;
+                    var c=v===0?'#27ae60':v===1?'#8bc34a':v===2?'#f39c12':'#e74c3c';
+                    h+='<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:'+c+'"></span>';
+                });
+            });
+        }
+        h+='</span>';
+        return h;
+    }
+
+    // Render larger shot card for "Senast in" banner
+    function renderShotCard(sh,wc){
+        var series=sh.shotSeries||sh.ShotSeries||[];
+        if(!series.length)return'';
+        var h='<div style="display:flex;gap:.5rem;flex-wrap:wrap;margin:.25rem 0">';
+        if(wc==='C'){
+            series.forEach(function(station,si){
+                var allEmpty=(station||[]).every(isUnshot);
+                var shotCount=(station||[]).filter(function(s){return !isUnshot(s)}).length;
+                if(allEmpty)return; // skip entirely unshot stations
+                var hits=(station||[]).filter(function(s){return s==='H'||s==='h'}).length;
+                h+='<div style="background:rgba(255,255,255,.05);border-radius:.35rem;padding:.3rem .5rem;display:flex;align-items:center;gap:4px">';
+                h+='<span style="font-size:.7rem;opacity:.4;margin-right:2px">'+(si+1)+'</span>';
+                (station||[]).forEach(function(shot){
+                    if(isUnshot(shot)){h+='<span style="display:inline-block;width:12px;height:12px;border-radius:50%;border:1.5px solid rgba(255,255,255,.15)"></span>';return}
+                    var isHit=shot==='H'||shot==='h';
+                    h+='<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:'+(isHit?'#27ae60':'#e74c3c')+'"></span>';
+                });
+                h+='<span style="font-size:.75rem;margin-left:3px;color:'+(hits===shotCount&&shotCount>0?'#27ae60':'rgba(255,255,255,.5)')+'">'+hits+'/'+shotCount+'</span>';
+                h+='</div>';
+            });
+        } else {
+            // Class A — show zone values
+            series.forEach(function(station,si){
+                var allEmpty=(station||[]).every(isUnshot);
+                if(allEmpty)return;
+                var sum=(station||[]).filter(function(s){return !isUnshot(s)}).reduce(function(a,s){return a+(parseInt(s)||0)},0);
+                h+='<div style="background:rgba(255,255,255,.05);border-radius:.35rem;padding:.3rem .5rem;display:flex;align-items:center;gap:4px">';
+                h+='<span style="font-size:.7rem;opacity:.4;margin-right:2px">'+(si+1)+'</span>';
+                (station||[]).forEach(function(shot){
+                    if(isUnshot(shot)){h+='<span style="display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:50%;border:1.5px solid rgba(255,255,255,.15)"></span>';return}
+                    var v=parseInt(shot)||0;
+                    var c=v===0?'#27ae60':v===1?'#8bc34a':v===2?'#f39c12':'#e74c3c';
+                    h+='<span style="display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:50%;background:'+c+';font-size:.6rem;color:#fff;font-weight:700">'+v+'</span>';
+                });
+                h+='<span style="font-size:.75rem;margin-left:3px;opacity:.5">'+sum+'</span>';
+                h+='</div>';
+            });
+        }
+        h+='</div>';
+        return h;
     }
     // Weapon class dropdown change — only re-renders, no auto-cycle
     document.getElementById('rbWcSelect').addEventListener('change',function(){selectedWC=this.value;renderAll()});

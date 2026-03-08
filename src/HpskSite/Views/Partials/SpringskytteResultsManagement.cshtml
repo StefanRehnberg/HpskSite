@@ -48,7 +48,7 @@
                 <li class="nav-item" role="presentation">
                     <button class="nav-link" id="springTabC-tab" data-bs-toggle="tab" data-bs-target="#springTabC"
                         type="button" role="tab" aria-controls="springTabC" aria-selected="false">
-                        <i class="bi bi-phone me-1"></i>Vapengrupp C — Banregistrering
+                        <i class="bi bi-phone me-1"></i>Vapengrupp C
                     </button>
                 </li>
             </ul>
@@ -73,10 +73,8 @@
                         </button>
                         <div class="ms-auto">
                             <select class="form-select form-select-sm" id="springShooterFilter" onchange="springFilterShooters()" style="width: auto;">
-                                <option value="all">Alla skyttar</option>
+                                <option value="all">Alla (Vapengrupp A)</option>
                                 <option value="noresult">Utan resultat</option>
-                                <option value="A">Vapengrupp A</option>
-                                <option value="C">Vapengrupp C</option>
                             </select>
                         </div>
                     </div>
@@ -155,6 +153,7 @@
     .shot-btn.active-hit { background-color: var(--bs-success); border-color: var(--bs-success); color: #fff; }
     .shot-btn.active-miss { background-color: var(--bs-danger); border-color: var(--bs-danger); color: #fff; }
     .zone-input { width: 42px; text-align: center; font-weight: 600; }
+    .zone-count-input { width: 56px; text-align: center; font-weight: 600; }
     .stop-group { border: 1px solid var(--bs-border-color); border-radius: 0.375rem; padding: 0.5rem; margin-bottom: 0.5rem; }
     .stop-header { font-weight: 600; font-size: 0.85rem; color: var(--bs-secondary-color); }
     .time-display { font-family: monospace; font-size: 1.1rem; font-weight: 700; }
@@ -224,10 +223,10 @@ async function springLoadShooters() {
 
 function springFilterShooters() {
     const filter = document.getElementById('springShooterFilter')?.value || 'all';
+    // Tab A only shows Class A shooters
     springFilteredShooters = springShooters.filter(s => {
+        if (s.weaponClass !== 'A') return false;
         if (filter === 'noresult') return !s.hasResult;
-        if (filter === 'A') return s.weaponClass === 'A';
-        if (filter === 'C') return s.weaponClass === 'C';
         return true;
     });
     springCurrentIndex = 0;
@@ -251,8 +250,6 @@ function springATakeSnapshot() {
     return JSON.stringify({
         shots: isClassC ? springCollectClassCShots() : springCollectClassAShots(),
         finishTime: document.getElementById('springFinishTime')?.value || '',
-        manualTime: document.getElementById('springSprintTimeManual')?.value || '',
-        status: document.getElementById('springStatus')?.value || '',
         multiplier: document.querySelector('input[name="springMultiplier"]:checked')?.value || '1'
     });
 }
@@ -302,7 +299,6 @@ function springRenderEntry() {
 
     const existing = shooter.existingResult;
     const isClassC = shooter.weaponClass === 'C';
-    const statusValue = existing?.status || '';
     const hasStartTime = !!shooter.startTime;
     const startTimeDisplay = shooter.startTime || '';
 
@@ -314,94 +310,66 @@ function springRenderEntry() {
                     <h5 class="mb-0">${shooter.memberName}</h5>
                     <small class="text-muted">${shooter.memberClub} | Vapengrupp ${shooter.weaponClass} | Klass ${shooter.ageGenderClass}${shooter.startOrder ? ' | #' + shooter.startOrder : ''}</small>
                 </div>
-                <div class="d-flex gap-2 align-items-center">
-                    ${shooter.hasResult ? '<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Har resultat</span>' : '<span class="badge bg-secondary">Inget resultat</span>'}
-                    <select class="form-select form-select-sm" id="springStatus" style="width: auto;" onchange="springStatusChanged()">
-                        <option value="" ${!statusValue ? 'selected' : ''}>Normal</option>
-                        <option value="DNS" ${statusValue === 'DNS' ? 'selected' : ''}>DNS (Ej start)</option>
-                        <option value="DNF" ${statusValue === 'DNF' ? 'selected' : ''}>DNF (Ej fullföljt)</option>
-                    </select>
-                </div>
+                ${shooter.hasResult ? '<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Har resultat</span>' : '<span class="badge bg-secondary">Inget resultat</span>'}
             </div>
 
             <!-- Time Entry -->
-            <div id="springResultFields">
-                <div class="row g-3 mb-3">
-                    <div class="col-md-3">
-                        <label class="form-label fw-bold"><i class="bi bi-play-circle me-1"></i>Starttid</label>
-                        <div class="form-control-plaintext time-display">${hasStartTime ? startTimeDisplay : '<span class="text-warning small">Saknas</span>'}</div>
-                        ${!hasStartTime ? '<div class="form-text text-warning">Generera startlista först</div>' : ''}
-                    </div>
-                    <div class="col-md-3" id="springFinishTimeCol">
-                        <label class="form-label fw-bold"><i class="bi bi-flag me-1"></i>Måltid</label>
-                        <input type="text" class="form-control" id="springFinishTime" placeholder="HH:MM:SS"
-                            ${!hasStartTime ? 'disabled' : ''}>
-                        <div class="form-text">Klockan vid mål</div>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label fw-bold"><i class="bi bi-stopwatch me-1"></i>Löptid</label>
-                        <div class="time-display text-success" id="springSprintTimeDisplay">
-                            ${existing?.sprintTimeSeconds ? formatSecondsToTime(existing.sprintTimeSeconds) : '-'}
-                        </div>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label fw-bold"><i class="bi bi-clock me-1"></i>Sluttid</label>
-                        <div class="time-display text-primary" id="springTotalTime">
-                            ${existing?.totalTimeDisplay || '-'}
-                        </div>
+            <div class="row g-3 mb-3">
+                <div class="col-md-3">
+                    <label class="form-label fw-bold"><i class="bi bi-play-circle me-1"></i>Starttid</label>
+                    <div class="form-control-plaintext time-display">${hasStartTime ? startTimeDisplay : '<span class="text-warning small">Saknas</span>'}</div>
+                    ${!hasStartTime ? '<div class="form-text text-warning">Generera startlista först</div>' : ''}
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label fw-bold"><i class="bi bi-flag me-1"></i>Måltid</label>
+                    <input type="text" class="form-control" id="springFinishTime" placeholder="HH:MM:SS"
+                        ${!hasStartTime ? 'disabled' : ''}>
+                    <div class="form-text">Klockan vid mål</div>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label fw-bold"><i class="bi bi-stopwatch me-1"></i>Löptid</label>
+                    <div class="time-display text-success" id="springSprintTimeDisplay">
+                        ${existing?.sprintTimeSeconds ? formatSecondsToTime(existing.sprintTimeSeconds) : '-'}
                     </div>
                 </div>
-
-                <!-- Manual sprint time override -->
-                <div class="mb-3">
-                    <a class="small text-muted" data-bs-toggle="collapse" href="#springManualTime" role="button" id="springManualTimeToggle">
-                        <i class="bi bi-wrench me-1"></i>Manuell löptid (backup)
-                    </a>
-                    <div class="collapse mt-2" id="springManualTime">
-                        <div class="row g-2 align-items-end">
-                            <div class="col-auto">
-                                <label class="form-label small">Löptid (MM:SS)</label>
-                                <input type="text" class="form-control form-control-sm" id="springSprintTimeManual" placeholder="MM:SS"
-                                    value="${existing?.sprintTimeSeconds ? formatSecondsToTime(existing.sprintTimeSeconds) : ''}">
-                            </div>
-                            <div class="col-auto">
-                                <div class="form-text">Använd vid reservtidtagning. Åsidosätter måltid.</div>
-                            </div>
-                        </div>
+                <div class="col-md-3">
+                    <label class="form-label fw-bold"><i class="bi bi-clock me-1"></i>Sluttid</label>
+                    <div class="time-display text-primary" id="springTotalTime">
+                        ${existing?.totalTimeDisplay || '-'}
                     </div>
                 </div>
-
-                <!-- Shooting Score display -->
-                <div class="row g-3 mb-3">
-                    <div class="col-md-4">
-                        <label class="form-label fw-bold"><i class="bi bi-crosshair me-1"></i>Skjutpoäng</label>
-                        <div class="time-display text-danger" id="springShootingScore">
-                            ${existing?.shootingScore ?? 0}
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Penalty Multiplier -->
-                ${isClassC ? `
-                <div class="mb-3">
-                    <label class="form-label small">Skjutpoäng per bom</label>
-                    <div class="btn-group btn-group-sm" role="group">
-                        <input type="radio" class="btn-check" name="springMultiplier" id="springMult1" value="1" checked>
-                        <label class="btn btn-outline-secondary" for="springMult1">1 (Normal)</label>
-                        <input type="radio" class="btn-check" name="springMultiplier" id="springMult2" value="2">
-                        <label class="btn btn-outline-secondary" for="springMult2">2 (Märkestagning)</label>
-                    </div>
-                </div>` : ''}
-
-                <!-- Shots -->
-                <h6 class="mb-2"><i class="bi bi-bullseye me-1"></i>Skjutresultat</h6>
-                ${isClassC ? springRenderClassCShots() : springRenderClassAShots()}
             </div>
+
+            <!-- Shooting Score display -->
+            <div class="row g-3 mb-3">
+                <div class="col-md-4">
+                    <label class="form-label fw-bold"><i class="bi bi-crosshair me-1"></i>Skjutpoäng</label>
+                    <div class="time-display text-danger" id="springShootingScore">
+                        ${existing?.shootingScore ?? 0}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Penalty Multiplier -->
+            ${isClassC ? `
+            <div class="mb-3">
+                <label class="form-label small">Skjutpoäng per bom</label>
+                <div class="btn-group btn-group-sm" role="group">
+                    <input type="radio" class="btn-check" name="springMultiplier" id="springMult1" value="1" checked>
+                    <label class="btn btn-outline-secondary" for="springMult1">1 (Normal)</label>
+                    <input type="radio" class="btn-check" name="springMultiplier" id="springMult2" value="2">
+                    <label class="btn btn-outline-secondary" for="springMult2">2 (Märkestagning)</label>
+                </div>
+            </div>` : ''}
+
+            <!-- Shots -->
+            <h6 class="mb-2"><i class="bi bi-bullseye me-1"></i>Skjutresultat</h6>
+            ${isClassC ? springRenderClassCShots() : springRenderClassAShots()}
 
             <!-- Save / Delete -->
             <div class="d-flex justify-content-between mt-3">
-                <button class="btn btn-danger btn-sm" onclick="springDeleteResult()" ${!shooter.hasResult ? 'disabled' : ''}>
-                    <i class="bi bi-trash me-1"></i>Ta bort
+                <button class="btn btn-outline-danger btn-sm" onclick="springClearResult()">
+                    <i class="bi bi-x-circle me-1"></i>Rensa resultaten
                 </button>
                 <div class="d-flex gap-2">
                     <button class="btn btn-outline-secondary" onclick="springANavigate(springNextShooter)">
@@ -428,8 +396,6 @@ function springRenderEntry() {
         });
     }
 
-    springStatusChanged();
-
     // Restore existing data if shooter has result
     if (existing && shooter.hasResult && existing.shots && existing.shots.length) {
         if (isClassC) {
@@ -454,12 +420,13 @@ function springRenderEntry() {
             }
             springRecalcClassC();
         } else {
-            for (let series = 0; series < existing.shots.length; series++) {
-                const seriesShots = existing.shots[series];
-                for (let shot = 0; shot < seriesShots.length; shot++) {
-                    const input = document.getElementById(`zona_${series + 1}_${shot + 1}`);
-                    if (input && seriesShots[shot] !== '' && seriesShots[shot] !== '0') {
-                        input.value = seriesShots[shot];
+            // Class A zone count format: each target = [ring1, ring2, ring3, ring4, bom]
+            for (let t = 0; t < existing.shots.length; t++) {
+                const zoneCounts = existing.shots[t];
+                for (let z = 0; z < zoneCounts.length && z < 5; z++) {
+                    const input = document.getElementById(`target_${t + 1}_zone_${z}`);
+                    if (input && zoneCounts[z] !== '' && zoneCounts[z] !== '0') {
+                        input.value = zoneCounts[z];
                     }
                 }
             }
@@ -521,34 +488,41 @@ function springRenderClassCShots() {
 }
 
 function springRenderClassAShots() {
-    const numSeries = springNumberOfSeries || 2;
-    const shotsPerSeries = Math.floor(30 / numSeries);
-    const extraShots = 30 - (shotsPerSeries * numSeries);
+    const numTargets = springNumberOfSeries || 2;
+    const shotsPerTarget = Math.floor(30 / numTargets);
+    const extraShots = 30 - (shotsPerTarget * numTargets);
+    const zones = ['Ring 1', 'Ring 2', 'Ring 3', 'Ring 4', 'Bom'];
+    const zonePoints = [0, 0, 1, 2, 3];
 
-    let html = `<div class="mb-2 small text-muted">${numSeries} serie(r), ${shotsPerSeries} skott/serie, Zon 0-3 (0=träff ring 1-2, 1=ring 3, 2=ring 4, 3=utanför)</div>`;
-    html += '<div class="row g-2">';
+    let html = `<div class="mb-2 small text-muted">${numTargets} mål, ${shotsPerTarget} skott/mål. Ring 1–2 = 0p, Ring 3 = 1p, Ring 4 = 2p, Bom = 3p</div>`;
 
-    for (let series = 1; series <= numSeries; series++) {
-        const shotsInThisSeries = series === numSeries ? shotsPerSeries + extraShots : shotsPerSeries;
+    for (let t = 1; t <= numTargets; t++) {
+        const shotsInTarget = t === numTargets ? shotsPerTarget + extraShots : shotsPerTarget;
         html += `
-        <div class="col-12">
-            <div class="stop-group">
-                <div class="stop-header mb-1">Serie ${series} (${shotsInThisSeries} skott)</div>
-                <div class="d-flex flex-wrap gap-1">`;
-        for (let shot = 1; shot <= shotsInThisSeries; shot++) {
-            const id = `zona_${series}_${shot}`;
+        <div class="stop-group">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+                <span class="stop-header">Mål ${t} <small class="text-muted fw-normal">(${shotsInTarget} skott)</small></span>
+                <span class="small fw-bold" id="targetA${t}Score">0p</span>
+            </div>
+            <div class="d-flex flex-wrap gap-2 align-items-center">`;
+        for (let z = 0; z < 5; z++) {
+            const id = `target_${t}_zone_${z}`;
             html += `
-                    <input type="number" class="form-control zone-input" id="${id}" min="0" max="3"
-                        data-series="${series}" data-shot="${shot}" placeholder="-"
-                        onchange="springRecalcClassA()" oninput="springRecalcClassA()">`;
+                <div class="text-center">
+                    <label class="form-label small mb-0" for="${id}">${zones[z]}</label>
+                    <input type="number" class="form-control zone-count-input" id="${id}" min="0" max="${shotsInTarget}"
+                        data-target="${t}" data-zone="${z}" placeholder="0"
+                        onchange="springRecalcClassA()" oninput="springRecalcClassA()">
+                </div>`;
         }
         html += `
-                    <span class="align-self-center ms-2 small fw-bold" id="seriesA${series}Score">0p</span>
+                <div class="text-center">
+                    <label class="form-label small mb-0">&nbsp;</label>
+                    <div class="small fw-bold mt-1" id="targetA${t}ShotCount" style="min-width:40px">0/${shotsInTarget}</div>
                 </div>
             </div>
         </div>`;
     }
-    html += '</div>';
     return html;
 }
 
@@ -598,23 +572,31 @@ function springRecalcClassC() {
 
 function springRecalcClassA() {
     let totalScore = 0;
-    const numSeries = springNumberOfSeries || 2;
-    const shotsPerSeries = Math.floor(30 / numSeries);
-    const extraShots = 30 - (shotsPerSeries * numSeries);
+    const numTargets = springNumberOfSeries || 2;
+    const shotsPerTarget = Math.floor(30 / numTargets);
+    const extraShots = 30 - (shotsPerTarget * numTargets);
+    const zonePoints = [0, 0, 1, 2, 3];
 
-    for (let series = 1; series <= numSeries; series++) {
-        let seriesScore = 0;
-        const shotsInThisSeries = series === numSeries ? shotsPerSeries + extraShots : shotsPerSeries;
-        for (let shot = 1; shot <= shotsInThisSeries; shot++) {
-            const input = document.getElementById(`zona_${series}_${shot}`);
-            if (input && input.value !== '') {
-                const val = parseInt(input.value);
-                if (!isNaN(val) && val >= 0 && val <= 3) seriesScore += val;
-            }
+    for (let t = 1; t <= numTargets; t++) {
+        let targetScore = 0;
+        let shotCount = 0;
+        const expected = t === numTargets ? shotsPerTarget + extraShots : shotsPerTarget;
+
+        for (let z = 0; z < 5; z++) {
+            const input = document.getElementById(`target_${t}_zone_${z}`);
+            const val = parseInt(input?.value) || 0;
+            shotCount += val;
+            targetScore += val * zonePoints[z];
         }
-        totalScore += seriesScore;
-        const scoreEl = document.getElementById(`seriesA${series}Score`);
-        if (scoreEl) scoreEl.textContent = `${seriesScore}p`;
+        totalScore += targetScore;
+
+        const scoreEl = document.getElementById(`targetA${t}Score`);
+        if (scoreEl) scoreEl.textContent = `${targetScore}p`;
+        const countEl = document.getElementById(`targetA${t}ShotCount`);
+        if (countEl) {
+            countEl.textContent = `${shotCount}/${expected}`;
+            countEl.style.color = shotCount === expected ? 'var(--bs-success)' : (shotCount > expected ? 'var(--bs-danger)' : '');
+        }
     }
 
     const scoreEl = document.getElementById('springShootingScore');
@@ -623,18 +605,12 @@ function springRecalcClassA() {
 }
 
 function springUpdateTotalTimeA(shootingScore, multiplier) {
-    // Determine sprint time: manual override > finish time calculation
-    const manualInput = document.getElementById('springSprintTimeManual')?.value;
     const finishInput = document.getElementById('springFinishTime')?.value;
     const shooter = springFilteredShooters[springCurrentIndex];
     const startTime = shooter?.startTime;
 
     let sprintSeconds = null;
-
-    // Manual override takes precedence
-    if (manualInput && manualInput.trim()) {
-        sprintSeconds = parseTimeToSeconds(manualInput);
-    } else if (finishInput && finishInput.trim() && startTime) {
+    if (finishInput && finishInput.trim() && startTime) {
         sprintSeconds = calculateSprintTime(startTime, finishInput);
     }
 
@@ -655,7 +631,7 @@ function springUpdateTotalTimeA(shootingScore, multiplier) {
 
 // Listen for finish time changes
 document.addEventListener('input', function(e) {
-    if (e.target.id === 'springFinishTime' || e.target.id === 'springSprintTimeManual') {
+    if (e.target.id === 'springFinishTime') {
         const shooter = springFilteredShooters[springCurrentIndex];
         if (shooter?.weaponClass === 'C') springRecalcClassC();
         else springRecalcClassA();
@@ -667,55 +643,21 @@ document.addEventListener('change', function(e) {
     if (e.target.name === 'springMultiplier') springRecalcClassC();
 });
 
-// Disable finish time when manual override is used
-document.addEventListener('input', function(e) {
-    if (e.target.id === 'springSprintTimeManual') {
-        const finishEl = document.getElementById('springFinishTime');
-        if (finishEl) {
-            finishEl.disabled = !!e.target.value.trim();
-        }
-    }
-});
-
-function springStatusChanged() {
-    const status = document.getElementById('springStatus')?.value;
-    const fields = document.getElementById('springResultFields');
-    if (fields) {
-        fields.style.opacity = status ? '0.4' : '1';
-        fields.style.pointerEvents = status ? 'none' : 'auto';
-    }
-}
-
 // ===== TAB A: SAVE / DELETE =====
 
 async function springSaveResult() {
     const shooter = springFilteredShooters[springCurrentIndex];
     if (!shooter) return;
 
-    const status = document.getElementById('springStatus')?.value || null;
     const isClassC = shooter.weaponClass === 'C';
-
-    // Determine which time input to send
-    const manualInput = document.getElementById('springSprintTimeManual')?.value?.trim() || null;
     const finishInput = document.getElementById('springFinishTime')?.value?.trim() || null;
 
-    // Validate: need either manual time, finish time (with start time), or DNS/DNF
-    if (!status && !manualInput && !finishInput) {
-        showSpringMessage('Ange måltid, manuell löptid, eller välj DNS/DNF.', 'warning');
+    // Collect and validate shots
+    const shotSeries = isClassC ? springCollectClassCShots() : springCollectClassAShots();
+    const incomplete = springValidateShotsComplete(shotSeries, isClassC);
+    if (incomplete) {
+        showSpringMessage(incomplete, 'warning');
         return;
-    }
-
-    // Collect shots
-    let shotSeries = [];
-    if (!status) {
-        shotSeries = isClassC ? springCollectClassCShots() : springCollectClassAShots();
-
-        // Validate completeness: every station/series must have all shots filled
-        const incomplete = springValidateShotsComplete(shotSeries, isClassC);
-        if (incomplete) {
-            showSpringMessage(incomplete, 'warning');
-            return;
-        }
     }
 
     const multiplier = isClassC
@@ -727,11 +669,10 @@ async function springSaveResult() {
         memberId: shooter.memberId,
         weaponClass: shooter.weaponClass,
         ageGenderClass: shooter.ageGenderClass,
-        sprintTimeInput: manualInput || null,
-        finishTimeInput: (!manualInput && finishInput) ? finishInput : null,
+        finishTimeInput: finishInput,
         shotSeries: shotSeries,
         penaltyMultiplier: multiplier,
-        status: status
+        status: null
     };
 
     try {
@@ -753,7 +694,7 @@ async function springSaveResult() {
                 shootingScore: data.shootingScore,
                 totalTimeSeconds: data.totalTimeSeconds,
                 totalTimeDisplay: data.totalTimeDisplay,
-                status: status,
+                status: null,
                 penaltyMultiplier: data.penaltyMultiplier,
                 shots: data.verificationShots || shotSeries
             };
@@ -766,10 +707,10 @@ async function springSaveResult() {
                     showSpringMessage('⚠ VARNING: Verifieringsfel — sparade skott skiljer sig från inskickade. Kontrollera resultatet!', 'danger');
                     console.error('Shot verification mismatch!', { sent: shotSeries, stored: data.verificationShots });
                 } else {
-                    showSpringMessage(`✓ Resultat verifierat och sparat: ${data.totalTimeDisplay || status || '-'}`, 'success');
+                    showSpringMessage(`✓ Resultat verifierat och sparat: ${data.totalTimeDisplay || '-'}`, 'success');
                 }
             } else {
-                showSpringMessage(`Resultat sparat: ${data.totalTimeDisplay || status || '-'}`, 'success');
+                showSpringMessage(`Resultat sparat: ${data.totalTimeDisplay || '-'}`, 'success');
             }
 
             // Re-take snapshot so current state is now the "saved" baseline
@@ -787,35 +728,36 @@ async function springSaveResult() {
     }
 }
 
-async function springDeleteResult() {
+function springClearResult() {
     const shooter = springFilteredShooters[springCurrentIndex];
-    if (!shooter || !confirm(`Ta bort resultat för ${shooter.memberName}?`)) return;
+    if (!shooter) return;
+    if (!confirm(`Rensa skjutresultaten för ${shooter.memberName}?`)) return;
 
-    try {
-        const response = await fetch('/umbraco/surface/Springskytte/DeleteSpringskytteResult', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]')?.value
-            },
-            body: JSON.stringify({
-                competitionId: springCompetitionId,
-                memberId: shooter.memberId,
-                weaponClass: shooter.weaponClass
-            })
-        });
-        const data = await response.json();
-        if (data.success) {
-            shooter.hasResult = false;
-            shooter.existingResult = null;
-            showSpringMessage('Resultat borttaget.', 'success');
-            springRenderEntry();
-        } else {
-            showSpringMessage(data.message || 'Fel vid borttagning.', 'danger');
+    const isClassC = shooter.weaponClass === 'C';
+    if (isClassC) {
+        for (let stop = 1; stop <= 6; stop++) {
+            for (let shot = 1; shot <= 5; shot++) {
+                const btn = document.getElementById(`shot_${stop}_${shot}`);
+                if (btn) {
+                    btn.dataset.value = '';
+                    btn.textContent = '-';
+                    btn.classList.remove('active-hit', 'active-miss');
+                    btn.classList.add('btn-outline-secondary');
+                }
+            }
         }
-    } catch (err) {
-        showSpringMessage('Ett fel uppstod.', 'danger');
+        springRecalcClassC();
+    } else {
+        const numTargets = springNumberOfSeries || 2;
+        for (let t = 1; t <= numTargets; t++) {
+            for (let z = 0; z < 5; z++) {
+                const input = document.getElementById(`target_${t}_zone_${z}`);
+                if (input) input.value = '';
+            }
+        }
+        springRecalcClassA();
     }
+    showSpringMessage('Skjutresultaten har rensats.', 'success');
 }
 
 function springCollectClassCShots() {
@@ -832,21 +774,18 @@ function springCollectClassCShots() {
 }
 
 function springCollectClassAShots() {
-    const series = [];
-    const numSeries = springNumberOfSeries || 2;
-    const shotsPerSeries = Math.floor(30 / numSeries);
-    const extraShots = 30 - (shotsPerSeries * numSeries);
+    const targets = [];
+    const numTargets = springNumberOfSeries || 2;
 
-    for (let s = 1; s <= numSeries; s++) {
-        const seriesShots = [];
-        const shotsInThisSeries = s === numSeries ? shotsPerSeries + extraShots : shotsPerSeries;
-        for (let shot = 1; shot <= shotsInThisSeries; shot++) {
-            const input = document.getElementById(`zona_${s}_${shot}`);
-            seriesShots.push(input?.value || '0');
+    for (let t = 1; t <= numTargets; t++) {
+        const zoneCounts = [];
+        for (let z = 0; z < 5; z++) {
+            const input = document.getElementById(`target_${t}_zone_${z}`);
+            zoneCounts.push(input?.value || '0');
         }
-        series.push(seriesShots);
+        targets.push(zoneCounts);
     }
-    return series;
+    return targets;
 }
 
 // ===== TAB C: RANGE OFFICER MODE =====
@@ -1504,7 +1443,7 @@ async function springLoadResultsList() {
                     html += `
                                 <tr>
                                     <td>${s.status ? s.status : (s.rank || '-')}</td>
-                                    <td>${s.name}</td>
+                                    <td>${s.name}${s.startOrder ? ' (' + s.startOrder + ')' : ''}</td>
                                     <td>${s.club}</td>
                                     <td class="time-col">${s.sprintTimeDisplay}</td>
                                     <td>${s.shootingScore ?? '-'}</td>
@@ -1597,20 +1536,20 @@ function springValidateShotsComplete(shotSeries, isClassC) {
             }
         }
     } else {
-        // Class A: check input DOM elements — value must be non-empty
-        const numSeries = springNumberOfSeries || 2;
-        const shotsPerSeries = Math.floor(30 / numSeries);
-        const extraShots = 30 - (shotsPerSeries * numSeries);
+        // Class A zone count format: each target has 5 zone inputs, sum must equal shots per target
+        const numTargets = springNumberOfSeries || 2;
+        const shotsPerTarget = Math.floor(30 / numTargets);
+        const extraShots = 30 - (shotsPerTarget * numTargets);
 
-        for (let s = 1; s <= numSeries; s++) {
-            const expected = s === numSeries ? shotsPerSeries + extraShots : shotsPerSeries;
-            let filled = 0;
-            for (let shot = 1; shot <= expected; shot++) {
-                const input = document.getElementById(`zona_${s}_${shot}`);
-                if (input && input.value !== '' && input.value !== null) filled++;
+        for (let t = 1; t <= numTargets; t++) {
+            const expected = t === numTargets ? shotsPerTarget + extraShots : shotsPerTarget;
+            let shotCount = 0;
+            for (let z = 0; z < 5; z++) {
+                const input = document.getElementById(`target_${t}_zone_${z}`);
+                shotCount += parseInt(input?.value) || 0;
             }
-            if (filled < expected) {
-                return `Serie ${s}: alla ${expected} skott måste registreras (${filled}/${expected} ifyllda).`;
+            if (shotCount !== expected) {
+                return `Mål ${t}: summan av alla zoner måste vara ${expected} (nu: ${shotCount}).`;
             }
         }
     }

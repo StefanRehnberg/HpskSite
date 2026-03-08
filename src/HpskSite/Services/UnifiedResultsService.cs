@@ -232,7 +232,7 @@ namespace HpskSite.Services
                 {
                     foreach (var comp in _contentService.GetByIds(competitionIds))
                     {
-                        competitionNameMap[comp.Id] = comp.Name ?? $"Tävling #{comp.Id}";
+                        competitionNameMap[comp.Id] = comp.GetValue<string>("competitionName") ?? comp.Name ?? $"Tävling #{comp.Id}";
                     }
                 }
 

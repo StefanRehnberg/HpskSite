@@ -52,19 +52,21 @@ namespace HpskSite.CompetitionTypes.Springskytte.Services
         }
 
         /// <summary>
-        /// Class A: Sum zone values. Ring 1-2 = 0, Ring 3 = 1, Ring 4 = 2, outside = 3.
+        /// Class A: Zone count format — each target is [ring1, ring2, ring3, ring4, bom].
+        /// Score = ring3Count * 1 + ring4Count * 2 + bomCount * 3.
         /// </summary>
         private int CalculateClassAScore(List<List<string>> series)
         {
             int totalScore = 0;
-            foreach (var seriesShots in series)
+            foreach (var target in series)
             {
-                foreach (var shot in seriesShots)
+                // Expected: 5 values = [ring1, ring2, ring3, ring4, bom]
+                if (target.Count >= 5)
                 {
-                    if (int.TryParse(shot, out int zoneValue))
-                    {
-                        totalScore += zoneValue;
-                    }
+                    int.TryParse(target[2], out int ring3);
+                    int.TryParse(target[3], out int ring4);
+                    int.TryParse(target[4], out int bom);
+                    totalScore += ring3 * 1 + ring4 * 2 + bom * 3;
                 }
             }
             return totalScore;
@@ -100,8 +102,18 @@ namespace HpskSite.CompetitionTypes.Springskytte.Services
                 }
                 else
                 {
-                    // Class A: count shots in ring 1-2 (zone 0) as "hits"
-                    hits = stop.Count(s => int.TryParse(s, out int v) && v == 0);
+                    // Class A zone count format: [ring1, ring2, ring3, ring4, bom]
+                    // "Hits" = ring1 + ring2 (zero-penalty shots)
+                    if (stop.Count >= 2)
+                    {
+                        int.TryParse(stop[0], out int r1);
+                        int.TryParse(stop[1], out int r2);
+                        hits = r1 + r2;
+                    }
+                    else
+                    {
+                        hits = 0;
+                    }
                 }
                 hitsPerStop.Add(hits);
             }

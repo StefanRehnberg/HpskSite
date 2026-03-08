@@ -46,7 +46,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Models
         /// <summary>
         /// JSON shots data. Format depends on weapon class:
         /// Class C: [["H","H","B","H","H"],["H","B","H","H","H"],...] (6 stops x 5 shots)
-        /// Class A: [["0","1","0","3",...],["0","0","2",...]] (1-6 series, 30 shots total, values 0-3)
+        /// Class A: [["3","5","2","1","1"],...] (N targets, each = [ring1,ring2,ring3,ring4,bom] zone counts)
         /// </summary>
         public string Shots { get; set; } = "[]";
 

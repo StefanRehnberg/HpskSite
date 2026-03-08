@@ -327,6 +327,25 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 if (!entries.Any())
                     return Json(new { success = true, results = new List<object>(), classGroups = new List<object>() });
 
+                // Load start order from content nodes (authoritative source)
+                var startOrderLookup = new Dictionary<string, int>();
+                var competition = _contentService.GetById(competitionId);
+                if (competition != null)
+                {
+                    var slNodes = _contentService.GetPagedChildren(competition.Id, 0, 50, out _)
+                        .Where(c => c.ContentType.Alias == "precisionStartList")
+                        .ToList();
+                    foreach (var node in slNodes)
+                    {
+                        var cfgJson = node.GetValue<string>("configurationData");
+                        if (string.IsNullOrEmpty(cfgJson)) continue;
+                        var config = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(cfgJson);
+                        if (config?.Starters == null) continue;
+                        foreach (var starter in config.Starters)
+                            startOrderLookup[$"{starter.MemberId}|{starter.WeaponClass}"] = starter.StartOrder;
+                    }
+                }
+
                 // Build shooter results with names
                 var memberIds = entries.Select(e => e.MemberId).Distinct().ToList();
                 var memberDict = LoadMemberInfo(memberIds);
@@ -336,7 +355,11 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     var (name, club) = memberDict.TryGetValue(e.MemberId, out var info)
                         ? info
                         : ($"Skytt {e.MemberId}", "Okänd klubb");
-                    return _scoringService.BuildShooterResult(e, name, club);
+                    var result = _scoringService.BuildShooterResult(e, name, club);
+                    // Apply start order from content nodes if DB value is missing
+                    if (result.StartOrder == 0 && startOrderLookup.TryGetValue($"{e.MemberId}|{e.WeaponClass}", out var slOrder))
+                        result.StartOrder = slOrder;
+                    return result;
                 }).ToList();
 
                 // Sort using tiebreaker
@@ -359,6 +382,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                                 rank = s.Status == null && s.TotalTimeSeconds.HasValue ? idx + 1 : 0,
                                 s.MemberId,
                                 s.Name,
+                                s.StartOrder,
                                 s.Club,
                                 s.WeaponClass,
                                 s.AgeGenderClass,

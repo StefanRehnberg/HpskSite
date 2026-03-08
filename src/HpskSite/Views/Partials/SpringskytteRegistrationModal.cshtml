@@ -519,16 +519,33 @@ function springRegShowSwish(competitionId, targetMemberId) {
     }
 
     fetch(url)
-        .then(response => response.text())
-        .then(html => {
-            if (modalBody) modalBody.innerHTML = html;
+        .then(response => response.json())
+        .then(data => {
+            if (!modalBody) return;
+            if (data.success) {
+                modalBody.innerHTML = `
+                    <div class="mb-3">
+                        <img src="${data.qrCode}" alt="Swish QR-kod" class="img-fluid" style="max-width: 300px;">
+                    </div>
+                    <p class="mb-1"><strong>Belopp:</strong> ${data.amount} kr</p>
+                    <p class="mb-1"><strong>Klasser:</strong> ${data.shootingClasses}</p>
+                    <p class="mb-1 text-muted"><small>Referens: ${data.invoiceNumber}</small></p>
+                    <p class="mt-3 text-muted"><small>Skanna QR-koden med Swish-appen för att betala.</small></p>
+                `;
+            } else {
+                modalBody.innerHTML = `
+                    <div class="alert alert-warning">
+                        <i class="bi bi-exclamation-triangle me-1"></i>${data.message || 'Kunde inte skapa betalning.'}
+                    </div>
+                `;
+            }
         })
         .catch(err => {
             console.error('Swish QR error:', err);
             if (modalBody) {
                 modalBody.innerHTML = `
                     <div class="alert alert-danger">
-                        <i class="bi bi-exclamation-triangle"></i> Kunde inte ladda betalningsinformation. Försök igen senare.
+                        <i class="bi bi-exclamation-triangle me-1"></i>Kunde inte ladda betalningsinformation. Försök igen senare.
                     </div>
                 `;
             }

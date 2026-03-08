@@ -279,7 +279,7 @@ namespace HpskSite.Services
                 Id = invoiceNode.Id,
                 InvoiceNumber = invoiceNode.GetValue<string>("invoiceNumber") ?? "",
                 CompetitionId = competition.Id,
-                CompetitionName = competition.Name ?? "",
+                CompetitionName = competition.GetValue<string>("competitionName") ?? competition.Name ?? "",
                 MemberId = invoiceNode.GetValue<string>("memberId") ?? "",
                 MemberName = invoiceNode.GetValue<string>("memberName") ?? "",
                 TotalAmount = invoiceNode.GetValue<decimal>("totalAmount"),

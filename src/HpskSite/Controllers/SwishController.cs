@@ -168,15 +168,7 @@ namespace HpskSite.Controllers
         {
             try
             {
-                Console.WriteLine("");
-                Console.WriteLine("🎯🎯🎯 SWISH CONTROLLER ENTRY POINT 🎯🎯🎯");
-                Console.WriteLine($"GeneratePaymentQR called with CompetitionId: {competitionId}");
-                Console.WriteLine("🎯🎯🎯 SWISH CONTROLLER ENTRY POINT END 🎯🎯🎯");
-                Console.WriteLine("");
-                
-                Console.WriteLine("Step 1: Getting current member...");
                 var currentMember = await _memberManager.GetCurrentMemberAsync();
-                Console.WriteLine($"Step 1 Complete: Current member = {currentMember?.Name ?? "NULL"}");
                 if (currentMember == null)
                 {
                     return Json(new { success = false, message = "Du måste vara inloggad." });
@@ -191,7 +183,8 @@ namespace HpskSite.Controllers
                 }
 
                 var swishNumber = competition.Value<string>("swishNumber");
-                var registrationFee = competition.Value<decimal>("registrationFee");
+                var _feeStr = competition.Value<string>("registrationFee") ?? "0";
+                decimal.TryParse(_feeStr, out var registrationFee);
 
                 _logger.LogInformation("Swish payment request - CompetitionId: {CompetitionId}, SwishNumber: {SwishNumber}, RegistrationFee: {RegistrationFee}", 
                     competitionId, swishNumber, registrationFee);
@@ -221,24 +214,22 @@ namespace HpskSite.Controllers
 
                 _logger.LogInformation("Looking for registration for member {MemberId} in competition {CompetitionId}", memberData.Id, competitionId);
 
-                // Find registrations hub under the competition
+                // Determine which member ID to search for
+                var searchMemberId = !string.IsNullOrEmpty(targetMemberId) ? targetMemberId : currentMember.Id.ToString();
+                _logger.LogInformation("Searching for registration for member {SearchMemberId} (targetMemberId param: '{TargetMemberId}', currentMember: {CurrentMemberId})",
+                    searchMemberId, targetMemberId ?? "null", currentMember.Id);
+
+                // First: try published content (fast, cached)
                 var registrationsHub = competition.Children()
                     .FirstOrDefault(x => x.ContentType?.Alias == "competitionRegistrationsHub");
 
                 if (registrationsHub != null)
                 {
-                    // Get all registrations under the hub
                     var registrations = registrationsHub.Children()
                         .Where(x => x.ContentType.Alias == "competitionRegistration");
 
-                    // Determine which member ID to search for
-                    var searchMemberId = !string.IsNullOrEmpty(targetMemberId) ? targetMemberId : currentMember.Id.ToString();
-                    _logger.LogInformation("Searching for registration for member {SearchMemberId} (targetMemberId param: '{TargetMemberId}', currentMember: {CurrentMemberId})",
-                        searchMemberId, targetMemberId ?? "null", currentMember.Id);
-
                     foreach (var registration in registrations)
                     {
-                        // Check if this registration belongs to the search member (could be target member or current user)
                         var registrationMemberId = registration.Value<string>("memberId");
                         if (registrationMemberId == searchMemberId)
                         {
@@ -246,10 +237,9 @@ namespace HpskSite.Controllers
                             if (isActive)
                             {
                                 userRegistrationId = registration.Id;
-                                registeredMemberId = registrationMemberId; // Store the actual registered member's ID
+                                registeredMemberId = registrationMemberId;
                                 registeredMemberName = registration.Value<string>("memberName");
 
-                                // NEW: Extract shooting classes from JSON array
                                 try
                                 {
                                     var shootingClassesJson = registration.Value<string>("shootingClasses");
@@ -270,9 +260,66 @@ namespace HpskSite.Controllers
                                     _logger.LogWarning(ex, "Error reading shootingClasses from registration {RegistrationId}", registration.Id);
                                 }
 
-                                _logger.LogInformation("Registration {RegistrationId} has shooting classes: '{ShootingClasses}'",
-                                    registration.Id, string.Join(", ", userShootingClasses));
-                                break; // Only one registration per user
+                                _logger.LogInformation("Registration {RegistrationId} found in published content", registration.Id);
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // Fallback: check unpublished content via IContentService
+                // (Registration may be saved but not yet published due to background publish delay)
+                if (!userRegistrationId.HasValue)
+                {
+                    _logger.LogInformation("Registration not found in published content, checking via IContentService fallback");
+                    var contentService = Services.ContentService;
+                    var competitionContent = contentService.GetById(competitionId);
+                    if (competitionContent != null)
+                    {
+                        long totalHub;
+                        var hubChildren = contentService.GetPagedChildren(competitionContent.Id, 0, 100, out totalHub);
+                        var hubContent = hubChildren.FirstOrDefault(x => x.ContentType.Alias == "competitionRegistrationsHub");
+
+                        if (hubContent != null)
+                        {
+                            long totalRegs;
+                            var regChildren = contentService.GetPagedChildren(hubContent.Id, 0, 500, out totalRegs);
+                            foreach (var reg in regChildren)
+                            {
+                                if (reg.ContentType.Alias != "competitionRegistration") continue;
+                                var regMemberId = reg.GetValue<string>("memberId");
+                                if (regMemberId != searchMemberId) continue;
+
+                                // Default isActive to true if property not explicitly set to false
+                                var hasIsActive = reg.Properties.Any(p => p.Alias == "isActive");
+                                var isActive = !hasIsActive || reg.GetValue<bool>("isActive");
+                                if (isActive)
+                                {
+                                    userRegistrationId = reg.Id;
+                                    registeredMemberId = regMemberId;
+                                    registeredMemberName = reg.GetValue<string>("memberName");
+
+                                    try
+                                    {
+                                        var shootingClassesJson = reg.GetValue<string>("shootingClasses");
+                                        if (!string.IsNullOrEmpty(shootingClassesJson))
+                                        {
+                                            var shootingClasses = CompetitionRegistrationDocument.DeserializeShootingClasses(shootingClassesJson);
+                                            foreach (var classEntry in shootingClasses)
+                                            {
+                                                if (!string.IsNullOrEmpty(classEntry.Class) && !userShootingClasses.Contains(classEntry.Class))
+                                                    userShootingClasses.Add(classEntry.Class);
+                                            }
+                                        }
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        _logger.LogWarning(ex, "Error reading shootingClasses from unpublished registration {RegistrationId}", reg.Id);
+                                    }
+
+                                    _logger.LogInformation("Found unpublished registration {RegistrationId} via IContentService fallback", reg.Id);
+                                    break;
+                                }
                             }
                         }
                     }
@@ -859,7 +906,8 @@ namespace HpskSite.Controllers
 
                 var competitionName = competition.Name;
                 var swishNumber = competition.Value<string>("swishNumber");
-                var registrationFee = competition.Value<decimal>("registrationFee");
+                var _feeStr = competition.Value<string>("registrationFee") ?? "0";
+                decimal.TryParse(_feeStr, out var registrationFee);
 
                 if (string.IsNullOrEmpty(swishNumber))
                 {
@@ -878,6 +926,9 @@ namespace HpskSite.Controllers
                 string targetMemberNameFromReg = null;
                 string searchMemberId = null; // Declare outside the if block so it's accessible later
 
+                // First: try published content (fast, cached)
+                searchMemberId = !string.IsNullOrEmpty(targetMemberId) ? targetMemberId : currentMember.Id.ToString();
+
                 var registrationsHub = competition.Children()
                     .FirstOrDefault(x => x.ContentType?.Alias == "competitionRegistrationsHub");
 
@@ -885,9 +936,6 @@ namespace HpskSite.Controllers
                 {
                     var registrations = registrationsHub.Children()
                         .Where(x => x.ContentType.Alias == "competitionRegistration");
-
-                    // Determine which member ID to search for
-                    searchMemberId = !string.IsNullOrEmpty(targetMemberId) ? targetMemberId : currentMember.Id.ToString();
 
                     foreach (var registration in registrations)
                     {
@@ -901,7 +949,6 @@ namespace HpskSite.Controllers
                                 targetMemberIdFromReg = registrationMemberId;
                                 targetMemberNameFromReg = registration.Value<string>("memberName");
 
-                                // Extract classes from JSON array
                                 var shootingClassesJson = registration.Value<string>("shootingClasses");
                                 var shootingClasses = CompetitionRegistrationDocument.DeserializeShootingClasses(shootingClassesJson);
 
@@ -913,7 +960,63 @@ namespace HpskSite.Controllers
                                     }
                                 }
 
-                                break; // Only one registration per user per competition
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // Fallback: check unpublished content via IContentService
+                if (!userRegistrationId.HasValue)
+                {
+                    _logger.LogInformation("SendQRCodeEmail: Registration not found in published content, checking via IContentService fallback");
+                    var contentService = Services.ContentService;
+                    var competitionContent = contentService.GetById(competitionId);
+                    if (competitionContent != null)
+                    {
+                        long totalHub;
+                        var hubChildren = contentService.GetPagedChildren(competitionContent.Id, 0, 100, out totalHub);
+                        var hubContent = hubChildren.FirstOrDefault(x => x.ContentType.Alias == "competitionRegistrationsHub");
+
+                        if (hubContent != null)
+                        {
+                            long totalRegs;
+                            var regChildren = contentService.GetPagedChildren(hubContent.Id, 0, 500, out totalRegs);
+                            foreach (var reg in regChildren)
+                            {
+                                if (reg.ContentType.Alias != "competitionRegistration") continue;
+                                var regMemberId = reg.GetValue<string>("memberId");
+                                if (regMemberId != searchMemberId) continue;
+
+                                var hasIsActive = reg.Properties.Any(p => p.Alias == "isActive");
+                                var isActive = !hasIsActive || reg.GetValue<bool>("isActive");
+                                if (isActive)
+                                {
+                                    userRegistrationId = reg.Id;
+                                    targetMemberIdFromReg = regMemberId;
+                                    targetMemberNameFromReg = reg.GetValue<string>("memberName");
+
+                                    try
+                                    {
+                                        var shootingClassesJson = reg.GetValue<string>("shootingClasses");
+                                        if (!string.IsNullOrEmpty(shootingClassesJson))
+                                        {
+                                            var shootingClasses = CompetitionRegistrationDocument.DeserializeShootingClasses(shootingClassesJson);
+                                            foreach (var classEntry in shootingClasses)
+                                            {
+                                                if (!string.IsNullOrEmpty(classEntry.Class) && !userShootingClasses.Contains(classEntry.Class))
+                                                    userShootingClasses.Add(classEntry.Class);
+                                            }
+                                        }
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        _logger.LogWarning(ex, "Error reading shootingClasses from unpublished registration {RegistrationId}", reg.Id);
+                                    }
+
+                                    _logger.LogInformation("SendQRCodeEmail: Found unpublished registration {RegistrationId} via IContentService fallback", reg.Id);
+                                    break;
+                                }
                             }
                         }
                     }

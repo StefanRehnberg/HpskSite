@@ -55,7 +55,7 @@ namespace HpskSite.CompetitionTypes.Precision.Services
 
                     // Convert value to appropriate type
                     var convertedValue = ConvertFieldValue(field.Key, field.Value);
-                    
+
                     // Set the property on the content
                     if (content.Properties.FirstOrDefault(p => p.Alias == propertyAlias) != null)
                     {
@@ -63,13 +63,19 @@ namespace HpskSite.CompetitionTypes.Precision.Services
                     }
                 }
 
-                // Save and publish — use "*" culture for invariant content
-                var publishResult = _contentService.Publish(content, new[] { "*" });
+                // Sync Umbraco node name with competitionName property
+                var updatedName = content.GetValue<string>("competitionName");
+                if (!string.IsNullOrEmpty(updatedName))
+                {
+                    content.Name = updatedName;
+                }
+
+                // Save first, then publish as system user (-1) to ensure publish succeeds
+                _contentService.Save(content);
+                var publishResult = _contentService.Publish(content, Array.Empty<string>(), -1);
 
                 if (!publishResult.Success)
                 {
-                    // Publish failed — try Save as fallback so data isn't lost
-                    _contentService.Save(content);
                     return CompetitionEditResult.SuccessResult(
                         "Competition saved (publish pending)",
                         new { competitionId = content.Id }
