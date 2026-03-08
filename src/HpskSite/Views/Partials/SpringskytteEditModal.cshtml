@@ -1,0 +1,803 @@
+@*
+ * Springskytte Competition Edit Modal
+ * Replaces CompetitionEditModal for Springskytte competitions.
+ * Uses weapon classes (A/C) + age/gender classes instead of standard shooting classes.
+ * Series: Class C always 6 stations, Class A configurable 1-6.
+ * Hides: allowDualCClass, allowSelfReporting, numberOfFinalSeries
+ *@
+
+<style>
+    #springEditModal input[type="text"].date-input { font-family: monospace; }
+</style>
+
+<div class="modal fade" id="springEditModal" tabindex="-1" aria-labelledby="springEditModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="springEditModalLabel">
+                    <i class="bi bi-pencil me-2"></i>Redigera Springskytte
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="springEditForm">
+                    <input type="hidden" id="springEdit_competitionId" name="competitionId" value="0">
+                    <div class="row">
+                        <div class="col-12">
+                            <h6 class="mb-3 text-primary">
+                                <i class="bi bi-info-circle me-1"></i>Grundinformation
+                            </h6>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="springEdit_competitionScope" class="form-label">Omfattning</label>
+                        <select class="form-select" id="springEdit_competitionScope" name="competitionScope">
+                            <option value="">-- Valj omfattning --</option>
+                            <option value="Svenskt Masterskap">Svenskt Masterskap</option>
+                            <option value="Landsdelsmasterskap">Landsdelsmasterskap</option>
+                            <option value="Kretsmasterskap">Kretsmasterskap</option>
+                            <option value="Klubbmasterskap">Klubbmasterskap</option>
+                        </select>
+                        <small class="form-text text-muted">Avgor hur standardmedaljer beraknas</small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="springEdit_seriesId" class="form-label">Tavlingsserie (valfritt)</label>
+                        <select class="form-select" id="springEdit_seriesId" name="seriesId">
+                            <option value="">Ingen serie</option>
+                        </select>
+                        <small class="form-text text-muted">Valj serie som tavlingen ingar i</small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="springEdit_competitionName" class="form-label">Tavlingsnamn <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="springEdit_competitionName" name="competitionName" required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="springEdit_description" class="form-label">Beskrivning</label>
+                        <textarea class="form-control" id="springEdit_description" name="description" rows="4"></textarea>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="springEdit_venue" class="form-label">Plats <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="springEdit_venue" name="venue" required>
+                    </div>
+
+                    <hr>
+
+                    <div class="row">
+                        <div class="col-12">
+                            <h6 class="mb-3 text-primary"><i class="bi bi-calendar me-1"></i>Datum</h6>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="springEdit_competitionDate" class="form-label">Tavlingsdatum <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control date-input" id="springEdit_competitionDate" name="competitionDate" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="springEdit_competitionEndDate" class="form-label">Slutdatum</label>
+                                <input type="text" class="form-control date-input" id="springEdit_competitionEndDate" name="competitionEndDate">
+                            </div>
+                        </div>
+                    </div>
+
+                    <hr>
+
+                    <div class="row">
+                        <div class="col-12">
+                            <h6 class="mb-3 text-primary"><i class="bi bi-clipboard me-1"></i>Anmalansinformation</h6>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="springEdit_registrationOpenDate" class="form-label">Anmalan oppnar <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control date-input" id="springEdit_registrationOpenDate" name="registrationOpenDate" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="springEdit_registrationCloseDate" class="form-label">Anmalan stanger <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control date-input" id="springEdit_registrationCloseDate" name="registrationCloseDate" required>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="springEdit_maxParticipants" class="form-label">Max antal deltagare <span class="text-danger">*</span></label>
+                                <input type="number" class="form-control" id="springEdit_maxParticipants" name="maxParticipants" min="1" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="springEdit_registrationFee" class="form-label">Anmalningsavgift (kr)</label>
+                                <input type="number" class="form-control" id="springEdit_registrationFee" name="registrationFee" min="0" step="0.01">
+                            </div>
+                        </div>
+                    </div>
+
+                    <hr>
+
+                    <div class="row">
+                        <div class="col-12">
+                            <h6 class="mb-3 text-primary"><i class="bi bi-gear me-1"></i>Klasser & Stationer</h6>
+                        </div>
+                    </div>
+
+                    <!-- Springskytte Weapon Classes -->
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Vapengrupper <span class="text-danger">*</span></label>
+                        <div class="d-flex gap-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" value="A" id="springEdit_weaponA" onchange="springEditUpdateClasses()">
+                                <label class="form-check-label" for="springEdit_weaponA">
+                                    <span class="badge bg-primary fs-6 px-3 py-2">A</span>
+                                    <small class="d-block text-muted mt-1">Tavla (ring 1-4)</small>
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" value="C" id="springEdit_weaponC" onchange="springEditUpdateClasses()">
+                                <label class="form-check-label" for="springEdit_weaponC">
+                                    <span class="badge bg-primary fs-6 px-3 py-2">C</span>
+                                    <small class="d-block text-muted mt-1">Fallmal</small>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Age/Gender Classes -->
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Alders-/konsklasser <span class="text-danger">*</span></label>
+                        <div class="mb-2">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="springEditToggleAllAges(true)">Valj alla</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="springEditToggleAllAges(false)">Avmarkera alla</button>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-body py-2">
+                                <small class="text-muted fw-bold">Junior</small>
+                                <div class="row g-1 mb-2">
+                                    <div class="col-6"><div class="form-check"><input class="form-check-input springEdit-age-cb" type="checkbox" value="D 15" id="springEdit_age_D15" onchange="springEditUpdateClasses()"><label class="form-check-label" for="springEdit_age_D15">D 15 <small class="text-muted">(-15 ar)</small></label></div></div>
+                                    <div class="col-6"><div class="form-check"><input class="form-check-input springEdit-age-cb" type="checkbox" value="H 15" id="springEdit_age_H15" onchange="springEditUpdateClasses()"><label class="form-check-label" for="springEdit_age_H15">H 15 <small class="text-muted">(-15 ar)</small></label></div></div>
+                                    <div class="col-6"><div class="form-check"><input class="form-check-input springEdit-age-cb" type="checkbox" value="D 18" id="springEdit_age_D18" onchange="springEditUpdateClasses()"><label class="form-check-label" for="springEdit_age_D18">D 18 <small class="text-muted">(16-18 ar)</small></label></div></div>
+                                    <div class="col-6"><div class="form-check"><input class="form-check-input springEdit-age-cb" type="checkbox" value="H 18" id="springEdit_age_H18" onchange="springEditUpdateClasses()"><label class="form-check-label" for="springEdit_age_H18">H 18 <small class="text-muted">(16-18 ar)</small></label></div></div>
+                                    <div class="col-6"><div class="form-check"><input class="form-check-input springEdit-age-cb" type="checkbox" value="D jun" id="springEdit_age_Djun" onchange="springEditUpdateClasses()"><label class="form-check-label" for="springEdit_age_Djun">D jun <small class="text-muted">(15-20 ar)</small></label></div></div>
+                                    <div class="col-6"><div class="form-check"><input class="form-check-input springEdit-age-cb" type="checkbox" value="H jun" id="springEdit_age_Hjun" onchange="springEditUpdateClasses()"><label class="form-check-label" for="springEdit_age_Hjun">H jun <small class="text-muted">(15-20 ar)</small></label></div></div>
+                                </div>
+
+                                <small class="text-muted fw-bold">Senior</small>
+                                <div class="row g-1 mb-2">
+                                    <div class="col-6"><div class="form-check"><input class="form-check-input springEdit-age-cb" type="checkbox" value="D 21" id="springEdit_age_D21" onchange="springEditUpdateClasses()"><label class="form-check-label" for="springEdit_age_D21">D 21 <small class="text-muted">(21-34 ar)</small></label></div></div>
+                                    <div class="col-6"><div class="form-check"><input class="form-check-input springEdit-age-cb" type="checkbox" value="H 21" id="springEdit_age_H21" onchange="springEditUpdateClasses()"><label class="form-check-label" for="springEdit_age_H21">H 21 <small class="text-muted">(21-34 ar)</small></label></div></div>
+                                    <div class="col-6"><div class="form-check"><input class="form-check-input springEdit-age-cb" type="checkbox" value="D 35" id="springEdit_age_D35" onchange="springEditUpdateClasses()"><label class="form-check-label" for="springEdit_age_D35">D 35 <small class="text-muted">(35-49 ar)</small></label></div></div>
+                                    <div class="col-6"><div class="form-check"><input class="form-check-input springEdit-age-cb" type="checkbox" value="H 35" id="springEdit_age_H35" onchange="springEditUpdateClasses()"><label class="form-check-label" for="springEdit_age_H35">H 35 <small class="text-muted">(35-49 ar)</small></label></div></div>
+                                </div>
+
+                                <small class="text-muted fw-bold">Veteran</small>
+                                <div class="row g-1">
+                                    <div class="col-6"><div class="form-check"><input class="form-check-input springEdit-age-cb" type="checkbox" value="D 50" id="springEdit_age_D50" onchange="springEditUpdateClasses()"><label class="form-check-label" for="springEdit_age_D50">D 50 <small class="text-muted">(50-59 ar)</small></label></div></div>
+                                    <div class="col-6"><div class="form-check"><input class="form-check-input springEdit-age-cb" type="checkbox" value="H 50" id="springEdit_age_H50" onchange="springEditUpdateClasses()"><label class="form-check-label" for="springEdit_age_H50">H 50 <small class="text-muted">(50-59 ar)</small></label></div></div>
+                                    <div class="col-6"><div class="form-check"><input class="form-check-input springEdit-age-cb" type="checkbox" value="D 60" id="springEdit_age_D60" onchange="springEditUpdateClasses()"><label class="form-check-label" for="springEdit_age_D60">D 60 <small class="text-muted">(60-64 ar)</small></label></div></div>
+                                    <div class="col-6"><div class="form-check"><input class="form-check-input springEdit-age-cb" type="checkbox" value="H 60" id="springEdit_age_H60" onchange="springEditUpdateClasses()"><label class="form-check-label" for="springEdit_age_H60">H 60 <small class="text-muted">(60-64 ar)</small></label></div></div>
+                                    <div class="col-6"><div class="form-check"><input class="form-check-input springEdit-age-cb" type="checkbox" value="D 65" id="springEdit_age_D65" onchange="springEditUpdateClasses()"><label class="form-check-label" for="springEdit_age_D65">D 65 <small class="text-muted">(65-69 ar)</small></label></div></div>
+                                    <div class="col-6"><div class="form-check"><input class="form-check-input springEdit-age-cb" type="checkbox" value="H 65" id="springEdit_age_H65" onchange="springEditUpdateClasses()"><label class="form-check-label" for="springEdit_age_H65">H 65 <small class="text-muted">(65-69 ar)</small></label></div></div>
+                                    <div class="col-6"><div class="form-check"><input class="form-check-input springEdit-age-cb" type="checkbox" value="D 70" id="springEdit_age_D70" onchange="springEditUpdateClasses()"><label class="form-check-label" for="springEdit_age_D70">D 70 <small class="text-muted">(70+ ar)</small></label></div></div>
+                                    <div class="col-6"><div class="form-check"><input class="form-check-input springEdit-age-cb" type="checkbox" value="H 70" id="springEdit_age_H70" onchange="springEditUpdateClasses()"><label class="form-check-label" for="springEdit_age_H70">H 70 <small class="text-muted">(70+ ar)</small></label></div></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Class summary -->
+                    <div id="springEdit_classSummary" class="mb-3" style="display: none;">
+                        <label class="form-label fw-bold">Valda klasser:</label>
+                        <div id="springEdit_classBadges" class="d-flex flex-wrap gap-1"></div>
+                    </div>
+
+                    <input type="hidden" id="springEdit_shootingClassIds" name="shootingClassIds">
+
+                    <!-- Series config -->
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Stationer / Serier</label>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-2">
+                                    <span class="text-muted">Klass C:</span> <strong>6 stationer</strong> (fast)
+                                </div>
+                            </div>
+                            <div class="col-md-6" id="springEdit_classASeriesGroup" style="display: none;">
+                                <label for="springEdit_classASeries" class="form-label">Klass A - Antal serier</label>
+                                <select class="form-select" id="springEdit_classASeries" style="max-width: 100px;">
+                                    <option value="1">1</option>
+                                    <option value="2">2</option>
+                                    <option value="3">3</option>
+                                    <option value="4">4</option>
+                                    <option value="5">5</option>
+                                    <option value="6">6</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Checkboxes (only relevant ones for Springskytte) -->
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="springEdit_showLiveResults" name="showLiveResults">
+                                    <label class="form-check-label" for="springEdit_showLiveResults">
+                                        Visa live-resultat
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="springEdit_isAwardingStandardMedals" name="isAwardingStandardMedals">
+                                    <label class="form-check-label" for="springEdit_isAwardingStandardMedals">
+                                        Standardmedaljsgrundande
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="springEdit_isClubOnly" name="isClubOnly">
+                                    <label class="form-check-label" for="springEdit_isClubOnly">
+                                        <i class="bi bi-shield-check me-1"></i>Endast for specifik klubb
+                                    </label>
+                                </div>
+                                <small class="form-text text-muted d-block mt-1">Begransa denna tavling till medlemmar fran en specifik klubb</small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Organizer Section -->
+                    <div class="card mb-3 border-info">
+                        <div class="card-header bg-info bg-opacity-10">
+                            <i class="bi bi-building me-1"></i>Arrangor / Synlighet
+                        </div>
+                        <div class="card-body">
+                            <p class="text-muted small mb-3">
+                                Valj <strong>klubb</strong> om tavlingen arrangeras av en specifik klubb.
+                                Valj <strong>krets</strong> om tavlingen arrangeras av en krets.
+                                Lamna bada tomma for nationella tavlingar.
+                            </p>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="springEdit_clubId" class="form-label">Ansvarig klubb</label>
+                                        <select class="form-select" id="springEdit_clubId" name="clubId" onchange="springEditOnClubChange()">
+                                            <option value="">-- Ingen klubb --</option>
+                                        </select>
+                                        <small class="form-text text-muted">Laddar klubbar...</small>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="springEdit_regionalFederation" class="form-label">Krets (endast om ingen klubb)</label>
+                                        <select class="form-select" id="springEdit_regionalFederation" name="regionalFederation" onchange="springEditOnRegionChange()">
+                                            <option value="">-- Ingen krets --</option>
+                                        </select>
+                                        <small class="form-text text-muted">Laddar kretsar...</small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <hr>
+
+                    <div class="row">
+                        <div class="col-12">
+                            <h6 class="mb-3 text-primary"><i class="bi bi-people me-1"></i>Tavlingsledning & Betalning</h6>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="springEdit_competitionDirector" class="form-label">Tavlingsledare <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="springEdit_competitionDirector" name="competitionDirector" required>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="springEdit_contactEmail" class="form-label">Kontakt e-post <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control" id="springEdit_contactEmail" name="contactEmail" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="springEdit_contactPhone" class="form-label">Kontakt telefon</label>
+                                <input type="text" class="form-control" id="springEdit_contactPhone" name="contactPhone">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Tavlingsledare</label>
+                        <div>
+                            <button type="button" class="btn btn-outline-primary btn-sm" onclick="openManagerSelectionModal()">
+                                <i class="bi bi-person-plus"></i> Hantera tavlingsledare
+                            </button>
+                        </div>
+                        <div id="springEdit_managerBadges" class="mt-2"></div>
+                        <input type="hidden" id="springEdit_competitionManagers_ids" name="competitionManagerIds">
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="springEdit_swishNumber" class="form-label">Swish-nummer</label>
+                        <input type="text" class="form-control" id="springEdit_swishNumber" name="swishNumber" placeholder="1123456789">
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="springEdit_addToMenu" name="addToMenu">
+                            <label class="form-check-label" for="springEdit_addToMenu">
+                                Lagg till genvag till tavlingen i menyn
+                            </label>
+                        </div>
+                    </div>
+                </form>
+
+                <div id="springEditFormErrors" class="alert alert-danger d-none mb-0 mt-3" role="alert">
+                    <strong>Fel vid sparning:</strong>
+                    <ul id="springEditErrorList" class="mb-0 mt-2"></ul>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    <i class="bi bi-x-circle me-1"></i>Avbryt
+                </button>
+                <button type="button" class="btn btn-primary" id="springEditSaveBtn" onclick="springEditSave()">
+                    <i class="bi bi-check-circle me-1"></i>Spara andringar
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+[data-bs-theme="dark"] #springEditModal .ck.ck-editor__main > .ck-editor__editable {
+    background-color: var(--bs-body-bg);
+    color: var(--bs-body-color);
+    border-color: var(--bs-border-color);
+}
+[data-bs-theme="dark"] #springEditModal .ck.ck-toolbar {
+    background-color: var(--bs-tertiary-bg);
+    border-color: var(--bs-border-color);
+}
+[data-bs-theme="dark"] #springEditModal .ck.ck-toolbar .ck-button {
+    color: var(--bs-body-color);
+}
+[data-bs-theme="dark"] #springEditModal .ck.ck-toolbar .ck-button:hover {
+    background-color: var(--bs-secondary-bg);
+}
+#springEditModal .ck-editor__editable {
+    min-height: 120px;
+}
+</style>
+
+<script>
+let springEditDescEditor = null;
+
+const springEditModalEl = document.getElementById('springEditModal');
+
+// Initialize Flatpickr + CKEditor when modal opens
+springEditModalEl.addEventListener('show.bs.modal', function() {
+    setTimeout(function() {
+        try {
+            flatpickr('#springEdit_competitionDate', { enableTime: true, dateFormat: 'Y-m-d H:i', time_24hr: true, locale: 'sv' });
+            flatpickr('#springEdit_competitionEndDate', { dateFormat: 'Y-m-d', locale: 'sv' });
+            flatpickr('#springEdit_registrationOpenDate', { enableTime: true, dateFormat: 'Y-m-d H:i', time_24hr: true, locale: 'sv' });
+            flatpickr('#springEdit_registrationCloseDate', { enableTime: true, dateFormat: 'Y-m-d H:i', time_24hr: true, locale: 'sv' });
+        } catch (e) { console.error('Flatpickr init error:', e); }
+
+        if (!springEditDescEditor) {
+            ClassicEditor
+                .create(document.getElementById('springEdit_description'), {
+                    toolbar: ['heading', '|', 'bold', 'italic', 'underline', '|', 'link', 'blockQuote', '|', 'bulletedList', 'numberedList', '|', 'undo', 'redo'],
+                    language: 'sv'
+                })
+                .then(editor => { springEditDescEditor = editor; })
+                .catch(err => console.error('CKEditor init error:', err));
+        }
+
+        springEditLoadClubs();
+        springEditLoadSeries();
+    }, 100);
+});
+
+// Reset on close
+springEditModalEl.addEventListener('hidden.bs.modal', function() {
+    document.getElementById('springEditForm').reset();
+    document.querySelectorAll('#springEditModal .springEdit-age-cb, #springEdit_weaponA, #springEdit_weaponC').forEach(cb => cb.checked = false);
+    document.getElementById('springEdit_classSummary').style.display = 'none';
+    document.getElementById('springEdit_classASeriesGroup').style.display = 'none';
+    if (springEditDescEditor) springEditDescEditor.setData('');
+});
+
+// --- Class selection logic ---
+
+function springEditUpdateClasses() {
+    const weapons = [];
+    if (document.getElementById('springEdit_weaponA').checked) weapons.push('A');
+    if (document.getElementById('springEdit_weaponC').checked) weapons.push('C');
+
+    const ages = Array.from(document.querySelectorAll('.springEdit-age-cb:checked')).map(cb => cb.value);
+
+    // Build combined classes: "A-D 21", "C-H 35", etc.
+    const classes = [];
+    weapons.forEach(w => ages.forEach(a => classes.push(`${w}-${a}`)));
+
+    document.getElementById('springEdit_shootingClassIds').value = classes.join(',');
+
+    // Update summary
+    const summaryDiv = document.getElementById('springEdit_classSummary');
+    const badgesDiv = document.getElementById('springEdit_classBadges');
+    if (classes.length > 0) {
+        summaryDiv.style.display = '';
+        badgesDiv.innerHTML = classes.map(c => `<span class="badge bg-secondary">${c}</span>`).join('');
+    } else {
+        summaryDiv.style.display = 'none';
+    }
+
+    // Show/hide Class A series selector
+    document.getElementById('springEdit_classASeriesGroup').style.display = weapons.includes('A') ? '' : 'none';
+}
+
+function springEditToggleAllAges(checked) {
+    document.querySelectorAll('.springEdit-age-cb').forEach(cb => cb.checked = checked);
+    springEditUpdateClasses();
+}
+
+// --- Populate from competition data ---
+
+window.populateSpringEditModal = function(comp) {
+    if (!comp) return;
+
+    document.getElementById('springEdit_competitionId').value = comp.id || 0;
+
+    // Basic fields
+    const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.value = val ?? ''; };
+    const setCheck = (id, val) => { const el = document.getElementById(id); if (el) el.checked = !!val; };
+
+    setVal('springEdit_competitionName', comp.competitionName);
+    setVal('springEdit_venue', comp.venue);
+    setVal('springEdit_maxParticipants', comp.maxParticipants || 50);
+    setVal('springEdit_registrationFee', comp.registrationFee || 0);
+    setVal('springEdit_competitionDirector', comp.competitionDirector);
+    setVal('springEdit_contactEmail', comp.contactEmail);
+    setVal('springEdit_contactPhone', comp.contactPhone);
+    setVal('springEdit_swishNumber', comp.swishNumber);
+    setVal('springEdit_competitionScope', comp.competitionScope);
+
+    // Description via CKEditor
+    if (springEditDescEditor) {
+        springEditDescEditor.setData(comp.description || '');
+    } else {
+        setVal('springEdit_description', comp.description);
+    }
+
+    // Dates via Flatpickr
+    const setDate = (id, dateStr, withTime) => {
+        const el = document.getElementById(id);
+        if (el && el._flatpickr && dateStr) {
+            el._flatpickr.setDate(dateStr);
+        } else if (el && dateStr) {
+            el.value = window.formatDateForInput ? formatDateForInput(dateStr, withTime) : dateStr;
+        } else if (el && el._flatpickr) {
+            el._flatpickr.clear();
+        }
+    };
+    setDate('springEdit_competitionDate', comp.competitionDate, true);
+    setDate('springEdit_competitionEndDate', comp.competitionEndDate, false);
+    setDate('springEdit_registrationOpenDate', comp.registrationOpenDate, true);
+    setDate('springEdit_registrationCloseDate', comp.registrationCloseDate, true);
+
+    // Checkboxes
+    setCheck('springEdit_showLiveResults', comp.showLiveResults);
+    setCheck('springEdit_isAwardingStandardMedals', comp.isAwardingStandardMedals);
+    setCheck('springEdit_addToMenu', comp.addToMenu);
+    setCheck('springEdit_isClubOnly', comp.isClubOnly);
+
+    // Managers
+    const managerIds = Array.isArray(comp.competitionManagers) ? comp.competitionManagers : [];
+    setVal('springEdit_competitionManagers_ids', managerIds.join(','));
+    const badgesEl = document.getElementById('springEdit_managerBadges');
+    if (badgesEl) {
+        badgesEl.innerHTML = managerIds.length === 0
+            ? '<small class="text-muted">Inga tavlingsledare valda</small>'
+            : '<small class="text-muted">Laddar...</small>';
+    }
+
+    // Club + Region
+    const clubSelect = document.getElementById('springEdit_clubId');
+    if (clubSelect) clubSelect.dataset.currentValue = comp.clubId || '';
+    const regionSelect = document.getElementById('springEdit_regionalFederation');
+    if (regionSelect) regionSelect.dataset.currentValue = comp.regionalFederation || '';
+
+    // Series dropdown
+    const seriesDropdown = document.getElementById('springEdit_seriesId');
+    if (seriesDropdown) {
+        seriesDropdown.dataset.pendingValue = comp.seriesId || '';
+        seriesDropdown.dataset.originalSeriesId = comp.seriesId || '';
+    }
+
+    // Parse shooting class IDs to set weapon + age checkboxes
+    const classIds = (comp.shootingClassIds || '').split(',').map(s => s.trim()).filter(s => s);
+    const weapons = new Set();
+    const ages = new Set();
+    classIds.forEach(cls => {
+        const parts = cls.split('-');
+        if (parts.length === 2) {
+            weapons.add(parts[0].trim());
+            ages.add(parts[1].trim());
+        }
+    });
+
+    document.getElementById('springEdit_weaponA').checked = weapons.has('A');
+    document.getElementById('springEdit_weaponC').checked = weapons.has('C');
+    document.querySelectorAll('.springEdit-age-cb').forEach(cb => {
+        cb.checked = ages.has(cb.value);
+    });
+
+    // Parse numberOfSeriesOrStations for Class A series count
+    // The stored value is the Class A series count (Class C is always 6)
+    const storedSeries = comp.numberOfSeriesOrStations || 6;
+    setVal('springEdit_classASeries', storedSeries);
+
+    springEditUpdateClasses();
+};
+
+// --- Club/Region loading ---
+
+function springEditLoadClubs() {
+    const clubSelect = document.getElementById('springEdit_clubId');
+    if (clubSelect.options.length > 1) {
+        // Already loaded, just set value
+        const val = clubSelect.dataset.currentValue;
+        if (val && val !== '0') clubSelect.value = val;
+        return;
+    }
+    fetch('/umbraco/surface/CompetitionAdmin/GetClubsForCompetitionAdmin')
+        .then(r => r.json())
+        .then(data => {
+            if (data.success && data.clubs) {
+                const helpText = clubSelect.parentElement.querySelector('small');
+                if (helpText) helpText.style.display = 'none';
+                data.clubs.forEach(club => {
+                    const opt = document.createElement('option');
+                    opt.value = club.id;
+                    opt.textContent = club.name;
+                    clubSelect.appendChild(opt);
+                });
+                const val = clubSelect.dataset.currentValue;
+                if (val && val !== '0') clubSelect.value = val;
+
+                // Load regions too
+                springEditLoadRegions();
+            }
+        })
+        .catch(err => console.error('Error loading clubs:', err));
+}
+
+function springEditLoadRegions() {
+    const regionSelect = document.getElementById('springEdit_regionalFederation');
+    if (regionSelect.options.length > 1) return;
+    fetch('/umbraco/surface/RegionalAdmin/GetAllRegions')
+        .then(r => r.json())
+        .then(data => {
+            if (data.success && data.regions) {
+                const helpText = regionSelect.parentElement.querySelector('small');
+                if (helpText) helpText.style.display = 'none';
+                data.regions.forEach(region => {
+                    const opt = document.createElement('option');
+                    opt.value = region.id;
+                    opt.textContent = region.name;
+                    regionSelect.appendChild(opt);
+                });
+                const val = regionSelect.dataset.currentValue;
+                if (val) regionSelect.value = val;
+            }
+        })
+        .catch(err => console.error('Error loading regions:', err));
+}
+
+function springEditLoadSeries() {
+    const select = document.getElementById('springEdit_seriesId');
+    fetch(`/umbraco/surface/CompetitionAdmin/GetSeriesList?_=${Date.now()}`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.success && data.data) {
+                select.innerHTML = '<option value="">Ingen serie</option>';
+                data.data.forEach(s => {
+                    const opt = document.createElement('option');
+                    opt.value = s.id;
+                    opt.textContent = s.name;
+                    select.appendChild(opt);
+                });
+            }
+            const pending = select.dataset.pendingValue;
+            if (pending) { select.value = pending; delete select.dataset.pendingValue; }
+        })
+        .catch(err => console.error('Error loading series:', err));
+}
+
+function springEditOnClubChange() {
+    const clubId = document.getElementById('springEdit_clubId').value;
+    const regionSelect = document.getElementById('springEdit_regionalFederation');
+    regionSelect.disabled = !!clubId;
+    if (clubId) regionSelect.value = '';
+}
+
+function springEditOnRegionChange() {
+    // No special behavior needed
+}
+
+// --- Save ---
+
+function springEditSave() {
+    if (springEditDescEditor) {
+        document.getElementById('springEdit_description').value = springEditDescEditor.getData();
+    }
+
+    const form = document.getElementById('springEditForm');
+    if (!form.checkValidity()) { form.reportValidity(); return; }
+
+    // Validate classes
+    const classIds = document.getElementById('springEdit_shootingClassIds').value;
+    if (!classIds) {
+        alert('Valj minst en vapenklass och en aldersklass.');
+        return;
+    }
+
+    const formData = new FormData(form);
+    const fields = {};
+
+    for (let [key, value] of formData.entries()) {
+        if (key === 'competitionId' || key === 'competitionManagers' || key === 'competitionManagerIds') continue;
+        if ((key === 'competitionEndDate' || key === 'description' || key === 'contactPhone') && !value) continue;
+
+        if (key === 'showLiveResults' || key === 'addToMenu' || key === 'isClubOnly' || key === 'isAwardingStandardMedals') {
+            fields[key] = value === 'on';
+        } else {
+            fields[key] = value;
+        }
+    }
+
+    // Calculate numberOfSeriesOrStations from Class A series (or default 6 for C-only)
+    const hasA = document.getElementById('springEdit_weaponA').checked;
+    fields.numberOfSeriesOrStations = hasA
+        ? parseInt(document.getElementById('springEdit_classASeries').value) || 6
+        : 6;
+
+    // Series handling
+    const newSeriesId = fields.seriesId || '';
+    delete fields.seriesId;
+
+    // Managers
+    const managerIdsStr = document.getElementById('springEdit_competitionManagers_ids').value || '';
+    fields.competitionManagers = managerIdsStr.split(',').map(id => id.trim()).filter(id => id).map(id => parseInt(id));
+
+    // Region
+    const regionSelect = document.getElementById('springEdit_regionalFederation');
+    fields.regionalFederation = regionSelect.disabled ? '' : (regionSelect.value || '');
+
+    // Unchecked checkboxes
+    ['showLiveResults', 'addToMenu', 'isClubOnly', 'isAwardingStandardMedals'].forEach(f => {
+        if (!(f in fields)) fields[f] = false;
+    });
+
+    // Always false for Springskytte
+    fields.allowDualCClass = false;
+    fields.allowSelfReporting = false;
+
+    // Validate dates
+    const requiredDates = ['competitionDate', 'registrationOpenDate', 'registrationCloseDate'];
+    for (let f of requiredDates) {
+        if (!fields[f]) { alert(`${f} ar obligatoriskt.`); return; }
+    }
+
+    const saveBtn = document.getElementById('springEditSaveBtn');
+    const originalText = saveBtn.innerHTML;
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<i class="bi bi-spinner-border spinner-border-sm"></i> Sparar...';
+
+    const competitionId = parseInt(document.getElementById('springEdit_competitionId').value) || 0;
+
+    fetch('/umbraco/surface/CompetitionEdit/SaveCompetition', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value
+        },
+        body: JSON.stringify({
+            competitionId: competitionId,
+            competitionType: 'Springskytte',
+            fields: fields
+        })
+    })
+    .then(response => {
+        if (!response.ok) return response.text().then(text => { throw new Error(`HTTP ${response.status}: ${text}`); });
+        return response.json();
+    })
+    .then(data => {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = originalText;
+
+        if (data.success) {
+            document.getElementById('springEditFormErrors').classList.add('d-none');
+
+            // Handle series move
+            const seriesDropdown = document.getElementById('springEdit_seriesId');
+            const originalSeriesId = seriesDropdown ? (seriesDropdown.dataset.originalSeriesId || '') : '';
+            if (String(newSeriesId) !== String(originalSeriesId)) {
+                fetch('/umbraco/surface/CompetitionAdmin/MoveCompetitionToSeries', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value
+                    },
+                    body: JSON.stringify({ competitionId: competitionId, seriesId: newSeriesId ? parseInt(newSeriesId) : null })
+                })
+                .then(r => r.json())
+                .then(() => {
+                    bootstrap.Modal.getInstance(springEditModalEl).hide();
+                    setTimeout(() => {
+                        if (typeof loadCompetitionsList === 'function') loadCompetitionsList();
+                        if (typeof loadSeriesList === 'function') loadSeriesList();
+                    }, 300);
+                })
+                .catch(() => {
+                    bootstrap.Modal.getInstance(springEditModalEl).hide();
+                    setTimeout(() => { if (typeof loadCompetitionsList === 'function') loadCompetitionsList(); }, 300);
+                });
+                return;
+            }
+
+            if (typeof showNotification === 'function') {
+                showNotification('Tavlingen uppdaterades framgangsrikt!', 'success');
+            }
+            bootstrap.Modal.getInstance(springEditModalEl).hide();
+            setTimeout(() => { if (typeof loadCompetitionsList === 'function') loadCompetitionsList(); }, 500);
+        } else {
+            const errorList = document.getElementById('springEditErrorList');
+            errorList.innerHTML = '';
+            if (data.errors && typeof data.errors === 'object') {
+                for (let [, error] of Object.entries(data.errors)) {
+                    const li = document.createElement('li');
+                    li.textContent = error;
+                    errorList.appendChild(li);
+                }
+            } else {
+                const li = document.createElement('li');
+                li.textContent = data.message || 'Ett okant fel uppstod';
+                errorList.appendChild(li);
+            }
+            document.getElementById('springEditFormErrors').classList.remove('d-none');
+        }
+    })
+    .catch(error => {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = originalText;
+        console.error('Error saving competition:', error);
+        if (typeof showNotification === 'function') {
+            showNotification('Fel vid sparning: ' + error.message, 'error');
+        }
+    });
+}
+</script>

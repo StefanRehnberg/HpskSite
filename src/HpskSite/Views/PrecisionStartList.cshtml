@@ -7,6 +7,19 @@
 @inject IMemberService MemberService
 @inject HpskSite.Services.ClubService ClubService
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+
+@functions {
+    static int ParseTimeToSeconds(string time)
+    {
+        if (string.IsNullOrEmpty(time)) return 0;
+        var parts = time.Split(':');
+        if (parts.Length == 3 && int.TryParse(parts[0], out var h) && int.TryParse(parts[1], out var m) && int.TryParse(parts[2], out var s))
+            return h * 3600 + m * 60 + s;
+        if (parts.Length == 2 && int.TryParse(parts[0], out var h2) && int.TryParse(parts[1], out var m2))
+            return h2 * 3600 + m2 * 60;
+        return 0;
+    }
+}
 @{
 	Layout = null;
 
@@ -36,8 +49,15 @@
 
 	// Get competition name
 	// Direct cache lookup (O(1) instead of full tree scan)
-	var competitionNode = Umbraco.Content(competitionId);
+	var competitionNode = competitionId > 0 ? Umbraco.Content(competitionId) : null;
 	var competition = (competitionNode?.ContentType.Alias == "competition") ? competitionNode : null;
+	// Fallback: for Springskytte lists, the parent IS the competition
+	if (competition == null)
+	{
+		var parentNode = Model.Parent;
+		if (parentNode?.ContentType.Alias == "competition")
+			competition = parentNode;
+	}
 	var competitionName = competition?.Name ?? "Okänd tävling";
 }
 
@@ -149,8 +169,81 @@
                 {
                     var config = JsonConvert.DeserializeObject<dynamic>(configurationData);
 
-                    if (config?.Teams != null)
+                    if (config?.Starters != null)
                     {
+                        // Springskytte format: individual time-interval start list
+                        var starters = (IEnumerable<dynamic>)config.Starters;
+                        var listName = (string)config.ListName;
+                        var defaultInterval = (string)config.DefaultInterval;
+
+                        if (!string.IsNullOrEmpty(listName))
+                        {
+                            <div class="team-header">@listName</div>
+                        }
+
+                        <table class="start-list-table">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Starttid</th>
+                                    <th>Namn</th>
+                                    <th>Förening</th>
+                                    <th>Vapen</th>
+                                    <th>Klass</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @{
+                                    string prevTime = null;
+                                    var intervalSec = 60;
+                                    if (!string.IsNullOrEmpty(defaultInterval))
+                                    {
+                                        var parts = defaultInterval.Split(':');
+                                        if (parts.Length == 2 && int.TryParse(parts[0], out var m) && int.TryParse(parts[1], out var s))
+                                            intervalSec = m * 60 + s;
+                                    }
+                                }
+                                @foreach (var s in starters)
+                                {
+                                    var sTime = (string)s.StartTime;
+                                    // Detect breaks
+                                    if (prevTime != null && sTime != null)
+                                    {
+                                        var gap = ParseTimeToSeconds(sTime) - ParseTimeToSeconds(prevTime);
+                                        if (gap > intervalSec * 1.5)
+                                        {
+                                            <tr style="background-color:#fff3cd">
+                                                <td colspan="6" style="text-align:center;font-weight:bold;font-size:10px;padding:2px">
+                                                    Paus
+                                                </td>
+                                            </tr>
+                                        }
+                                    }
+
+                                    var sName = (string)s.Name;
+                                    var sClub = (string)s.Club;
+                                    var rowClass = "";
+                                    if (!string.IsNullOrEmpty(currentMemberName) && sName == currentMemberName)
+                                        rowClass = "current-user";
+                                    else if (!string.IsNullOrEmpty(currentMemberClub) && sClub == currentMemberClub)
+                                        rowClass = "same-club";
+
+                                    <tr class="@rowClass">
+                                        <td class="text-center">@s.StartOrder</td>
+                                        <td style="font-family:monospace;font-weight:bold">@sTime</td>
+                                        <td>@sName</td>
+                                        <td>@HpskSite.Helpers.ClubNameHelper.Shorten(sClub)</td>
+                                        <td class="text-center">@s.WeaponClass</td>
+                                        <td>@s.AgeGenderClass</td>
+                                    </tr>
+                                    prevTime = sTime;
+                                }
+                            </tbody>
+                        </table>
+                    }
+                    else if (config?.Teams != null)
+                    {
+                        // Precision format: team-based start list
                         var teams = (IEnumerable<dynamic>)config.Teams;
 
                         foreach (var team in teams)

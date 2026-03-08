@@ -145,6 +145,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Models
         public string AgeGenderClass { get; set; } = "";
         public decimal? SprintTimeSeconds { get; set; }
         public string? SprintTimeInput { get; set; }  // "MM:SS" or "H:MM:SS" for UI parsing
+        public string? FinishTimeInput { get; set; }  // "HH:MM:SS" finish time — sprint = finish - start
         public List<List<string>>? ShotSeries { get; set; }
         public int PenaltyMultiplier { get; set; } = 1;
         public string? Status { get; set; }  // null, "DNS", "DNF"
@@ -156,8 +157,14 @@ namespace HpskSite.CompetitionTypes.Springskytte.Models
         public string Message { get; set; } = "";
         public int? ResultId { get; set; }
         public int ShootingScore { get; set; }
+        public decimal? SprintTimeSeconds { get; set; }
         public decimal? TotalTimeSeconds { get; set; }
         public string TotalTimeDisplay { get; set; } = "";
+        public int PenaltyMultiplier { get; set; }
+        /// <summary>
+        /// Verification: shots as stored in DB, returned for client-side integrity check.
+        /// </summary>
+        public List<List<string>>? VerificationShots { get; set; }
     }
 
     public class SpringskytteDeleteResultRequest
@@ -190,6 +197,8 @@ namespace HpskSite.CompetitionTypes.Springskytte.Models
         public string DefaultInterval { get; set; } = "01:00";  // MM:SS between starts
         public int BreakAfterEvery { get; set; } = 10;  // Long break after N starters
         public string BreakDuration { get; set; } = "05:00";  // MM:SS for long break
+        public string ListName { get; set; } = "";  // User-assigned label (e.g., "Vapengrupp A")
+        public List<string> CoveredClasses { get; set; } = new();  // Registration class patterns (e.g., ["A-D 21","A-H 35"])
         public List<SpringskytteStartListEntry> Starters { get; set; } = new();
     }
 
@@ -200,6 +209,15 @@ namespace HpskSite.CompetitionTypes.Springskytte.Models
         public string DefaultInterval { get; set; } = "01:00";
         public int BreakAfterEvery { get; set; } = 10;
         public string BreakDuration { get; set; } = "05:00";
+        public List<string> CoveredClasses { get; set; } = new();  // Which classes to include (empty = all)
+        public string ListName { get; set; } = "";  // Name for this list
+        public int? ExistingNodeId { get; set; }  // If set, replace this specific node; if null, create new
+    }
+
+    public class SpringskytteDeleteStartListRequest
+    {
+        public int CompetitionId { get; set; }
+        public int NodeId { get; set; }
     }
 
     /// <summary>

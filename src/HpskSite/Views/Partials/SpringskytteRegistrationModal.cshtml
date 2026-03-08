@@ -79,6 +79,12 @@
                     <p class="text-muted small mb-2"><i class="bi bi-person me-1"></i>Anmäler: <strong>@regMemberName</strong> (@regClubName)</p>
                 }
 
+                <!-- Existing registration notice -->
+                <div id="springRegExistingNotice" class="alert alert-info small py-2 px-3" style="display:none;">
+                    <i class="bi bi-info-circle me-1"></i>
+                    <span id="springRegExistingText"></span>
+                </div>
+
                 <!-- Weapon Class -->
                 <div class="mb-3">
                     <label class="form-label fw-bold">Vapengrupp <span class="text-danger">*</span></label>
@@ -167,16 +173,6 @@
                     <div id="springRegSummaryBadges" class="d-flex flex-wrap gap-2"></div>
                 </div>
 
-                <!-- Start Preference -->
-                <div class="mb-3">
-                    <label for="springRegStartPref" class="form-label">Startönskemål</label>
-                    <select class="form-select" id="springRegStartPref">
-                        <option value="Inget">Inget önskemål</option>
-                        <option value="Tidig">Tidig start</option>
-                        <option value="Sen">Sen start</option>
-                    </select>
-                </div>
-
                 </div><!-- /springRegFormBody -->
 
                 <!-- Error message -->
@@ -204,6 +200,48 @@ const springRegConfig = {
     clubs: @Html.Raw(allClubsJson)
 };
 let springRegSelectedTargetMemberId = springRegConfig.memberId || null;
+let springRegExistingRegistrations = null; // cached: { memberId -> [class1, class2, ...] }
+
+// --- Load existing registrations for duplicate detection ---
+async function springRegLoadExistingRegistrations() {
+    if (springRegExistingRegistrations !== null) return; // already loaded
+    try {
+        const response = await fetch(`/umbraco/surface/Competition/GetCompetitionRegistrations?competitionId=${@competitionId}`, {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        });
+        const data = await response.json();
+        if (data.success && data.registrations) {
+            springRegExistingRegistrations = {};
+            for (const reg of data.registrations) {
+                const mid = reg.memberId;
+                if (!springRegExistingRegistrations[mid]) springRegExistingRegistrations[mid] = [];
+                if (reg.shootingClasses) {
+                    for (const sc of reg.shootingClasses) {
+                        springRegExistingRegistrations[mid].push(sc.class || sc.className || '');
+                    }
+                }
+            }
+        }
+    } catch (err) {
+        console.error('Error loading existing registrations:', err);
+    }
+}
+
+function springRegCheckExisting(memberId) {
+    const notice = document.getElementById('springRegExistingNotice');
+    const text = document.getElementById('springRegExistingText');
+    if (!notice || !text) return;
+
+    if (!memberId || !springRegExistingRegistrations || !springRegExistingRegistrations[memberId]) {
+        notice.style.display = 'none';
+        return;
+    }
+
+    const classes = springRegExistingRegistrations[memberId];
+    const badges = classes.map(c => `<span class="badge bg-warning text-dark me-1">${c}</span>`).join('');
+    text.innerHTML = `Redan anmäld i: ${badges} — ny anmälan uppdaterar befintlig.`;
+    notice.style.display = 'block';
+}
 
 // --- Init: populate club dropdown for admins ---
 (function() {
@@ -282,9 +320,11 @@ function springRegOnMemberSelected() {
         const name = memberSelect.options[memberSelect.selectedIndex].textContent.split(' (')[0];
         const clubName = clubSelect.options[clubSelect.selectedIndex].textContent;
         springRegShowTargetInfo(name, clubName);
+        springRegCheckExisting(springRegSelectedTargetMemberId);
     } else {
         const infoDiv = document.getElementById('springRegTargetInfo');
         if (infoDiv) infoDiv.style.display = 'none';
+        springRegCheckExisting(null);
     }
     springRegUpdateSummary();
 }
@@ -350,7 +390,7 @@ async function springRegSubmit() {
     successDiv.style.display = 'none';
 
     const selectedClasses = classes.join(',');
-    const startPreference = document.getElementById('springRegStartPref').value;
+    const startPreference = 'Inget';
     const competitionId = @competitionId;
 
     try {
@@ -495,6 +535,14 @@ function springRegShowSwish(competitionId, targetMemberId) {
         });
 }
 
+// Load existing registrations when modal opens and check for current member
+document.getElementById('registrationModal')?.addEventListener('shown.bs.modal', async () => {
+    await springRegLoadExistingRegistrations();
+    // For regular members (no club dropdown), check immediately
+    const memberId = springRegSelectedTargetMemberId || springRegConfig.memberId;
+    if (memberId) springRegCheckExisting(memberId);
+});
+
 // Reset form when modal is closed
 document.getElementById('registrationModal')?.addEventListener('hidden.bs.modal', () => {
     const weaponA = document.getElementById('springRegWeaponA');
@@ -502,9 +550,9 @@ document.getElementById('registrationModal')?.addEventListener('hidden.bs.modal'
     if (weaponA) weaponA.checked = false;
     if (weaponC) weaponC.checked = false;
     document.getElementById('springRegAgeClass').value = '';
-    document.getElementById('springRegStartPref').value = 'Inget';
     document.getElementById('springRegError').style.display = 'none';
     document.getElementById('springRegSuccess').style.display = 'none';
+    document.getElementById('springRegExistingNotice').style.display = 'none';
     document.getElementById('springRegFormBody').style.display = '';
     document.getElementById('springRegFooter').style.display = '';
 

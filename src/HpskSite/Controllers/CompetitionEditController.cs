@@ -120,7 +120,8 @@ namespace HpskSite.Controllers
                     externalUrl = content.GetValue<string>("externalUrl") ?? "",
                     externalRegistrationEmail = content.GetValue<string>("externalRegistrationEmail") ?? "",
                     seriesId = isInSeries ? parent!.Id : (int?)null,
-                    seriesName = isInSeries ? parent!.Name : null
+                    seriesName = isInSeries ? parent!.Name : null,
+                    competitionType = content.GetValue<string>("competitionType") ?? "Precision"
                 };
 
                 Console.WriteLine($"Returning competition data for: {content.Name}");
@@ -294,6 +295,7 @@ namespace HpskSite.Controllers
             return request.CompetitionType.ToLower() switch
             {
                 "precision" => await SavePrecisionCompetition(request, content),
+                "springskytte" => await SavePrecisionCompetition(request, content),
                 _ => new
                 {
                     success = false,

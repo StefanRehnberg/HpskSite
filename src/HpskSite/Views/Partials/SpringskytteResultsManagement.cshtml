@@ -3,6 +3,10 @@
  * Completely isolated from standard competition results entry.
  * Handles time-based results with stop-by-stop shot recording.
  *
+ * Two entry modes:
+ *   Tab 1 "Vapengrupp A" — Sequential shooter navigation, finish time → sprint calculation
+ *   Tab 2 "Vapengrupp C — Banregistrering" — Mobile-first range officer mode with number pad lookup
+ *
  * Class C: 6 stops x 5 shots, each Hit (H) or Miss (B)
  * Class A: Configurable series (1-6), 30 shots total, zone values 0-3
  *@
@@ -11,7 +15,12 @@
     var competitionId = ViewData["CompetitionId"]?.ToString() ?? "";
     var competitionType = ViewData["CompetitionType"]?.ToString() ?? "Springskytte";
     var numberOfSeries = ViewData["NumberOfSeriesOrStations"] as int? ?? 6;
+    var competitionName = ViewData["CompetitionName"]?.ToString() ?? "Springskytte";
 }
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
 
 <div class="springskytte-results-management" data-competition-id="@competitionId" data-number-of-series="@numberOfSeries">
     <!-- Results Entry Section -->
@@ -23,41 +32,92 @@
                     <h5 class="mb-0"><i class="bi bi-stopwatch me-2"></i>Registrera Resultat</h5>
                 </div>
                 <span class="text-muted small">
-                    <i class="bi bi-info-circle me-1"></i>Ange löptid och skjutresultat per skytt
+                    <i class="bi bi-info-circle me-1"></i>Ange måltid och skjutresultat per skytt
                 </span>
             </div>
         </div>
         <div class="card-body" id="springEntryBody">
-            <!-- Shooter Navigation -->
-            <div class="d-flex flex-wrap align-items-center gap-2 mb-3 sticky-top bg-body py-2" style="z-index: 10;">
-                <button class="btn btn-sm btn-outline-secondary" onclick="springFirstShooter()" title="Första skytten">
-                    <i class="bi bi-skip-backward-fill"></i>
-                </button>
-                <button class="btn btn-sm btn-outline-secondary" onclick="springPrevShooter()" title="Föregående skytt">
-                    <i class="bi bi-caret-left-fill"></i>
-                </button>
-                <span class="fw-bold" id="springCurrentShooterInfo">Laddar...</span>
-                <button class="btn btn-sm btn-outline-secondary" onclick="springNextShooter()" title="Nästa skytt">
-                    <i class="bi bi-caret-right-fill"></i>
-                </button>
-                <button class="btn btn-sm btn-outline-secondary" onclick="springLastShooter()" title="Sista skytten">
-                    <i class="bi bi-skip-forward-fill"></i>
-                </button>
-                <div class="ms-auto">
-                    <select class="form-select form-select-sm" id="springShooterFilter" onchange="springFilterShooters()" style="width: auto;">
-                        <option value="all">Alla skyttar</option>
-                        <option value="noresult">Utan resultat</option>
-                        <option value="A">Vapengrupp A</option>
-                        <option value="C">Vapengrupp C</option>
-                    </select>
-                </div>
-            </div>
+            <!-- Tabs for Class A / Class C -->
+            <ul class="nav nav-tabs mb-3" id="springEntryTabs" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active" id="springTabA-tab" data-bs-toggle="tab" data-bs-target="#springTabA"
+                        type="button" role="tab" aria-controls="springTabA" aria-selected="true">
+                        <i class="bi bi-card-list me-1"></i>Vapengrupp A
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="springTabC-tab" data-bs-toggle="tab" data-bs-target="#springTabC"
+                        type="button" role="tab" aria-controls="springTabC" aria-selected="false">
+                        <i class="bi bi-phone me-1"></i>Vapengrupp C — Banregistrering
+                    </button>
+                </li>
+            </ul>
 
-            <!-- Entry Form Container -->
-            <div id="springEntryContainer">
-                <div class="text-center py-4">
-                    <div class="spinner-border" role="status"><span class="visually-hidden">Laddar...</span></div>
-                    <p class="mt-2 text-muted">Laddar skyttar...</p>
+            <div class="tab-content" id="springEntryTabContent">
+                <!-- ===== TAB 1: CLASS A — Sequential Entry ===== -->
+                <div class="tab-pane fade show active" id="springTabA" role="tabpanel" aria-labelledby="springTabA-tab">
+                    <!-- Shooter Navigation -->
+                    <div class="d-flex flex-wrap align-items-center gap-2 mb-3 sticky-top bg-body py-2" style="z-index: 10;">
+                        <button class="btn btn-sm btn-outline-secondary" onclick="springANavigate(springFirstShooter)" title="Forsta skytten">
+                            <i class="bi bi-skip-backward-fill"></i>
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="springANavigate(springPrevShooter)" title="Foregaende skytt">
+                            <i class="bi bi-caret-left-fill"></i>
+                        </button>
+                        <span class="fw-bold" id="springCurrentShooterInfo">Laddar...</span>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="springANavigate(springNextShooter)" title="Nasta skytt">
+                            <i class="bi bi-caret-right-fill"></i>
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="springANavigate(springLastShooter)" title="Sista skytten">
+                            <i class="bi bi-skip-forward-fill"></i>
+                        </button>
+                        <div class="ms-auto">
+                            <select class="form-select form-select-sm" id="springShooterFilter" onchange="springFilterShooters()" style="width: auto;">
+                                <option value="all">Alla skyttar</option>
+                                <option value="noresult">Utan resultat</option>
+                                <option value="A">Vapengrupp A</option>
+                                <option value="C">Vapengrupp C</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Entry Form Container -->
+                    <div id="springEntryContainer">
+                        <div class="text-center py-4">
+                            <div class="spinner-border" role="status"><span class="visually-hidden">Laddar...</span></div>
+                            <p class="mt-2 text-muted">Laddar skyttar...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ===== TAB 2: CLASS C — Range Officer Mode ===== -->
+                <div class="tab-pane fade" id="springTabC" role="tabpanel" aria-labelledby="springTabC-tab">
+                    <!-- Top bar -->
+                    <div class="d-flex justify-content-between align-items-center mb-3 sticky-top bg-body py-2" style="z-index: 10;">
+                        <small class="text-muted">@competitionName</small>
+                        <button class="btn btn-sm" id="springLockBtn" onclick="springToggleLock()">
+                            <i class="bi bi-unlock me-1"></i>Lås skärm
+                        </button>
+                    </div>
+
+                    <!-- Shooter lookup -->
+                    <div class="card mb-3">
+                        <div class="card-body">
+                            <label class="form-label fw-bold fs-5">Startnummer</label>
+                            <div class="d-flex gap-2">
+                                <input type="number" class="form-control form-control-lg" id="springCStartNumber"
+                                    placeholder="Ange startnummer" inputmode="numeric" min="1"
+                                    onkeydown="if(event.key==='Enter'){springCLookup(); event.preventDefault();}">
+                                <button class="btn btn-primary btn-lg px-4" onclick="springCLookup()">Hämta</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Active shooter card (hidden until lookup) -->
+                    <div id="springCActiveCard" style="display:none;"></div>
+
+                    <!-- Recently entered list -->
+                    <div id="springCRecentList" class="mt-3"></div>
                 </div>
             </div>
         </div>
@@ -83,7 +143,7 @@
             <div id="springResultsContent">
                 <div class="text-center py-4 text-muted">
                     <i class="bi bi-file-earmark-text display-4"></i>
-                    <p class="mt-2">Klicka "Uppdatera" för att skapa resultatlista</p>
+                    <p class="mt-2">Klicka "Uppdatera" for att skapa resultatlista</p>
                 </div>
             </div>
         </div>
@@ -104,6 +164,16 @@
     .springskytte-results-table th { white-space: nowrap; font-size: 0.85rem; }
     .springskytte-results-table td { font-size: 0.85rem; }
     .springskytte-results-table .time-col { font-family: monospace; }
+
+    /* Class C — Range Officer Mode */
+    .shot-btn-lg { min-width: 52px; min-height: 52px; font-size: 1.1rem; font-weight: 700; padding: 0; border-radius: 0.5rem; }
+    .shot-btn-lg.active-hit { background-color: var(--bs-success); border-color: var(--bs-success); color: #fff; }
+    .shot-btn-lg.active-miss { background-color: var(--bs-danger); border-color: var(--bs-danger); color: #fff; }
+    .spring-c-station { border: 1px solid var(--bs-border-color); border-radius: 0.5rem; padding: 0.75rem; margin-bottom: 0.75rem; }
+    .spring-c-station-header { font-weight: 700; font-size: 1rem; margin-bottom: 0.5rem; }
+    .spring-c-recent-item { cursor: pointer; }
+    .spring-c-recent-item:hover { background-color: var(--bs-tertiary-bg); }
+    .spring-lock-active { background-color: var(--bs-warning); border-color: var(--bs-warning); color: #000; }
 </style>
 
 <script>
@@ -114,8 +184,14 @@ let springCurrentIndex = 0;
 const springCompetitionId = parseInt('@competitionId');
 const springNumberOfSeries = parseInt('@numberOfSeries') || 6;
 
+// Class C state
+let springCRecentEntries = [];  // last 5 saved entries
+let springCActiveShooter = null;
+let springScreenLocked = false;
+
 document.addEventListener('DOMContentLoaded', () => {
     springLoadShooters();
+    springLoadResultsList();
 });
 
 // ===== DATA LOADING =====
@@ -164,7 +240,35 @@ function springFilterShooters() {
     }
 }
 
-// ===== NAVIGATION =====
+// ===== NAVIGATION (Tab A) =====
+
+let springASnapshot = null;
+
+function springATakeSnapshot() {
+    const shooter = springFilteredShooters[springCurrentIndex];
+    if (!shooter) return null;
+    const isClassC = shooter.weaponClass === 'C';
+    return JSON.stringify({
+        shots: isClassC ? springCollectClassCShots() : springCollectClassAShots(),
+        finishTime: document.getElementById('springFinishTime')?.value || '',
+        manualTime: document.getElementById('springSprintTimeManual')?.value || '',
+        status: document.getElementById('springStatus')?.value || '',
+        multiplier: document.querySelector('input[name="springMultiplier"]:checked')?.value || '1'
+    });
+}
+
+function springAHasUnsavedChanges() {
+    if (!springASnapshot) return false;
+    return springATakeSnapshot() !== springASnapshot;
+}
+
+function springANavigate(fn) {
+    if (springAHasUnsavedChanges()) {
+        const shooter = springFilteredShooters[springCurrentIndex];
+        if (!confirm(`${shooter?.memberName || 'Skytten'} har osparade ändringar. Vill du fortsätta utan att spara?`)) return;
+    }
+    fn();
+}
 
 function springFirstShooter() { springCurrentIndex = 0; springUpdateNav(); springRenderEntry(); }
 function springPrevShooter() { if (springCurrentIndex > 0) { springCurrentIndex--; springUpdateNav(); springRenderEntry(); } }
@@ -178,7 +282,18 @@ function springUpdateNav() {
     el.textContent = `${springCurrentIndex + 1}/${springFilteredShooters.length}: ${s.memberName} (${s.weaponClass} - ${s.ageGenderClass})`;
 }
 
-// ===== ENTRY FORM RENDERING =====
+// ===== SHARED UTILITY =====
+
+function calculateSprintTime(startTimeStr, finishTimeStr) {
+    if (!startTimeStr || !finishTimeStr) return null;
+    const startSec = parseTimeToSeconds(startTimeStr);
+    const finishSec = parseTimeToSeconds(finishTimeStr);
+    if (startSec === null || finishSec === null) return null;
+    const diff = finishSec - startSec;
+    return diff >= 0 ? diff : null;
+}
+
+// ===== TAB A: ENTRY FORM RENDERING =====
 
 function springRenderEntry() {
     const container = document.getElementById('springEntryContainer');
@@ -188,14 +303,8 @@ function springRenderEntry() {
     const existing = shooter.existingResult;
     const isClassC = shooter.weaponClass === 'C';
     const statusValue = existing?.status || '';
-
-    // Parse existing shots
-    let existingShots = [];
-    if (existing && shooter.hasResult) {
-        try {
-            // Fetch full result data from DB if needed
-        } catch(e) {}
-    }
+    const hasStartTime = !!shooter.startTime;
+    const startTimeDisplay = shooter.startTime || '';
 
     let html = `
         <div class="border rounded p-3">
@@ -203,7 +312,7 @@ function springRenderEntry() {
             <div class="d-flex flex-wrap justify-content-between align-items-center mb-3">
                 <div>
                     <h5 class="mb-0">${shooter.memberName}</h5>
-                    <small class="text-muted">${shooter.memberClub} | Vapengrupp ${shooter.weaponClass} | Klass ${shooter.ageGenderClass}</small>
+                    <small class="text-muted">${shooter.memberClub} | Vapengrupp ${shooter.weaponClass} | Klass ${shooter.ageGenderClass}${shooter.startOrder ? ' | #' + shooter.startOrder : ''}</small>
                 </div>
                 <div class="d-flex gap-2 align-items-center">
                     ${shooter.hasResult ? '<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Har resultat</span>' : '<span class="badge bg-secondary">Inget resultat</span>'}
@@ -215,22 +324,27 @@ function springRenderEntry() {
                 </div>
             </div>
 
-            <!-- Sprint Time -->
+            <!-- Time Entry -->
             <div id="springResultFields">
                 <div class="row g-3 mb-3">
-                    <div class="col-md-4">
-                        <label class="form-label fw-bold"><i class="bi bi-stopwatch me-1"></i>Löptid</label>
-                        <input type="text" class="form-control" id="springSprintTime" placeholder="MM:SS"
-                            value="${existing?.sprintTimeSeconds ? formatSecondsToTime(existing.sprintTimeSeconds) : ''}">
-                        <div class="form-text">Ange som MM:SS eller H:MM:SS</div>
+                    <div class="col-md-3">
+                        <label class="form-label fw-bold"><i class="bi bi-play-circle me-1"></i>Starttid</label>
+                        <div class="form-control-plaintext time-display">${hasStartTime ? startTimeDisplay : '<span class="text-warning small">Saknas</span>'}</div>
+                        ${!hasStartTime ? '<div class="form-text text-warning">Generera startlista först</div>' : ''}
                     </div>
-                    <div class="col-md-4">
-                        <label class="form-label fw-bold"><i class="bi bi-crosshair me-1"></i>Skjutpoäng</label>
-                        <div class="time-display text-danger" id="springShootingScore">
-                            ${existing?.shootingScore ?? 0}
+                    <div class="col-md-3" id="springFinishTimeCol">
+                        <label class="form-label fw-bold"><i class="bi bi-flag me-1"></i>Måltid</label>
+                        <input type="text" class="form-control" id="springFinishTime" placeholder="HH:MM:SS"
+                            ${!hasStartTime ? 'disabled' : ''}>
+                        <div class="form-text">Klockan vid mål</div>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label fw-bold"><i class="bi bi-stopwatch me-1"></i>Löptid</label>
+                        <div class="time-display text-success" id="springSprintTimeDisplay">
+                            ${existing?.sprintTimeSeconds ? formatSecondsToTime(existing.sprintTimeSeconds) : '-'}
                         </div>
                     </div>
-                    <div class="col-md-4">
+                    <div class="col-md-3">
                         <label class="form-label fw-bold"><i class="bi bi-clock me-1"></i>Sluttid</label>
                         <div class="time-display text-primary" id="springTotalTime">
                             ${existing?.totalTimeDisplay || '-'}
@@ -238,10 +352,39 @@ function springRenderEntry() {
                     </div>
                 </div>
 
+                <!-- Manual sprint time override -->
+                <div class="mb-3">
+                    <a class="small text-muted" data-bs-toggle="collapse" href="#springManualTime" role="button" id="springManualTimeToggle">
+                        <i class="bi bi-wrench me-1"></i>Manuell löptid (backup)
+                    </a>
+                    <div class="collapse mt-2" id="springManualTime">
+                        <div class="row g-2 align-items-end">
+                            <div class="col-auto">
+                                <label class="form-label small">Löptid (MM:SS)</label>
+                                <input type="text" class="form-control form-control-sm" id="springSprintTimeManual" placeholder="MM:SS"
+                                    value="${existing?.sprintTimeSeconds ? formatSecondsToTime(existing.sprintTimeSeconds) : ''}">
+                            </div>
+                            <div class="col-auto">
+                                <div class="form-text">Använd vid reservtidtagning. Åsidosätter måltid.</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Shooting Score display -->
+                <div class="row g-3 mb-3">
+                    <div class="col-md-4">
+                        <label class="form-label fw-bold"><i class="bi bi-crosshair me-1"></i>Skjutpoäng</label>
+                        <div class="time-display text-danger" id="springShootingScore">
+                            ${existing?.shootingScore ?? 0}
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Penalty Multiplier -->
                 ${isClassC ? `
                 <div class="mb-3">
-                    <label class="form-label small">Poäng per bom</label>
+                    <label class="form-label small">Skjutpoäng per bom</label>
                     <div class="btn-group btn-group-sm" role="group">
                         <input type="radio" class="btn-check" name="springMultiplier" id="springMult1" value="1" checked>
                         <label class="btn btn-outline-secondary" for="springMult1">1 (Normal)</label>
@@ -261,7 +404,7 @@ function springRenderEntry() {
                     <i class="bi bi-trash me-1"></i>Ta bort
                 </button>
                 <div class="d-flex gap-2">
-                    <button class="btn btn-outline-secondary" onclick="springNextShooter()">
+                    <button class="btn btn-outline-secondary" onclick="springANavigate(springNextShooter)">
                         Hoppa över <i class="bi bi-skip-forward ms-1"></i>
                     </button>
                     <button class="btn btn-primary" onclick="springSaveResult()">
@@ -272,7 +415,83 @@ function springRenderEntry() {
         </div>`;
 
     container.innerHTML = html;
-    springStatusChanged(); // Show/hide fields based on status
+
+    // Initialize Flatpickr for finish time
+    if (hasStartTime) {
+        flatpickr('#springFinishTime', {
+            locale: 'sv',
+            enableTime: true,
+            noCalendar: true,
+            dateFormat: 'H:i:S',
+            time_24hr: true,
+            enableSeconds: true
+        });
+    }
+
+    springStatusChanged();
+
+    // Restore existing data if shooter has result
+    if (existing && shooter.hasResult && existing.shots && existing.shots.length) {
+        if (isClassC) {
+            for (let stop = 0; stop < existing.shots.length && stop < 6; stop++) {
+                const stopShots = existing.shots[stop];
+                for (let shot = 0; shot < stopShots.length && shot < 5; shot++) {
+                    const btn = document.getElementById(`shot_${stop + 1}_${shot + 1}`);
+                    if (!btn) continue;
+                    const val = stopShots[shot];
+                    if (val === 'H') {
+                        btn.dataset.value = 'H';
+                        btn.textContent = 'T';
+                        btn.classList.remove('btn-outline-secondary');
+                        btn.classList.add('active-hit');
+                    } else if (val === 'B') {
+                        btn.dataset.value = 'B';
+                        btn.textContent = 'B';
+                        btn.classList.remove('btn-outline-secondary');
+                        btn.classList.add('active-miss');
+                    }
+                }
+            }
+            springRecalcClassC();
+        } else {
+            for (let series = 0; series < existing.shots.length; series++) {
+                const seriesShots = existing.shots[series];
+                for (let shot = 0; shot < seriesShots.length; shot++) {
+                    const input = document.getElementById(`zona_${series + 1}_${shot + 1}`);
+                    if (input && seriesShots[shot] !== '' && seriesShots[shot] !== '0') {
+                        input.value = seriesShots[shot];
+                    }
+                }
+            }
+            springRecalcClassA();
+        }
+
+        // Restore multiplier for Class C
+        if (isClassC && existing.penaltyMultiplier === 2) {
+            const mult2 = document.getElementById('springMult2');
+            if (mult2) mult2.checked = true;
+        }
+
+        // Restore finish time from start time + sprint time
+        if (existing.sprintTimeSeconds != null && hasStartTime) {
+            const startSec = parseTimeToSeconds(shooter.startTime);
+            if (startSec !== null) {
+                const finishSec = startSec + existing.sprintTimeSeconds;
+                const finishTimeStr = formatSecondsToHMS(finishSec);
+                const finishEl = document.getElementById('springFinishTime');
+                if (finishEl) {
+                    finishEl.value = finishTimeStr;
+                    if (finishEl._flatpickr) finishEl._flatpickr.setDate(finishTimeStr, true);
+                }
+            }
+        }
+    }
+
+    // Recalculate display (this also updates sprint/total from restored finish time)
+    if (isClassC) springRecalcClassC(); else springRecalcClassA();
+
+    // Take snapshot for unsaved-changes detection
+    springASnapshot = springATakeSnapshot();
 }
 
 function springRenderClassCShots() {
@@ -302,10 +521,9 @@ function springRenderClassCShots() {
 }
 
 function springRenderClassAShots() {
-    // Class A: configurable number of series, always 30 shots total
     const numSeries = springNumberOfSeries || 2;
     const shotsPerSeries = Math.floor(30 / numSeries);
-    const extraShots = 30 - (shotsPerSeries * numSeries); // Handle uneven splits
+    const extraShots = 30 - (shotsPerSeries * numSeries);
 
     let html = `<div class="mb-2 small text-muted">${numSeries} serie(r), ${shotsPerSeries} skott/serie, Zon 0-3 (0=träff ring 1-2, 1=ring 3, 2=ring 4, 3=utanför)</div>`;
     html += '<div class="row g-2">';
@@ -339,19 +557,16 @@ function springRenderClassAShots() {
 function springToggleClassCShot(btn) {
     const current = btn.dataset.value;
     if (current === '' || current === undefined) {
-        // First click: Hit
         btn.dataset.value = 'H';
         btn.textContent = 'T';
         btn.classList.remove('btn-outline-secondary', 'active-miss');
         btn.classList.add('active-hit');
     } else if (current === 'H') {
-        // Second click: Miss
         btn.dataset.value = 'B';
         btn.textContent = 'B';
         btn.classList.remove('active-hit');
         btn.classList.add('active-miss');
     } else {
-        // Third click: Reset
         btn.dataset.value = '';
         btn.textContent = '-';
         btn.classList.remove('active-hit', 'active-miss');
@@ -376,8 +591,9 @@ function springRecalcClassC() {
 
     const multiplier = parseInt(document.querySelector('input[name="springMultiplier"]:checked')?.value || '1');
     const shootingScore = totalMisses * multiplier;
-    document.getElementById('springShootingScore').textContent = shootingScore;
-    springUpdateTotalTime(shootingScore, multiplier);
+    const scoreEl = document.getElementById('springShootingScore');
+    if (scoreEl) scoreEl.textContent = shootingScore;
+    springUpdateTotalTimeA(shootingScore, multiplier);
 }
 
 function springRecalcClassA() {
@@ -401,25 +617,45 @@ function springRecalcClassA() {
         if (scoreEl) scoreEl.textContent = `${seriesScore}p`;
     }
 
-    document.getElementById('springShootingScore').textContent = totalScore;
-    springUpdateTotalTime(totalScore, 1);
+    const scoreEl = document.getElementById('springShootingScore');
+    if (scoreEl) scoreEl.textContent = totalScore;
+    springUpdateTotalTimeA(totalScore, 1);
 }
 
-function springUpdateTotalTime(shootingScore, multiplier) {
-    const sprintInput = document.getElementById('springSprintTime')?.value;
-    const sprintSeconds = parseTimeToSeconds(sprintInput);
+function springUpdateTotalTimeA(shootingScore, multiplier) {
+    // Determine sprint time: manual override > finish time calculation
+    const manualInput = document.getElementById('springSprintTimeManual')?.value;
+    const finishInput = document.getElementById('springFinishTime')?.value;
+    const shooter = springFilteredShooters[springCurrentIndex];
+    const startTime = shooter?.startTime;
+
+    let sprintSeconds = null;
+
+    // Manual override takes precedence
+    if (manualInput && manualInput.trim()) {
+        sprintSeconds = parseTimeToSeconds(manualInput);
+    } else if (finishInput && finishInput.trim() && startTime) {
+        sprintSeconds = calculateSprintTime(startTime, finishInput);
+    }
+
+    const sprintDisplay = document.getElementById('springSprintTimeDisplay');
+    if (sprintDisplay) {
+        sprintDisplay.textContent = sprintSeconds !== null ? formatSecondsToTime(sprintSeconds) : '-';
+    }
+
+    const totalEl = document.getElementById('springTotalTime');
     if (sprintSeconds !== null) {
         const penaltySeconds = shootingScore * multiplier * 60;
         const totalSeconds = sprintSeconds + penaltySeconds;
-        document.getElementById('springTotalTime').textContent = formatSecondsToTime(totalSeconds);
+        if (totalEl) totalEl.textContent = formatSecondsToTime(totalSeconds);
     } else {
-        document.getElementById('springTotalTime').textContent = '-';
+        if (totalEl) totalEl.textContent = '-';
     }
 }
 
-// Listen for sprint time changes
+// Listen for finish time changes
 document.addEventListener('input', function(e) {
-    if (e.target.id === 'springSprintTime') {
+    if (e.target.id === 'springFinishTime' || e.target.id === 'springSprintTimeManual') {
         const shooter = springFilteredShooters[springCurrentIndex];
         if (shooter?.weaponClass === 'C') springRecalcClassC();
         else springRecalcClassA();
@@ -431,6 +667,16 @@ document.addEventListener('change', function(e) {
     if (e.target.name === 'springMultiplier') springRecalcClassC();
 });
 
+// Disable finish time when manual override is used
+document.addEventListener('input', function(e) {
+    if (e.target.id === 'springSprintTimeManual') {
+        const finishEl = document.getElementById('springFinishTime');
+        if (finishEl) {
+            finishEl.disabled = !!e.target.value.trim();
+        }
+    }
+});
+
 function springStatusChanged() {
     const status = document.getElementById('springStatus')?.value;
     const fields = document.getElementById('springResultFields');
@@ -440,29 +686,35 @@ function springStatusChanged() {
     }
 }
 
-// ===== SAVE / DELETE =====
+// ===== TAB A: SAVE / DELETE =====
 
 async function springSaveResult() {
     const shooter = springFilteredShooters[springCurrentIndex];
     if (!shooter) return;
 
     const status = document.getElementById('springStatus')?.value || null;
-    const sprintTimeInput = document.getElementById('springSprintTime')?.value || null;
     const isClassC = shooter.weaponClass === 'C';
 
-    // Validate sprint time (required unless DNS/DNF)
-    if (!status && !sprintTimeInput) {
-        alert('Ange löptid eller välj DNS/DNF.');
+    // Determine which time input to send
+    const manualInput = document.getElementById('springSprintTimeManual')?.value?.trim() || null;
+    const finishInput = document.getElementById('springFinishTime')?.value?.trim() || null;
+
+    // Validate: need either manual time, finish time (with start time), or DNS/DNF
+    if (!status && !manualInput && !finishInput) {
+        showSpringMessage('Ange måltid, manuell löptid, eller välj DNS/DNF.', 'warning');
         return;
     }
 
     // Collect shots
     let shotSeries = [];
     if (!status) {
-        if (isClassC) {
-            shotSeries = springCollectClassCShots();
-        } else {
-            shotSeries = springCollectClassAShots();
+        shotSeries = isClassC ? springCollectClassCShots() : springCollectClassAShots();
+
+        // Validate completeness: every station/series must have all shots filled
+        const incomplete = springValidateShotsComplete(shotSeries, isClassC);
+        if (incomplete) {
+            showSpringMessage(incomplete, 'warning');
+            return;
         }
     }
 
@@ -475,7 +727,8 @@ async function springSaveResult() {
         memberId: shooter.memberId,
         weaponClass: shooter.weaponClass,
         ageGenderClass: shooter.ageGenderClass,
-        sprintTimeInput: sprintTimeInput,
+        sprintTimeInput: manualInput || null,
+        finishTimeInput: (!manualInput && finishInput) ? finishInput : null,
         shotSeries: shotSeries,
         penaltyMultiplier: multiplier,
         status: status
@@ -493,19 +746,35 @@ async function springSaveResult() {
         const data = await response.json();
 
         if (data.success) {
-            // Update shooter status
+            // Use server-verified data (read-back from DB) — not local copies
             shooter.hasResult = true;
             shooter.existingResult = {
-                sprintTimeSeconds: parseTimeToSeconds(sprintTimeInput),
+                sprintTimeSeconds: data.sprintTimeSeconds,
                 shootingScore: data.shootingScore,
                 totalTimeSeconds: data.totalTimeSeconds,
                 totalTimeDisplay: data.totalTimeDisplay,
-                status: status
+                status: status,
+                penaltyMultiplier: data.penaltyMultiplier,
+                shots: data.verificationShots || shotSeries
             };
 
-            showSpringMessage(`Resultat sparat: ${data.totalTimeDisplay || status || '-'}`, 'success');
+            // Client-side verification: compare sent shots with server-verified shots
+            if (data.verificationShots) {
+                const sentJson = JSON.stringify(shotSeries);
+                const storedJson = JSON.stringify(data.verificationShots);
+                if (sentJson !== storedJson) {
+                    showSpringMessage('⚠ VARNING: Verifieringsfel — sparade skott skiljer sig från inskickade. Kontrollera resultatet!', 'danger');
+                    console.error('Shot verification mismatch!', { sent: shotSeries, stored: data.verificationShots });
+                } else {
+                    showSpringMessage(`✓ Resultat verifierat och sparat: ${data.totalTimeDisplay || status || '-'}`, 'success');
+                }
+            } else {
+                showSpringMessage(`Resultat sparat: ${data.totalTimeDisplay || status || '-'}`, 'success');
+            }
 
-            // Auto-advance to next shooter
+            // Re-take snapshot so current state is now the "saved" baseline
+            springASnapshot = springATakeSnapshot();
+
             if (springCurrentIndex < springFilteredShooters.length - 1) {
                 setTimeout(() => { springNextShooter(); }, 500);
             }
@@ -578,6 +847,587 @@ function springCollectClassAShots() {
         series.push(seriesShots);
     }
     return series;
+}
+
+// ===== TAB C: RANGE OFFICER MODE =====
+
+function springToggleLock() {
+    springScreenLocked = !springScreenLocked;
+    const btn = document.getElementById('springLockBtn');
+    if (springScreenLocked) {
+        btn.innerHTML = '<i class="bi bi-lock-fill me-1"></i>Låst';
+        btn.classList.add('spring-lock-active');
+        window.onbeforeunload = function(e) {
+            e.preventDefault();
+            return '';
+        };
+    } else {
+        btn.innerHTML = '<i class="bi bi-unlock me-1"></i>Lås skärm';
+        btn.classList.remove('spring-lock-active');
+        window.onbeforeunload = null;
+    }
+}
+
+// Snapshot of Class C state when a shooter is loaded/saved — used to detect unsaved changes
+let springCSnapshot = null;
+
+function springCTakeSnapshot() {
+    return JSON.stringify({
+        shots: springCCollectShots(),
+        finishTime: document.getElementById('cFinishTime')?.value || '',
+        multiplier: springCMultiplier
+    });
+}
+
+function springCHasUnsavedChanges() {
+    if (!springCActiveShooter || !springCSnapshot) return false;
+    return springCTakeSnapshot() !== springCSnapshot;
+}
+
+function springCLookup() {
+    const input = document.getElementById('springCStartNumber');
+    const startNumber = parseInt(input?.value);
+    if (!startNumber || isNaN(startNumber)) {
+        showSpringCToast('Ange ett startnummer.', 'warning');
+        input?.focus();
+        return;
+    }
+
+    // Check for unsaved changes on currently loaded shooter
+    if (springCHasUnsavedChanges()) {
+        if (!confirm(`Skytt #${springCActiveShooter.startOrder} har osparade ändringar. Vill du fortsätta utan att spara?`)) {
+            input?.select();
+            input?.focus();
+            return;
+        }
+    }
+
+    // Find shooter by start order, Class C only
+    const shooter = springShooters.find(s => s.startOrder === startNumber && s.weaponClass === 'C');
+    if (!shooter) {
+        showSpringCToast(`Startnummer ${startNumber} hittades inte (Vapengrupp C).`, 'danger');
+        input?.select();
+        input?.focus();
+        return;
+    }
+
+    springCActiveShooter = shooter;
+    springCRenderActiveCard(shooter);
+}
+
+function springCRenderActiveCard(shooter) {
+    const card = document.getElementById('springCActiveCard');
+    const existing = shooter.existingResult;
+    const hasStartTime = !!shooter.startTime;
+    const multiplierVal = existing?.penaltyMultiplier || 1;
+
+    let html = `
+    <div class="card border-primary">
+        <div class="card-header bg-primary text-white">
+            <h5 class="mb-0">#${shooter.startOrder} — ${shooter.memberName} <small class="opacity-75">(${shooter.registeredClass})</small></h5>
+        </div>
+        <div class="card-body">
+            <!-- Stations: 6 x 5 shots, large buttons -->
+            <h6 class="mb-2"><i class="bi bi-bullseye me-1"></i>Stationer</h6>`;
+
+    for (let stop = 1; stop <= 6; stop++) {
+        html += `
+            <div class="spring-c-station" id="cStation${stop}">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="spring-c-station-header">Station ${stop}</span>
+                    <div class="d-flex align-items-center gap-2">
+                        <span class="fw-bold" id="cStop${stop}Count">0/5</span>
+                        <button type="button" class="btn btn-sm btn-outline-success" id="cStationSave${stop}"
+                            onclick="springCStationSave(${stop})" title="Spara station ${stop}">
+                            <i class="bi bi-floppy"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="d-flex gap-2 flex-wrap" id="cStationShots${stop}">`;
+        for (let shot = 1; shot <= 5; shot++) {
+            const id = `cShot_${stop}_${shot}`;
+            html += `
+                    <button type="button" class="btn btn-outline-secondary shot-btn-lg" id="${id}"
+                        onclick="springCToggleShot(this)" data-stop="${stop}" data-shot="${shot}" data-value="">
+                        -
+                    </button>`;
+        }
+        html += `
+                </div>
+            </div>`;
+    }
+
+    html += `
+            <!-- Shooting score summary -->
+            <div class="d-flex align-items-center gap-3 my-3 p-2 rounded" style="background: var(--bs-tertiary-bg);">
+                <span class="fw-bold">Skjutpoäng: <span id="cTotalMisses" class="text-danger fs-5">0</span></span>
+            </div>
+
+            <!-- Penalty multiplier -->
+            <div class="mb-3">
+                <label class="form-label fw-bold">Skjutpoäng per bom</label>
+                <div class="d-flex gap-2">
+                    <button type="button" class="btn btn-lg ${multiplierVal !== 2 ? 'btn-primary' : 'btn-outline-secondary'}" id="cMult1"
+                        onclick="springCSetMultiplier(1)">x1 Normal</button>
+                    <button type="button" class="btn btn-lg ${multiplierVal === 2 ? 'btn-warning' : 'btn-outline-secondary'}" id="cMult2"
+                        onclick="springCSetMultiplier(2)">x2 Märkestagning</button>
+                </div>
+            </div>
+
+            <!-- Time entry -->
+            <div class="row g-3 mb-3">
+                <div class="col-6">
+                    <label class="form-label fw-bold">Starttid</label>
+                    <div class="form-control-plaintext time-display fs-5">${hasStartTime ? shooter.startTime : '<span class="text-warning">Saknas</span>'}</div>
+                </div>
+                <div class="col-6">
+                    <label class="form-label fw-bold">Löptid</label>
+                    <div class="time-display text-success fs-5" id="cSprintTime">-</div>
+                </div>
+            </div>
+            <div class="row g-3 mb-3">
+                <div class="col-8">
+                    <label class="form-label fw-bold">Måltid</label>
+                    <input type="text" class="form-control form-control-lg" id="cFinishTime" placeholder="HH:MM:SS"
+                        ${!hasStartTime ? 'disabled' : ''}>
+                </div>
+                <div class="col-4 d-flex align-items-end">
+                    <button class="btn btn-outline-secondary btn-lg w-100" onclick="springCNow()" ${!hasStartTime ? 'disabled' : ''}>
+                        <i class="bi bi-clock me-1"></i>Nu
+                    </button>
+                </div>
+            </div>
+
+            <!-- Total time -->
+            <div class="text-center p-3 rounded mb-3" style="background: var(--bs-tertiary-bg);">
+                <div class="small text-muted">Sluttid</div>
+                <div class="time-display text-primary fs-3" id="cTotalTime">-</div>
+            </div>
+
+            <!-- Save button -->
+            <button class="btn btn-success btn-lg w-100 py-3" onclick="springCSave()" id="cSaveBtn">
+                <i class="bi bi-check-circle me-1"></i>Spara resultat
+            </button>
+        </div>
+    </div>`;
+
+    card.innerHTML = html;
+    card.style.display = 'block';
+
+    // Init Flatpickr for finish time
+    if (hasStartTime) {
+        flatpickr('#cFinishTime', {
+            locale: 'sv',
+            enableTime: true,
+            noCalendar: true,
+            dateFormat: 'H:i:S',
+            time_24hr: true,
+            enableSeconds: true
+        });
+    }
+
+    // Init multiplier state
+    springCMultiplier = multiplierVal;
+    springCLockedStations = new Set();
+
+    // Restore existing data if shooter has result
+    if (existing && shooter.hasResult) {
+        // Restore shots and lock stations that have data
+        if (existing.shots && existing.shots.length) {
+            for (let stop = 0; stop < existing.shots.length && stop < 6; stop++) {
+                const stopShots = existing.shots[stop];
+                let stationHasData = false;
+                for (let shot = 0; shot < stopShots.length && shot < 5; shot++) {
+                    const btn = document.getElementById(`cShot_${stop + 1}_${shot + 1}`);
+                    if (!btn) continue;
+                    const val = stopShots[shot];
+                    if (val === 'H') {
+                        btn.dataset.value = 'H';
+                        btn.textContent = 'T';
+                        btn.classList.remove('btn-outline-secondary');
+                        btn.classList.add('active-hit');
+                        stationHasData = true;
+                    } else if (val === 'B') {
+                        btn.dataset.value = 'B';
+                        btn.textContent = 'B';
+                        btn.classList.remove('btn-outline-secondary');
+                        btn.classList.add('active-miss');
+                        stationHasData = true;
+                    }
+                }
+                // Auto-lock stations that have saved data
+                if (stationHasData) {
+                    springCLockStation(stop + 1);
+                }
+            }
+        }
+
+        // Restore finish time from start time + sprint time
+        if (existing.sprintTimeSeconds != null && hasStartTime) {
+            const startSec = parseTimeToSeconds(shooter.startTime);
+            if (startSec !== null) {
+                const finishSec = startSec + existing.sprintTimeSeconds;
+                const finishTimeStr = formatSecondsToHMS(finishSec);
+                const finishEl = document.getElementById('cFinishTime');
+                if (finishEl) {
+                    finishEl.value = finishTimeStr;
+                    if (finishEl._flatpickr) finishEl._flatpickr.setDate(finishTimeStr, true);
+                }
+            }
+        }
+
+        // Recalculate station counts, shooting score, sprint/total from restored finish time
+        springCRecalc();
+    }
+
+    // Take snapshot of initial state for unsaved-changes detection
+    springCSnapshot = springCTakeSnapshot();
+}
+
+let springCMultiplier = 1;
+let springCLockedStations = new Set(); // stations that have been saved and are locked
+
+function springCStationSave(stop) {
+    // All 5 shots must be entered (H or B)
+    let enteredCount = 0;
+    for (let shot = 1; shot <= 5; shot++) {
+        const btn = document.getElementById(`cShot_${stop}_${shot}`);
+        if (btn?.dataset.value === 'H' || btn?.dataset.value === 'B') enteredCount++;
+    }
+    if (enteredCount < 5) {
+        showSpringCToast(`Station ${stop}: alla 5 skott måste registreras (${enteredCount}/5 ifyllda).`, 'warning');
+        return;
+    }
+
+    // Save full result to server (reuses existing endpoint)
+    springCSavePartial(() => {
+        // On success: lock the station
+        springCLockStation(stop);
+    });
+}
+
+async function springCSavePartial(onSuccess) {
+    const shooter = springCActiveShooter;
+    if (!shooter) return;
+
+    const finishInput = document.getElementById('cFinishTime')?.value?.trim() || null;
+    const shotSeries = springCCollectShots();
+
+    const requestData = {
+        competitionId: springCompetitionId,
+        memberId: shooter.memberId,
+        weaponClass: shooter.weaponClass,
+        ageGenderClass: shooter.ageGenderClass,
+        finishTimeInput: finishInput,
+        shotSeries: shotSeries,
+        penaltyMultiplier: springCMultiplier,
+        status: null
+    };
+
+    try {
+        const response = await fetch('/umbraco/surface/Springskytte/SaveSpringskytteResult', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]')?.value
+            },
+            body: JSON.stringify(requestData)
+        });
+        const data = await response.json();
+
+        if (data.success) {
+            // Use server-verified data (read-back from DB)
+            shooter.hasResult = true;
+            shooter.existingResult = {
+                shootingScore: data.shootingScore,
+                totalTimeSeconds: data.totalTimeSeconds,
+                totalTimeDisplay: data.totalTimeDisplay,
+                sprintTimeSeconds: data.sprintTimeSeconds,
+                status: null,
+                penaltyMultiplier: data.penaltyMultiplier,
+                shots: data.verificationShots || shotSeries
+            };
+
+            // Client-side verification
+            if (data.verificationShots) {
+                const sentJson = JSON.stringify(shotSeries);
+                const storedJson = JSON.stringify(data.verificationShots);
+                if (sentJson !== storedJson) {
+                    showSpringCToast('⚠ VARNING: Skottdata verifieringsfel! Kontrollera resultatet.', 'danger');
+                    console.error('Shot verification mismatch!', { sent: shotSeries, stored: data.verificationShots });
+                }
+            }
+
+            springCSnapshot = springCTakeSnapshot();
+            if (onSuccess) onSuccess();
+        } else {
+            showSpringCToast(data.message || 'Fel vid sparning.', 'danger');
+        }
+    } catch (err) {
+        console.error('Error saving partial result:', err);
+        showSpringCToast('Ett fel uppstod vid sparning.', 'danger');
+    }
+}
+
+function springCLockStation(stop) {
+    springCLockedStations.add(stop);
+    const shotsContainer = document.getElementById(`cStationShots${stop}`);
+    if (shotsContainer) {
+        shotsContainer.style.opacity = '0.6';
+        shotsContainer.style.pointerEvents = 'none';
+    }
+    const saveBtn = document.getElementById(`cStationSave${stop}`);
+    if (saveBtn) {
+        saveBtn.className = 'btn btn-sm btn-secondary';
+        saveBtn.innerHTML = '<i class="bi bi-lock-fill"></i>';
+        saveBtn.onclick = function() { springCUnlockStation(stop); };
+        saveBtn.title = `Lås upp station ${stop}`;
+    }
+}
+
+function springCUnlockStation(stop) {
+    if (!confirm(`Vill du låsa upp station ${stop} för redigering?`)) return;
+    springCLockedStations.delete(stop);
+    const shotsContainer = document.getElementById(`cStationShots${stop}`);
+    if (shotsContainer) {
+        shotsContainer.style.opacity = '1';
+        shotsContainer.style.pointerEvents = 'auto';
+    }
+    const saveBtn = document.getElementById(`cStationSave${stop}`);
+    if (saveBtn) {
+        saveBtn.className = 'btn btn-sm btn-outline-success';
+        saveBtn.innerHTML = '<i class="bi bi-floppy"></i>';
+        saveBtn.onclick = function() { springCStationSave(stop); };
+        saveBtn.title = `Spara station ${stop}`;
+    }
+}
+
+function springCSetMultiplier(val) {
+    springCMultiplier = val;
+    document.getElementById('cMult1').className = `btn btn-lg ${val === 1 ? 'btn-primary' : 'btn-outline-secondary'}`;
+    document.getElementById('cMult2').className = `btn btn-lg ${val === 2 ? 'btn-warning' : 'btn-outline-secondary'}`;
+    springCRecalc();
+}
+
+function springCToggleShot(btn) {
+    const stop = parseInt(btn.dataset.stop);
+    if (springCLockedStations.has(stop)) return;
+    const current = btn.dataset.value;
+    if (current === '' || current === undefined) {
+        btn.dataset.value = 'H';
+        btn.textContent = 'T';
+        btn.classList.remove('btn-outline-secondary', 'active-miss');
+        btn.classList.add('active-hit');
+    } else if (current === 'H') {
+        btn.dataset.value = 'B';
+        btn.textContent = 'B';
+        btn.classList.remove('active-hit');
+        btn.classList.add('active-miss');
+    } else {
+        btn.dataset.value = '';
+        btn.textContent = '-';
+        btn.classList.remove('active-hit', 'active-miss');
+        btn.classList.add('btn-outline-secondary');
+    }
+    springCRecalc();
+}
+
+function springCRecalc() {
+    let totalMisses = 0;
+    for (let stop = 1; stop <= 6; stop++) {
+        let hits = 0, misses = 0;
+        for (let shot = 1; shot <= 5; shot++) {
+            const btn = document.getElementById(`cShot_${stop}_${shot}`);
+            if (btn?.dataset.value === 'H') hits++;
+            if (btn?.dataset.value === 'B') misses++;
+        }
+        totalMisses += misses;
+        const countEl = document.getElementById(`cStop${stop}Count`);
+        if (countEl) countEl.textContent = `${hits}/5`;
+    }
+
+    document.getElementById('cTotalMisses').textContent = totalMisses;
+
+    const shooter = springCActiveShooter;
+    const finishInput = document.getElementById('cFinishTime')?.value;
+    const sprintSeconds = shooter?.startTime ? calculateSprintTime(shooter.startTime, finishInput) : null;
+
+    const sprintEl = document.getElementById('cSprintTime');
+    if (sprintEl) sprintEl.textContent = sprintSeconds !== null ? formatSecondsToTime(sprintSeconds) : '-';
+
+    const shootingScore = totalMisses * springCMultiplier;
+    const totalEl = document.getElementById('cTotalTime');
+    if (sprintSeconds !== null) {
+        const totalSeconds = sprintSeconds + shootingScore * 60;
+        if (totalEl) totalEl.textContent = formatSecondsToTime(totalSeconds);
+    } else {
+        if (totalEl) totalEl.textContent = '-';
+    }
+}
+
+// Listen for Class C finish time changes
+document.addEventListener('input', function(e) {
+    if (e.target.id === 'cFinishTime') springCRecalc();
+});
+
+function springCNow() {
+    const el = document.getElementById('cFinishTime');
+    if (el && el.value.trim() && !confirm('Måltid är redan ifylld. Vill du skriva över med aktuell tid?')) return;
+
+    const now = new Date();
+    const h = String(now.getHours()).padStart(2, '0');
+    const m = String(now.getMinutes()).padStart(2, '0');
+    const s = String(now.getSeconds()).padStart(2, '0');
+    const timeStr = `${h}:${m}:${s}`;
+    if (el) {
+        el.value = timeStr;
+        if (el._flatpickr) el._flatpickr.setDate(timeStr, true);
+    }
+    springCRecalc();
+}
+
+function springCCollectShots() {
+    const series = [];
+    for (let stop = 1; stop <= 6; stop++) {
+        const stopShots = [];
+        for (let shot = 1; shot <= 5; shot++) {
+            const btn = document.getElementById(`cShot_${stop}_${shot}`);
+            stopShots.push(btn?.dataset.value || '');
+        }
+        series.push(stopShots);
+    }
+    return series;
+}
+
+async function springCSave() {
+    const shooter = springCActiveShooter;
+    if (!shooter) return;
+
+    const finishInput = document.getElementById('cFinishTime')?.value?.trim() || null;
+    const shotSeries = springCCollectShots();
+
+    // Validate completeness: all 6 stations must have 5 shots each
+    const incomplete = springValidateShotsComplete(shotSeries, true);
+    if (incomplete) {
+        showSpringCToast(incomplete, 'warning');
+        return;
+    }
+
+    const requestData = {
+        competitionId: springCompetitionId,
+        memberId: shooter.memberId,
+        weaponClass: shooter.weaponClass,
+        ageGenderClass: shooter.ageGenderClass,
+        finishTimeInput: finishInput,
+        shotSeries: shotSeries,
+        penaltyMultiplier: springCMultiplier,
+        status: null
+    };
+
+    const saveBtn = document.getElementById('cSaveBtn');
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Sparar...'; }
+
+    try {
+        const response = await fetch('/umbraco/surface/Springskytte/SaveSpringskytteResult', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]')?.value
+            },
+            body: JSON.stringify(requestData)
+        });
+        const data = await response.json();
+
+        if (data.success) {
+            // Use server-verified data (read-back from DB)
+            shooter.hasResult = true;
+            shooter.existingResult = {
+                shootingScore: data.shootingScore,
+                totalTimeSeconds: data.totalTimeSeconds,
+                totalTimeDisplay: data.totalTimeDisplay,
+                sprintTimeSeconds: data.sprintTimeSeconds,
+                status: null,
+                penaltyMultiplier: data.penaltyMultiplier,
+                shots: data.verificationShots || shotSeries
+            };
+
+            // Client-side verification
+            let verifiedMsg = `Sparat: ${shooter.memberName} — ${data.totalTimeDisplay || '-'}`;
+            if (data.verificationShots) {
+                const sentJson = JSON.stringify(shotSeries);
+                const storedJson = JSON.stringify(data.verificationShots);
+                if (sentJson !== storedJson) {
+                    showSpringCToast('⚠ VARNING: Skottdata verifieringsfel! Kontrollera resultatet.', 'danger');
+                    console.error('Shot verification mismatch!', { sent: shotSeries, stored: data.verificationShots });
+                    // Don't clear the card — let the user review
+                    return;
+                }
+                verifiedMsg = `✓ Verifierat: ${shooter.memberName} — ${data.totalTimeDisplay || '-'}`;
+            }
+
+            // Add to recent entries
+            springCRecentEntries.unshift({
+                startOrder: shooter.startOrder,
+                name: shooter.memberName,
+                registeredClass: shooter.registeredClass,
+                totalTimeDisplay: data.totalTimeDisplay,
+                shootingScore: data.shootingScore
+            });
+            if (springCRecentEntries.length > 5) springCRecentEntries.pop();
+            springCRenderRecentList();
+
+            showSpringCToast(verifiedMsg, 'success');
+
+            // Clear state and refocus
+            springCSnapshot = null;
+            document.getElementById('springCActiveCard').style.display = 'none';
+            springCActiveShooter = null;
+            const input = document.getElementById('springCStartNumber');
+            if (input) { input.value = ''; input.focus(); }
+        } else {
+            showSpringCToast(data.message || 'Fel vid sparning.', 'danger');
+        }
+    } catch (err) {
+        console.error('Error saving Class C result:', err);
+        showSpringCToast('Ett fel uppstod vid sparning.', 'danger');
+    } finally {
+        if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Spara resultat'; }
+    }
+}
+
+function springCRenderRecentList() {
+    const container = document.getElementById('springCRecentList');
+    if (!springCRecentEntries.length) { container.innerHTML = ''; return; }
+
+    let html = '<h6 class="text-muted mb-2"><i class="bi bi-clock-history me-1"></i>Senast registrerade</h6>';
+    html += '<div class="list-group">';
+    for (const entry of springCRecentEntries) {
+        html += `
+        <div class="list-group-item list-group-item-action spring-c-recent-item d-flex justify-content-between align-items-center"
+            onclick="document.getElementById('springCStartNumber').value='${entry.startOrder}'; springCLookup();">
+            <div>
+                <span class="fw-bold">#${entry.startOrder}</span> ${entry.name}
+                <small class="text-muted ms-1">(${entry.registeredClass})</small>
+            </div>
+            <div class="text-end">
+                <span class="badge bg-success">${entry.totalTimeDisplay || '-'}</span>
+                <small class="text-muted ms-1">Skjutp: ${entry.shootingScore}</small>
+            </div>
+        </div>`;
+    }
+    html += '</div>';
+    container.innerHTML = html;
+}
+
+function showSpringCToast(msg, type) {
+    const container = document.getElementById('springTabC');
+    const alertDiv = document.createElement('div');
+    alertDiv.className = `alert alert-${type} alert-dismissible fade show mt-2`;
+    alertDiv.style.position = 'relative';
+    alertDiv.style.zIndex = '20';
+    alertDiv.innerHTML = `${msg}<button type="button" class="btn-close" data-bs-dismiss="alert"></button>`;
+    container.prepend(alertDiv);
+    setTimeout(() => alertDiv.remove(), 3000);
 }
 
 // ===== RESULTS LIST =====
@@ -730,8 +1580,56 @@ function formatSecondsToTime(totalSeconds) {
     return `${m}:${String(sec).padStart(2,'0')}`;
 }
 
+// Validate that all shots are filled in every station/series.
+// Checks DOM elements directly to distinguish empty from valid values.
+// Returns error message string if incomplete, null if OK.
+function springValidateShotsComplete(shotSeries, isClassC) {
+    if (isClassC) {
+        // Class C: check button data-value — must be 'H' or 'B'
+        for (let i = 0; i < shotSeries.length; i++) {
+            const shots = shotSeries[i];
+            let filled = 0;
+            for (const s of shots) {
+                if (s === 'H' || s === 'B') filled++;
+            }
+            if (filled < 5) {
+                return `Station ${i + 1}: alla 5 skott måste registreras (${filled}/5 ifyllda).`;
+            }
+        }
+    } else {
+        // Class A: check input DOM elements — value must be non-empty
+        const numSeries = springNumberOfSeries || 2;
+        const shotsPerSeries = Math.floor(30 / numSeries);
+        const extraShots = 30 - (shotsPerSeries * numSeries);
+
+        for (let s = 1; s <= numSeries; s++) {
+            const expected = s === numSeries ? shotsPerSeries + extraShots : shotsPerSeries;
+            let filled = 0;
+            for (let shot = 1; shot <= expected; shot++) {
+                const input = document.getElementById(`zona_${s}_${shot}`);
+                if (input && input.value !== '' && input.value !== null) filled++;
+            }
+            if (filled < expected) {
+                return `Serie ${s}: alla ${expected} skott måste registreras (${filled}/${expected} ifyllda).`;
+            }
+        }
+    }
+    return null;
+}
+
+// Always HH:MM:SS format (for finish time / clock time restoration)
+function formatSecondsToHMS(totalSeconds) {
+    if (totalSeconds === null || totalSeconds === undefined) return '';
+    const s = Math.round(totalSeconds);
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+}
+
 function showSpringMessage(msg, type) {
     const container = document.getElementById('springEntryContainer');
+    if (!container) return;
     const alertDiv = document.createElement('div');
     alertDiv.className = `alert alert-${type} alert-dismissible fade show mt-2`;
     alertDiv.innerHTML = `${msg}<button type="button" class="btn-close" data-bs-dismiss="alert"></button>`;

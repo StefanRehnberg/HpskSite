@@ -1,7 +1,7 @@
 @*
- * Springskytte Start List Management Partial View
- * Time-interval based start list (not team-based like other competition types).
- * Each shooter gets an individual start time with configurable intervals and breaks.
+ * Springskytte Multi-Start-List Designer
+ * Supports multiple start lists per competition, each covering different class groupings.
+ * Each list stored as a separate precisionStartList child node.
  *@
 
 @{
@@ -9,67 +9,28 @@
 }
 
 <div class="springskytte-startlist-management" data-competition-id="@competitionId">
-    <!-- Current Start List Display -->
-    <div class="card">
+    <!-- Designer Controls -->
+    <div class="card mb-3">
         <div class="card-header">
             <div class="d-flex justify-content-between align-items-center">
-                <h5 class="mb-0"><i class="bi bi-list-ol me-2"></i>Startlista (Springskytte)</h5>
+                <h5 class="mb-0"><i class="bi bi-list-ol me-2"></i>Startlistor (Springskytte)</h5>
                 <div class="d-flex gap-2">
-                    <button class="btn btn-primary btn-sm" onclick="springOpenGenerateModal()">
-                        <i class="bi bi-arrow-clockwise me-1"></i>Generera startlista
+                    <button class="btn btn-primary btn-sm" onclick="springAddNewList()">
+                        <i class="bi bi-plus-lg me-1"></i>Ny startlista
+                    </button>
+                    <button class="btn btn-success btn-sm" onclick="springRenumberAll()" id="springRenumberBtn" style="display:none" title="Tilldela löpande startnummer per vapengrupp över alla listor">
+                        <i class="bi bi-sort-numeric-down me-1"></i>Numrera startnummer
+                    </button>
+                    <button class="btn btn-outline-secondary btn-sm" onclick="springResetNumbers()" id="springResetBtn" style="display:none" title="Återställ till listnumrering (1, 2, 3... per lista)">
+                        <i class="bi bi-arrow-counterclockwise me-1"></i>Återställ
                     </button>
                 </div>
             </div>
         </div>
-        <div class="card-body">
-            <div id="springStartListContent">
-                <div class="text-center py-4">
-                    <div class="spinner-border spinner-border-sm" role="status"><span class="visually-hidden">Laddar...</span></div>
-                    <p class="mt-2 text-muted">Laddar startlista...</p>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Generate Start List Modal -->
-<div class="modal fade" id="springGenerateModal" tabindex="-1">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title"><i class="bi bi-gear me-2"></i>Generera Startlista</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <div class="mb-3">
-                    <label for="springFirstStart" class="form-label fw-bold">Första starttid</label>
-                    <input type="text" class="form-control" id="springFirstStart" value="10:00" placeholder="HH:MM">
-                </div>
-                <div class="mb-3">
-                    <label for="springInterval" class="form-label fw-bold">Intervall mellan starter</label>
-                    <input type="text" class="form-control" id="springInterval" value="01:00" placeholder="MM:SS">
-                    <div class="form-text">Tid mellan varje start (MM:SS)</div>
-                </div>
-                <div class="mb-3">
-                    <label for="springBreakAfter" class="form-label fw-bold">Paus efter antal starter</label>
-                    <input type="number" class="form-control" id="springBreakAfter" value="10" min="3" max="30">
-                </div>
-                <div class="mb-3">
-                    <label for="springBreakDuration" class="form-label fw-bold">Pauslängd</label>
-                    <input type="text" class="form-control" id="springBreakDuration" value="05:00" placeholder="MM:SS">
-                    <div class="form-text">Längden på paus (MM:SS)</div>
-                </div>
-
-                <div class="alert alert-info small">
-                    <i class="bi bi-info-circle me-1"></i>
-                    Startlistan genereras utifrån anmälda skyttar, sorterade per vapengrupp. Varje skytt får en individuell starttid.
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
-                <button type="button" class="btn btn-primary" id="springGenerateBtn" onclick="springGenerateStartList()">
-                    <i class="bi bi-arrow-clockwise me-1"></i>Generera
-                </button>
+        <div class="card-body" id="springListCardsContainer">
+            <div class="text-center py-4" id="springLoadingIndicator">
+                <div class="spinner-border spinner-border-sm" role="status"><span class="visually-hidden">Laddar...</span></div>
+                <p class="mt-2 text-muted">Laddar startlistor...</p>
             </div>
         </div>
     </div>
@@ -80,115 +41,337 @@
 <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
 
+<style>
+    .spring-list-card {
+        border: 1px solid var(--bs-border-color);
+        border-radius: 0.5rem;
+        margin-bottom: 1rem;
+    }
+    .spring-list-card .card-header {
+        background: var(--bs-tertiary-bg);
+    }
+    .spring-class-checkbox label {
+        cursor: pointer;
+        font-size: 0.9rem;
+    }
+    .spring-class-checkbox .disabled-class {
+        opacity: 0.5;
+        text-decoration: line-through;
+    }
+    .spring-class-group-header {
+        font-weight: 600;
+        font-size: 0.85rem;
+        color: var(--bs-secondary-color);
+        margin-bottom: 0.25rem;
+        margin-top: 0.5rem;
+    }
+    .spring-starters-table th, .spring-starters-table td {
+        font-size: 0.85rem;
+        padding: 0.3rem 0.5rem;
+    }
+    .spring-status-badge {
+        font-size: 0.75rem;
+    }
+</style>
+
 <script>
-const springSlCompetitionId = parseInt('@competitionId');
+const springCompId = parseInt('@competitionId');
+let springAvailableClasses = []; // loaded from server
+let springExistingLists = []; // loaded from server
+let springLocalCards = []; // client-side card state: { tempId, nodeId, listName, coveredClasses, firstStartTime, defaultInterval, breakAfterEvery, breakDuration, starters, generatedDate }
 
 document.addEventListener('DOMContentLoaded', () => {
-    springSlLoadStartList();
-
-    // Initialize Flatpickr for first start time
-    flatpickr('#springFirstStart', {
-        locale: 'sv',
-        enableTime: true,
-        noCalendar: true,
-        dateFormat: 'H:i',
-        time_24hr: true,
-        defaultHour: 10,
-        defaultMinute: 0
-    });
+    springLoadAll();
 });
 
-function springOpenGenerateModal() {
-    const modal = new bootstrap.Modal(document.getElementById('springGenerateModal'));
-    modal.show();
-}
-
-async function springSlLoadStartList() {
+async function springLoadAll() {
     try {
-        const response = await fetch(`/umbraco/surface/Springskytte/GetSpringskytteStartList?competitionId=${springSlCompetitionId}`);
-        const data = await response.json();
+        const [classesRes, listsRes] = await Promise.all([
+            fetch(`/umbraco/surface/Springskytte/GetSpringskytteAvailableClasses?competitionId=${springCompId}`).then(r => r.json()),
+            fetch(`/umbraco/surface/Springskytte/GetSpringskytteStartLists?competitionId=${springCompId}`).then(r => r.json())
+        ]);
 
-        const container = document.getElementById('springStartListContent');
-
-        if (data.success && data.hasStartList && data.starters?.length > 0) {
-            let html = `
-                <div class="d-flex justify-content-between align-items-center mb-2">
-                    <small class="text-muted">
-                        <i class="bi bi-people me-1"></i>${data.starters.length} startande |
-                        Start: ${data.firstStartTime || '-'} |
-                        Intervall: ${data.defaultInterval || '-'} |
-                        Paus var ${data.breakAfterEvery || '-'}:e start
-                    </small>
-                </div>
-                <div class="table-responsive">
-                    <table class="table table-sm table-striped table-hover">
-                        <thead>
-                            <tr>
-                                <th style="width:50px">#</th>
-                                <th style="width:80px">Starttid</th>
-                                <th>Namn</th>
-                                <th>Klubb</th>
-                                <th style="width:60px">Vapen</th>
-                                <th>Klass</th>
-                            </tr>
-                        </thead>
-                        <tbody>`;
-
-            let prevTime = null;
-            for (const s of data.starters) {
-                // Detect breaks (gap > normal interval)
-                if (prevTime && s.startTime) {
-                    const gap = parseTimeDiff(prevTime, s.startTime);
-                    const normalInterval = parseTimeMM(data.defaultInterval);
-                    if (gap > normalInterval * 1.5) {
-                        html += `<tr class="table-warning"><td colspan="6" class="text-center small fw-bold py-1">
-                            <i class="bi bi-pause-circle me-1"></i>Paus</td></tr>`;
-                    }
-                }
-
-                html += `
-                            <tr>
-                                <td>${s.startOrder}</td>
-                                <td class="fw-bold" style="font-family:monospace">${s.startTime}</td>
-                                <td>${s.name}</td>
-                                <td>${s.club}</td>
-                                <td><span class="badge bg-secondary">${s.weaponClass}</span></td>
-                                <td>${s.ageGenderClass}</td>
-                            </tr>`;
-                prevTime = s.startTime;
-            }
-
-            html += `
-                        </tbody>
-                    </table>
-                </div>`;
-            container.innerHTML = html;
-        } else {
-            container.innerHTML = `
-                <div class="text-center py-4">
-                    <i class="bi bi-list-ol display-4 text-muted"></i>
-                    <p class="mt-2 text-muted">Ingen startlista genererad. Klicka "Generera startlista" för att skapa en.</p>
-                </div>`;
+        if (classesRes.success) {
+            springAvailableClasses = classesRes.classes;
         }
+
+        springLocalCards = [];
+        if (listsRes.success && listsRes.lists?.length > 0) {
+            springExistingLists = listsRes.lists;
+            for (const list of listsRes.lists) {
+                springLocalCards.push({
+                    tempId: 'node_' + list.nodeId,
+                    nodeId: list.nodeId,
+                    listName: list.listName,
+                    coveredClasses: list.coveredClasses || [],
+                    firstStartTime: list.firstStartTime,
+                    defaultInterval: list.defaultInterval,
+                    breakAfterEvery: list.breakAfterEvery,
+                    breakDuration: list.breakDuration,
+                    starters: list.starters || [],
+                    generatedDate: list.generatedDate
+                });
+            }
+        }
+
+        springRenderCards();
     } catch (err) {
-        console.error('Error loading start list:', err);
-        document.getElementById('springStartListContent').innerHTML =
-            '<div class="alert alert-danger">Kunde inte ladda startlista.</div>';
+        console.error('Error loading start list data:', err);
+        document.getElementById('springListCardsContainer').innerHTML =
+            '<div class="alert alert-danger">Kunde inte ladda startlistor.</div>';
     }
 }
 
-async function springGenerateStartList() {
-    const btn = document.getElementById('springGenerateBtn');
+function springRenderCards() {
+    const container = document.getElementById('springListCardsContainer');
+    document.getElementById('springLoadingIndicator')?.remove();
+
+    if (springLocalCards.length === 0) {
+        container.innerHTML = `
+            <div class="text-center py-4" id="springEmptyState">
+                <i class="bi bi-list-ol display-4 text-muted"></i>
+                <p class="mt-2 text-muted">Inga startlistor skapade. Klicka "+ Ny startlista" för att skapa en.</p>
+            </div>`;
+        return;
+    }
+
+    // Build all assigned classes for disabling across cards
+    const assignedMap = {}; // classId -> tempId of card that owns it
+    for (const card of springLocalCards) {
+        for (const cls of (card.coveredClasses || [])) {
+            assignedMap[cls] = card.tempId;
+        }
+    }
+
+    let html = '';
+    for (const card of springLocalCards) {
+        html += springRenderOneCard(card, assignedMap);
+    }
+    container.innerHTML = html;
+
+    // Initialize flatpickr on new time inputs
+    for (const card of springLocalCards) {
+        flatpickr(`#springFirstStart_${card.tempId}`, {
+            locale: 'sv', enableTime: true, noCalendar: true,
+            dateFormat: 'H:i', time_24hr: true, defaultHour: 10, defaultMinute: 0
+        });
+    }
+
+    springUpdateTopButtons();
+}
+
+function springRenderOneCard(card, assignedMap) {
+    const isGenerated = card.starters && card.starters.length > 0;
+    const statusBadge = isGenerated
+        ? `<span class="badge bg-success spring-status-badge"><i class="bi bi-check-circle me-1"></i>Genererad (${card.starters.length} startande${card.generatedDate ? ', ' + card.generatedDate : ''})</span>`
+        : `<span class="badge bg-warning text-dark spring-status-badge"><i class="bi bi-exclamation-circle me-1"></i>Ej genererad</span>`;
+
+    // Group available classes by weapon class
+    const weaponGroups = {};
+    for (const cls of springAvailableClasses) {
+        const wc = cls.weaponClass;
+        if (!weaponGroups[wc]) weaponGroups[wc] = [];
+        weaponGroups[wc].push(cls);
+    }
+
+    let classCheckboxesHtml = '';
+    for (const [wc, classes] of Object.entries(weaponGroups).sort()) {
+        classCheckboxesHtml += `<div class="spring-class-group-header">Vapengrupp ${wc}</div><div class="d-flex flex-wrap gap-2 mb-1">`;
+        for (const cls of classes) {
+            const isOwned = (card.coveredClasses || []).includes(cls.classId);
+            const assignedTo = assignedMap[cls.classId];
+            const isOtherCard = assignedTo && assignedTo !== card.tempId;
+            const disabled = isOtherCard ? 'disabled' : '';
+            const labelClass = isOtherCard ? 'disabled-class' : '';
+            const checked = isOwned ? 'checked' : '';
+            const otherName = isOtherCard ? ` (${springLocalCards.find(c => c.tempId === assignedTo)?.listName || '?'})` : '';
+
+            classCheckboxesHtml += `
+                <div class="form-check form-check-inline spring-class-checkbox">
+                    <input class="form-check-input" type="checkbox" id="cls_${card.tempId}_${cls.classId.replace(/\s/g,'_')}"
+                        value="${cls.classId}" ${checked} ${disabled}
+                        onchange="springToggleClass('${card.tempId}', '${cls.classId}', this.checked)">
+                    <label class="form-check-label ${labelClass}" for="cls_${card.tempId}_${cls.classId.replace(/\s/g,'_')}">
+                        ${cls.classId} <small class="text-muted">(${cls.count})</small>${otherName}
+                    </label>
+                </div>`;
+        }
+        classCheckboxesHtml += '</div>';
+    }
+
+    // Starters table
+    let startersHtml = '';
+    if (isGenerated) {
+        startersHtml = springBuildStartersTable(card);
+    }
+
+    return `
+    <div class="card spring-list-card" id="springCard_${card.tempId}">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <div class="d-flex align-items-center gap-2">
+                <input type="text" class="form-control form-control-sm" style="width:250px;font-weight:600"
+                    value="${escapeHtml(card.listName)}"
+                    onchange="springUpdateCardName('${card.tempId}', this.value)"
+                    placeholder="Listnamn...">
+                ${statusBadge}
+            </div>
+            <button class="btn btn-outline-danger btn-sm" onclick="springDeleteList('${card.tempId}')" title="Ta bort startlista">
+                <i class="bi bi-trash"></i>
+            </button>
+        </div>
+        <div class="card-body">
+            <!-- Class checkboxes -->
+            <div class="mb-3">
+                <label class="form-label fw-bold small">Klasser i denna lista:</label>
+                ${classCheckboxesHtml}
+            </div>
+
+            <!-- Time parameters -->
+            <div class="row g-2 mb-3">
+                <div class="col-md-3">
+                    <label class="form-label small fw-bold">Första starttid</label>
+                    <input type="text" class="form-control form-control-sm" id="springFirstStart_${card.tempId}"
+                        value="${card.firstStartTime || '10:00'}" placeholder="HH:MM">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-bold">Intervall (MM:SS)</label>
+                    <input type="text" class="form-control form-control-sm" id="springInterval_${card.tempId}"
+                        value="${card.defaultInterval || '01:00'}" placeholder="MM:SS">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-bold">Paus efter antal</label>
+                    <input type="number" class="form-control form-control-sm" id="springBreakAfter_${card.tempId}"
+                        value="${card.breakAfterEvery || 10}" min="3" max="30">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-bold">Pauslängd (MM:SS)</label>
+                    <input type="text" class="form-control form-control-sm" id="springBreakDur_${card.tempId}"
+                        value="${card.breakDuration || '05:00'}" placeholder="MM:SS">
+                </div>
+            </div>
+
+            <!-- Action buttons -->
+            <div class="d-flex gap-2 mb-3">
+                <button class="btn btn-primary btn-sm" onclick="springGenerateList('${card.tempId}')" id="springGenBtn_${card.tempId}">
+                    <i class="bi bi-arrow-clockwise me-1"></i>${isGenerated ? 'Regenerera' : 'Generera'}
+                </button>
+            </div>
+
+            <!-- Generated starters -->
+            ${startersHtml}
+        </div>
+    </div>`;
+}
+
+function springBuildStartersTable(card) {
+    if (!card.starters || card.starters.length === 0) return '';
+
+    const interval = card.defaultInterval || '01:00';
+    let html = `
+        <div class="table-responsive" style="max-height:400px;overflow-y:auto">
+            <table class="table table-sm table-striped table-hover spring-starters-table mb-0">
+                <thead class="table-light" style="position:sticky;top:0;z-index:1">
+                    <tr><th>#</th><th>Starttid</th><th>Namn</th><th>Klubb</th><th>Vapen</th><th>Klass</th></tr>
+                </thead>
+                <tbody>`;
+
+    let prevTime = null;
+    for (const s of card.starters) {
+        if (prevTime && s.startTime) {
+            const gap = springParseTimeDiff(prevTime, s.startTime);
+            const normalInterval = springParseTimeMM(interval);
+            if (gap > normalInterval * 1.5) {
+                html += `<tr class="table-warning"><td colspan="6" class="text-center small fw-bold py-1">
+                    <i class="bi bi-pause-circle me-1"></i>Paus</td></tr>`;
+            }
+        }
+        html += `<tr>
+            <td>${s.startOrder}</td>
+            <td class="fw-bold" style="font-family:monospace">${s.startTime}</td>
+            <td>${escapeHtml(s.name)}</td>
+            <td>${escapeHtml(s.club)}</td>
+            <td><span class="badge bg-secondary">${s.weaponClass}</span></td>
+            <td>${s.ageGenderClass}</td>
+        </tr>`;
+        prevTime = s.startTime;
+    }
+
+    html += '</tbody></table></div>';
+    return html;
+}
+
+// ===== Card state management =====
+
+let springTempIdCounter = 0;
+
+function springAddNewList() {
+    const tempId = 'new_' + (++springTempIdCounter);
+    springLocalCards.push({
+        tempId,
+        nodeId: null,
+        listName: 'Ny startlista',
+        coveredClasses: [],
+        firstStartTime: '10:00',
+        defaultInterval: '01:00',
+        breakAfterEvery: 10,
+        breakDuration: '05:00',
+        starters: [],
+        generatedDate: ''
+    });
+    springRenderCards();
+}
+
+function springUpdateCardName(tempId, name) {
+    const card = springLocalCards.find(c => c.tempId === tempId);
+    if (card) card.listName = name;
+}
+
+function springToggleClass(tempId, classId, checked) {
+    const card = springLocalCards.find(c => c.tempId === tempId);
+    if (!card) return;
+    if (checked) {
+        if (!card.coveredClasses.includes(classId)) {
+            card.coveredClasses.push(classId);
+        }
+    } else {
+        card.coveredClasses = card.coveredClasses.filter(c => c !== classId);
+    }
+    // Re-render to update disabled states across all cards
+    springRenderCards();
+}
+
+// ===== Generate & Delete =====
+
+async function springGenerateList(tempId) {
+    const card = springLocalCards.find(c => c.tempId === tempId);
+    if (!card) return;
+
+    // Read current UI values
+    card.listName = document.querySelector(`#springCard_${tempId} input[type="text"]`)?.value || card.listName;
+    card.firstStartTime = document.getElementById(`springFirstStart_${tempId}`)?.value || '10:00';
+    card.defaultInterval = document.getElementById(`springInterval_${tempId}`)?.value || '01:00';
+    card.breakAfterEvery = parseInt(document.getElementById(`springBreakAfter_${tempId}`)?.value) || 10;
+    card.breakDuration = document.getElementById(`springBreakDur_${tempId}`)?.value || '05:00';
+
+    if (card.coveredClasses.length === 0) {
+        alert('Välj minst en klass för denna startlista.');
+        return;
+    }
+
+    const btn = document.getElementById(`springGenBtn_${tempId}`);
     btn.disabled = true;
     btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Genererar...';
 
     try {
         const requestData = {
-            competitionId: springSlCompetitionId,
-            firstStartTime: document.getElementById('springFirstStart').value,
-            defaultInterval: document.getElementById('springInterval').value,
-            breakAfterEvery: parseInt(document.getElementById('springBreakAfter').value) || 10,
-            breakDuration: document.getElementById('springBreakDuration').value
+            competitionId: springCompId,
+            firstStartTime: card.firstStartTime,
+            defaultInterval: card.defaultInterval,
+            breakAfterEvery: card.breakAfterEvery,
+            breakDuration: card.breakDuration,
+            coveredClasses: card.coveredClasses,
+            listName: card.listName,
+            existingNodeId: card.nodeId
         };
 
         const response = await fetch('/umbraco/surface/Springskytte/GenerateSpringskytteStartList', {
@@ -202,9 +385,11 @@ async function springGenerateStartList() {
         const data = await response.json();
 
         if (data.success) {
-            bootstrap.Modal.getInstance(document.getElementById('springGenerateModal'))?.hide();
-            springSlLoadStartList();
-            alert(data.message);
+            card.nodeId = data.nodeId;
+            card.starters = data.starters || [];
+            card.generatedDate = new Date().toISOString().slice(0, 16).replace('T', ' ');
+            card.tempId = 'node_' + data.nodeId; // Normalize tempId
+            springRenderCards();
         } else {
             alert(data.message || 'Fel vid generering.');
         }
@@ -212,13 +397,124 @@ async function springGenerateStartList() {
         console.error('Error generating start list:', err);
         alert('Ett fel uppstod vid generering av startlista.');
     } finally {
-        btn.disabled = false;
-        btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Generera';
+        const btnEl = document.getElementById(`springGenBtn_${tempId}`);
+        if (btnEl) {
+            btnEl.disabled = false;
+            btnEl.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Generera';
+        }
     }
 }
 
-// Helper: parse HH:MM:SS time difference in seconds
-function parseTimeDiff(t1, t2) {
+async function springDeleteList(tempId) {
+    const card = springLocalCards.find(c => c.tempId === tempId);
+    if (!card) return;
+
+    if (!confirm(`Ta bort startlistan "${card.listName}"?`)) return;
+
+    if (card.nodeId) {
+        // Delete from server
+        try {
+            const response = await fetch('/umbraco/surface/Springskytte/DeleteSpringskytteStartList', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]')?.value
+                },
+                body: JSON.stringify({ competitionId: springCompId, nodeId: card.nodeId })
+            });
+            const data = await response.json();
+            if (!data.success) {
+                alert(data.message || 'Fel vid borttagning.');
+                return;
+            }
+        } catch (err) {
+            console.error('Error deleting start list:', err);
+            alert('Ett fel uppstod vid borttagning.');
+            return;
+        }
+    }
+
+    // Remove from local state
+    springLocalCards = springLocalCards.filter(c => c.tempId !== tempId);
+    springRenderCards();
+}
+
+// ===== Renumber & Reset =====
+
+async function springRenumberAll() {
+    if (!confirm('Tilldela löpande startnummer per vapengrupp över alla genererade listor?')) return;
+
+    const btn = document.getElementById('springRenumberBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Numrerar...';
+
+    try {
+        const response = await fetch('/umbraco/surface/Springskytte/RenumberSpringskytteStartLists', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]')?.value
+            },
+            body: JSON.stringify(springCompId)
+        });
+        const data = await response.json();
+        if (data.success) {
+            alert(data.message);
+            await springLoadAll();
+        } else {
+            alert(data.message || 'Fel vid numrering.');
+        }
+    } catch (err) {
+        console.error('Error renumbering:', err);
+        alert('Ett fel uppstod.');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-sort-numeric-down me-1"></i>Numrera startnummer';
+    }
+}
+
+async function springResetNumbers() {
+    if (!confirm('Återställ alla startnummer till listnumrering (1, 2, 3... per lista)?')) return;
+
+    const btn = document.getElementById('springResetBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Återställer...';
+
+    try {
+        const response = await fetch('/umbraco/surface/Springskytte/ResetSpringskytteStartNumbers', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]')?.value
+            },
+            body: JSON.stringify(springCompId)
+        });
+        const data = await response.json();
+        if (data.success) {
+            alert(data.message);
+            await springLoadAll();
+        } else {
+            alert(data.message || 'Fel vid återställning.');
+        }
+    } catch (err) {
+        console.error('Error resetting:', err);
+        alert('Ett fel uppstod.');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-arrow-counterclockwise me-1"></i>Återställ';
+    }
+}
+
+function springUpdateTopButtons() {
+    const hasGenerated = springLocalCards.some(c => c.starters && c.starters.length > 0);
+    const hasMultiple = springLocalCards.filter(c => c.starters && c.starters.length > 0).length > 1;
+    document.getElementById('springRenumberBtn').style.display = hasGenerated ? '' : 'none';
+    document.getElementById('springResetBtn').style.display = hasGenerated ? '' : 'none';
+}
+
+// ===== Helpers =====
+
+function springParseTimeDiff(t1, t2) {
     const toSec = t => {
         const p = t.split(':').map(Number);
         return p.length === 3 ? p[0]*3600+p[1]*60+p[2] : p[0]*3600+p[1]*60;
@@ -226,10 +522,16 @@ function parseTimeDiff(t1, t2) {
     return toSec(t2) - toSec(t1);
 }
 
-// Helper: parse MM:SS to seconds
-function parseTimeMM(mmss) {
+function springParseTimeMM(mmss) {
     if (!mmss) return 60;
     const p = mmss.split(':').map(Number);
     return p.length === 2 ? p[0]*60+p[1] : p[0]*60;
+}
+
+function escapeHtml(str) {
+    if (!str) return '';
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
 }
 </script>

@@ -86,6 +86,65 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                         return Json(new SpringskytteResultResponse { Success = false, Message = "Ogiltigt tidsformat. Använd MM:SS eller H:MM:SS." });
                 }
 
+                // If finish time provided and no sprint time yet, calculate sprint = finish - start
+                if (sprintTimeSeconds == null && !string.IsNullOrWhiteSpace(request.FinishTimeInput))
+                {
+                    var finishSeconds = _scoringService.ParseSprintTime(request.FinishTimeInput);
+                    if (finishSeconds == null)
+                        return Json(new SpringskytteResultResponse { Success = false, Message = "Ogiltigt måltidsformat. Använd HH:MM:SS." });
+
+                    // Look up start time: first from DB result entry, then from start list content nodes
+                    string? shooterStartTime = null;
+
+                    using (var lookupDb = _umbracoDatabaseFactory.CreateDatabase())
+                    {
+                        var shooterEntry = await lookupDb.FirstOrDefaultAsync<SpringskytteResultEntry>(
+                            "WHERE CompetitionId = @0 AND MemberId = @1 AND WeaponClass = @2",
+                            request.CompetitionId, request.MemberId, request.WeaponClass);
+
+                        if (shooterEntry != null && !string.IsNullOrWhiteSpace(shooterEntry.StartTime))
+                            shooterStartTime = shooterEntry.StartTime;
+                    } // lookupDb disposed here before main db connection is opened
+
+                    if (string.IsNullOrWhiteSpace(shooterStartTime))
+                    {
+                        // Fall back to start list content nodes
+                        var comp = _contentService.GetById(request.CompetitionId);
+                        if (comp != null)
+                        {
+                            var slNodes = _contentService.GetPagedChildren(comp.Id, 0, 50, out _)
+                                .Where(c => c.ContentType.Alias == "precisionStartList")
+                                .ToList();
+
+                            foreach (var node in slNodes)
+                            {
+                                var cfgJson = node.GetValue<string>("configurationData");
+                                if (string.IsNullOrEmpty(cfgJson)) continue;
+                                var config = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(cfgJson);
+                                if (config?.Starters == null) continue;
+                                var starter = config.Starters.FirstOrDefault(s =>
+                                    s.MemberId == request.MemberId && s.WeaponClass == request.WeaponClass);
+                                if (starter != null && !string.IsNullOrEmpty(starter.StartTime))
+                                {
+                                    shooterStartTime = starter.StartTime;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    if (string.IsNullOrWhiteSpace(shooterStartTime))
+                        return Json(new SpringskytteResultResponse { Success = false, Message = "Starttid saknas — generera startlista först." });
+
+                    var startSeconds = _scoringService.ParseSprintTime(shooterStartTime);
+                    if (startSeconds == null)
+                        return Json(new SpringskytteResultResponse { Success = false, Message = "Kunde inte tolka starttid från startlistan." });
+
+                    sprintTimeSeconds = finishSeconds.Value - startSeconds.Value;
+                    if (sprintTimeSeconds < 0)
+                        return Json(new SpringskytteResultResponse { Success = false, Message = "Måltid är före starttid — kontrollera tiderna." });
+                }
+
                 // Serialize shots
                 var shotsJson = request.ShotSeries != null
                     ? JsonConvert.SerializeObject(request.ShotSeries)
@@ -109,6 +168,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     "WHERE CompetitionId = @0 AND MemberId = @1 AND WeaponClass = @2",
                     request.CompetitionId, request.MemberId, request.WeaponClass);
 
+                int savedResultId;
                 if (existing != null)
                 {
                     // Update
@@ -122,53 +182,96 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     existing.EnteredBy = enteredBy;
                     existing.LastModified = now;
                     await db.UpdateAsync(existing);
+                    savedResultId = existing.Id;
 
                     _logger.LogInformation("Updated Springskytte result for MemberId={MemberId}, CompetitionId={CompetitionId}, WeaponClass={WeaponClass}",
                         request.MemberId, request.CompetitionId, request.WeaponClass);
+                }
+                else
+                {
+                    // Insert new
+                    var entry = new SpringskytteResultEntry
+                    {
+                        CompetitionId = request.CompetitionId,
+                        MemberId = request.MemberId,
+                        WeaponClass = request.WeaponClass,
+                        AgeGenderClass = request.AgeGenderClass,
+                        StartOrder = 0,
+                        SprintTimeSeconds = request.Status != null ? null : sprintTimeSeconds,
+                        Shots = shotsJson,
+                        ShootingScore = request.Status != null ? null : (int?)shootingScore,
+                        PenaltyMultiplier = penaltyMultiplier,
+                        TotalTimeSeconds = request.Status != null ? null : totalTime,
+                        Status = request.Status,
+                        EnteredBy = enteredBy,
+                        EnteredAt = now,
+                        LastModified = now
+                    };
 
+                    var rawId = await db.InsertAsync(entry);
+                    savedResultId = Convert.ToInt32(rawId);
+
+                    _logger.LogInformation("Inserted Springskytte result Id={ResultId} for MemberId={MemberId}, CompetitionId={CompetitionId}",
+                        savedResultId, request.MemberId, request.CompetitionId);
+                }
+
+                // === VERIFICATION READ-BACK ===
+                // Re-read the stored row from DB to verify data integrity
+                var verification = await db.FirstOrDefaultAsync<SpringskytteResultEntry>(
+                    "WHERE Id = @0", savedResultId);
+
+                if (verification == null)
+                {
+                    _logger.LogError("INTEGRITY FAILURE: Could not read back saved result Id={ResultId}", savedResultId);
                     return Json(new SpringskytteResultResponse
                     {
-                        Success = true,
-                        Message = "Resultat uppdaterat.",
-                        ResultId = existing.Id,
-                        ShootingScore = shootingScore,
-                        TotalTimeSeconds = totalTime,
-                        TotalTimeDisplay = FormatTime(totalTime)
+                        Success = false,
+                        Message = "DATAFEL: Resultat sparades men kunde inte verifieras. Kontrollera och spara igen."
                     });
                 }
 
-                // Insert new
-                var entry = new SpringskytteResultEntry
+                // Verify shots match what was sent
+                var storedShots = SpringskytteScoringService.DeserializeShots(verification.Shots);
+                var sentShots = SpringskytteScoringService.DeserializeShots(shotsJson);
+                bool shotsMatch = JsonConvert.SerializeObject(storedShots) == JsonConvert.SerializeObject(sentShots);
+
+                if (!shotsMatch)
                 {
-                    CompetitionId = request.CompetitionId,
-                    MemberId = request.MemberId,
-                    WeaponClass = request.WeaponClass,
-                    AgeGenderClass = request.AgeGenderClass,
-                    StartOrder = 0,
-                    SprintTimeSeconds = request.Status != null ? null : sprintTimeSeconds,
-                    Shots = shotsJson,
-                    ShootingScore = request.Status != null ? null : (int?)shootingScore,
-                    PenaltyMultiplier = penaltyMultiplier,
-                    TotalTimeSeconds = request.Status != null ? null : totalTime,
-                    Status = request.Status,
-                    EnteredBy = enteredBy,
-                    EnteredAt = now,
-                    LastModified = now
-                };
+                    _logger.LogError("INTEGRITY FAILURE: Shots mismatch for Id={ResultId}. Sent={Sent}, Stored={Stored}",
+                        savedResultId, shotsJson, verification.Shots);
+                    return Json(new SpringskytteResultResponse
+                    {
+                        Success = false,
+                        Message = "DATAFEL: Skottdata stämmer inte överens med det som sparades. Spara igen.",
+                        VerificationShots = storedShots
+                    });
+                }
 
-                var resultId = await db.InsertAsync(entry);
+                bool timeMatch = verification.SprintTimeSeconds == (request.Status != null ? null : sprintTimeSeconds)
+                    && verification.TotalTimeSeconds == (request.Status != null ? null : totalTime);
 
-                _logger.LogInformation("Inserted Springskytte result Id={ResultId} for MemberId={MemberId}, CompetitionId={CompetitionId}",
-                    resultId, request.MemberId, request.CompetitionId);
+                if (!timeMatch)
+                {
+                    _logger.LogError("INTEGRITY FAILURE: Time mismatch for Id={ResultId}. Expected sprint={Sprint}/total={Total}, Got sprint={StoredSprint}/total={StoredTotal}",
+                        savedResultId, sprintTimeSeconds, totalTime, verification.SprintTimeSeconds, verification.TotalTimeSeconds);
+                    return Json(new SpringskytteResultResponse
+                    {
+                        Success = false,
+                        Message = "DATAFEL: Tidsdata stämmer inte överens med det som sparades. Spara igen."
+                    });
+                }
 
                 return Json(new SpringskytteResultResponse
                 {
                     Success = true,
-                    Message = "Resultat sparat.",
-                    ResultId = (int)(long)resultId,
-                    ShootingScore = shootingScore,
-                    TotalTimeSeconds = totalTime,
-                    TotalTimeDisplay = FormatTime(totalTime)
+                    Message = existing != null ? "Resultat uppdaterat." : "Resultat sparat.",
+                    ResultId = savedResultId,
+                    ShootingScore = verification.ShootingScore ?? 0,
+                    SprintTimeSeconds = verification.SprintTimeSeconds,
+                    TotalTimeSeconds = verification.TotalTimeSeconds,
+                    TotalTimeDisplay = FormatTime(verification.TotalTimeSeconds),
+                    PenaltyMultiplier = verification.PenaltyMultiplier,
+                    VerificationShots = storedShots
                 });
             }
             catch (Exception ex)
@@ -342,12 +445,28 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     ClassGroups = classGroups
                 };
 
-                // Store results on competition content node
+                // Store results on competitionResult child node (same pattern as Precision)
                 var competition = _contentService.GetById(competitionId);
                 if (competition != null)
                 {
-                    competition.SetValue("competitionResult", JsonConvert.SerializeObject(finalResults));
-                    _contentService.Publish(competition, Array.Empty<string>());
+                    var resultPage = _contentService.GetPagedChildren(competition.Id, 0, 50, out _)
+                        .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
+
+                    var isNewNode = false;
+                    if (resultPage == null)
+                    {
+                        resultPage = _contentService.Create("Resultat", competition.Id, "competitionResult");
+                        isNewNode = true;
+                    }
+
+                    resultPage.SetValue("resultData", JsonConvert.SerializeObject(finalResults));
+                    resultPage.SetValue("lastUpdated", DateTime.Now);
+                    resultPage.SetValue("resultType", "Final Results");
+                    resultPage.SetValue("isOfficial", true);
+
+                    if (isNewNode)
+                        _contentService.Save(resultPage);  // New nodes need Save() before Publish()
+                    _contentService.Publish(resultPage, new[] { "*" });
 
                     _logger.LogInformation("Published Springskytte final results for CompetitionId={CompetitionId}, {Count} shooters",
                         competitionId, shooterResults.Count);
@@ -394,25 +513,58 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     r => $"{r.MemberId}|{r.WeaponClass}",
                     r => r);
 
-                var shooters = registrations.Select(r => new
+                // Load start list data from content nodes (authoritative source for startOrder/startTime)
+                var startListLookup = new Dictionary<string, (int StartOrder, string StartTime)>();
+                var competition = _contentService.GetById(competitionId);
+                if (competition != null)
                 {
-                    r.MemberId,
-                    r.MemberName,
-                    r.MemberClub,
-                    weaponClass = ExtractWeaponClass(r.MemberClass),
-                    ageGenderClass = ExtractAgeGenderClass(r.MemberClass),
-                    registeredClass = r.MemberClass,
-                    hasResult = resultLookup.ContainsKey($"{r.MemberId}|{ExtractWeaponClass(r.MemberClass)}"),
-                    existingResult = resultLookup.TryGetValue($"{r.MemberId}|{ExtractWeaponClass(r.MemberClass)}", out var res)
-                        ? new
+                    var startListNodes = _contentService.GetPagedChildren(competition.Id, 0, 50, out _)
+                        .Where(c => c.ContentType.Alias == "precisionStartList")
+                        .ToList();
+
+                    foreach (var node in startListNodes)
+                    {
+                        var cfgJson = node.GetValue<string>("configurationData");
+                        if (string.IsNullOrEmpty(cfgJson)) continue;
+                        var config = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(cfgJson);
+                        if (config?.Starters == null) continue;
+                        foreach (var starter in config.Starters)
                         {
-                            res.SprintTimeSeconds,
-                            res.ShootingScore,
-                            res.TotalTimeSeconds,
-                            totalTimeDisplay = FormatTime(res.TotalTimeSeconds),
-                            res.Status
+                            var slKey = $"{starter.MemberId}|{starter.WeaponClass}";
+                            startListLookup[slKey] = (starter.StartOrder, starter.StartTime);
                         }
-                        : null
+                    }
+                }
+
+                var shooters = registrations.Select(r =>
+                {
+                    var key = $"{r.MemberId}|{ExtractWeaponClass(r.MemberClass)}";
+                    var hasRes = resultLookup.TryGetValue(key, out var res);
+                    startListLookup.TryGetValue(key, out var slData);
+                    return new
+                    {
+                        r.MemberId,
+                        r.MemberName,
+                        r.MemberClub,
+                        weaponClass = ExtractWeaponClass(r.MemberClass),
+                        ageGenderClass = ExtractAgeGenderClass(r.MemberClass),
+                        registeredClass = r.MemberClass,
+                        startOrder = slData.StartOrder > 0 ? slData.StartOrder : (hasRes ? res.StartOrder : 0),
+                        startTime = !string.IsNullOrEmpty(slData.StartTime) ? slData.StartTime : (hasRes ? res.StartTime : null as string),
+                        hasResult = hasRes && (res.SprintTimeSeconds != null || res.Status != null || (res.Shots != null && res.Shots != "[]")),
+                        existingResult = hasRes
+                            ? new
+                            {
+                                res.SprintTimeSeconds,
+                                res.ShootingScore,
+                                res.TotalTimeSeconds,
+                                totalTimeDisplay = FormatTime(res.TotalTimeSeconds),
+                                res.Status,
+                                res.PenaltyMultiplier,
+                                shots = SpringskytteScoringService.DeserializeShots(res.Shots)
+                            }
+                            : null
+                    };
                 }).ToList();
 
                 return Json(new
@@ -449,13 +601,27 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 if (!registrations.Any())
                     return Json(new { success = false, message = "Inga anmälda skyttar hittades." });
 
+                // Filter registrations by CoveredClasses if specified
+                var coveredClasses = request.CoveredClasses?.Where(c => !string.IsNullOrWhiteSpace(c)).ToList() ?? new List<string>();
+                if (coveredClasses.Any())
+                {
+                    var coveredSet = new HashSet<string>(coveredClasses, StringComparer.OrdinalIgnoreCase);
+                    registrations = registrations
+                        .Where(r => coveredSet.Contains(r.MemberClass?.Trim() ?? ""))
+                        .ToList();
+
+                    if (!registrations.Any())
+                        return Json(new { success = false, message = "Inga anmälda skyttar matchar de valda klasserna." });
+                }
+
                 // Parse time parameters
                 var firstStart = TimeSpan.Parse(request.FirstStartTime);
                 var interval = TimeSpan.Parse("00:" + request.DefaultInterval);
                 var breakDuration = TimeSpan.Parse("00:" + request.BreakDuration);
                 int breakAfter = request.BreakAfterEvery > 0 ? request.BreakAfterEvery : 10;
 
-                // Build start list entries, ordered by weapon class then registration order
+                // Build start list entries with list-local numbering (1, 2, 3...)
+                // Cross-list per-weapon-class numbering is done separately via RenumberSpringskytteStartLists
                 var starters = new List<SpringskytteStartListEntry>();
                 var currentTime = firstStart;
                 int startOrder = 1;
@@ -490,42 +656,57 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     sinceLastBreak++;
                 }
 
+                var competition = _contentService.GetById(request.CompetitionId);
+
                 // Store start list as JSON on competition content node
+                var listName = !string.IsNullOrWhiteSpace(request.ListName) ? request.ListName : "Startlista";
                 var config = new SpringskytteStartListConfig
                 {
                     FirstStartTime = request.FirstStartTime,
                     DefaultInterval = request.DefaultInterval,
                     BreakAfterEvery = breakAfter,
                     BreakDuration = request.BreakDuration,
+                    ListName = listName,
+                    CoveredClasses = coveredClasses,
                     Starters = starters
                 };
 
-                var competition = _contentService.GetById(request.CompetitionId);
                 if (competition != null)
                 {
-                    // Store as configurationData on precisionStartList child (reuse document type)
-                    var startListContent = _contentService.GetPagedChildren(competition.Id, 0, 20, out _)
-                        .FirstOrDefault(c => c.ContentType.Alias == "precisionStartList");
+                    Umbraco.Cms.Core.Models.IContent? startListContent = null;
+
+                    if (request.ExistingNodeId.HasValue && request.ExistingNodeId.Value > 0)
+                    {
+                        // Update existing node
+                        startListContent = _contentService.GetById(request.ExistingNodeId.Value);
+                        if (startListContent == null || startListContent.ParentId != competition.Id)
+                            return Json(new { success = false, message = "Startlistan hittades inte." });
+                    }
 
                     if (startListContent == null)
                     {
+                        // Create new node
                         var contentType = _contentTypeService.Get("precisionStartList");
                         if (contentType != null)
                         {
-                            startListContent = _contentService.Create("Startlista", competition, contentType.Alias);
+                            startListContent = _contentService.Create(listName, competition, contentType.Alias);
                         }
                     }
 
                     if (startListContent != null)
                     {
+                        startListContent.Name = listName;
                         startListContent.SetValue("configurationData", JsonConvert.SerializeObject(config));
                         startListContent.SetValue("teamFormat", "Springskytte");
                         startListContent.SetValue("generatedDate", DateTime.Now);
                         startListContent.SetValue("startListContent", BuildStartListHtml(starters));
-                        _contentService.Publish(startListContent, Array.Empty<string>());
+                        // Save first to persist new nodes (Create() only makes in-memory object),
+                        // then Publish to make it visible on the public site.
+                        _contentService.Save(startListContent);
+                        _contentService.Publish(startListContent, new[] { "*" });
                     }
 
-                    // Also update result entries with start order/time
+                    // Update result entries with start order/time for this list's starters only
                     using var db = _umbracoDatabaseFactory.CreateDatabase();
                     foreach (var starter in starters)
                     {
@@ -536,17 +717,20 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                             starter.StartOrder, starter.StartTime, DateTime.Now,
                             request.CompetitionId, starter.MemberId, starter.WeaponClass);
                     }
+
+                    _logger.LogInformation("Generated Springskytte start list '{ListName}' for CompetitionId={CompetitionId}, {Count} starters, NodeId={NodeId}",
+                        listName, request.CompetitionId, starters.Count, startListContent?.Id);
+
+                    return Json(new
+                    {
+                        success = true,
+                        message = $"Startlista \"{listName}\" genererad med {starters.Count} startande.",
+                        nodeId = startListContent?.Id,
+                        starters
+                    });
                 }
 
-                _logger.LogInformation("Generated Springskytte start list for CompetitionId={CompetitionId}, {Count} starters",
-                    request.CompetitionId, starters.Count);
-
-                return Json(new
-                {
-                    success = true,
-                    message = $"Startlista genererad med {starters.Count} startande.",
-                    starters
-                });
+                return Json(new { success = false, message = "Tävling hittades inte." });
             }
             catch (Exception ex)
             {
@@ -555,6 +739,56 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
             }
         }
 
+        [HttpGet]
+        public IActionResult GetSpringskytteStartLists(int competitionId)
+        {
+            try
+            {
+                var competition = _contentService.GetById(competitionId);
+                if (competition == null)
+                    return Json(new { success = false, message = "Tävling hittades inte." });
+
+                var startListNodes = _contentService.GetPagedChildren(competition.Id, 0, 50, out _)
+                    .Where(c => c.ContentType.Alias == "precisionStartList")
+                    .ToList();
+
+                if (!startListNodes.Any())
+                    return Json(new { success = true, lists = new List<object>() });
+
+                var lists = startListNodes.Select(node =>
+                {
+                    var configJson = node.GetValue<string>("configurationData");
+                    var config = !string.IsNullOrEmpty(configJson)
+                        ? JsonConvert.DeserializeObject<SpringskytteStartListConfig>(configJson)
+                        : null;
+
+                    return new
+                    {
+                        nodeId = node.Id,
+                        listName = !string.IsNullOrEmpty(config?.ListName) ? config.ListName : "Alla klasser",
+                        coveredClasses = config?.CoveredClasses ?? new List<string>(),
+                        firstStartTime = config?.FirstStartTime ?? "10:00",
+                        defaultInterval = config?.DefaultInterval ?? "01:00",
+                        breakAfterEvery = config?.BreakAfterEvery ?? 10,
+                        breakDuration = config?.BreakDuration ?? "05:00",
+                        starters = config?.Starters ?? new List<SpringskytteStartListEntry>(),
+                        starterCount = config?.Starters?.Count ?? 0,
+                        generatedDate = node.GetValue<DateTime?>("generatedDate")?.ToString("yyyy-MM-dd HH:mm") ?? ""
+                    };
+                }).ToList();
+
+                return Json(new { success = true, lists });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting Springskytte start lists");
+                return Json(new { success = false, message = "Ett fel uppstod." });
+            }
+        }
+
+        /// <summary>
+        /// Backward-compatible endpoint — returns the first start list (for public page, etc.)
+        /// </summary>
         [HttpGet]
         public IActionResult GetSpringskytteStartList(int competitionId)
         {
@@ -591,6 +825,288 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error getting Springskytte start list");
+                return Json(new { success = false, message = "Ett fel uppstod." });
+            }
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeleteSpringskytteStartList([FromBody] SpringskytteDeleteStartListRequest request)
+        {
+            try
+            {
+                if (request == null || request.CompetitionId <= 0 || request.NodeId <= 0)
+                    return Json(new { success = false, message = "Ogiltig begäran." });
+
+                if (!await HasCompetitionAccess(request.CompetitionId))
+                    return Json(new { success = false, message = "Åtkomst nekad." });
+
+                var node = _contentService.GetById(request.NodeId);
+                if (node == null || node.ContentType.Alias != "precisionStartList")
+                    return Json(new { success = false, message = "Startlistan hittades inte." });
+
+                // Verify the node belongs to this competition
+                var competition = _contentService.GetById(request.CompetitionId);
+                if (competition == null || node.ParentId != competition.Id)
+                    return Json(new { success = false, message = "Startlistan tillhör inte denna tävling." });
+
+                // Read config to find affected starters
+                var configJson = node.GetValue<string>("configurationData");
+                var config = !string.IsNullOrEmpty(configJson)
+                    ? JsonConvert.DeserializeObject<SpringskytteStartListConfig>(configJson)
+                    : null;
+
+                // Clear StartOrder/StartTime for affected result entries
+                if (config?.Starters?.Any() == true)
+                {
+                    using var db = _umbracoDatabaseFactory.CreateDatabase();
+                    foreach (var starter in config.Starters)
+                    {
+                        await db.ExecuteAsync(
+                            @"UPDATE SpringskytteResultEntry
+                              SET StartOrder = 0, StartTime = NULL, LastModified = @0
+                              WHERE CompetitionId = @1 AND MemberId = @2 AND WeaponClass = @3",
+                            DateTime.Now, request.CompetitionId, starter.MemberId, starter.WeaponClass);
+                    }
+                }
+
+                // Delete the node
+                _contentService.Unpublish(node);
+                _contentService.Delete(node);
+
+                _logger.LogInformation("Deleted Springskytte start list NodeId={NodeId} for CompetitionId={CompetitionId}",
+                    request.NodeId, request.CompetitionId);
+
+                return Json(new { success = true, message = "Startlistan har tagits bort." });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error deleting Springskytte start list");
+                return Json(new { success = false, message = "Ett fel uppstod." });
+            }
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> GetSpringskytteAvailableClasses(int competitionId)
+        {
+            try
+            {
+                if (!await HasCompetitionAccess(competitionId))
+                    return Json(new { success = false, message = "Åtkomst nekad." });
+
+                // Get registrations
+                var registrations = await _startListRepository.GetCompetitionRegistrations(competitionId);
+
+                // Extract distinct classes with counts
+                var classCounts = registrations
+                    .GroupBy(r => r.MemberClass?.Trim() ?? "")
+                    .Where(g => !string.IsNullOrEmpty(g.Key))
+                    .Select(g => new { classId = g.Key, count = g.Count() })
+                    .OrderBy(c => c.classId)
+                    .ToList();
+
+                // Load existing start list nodes to see which classes are already assigned
+                var competition = _contentService.GetById(competitionId);
+                var assignments = new Dictionary<string, (int nodeId, string listName)>();
+
+                if (competition != null)
+                {
+                    var startListNodes = _contentService.GetPagedChildren(competition.Id, 0, 50, out _)
+                        .Where(c => c.ContentType.Alias == "precisionStartList")
+                        .ToList();
+
+                    foreach (var node in startListNodes)
+                    {
+                        var configJson = node.GetValue<string>("configurationData");
+                        if (string.IsNullOrEmpty(configJson)) continue;
+                        var config = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(configJson);
+                        if (config?.CoveredClasses == null) continue;
+
+                        foreach (var cls in config.CoveredClasses)
+                        {
+                            assignments[cls] = (node.Id, config.ListName ?? "");
+                        }
+                    }
+                }
+
+                var classes = classCounts.Select(c => new
+                {
+                    c.classId,
+                    c.count,
+                    weaponClass = ExtractWeaponClass(c.classId),
+                    ageGenderClass = ExtractAgeGenderClass(c.classId),
+                    assignedToNodeId = assignments.TryGetValue(c.classId, out var a) ? a.nodeId : (int?)null,
+                    assignedToListName = assignments.TryGetValue(c.classId, out var b) ? b.listName : null
+                }).ToList();
+
+                return Json(new { success = true, classes });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting available classes for Springskytte");
+                return Json(new { success = false, message = "Ett fel uppstod." });
+            }
+        }
+
+        // ===== START NUMBER MANAGEMENT =====
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> RenumberSpringskytteStartLists([FromBody] int competitionId)
+        {
+            try
+            {
+                if (competitionId <= 0)
+                    return Json(new { success = false, message = "Ogiltig begäran." });
+
+                if (!await HasCompetitionAccess(competitionId))
+                    return Json(new { success = false, message = "Åtkomst nekad." });
+
+                var competition = _contentService.GetById(competitionId);
+                if (competition == null)
+                    return Json(new { success = false, message = "Tävling hittades inte." });
+
+                // Load all start list nodes
+                var nodes = _contentService.GetPagedChildren(competition.Id, 0, 50, out _)
+                    .Where(c => c.ContentType.Alias == "precisionStartList")
+                    .ToList();
+
+                if (!nodes.Any())
+                    return Json(new { success = false, message = "Inga startlistor hittades." });
+
+                // Collect all starters with their node reference, ordered by list first-start-time then position
+                var allStarters = new List<(Umbraco.Cms.Core.Models.IContent node, SpringskytteStartListConfig config, int starterIndex)>();
+
+                var nodeConfigs = new List<(Umbraco.Cms.Core.Models.IContent node, SpringskytteStartListConfig config)>();
+                foreach (var node in nodes)
+                {
+                    var cfgJson = node.GetValue<string>("configurationData");
+                    if (string.IsNullOrEmpty(cfgJson)) continue;
+                    var config = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(cfgJson);
+                    if (config?.Starters == null || !config.Starters.Any()) continue;
+                    nodeConfigs.Add((node, config));
+                }
+
+                // Sort lists by first start time so earlier lists get lower numbers
+                nodeConfigs.Sort((a, b) =>
+                {
+                    TimeSpan.TryParse(a.config.FirstStartTime, out var ta);
+                    TimeSpan.TryParse(b.config.FirstStartTime, out var tb);
+                    return ta.CompareTo(tb);
+                });
+
+                // Assign sequential numbers per weapon class across all lists
+                var weaponClassCounter = new Dictionary<string, int>();
+
+                foreach (var (node, config) in nodeConfigs)
+                {
+                    foreach (var starter in config.Starters)
+                    {
+                        if (!weaponClassCounter.ContainsKey(starter.WeaponClass))
+                            weaponClassCounter[starter.WeaponClass] = 1;
+                        starter.StartOrder = weaponClassCounter[starter.WeaponClass]++;
+                    }
+
+                    // Save updated config back to node
+                    node.SetValue("configurationData", JsonConvert.SerializeObject(config));
+                    node.SetValue("startListContent", BuildStartListHtml(config.Starters));
+                    _contentService.Save(node);
+                    _contentService.Publish(node, new[] { "*" });
+                }
+
+                // Update DB result entries
+                using var db = _umbracoDatabaseFactory.CreateDatabase();
+                foreach (var (_, config) in nodeConfigs)
+                {
+                    foreach (var starter in config.Starters)
+                    {
+                        await db.ExecuteAsync(
+                            @"UPDATE SpringskytteResultEntry
+                              SET StartOrder = @0, StartTime = @1, LastModified = @2
+                              WHERE CompetitionId = @3 AND MemberId = @4 AND WeaponClass = @5",
+                            starter.StartOrder, starter.StartTime, DateTime.Now,
+                            competitionId, starter.MemberId, starter.WeaponClass);
+                    }
+                }
+
+                var totalStarters = nodeConfigs.Sum(nc => nc.config.Starters.Count);
+                _logger.LogInformation("Renumbered Springskytte start lists for CompetitionId={CompetitionId}, {Count} starters across {Lists} lists",
+                    competitionId, totalStarters, nodeConfigs.Count);
+
+                return Json(new
+                {
+                    success = true,
+                    message = $"Startnummer tilldelade för {totalStarters} startande i {nodeConfigs.Count} listor."
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error renumbering Springskytte start lists");
+                return Json(new { success = false, message = "Ett fel uppstod." });
+            }
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ResetSpringskytteStartNumbers([FromBody] int competitionId)
+        {
+            try
+            {
+                if (competitionId <= 0)
+                    return Json(new { success = false, message = "Ogiltig begäran." });
+
+                if (!await HasCompetitionAccess(competitionId))
+                    return Json(new { success = false, message = "Åtkomst nekad." });
+
+                var competition = _contentService.GetById(competitionId);
+                if (competition == null)
+                    return Json(new { success = false, message = "Tävling hittades inte." });
+
+                var nodes = _contentService.GetPagedChildren(competition.Id, 0, 50, out _)
+                    .Where(c => c.ContentType.Alias == "precisionStartList")
+                    .ToList();
+
+                int totalReset = 0;
+                foreach (var node in nodes)
+                {
+                    var cfgJson = node.GetValue<string>("configurationData");
+                    if (string.IsNullOrEmpty(cfgJson)) continue;
+                    var config = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(cfgJson);
+                    if (config?.Starters == null || !config.Starters.Any()) continue;
+
+                    // Reset to list-local numbering (1, 2, 3...)
+                    int localOrder = 1;
+                    foreach (var starter in config.Starters)
+                    {
+                        starter.StartOrder = localOrder++;
+                    }
+                    totalReset += config.Starters.Count;
+
+                    node.SetValue("configurationData", JsonConvert.SerializeObject(config));
+                    node.SetValue("startListContent", BuildStartListHtml(config.Starters));
+                    _contentService.Save(node);
+                    _contentService.Publish(node, new[] { "*" });
+                }
+
+                // Reset DB result entries
+                using var db = _umbracoDatabaseFactory.CreateDatabase();
+                await db.ExecuteAsync(
+                    @"UPDATE SpringskytteResultEntry SET StartOrder = 0, StartTime = NULL, LastModified = @0
+                      WHERE CompetitionId = @1",
+                    DateTime.Now, competitionId);
+
+                _logger.LogInformation("Reset Springskytte start numbers for CompetitionId={CompetitionId}, {Count} starters",
+                    competitionId, totalReset);
+
+                return Json(new
+                {
+                    success = true,
+                    message = $"Startnummer återställda för {totalReset} startande."
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error resetting Springskytte start numbers");
                 return Json(new { success = false, message = "Ett fel uppstod." });
             }
         }

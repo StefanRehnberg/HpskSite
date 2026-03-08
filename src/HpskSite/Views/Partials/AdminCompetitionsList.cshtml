@@ -129,7 +129,7 @@
             <span class="badge bg-info">{registrationCount}</span>
         </td>
         <td class="text-end">
-            <button class="btn btn-sm btn-outline-primary" onclick="openAdminEditModal({id}, {isExternal})" title="Redigera">
+            <button class="btn btn-sm btn-outline-primary" onclick="openAdminEditModal({id}, {isExternal}, '{type}')" title="Redigera">
                 <i class="bi bi-pencil"></i>
             </button>
             <button class="btn btn-sm btn-outline-info" onclick="openAdminCopyModal({id})" title="Kopiera">
@@ -641,12 +641,18 @@ window.reloadCompetitionsList = function() {
 };
 
 // Open edit modal for admin page
-window.openAdminEditModal = function(competitionId, isExternal) {
-    console.log('Opening edit modal for competition ID:', competitionId, 'isExternal:', isExternal);
+window.openAdminEditModal = function(competitionId, isExternal, competitionType) {
+    console.log('Opening edit modal for competition ID:', competitionId, 'isExternal:', isExternal, 'type:', competitionType);
 
     // Route to correct modal based on competition type
     if (isExternal === true) {
         openAdvertEditModal(competitionId);
+        return;
+    }
+
+    // Springskytte has its own edit modal
+    if (competitionType === 'Springskytte') {
+        openSpringskytteEditModal(competitionId);
         return;
     }
 
@@ -725,6 +731,51 @@ function openInternalEditModal(competitionId) {
     })
     .catch(error => {
         console.error('Error loading competition:', error);
+        alert('Fel vid laddning av tävlingsdata: ' + error.message);
+    });
+}
+
+// Open Springskytte competition edit modal
+function openSpringskytteEditModal(competitionId) {
+    console.log('Opening SPRINGSKYTTE edit modal for competition ID:', competitionId);
+
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+
+    fetch(`/umbraco/surface/CompetitionEdit/GetCompetitionData?competitionId=${competitionId}`, {
+        method: 'GET',
+        headers: { 'RequestVerificationToken': token },
+        credentials: 'same-origin'
+    })
+    .then(response => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        return response.json();
+    })
+    .then(data => {
+        if (data.success) {
+            const modalElement = document.getElementById('springEditModal');
+            if (!modalElement) {
+                console.error('springEditModal element not found!');
+                alert('Springskytte-redigeringsmodal inte tillgänglig.');
+                return;
+            }
+
+            const modal = window.springEditModalInstance || new bootstrap.Modal(modalElement);
+            window.springEditModalInstance = modal;
+            modal.show();
+
+            setTimeout(() => {
+                if (typeof window.populateSpringEditModal === 'function') {
+                    window.populateSpringEditModal(data.data);
+                } else {
+                    console.error('populateSpringEditModal function is not defined');
+                }
+            }, 200);
+        } else {
+            alert('Kunde inte ladda tävlingsdata: ' + (data.message || 'Okänt fel'));
+        }
+    })
+    .catch(error => {
+        console.error('Error loading springskytte competition:', error);
         alert('Fel vid laddning av tävlingsdata: ' + error.message);
     });
 }

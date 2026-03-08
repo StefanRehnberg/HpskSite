@@ -7,6 +7,7 @@
 @inject Umbraco.Cms.Core.Security.IMemberManager MemberManager
 @inject Umbraco.Cms.Core.Services.IContentService ContentService
 @inject HpskSite.Services.AdminAuthorizationService AuthService
+@inject HpskSite.Services.ClubService ClubService
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
     Layout = "Master.cshtml";
@@ -51,6 +52,14 @@
     bool canManageCompetition = false;
     bool isSiteAdmin = false;
 
+    // Registration modal variables (computed inside auth block)
+    var regRole = "member";
+    var regMemberId = 0;
+    int? regClubId = null;
+    var regClubName = "";
+    var regMemberName = "";
+    var allClubsJson = "[]";
+
     if (currentMember != null)
     {
         // Load member data and roles once — derive all auth from this (avoids ~15 redundant service calls)
@@ -59,6 +68,31 @@
         {
             var roles = MemberService.GetAllRoles(memberData.Id)?.ToList() ?? new List<string>();
             isSiteAdmin = roles.Contains("Administrators");
+
+            // Compute registration target info
+            regMemberId = memberData.Id;
+            regMemberName = currentMember.Name ?? "";
+            var primaryClubIdStr = memberData.GetValue<string>("primaryClubId");
+            if (!string.IsNullOrEmpty(primaryClubIdStr) && int.TryParse(primaryClubIdStr, out int pClubId))
+            {
+                regClubId = pClubId;
+                regClubName = ClubService.GetClubNameById(pClubId) ?? "";
+            }
+
+            if (isSiteAdmin) regRole = "admin";
+            else if (roles.Any(r => r.StartsWith("ClubAdmin_"))) regRole = "clubAdmin";
+            else if (roles.Any(r => r.StartsWith("Skjutledare_"))) regRole = "skjutledare";
+
+            // For admin/clubAdmin roles, provide club list for target member selection
+            if (regRole != "member")
+            {
+                var clubs = ClubService.GetAllClubs()
+                    .Where(c => c.IsActive)
+                    .OrderBy(c => c.Name)
+                    .Select(c => new { id = c.Id, name = c.Name })
+                    .ToList();
+                allClubsJson = System.Text.Json.JsonSerializer.Serialize(clubs);
+            }
 
             if (competition != null)
             {
@@ -113,6 +147,8 @@
     var lJuniorClasses = new List<HpskSite.Models.ShootingClass>();
     var lDamClasses = new List<HpskSite.Models.ShootingClass>();
     var mClasses = new List<HpskSite.Models.ShootingClass>();
+    var shootingClassIds = "";
+    var competitionType = ViewData["CompetitionType"]?.ToString() ?? "Precision";
 
     if (competition != null)
     {
@@ -120,7 +156,7 @@
 
         // Get shooting class IDs
         var shootingClassIdsRaw = competition.Value("shootingClassIds");
-        var shootingClassIds = "";
+        shootingClassIds = "";
 
         // Handle different data types from Umbraco multiselect
         if (shootingClassIdsRaw is string[] stringArray)
@@ -450,6 +486,7 @@
                 @{
                     var resultsViewData = new ViewDataDictionary(ViewData);
                     resultsViewData["CompetitionId"] = competitionId;
+                    resultsViewData["CompetitionName"] = competition?.Value<string>("competitionName") ?? "Tävling";
                     // NumberOfSeriesOrStations is already in ViewData from line 39
                 }
                 @if ((ViewData["CompetitionType"]?.ToString() ?? "Precision") == "Springskytte")
@@ -614,8 +651,8 @@ function openResultsTab() {
 }
 </script>
 
-@* Competition configuration for registration modal *@
-@if (competition != null)
+@* Competition configuration for registration modal (not needed for Springskytte — it has its own inline JS) *@
+@if (competition != null && competitionType != "Springskytte")
 {
     var swishNumberMgmt = competition.Value<string>("swishNumber");
     var hasSwishNumberMgmt = !string.IsNullOrWhiteSpace(swishNumberMgmt);
@@ -634,26 +671,47 @@ window.CompetitionConfig = {
 
 @if (competition != null)
 {
-    @await Html.PartialAsync("CompetitionRegistrationModal", new ViewDataDictionary(ViewData)
+    if (competitionType == "Springskytte")
     {
-        { "CompetitionId", competitionId },
-        { "CompetitionName", competition.Value<string>("competitionName") },
-        { "AClasses", aClasses },
-        { "BClasses", bClasses },
-        { "CClasses", cClasses },
-        { "CRegularClasses", cRegularClasses },
-        { "CVetClasses", cVetClasses },
-        { "CJuniorClasses", cJuniorClasses },
-        { "CDamClasses", cDamClasses },
-        { "RClasses", rClasses },
-        { "LClasses", lClasses },
-        { "LRegularClasses", lRegularClasses },
-        { "LVetClasses", lVetClasses },
-        { "LJuniorClasses", lJuniorClasses },
-        { "LDamClasses", lDamClasses },
-        { "MClasses", mClasses },
-        { "AllowDualCClassRegistration", allowDualCClassRegistration }
-    })
+        var hasSwishSprint = !string.IsNullOrWhiteSpace(competition.Value<string>("swishNumber")) && (competition.Value<decimal?>("registrationFee") ?? 0) > 0;
+        @await Html.PartialAsync("SpringskytteRegistrationModal", new ViewDataDictionary(ViewData)
+        {
+            { "CompetitionId", competitionId },
+            { "CompetitionName", competition.Value<string>("competitionName") },
+            { "ShootingClassIds", shootingClassIds },
+            { "RegRole", regRole },
+            { "RegMemberId", regMemberId },
+            { "RegMemberName", regMemberName },
+            { "RegClubId", regClubId },
+            { "RegClubName", regClubName },
+            { "AllClubsJson", allClubsJson },
+            { "HasSwish", hasSwishSprint },
+            { "RegistrationFee", competition.Value<decimal?>("registrationFee") ?? 0m }
+        })
+    }
+    else
+    {
+        @await Html.PartialAsync("CompetitionRegistrationModal", new ViewDataDictionary(ViewData)
+        {
+            { "CompetitionId", competitionId },
+            { "CompetitionName", competition.Value<string>("competitionName") },
+            { "AClasses", aClasses },
+            { "BClasses", bClasses },
+            { "CClasses", cClasses },
+            { "CRegularClasses", cRegularClasses },
+            { "CVetClasses", cVetClasses },
+            { "CJuniorClasses", cJuniorClasses },
+            { "CDamClasses", cDamClasses },
+            { "RClasses", rClasses },
+            { "LClasses", lClasses },
+            { "LRegularClasses", lRegularClasses },
+            { "LVetClasses", lVetClasses },
+            { "LJuniorClasses", lJuniorClasses },
+            { "LDamClasses", lDamClasses },
+            { "MClasses", mClasses },
+            { "AllowDualCClassRegistration", allowDualCClassRegistration }
+        })
+    }
 
     @* Update Confirmation Modal - required by competition-registration.js for updating existing registrations *@
     @await Html.PartialAsync("CompetitionUpdateConfirmModal")

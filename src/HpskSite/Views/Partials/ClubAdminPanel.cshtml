@@ -1299,7 +1299,7 @@ function displayClubCompetitions(competitions) {
                     <a href="/competitions/${comp.id}/" class="btn btn-sm btn-outline-secondary" title="Öppna" target="_blank">
                         <i class="bi bi-eye"></i>
                     </a>
-                    <button class="btn btn-sm btn-outline-primary" onclick="editClubCompetition(${comp.id})" title="Redigera">
+                    <button class="btn btn-sm btn-outline-primary" onclick="editClubCompetition(${comp.id}, '${escapeHtml(comp.type)}')" title="Redigera">
                         <i class="bi bi-pencil"></i>
                     </button>
                     <a href="/competitionmanagement?competitionId=${comp.id}" class="btn btn-sm btn-outline-info" title="Hantera tävling">
@@ -1360,10 +1360,10 @@ function showCreateClubCompetitionModal() {
 }
 
 // Edit existing club competition
-function editClubCompetition(competitionId) {
+function editClubCompetition(competitionId, competitionType) {
     // Use the global openAdminEditModal function if it exists
     if (typeof window.openAdminEditModal === 'function') {
-        window.openAdminEditModal(competitionId);
+        window.openAdminEditModal(competitionId, false, competitionType);
 
         // Set callback to reload competitions list after save
         window.onCompetitionSaved = function() {

@@ -63,8 +63,18 @@ namespace HpskSite.CompetitionTypes.Precision.Services
                     }
                 }
 
-                // Publish (which implicitly saves) — avoids acquiring write lock twice
-                _contentService.Publish(content, Array.Empty<string>());
+                // Save and publish — use "*" culture for invariant content
+                var publishResult = _contentService.Publish(content, new[] { "*" });
+
+                if (!publishResult.Success)
+                {
+                    // Publish failed — try Save as fallback so data isn't lost
+                    _contentService.Save(content);
+                    return CompetitionEditResult.SuccessResult(
+                        "Competition saved (publish pending)",
+                        new { competitionId = content.Id }
+                    );
+                }
 
                 return CompetitionEditResult.SuccessResult(
                     "Competition updated successfully",
