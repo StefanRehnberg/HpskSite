@@ -126,6 +126,32 @@
                         </div>
                     </div>
 
+                    <div class="mb-3">
+                        <div class="d-flex align-items-center gap-3 mb-2">
+                            <div class="form-check mb-0">
+                                <input class="form-check-input" type="checkbox" id="springEdit_allowTeams" name="allowTeams" onchange="springEditAllowTeamsChange()">
+                                <label class="form-check-label" for="springEdit_allowTeams">Tillåt laganmälan</label>
+                            </div>
+                            <div class="input-group" style="max-width: 200px;">
+                                <input type="number" class="form-control" id="springEdit_teamRegistrationFee" name="teamRegistrationFee" min="0" value="0" step="0.01" disabled placeholder="Lagavgift">
+                                <span class="input-group-text">kr</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="d-flex align-items-center gap-3 mb-2">
+                            <div class="form-check mb-0">
+                                <input class="form-check-input" type="checkbox" id="springEdit_allowStafett" name="allowStafett" onchange="springEditAllowStafettChange()">
+                                <label class="form-check-label" for="springEdit_allowStafett">Tillåt stafettanmälan</label>
+                            </div>
+                            <div class="input-group" style="max-width: 200px;">
+                                <input type="number" class="form-control" id="springEdit_stafettRegistrationFee" name="stafettRegistrationFee" min="0" value="0" step="0.01" disabled placeholder="Stafettavgift">
+                                <span class="input-group-text">kr</span>
+                            </div>
+                        </div>
+                    </div>
+
                     <hr>
 
                     <div class="row">
@@ -432,6 +458,20 @@ springEditModalEl.addEventListener('hidden.bs.modal', function() {
 
 // --- Class selection logic ---
 
+function springEditAllowTeamsChange() {
+    const checked = document.getElementById('springEdit_allowTeams').checked;
+    const feeInput = document.getElementById('springEdit_teamRegistrationFee');
+    feeInput.disabled = !checked;
+    if (!checked) feeInput.value = '0';
+}
+
+function springEditAllowStafettChange() {
+    const checked = document.getElementById('springEdit_allowStafett').checked;
+    const feeInput = document.getElementById('springEdit_stafettRegistrationFee');
+    feeInput.disabled = !checked;
+    if (!checked) feeInput.value = '0';
+}
+
 function springEditUpdateClasses() {
     const weapons = [];
     if (document.getElementById('springEdit_weaponA').checked) weapons.push('A');
@@ -479,6 +519,12 @@ window.populateSpringEditModal = function(comp) {
     setVal('springEdit_venue', comp.venue);
     setVal('springEdit_maxParticipants', comp.maxParticipants || 50);
     setVal('springEdit_registrationFee', comp.registrationFee || 0);
+    setVal('springEdit_teamRegistrationFee', comp.teamRegistrationFee || 0);
+    setCheck('springEdit_allowTeams', comp.allowTeams);
+    springEditAllowTeamsChange();
+    setVal('springEdit_stafettRegistrationFee', comp.stafettRegistrationFee || 0);
+    setCheck('springEdit_allowStafett', comp.allowStafett);
+    springEditAllowStafettChange();
     setVal('springEdit_competitionDirector', comp.competitionDirector);
     setVal('springEdit_contactEmail', comp.contactEmail);
     setVal('springEdit_contactPhone', comp.contactPhone);
@@ -665,14 +711,18 @@ function springEditSave() {
         return;
     }
 
+    // Temporarily enable disabled fields so FormData includes them
+    const disabledFields = form.querySelectorAll(':disabled');
+    disabledFields.forEach(f => f.disabled = false);
     const formData = new FormData(form);
+    disabledFields.forEach(f => f.disabled = true);
     const fields = {};
 
     for (let [key, value] of formData.entries()) {
         if (key === 'competitionId' || key === 'competitionManagers' || key === 'competitionManagerIds') continue;
         if ((key === 'competitionEndDate' || key === 'description' || key === 'contactPhone') && !value) continue;
 
-        if (key === 'showLiveResults' || key === 'addToMenu' || key === 'isClubOnly' || key === 'isAwardingStandardMedals') {
+        if (key === 'showLiveResults' || key === 'addToMenu' || key === 'isClubOnly' || key === 'isAwardingStandardMedals' || key === 'allowTeams' || key === 'allowStafett') {
             fields[key] = value === 'on';
         } else {
             fields[key] = value;
@@ -698,7 +748,7 @@ function springEditSave() {
     fields.regionalFederation = regionSelect.disabled ? '' : (regionSelect.value || '');
 
     // Unchecked checkboxes
-    ['showLiveResults', 'addToMenu', 'isClubOnly', 'isAwardingStandardMedals'].forEach(f => {
+    ['showLiveResults', 'addToMenu', 'isClubOnly', 'isAwardingStandardMedals', 'allowTeams', 'allowStafett'].forEach(f => {
         if (!(f in fields)) fields[f] = false;
     });
 

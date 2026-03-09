@@ -119,6 +119,10 @@ namespace HpskSite.Controllers
                     isExternal = content.GetValue<bool>("isExternal"),
                     externalUrl = content.GetValue<string>("externalUrl") ?? "",
                     externalRegistrationEmail = content.GetValue<string>("externalRegistrationEmail") ?? "",
+                    allowTeams = content.GetValue<bool>("allowTeams"),
+                    teamRegistrationFee = content.GetValue<string>("teamRegistrationFee") ?? "0",
+                    allowStafett = content.GetValue<bool>("allowStafett"),
+                    stafettRegistrationFee = content.GetValue<string>("stafettRegistrationFee") ?? "0",
                     seriesId = isInSeries ? parent!.Id : (int?)null,
                     seriesName = isInSeries ? parent!.Name : null,
                     competitionType = content.GetValue<string>("competitionType") ?? "Precision"

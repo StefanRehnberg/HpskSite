@@ -295,6 +295,12 @@ document.addEventListener('DOMContentLoaded', function() {
             createTabEl.innerHTML = createTabOriginalHtml;
             rebindCreateTab();
         }
+        // Always reset member state to avoid stale data
+        selectedMembers.clear();
+        selectedSpare = null;
+        allRegisteredMembers = [];
+        document.getElementById('memberSelectionArea').style.display = 'none';
+        document.getElementById('membersTableBody').innerHTML = '';
         clearAllAlerts();
         initDropdowns();
         loadTeamClasses();

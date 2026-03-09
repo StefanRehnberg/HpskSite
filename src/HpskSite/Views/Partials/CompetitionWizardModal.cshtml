@@ -30,6 +30,8 @@
                     <span class="wizard-dot" data-step="4"></span>
                     <span class="wizard-line"></span>
                     <span class="wizard-dot" data-step="5"></span>
+                    <span class="wizard-line"></span>
+                    <span class="wizard-dot" data-step="6"></span>
                 </div>
                 <div class="text-center mt-2">
                     <small id="wizardStepLabel" class="text-muted"></small>
@@ -114,6 +116,14 @@
                         <div class="alert alert-warning py-2 d-none" id="wizard_clubMismatchWarning">
                             <i class="bi bi-exclamation-triangle me-1"></i>
                             <span id="wizard_clubMismatchText"></span>
+                        </div>
+
+                        <div class="mb-3 form-check mt-3">
+                            <input type="checkbox" class="form-check-input" id="wizard_isClubOnly" name="isClubOnly">
+                            <label class="form-check-label" for="wizard_isClubOnly">
+                                Endast för vald klubb
+                            </label>
+                            <small class="form-text text-muted d-block">Tävlingen visas bara för den valda klubbens medlemmar</small>
                         </div>
 
                         <div class="alert alert-light py-2 mb-0" id="wizard_organizerHelpText">
@@ -321,19 +331,66 @@
                             <label for="wizard_contactPhone" class="form-label">Kontakt telefon</label>
                             <input type="tel" class="form-control" id="wizard_contactPhone" name="contactPhone">
                         </div>
+                    </div>
+
+                    <!-- Step 5: Betalningar -->
+                    <div class="wizard-step d-none" data-step="5">
+                        <h6 class="mb-3 text-primary"><i class="bi bi-credit-card me-1"></i>Betalningar</h6>
 
                         <div class="mb-3">
-                            <label for="wizard_registrationFee" class="form-label">Anmälningsavgift</label>
+                            <label for="wizard_registrationFee" class="form-label">Anmälningsavgift (individuell)</label>
                             <div class="input-group">
                                 <input type="number" class="form-control" id="wizard_registrationFee" name="registrationFee" min="0" value="0">
                                 <span class="input-group-text">kr</span>
                             </div>
                             <small class="form-text text-muted">0 för ingen avgift</small>
                         </div>
+
+                        <hr class="my-3">
+
+                        <div class="mb-3" id="wizard_teamFeeGroup">
+                            <div class="d-flex align-items-center gap-3 mb-2">
+                                <div class="form-check mb-0">
+                                    <input type="checkbox" class="form-check-input" id="wizard_allowTeams" name="allowTeams" onchange="onWizardAllowTeamsChange()">
+                                    <label class="form-check-label" for="wizard_allowTeams">
+                                        Tillåt laganmälan
+                                    </label>
+                                </div>
+                                <div class="input-group" style="max-width: 200px;">
+                                    <input type="number" class="form-control" id="wizard_teamRegistrationFee" name="teamRegistrationFee" min="0" value="0" disabled placeholder="Lagavgift">
+                                    <span class="input-group-text">kr</span>
+                                </div>
+                            </div>
+                            <small class="form-text text-muted">0 för ingen lagavgift</small>
+                        </div>
+
+                        <div class="mb-3 d-none" id="wizard_stafettFeeGroup">
+                            <div class="d-flex align-items-center gap-3 mb-2">
+                                <div class="form-check mb-0">
+                                    <input type="checkbox" class="form-check-input" id="wizard_allowStafett" name="allowStafett" onchange="onWizardAllowStafettChange()">
+                                    <label class="form-check-label" for="wizard_allowStafett">
+                                        Tillåt stafettanmälan
+                                    </label>
+                                </div>
+                                <div class="input-group" style="max-width: 200px;">
+                                    <input type="number" class="form-control" id="wizard_stafettRegistrationFee" name="stafettRegistrationFee" min="0" value="0" disabled placeholder="Stafettavgift">
+                                    <span class="input-group-text">kr</span>
+                                </div>
+                            </div>
+                            <small class="form-text text-muted">0 för ingen stafettavgift</small>
+                        </div>
+
+                        <hr class="my-3">
+
+                        <div class="mb-3">
+                            <label for="wizard_swishNumber" class="form-label">Swish-nummer</label>
+                            <input type="text" class="form-control" id="wizard_swishNumber" name="swishNumber" pattern="[0-9]{10}" maxlength="10">
+                            <small class="form-text text-muted">10 siffror. Krävs för att aktivera Swish-betalning vid anmälan.</small>
+                        </div>
                     </div>
 
-                    <!-- Step 5: Avancerat -->
-                    <div class="wizard-step d-none" data-step="5">
+                    <!-- Step 6: Avancerat -->
+                    <div class="wizard-step d-none" data-step="6">
                         <h6 class="mb-3 text-primary"><i class="bi bi-gear me-1"></i>Avancerade inställningar (valfritt)</h6>
 
                         <!-- Tävlingsinställningar Section -->
@@ -402,6 +459,9 @@
                                             <label class="form-check-label" for="wizard_allowDualCClass">
                                                 Tillåt dubbel C-klassregistrering
                                             </label>
+                                            <i class="bi bi-info-circle ms-1 text-muted" role="button" tabindex="0"
+                                               data-bs-toggle="tooltip" data-bs-placement="right"
+                                               title="Tillåter skyttar att anmäla sig i två C-klasser samtidigt (t.ex. C1 och C1_Dam)."></i>
                                         </div>
 
                                         <div class="mb-3 form-check">
@@ -409,50 +469,25 @@
                                             <label class="form-check-label" for="wizard_showLiveResults">
                                                 Visa live-resultat
                                             </label>
-                                        </div>
-
-                                        <div class="mb-3 form-check">
-                                            <input type="checkbox" class="form-check-input" id="wizard_isClubOnly" name="isClubOnly">
-                                            <label class="form-check-label" for="wizard_isClubOnly">
-                                                Endast för specifik klubb
-                                            </label>
+                                            <i class="bi bi-info-circle ms-1 text-muted" role="button" tabindex="0"
+                                               data-bs-toggle="tooltip" data-bs-placement="right"
+                                               title="Resultat visas publikt i realtid allt eftersom de matas in."></i>
                                         </div>
 
                                         <div class="mb-3 form-check" id="wizard_selfReportingGroup">
                                             <input type="checkbox" class="form-check-input" id="wizard_allowSelfReporting" name="allowSelfReporting">
                                             <label class="form-check-label" for="wizard_allowSelfReporting">
-                                                Tillåt resultatrapportering
+                                                Tillåt resultatrapportering (Hemmabana)
                                             </label>
+                                            <i class="bi bi-info-circle ms-1 text-muted" role="button" tabindex="0"
+                                               data-bs-toggle="tooltip" data-bs-placement="right"
+                                               title="Klubbadministratörer och skjutledare kan rapportera resultat för sina medlemmar via tävlingssidan. Används för spridda tävlingar där skjutningen sker på hemmabanor."></i>
                                         </div>
                                     </div>
                                 </div>
                             </div>
                         </div>
 
-                        <!-- Betalning & Ledning Section -->
-                        <div class="accordion" id="wizardAccordionPayment">
-                            <div class="accordion-item">
-                                <h2 class="accordion-header" id="headingPayment">
-                                    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapsePayment">
-                                        Betalning & Ledning
-                                    </button>
-                                </h2>
-                                <div id="collapsePayment" class="accordion-collapse collapse" data-bs-parent="#wizardAccordionPayment">
-                                    <div class="accordion-body">
-                                        <div class="mb-3">
-                                            <label for="wizard_swishNumber" class="form-label">Swish-nummer</label>
-                                            <input type="text" class="form-control" id="wizard_swishNumber" name="swishNumber" pattern="[0-9]{10}" maxlength="10">
-                                            <small class="form-text text-muted">10 siffror för betalning via Swish</small>
-                                        </div>
-
-                                        <div class="mb-3">
-                                            <label class="form-label">Tävlingsledare (managers)</label>
-                                            <p><small class="text-muted">Denna funktion kan konfigureras efter att tävlingen skapats</small></p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
                     </div>
 
                 </form>
@@ -793,6 +828,17 @@ function onCompetitionTypeChange() {
 
     // Filter visible class sections and clear incompatible selections
     filterClassSections();
+
+    // Show/hide Springskytte-specific stafett option
+    const isSpringskytte = typeSelect.value === 'Springskytte';
+    const stafettGroup = document.getElementById('wizard_stafettFeeGroup');
+    if (stafettGroup) {
+        stafettGroup.classList.toggle('d-none', !isSpringskytte);
+        if (!isSpringskytte) {
+            document.getElementById('wizard_allowStafett').checked = false;
+            onWizardAllowStafettChange();
+        }
+    }
 }
 
 // Show/hide class sections in the overlay based on competition type.
@@ -902,6 +948,11 @@ document.getElementById('competitionWizardModal').addEventListener('show.bs.moda
     setTimeout(() => {
         initializeWizardDatePickers();
     }, 100);
+
+    // Initialize Bootstrap tooltips for info icons
+    document.querySelectorAll('#competitionWizardModal [data-bs-toggle="tooltip"]').forEach(el => {
+        bootstrap.Tooltip.getOrCreateInstance(el);
+    });
 });
 
 // Detect if we're on a club page or admin page
@@ -931,6 +982,13 @@ function resetWizard() {
 
     // Reset type-specific UI state (readOnly, disabled, etc.)
     applySeriesDefaults();
+
+    // Reset team fee disabled state
+    document.getElementById('wizard_teamRegistrationFee').disabled = true;
+
+    // Reset stafett state
+    document.getElementById('wizard_stafettRegistrationFee').disabled = true;
+    document.getElementById('wizard_stafettFeeGroup').classList.add('d-none');
 }
 
 // Initialize Flatpickr date pickers
@@ -1148,6 +1206,20 @@ function onWizardRegionChange() {
     updateWizardMismatchWarning();
 }
 
+function onWizardAllowTeamsChange() {
+    const checked = document.getElementById('wizard_allowTeams').checked;
+    const feeInput = document.getElementById('wizard_teamRegistrationFee');
+    feeInput.disabled = !checked;
+    if (!checked) feeInput.value = '0';
+}
+
+function onWizardAllowStafettChange() {
+    const checked = document.getElementById('wizard_allowStafett').checked;
+    const feeInput = document.getElementById('wizard_stafettRegistrationFee');
+    feeInput.disabled = !checked;
+    if (!checked) feeInput.value = '0';
+}
+
 // Show/hide mismatch warning in wizard (only relevant on club pages)
 function updateWizardMismatchWarning() {
     const warningDiv = document.getElementById('wizard_clubMismatchWarning');
@@ -1215,7 +1287,7 @@ function wizardNextStep() {
         return;
     }
 
-    if (wizardCurrentStep < 5) {
+    if (wizardCurrentStep < 6) {
         wizardCurrentStep++;
         updateWizardUI();
     }
@@ -1265,14 +1337,15 @@ function updateWizardUI() {
 
     // Update step label
     const stepLabels = [
-        'Steg 1 av 6: Tävlingstyp',
-        'Steg 2 av 6: Arrangör',
-        'Steg 3 av 6: Anmälan',
+        'Steg 1 av 7: Tävlingstyp',
+        'Steg 2 av 7: Arrangör',
+        'Steg 3 av 7: Anmälan',
         document.getElementById('wizard_competitionType').value === 'Springskytte'
-            ? 'Steg 4 av 6: Vapengrupper & Åldersklasser'
-            : 'Steg 4 av 6: Skytteklasser',
-        'Steg 5 av 6: Serier & Kontakt',
-        'Steg 6 av 6: Avancerat'
+            ? 'Steg 4 av 7: Vapengrupper & Åldersklasser'
+            : 'Steg 4 av 7: Skytteklasser',
+        'Steg 5 av 7: Serier & Kontakt',
+        'Steg 6 av 7: Betalningar',
+        'Steg 7 av 7: Avancerat'
     ];
     document.getElementById('wizardStepLabel').textContent = stepLabels[wizardCurrentStep];
 
@@ -1285,10 +1358,10 @@ function updateWizardUI() {
     btnBack.style.display = wizardCurrentStep > 0 ? 'inline-block' : 'none';
 
     // Next/Create buttons based on step
-    if (wizardCurrentStep < 5) {
+    if (wizardCurrentStep < 6) {
         btnNext.style.display = 'inline-block';
         btnCreate.style.display = 'none';
-    } else { // Step 5
+    } else { // Step 6
         btnNext.style.display = 'none';
         btnCreate.style.display = 'inline-block';
     }
@@ -1502,15 +1575,20 @@ function submitWizard() {
             return;
         }
     }
+    wizardCurrentStep = 6; // Restore to last step
 
-    // Collect form data
+    // Temporarily enable disabled fields so FormData includes them
+    const disabledFields = document.querySelectorAll('#competitionWizardForm :disabled');
+    disabledFields.forEach(f => f.disabled = false);
     const formData = new FormData(document.getElementById('competitionWizardForm'));
+    disabledFields.forEach(f => f.disabled = true);
     const fields = {};
 
     for (let [key, value] of formData.entries()) {
         // Convert checkbox values
         if (key === 'allowDualCClass' || key === 'showLiveResults' ||
-            key === 'isClubOnly' || key === 'allowSelfReporting' || key === 'isAwardingStandardMedals') {
+            key === 'isClubOnly' || key === 'allowSelfReporting' || key === 'isAwardingStandardMedals' ||
+            key === 'allowTeams' || key === 'allowStafett') {
             fields[key] = value === 'on';
         } else {
             fields[key] = value;
@@ -1518,7 +1596,7 @@ function submitWizard() {
     }
 
     // Ensure unchecked checkboxes are false
-    ['allowDualCClass', 'showLiveResults', 'isClubOnly', 'allowSelfReporting', 'isAwardingStandardMedals'].forEach(field => {
+    ['allowDualCClass', 'showLiveResults', 'isClubOnly', 'allowSelfReporting', 'isAwardingStandardMedals', 'allowTeams', 'allowStafett'].forEach(field => {
         if (!(field in fields)) {
             fields[field] = false;
         }

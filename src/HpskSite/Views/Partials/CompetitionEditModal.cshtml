@@ -85,6 +85,12 @@
     var swishNumber = competition?.Value<string>("swishNumber") ?? "";
     var addToMenu = competition?.Value<bool>("addToMenu");
     var numberOfFinalSeries = competition?.Value<int>("numberOfFinalSeries") ?? 0;
+    var allowTeams = competition?.Value<bool>("allowTeams") ?? false;
+    var teamRegFeeStr = competition?.Value<string>("teamRegistrationFee") ?? "0";
+    decimal.TryParse(teamRegFeeStr, out var teamRegFee);
+    var allowStafett = competition?.Value<bool>("allowStafett") ?? false;
+    var stafettRegFeeStr = competition?.Value<string>("stafettRegistrationFee") ?? "0";
+    decimal.TryParse(stafettRegFeeStr, out var stafettRegFee);
 
     var isClubOnly = competition?.Value<bool>("isClubOnly") ?? false;
     var clubId = competition?.Value<int>("clubId") ?? 0;
@@ -269,6 +275,36 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                         </div>
                     </div>
 
+                    <div class="mb-3">
+                        <div class="d-flex align-items-center gap-3 mb-2">
+                            <div class="form-check mb-0">
+                                <input class="form-check-input" type="checkbox" id="allowTeams" name="allowTeams" @(allowTeams ? "checked" : "") onchange="onEditAllowTeamsChange()">
+                                <label class="form-check-label" for="allowTeams">
+                                    Tillåt laganmälan
+                                </label>
+                            </div>
+                            <div class="input-group" style="max-width: 200px;">
+                                <input type="number" class="form-control" id="teamRegistrationFee" name="teamRegistrationFee" value="@teamRegFee" min="0" step="0.01" @(!allowTeams ? "disabled" : "") placeholder="Lagavgift">
+                                <span class="input-group-text">kr</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3 d-none" id="edit_stafettFeeGroup">
+                        <div class="d-flex align-items-center gap-3 mb-2">
+                            <div class="form-check mb-0">
+                                <input class="form-check-input" type="checkbox" id="allowStafett" name="allowStafett" @(allowStafett ? "checked" : "") onchange="onEditAllowStafettChange()">
+                                <label class="form-check-label" for="allowStafett">
+                                    Tillåt stafettanmälan
+                                </label>
+                            </div>
+                            <div class="input-group" style="max-width: 200px;">
+                                <input type="number" class="form-control" id="stafettRegistrationFee" name="stafettRegistrationFee" value="@stafettRegFee" min="0" step="0.01" @(!allowStafett ? "disabled" : "") placeholder="Stafettavgift">
+                                <span class="input-group-text">kr</span>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="row">
                         <div class="col-12">
                             <h6 class="mb-3 text-primary"><i class="bi bi-gear me-1"></i>Konfiguration</h6>
@@ -325,7 +361,7 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                                 <div class="form-check">
                                     <input class="form-check-input" type="checkbox" id="allowSelfReporting" name="allowSelfReporting" @(allowSelfReporting == true ? "checked" : "")>
                                     <label class="form-check-label" for="allowSelfReporting">
-                                        Tillåt resultatrapportering
+                                        Tillåt resultatrapportering (hemmabana)
                                     </label>
                                 </div>
                                 <small class="form-text text-muted d-block mt-1">Klubbadmins och skjutledare kan rapportera resultat från sina skyttar under tävlingsperioden</small>
@@ -786,6 +822,7 @@ window.populateEditModal = function(competition) {
     setFieldValue('numberOfSeriesOrStations', competition.numberOfSeriesOrStations || 1);
     setFieldValue('numberOfFinalSeries', competition.numberOfFinalSeries || 0);
     setFieldValue('swishNumber', competition.swishNumber || '');
+    setFieldValue('teamRegistrationFee', competition.teamRegistrationFee || 0);
 
     // Handle competitionManagers - array of member IDs
     var managerIds = Array.isArray(competition.competitionManagers) ? competition.competitionManagers : [];
@@ -813,6 +850,18 @@ window.populateEditModal = function(competition) {
     setCheckboxValue('addToMenu', competition.addToMenu || false);
     setCheckboxValue('isAwardingStandardMedals', competition.isAwardingStandardMedals || false);
     setCheckboxValue('allowSelfReporting', competition.allowSelfReporting || false);
+    setCheckboxValue('allowTeams', competition.allowTeams || false);
+    onEditAllowTeamsChange();
+    setFieldValue('stafettRegistrationFee', competition.stafettRegistrationFee || 0);
+    setCheckboxValue('allowStafett', competition.allowStafett || false);
+    onEditAllowStafettChange();
+
+    // Show/hide stafett row based on competition type
+    const isSpringskytte = (competition.competitionType === 'Springskytte');
+    const stafettGroup = document.getElementById('edit_stafettFeeGroup');
+    if (stafettGroup) {
+        stafettGroup.classList.toggle('d-none', !isSpringskytte);
+    }
 
     // Competition scope dropdown
     setFieldValue('competitionScope', competition.competitionScope || '');
@@ -887,6 +936,28 @@ function updateShootingClassIds() {
     document.getElementById('shootingClassIds').value = selected;
 }
 
+function onEditAllowTeamsChange() {
+    const allowTeams = document.getElementById('allowTeams')?.checked || false;
+    const teamFeeField = document.getElementById('teamRegistrationFee');
+    if (teamFeeField) {
+        teamFeeField.disabled = !allowTeams;
+        if (!allowTeams) {
+            teamFeeField.value = 0;
+        }
+    }
+}
+
+function onEditAllowStafettChange() {
+    const allowStafett = document.getElementById('allowStafett')?.checked || false;
+    const stafettFeeField = document.getElementById('stafettRegistrationFee');
+    if (stafettFeeField) {
+        stafettFeeField.disabled = !allowStafett;
+        if (!allowStafett) {
+            stafettFeeField.value = 0;
+        }
+    }
+}
+
 function saveCompetition() {
     // Sync CKEditor content to textarea before reading form
     if (compDescriptionEditor) {
@@ -899,7 +970,11 @@ function saveCompetition() {
         return;
     }
 
+    // Temporarily enable disabled fields so they're included in FormData
+    const disabledFields = form.querySelectorAll(':disabled');
+    disabledFields.forEach(f => f.disabled = false);
     const formData = new FormData(form);
+    disabledFields.forEach(f => f.disabled = true);
     const fields = {};
 
     for (let [key, value] of formData.entries()) {
@@ -917,7 +992,7 @@ function saveCompetition() {
             continue;
         }
 
-        if (key === 'showLiveResults' || key === 'addToMenu' || key === 'allowDualCClass' || key === 'isClubOnly' || key === 'isAwardingStandardMedals' || key === 'allowSelfReporting') {
+        if (key === 'showLiveResults' || key === 'addToMenu' || key === 'allowDualCClass' || key === 'isClubOnly' || key === 'isAwardingStandardMedals' || key === 'allowSelfReporting' || key === 'allowTeams' || key === 'allowStafett') {
             fields[key] = value === 'on';
         } else {
             fields[key] = value;
@@ -944,7 +1019,7 @@ function saveCompetition() {
     fields.regionalFederation = regionSelect.disabled ? '' : (regionSelect.value || '');
 
     // Ensure unchecked checkboxes are explicitly set to false
-    const checkboxFields = ['showLiveResults', 'addToMenu', 'allowDualCClass', 'isClubOnly', 'isAwardingStandardMedals', 'isExternal', 'allowSelfReporting'];
+    const checkboxFields = ['showLiveResults', 'addToMenu', 'allowDualCClass', 'isClubOnly', 'isAwardingStandardMedals', 'isExternal', 'allowSelfReporting', 'allowTeams', 'allowStafett'];
     checkboxFields.forEach(field => {
         if (!(field in fields)) {
             fields[field] = false;

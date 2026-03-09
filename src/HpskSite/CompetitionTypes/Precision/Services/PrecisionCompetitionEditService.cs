@@ -335,6 +335,10 @@ namespace HpskSite.CompetitionTypes.Precision.Services
                 "competitionScope" => "competitionScope",
                 "isAwardingStandardMedals" => "isAwardingStandardMedals",
                 "allowSelfReporting" => "allowSelfReporting",
+                "allowTeams" => "allowTeams",
+                "teamRegistrationFee" => "teamRegistrationFee",
+                "allowStafett" => "allowStafett",
+                "stafettRegistrationFee" => "stafettRegistrationFee",
                 _ => null
             };
         }
@@ -352,10 +356,10 @@ namespace HpskSite.CompetitionTypes.Precision.Services
                 "maxParticipants" or "numberOfSeriesOrStations" or "numberOfFinalSeries" or "clubId" =>
                     int.TryParse(value.ToString(), out var intVal) && intVal >= 0 ? intVal : (object)null,
 
-                "registrationFee" =>
+                "registrationFee" or "teamRegistrationFee" or "stafettRegistrationFee" =>
                     decimal.TryParse(value.ToString(), out var decVal) && decVal >= 0 ? decVal : (object)null,
 
-                "showLiveResults" or "isActive" or "isClubOnly" or "allowDualCClass" or "addToMenu" or "isAwardingStandardMedals" or "allowSelfReporting" =>
+                "showLiveResults" or "isActive" or "isClubOnly" or "allowDualCClass" or "addToMenu" or "isAwardingStandardMedals" or "allowSelfReporting" or "allowTeams" or "allowStafett" =>
                     bool.TryParse(value.ToString(), out var boolVal) ? boolVal : false,
 
                 "competitionDate" or "competitionEndDate" or "registrationOpenDate" or "registrationCloseDate" =>

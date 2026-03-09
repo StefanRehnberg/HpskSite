@@ -698,6 +698,10 @@ namespace HpskSite.Controllers
                     contactEmail = competition.GetValue<string>("contactEmail") ?? "",
                     contactPhone = competition.GetValue<string>("contactPhone") ?? "",
                     swishNumber = competition.GetValue<string>("swishNumber") ?? "",
+                    allowTeams = competition.GetValue<bool>("allowTeams"),
+                    teamRegistrationFee = competition.GetValue<string>("teamRegistrationFee") ?? "0",
+                    allowStafett = competition.GetValue<bool>("allowStafett"),
+                    stafettRegistrationFee = competition.GetValue<string>("stafettRegistrationFee") ?? "0",
                     competitionManagers = GetCompetitionManagerIds(competition),
                     competitionScope = competition.GetValue<string>("competitionScope") ?? "",
                     seriesId = seriesId,
@@ -923,7 +927,7 @@ namespace HpskSite.Controllers
                                 value = dateValue;
                             }
                         }
-                        else if (field.Key == "registrationFee" && value != null)
+                        else if ((field.Key == "registrationFee" || field.Key == "teamRegistrationFee" || field.Key == "stafettRegistrationFee") && value != null)
                         {
                             // registrationFee must be stored as decimal (not int) for Model.Value<decimal?> to work
                             if (value is System.Text.Json.JsonElement jsonElementDec)
@@ -966,7 +970,8 @@ namespace HpskSite.Controllers
                         }
                         else if ((field.Key == "showLiveResults" || field.Key == "addToMenu" ||
                                   field.Key == "allowDualCClass" || field.Key == "isActive" || field.Key == "isClubOnly" ||
-                                  field.Key == "allowSelfReporting") && value != null)
+                                  field.Key == "allowSelfReporting" || field.Key == "allowTeams" || field.Key == "allowStafett" ||
+                                  field.Key == "isAwardingStandardMedals") && value != null)
                         {
                             // Handle JsonElement booleans
                             if (value is System.Text.Json.JsonElement jsonElement)

@@ -109,6 +109,7 @@
     var allowDualCClassRegistration = Model.Value<bool>("allowDualCClassRegistration");
     var allowSelfReporting = Model.Value<bool>("allowSelfReporting");
     var allowTeams = Model.Value<bool>("allowTeams");
+    var allowStafett = Model.Value<bool>("allowStafett");
 
     // Get competition shooting classes using Models.ShootingClasses
     var competitionShootingClasses = new List<ShootingClass>();
@@ -784,6 +785,12 @@
 									<i class="bi bi-people-fill me-1"></i>Anmäl lag
 								</button>
 							}
+							@if (allowStafett)
+							{
+								<button class="btn btn-outline-success w-100 mt-2" disabled>
+									<i class="bi bi-people-fill me-1"></i>Anmäl stafettlag
+								</button>
+							}
 						}
 						else if (regNotYetOpen)
 						{
@@ -799,6 +806,12 @@
 									<i class="bi bi-people-fill me-1"></i>Anmäl lag
 								</button>
 							}
+							@if (allowStafett)
+							{
+								<button class="btn btn-outline-success w-100 mt-2" data-bs-toggle="modal" data-bs-target="#registrationNotOpenModal">
+									<i class="bi bi-people-fill me-1"></i>Anmäl stafettlag
+								</button>
+							}
 						}
 						else if (canRegister)
 						{
@@ -812,6 +825,12 @@
 							{
 								<button type="button" class="btn btn-success w-100 mt-2" data-bs-toggle="modal" data-bs-target="#teamRegistrationModal">
 									<i class="bi bi-people-fill me-1"></i>Anmäl lag
+								</button>
+							}
+							@if (allowStafett)
+							{
+								<button type="button" class="btn btn-outline-success w-100 mt-2" data-bs-toggle="modal" data-bs-target="#stafettComingSoonModal">
+									<i class="bi bi-people-fill me-1"></i>Anmäl stafettlag
 								</button>
 							}
 						}
@@ -830,9 +849,39 @@
 									<i class="bi bi-people-fill me-1"></i>Anmäl lag
 								</button>
 							}
+							@if (allowStafett)
+							{
+								<button class="btn btn-outline-success w-100 mt-2" disabled>
+									<i class="bi bi-people-fill me-1"></i>Anmäl stafettlag
+								</button>
+							}
 						}
 					</div>
 				</div>
+
+				@* ======================================== Stafett Coming Soon Modal ======================================== *@
+				@if (allowStafett)
+				{
+					<div class="modal fade" id="stafettComingSoonModal" tabindex="-1" aria-labelledby="stafettComingSoonModalLabel" aria-hidden="true">
+						<div class="modal-dialog modal-dialog-centered">
+							<div class="modal-content">
+								<div class="modal-header">
+									<h5 class="modal-title" id="stafettComingSoonModalLabel">
+										<i class="bi bi-people-fill me-2"></i>Stafettanmälan
+									</h5>
+									<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+								</div>
+								<div class="modal-body text-center py-4">
+									<i class="bi bi-tools display-4 text-muted mb-3 d-block"></i>
+									<p class="mb-0">Stafettanmälan är under utveckling och kommer snart.</p>
+								</div>
+								<div class="modal-footer">
+									<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+								</div>
+							</div>
+						</div>
+					</div>
+				}
 
 				@* ======================================== Registration Not Open Modal ======================================== *@
 				<div class="modal fade" id="registrationNotOpenModal" tabindex="-1" aria-labelledby="registrationNotOpenModalLabel" aria-hidden="true">
