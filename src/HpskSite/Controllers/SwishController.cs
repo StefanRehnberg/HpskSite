@@ -32,6 +32,8 @@ namespace HpskSite.Controllers
         private readonly IMemberService _memberService;
         private readonly PaymentService _paymentService;
         private readonly EmailService _emailService;
+        private readonly ClubService _clubService;
+        private readonly IUmbracoDatabaseFactory _databaseFactory;
         private readonly ILogger<SwishController> _logger;
 
         public SwishController(
@@ -45,6 +47,7 @@ namespace HpskSite.Controllers
             IMemberService memberService,
             PaymentService paymentService,
             EmailService emailService,
+            ClubService clubService,
             ILogger<SwishController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
@@ -52,6 +55,8 @@ namespace HpskSite.Controllers
             _memberService = memberService ?? throw new ArgumentNullException(nameof(memberService));
             _paymentService = paymentService ?? throw new ArgumentNullException(nameof(paymentService));
             _emailService = emailService ?? throw new ArgumentNullException(nameof(emailService));
+            _clubService = clubService ?? throw new ArgumentNullException(nameof(clubService));
+            _databaseFactory = databaseFactory ?? throw new ArgumentNullException(nameof(databaseFactory));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
@@ -481,6 +486,119 @@ namespace HpskSite.Controllers
                 Console.WriteLine($"❌❌❌ EXCEPTION END ❌❌❌");
                 
                 _logger.LogError(ex, "Error generating Swish QR code for competition {CompetitionId}", competitionId);
+                return Json(new { success = false, message = $"Ett fel uppstod: {ex.Message}" });
+            }
+        }
+
+        /// <summary>
+        /// Generate Swish QR code for team registration payment
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GenerateTeamPaymentQR(int competitionId, int teamId)
+        {
+            try
+            {
+                var currentMember = await _memberManager.GetCurrentMemberAsync();
+                if (currentMember == null)
+                    return Json(new { success = false, message = "Du måste vara inloggad." });
+
+                var competition = UmbracoContext.Content.GetById(competitionId);
+                if (competition == null)
+                    return Json(new { success = false, message = "Tävlingen kunde inte hittas." });
+
+                var swishNumber = competition.Value<string>("swishNumber");
+                if (string.IsNullOrEmpty(swishNumber))
+                    return Json(new { success = false, message = "Ingen Swish-nummer är konfigurerad." });
+
+                var feeStr = competition.Value<string>("teamRegistrationFee") ?? "0";
+                if (!decimal.TryParse(feeStr, out var teamFee) || teamFee <= 0)
+                    return Json(new { success = false, message = "Ingen lagavgift är konfigurerad." });
+
+                // Look up the team
+                CompetitionTeamDto team;
+                using (var db = _databaseFactory.CreateDatabase())
+                {
+                    team = db.SingleOrDefault<CompetitionTeamDto>(
+                        "SELECT * FROM CompetitionTeam WHERE Id = @0 AND CompetitionId = @1", teamId, competitionId);
+                }
+
+                if (team == null)
+                    return Json(new { success = false, message = "Laget kunde inte hittas." });
+
+                var clubName = _clubService.GetClubNameById(team.ClubId) ?? "Okänd förening";
+                var amountString = teamFee.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
+
+                // Find the team registration doc for invoice linking
+                int teamRegistrationDocId = 0;
+                var regHub = competition.Children()
+                    .FirstOrDefault(c => c.ContentType?.Alias == "competitionRegistrationsHub");
+                if (regHub != null)
+                {
+                    var teamRegDoc = regHub.Children()
+                        .FirstOrDefault(c => c.ContentType?.Alias == "competitionTeamRegistration"
+                            && c.Value<int>("teamId") == teamId);
+                    if (teamRegDoc != null)
+                        teamRegistrationDocId = teamRegDoc.Id;
+                }
+
+                // Check for existing team invoice
+                var teamMemberId = $"team-{teamId}";
+                var existingInvoice = await _paymentService.GetExistingInvoiceForMember(competitionId, teamMemberId);
+                IContent? invoice = null;
+
+                if (existingInvoice != null)
+                {
+                    var paymentStatusProp = existingInvoice.GetProperty("paymentStatus");
+                    var paymentStatus = paymentStatusProp?.GetSourceValue()?.ToString()?.Trim('"', '\'', ' ') ?? "Pending";
+
+                    if (paymentStatus == "Paid")
+                        return Json(new { success = false, message = "Lagavgiften har redan betalats." });
+
+                    if (paymentStatus == "Cancelled")
+                    {
+                        invoice = await _paymentService.CreateTeamInvoiceAsync(
+                            competitionId, teamId, team.TeamName, clubName, teamFee, teamRegistrationDocId);
+                    }
+                    else
+                    {
+                        // Reuse pending invoice
+                        invoice = Services.ContentService.GetById(existingInvoice.Id);
+                    }
+                }
+                else
+                {
+                    invoice = await _paymentService.CreateTeamInvoiceAsync(
+                        competitionId, teamId, team.TeamName, clubName, teamFee, teamRegistrationDocId);
+                }
+
+                if (invoice == null)
+                    return Json(new { success = false, message = "Kunde inte skapa faktura." });
+
+                var invoiceNumber = invoice.GetValue<string>("invoiceNumber") ?? invoice.Id.ToString();
+                var message = $"Lag: {invoiceNumber}";
+
+                var normalizedSwishNumber = swishNumber.Trim().Replace(" ", "").Replace("-", "");
+                if (!normalizedSwishNumber.All(char.IsDigit) || normalizedSwishNumber.Length != 10 || !normalizedSwishNumber.StartsWith("0"))
+                    return Json(new { success = false, message = "Ogiltigt Swish-nummer." });
+
+                byte[] qrCodeBytes = SwishQrCodeGenerator.GeneratePng(normalizedSwishNumber, amountString, message);
+                var qrCodeBase64 = Convert.ToBase64String(qrCodeBytes);
+
+                return Json(new
+                {
+                    success = true,
+                    qrCode = $"data:image/png;base64,{qrCodeBase64}",
+                    amount = teamFee,
+                    teamName = team.TeamName,
+                    teamClass = team.TeamClass,
+                    clubName = clubName,
+                    invoiceNumber = invoiceNumber,
+                    message = message
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error generating team Swish QR for competition {CompetitionId}, team {TeamId}", competitionId, teamId);
                 return Json(new { success = false, message = $"Ett fel uppstod: {ex.Message}" });
             }
         }
@@ -1119,5 +1237,104 @@ namespace HpskSite.Controllers
             }
         }
 
+        /// <summary>
+        /// Send Swish QR code for team payment via email to the logged-in user
+        /// </summary>
+        [HttpPost]
+        [IgnoreAntiforgeryToken]
+        public async Task<IActionResult> SendTeamQRCodeEmail(int competitionId, int teamId)
+        {
+            try
+            {
+                var currentMember = await _memberManager.GetCurrentMemberAsync();
+                if (currentMember == null)
+                    return Json(new { success = false, message = "Du måste vara inloggad." });
+
+                var memberData = _memberService.GetById(currentMember.Key);
+                if (memberData == null || string.IsNullOrEmpty(memberData.Email))
+                    return Json(new { success = false, message = "Ingen e-postadress registrerad." });
+
+                var competition = UmbracoContext.Content.GetById(competitionId);
+                if (competition == null)
+                    return Json(new { success = false, message = "Tävlingen kunde inte hittas." });
+
+                var swishNumber = competition.Value<string>("swishNumber");
+                var feeStr = competition.Value<string>("teamRegistrationFee") ?? "0";
+                if (!decimal.TryParse(feeStr, out var teamFee) || teamFee <= 0 || string.IsNullOrEmpty(swishNumber))
+                    return Json(new { success = false, message = "Betalning ej konfigurerad." });
+
+                // Look up the team
+                CompetitionTeamDto team;
+                using (var db = _databaseFactory.CreateDatabase())
+                {
+                    team = db.SingleOrDefault<CompetitionTeamDto>(
+                        "SELECT * FROM CompetitionTeam WHERE Id = @0 AND CompetitionId = @1", teamId, competitionId);
+                }
+                if (team == null)
+                    return Json(new { success = false, message = "Laget kunde inte hittas." });
+
+                var clubName = _clubService.GetClubNameById(team.ClubId) ?? "Okänd förening";
+                var amountString = teamFee.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
+                var teamMemberId = $"team-{teamId}";
+
+                // Find team registration doc for invoice linking
+                int teamRegDocId = 0;
+                var regHub2 = competition.Children()
+                    .FirstOrDefault(c => c.ContentType?.Alias == "competitionRegistrationsHub");
+                if (regHub2 != null)
+                {
+                    var teamRegDoc = regHub2.Children()
+                        .FirstOrDefault(c => c.ContentType?.Alias == "competitionTeamRegistration"
+                            && c.Value<int>("teamId") == teamId);
+                    if (teamRegDoc != null) teamRegDocId = teamRegDoc.Id;
+                }
+
+                // Get or create invoice
+                var existingInvoice = await _paymentService.GetExistingInvoiceForMember(competitionId, teamMemberId);
+                IContent? invoice;
+                string invoiceNumber;
+
+                if (existingInvoice != null)
+                {
+                    invoice = Services.ContentService.GetById(existingInvoice.Key);
+                    if (invoice == null)
+                        return Json(new { success = false, message = "Kunde inte hämta fakturadata." });
+                    invoiceNumber = invoice.GetValue<string>("invoiceNumber") ?? invoice.Id.ToString();
+                }
+                else
+                {
+                    invoice = await _paymentService.CreateTeamInvoiceAsync(
+                        competitionId, teamId, team.TeamName, clubName, teamFee, teamRegDocId);
+                    if (invoice == null)
+                        return Json(new { success = false, message = "Kunde inte skapa faktura." });
+                    invoiceNumber = invoice.GetValue<string>("invoiceNumber") ?? invoice.Id.ToString();
+                }
+
+                var message = $"Lag: {invoiceNumber}";
+                var normalizedSwishNumber = swishNumber.Trim().Replace(" ", "").Replace("-", "");
+                if (!normalizedSwishNumber.All(char.IsDigit) || normalizedSwishNumber.Length != 10 || !normalizedSwishNumber.StartsWith("0"))
+                    return Json(new { success = false, message = "Ogiltigt Swish-nummer." });
+
+                var qrCodeBytes = SwishQrCodeGenerator.GeneratePng(normalizedSwishNumber, amountString, message);
+
+                await _emailService.SendSwishQRCodeEmailAsync(
+                    memberData.Email,
+                    currentMember.Name ?? "Medlem",
+                    $"{competition.Name} - Lag: {team.TeamName}",
+                    qrCodeBytes,
+                    teamFee,
+                    $"Lagklass: {team.TeamClass}",
+                    invoiceNumber,
+                    normalizedSwishNumber,
+                    message);
+
+                return Json(new { success = true, message = $"QR-kod skickad till {memberData.Email}" });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error sending team Swish QR email for competition {CompetitionId}, team {TeamId}", competitionId, teamId);
+                return Json(new { success = false, message = $"Ett fel uppstod: {ex.Message}" });
+            }
+        }
     }
 }

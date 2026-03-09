@@ -6,9 +6,18 @@
 *@
 
 <div class="club-invoices-list">
-    <!-- Header -->
+    <!-- Header with View Type Selector -->
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h5><i class="bi bi-receipt me-2"></i>Fakturor</h5>
+    </div>
+
+    <!-- View Type Selector -->
+    <div class="mb-3">
+        <select class="form-select" id="clubInvoiceViewType" onchange="changeClubInvoiceViewType()">
+            <option value="outgoing">Fakturor att betala</option>
+            <option value="incoming">Fakturor att få betalt för</option>
+            <option value="members">Medlemmars fakturor</option>
+        </select>
     </div>
 
     <!-- Filter Section -->
@@ -120,7 +129,7 @@
     <!-- Empty State -->
     <div class="alert alert-info d-none text-center" id="clubNoInvoicesAlert">
         <i class="bi bi-inbox me-2"></i>
-        Inga fakturor hittades för klubbens tävlingar.
+        <span id="clubNoInvoicesMessage">Inga fakturor hittades.</span>
     </div>
 
     <!-- Error Alert -->
@@ -181,6 +190,11 @@ let clubInvoicesListLoaded = false;
 let currentClubInvoicePage = 1;
 const clubInvoicesPerPage = 50;
 
+function changeClubInvoiceViewType() {
+    currentClubInvoicePage = 1;
+    loadClubInvoices();
+}
+
 // Load club invoices function
 function loadClubInvoices() {
     const spinner = document.getElementById('clubInvoicesLoadingSpinner');
@@ -195,6 +209,7 @@ function loadClubInvoices() {
     noInvoicesAlert.classList.add('d-none');
 
     // Build query parameters - using clubId from parent scope
+    const viewType = document.getElementById('clubInvoiceViewType')?.value || 'outgoing';
     const paymentStatus = document.getElementById('clubStatusFilterInvoices')?.value || '';
     const memberSearch = document.getElementById('clubMemberSearchInvoices')?.value || '';
     const invoiceNumberSearch = document.getElementById('clubInvoiceNumberSearch')?.value || '';
@@ -205,7 +220,8 @@ function loadClubInvoices() {
         page: currentClubInvoicePage,
         pageSize: clubInvoicesPerPage,
         activeCompetitionsOnly: false,  // Show all competitions for the club
-        excludePaid: excludePaid
+        excludePaid: excludePaid,
+        viewType: viewType
     });
 
     if (paymentStatus) params.append('paymentStatus', paymentStatus);
@@ -242,6 +258,13 @@ function loadClubInvoices() {
             if (invoices.length === 0) {
                 tableContainer.classList.add('d-none');
                 noInvoicesAlert.classList.remove('d-none');
+                const emptyMessages = {
+                    'outgoing': 'Inga fakturor att betala hittades.',
+                    'incoming': 'Inga fakturor att få betalt för hittades.',
+                    'members': 'Inga fakturor för klubbens medlemmar hittades.'
+                };
+                const vt = document.getElementById('clubInvoiceViewType')?.value || 'outgoing';
+                document.getElementById('clubNoInvoicesMessage').textContent = emptyMessages[vt] || 'Inga fakturor hittades.';
                 tbody.innerHTML = '';
                 document.getElementById('clubInvoicePaginationNav').classList.add('d-none');
             } else {
@@ -262,6 +285,13 @@ function updateClubSummaryCards(metadata) {
     document.getElementById('clubTotalInvoicesCount').textContent = metadata.totalInvoices || 0;
     document.getElementById('clubPaidAmount').textContent = (metadata.paidAmount || 0).toFixed(2) + ' kr';
     document.getElementById('clubPendingAmount').textContent = (metadata.pendingAmount || 0).toFixed(2) + ' kr';
+
+    // Update summary card labels based on view type
+    const vt = document.getElementById('clubInvoiceViewType')?.value || 'outgoing';
+    const paidLabel = document.querySelector('#clubInvoiceSummaryCards .text-success')?.closest('.card-body')?.querySelector('.card-subtitle');
+    const pendingLabel = document.querySelector('#clubInvoiceSummaryCards .text-warning')?.closest('.card-body')?.querySelector('.card-subtitle');
+    if (paidLabel) paidLabel.textContent = vt === 'outgoing' ? 'Betalt' : 'Betald';
+    if (pendingLabel) pendingLabel.textContent = vt === 'outgoing' ? 'Att betala' : 'Väntande';
 }
 
 function renderClubInvoices(invoices) {

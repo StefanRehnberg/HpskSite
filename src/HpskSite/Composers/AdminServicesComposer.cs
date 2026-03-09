@@ -35,6 +35,9 @@ namespace HpskSite.Composers
             // Register SeriesCalculationService as scoped
             builder.Services.AddScoped<SeriesCalculationService>();
 
+            // Register CompetitionTeamService as scoped
+            builder.Services.AddScoped<CompetitionTeamService>();
+
             // Configure document archive options from appsettings.json
             builder.Services.Configure<DocumentArchiveOptions>(
                 builder.Config.GetSection("DocumentArchive"));

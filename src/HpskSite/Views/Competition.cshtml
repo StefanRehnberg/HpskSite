@@ -108,6 +108,7 @@
 
     var allowDualCClassRegistration = Model.Value<bool>("allowDualCClassRegistration");
     var allowSelfReporting = Model.Value<bool>("allowSelfReporting");
+    var allowTeams = Model.Value<bool>("allowTeams");
 
     // Get competition shooting classes using Models.ShootingClasses
     var competitionShootingClasses = new List<ShootingClass>();
@@ -245,6 +246,9 @@
     var regClubName = "";
     var svComparer = StringComparer.Create(new CultureInfo("sv-SE"), ignoreCase: true);
     var allClubsJson = "[]";
+    var regRegionCode = "";
+    var isRegionalAdmin = false;
+    var clubsWithRegionsJson = "[]";
 
     // Distributed result reporting authorization (computed below alongside other auth)
     bool canReportDistributedResults = false;
@@ -262,6 +266,13 @@
                 regClubId = primaryClubId;
                 regClubName = ClubService.GetClubNameById(primaryClubId) ?? "";
                 currentMemberClub = regClubName;
+                // Look up region for member's club (O(1) cache lookup)
+                if (string.IsNullOrEmpty(regRegionCode))
+                {
+                    var memberClubNode = Umbraco.Content(primaryClubId);
+                    if (memberClubNode != null)
+                        regRegionCode = memberClubNode.Value<string>("regionalFederation") ?? "";
+                }
             }
 
             // Load roles once — derive all authorization from this (avoids ~24 redundant service calls)
@@ -273,6 +284,15 @@
             if (isSiteAdmin) regRole = "admin";
             else if (isClubAdmin) regRole = "clubAdmin";
             else if (isSkjutledare) regRole = "skjutledare";
+
+            // Detect regional admin
+            var regionalAdminRole = roles.FirstOrDefault(r => r.StartsWith("RegionalAdmin_"));
+            if (regionalAdminRole != null)
+            {
+                regRegionCode = regionalAdminRole.Replace("RegionalAdmin_", "");
+                isRegionalAdmin = true;
+                if (regRole == "member") regRole = "regionalAdmin";
+            }
 
             // For club admin / skjutledare without primaryClubId, use role-derived club
             if (!regClubId.HasValue && isClubAdmin)
@@ -309,6 +329,31 @@
                 // Member only sees own club
                 var ownClub = new[] { new { id = regClubId.Value, name = regClubName } };
                 allClubsJson = System.Text.Json.JsonSerializer.Serialize(ownClub);
+            }
+
+            // Build clubs-with-regions for team registration (only for admin/regional admin who need club picker)
+            // Uses Umbraco.Content() O(1) lookups — no DescendantsOrSelf
+            if (allowTeams && (isSiteAdmin || isRegionalAdmin))
+            {
+                var allActiveClubs = ClubService.GetAllClubs().Where(c => c.IsActive).ToList();
+                var clubsWithRegionsList = new List<Dictionary<string, object>>();
+                foreach (var c in allActiveClubs)
+                {
+                    var cNode = Umbraco.Content(c.Id);
+                    var region = cNode?.Value<string>("regionalFederation") ?? "";
+                    clubsWithRegionsList.Add(new Dictionary<string, object>
+                    {
+                        ["id"] = c.Id,
+                        ["name"] = c.Name,
+                        ["region"] = region
+                    });
+                }
+                var jsonOpts = new System.Text.Json.JsonSerializerOptions
+                {
+                    Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+                };
+                clubsWithRegionsJson = System.Text.Json.JsonSerializer.Serialize(
+                    clubsWithRegionsList.OrderBy(x => (string)x["name"], svComparer), jsonOpts);
             }
 
             // Competition management — compute from already-loaded roles and managerIds
@@ -534,25 +579,7 @@
 			@* ======================================== INTERNAL COMPETITION BUTTONS ======================================== *@
 			else
 			{
-				@* Registration buttons *@
-				@if (isActive && now >= registrationOpenDate && now <= registrationCloseDate && (hasShootingClasses || isSpringskytte))
-				{
-				<button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#registrationModal">
-				<i class="bi bi-person-plus"></i> Anmäl
-				</button>
-				}
-								 else if (isActive && now > registrationCloseDate && now < competitionDate)
-				{
-				 <button class="btn btn-warning" disabled>
-				  <i class="bi bi-calendar-x"></i> Anmälan stängd
-				</button>
-				}
-				else if (!isActive)
-				{
-				<button class="btn btn-secondary" disabled>
-				  <i class="bi bi-pause-circle"></i> Inte aktiv
-				</button>
-				}
+				@* Registration button moved to "Anmälan" card in right column *@
 
 				@* Distributed result reporting button *@
 				@if (canReportDistributedResults)
@@ -731,6 +758,104 @@
 		@if (!isExternal)
 		{
 			<div class="col-lg-4">
+				@* ======================================== Anmälan Card ======================================== *@
+				<div class="card mb-4">
+					<div class="card-header">
+						<h5 class="mb-0"><i class="bi bi-person-plus me-2"></i>Anmälan</h5>
+					</div>
+					<div class="card-body">
+						@{
+							var regClosed = now > registrationCloseDate;
+							var regNotYetOpen = now < registrationOpenDate;
+							var regOpen = !regClosed && !regNotYetOpen;
+							var canRegister = isActive && regOpen && (hasShootingClasses || isSpringskytte);
+						}
+						@if (regClosed)
+						{
+							<p class="text-muted small mb-2">
+								<i class="bi bi-calendar-x me-1"></i>Anmälan stängde @registrationCloseDate.ToString("d MMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))
+							</p>
+							<button class="btn btn-success w-100" disabled>
+								<i class="bi bi-person-plus me-1"></i>Anmäl
+							</button>
+							@if (allowTeams)
+							{
+								<button class="btn btn-success w-100 mt-2" disabled>
+									<i class="bi bi-people-fill me-1"></i>Anmäl lag
+								</button>
+							}
+						}
+						else if (regNotYetOpen)
+						{
+							<p class="text-muted small mb-2">
+								<i class="bi bi-clock me-1"></i>Anmälan öppnar @registrationOpenDate.ToString("d MMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))
+							</p>
+							<button class="btn btn-success w-100" data-bs-toggle="modal" data-bs-target="#registrationNotOpenModal">
+								<i class="bi bi-person-plus me-1"></i>Anmäl
+							</button>
+							@if (allowTeams)
+							{
+								<button class="btn btn-success w-100 mt-2" data-bs-toggle="modal" data-bs-target="#registrationNotOpenModal">
+									<i class="bi bi-people-fill me-1"></i>Anmäl lag
+								</button>
+							}
+						}
+						else if (canRegister)
+						{
+							<p class="text-muted small mb-2">
+								<i class="bi bi-calendar-check me-1"></i>Sista anmälningsdag: @registrationCloseDate.ToString("d MMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))
+							</p>
+							<button type="button" class="btn btn-success w-100" data-bs-toggle="modal" data-bs-target="#registrationModal">
+								<i class="bi bi-person-plus me-1"></i>Anmäl
+							</button>
+							@if (allowTeams)
+							{
+								<button type="button" class="btn btn-success w-100 mt-2" data-bs-toggle="modal" data-bs-target="#teamRegistrationModal">
+									<i class="bi bi-people-fill me-1"></i>Anmäl lag
+								</button>
+							}
+						}
+						else
+						{
+							@* Not active or no shooting classes configured *@
+							<p class="text-muted small mb-2">
+								<i class="bi bi-info-circle me-1"></i>Anmälan är inte tillgänglig just nu.
+							</p>
+							<button class="btn btn-success w-100" disabled>
+								<i class="bi bi-person-plus me-1"></i>Anmäl
+							</button>
+							@if (allowTeams)
+							{
+								<button class="btn btn-success w-100 mt-2" disabled>
+									<i class="bi bi-people-fill me-1"></i>Anmäl lag
+								</button>
+							}
+						}
+					</div>
+				</div>
+
+				@* ======================================== Registration Not Open Modal ======================================== *@
+				<div class="modal fade" id="registrationNotOpenModal" tabindex="-1" aria-labelledby="registrationNotOpenModalLabel" aria-hidden="true">
+					<div class="modal-dialog modal-dialog-centered">
+						<div class="modal-content">
+							<div class="modal-header">
+								<h5 class="modal-title" id="registrationNotOpenModalLabel">
+									<i class="bi bi-clock me-2"></i>Anmälan har inte öppnat
+								</h5>
+								<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+							</div>
+							<div class="modal-body">
+								<p>Anmälan till <strong>@competitionName</strong> har inte öppnat ännu.</p>
+								<p>Anmälan öppnar <strong>@registrationOpenDate.ToString("dddd d MMMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))</strong>.</p>
+								<p class="text-muted small mb-0">Kom tillbaka efter detta datum för att anmäla dig.</p>
+							</div>
+							<div class="modal-footer">
+								<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+							</div>
+						</div>
+					</div>
+				</div>
+
 				<div class="card information-sidebar">
 					<div class="card-header">
 						<h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Information</h5>
@@ -1063,6 +1188,26 @@
 	}
 
 
+	@* Team Registration Modal *@
+	var teamRegFeeStr = Model.Value<string>("teamRegistrationFee") ?? "0";
+	decimal.TryParse(teamRegFeeStr, out var teamRegFee);
+	var teamHasSwish = allowTeams && !string.IsNullOrWhiteSpace(Model.Value<string>("swishNumber")) && teamRegFee > 0;
+	if (allowTeams)
+	{
+		@await Html.PartialAsync("CompetitionTeamRegistrationModal", new ViewDataDictionary(ViewData)
+		{
+			{ "CompetitionId", Model.Id },
+			{ "CurrentMemberClubId", regClubId ?? 0 },
+			{ "CurrentMemberClubName", regClubName },
+			{ "CurrentMemberId", regMemberId },
+			{ "RegRole", regRole },
+			{ "RegRegionCode", regRegionCode },
+			{ "ClubsWithRegionsJson", clubsWithRegionsJson },
+			{ "TeamRegistrationFee", teamRegFee },
+			{ "TeamHasSwish", teamHasSwish }
+		})
+	}
+
 	@* Preference Modal *@
 	@await Html.PartialAsync("CompetitionPreferenceModal")
 
@@ -1255,7 +1400,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
         .then(response => response.json())
         .then(data => {
-            var hasResults = @(isSpringskytte ? "data.success && data.classGroups && data.classGroups.length > 0" : "data.Success && data.Count > 0");
+            var hasResults = @Html.Raw(isSpringskytte ? "data.success && data.classGroups && data.classGroups.length > 0" : "data.Success && data.Count > 0");
             if (hasResults) {
                 var container = document.getElementById('liveResultsCheck');
                 if (container) {

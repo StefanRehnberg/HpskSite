@@ -607,5 +607,124 @@ namespace HpskSite.Services
                 _logger.LogError(ex, "Error linking registration {RegistrationId} to invoice {InvoiceId}", registrationId, invoiceId);
             }
         }
+
+        /// <summary>
+        /// Create an invoice for a team registration (no individual registration link).
+        /// Uses teamId as the memberId field for identification.
+        /// </summary>
+        public Task<IContent?> CreateTeamInvoiceAsync(
+            int competitionId,
+            int teamId,
+            string teamName,
+            string clubName,
+            decimal totalAmount,
+            int registrationId = 0,
+            string paymentMethod = "Swish")
+        {
+            try
+            {
+                _logger.LogInformation("Creating team invoice - CompetitionId: {CompetitionId}, TeamId: {TeamId}, TeamName: {TeamName}, Amount: {Amount}",
+                    competitionId, teamId, teamName, totalAmount);
+
+                var umbracoContext = _umbracoContextAccessor.GetRequiredUmbracoContext();
+                if (umbracoContext?.Content == null)
+                {
+                    _logger.LogError("Umbraco context or content is null");
+                    return Task.FromResult<IContent?>(null);
+                }
+
+                var competition = umbracoContext.Content.GetById(competitionId);
+                if (competition == null)
+                {
+                    _logger.LogWarning("Competition {CompetitionId} not found", competitionId);
+                    return Task.FromResult<IContent?>(null);
+                }
+
+                var allChildren = competition.Children().ToList();
+                var invoicesHub = allChildren
+                    .FirstOrDefault(x => x.ContentType?.Alias == "registrationInvoicesHub");
+
+                if (invoicesHub == null)
+                {
+                    _logger.LogInformation("No invoices hub found for competition {CompetitionId}. Creating it automatically.", competitionId);
+                    var competitionContent = _contentService.GetById(competitionId);
+                    if (competitionContent == null)
+                        return Task.FromResult<IContent?>(null);
+
+                    var hub = _contentService.Create("Fakturor", competitionContent.Id, "registrationInvoicesHub");
+                    if (hub == null)
+                        return Task.FromResult<IContent?>(null);
+
+                    var hubSaveResult = _contentService.Save(hub);
+                    if (!hubSaveResult.Success)
+                        return Task.FromResult<IContent?>(null);
+
+                    var hubPublishResult = _contentService.Publish(hub, Array.Empty<string>());
+                    if (!hubPublishResult.Success)
+                    {
+                        _contentService.Delete(hub);
+                        return Task.FromResult<IContent?>(null);
+                    }
+
+                    invoicesHub = umbracoContext.Content.GetById(hub.Id);
+                    if (invoicesHub == null)
+                        return Task.FromResult<IContent?>(null);
+                }
+
+                // Use "team-{teamId}" as memberId to distinguish from individual invoices
+                var teamMemberId = $"team-{teamId}";
+                var invoiceName = $"Lag: {teamName} ({clubName}) - {DateTime.Now:yyyy-MM-dd}";
+                var invoice = _contentService.Create(invoiceName, invoicesHub.Id, "registrationInvoice");
+                if (invoice == null)
+                    return Task.FromResult<IContent?>(null);
+
+                var contentType = _contentTypeService.Get(invoice.ContentType.Id);
+                if (contentType == null)
+                {
+                    _contentService.Delete(invoice);
+                    return Task.FromResult<IContent?>(null);
+                }
+                var propertyTypes = contentType.PropertyTypes;
+
+                SetInvoicePropertySafely(invoice, "competitionId", competitionId, propertyTypes, _logger);
+                SetInvoicePropertySafely(invoice, "memberId", teamMemberId, propertyTypes, _logger);
+                SetInvoicePropertySafely(invoice, "memberName", $"Lag: {teamName} ({clubName})", propertyTypes, _logger);
+                SetInvoicePropertySafely(invoice, "totalAmount", totalAmount, propertyTypes, _logger);
+                SetInvoicePropertySafely(invoice, "paymentMethod", paymentMethod, propertyTypes, _logger);
+                SetInvoicePropertySafely(invoice, "paymentStatus", "Pending", propertyTypes, _logger);
+                SetInvoicePropertySafely(invoice, "createdDate", DateTime.Now, propertyTypes, _logger);
+                SetInvoicePropertySafely(invoice, "isActive", true, propertyTypes, _logger);
+
+                // Link to the competitionTeamRegistration doc if available
+                if (registrationId > 0)
+                    SetInvoicePropertySafely(invoice, "registrationId", registrationId, propertyTypes, _logger);
+
+                var invoiceNumber = GenerateInvoiceNumber(competitionId, teamMemberId, invoice.Id);
+                SetInvoicePropertySafely(invoice, "invoiceNumber", invoiceNumber, propertyTypes, _logger);
+
+                var saveResult = _contentService.Save(invoice);
+                if (saveResult.Success)
+                {
+                    var publishResult = _contentService.Publish(invoice, Array.Empty<string>());
+                    if (publishResult.Success)
+                    {
+                        _logger.LogInformation("Team invoice {InvoiceId} created successfully for team {TeamId}", invoice.Id, teamId);
+                        return Task.FromResult<IContent?>(invoice);
+                    }
+                    _contentService.Delete(invoice);
+                }
+                else
+                {
+                    _contentService.Delete(invoice);
+                }
+
+                return Task.FromResult<IContent?>(null);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error creating team invoice for CompetitionId: {CompetitionId}, TeamId: {TeamId}", competitionId, teamId);
+                return Task.FromResult<IContent?>(null);
+            }
+        }
     }
 }

@@ -1,0 +1,854 @@
+@using HpskSite.Models
+@using static HpskSite.Models.Federations
+@using System.Text.Json
+@using System.Text.Encodings.Web
+@* Competition Team Registration Modal *@
+@* Included from Competition.cshtml when allowTeams is true *@
+
+<div class="modal fade" id="teamRegistrationModal" tabindex="-1" aria-labelledby="teamRegistrationModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="teamRegistrationModalLabel">
+                    <i class="bi bi-people-fill me-2"></i>Laganmälan
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <ul class="nav nav-tabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#teamsListTab" type="button" role="tab">
+                            <i class="bi bi-list-ul me-1"></i>Lag
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#createTeamTab" type="button" role="tab">
+                            <i class="bi bi-plus-circle me-1"></i>Skapa lag
+                        </button>
+                    </li>
+                </ul>
+
+                <div class="tab-content pt-3">
+                    @* ====== Tab 1: Existing Teams ====== *@
+                    <div class="tab-pane fade show active" id="teamsListTab" role="tabpanel">
+                        <div id="existingTeamsList">
+                            <div class="text-center py-3">
+                                <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+                                <span class="ms-2">Laddar lag...</span>
+                            </div>
+                        </div>
+                        <div id="teamsListMessage" class="d-none mt-2"></div>
+                    </div>
+
+                    @* ====== Tab 2: Create Team ====== *@
+                    <div class="tab-pane fade" id="createTeamTab" role="tabpanel">
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="teamRegionSelect" class="form-label">Krets</label>
+                                <select class="form-select" id="teamRegionSelect">
+                                    <option value="">Alla kretsar</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="teamClubSelect" class="form-label">Förening</label>
+                                <select class="form-select" id="teamClubSelect">
+                                    <option value="">Välj förening...</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="teamName" class="form-label">Lagnamn</label>
+                            <input type="text" class="form-control" id="teamName" placeholder="T.ex. 'Klubbens A-lag'" maxlength="100">
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="teamClassSelect" class="form-label">Lagklass</label>
+                            <select class="form-select" id="teamClassSelect">
+                                <option value="">Välj lagklass...</option>
+                            </select>
+                            <div class="form-text" id="teamClassInfo"></div>
+                        </div>
+
+                        <div id="memberSelectionArea" style="display:none;">
+                            <label class="form-label">Anmälda skyttar från vald förening</label>
+                            <div class="table-responsive">
+                                <table class="table table-sm table-hover mb-0" id="membersTable">
+                                    <thead>
+                                        <tr>
+                                            <th style="width:40px;"></th>
+                                            <th>Namn</th>
+                                            <th>Klasser</th>
+                                            <th style="width:70px;" class="text-center">Reserv</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="membersTableBody">
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div class="form-text mt-1" id="memberCountInfo"></div>
+                        </div>
+
+                        <div id="createTeamError" class="alert alert-danger d-none mt-3"></div>
+                        <div id="createTeamSuccess" class="alert alert-success d-none mt-3"></div>
+
+                        <button type="button" class="btn btn-primary w-100 mt-3" id="createTeamBtn" disabled>
+                            <i class="bi bi-people-fill me-1"></i>Skapa lag
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* ====== Edit Team Modal (nested) ====== *@
+<div class="modal fade" id="editTeamModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-pencil me-2"></i>Redigera lag</h5>
+                <button type="button" class="btn-close" id="editTeamCloseBtn" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="editTeamId">
+                <input type="hidden" id="editTeamClass">
+                <input type="hidden" id="editTeamClubId">
+                <input type="hidden" id="editTeamCompetitionId">
+
+                <div class="mb-3">
+                    <label for="editTeamName" class="form-label">Lagnamn</label>
+                    <input type="text" class="form-control" id="editTeamName" maxlength="100">
+                </div>
+
+                <div class="mb-1">
+                    <span class="form-label">Lagklass: <strong id="editTeamClassDisplay"></strong></span>
+                    <span class="form-text ms-2" id="editTeamClassInfo"></span>
+                </div>
+
+                <div class="table-responsive mt-2">
+                    <table class="table table-sm table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th style="width:40px;"></th>
+                                <th>Namn</th>
+                                <th>Klasser</th>
+                                <th style="width:70px;" class="text-center">Reserv</th>
+                            </tr>
+                        </thead>
+                        <tbody id="editMembersTableBody">
+                        </tbody>
+                    </table>
+                </div>
+                <div class="form-text mt-1" id="editMemberCountInfo"></div>
+
+                <div id="editTeamError" class="alert alert-danger d-none mt-3"></div>
+                <div id="editTeamSuccess" class="alert alert-success d-none mt-3"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" id="editTeamCancelBtn">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="editTeamSaveBtn" disabled>
+                    <i class="bi bi-check-lg me-1"></i>Spara ändringar
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@{
+    var regionOptions = new List<object>();
+    foreach (Federations.RegionalFederations rf in Enum.GetValues(typeof(Federations.RegionalFederations)))
+    {
+        regionOptions.Add(new { code = rf.ToString(), name = rf.GetDescription() });
+    }
+    var jsonOpts = new JsonSerializerOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+    var regionOptionsJson = JsonSerializer.Serialize(regionOptions, jsonOpts);
+}
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const competitionId = @(ViewData["CompetitionId"]);
+    const currentMemberClubId = @(ViewData["CurrentMemberClubId"] ?? 0);
+    const currentMemberClubName = '@Html.Raw(((string)(ViewData["CurrentMemberClubName"] ?? "")).Replace("'", "\\'"))';
+    const currentMemberId = @(ViewData["CurrentMemberId"] ?? 0);
+    const regRole = '@(ViewData["RegRole"] ?? "member")';
+    const regRegionCode = '@(ViewData["RegRegionCode"] ?? "")';
+    const allClubsWithRegions = @Html.Raw((string)(ViewData["ClubsWithRegionsJson"] ?? "[]"));
+    const allRegions = @Html.Raw(regionOptionsJson);
+    const teamRegistrationFee = @(ViewData["TeamRegistrationFee"] ?? 0);
+    const teamHasSwish = @((ViewData["TeamHasSwish"] as bool? ?? false).ToString().ToLower());
+
+    const isAdmin = regRole === 'admin';
+    const isRegionalAdmin = regRole === 'regionalAdmin';
+    const isMember = !isAdmin && !isRegionalAdmin;
+
+    let availableTeamClasses = [];
+    let allRegisteredMembers = [];
+    let selectedMembers = new Set();
+    let selectedSpare = null;
+
+    // ==================== Region/Club dropdowns ====================
+    const regionSelect = document.getElementById('teamRegionSelect');
+    const clubSelect = document.getElementById('teamClubSelect');
+
+    function initDropdowns() {
+        regionSelect.innerHTML = '<option value="">Alla kretsar</option>';
+        allRegions.forEach(r => {
+            const opt = document.createElement('option');
+            opt.value = r.code;
+            opt.textContent = r.name;
+            regionSelect.appendChild(opt);
+        });
+
+        if (isMember) {
+            regionSelect.value = regRegionCode;
+            regionSelect.disabled = true;
+            populateClubDropdown(regRegionCode);
+            clubSelect.value = currentMemberClubId.toString();
+            clubSelect.disabled = true;
+        } else if (isRegionalAdmin) {
+            regionSelect.value = regRegionCode;
+            regionSelect.disabled = true;
+            populateClubDropdown(regRegionCode);
+            if (currentMemberClubId > 0) clubSelect.value = currentMemberClubId.toString();
+        } else {
+            populateClubDropdown('');
+        }
+    }
+
+    function populateClubDropdown(regionFilter) {
+        const currentVal = clubSelect.value;
+        clubSelect.innerHTML = '<option value="">Välj förening...</option>';
+
+        if (isMember && currentMemberClubId > 0) {
+            const opt = document.createElement('option');
+            opt.value = currentMemberClubId;
+            opt.textContent = currentMemberClubName;
+            clubSelect.appendChild(opt);
+            clubSelect.value = currentMemberClubId.toString();
+            return;
+        }
+
+        let clubs = allClubsWithRegions;
+        if (regionFilter) clubs = clubs.filter(c => c.region === regionFilter);
+        clubs.forEach(c => {
+            const opt = document.createElement('option');
+            opt.value = c.id;
+            opt.textContent = c.name;
+            clubSelect.appendChild(opt);
+        });
+
+        if (currentVal && clubSelect.querySelector(`option[value="${currentVal}"]`)) {
+            clubSelect.value = currentVal;
+        }
+    }
+
+    regionSelect.addEventListener('change', function() {
+        populateClubDropdown(this.value);
+        onClubChanged();
+    });
+    clubSelect.addEventListener('change', onClubChanged);
+
+    async function onClubChanged() {
+        clearAllAlerts();
+        const clubId = clubSelect.value;
+        const memberArea = document.getElementById('memberSelectionArea');
+        selectedMembers.clear();
+        selectedSpare = null;
+        allRegisteredMembers = [];
+
+        if (!clubId) {
+            memberArea.style.display = 'none';
+            updateCreateButton();
+            return;
+        }
+        memberArea.style.display = 'block';
+        await loadRegisteredMembers(parseInt(clubId), 'membersTableBody', 'teamClassSelect');
+    }
+
+    // ==================== Modal init ====================
+    let successTimer = null;
+    function clearAllAlerts() {
+        if (successTimer) { clearTimeout(successTimer); successTimer = null; }
+        document.querySelectorAll('#teamRegistrationModal .alert, #teamsListMessage').forEach(el => {
+            el.classList.add('d-none');
+            el.textContent = '';
+        });
+    }
+    function showSuccessAlert(el, message) {
+        el.textContent = message;
+        el.classList.remove('d-none');
+        if (successTimer) clearTimeout(successTimer);
+        successTimer = setTimeout(() => { el.classList.add('d-none'); successTimer = null; }, 3000);
+    }
+
+    const modal = document.getElementById('teamRegistrationModal');
+    const createTabEl = document.getElementById('createTeamTab');
+    const createTabOriginalHtml = createTabEl.innerHTML;
+
+    modal.addEventListener('show.bs.modal', () => {
+        // Restore create tab if it was replaced by payment options
+        if (!document.getElementById('createTeamBtn')) {
+            createTabEl.innerHTML = createTabOriginalHtml;
+            rebindCreateTab();
+        }
+        clearAllAlerts();
+        initDropdowns();
+        loadTeamClasses();
+        loadExistingTeams();
+        if (clubSelect.value) onClubChanged();
+    });
+
+    modal.querySelectorAll('[data-bs-toggle="tab"]').forEach(tab => {
+        tab.addEventListener('show.bs.tab', clearAllAlerts);
+    });
+
+    async function loadTeamClasses() {
+        try {
+            const resp = await fetch(`/umbraco/surface/CompetitionTeam/GetTeamsForCompetition?competitionId=${competitionId}`);
+            const data = await resp.json();
+            if (!data.success) return;
+            availableTeamClasses = data.teamClasses || [];
+            const select = document.getElementById('teamClassSelect');
+            select.innerHTML = '<option value="">Välj lagklass...</option>';
+            availableTeamClasses.forEach(tc => {
+                const opt = document.createElement('option');
+                opt.value = tc.teamClass;
+                opt.textContent = `${tc.teamClass} - ${tc.coreMembers} skyttar + reserv`;
+                select.appendChild(opt);
+            });
+        } catch(e) {
+            console.error('Error loading team classes:', e);
+        }
+    }
+
+    function bindTeamClassSelect() {
+        document.getElementById('teamClassSelect').addEventListener('change', function() {
+            clearAllAlerts();
+            const teamClass = this.value;
+            const info = document.getElementById('teamClassInfo');
+            if (!teamClass) {
+                info.textContent = '';
+            } else {
+                const tc = availableTeamClasses.find(t => t.teamClass === teamClass);
+                if (tc) info.textContent = `${tc.coreMembers} ordinarie + ${tc.maxSpares} reserv. Klasser: ${tc.compatibleClasses.join(', ')}`;
+            }
+            selectedMembers.clear();
+            selectedSpare = null;
+            renderMembersTable('membersTableBody', 'teamClassSelect', selectedMembers, s => selectedSpare = s, () => selectedSpare, () => updateCreateButton());
+        });
+    }
+    bindTeamClassSelect();
+
+    // ==================== Load registered members (shared) ====================
+    async function loadRegisteredMembers(clubId, tbodyId, classSelectId) {
+        const tbody = document.getElementById(tbodyId);
+        tbody.innerHTML = '<tr><td colspan="4" class="text-center"><div class="spinner-border spinner-border-sm"></div></td></tr>';
+        try {
+            const resp = await fetch(`/umbraco/surface/CompetitionTeam/GetRegisteredMembersForClub?competitionId=${competitionId}&clubId=${clubId}`);
+            const data = await resp.json();
+            if (!data.success || !data.members?.length) {
+                tbody.innerHTML = '<tr><td colspan="4" class="text-muted small">Inga anmälda skyttar från denna förening.</td></tr>';
+                allRegisteredMembers = [];
+                updateCreateButton();
+                return data.members || [];
+            }
+            allRegisteredMembers = data.members;
+            renderMembersTable(tbodyId, classSelectId, selectedMembers, s => selectedSpare = s, () => selectedSpare, () => updateCreateButton());
+            return data.members;
+        } catch(e) {
+            tbody.innerHTML = '<tr><td colspan="4" class="text-danger small">Fel vid laddning.</td></tr>';
+            return [];
+        }
+    }
+
+    function renderMembersTable(tbodyId, classSelectId, selMembers, setSpare, getSpare, onChange) {
+        const tbody = document.getElementById(tbodyId);
+        const teamClass = document.getElementById(classSelectId).value;
+        const tc = teamClass ? availableTeamClasses.find(t => t.teamClass === teamClass) : null;
+        const compatibleClasses = tc ? tc.compatibleClasses : [];
+        const members = (tbodyId === 'membersTableBody') ? allRegisteredMembers : editRegisteredMembers;
+
+        if (!members.length) {
+            tbody.innerHTML = '<tr><td colspan="4" class="text-muted small">Inga anmälda skyttar.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = '';
+        members.forEach(m => {
+            const row = document.createElement('tr');
+            const isEligible = !teamClass || m.shootingClasses.some(c => compatibleClasses.includes(c));
+            const isSelected = selMembers.has(m.memberId);
+            if (!isEligible) row.classList.add('text-muted');
+
+            const tdCheck = document.createElement('td');
+            const cb = document.createElement('input');
+            cb.type = 'checkbox'; cb.className = 'form-check-input'; cb.value = m.memberId;
+            cb.checked = isSelected; cb.disabled = !isEligible || !teamClass;
+            tdCheck.appendChild(cb);
+            row.appendChild(tdCheck);
+
+            const tdName = document.createElement('td');
+            tdName.textContent = m.name;
+            row.appendChild(tdName);
+
+            const tdClasses = document.createElement('td');
+            tdClasses.innerHTML = m.shootingClasses.map(c =>
+                (teamClass && compatibleClasses.includes(c))
+                    ? `<span class="badge bg-success me-1">${c}</span>`
+                    : `<span class="badge bg-secondary me-1">${c}</span>`
+            ).join('');
+            row.appendChild(tdClasses);
+
+            const tdSpare = document.createElement('td');
+            tdSpare.className = 'text-center';
+            const radio = document.createElement('input');
+            radio.type = 'radio'; radio.className = 'form-check-input'; radio.name = `spare_${tbodyId}`;
+            radio.value = m.memberId; radio.checked = getSpare() === m.memberId; radio.disabled = !isSelected;
+            tdSpare.appendChild(radio);
+            row.appendChild(tdSpare);
+
+            cb.addEventListener('change', function() {
+                if (this.checked) { selMembers.add(m.memberId); radio.disabled = false; }
+                else { selMembers.delete(m.memberId); radio.disabled = true; if (radio.checked) { radio.checked = false; setSpare(null); } }
+                onChange();
+            });
+            radio.addEventListener('change', function() { setSpare(this.checked ? m.memberId : null); onChange(); });
+
+            tbody.appendChild(row);
+        });
+        onChange();
+    }
+
+    // ==================== Create button validation ====================
+    function updateCreateButton() {
+        const teamClass = document.getElementById('teamClassSelect').value;
+        const teamName = document.getElementById('teamName').value.trim();
+        const clubId = clubSelect.value;
+        const tc = availableTeamClasses.find(t => t.teamClass === teamClass);
+        const btn = document.getElementById('createTeamBtn');
+        const countInfo = document.getElementById('memberCountInfo');
+
+        if (!tc || !teamName || !clubId) { btn.disabled = true; countInfo.textContent = ''; return; }
+
+        const nonSpareCount = selectedSpare ? selectedMembers.size - 1 : selectedMembers.size;
+        countInfo.textContent = `Valda: ${nonSpareCount} ordinarie${selectedSpare ? ' + 1 reserv' : ''} (behövs: ${tc.coreMembers} ordinarie)`;
+        btn.disabled = nonSpareCount !== tc.coreMembers;
+    }
+
+    function bindCreateTabEvents() {
+        document.getElementById('teamName').addEventListener('input', () => { clearAllAlerts(); updateCreateButton(); });
+        document.getElementById('createTeamBtn').addEventListener('click', handleCreateTeam);
+    }
+    bindCreateTabEvents();
+
+    function rebindCreateTab() {
+        bindTeamClassSelect();
+        bindCreateTabEvents();
+        selectedMembers.clear();
+        selectedSpare = null;
+        allRegisteredMembers = [];
+        document.getElementById('memberSelectionArea').style.display = 'none';
+    }
+
+    // ==================== Create team ====================
+    async function handleCreateTeam() {
+        const btn = document.getElementById('createTeamBtn'); btn.disabled = true;
+        const errorEl = document.getElementById('createTeamError');
+        const successEl = document.getElementById('createTeamSuccess');
+        errorEl.classList.add('d-none'); successEl.classList.add('d-none');
+
+        try {
+            const resp = await fetch('/umbraco/surface/CompetitionTeam/CreateTeam', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    competitionId, teamName: document.getElementById('teamName').value.trim(),
+                    teamClass: document.getElementById('teamClassSelect').value,
+                    clubId: parseInt(clubSelect.value),
+                    memberIds: Array.from(selectedMembers), spareId: selectedSpare
+                })
+            });
+            const data = await resp.json();
+            if (data.success) {
+                showSuccessAlert(successEl, data.message);
+                document.getElementById('teamName').value = '';
+                document.getElementById('teamClassSelect').value = '';
+                document.getElementById('teamClassInfo').textContent = '';
+                selectedMembers.clear(); selectedSpare = null;
+                if (clubSelect.value) await loadRegisteredMembers(parseInt(clubSelect.value), 'membersTableBody', 'teamClassSelect');
+                loadExistingTeams();
+                // Show payment options if configured
+                if (teamHasSwish && data.teamId) {
+                    showTeamPaymentOptions(data.teamId);
+                }
+            } else {
+                errorEl.textContent = data.message; errorEl.classList.remove('d-none'); btn.disabled = false;
+            }
+        } catch(e) {
+            errorEl.textContent = 'Ett nätverksfel uppstod.'; errorEl.classList.remove('d-none'); btn.disabled = false;
+        }
+    }
+
+    // ==================== Tab 1: List existing teams ====================
+    async function loadExistingTeams() {
+        const container = document.getElementById('existingTeamsList');
+        try {
+            const resp = await fetch(`/umbraco/surface/CompetitionTeam/GetTeamsForCompetition?competitionId=${competitionId}`);
+            const data = await resp.json();
+
+            if (!data.success || !data.teams?.length) {
+                container.innerHTML = '<div class="text-muted text-center py-3">Inga lag skapade ännu.</div>';
+                return;
+            }
+
+            let html = '';
+            const teamsByClass = {};
+            data.teams.forEach(t => {
+                if (!teamsByClass[t.teamClass]) teamsByClass[t.teamClass] = [];
+                teamsByClass[t.teamClass].push(t);
+            });
+
+            for (const [cls, teams] of Object.entries(teamsByClass)) {
+                const tcInfo = (data.teamClasses || []).find(tc => tc.teamClass === cls);
+                const maxTotal = tcInfo ? tcInfo.coreMembers + tcInfo.maxSpares : 4;
+
+                html += `<h6 class="mt-3 mb-2">${cls}</h6>`;
+                teams.forEach(team => {
+                    const memberCount = team.members?.length || 0;
+
+                    html += `<div class="card mb-2"><div class="card-body py-2 px-3">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <strong>${team.teamName}</strong>
+                                <span class="text-muted small ms-2">${team.clubName}</span>
+                                <div class="small mt-1">`;
+
+                    if (team.members) {
+                        team.members.forEach(m => {
+                            const badge = m.isSpare ? ' <span class="badge bg-secondary">Reserv</span>' : '';
+                            html += `<span class="d-block">${m.name}${badge}</span>`;
+                        });
+                    }
+
+                    html += `</div></div><div class="d-flex flex-column align-items-end">
+                        <span class="badge bg-info mb-2">${memberCount}/${maxTotal}</span>
+                        <div>
+                            <button class="btn btn-outline-primary btn-sm me-1 edit-team-btn" data-team-id="${team.id}" data-team-name="${team.teamName.replace(/"/g, '&quot;')}" data-team-class="${team.teamClass}" data-club-id="${team.clubId}" title="Redigera">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                            <button class="btn btn-outline-danger btn-sm delete-team-btn" data-team-id="${team.id}" data-team-name="${team.teamName.replace(/"/g, '&quot;')}" title="Ta bort">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
+                    </div></div></div></div>`;
+                });
+            }
+
+            container.innerHTML = html;
+
+            container.querySelectorAll('.edit-team-btn').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    openEditModal(
+                        parseInt(this.dataset.teamId),
+                        this.dataset.teamName,
+                        this.dataset.teamClass,
+                        parseInt(this.dataset.clubId)
+                    );
+                });
+            });
+
+            container.querySelectorAll('.delete-team-btn').forEach(btn => {
+                btn.addEventListener('click', async function() {
+                    const teamId = parseInt(this.dataset.teamId);
+                    const teamName = this.dataset.teamName;
+                    if (!confirm(`Vill du verkligen ta bort laget "${teamName}"?`)) return;
+                    await deleteTeam(teamId);
+                });
+            });
+
+        } catch(e) {
+            container.innerHTML = '<div class="text-danger small">Fel vid laddning av lag.</div>';
+        }
+    }
+
+    async function deleteTeam(teamId) {
+        const msgEl = document.getElementById('teamsListMessage');
+        msgEl.classList.add('d-none');
+        try {
+            const resp = await fetch('/umbraco/surface/CompetitionTeam/DeleteTeam', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ teamId })
+            });
+            const data = await resp.json();
+            if (data.success) {
+                msgEl.className = 'alert alert-success mt-2';
+                showSuccessAlert(msgEl, data.message);
+                loadExistingTeams();
+            } else {
+                msgEl.className = 'alert alert-danger mt-2';
+                msgEl.textContent = data.message;
+                msgEl.classList.remove('d-none');
+            }
+        } catch(e) {
+            msgEl.className = 'alert alert-danger mt-2';
+            msgEl.textContent = 'Ett nätverksfel uppstod.';
+        }
+    }
+
+    // ==================== Edit Team Modal ====================
+    let editRegisteredMembers = [];
+    let editSelectedMembers = new Set();
+    let editSelectedSpare = null;
+
+    // We create a hidden select to hold the team class for renderMembersTable compatibility
+    const editClassHolder = document.createElement('select');
+    editClassHolder.id = 'editTeamClassSelect_hidden';
+    editClassHolder.style.display = 'none';
+    document.body.appendChild(editClassHolder);
+
+    const editModalEl = document.getElementById('editTeamModal');
+    const mainModal = document.getElementById('teamRegistrationModal');
+
+    document.getElementById('editTeamCloseBtn').addEventListener('click', closeEditModal);
+    document.getElementById('editTeamCancelBtn').addEventListener('click', closeEditModal);
+
+    function closeEditModal() {
+        bootstrap.Modal.getOrCreateInstance(editModalEl).hide();
+        // Re-show main modal after a short delay for bootstrap transition
+        setTimeout(() => {
+            bootstrap.Modal.getOrCreateInstance(mainModal).show();
+        }, 200);
+    }
+
+    async function openEditModal(teamId, teamName, teamClass, clubId) {
+        // Hide main modal first
+        bootstrap.Modal.getOrCreateInstance(mainModal).hide();
+
+        document.getElementById('editTeamId').value = teamId;
+        document.getElementById('editTeamName').value = teamName;
+        document.getElementById('editTeamClass').value = teamClass;
+        document.getElementById('editTeamClubId').value = clubId;
+        document.getElementById('editTeamCompetitionId').value = competitionId;
+        document.getElementById('editTeamClassDisplay').textContent = teamClass;
+
+        const tc = availableTeamClasses.find(t => t.teamClass === teamClass);
+        document.getElementById('editTeamClassInfo').textContent = tc
+            ? `(${tc.coreMembers} ordinarie + ${tc.maxSpares} reserv)`
+            : '';
+
+        // Set up hidden select for renderMembersTable
+        editClassHolder.innerHTML = `<option value="${teamClass}">${teamClass}</option>`;
+        editClassHolder.value = teamClass;
+
+        // Reset state
+        editSelectedMembers.clear();
+        editSelectedSpare = null;
+        editRegisteredMembers = [];
+
+        document.getElementById('editTeamError').classList.add('d-none');
+        document.getElementById('editTeamSuccess').classList.add('d-none');
+
+        // Load registered members for the club
+        const tbody = document.getElementById('editMembersTableBody');
+        tbody.innerHTML = '<tr><td colspan="4" class="text-center"><div class="spinner-border spinner-border-sm"></div></td></tr>';
+
+        setTimeout(() => bootstrap.Modal.getOrCreateInstance(editModalEl).show(), 200);
+
+        try {
+            const resp = await fetch(`/umbraco/surface/CompetitionTeam/GetRegisteredMembersForClub?competitionId=${competitionId}&clubId=${clubId}`);
+            const data = await resp.json();
+            editRegisteredMembers = data.success ? (data.members || []) : [];
+
+            // Fetch current team members to pre-select
+            const teamsResp = await fetch(`/umbraco/surface/CompetitionTeam/GetTeamsForCompetition?competitionId=${competitionId}`);
+            const teamsData = await teamsResp.json();
+            if (teamsData.success) {
+                const team = teamsData.teams.find(t => t.id === teamId);
+                if (team?.members) {
+                    team.members.forEach(m => {
+                        editSelectedMembers.add(m.memberId);
+                        if (m.isSpare) editSelectedSpare = m.memberId;
+                    });
+                }
+            }
+
+            renderMembersTable('editMembersTableBody', 'editTeamClassSelect_hidden',
+                editSelectedMembers, s => editSelectedSpare = s, () => editSelectedSpare, updateEditButton);
+        } catch(e) {
+            tbody.innerHTML = '<tr><td colspan="4" class="text-danger small">Fel vid laddning.</td></tr>';
+        }
+    }
+
+    function updateEditButton() {
+        const teamClass = document.getElementById('editTeamClass').value;
+        const teamName = document.getElementById('editTeamName').value.trim();
+        const tc = availableTeamClasses.find(t => t.teamClass === teamClass);
+        const btn = document.getElementById('editTeamSaveBtn');
+        const countInfo = document.getElementById('editMemberCountInfo');
+
+        if (!tc || !teamName) { btn.disabled = true; countInfo.textContent = ''; return; }
+
+        const nonSpareCount = editSelectedSpare ? editSelectedMembers.size - 1 : editSelectedMembers.size;
+        countInfo.textContent = `Valda: ${nonSpareCount} ordinarie${editSelectedSpare ? ' + 1 reserv' : ''} (behövs: ${tc.coreMembers} ordinarie)`;
+        btn.disabled = nonSpareCount !== tc.coreMembers;
+    }
+
+    document.getElementById('editTeamName').addEventListener('input', updateEditButton);
+
+    document.getElementById('editTeamSaveBtn').addEventListener('click', async function() {
+        const btn = this; btn.disabled = true;
+        const errorEl = document.getElementById('editTeamError');
+        const successEl = document.getElementById('editTeamSuccess');
+        errorEl.classList.add('d-none'); successEl.classList.add('d-none');
+
+        try {
+            const resp = await fetch('/umbraco/surface/CompetitionTeam/UpdateTeam', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    teamId: parseInt(document.getElementById('editTeamId').value),
+                    teamName: document.getElementById('editTeamName').value.trim(),
+                    memberIds: Array.from(editSelectedMembers),
+                    spareId: editSelectedSpare
+                })
+            });
+            const data = await resp.json();
+            if (data.success) {
+                successEl.textContent = data.message; successEl.classList.remove('d-none');
+                // Refresh teams list and close after a moment
+                loadExistingTeams();
+                setTimeout(closeEditModal, 800);
+            } else {
+                errorEl.textContent = data.message; errorEl.classList.remove('d-none'); btn.disabled = false;
+            }
+        } catch(e) {
+            errorEl.textContent = 'Ett nätverksfel uppstod.'; errorEl.classList.remove('d-none'); btn.disabled = false;
+        }
+    });
+    // ==================== Team Payment Options ====================
+    function showTeamPaymentOptions(teamId) {
+        // Replace create tab content with payment options screen
+        const createTab = document.getElementById('createTeamTab');
+        createTab.innerHTML = `
+            <div class="text-center py-4">
+                <div class="text-success mb-3">
+                    <i class="bi bi-check-circle" style="font-size: 4rem;"></i>
+                </div>
+                <h4 class="mb-3">Laget har skapats!</h4>
+                <div class="alert alert-info mt-4 text-start">
+                    <h5 class="mb-3"><i class="bi bi-wallet2"></i> Betala lagavgift</h5>
+                    <p class="mb-3">Slutför laganmälan genom att betala lagavgiften (${teamRegistrationFee} kr) med Swish.</p>
+                    <div class="d-flex flex-column gap-2 align-items-center">
+                        <button type="button" class="btn btn-primary w-75" id="teamPayNowBtn">
+                            <i class="bi bi-qr-code me-1"></i>Betala nu med Swish
+                        </button>
+                        <button type="button" class="btn btn-outline-primary w-75" id="teamEmailQrBtn">
+                            <i class="bi bi-envelope me-1"></i>Skicka QR-kod via e-post
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary w-75" id="teamPayLaterBtn">
+                            <i class="bi bi-clock me-1"></i>Betala senare
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        document.getElementById('teamPayNowBtn').addEventListener('click', () => showTeamSwishQR(teamId));
+        document.getElementById('teamEmailQrBtn').addEventListener('click', () => sendTeamSwishQREmail(teamId));
+        document.getElementById('teamPayLaterBtn').addEventListener('click', resetCreateTab);
+    }
+
+    function resetCreateTab() {
+        createTabEl.innerHTML = createTabOriginalHtml;
+        rebindCreateTab();
+        initDropdowns();
+        loadTeamClasses();
+        if (clubSelect.value) onClubChanged();
+    }
+
+    function showTeamSwishQR(teamId) {
+        const swishModalEl = document.getElementById('swishPaymentModal');
+        if (!swishModalEl) return;
+
+        // Hide team registration modal first
+        bootstrap.Modal.getOrCreateInstance(mainModal).hide();
+
+        const modalBody = document.getElementById('swishPaymentModalBody');
+        modalBody.innerHTML = `
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Laddar QR-kod...</span>
+            </div>
+            <p class="mt-2">Laddar betalningsinformation...</p>
+        `;
+
+        setTimeout(() => {
+            bootstrap.Modal.getOrCreateInstance(swishModalEl).show();
+        }, 200);
+
+        fetch(`/umbraco/surface/Swish/GenerateTeamPaymentQR?competitionId=${competitionId}&teamId=${teamId}`)
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    modalBody.innerHTML = `
+                        <div class="mb-3">
+                            <img src="${data.qrCode}" alt="Swish QR Code" style="max-width: 300px; width: 100%;" class="img-fluid">
+                        </div>
+                        <div class="alert alert-info text-start mb-0">
+                            <h6 class="mb-2"><strong><i class="bi bi-info-circle"></i> Betalningsinformation</strong></h6>
+                            <p class="mb-1"><strong>Lag:</strong> ${data.teamName}</p>
+                            <p class="mb-1"><strong>Klass:</strong> ${data.teamClass}</p>
+                            <p class="mb-1"><strong>Förening:</strong> ${data.clubName}</p>
+                            <p class="mb-1"><strong>Belopp:</strong> ${data.amount} kr</p>
+                            <p class="mb-0"><strong>Fakturanummer:</strong> ${data.invoiceNumber}</p>
+                        </div>
+                        <p class="text-muted small mt-3 mb-0">
+                            <i class="bi bi-phone"></i> Scanna QR-koden med Swish-appen för att betala
+                        </p>
+                    `;
+                } else {
+                    modalBody.innerHTML = `
+                        <div class="alert alert-danger mb-0">
+                            <i class="bi bi-exclamation-triangle"></i> <strong>Fel</strong><br>${data.message}
+                        </div>
+                    `;
+                }
+            })
+            .catch(() => {
+                modalBody.innerHTML = `
+                    <div class="alert alert-danger mb-0">
+                        <i class="bi bi-exclamation-triangle"></i> Ett nätverksfel uppstod.
+                    </div>
+                `;
+            });
+    }
+
+    async function sendTeamSwishQREmail(teamId) {
+        const btn = document.getElementById('teamEmailQrBtn');
+        const origText = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Skickar...';
+
+        try {
+            const resp = await fetch(`/umbraco/surface/Swish/SendTeamQRCodeEmail?competitionId=${competitionId}&teamId=${teamId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            const data = await resp.json();
+            btn.innerHTML = data.success
+                ? '<i class="bi bi-check-lg me-1"></i>E-post skickad!'
+                : `<i class="bi bi-exclamation-triangle me-1"></i>${data.message}`;
+            if (data.success) {
+                setTimeout(() => { btn.innerHTML = origText; btn.disabled = false; }, 3000);
+            } else {
+                btn.disabled = false;
+            }
+        } catch(e) {
+            btn.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>Fel vid skickning';
+            btn.disabled = false;
+        }
+    }
+});
+</script>

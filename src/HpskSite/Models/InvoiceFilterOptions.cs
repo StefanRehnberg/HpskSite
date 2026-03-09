@@ -57,5 +57,14 @@ namespace HpskSite.Models
         /// Number of invoices per page (default: 50)
         /// </summary>
         public int PageSize { get; set; } = 50;
+
+        /// <summary>
+        /// View type for club invoice tab:
+        /// "incoming" = invoices for registrations to the club's own competitions (receivables)
+        /// "outgoing" = team invoices the club needs to pay (payables)
+        /// "members" = individual invoices for club members across all competitions
+        /// Default: null (no view type filtering, original behavior)
+        /// </summary>
+        public string? ViewType { get; set; }
     }
 }

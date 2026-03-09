@@ -28,7 +28,7 @@ namespace HpskSite.Controllers
         private readonly AppCaches _appCaches;
 
         // Cache configuration
-        private const string InvoicesListCacheKey = "admin_invoices_{0}_{1}_{2}_{3}_{4}"; // competitionId, clubId, excludePaid, activeOnly, page
+        private const string InvoicesListCacheKey = "admin_invoices_{0}_{1}_{2}_{3}_{4}_{5}"; // competitionId, clubId, excludePaid, activeOnly, page, viewType
         private static readonly TimeSpan InvoiceCacheDuration = TimeSpan.FromMinutes(5);
 
         public InvoiceAdminController(
@@ -72,7 +72,8 @@ namespace HpskSite.Controllers
             bool activeCompetitionsOnly = true,
             bool excludePaid = true,
             int page = 1,
-            int pageSize = 50)
+            int pageSize = 50,
+            string? viewType = null)
         {
             // Authorization: Site admin OR club admin for specified club OR regional admin
             bool isSiteAdmin = await _authService.IsCurrentUserAdminAsync();
@@ -91,7 +92,7 @@ namespace HpskSite.Controllers
                 string? cacheKey = null;
                 if (string.IsNullOrEmpty(memberSearch) && string.IsNullOrEmpty(invoiceNumberSearch) && string.IsNullOrEmpty(paymentStatus))
                 {
-                    cacheKey = string.Format(InvoicesListCacheKey, competitionId ?? 0, clubId ?? 0, excludePaid, activeCompetitionsOnly, page);
+                    cacheKey = string.Format(InvoicesListCacheKey, competitionId ?? 0, clubId ?? 0, excludePaid, activeCompetitionsOnly, page, viewType ?? "");
                     var cachedResult = _appCaches.RuntimeCache.Get(cacheKey);
                     if (cachedResult != null)
                     {
@@ -111,7 +112,8 @@ namespace HpskSite.Controllers
                     ActiveCompetitionsOnly = activeCompetitionsOnly,
                     ExcludePaid = excludePaid,
                     Page = page,
-                    PageSize = pageSize
+                    PageSize = pageSize,
+                    ViewType = viewType
                 };
 
                 // Call service to aggregate and filter invoices

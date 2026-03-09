@@ -18,15 +18,18 @@ namespace HpskSite.Services
         private readonly ILogger<InvoiceAdminService> _logger;
         private readonly IContentService _contentService;
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
+        private readonly IMemberService _memberService;
 
         public InvoiceAdminService(
             ILogger<InvoiceAdminService> logger,
             IContentService contentService,
-            IUmbracoContextAccessor umbracoContextAccessor)
+            IUmbracoContextAccessor umbracoContextAccessor,
+            IMemberService memberService)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _contentService = contentService ?? throw new ArgumentNullException(nameof(contentService));
             _umbracoContextAccessor = umbracoContextAccessor ?? throw new ArgumentNullException(nameof(umbracoContextAccessor));
+            _memberService = memberService ?? throw new ArgumentNullException(nameof(memberService));
         }
 
         /// <summary>
@@ -42,9 +45,11 @@ namespace HpskSite.Services
                 _logger.LogInformation("Starting invoice aggregation with filters: CompetitionId={CompetitionId}, Status={Status}, ActiveOnly={ActiveOnly}",
                     filters.CompetitionId, filters.PaymentStatus, filters.ActiveCompetitionsOnly);
 
-                // Step 1: Get all competitions and invoice hubs efficiently (single-pass BFS)
+                // Step 1: Get all competitions, invoice hubs, and team registrations efficiently (single-pass BFS)
                 var allCompetitions = new List<IContent>();
                 var allInvoicesHubs = new List<IContent>();
+                var allTeamRegDocs = new List<IContent>();
+                var allRegistrationHubs = new List<IContent>();
 
                 var rootContent = _contentService.GetRootContent();
                 foreach (var root in rootContent)
@@ -52,6 +57,8 @@ namespace HpskSite.Services
                     var descendants = GetFlatDescendants(root);
                     allCompetitions.AddRange(descendants.Where(c => c.ContentType.Alias == "competition"));
                     allInvoicesHubs.AddRange(descendants.Where(c => c.ContentType.Alias == "registrationInvoicesHub"));
+                    allTeamRegDocs.AddRange(descendants.Where(c => c.ContentType.Alias == "competitionTeamRegistration"));
+                    allRegistrationHubs.AddRange(descendants.Where(c => c.ContentType.Alias == "competitionRegistrationsHub"));
                 }
 
                 _logger.LogInformation("Found {CompetitionCount} competitions and {HubCount} invoice hubs",
@@ -76,15 +83,20 @@ namespace HpskSite.Services
                         .ToList();
                 }
 
-                // If filtering by specific club, narrow down to competitions belonging to that club
+                // If filtering by specific club, apply view-type-specific logic
                 if (filters.ClubId.HasValue && filters.ClubId.Value > 0)
                 {
-                    filteredCompetitions = filteredCompetitions
-                        .Where(comp => comp.GetValue<int>("clubId") == filters.ClubId.Value)
-                        .ToList();
+                    // For "outgoing" and "members" views, we need all competitions (not just club's own)
+                    // For "incoming" (default when no viewType), filter to club's own competitions
+                    if (filters.ViewType != "outgoing" && filters.ViewType != "members")
+                    {
+                        filteredCompetitions = filteredCompetitions
+                            .Where(comp => comp.GetValue<int>("clubId") == filters.ClubId.Value)
+                            .ToList();
 
-                    _logger.LogInformation("Filtered to {ClubCount} competitions for club {ClubId}",
-                        filteredCompetitions.Count, filters.ClubId.Value);
+                        _logger.LogInformation("Filtered to {ClubCount} competitions for club {ClubId} (incoming view)",
+                            filteredCompetitions.Count, filters.ClubId.Value);
+                    }
                 }
 
                 // If filtering by region, narrow down to competitions belonging to clubs in that region
@@ -117,15 +129,30 @@ namespace HpskSite.Services
                 // Step 3: Group invoice hubs by competition ID for O(1) lookup
                 var hubsByCompetition = allInvoicesHubs.ToDictionary(hub => hub.ParentId);
 
-                // Step 4: Aggregate all invoices from filtered competitions
+                // Step 4: Aggregate invoices based on view type
                 var allInvoices = new List<InvoiceInfo>();
 
-                foreach (var competition in filteredCompetitions)
+                if (filters.ViewType == "outgoing" && filters.ClubId.HasValue && filters.ClubId.Value > 0)
                 {
-                    if (hubsByCompetition.TryGetValue(competition.Id, out var hub))
+                    // "Fakturor att betala" — team invoices the club needs to pay
+                    allInvoices = GetOutgoingTeamInvoices(filteredCompetitions, hubsByCompetition,
+                        allTeamRegDocs, allRegistrationHubs, filters.ClubId.Value);
+                }
+                else if (filters.ViewType == "members" && filters.ClubId.HasValue && filters.ClubId.Value > 0)
+                {
+                    // "Medlemmars Fakturor" — individual invoices for club members
+                    allInvoices = GetMemberInvoices(filteredCompetitions, hubsByCompetition, filters.ClubId.Value);
+                }
+                else
+                {
+                    // "Fakturor att få betalt för" (incoming) or no view type — current behavior
+                    foreach (var competition in filteredCompetitions)
                     {
-                        var invoices = GetInvoicesFromHub(hub, competition);
-                        allInvoices.AddRange(invoices);
+                        if (hubsByCompetition.TryGetValue(competition.Id, out var hub))
+                        {
+                            var invoices = GetInvoicesFromHub(hub, competition);
+                            allInvoices.AddRange(invoices);
+                        }
                     }
                 }
 
@@ -161,6 +188,125 @@ namespace HpskSite.Services
                     ErrorMessage = ex.Message
                 };
             }
+        }
+
+        /// <summary>
+        /// Get team invoices the club needs to pay (outgoing).
+        /// Finds team registration docs for the club, then matches invoices with memberId="team-{teamId}".
+        /// </summary>
+        private List<InvoiceInfo> GetOutgoingTeamInvoices(
+            List<IContent> competitions,
+            Dictionary<int, IContent> hubsByCompetition,
+            List<IContent> allTeamRegDocs,
+            List<IContent> allRegistrationHubs,
+            int clubId)
+        {
+            var result = new List<InvoiceInfo>();
+
+            // Map registration hub ID -> competition ID
+            var regHubToCompetitionId = allRegistrationHubs.ToDictionary(h => h.Id, h => h.ParentId);
+            var competitionLookup = competitions.ToDictionary(c => c.Id);
+
+            // Find team IDs belonging to this club and their competitions
+            var clubTeamIds = new HashSet<int>();
+            var teamCompetitionIds = new HashSet<int>();
+
+            foreach (var teamReg in allTeamRegDocs)
+            {
+                if (teamReg.GetValue<int>("clubId") != clubId) continue;
+
+                var teamId = teamReg.GetValue<int>("teamId");
+                if (teamId > 0) clubTeamIds.Add(teamId);
+
+                if (regHubToCompetitionId.TryGetValue(teamReg.ParentId, out var compId)
+                    && competitionLookup.ContainsKey(compId))
+                {
+                    teamCompetitionIds.Add(compId);
+                }
+            }
+
+            if (clubTeamIds.Count == 0) return result;
+
+            _logger.LogInformation("Found {TeamCount} teams for club {ClubId} across {CompCount} competitions",
+                clubTeamIds.Count, clubId, teamCompetitionIds.Count);
+
+            // Get team invoices from those competitions
+            foreach (var compId in teamCompetitionIds)
+            {
+                if (hubsByCompetition.TryGetValue(compId, out var hub)
+                    && competitionLookup.TryGetValue(compId, out var comp))
+                {
+                    var invoices = GetInvoicesFromHub(hub, comp);
+                    foreach (var inv in invoices)
+                    {
+                        if (inv.MemberId.StartsWith("team-")
+                            && int.TryParse(inv.MemberId.Substring(5), out var teamId)
+                            && clubTeamIds.Contains(teamId))
+                        {
+                            result.Add(inv);
+                        }
+                    }
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Get individual invoices for club members across all competitions.
+        /// Looks up all members with primaryClubId matching the club, then finds their invoices.
+        /// </summary>
+        private List<InvoiceInfo> GetMemberInvoices(
+            List<IContent> competitions,
+            Dictionary<int, IContent> hubsByCompetition,
+            int clubId)
+        {
+            var result = new List<InvoiceInfo>();
+
+            // Build set of member IDs belonging to this club
+            var clubMemberIds = new HashSet<string>();
+            int pageIndex = 0;
+            const int pageSize = 500;
+            long totalRecords;
+            do
+            {
+                var members = _memberService.GetAll(pageIndex, pageSize, out totalRecords);
+                foreach (var member in members)
+                {
+                    var primaryClubIdStr = member.GetValue<string>("primaryClubId");
+                    if (!string.IsNullOrEmpty(primaryClubIdStr)
+                        && int.TryParse(primaryClubIdStr, out var memberClubId)
+                        && memberClubId == clubId)
+                    {
+                        clubMemberIds.Add(member.Id.ToString());
+                    }
+                }
+                pageIndex++;
+            } while (pageIndex * pageSize < totalRecords);
+
+            if (clubMemberIds.Count == 0) return result;
+
+            _logger.LogInformation("Found {MemberCount} members for club {ClubId}", clubMemberIds.Count, clubId);
+
+            // Get individual invoices (non-team) for these members from all competitions
+            foreach (var competition in competitions)
+            {
+                if (hubsByCompetition.TryGetValue(competition.Id, out var hub))
+                {
+                    var invoices = GetInvoicesFromHub(hub, competition);
+                    foreach (var inv in invoices)
+                    {
+                        // Skip team invoices, only include individual member invoices
+                        if (inv.MemberId.StartsWith("team-")) continue;
+                        if (clubMemberIds.Contains(inv.MemberId))
+                        {
+                            result.Add(inv);
+                        }
+                    }
+                }
+            }
+
+            return result;
         }
 
         /// <summary>
