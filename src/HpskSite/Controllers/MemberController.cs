@@ -1438,8 +1438,8 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetMyCompetitionRegistrations(
             int? year = null,
-            string? competitionStatus = null,  // "upcoming", "past", "all"
-            string? paymentStatus = null,      // "paid", "pending", "no_invoice", "all"
+            string? competitionStatus = null,
+            string? paymentStatus = null,
             string? searchText = null)
         {
             try
@@ -1453,19 +1453,13 @@ namespace HpskSite.Controllers
 
                 var memberIdInt = int.Parse(member.Id);
 
-                // PHASE 4: Check cache first (only for unfiltered requests to maximize cache hits)
-                // Cache key includes member ID only (filters applied after cache retrieval)
+                // PHASE 4: Check cache first — cache stores unfiltered results, filters applied after
                 var baseCacheKey = $"member_competitions_{memberIdInt}";
-
-                // Only use cache for base query (no filters) - filters are applied to cached data
-                if (!year.HasValue && string.IsNullOrEmpty(competitionStatus) &&
-                    string.IsNullOrEmpty(paymentStatus) && string.IsNullOrEmpty(searchText))
+                var cachedResult = _appCaches.RuntimeCache.GetCacheItem<List<CompetitionRegistrationDto>>(baseCacheKey);
+                if (cachedResult != null)
                 {
-                    var cachedResult = _appCaches.RuntimeCache.GetCacheItem<List<object>>(baseCacheKey);
-                    if (cachedResult != null)
-                    {
-                        return Json(new { success = true, registrations = cachedResult });
-                    }
+                    var filtered = ApplyCompetitionFilters(cachedResult, year, competitionStatus, paymentStatus, searchText);
+                    return Json(new { success = true, registrations = filtered });
                 }
 
                 // 2. PHASE 1 OPTIMIZATION: Direct traversal from competitions hub
@@ -1560,7 +1554,7 @@ namespace HpskSite.Controllers
                 var invoiceLookup = BuildInvoiceLookup(competitionIds);
 
                 // 5. Map to response objects with competition details, payment status
-                var results = new List<object>();
+                var results = new List<CompetitionRegistrationDto>();
 
                 foreach (var reg in myRegistrations)
                 {
@@ -1579,29 +1573,38 @@ namespace HpskSite.Controllers
                         var classes = ParseShootingClasses(shootingClassesJson);
 
                         // Determine competition status
-                        var competitionDate = competition.GetValue<DateTime?>("startDate") ?? DateTime.MinValue;
+                        var competitionDate = competition.GetValue<DateTime?>("competitionDate") ?? DateTime.MinValue;
                         var status = competitionDate > DateTime.Now ? "upcoming" : "past";
+
+                        // Determine if competition is payable (has fee + Swish)
+                        var compFeeStr = competition.GetValue<string>("registrationFee") ?? "0";
+                        decimal.TryParse(compFeeStr, System.Globalization.NumberStyles.Any,
+                            System.Globalization.CultureInfo.InvariantCulture, out var compFee);
+                        var compSwish = competition.GetValue<string>("swishNumber") ?? "";
+                        var isPayable = compFee > 0 && !string.IsNullOrWhiteSpace(compSwish);
 
                         // Get payment status from batch-loaded invoice lookup
                         var paymentInfo = invoiceLookup.TryGetValue((competitionId, memberIdInt), out var invoice)
                             ? invoice
-                            : ("no_invoice", 0m, false, (int?)null);
+                            : (isPayable ? "unpaid" : "no_invoice", isPayable ? compFee : 0m, false, (int?)null);
 
-                        results.Add(new
+                        results.Add(new CompetitionRegistrationDto
                         {
-                            registrationId = reg.Id,
-                            competitionId = competitionId,
-                            competitionName = competition.Name ?? "Unknown",
-                            competitionDate = competitionDate,
-                            competitionType = competition.GetValue<string>("competitionType") ?? "Precision",
-                            shootingClasses = classes,
-                            competitionStatus = status,
-                            paymentStatus = paymentInfo.Item1,
-                            paymentAmount = paymentInfo.Item2,
-                            hasInvoice = paymentInfo.Item3,
-                            invoiceId = paymentInfo.Item4,
-                            canUnregister = CanUnregister(competitionDate, paymentInfo.Item1),
-                            registrationDate = reg.CreateDate
+                            RegistrationId = reg.Id,
+                            CompetitionId = competitionId,
+                            CompetitionName = competition.Name ?? "Unknown",
+                            CompetitionDate = competitionDate,
+                            CompetitionType = competition.GetValue<string>("competitionType") ?? "Precision",
+                            ShootingClasses = classes,
+                            CompetitionStatus = status,
+                            PaymentStatus = paymentInfo.Item1,
+                            PaymentAmount = paymentInfo.Item2,
+                            HasInvoice = paymentInfo.Item3,
+                            InvoiceId = paymentInfo.Item4,
+                            IsPayable = isPayable,
+                            RegistrationFee = compFee,
+                            CanUnregister = CanUnregister(competitionDate, paymentInfo.Item1),
+                            RegistrationDate = reg.CreateDate
                         });
                     }
                     catch (Exception ex)
@@ -1612,55 +1615,56 @@ namespace HpskSite.Controllers
                     }
                 }
 
-                // PHASE 4: Cache the unfiltered results for 30 seconds
-                // Only cache if no filters were applied (to maximize cache hits)
-                if (!year.HasValue && string.IsNullOrEmpty(competitionStatus) &&
-                    string.IsNullOrEmpty(paymentStatus) && string.IsNullOrEmpty(searchText))
-                {
-                    _appCaches.RuntimeCache.InsertCacheItem(baseCacheKey, () => results, TimeSpan.FromSeconds(30));
-                }
+                // Cache unfiltered results for 30 seconds
+                _appCaches.RuntimeCache.InsertCacheItem(baseCacheKey, () => results, TimeSpan.FromSeconds(30));
 
-                // 6. Apply filters
-                if (year.HasValue)
-                {
-                    results = results.Where(r =>
-                    {
-                        var date = (DateTime)((dynamic)r).competitionDate;
-                        return date.Year == year.Value;
-                    }).ToList<object>();
-                }
-
-                if (!string.IsNullOrEmpty(competitionStatus) && competitionStatus != "all")
-                {
-                    results = results.Where(r => ((dynamic)r).competitionStatus == competitionStatus).ToList<object>();
-                }
-
-                if (!string.IsNullOrEmpty(paymentStatus) && paymentStatus != "all")
-                {
-                    results = results.Where(r => ((dynamic)r).paymentStatus == paymentStatus).ToList<object>();
-                }
-
-                if (!string.IsNullOrEmpty(searchText))
-                {
-                    results = results.Where(r =>
-                    {
-                        var name = ((dynamic)r).competitionName as string ?? "";
-                        return name.Contains(searchText, StringComparison.OrdinalIgnoreCase);
-                    }).ToList<object>();
-                }
-
-                // 5. Sort by date (upcoming first, then past)
-                results = results.OrderByDescending(r => ((dynamic)r).competitionStatus == "upcoming")
-                                 .ThenBy(r => ((dynamic)r).competitionDate)
-                                 .ToList<object>();
-
-                return Json(new { success = true, registrations = results });
+                // Apply filters and return
+                var filteredResults = ApplyCompetitionFilters(results, year, competitionStatus, paymentStatus, searchText);
+                return Json(new { success = true, registrations = filteredResults });
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Error in GetMyCompetitionRegistrations: {ex.Message}");
                 return Json(new { success = false, message = "Error loading registrations: " + ex.Message });
             }
+        }
+
+        private List<CompetitionRegistrationDto> ApplyCompetitionFilters(
+            List<CompetitionRegistrationDto> results, int? year, string? competitionStatus, string? paymentStatus, string? searchText)
+        {
+            IEnumerable<CompetitionRegistrationDto> filtered = results;
+
+            if (year.HasValue)
+            {
+                filtered = filtered.Where(r => r.CompetitionDate.Year == year.Value);
+            }
+
+            if (!string.IsNullOrEmpty(competitionStatus) && competitionStatus != "all")
+            {
+                filtered = filtered.Where(r => r.CompetitionStatus == competitionStatus);
+            }
+
+            if (!string.IsNullOrEmpty(paymentStatus) && paymentStatus != "all")
+            {
+                if (paymentStatus == "not_paid")
+                {
+                    filtered = filtered.Where(r => r.PaymentStatus == "pending" || r.PaymentStatus == "unpaid");
+                }
+                else
+                {
+                    filtered = filtered.Where(r => r.PaymentStatus == paymentStatus);
+                }
+            }
+
+            if (!string.IsNullOrEmpty(searchText))
+            {
+                filtered = filtered.Where(r => (r.CompetitionName ?? "").Contains(searchText, StringComparison.OrdinalIgnoreCase));
+            }
+
+            return filtered
+                .OrderByDescending(r => r.CompetitionStatus == "upcoming")
+                .ThenBy(r => r.CompetitionDate)
+                .ToList();
         }
 
         /// <summary>
@@ -3153,5 +3157,24 @@ namespace HpskSite.Controllers
 
         #endregion
 
+    }
+
+    public class CompetitionRegistrationDto
+    {
+        public int RegistrationId { get; set; }
+        public int CompetitionId { get; set; }
+        public string CompetitionName { get; set; } = "";
+        public DateTime CompetitionDate { get; set; }
+        public string CompetitionType { get; set; } = "Precision";
+        public List<string> ShootingClasses { get; set; } = new();
+        public string CompetitionStatus { get; set; } = "";
+        public string PaymentStatus { get; set; } = "";
+        public decimal PaymentAmount { get; set; }
+        public bool HasInvoice { get; set; }
+        public int? InvoiceId { get; set; }
+        public bool IsPayable { get; set; }
+        public decimal RegistrationFee { get; set; }
+        public bool CanUnregister { get; set; }
+        public DateTime RegistrationDate { get; set; }
     }
 }
