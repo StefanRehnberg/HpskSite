@@ -1,0 +1,644 @@
+@using HpskSite.Models
+@using static HpskSite.Models.Federations
+@using System.Text.Json
+@using System.Text.Encodings.Web
+@* Stafett (Relay) Registration Modal *@
+@* Included from Competition.cshtml when allowStafett is true *@
+
+<div class="modal fade" id="stafettRegistrationModal" tabindex="-1" aria-labelledby="stafettRegistrationModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="stafettRegistrationModalLabel">
+                    <i class="bi bi-people-fill me-2"></i>Stafettanmälan
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <ul class="nav nav-tabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#stafettTeamsListTab" type="button" role="tab">
+                            <i class="bi bi-list-ul me-1"></i>Stafettlag
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#createStafettTab" type="button" role="tab">
+                            <i class="bi bi-plus-circle me-1"></i>Skapa stafettlag
+                        </button>
+                    </li>
+                </ul>
+
+                <div class="tab-content pt-3">
+                    @* ====== Tab 1: Existing Stafett Teams ====== *@
+                    <div class="tab-pane fade show active" id="stafettTeamsListTab" role="tabpanel">
+                        <div id="existingStafettTeamsList">
+                            <div class="text-center py-3">
+                                <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+                                <span class="ms-2">Laddar stafettlag...</span>
+                            </div>
+                        </div>
+                        <div id="stafettTeamsListMessage" class="d-none mt-2"></div>
+                    </div>
+
+                    @* ====== Tab 2: Create Stafett Team ====== *@
+                    <div class="tab-pane fade" id="createStafettTab" role="tabpanel">
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="stafettRegionSelect" class="form-label">Krets</label>
+                                <select class="form-select" id="stafettRegionSelect">
+                                    <option value="">Alla kretsar</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="stafettClubSelect" class="form-label">Förening</label>
+                                <select class="form-select" id="stafettClubSelect">
+                                    <option value="">Välj förening...</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="stafettTeamName" class="form-label">Lagnamn</label>
+                            <input type="text" class="form-control" id="stafettTeamName" placeholder="T.ex. 'Klubbens Stafett A'" maxlength="100">
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="stafettClassSelect" class="form-label">Stafettklass</label>
+                            <select class="form-select" id="stafettClassSelect">
+                                <option value="">Välj stafettklass...</option>
+                            </select>
+                            <div class="form-text" id="stafettClassInfo"></div>
+                        </div>
+
+                        <div id="stafettMemberSelectionArea" style="display:none;">
+                            <label class="form-label">Klubbmedlemmar</label>
+                            <p class="text-muted small mb-2">Stafettdeltagare behöver inte vara individuellt anmälda i tävlingen.</p>
+                            <div style="max-height: 280px; overflow-y: auto; border: 1px solid var(--bs-border-color); border-radius: 0.375rem;">
+                                <table class="table table-sm table-hover mb-0" id="stafettMembersTable">
+                                    <thead class="sticky-top" style="background: var(--bs-body-bg);">
+                                        <tr>
+                                            <th style="width:40px;"></th>
+                                            <th>Namn</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="stafettMembersTableBody">
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div class="form-text mt-1" id="stafettMemberCountInfo"></div>
+                        </div>
+
+                        <div id="createStafettError" class="alert alert-danger d-none mt-3"></div>
+                        <div id="createStafettSuccess" class="alert alert-success d-none mt-3"></div>
+
+                        <button type="button" class="btn btn-primary w-100 mt-3" id="createStafettBtn">
+                            <i class="bi bi-people-fill me-1"></i>Skapa stafettlag
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@{
+    var stafettRegionOptions = new List<object>();
+    foreach (Federations.RegionalFederations rf in Enum.GetValues(typeof(Federations.RegionalFederations)))
+    {
+        stafettRegionOptions.Add(new { code = rf.ToString(), name = rf.GetDescription() });
+    }
+    var stafettJsonOpts = new JsonSerializerOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+    var stafettRegionOptionsJson = JsonSerializer.Serialize(stafettRegionOptions, stafettJsonOpts);
+}
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const stafettCompetitionId = @(ViewData["CompetitionId"]);
+    const stafettCurrentMemberClubId = @(ViewData["CurrentMemberClubId"] ?? 0);
+    const stafettCurrentMemberClubName = '@Html.Raw(((string)(ViewData["CurrentMemberClubName"] ?? "")).Replace("'", "\\'"))';
+    const stafettCurrentMemberId = @(ViewData["CurrentMemberId"] ?? 0);
+    const stafettRegRole = '@(ViewData["RegRole"] ?? "member")';
+    const stafettRegRegionCode = '@(ViewData["RegRegionCode"] ?? "")';
+    const stafettAllClubsWithRegions = @Html.Raw((string)(ViewData["ClubsWithRegionsJson"] ?? "[]"));
+    const stafettAllRegions = @Html.Raw(stafettRegionOptionsJson);
+    const stafettRegistrationFee = @(ViewData["StafettRegistrationFee"] ?? 0);
+    const stafettHasSwish = @((ViewData["StafettHasSwish"] as bool? ?? false).ToString().ToLower());
+
+    const stafettIsAdmin = stafettRegRole === 'admin';
+    const stafettIsRegionalAdmin = stafettRegRole === 'regionalAdmin';
+    const stafettIsMember = !stafettIsAdmin && !stafettIsRegionalAdmin;
+
+    let stafettTeamClasses = [];
+    let stafettClubMembers = [];
+    let stafettSelectedMembers = new Set();
+
+    // ==================== Region/Club dropdowns ====================
+    const stafettRegionSelect = document.getElementById('stafettRegionSelect');
+    const stafettClubSelect = document.getElementById('stafettClubSelect');
+
+    function stafettInitDropdowns() {
+        stafettRegionSelect.innerHTML = '<option value="">Alla kretsar</option>';
+        stafettAllRegions.forEach(r => {
+            const opt = document.createElement('option');
+            opt.value = r.code;
+            opt.textContent = r.name;
+            stafettRegionSelect.appendChild(opt);
+        });
+
+        if (stafettIsMember) {
+            stafettRegionSelect.value = stafettRegRegionCode;
+            stafettRegionSelect.disabled = true;
+            stafettPopulateClubDropdown(stafettRegRegionCode);
+            stafettClubSelect.value = stafettCurrentMemberClubId.toString();
+            stafettClubSelect.disabled = true;
+        } else if (stafettIsRegionalAdmin) {
+            stafettRegionSelect.value = stafettRegRegionCode;
+            stafettRegionSelect.disabled = true;
+            stafettPopulateClubDropdown(stafettRegRegionCode);
+            if (stafettCurrentMemberClubId > 0) stafettClubSelect.value = stafettCurrentMemberClubId.toString();
+        } else {
+            stafettPopulateClubDropdown('');
+        }
+    }
+
+    function stafettPopulateClubDropdown(regionFilter) {
+        const currentVal = stafettClubSelect.value;
+        stafettClubSelect.innerHTML = '<option value="">Välj förening...</option>';
+
+        if (stafettIsMember && stafettCurrentMemberClubId > 0) {
+            const opt = document.createElement('option');
+            opt.value = stafettCurrentMemberClubId;
+            opt.textContent = stafettCurrentMemberClubName;
+            stafettClubSelect.appendChild(opt);
+            stafettClubSelect.value = stafettCurrentMemberClubId.toString();
+            return;
+        }
+
+        let clubs = stafettAllClubsWithRegions;
+        if (regionFilter) clubs = clubs.filter(c => c.region === regionFilter);
+        clubs.forEach(c => {
+            const opt = document.createElement('option');
+            opt.value = c.id;
+            opt.textContent = c.name;
+            stafettClubSelect.appendChild(opt);
+        });
+
+        if (currentVal && stafettClubSelect.querySelector(`option[value="${currentVal}"]`)) {
+            stafettClubSelect.value = currentVal;
+        }
+    }
+
+    stafettRegionSelect.addEventListener('change', function() {
+        stafettPopulateClubDropdown(this.value);
+        stafettOnClubChanged();
+    });
+    stafettClubSelect.addEventListener('change', stafettOnClubChanged);
+
+    async function stafettOnClubChanged() {
+        stafettClearAllAlerts();
+        const clubId = stafettClubSelect.value;
+        const memberArea = document.getElementById('stafettMemberSelectionArea');
+        stafettSelectedMembers.clear();
+        stafettClubMembers = [];
+
+        if (!clubId) {
+            memberArea.style.display = 'none';
+            stafettUpdateMemberCountInfo();
+            return;
+        }
+        memberArea.style.display = 'block';
+        await stafettLoadClubMembers(parseInt(clubId));
+    }
+
+    // ==================== Modal init ====================
+    let stafettSuccessTimer = null;
+    function stafettClearAllAlerts() {
+        if (stafettSuccessTimer) { clearTimeout(stafettSuccessTimer); stafettSuccessTimer = null; }
+        document.querySelectorAll('#stafettRegistrationModal .alert, #stafettTeamsListMessage').forEach(el => {
+            el.classList.add('d-none');
+            el.textContent = '';
+        });
+    }
+    function stafettShowSuccessAlert(el, message) {
+        el.textContent = message;
+        el.classList.remove('d-none');
+        if (stafettSuccessTimer) clearTimeout(stafettSuccessTimer);
+        stafettSuccessTimer = setTimeout(() => { el.classList.add('d-none'); stafettSuccessTimer = null; }, 3000);
+    }
+
+    const stafettModal = document.getElementById('stafettRegistrationModal');
+    const stafettCreateTabEl = document.getElementById('createStafettTab');
+    const stafettCreateTabOriginalHtml = stafettCreateTabEl.innerHTML;
+
+    stafettModal.addEventListener('show.bs.modal', () => {
+        // Restore create tab if it was replaced by payment options
+        if (!document.getElementById('createStafettBtn')) {
+            stafettCreateTabEl.innerHTML = stafettCreateTabOriginalHtml;
+            stafettRebindCreateTab();
+        }
+        stafettSelectedMembers.clear();
+        stafettClubMembers = [];
+        document.getElementById('stafettMemberSelectionArea').style.display = 'none';
+        document.getElementById('stafettMembersTableBody').innerHTML = '';
+        stafettClearAllAlerts();
+        stafettInitDropdowns();
+        stafettLoadTeamClasses();
+        stafettLoadExistingTeams();
+        if (stafettClubSelect.value) stafettOnClubChanged();
+    });
+
+    stafettModal.querySelectorAll('[data-bs-toggle="tab"]').forEach(tab => {
+        tab.addEventListener('show.bs.tab', stafettClearAllAlerts);
+    });
+
+    async function stafettLoadTeamClasses() {
+        try {
+            const resp = await fetch(`/umbraco/surface/CompetitionTeam/GetTeamsForCompetition?competitionId=${stafettCompetitionId}`);
+            const data = await resp.json();
+            if (!data.success) return;
+            stafettTeamClasses = data.stafettTeamClasses || [];
+            const select = document.getElementById('stafettClassSelect');
+            select.innerHTML = '<option value="">Välj stafettklass...</option>';
+            stafettTeamClasses.forEach(tc => {
+                const opt = document.createElement('option');
+                opt.value = tc.teamClass;
+                opt.textContent = `${tc.teamClass} (${tc.coreMembers} deltagare, ${tc.description})`;
+                select.appendChild(opt);
+            });
+        } catch(e) {
+            console.error('Error loading stafett classes:', e);
+        }
+    }
+
+    function stafettBindClassSelect() {
+        document.getElementById('stafettClassSelect').addEventListener('change', function() {
+            stafettClearAllAlerts();
+            stafettClearValidation();
+            const teamClass = this.value;
+            const info = document.getElementById('stafettClassInfo');
+            if (!teamClass) {
+                info.textContent = '';
+            } else {
+                const tc = stafettTeamClasses.find(t => t.teamClass === teamClass);
+                if (tc) {
+                    info.textContent = `${tc.coreMembers} deltagare. ${tc.description}`;
+                }
+            }
+            stafettSelectedMembers.clear();
+            stafettSelectedSpare = null;
+            stafettRenderMembersTable();
+        });
+    }
+    stafettBindClassSelect();
+
+    // ==================== Load club members (ALL members, not just registered) ====================
+    async function stafettLoadClubMembers(clubId) {
+        const tbody = document.getElementById('stafettMembersTableBody');
+        tbody.innerHTML = '<tr><td colspan="3" class="text-center"><div class="spinner-border spinner-border-sm"></div></td></tr>';
+        try {
+            const resp = await fetch(`/umbraco/surface/CompetitionTeam/GetClubMembersForRelay?competitionId=${stafettCompetitionId}&clubId=${clubId}`);
+            const data = await resp.json();
+            if (!data.success || !data.members?.length) {
+                tbody.innerHTML = '<tr><td colspan="3" class="text-muted small">Inga medlemmar hittades för denna förening.</td></tr>';
+                stafettClubMembers = [];
+                stafettUpdateMemberCountInfo();
+                return;
+            }
+            stafettClubMembers = data.members;
+            stafettRenderMembersTable();
+        } catch(e) {
+            tbody.innerHTML = '<tr><td colspan="3" class="text-danger small">Fel vid laddning.</td></tr>';
+        }
+    }
+
+    function stafettRenderMembersTable() {
+        const tbody = document.getElementById('stafettMembersTableBody');
+        const teamClass = document.getElementById('stafettClassSelect').value;
+
+        if (!stafettClubMembers.length) {
+            tbody.innerHTML = '<tr><td colspan="2" class="text-muted small">Inga medlemmar.</td></tr>';
+            stafettUpdateMemberCountInfo();
+            return;
+        }
+
+        tbody.innerHTML = '';
+        stafettClubMembers.forEach(m => {
+            const row = document.createElement('tr');
+            const isSelected = stafettSelectedMembers.has(m.memberId);
+
+            const tdCheck = document.createElement('td');
+            const cb = document.createElement('input');
+            cb.type = 'checkbox'; cb.className = 'form-check-input'; cb.value = m.memberId;
+            cb.checked = isSelected; cb.disabled = !teamClass;
+            tdCheck.appendChild(cb);
+            row.appendChild(tdCheck);
+
+            const tdName = document.createElement('td');
+            tdName.textContent = m.name;
+            row.appendChild(tdName);
+
+            cb.addEventListener('change', function() {
+                if (this.checked) stafettSelectedMembers.add(m.memberId);
+                else stafettSelectedMembers.delete(m.memberId);
+                stafettUpdateMemberCountInfo();
+            });
+
+            tbody.appendChild(row);
+        });
+        stafettUpdateMemberCountInfo();
+    }
+
+    // ==================== Validation ====================
+    function stafettClearValidation() {
+        document.querySelectorAll('#createStafettTab .is-invalid').forEach(el => el.classList.remove('is-invalid'));
+        document.querySelectorAll('#createStafettTab .invalid-feedback').forEach(el => el.remove());
+        document.getElementById('createStafettError').classList.add('d-none');
+    }
+
+    function stafettMarkInvalid(el, msg) {
+        el.classList.add('is-invalid');
+        let fb = el.parentElement.querySelector('.invalid-feedback');
+        if (!fb) {
+            fb = document.createElement('div');
+            fb.className = 'invalid-feedback';
+            el.after(fb);
+        }
+        fb.textContent = msg;
+    }
+
+    function stafettUpdateMemberCountInfo() {
+        const teamClass = document.getElementById('stafettClassSelect').value;
+        const tc = teamClass ? stafettTeamClasses.find(t => t.teamClass === teamClass) : null;
+        const countInfo = document.getElementById('stafettMemberCountInfo');
+        if (!tc) { countInfo.textContent = ''; return; }
+        const total = stafettSelectedMembers.size;
+        countInfo.textContent = total > 0
+            ? `Valda: ${total} av ${tc.coreMembers}`
+            : `Välj ${tc.coreMembers} deltagare`;
+    }
+
+    function stafettValidateCreateForm() {
+        stafettClearValidation();
+        let valid = true;
+        const classEl = document.getElementById('stafettClassSelect');
+        const nameEl = document.getElementById('stafettTeamName');
+        const teamClass = classEl.value;
+        const teamName = nameEl.value.trim();
+        const tc = teamClass ? stafettTeamClasses.find(t => t.teamClass === teamClass) : null;
+
+        if (!teamName) { stafettMarkInvalid(nameEl, 'Ange ett lagnamn'); valid = false; }
+        if (!teamClass || !tc) { stafettMarkInvalid(classEl, 'Välj en stafettklass'); valid = false; }
+
+        if (tc) {
+            const total = stafettSelectedMembers.size;
+            if (total !== tc.coreMembers) {
+                const errorEl = document.getElementById('createStafettError');
+                errorEl.textContent = `Välj exakt ${tc.coreMembers} deltagare (${total} valda).`;
+                errorEl.classList.remove('d-none');
+                valid = false;
+            }
+        }
+        if (!valid) {
+            const firstInvalid = document.querySelector('#createStafettTab .is-invalid')
+                || document.querySelector('#createStafettError:not(.d-none)');
+            if (firstInvalid) firstInvalid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+        return valid;
+    }
+
+    function stafettBindCreateTabEvents() {
+        document.getElementById('stafettTeamName').addEventListener('input', () => { stafettClearValidation(); });
+        document.getElementById('createStafettBtn').addEventListener('click', stafettHandleCreate);
+    }
+    stafettBindCreateTabEvents();
+
+    function stafettRebindCreateTab() {
+        stafettBindClassSelect();
+        stafettBindCreateTabEvents();
+        stafettSelectedMembers.clear();
+        stafettClubMembers = [];
+        document.getElementById('stafettMemberSelectionArea').style.display = 'none';
+    }
+
+    // ==================== Create stafett team ====================
+    async function stafettHandleCreate() {
+        if (!stafettValidateCreateForm()) return;
+        const btn = document.getElementById('createStafettBtn'); btn.disabled = true;
+        const errorEl = document.getElementById('createStafettError');
+        const successEl = document.getElementById('createStafettSuccess');
+        errorEl.classList.add('d-none'); successEl.classList.add('d-none');
+
+        try {
+            const resp = await fetch('/umbraco/surface/CompetitionTeam/CreateStafettTeam', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    competitionId: stafettCompetitionId,
+                    teamName: document.getElementById('stafettTeamName').value.trim(),
+                    teamClass: document.getElementById('stafettClassSelect').value,
+                    clubId: parseInt(stafettClubSelect.value),
+                    memberIds: Array.from(stafettSelectedMembers)
+                })
+            });
+            const data = await resp.json();
+            if (data.success) {
+                stafettShowSuccessAlert(successEl, data.message);
+                document.getElementById('stafettTeamName').value = '';
+                document.getElementById('stafettClassSelect').value = '';
+                document.getElementById('stafettClassInfo').textContent = '';
+                stafettSelectedMembers.clear();
+                btn.disabled = false;
+                if (stafettClubSelect.value) await stafettLoadClubMembers(parseInt(stafettClubSelect.value));
+                stafettLoadExistingTeams();
+                // Show payment options if configured
+                if (stafettHasSwish && data.teamId) {
+                    stafettShowPaymentOptions(data.teamId);
+                }
+            } else {
+                errorEl.textContent = data.message; errorEl.classList.remove('d-none'); btn.disabled = false;
+            }
+        } catch(e) {
+            errorEl.textContent = 'Ett nätverksfel uppstod.'; errorEl.classList.remove('d-none'); btn.disabled = false;
+        }
+    }
+
+    // ==================== Tab 1: List existing stafett teams ====================
+    async function stafettLoadExistingTeams() {
+        const container = document.getElementById('existingStafettTeamsList');
+        try {
+            const resp = await fetch(`/umbraco/surface/CompetitionTeam/GetTeamsForCompetition?competitionId=${stafettCompetitionId}`);
+            const data = await resp.json();
+
+            // Only show relay teams
+            const relayTeams = (data.teams || []).filter(t => t.isRelay);
+
+            if (!data.success || !relayTeams.length) {
+                container.innerHTML = '<div class="text-muted text-center py-3">Inga stafettlag skapade ännu.</div>';
+                return;
+            }
+
+            let html = '';
+            const teamsByClass = {};
+            relayTeams.forEach(t => {
+                if (!teamsByClass[t.teamClass]) teamsByClass[t.teamClass] = [];
+                teamsByClass[t.teamClass].push(t);
+            });
+
+            for (const [cls, teams] of Object.entries(teamsByClass)) {
+                const tcInfo = (data.stafettTeamClasses || []).find(tc => tc.teamClass === cls);
+                const maxTotal = tcInfo ? tcInfo.coreMembers + tcInfo.maxSpares : 4;
+
+                html += `<h6 class="mt-3 mb-2">${cls}</h6>`;
+                teams.forEach(team => {
+                    const memberCount = team.members?.length || 0;
+
+                    html += `<div class="card mb-2"><div class="card-body py-2 px-3">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <strong>${team.teamName}</strong>
+                                <span class="text-muted small ms-2">${team.clubName}</span>
+                                <div class="small mt-1">`;
+
+                    if (team.members) {
+                        team.members.forEach(m => {
+                            html += `<span class="d-block">${m.name}</span>`;
+                        });
+                    }
+
+                    html += `</div></div><div class="d-flex flex-column align-items-end">
+                        <span class="badge bg-info mb-2">${memberCount}/${maxTotal}</span>
+                        <div>
+                            <button class="btn btn-outline-danger btn-sm stafett-delete-team-btn" data-team-id="${team.id}" data-team-name="${team.teamName.replace(/"/g, '&quot;')}" title="Ta bort">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
+                    </div></div></div></div>`;
+                });
+            }
+
+            container.innerHTML = html;
+
+            container.querySelectorAll('.stafett-delete-team-btn').forEach(btn => {
+                btn.addEventListener('click', async function() {
+                    const teamId = parseInt(this.dataset.teamId);
+                    const teamName = this.dataset.teamName;
+                    if (!confirm(`Vill du verkligen ta bort stafettlaget "${teamName}"?`)) return;
+                    await stafettDeleteTeam(teamId);
+                });
+            });
+
+        } catch(e) {
+            container.innerHTML = '<div class="text-danger small">Fel vid laddning av stafettlag.</div>';
+        }
+    }
+
+    async function stafettDeleteTeam(teamId) {
+        const msgEl = document.getElementById('stafettTeamsListMessage');
+        msgEl.classList.add('d-none');
+        try {
+            const resp = await fetch('/umbraco/surface/CompetitionTeam/DeleteTeam', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ teamId })
+            });
+            const data = await resp.json();
+            if (data.success) {
+                msgEl.className = 'alert alert-success mt-2';
+                stafettShowSuccessAlert(msgEl, data.message);
+                stafettLoadExistingTeams();
+            } else {
+                msgEl.className = 'alert alert-danger mt-2';
+                msgEl.textContent = data.message;
+                msgEl.classList.remove('d-none');
+            }
+        } catch(e) {
+            msgEl.className = 'alert alert-danger mt-2';
+            msgEl.textContent = 'Ett nätverksfel uppstod.';
+        }
+    }
+
+    // ==================== Payment Options ====================
+    function stafettShowPaymentOptions(teamId) {
+        const createTab = document.getElementById('createStafettTab');
+        createTab.innerHTML = `
+            <div class="text-center py-4">
+                <div class="text-success mb-3">
+                    <i class="bi bi-check-circle" style="font-size: 4rem;"></i>
+                </div>
+                <h4 class="mb-3">Stafettlaget har skapats!</h4>
+                <div class="alert alert-info mt-4 text-start">
+                    <h5 class="mb-3"><i class="bi bi-wallet2"></i> Betala stafettavgift</h5>
+                    <p class="mb-3">Slutför stafettanmälan genom att betala avgiften (${stafettRegistrationFee} kr) med Swish.</p>
+                    <div class="d-flex flex-column gap-2 align-items-center">
+                        <button type="button" class="btn btn-primary w-75" id="stafettPayNowBtn">
+                            <i class="bi bi-qr-code me-1"></i>Betala nu med Swish
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary w-75" data-bs-dismiss="modal">
+                            <i class="bi bi-clock me-1"></i>Betala senare
+                        </button>
+                    </div>
+                </div>
+            </div>`;
+        document.getElementById('stafettPayNowBtn').addEventListener('click', () => showStafettSwishQR(teamId));
+    }
+
+    // ==================== Swish QR Code ====================
+    function showStafettSwishQR(teamId) {
+        const swishModalEl = document.getElementById('swishPaymentModal');
+        if (!swishModalEl) return;
+
+        // Hide stafett registration modal first
+        bootstrap.Modal.getOrCreateInstance(stafettModal).hide();
+
+        const modalBody = document.getElementById('swishPaymentModalBody');
+        modalBody.innerHTML = `
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Laddar QR-kod...</span>
+            </div>
+            <p class="mt-2">Laddar betalningsinformation...</p>
+        `;
+
+        setTimeout(() => {
+            bootstrap.Modal.getOrCreateInstance(swishModalEl).show();
+        }, 200);
+
+        fetch(`/umbraco/surface/Swish/GenerateTeamPaymentQR?competitionId=${stafettCompetitionId}&teamId=${teamId}`)
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    modalBody.innerHTML = `
+                        <div class="mb-3">
+                            <img src="${data.qrCode}" alt="Swish QR Code" style="max-width: 300px; width: 100%;" class="img-fluid">
+                        </div>
+                        <div class="alert alert-info text-start mb-0">
+                            <h6 class="mb-2"><strong><i class="bi bi-info-circle"></i> Betalningsinformation</strong></h6>
+                            <p class="mb-1"><strong>Lag:</strong> ${data.teamName}</p>
+                            <p class="mb-1"><strong>Klass:</strong> ${data.teamClass}</p>
+                            <p class="mb-1"><strong>Förening:</strong> ${data.clubName}</p>
+                            <p class="mb-1"><strong>Belopp:</strong> ${data.amount} kr</p>
+                            <p class="mb-0"><strong>Fakturanummer:</strong> ${data.invoiceNumber}</p>
+                        </div>
+                        <p class="text-muted small mt-3 mb-0">
+                            <i class="bi bi-phone"></i> Scanna QR-koden med Swish-appen för att betala
+                        </p>
+                    `;
+                } else {
+                    modalBody.innerHTML = `
+                        <div class="alert alert-danger mb-0">
+                            <i class="bi bi-exclamation-triangle"></i> <strong>Fel</strong><br>${data.message}
+                        </div>
+                    `;
+                }
+            })
+            .catch(() => {
+                modalBody.innerHTML = `
+                    <div class="alert alert-danger mb-0">
+                        <i class="bi bi-exclamation-triangle"></i> Ett nätverksfel uppstod.
+                    </div>
+                `;
+            });
+    }
+});
+</script>

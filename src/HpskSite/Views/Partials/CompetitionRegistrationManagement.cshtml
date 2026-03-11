@@ -419,7 +419,8 @@ function displayCompetitionRegistrations() {
                 // sc should be an object with 'class', 'className', and 'startPreference' properties
                 const classId = sc.class || sc.className || '';
                 const normalizedClass = normalizeShootingClass(classId);
-                return `<span class="badge bg-primary me-1 mb-1" style="font-size: 0.85em;">${normalizedClass}</span>`;
+                const displayClass = window.formatAgeSpan ? window.formatAgeSpan(normalizedClass) : normalizedClass;
+                return `<span class="badge bg-primary me-1 mb-1" style="font-size: 0.85em;">${displayClass}</span>`;
             }).join('');
         }
 

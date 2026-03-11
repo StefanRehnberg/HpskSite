@@ -40,7 +40,7 @@ namespace HpskSite.Services
 
         public async Task<(bool success, string message, int? teamId)> CreateTeamAsync(
             int competitionId, string teamName, string teamClass, int clubId,
-            int[] memberIds, int? spareId, int createdByMemberId)
+            int[] memberIds, int? spareId, int createdByMemberId, bool isRelay = false)
         {
             var (coreMembers, maxSpares) = TeamClassHelper.GetTeamSize(teamClass);
             var nonSpareIds = spareId.HasValue
@@ -54,20 +54,42 @@ namespace HpskSite.Services
             if (spareIds.Length > maxSpares)
                 return (false, $"Max {maxSpares} reserv(er) tillåtna.", null);
 
-            // Validate all members are registered in compatible classes
-            var isSpringskytte = GetCompetitionType(competitionId) == "Springskytte";
-            var compatibleClasses = TeamClassHelper.GetCompatibleIndividualClasses(teamClass, isSpringskytte);
-            var registeredMembers = GetRegisteredMembersInClasses(competitionId, compatibleClasses, isSpringskytte);
-            var registeredMemberIds = registeredMembers.Select(r => r.MemberId).ToHashSet();
-            var memberNameLookup = registeredMembers.ToDictionary(r => r.MemberId, r => r.Name);
+            // Build member name lookup
+            Dictionary<int, string> memberNameLookup;
+
+            if (isRelay)
+            {
+                // Relay: members do NOT need to be individually registered — look up names directly
+                memberNameLookup = new Dictionary<int, string>();
+                foreach (var memberId in memberIds)
+                {
+                    var member = _memberService.GetById(memberId);
+                    if (member != null)
+                        memberNameLookup[memberId] = $"{member.GetValue<string>("firstName")} {member.GetValue<string>("lastName")}";
+                    else
+                        memberNameLookup[memberId] = $"Medlem #{memberId}";
+                }
+            }
+            else
+            {
+                // Standard: validate all members are registered in compatible classes
+                var isSpringskytte = GetCompetitionType(competitionId) == "Springskytte";
+                var compatibleClasses = TeamClassHelper.GetCompatibleIndividualClasses(teamClass, isSpringskytte);
+                var registeredMembers = GetRegisteredMembersInClasses(competitionId, compatibleClasses, isSpringskytte);
+                var registeredMemberIds = registeredMembers.Select(r => r.MemberId).ToHashSet();
+                memberNameLookup = registeredMembers.ToDictionary(r => r.MemberId, r => r.Name);
+
+                foreach (var memberId in memberIds)
+                {
+                    if (!registeredMemberIds.Contains(memberId))
+                    {
+                        string GetNameReg(int id) => memberNameLookup.GetValueOrDefault(id, $"Medlem #{id}");
+                        return (false, $"{GetNameReg(memberId)} är inte anmäld i en kompatibel klass.", null);
+                    }
+                }
+            }
 
             string GetName(int id) => memberNameLookup.GetValueOrDefault(id, $"Medlem #{id}");
-
-            foreach (var memberId in memberIds)
-            {
-                if (!registeredMemberIds.Contains(memberId))
-                    return (false, $"{GetName(memberId)} är inte anmäld i en kompatibel klass.", null);
-            }
 
             // Check none are already in a team for this team class
             using var db = _databaseFactory.CreateDatabase();
@@ -85,18 +107,10 @@ namespace HpskSite.Services
             }
 
             // Create team
-            var team = new CompetitionTeamDto
-            {
-                CompetitionId = competitionId,
-                TeamName = teamName.Trim(),
-                TeamClass = teamClass,
-                ClubId = clubId,
-                CreatedBy = createdByMemberId,
-                CreatedAt = DateTime.UtcNow
-            };
-
-            var rawId = await db.InsertAsync(team);
-            var teamId = Convert.ToInt32(rawId);
+            var teamId = await db.ExecuteScalarAsync<int>(
+                @"INSERT INTO CompetitionTeam (CompetitionId, TeamName, TeamClass, ClubId, CreatedBy, CreatedAt, IsRelay)
+                  VALUES (@0, @1, @2, @3, @4, @5, @6); SELECT SCOPE_IDENTITY();",
+                competitionId, teamName.Trim(), teamClass, clubId, createdByMemberId, DateTime.UtcNow, isRelay);
 
             // Add members
             foreach (var memberId in nonSpareIds)
@@ -128,7 +142,7 @@ namespace HpskSite.Services
                 var memberNames = nonSpareIds.Select(id => GetName(id)).ToList();
                 if (spareIds.Length > 0) memberNames.AddRange(spareIds.Select(id => $"{GetName(id)} (reserv)"));
 
-                CreateTeamRegistrationDoc(competitionId, teamId, teamName, teamClass, clubId, clubName, memberNames);
+                CreateTeamRegistrationDoc(competitionId, teamId, teamName, teamClass, clubId, clubName, memberNames, isRelay);
             }
             catch (Exception ex)
             {
@@ -141,7 +155,7 @@ namespace HpskSite.Services
         public async Task<(bool success, string message)> JoinTeamAsync(int teamId, int memberId, bool isSpare)
         {
             using var db = _databaseFactory.CreateDatabase();
-            var team = await db.FirstOrDefaultAsync<CompetitionTeamDto>("WHERE Id = @0", teamId);
+            var team = await db.FirstOrDefaultAsync<CompetitionTeamDto>($"SELECT {TeamSelectCols} FROM CompetitionTeam WHERE Id = @0", teamId);
             if (team == null)
                 return (false, "Laget finns inte.");
 
@@ -202,7 +216,7 @@ namespace HpskSite.Services
         public async Task<(bool success, string message)> DeleteTeamAsync(int teamId)
         {
             using var db = _databaseFactory.CreateDatabase();
-            var team = await db.FirstOrDefaultAsync<CompetitionTeamDto>("WHERE Id = @0", teamId);
+            var team = await db.FirstOrDefaultAsync<CompetitionTeamDto>($"SELECT {TeamSelectCols} FROM CompetitionTeam WHERE Id = @0", teamId);
             if (team == null)
                 return (false, "Laget kunde inte hittas.");
 
@@ -228,7 +242,7 @@ namespace HpskSite.Services
         {
             using var db = _databaseFactory.CreateDatabase();
 
-            var team = await db.FirstOrDefaultAsync<CompetitionTeamDto>("WHERE Id = @0", teamId);
+            var team = await db.FirstOrDefaultAsync<CompetitionTeamDto>($"SELECT {TeamSelectCols} FROM CompetitionTeam WHERE Id = @0", teamId);
             if (team == null)
                 return (false, "Laget finns inte.");
 
@@ -248,8 +262,9 @@ namespace HpskSite.Services
             // Update team name
             if (!string.IsNullOrWhiteSpace(teamName))
             {
-                team.TeamName = teamName.Trim();
-                await db.UpdateAsync(team);
+                await db.ExecuteAsync(
+                    "UPDATE CompetitionTeam SET TeamName = @0 WHERE Id = @1",
+                    teamName.Trim(), teamId);
             }
 
             // Replace all members: delete existing, insert new
@@ -303,7 +318,7 @@ namespace HpskSite.Services
         {
             using var db = _databaseFactory.CreateDatabase();
 
-            var team = await db.FirstOrDefaultAsync<CompetitionTeamDto>("WHERE Id = @0", teamId);
+            var team = await db.FirstOrDefaultAsync<CompetitionTeamDto>($"SELECT {TeamSelectCols} FROM CompetitionTeam WHERE Id = @0", teamId);
             if (team == null)
                 return (false, "Laget finns inte.");
 
@@ -343,8 +358,9 @@ namespace HpskSite.Services
         {
             using var db = _databaseFactory.CreateDatabase();
 
+            var cols = TeamSelectCols;
             var teams = await db.FetchAsync<CompetitionTeamDto>(
-                "WHERE CompetitionId = @0 ORDER BY TeamClass, TeamName", competitionId);
+                $"SELECT {cols} FROM CompetitionTeam WHERE CompetitionId = @0 ORDER BY TeamClass, TeamName", competitionId);
 
             var result = new List<TeamWithMembers>();
             if (!teams.Any()) return result;
@@ -673,7 +689,48 @@ namespace HpskSite.Services
             return result;
         }
 
+        /// <summary>
+        /// Gets ALL approved members from a club (not just those registered in the competition).
+        /// Used for relay (stafett) registration where members don't need individual registration.
+        /// </summary>
+        public List<ClubMemberInfo> GetClubMembers(int clubId)
+        {
+            var result = new List<ClubMemberInfo>();
+            try
+            {
+                // Get all members and filter by club
+                long totalRecords;
+                var allMembers = _memberService.GetAll(0, 5000, out totalRecords);
+                foreach (var member in allMembers)
+                {
+                    var primaryClubIdStr = member.GetValue<string>("primaryClubId");
+                    if (string.IsNullOrEmpty(primaryClubIdStr)) continue;
+                    if (!int.TryParse(primaryClubIdStr, out int memberClubId) || memberClubId != clubId) continue;
+
+                    // Check member is approved (has "Users" role, not just "PendingApproval")
+                    var roles = _memberService.GetAllRoles(member.Id);
+                    if (!roles.Contains("Users")) continue;
+
+                    var firstName = member.GetValue<string>("firstName") ?? "";
+                    var lastName = member.GetValue<string>("lastName") ?? "";
+                    result.Add(new ClubMemberInfo
+                    {
+                        MemberId = member.Id,
+                        Name = $"{firstName} {lastName}".Trim()
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting club members for club {ClubId}", clubId);
+            }
+
+            return result.OrderBy(m => m.Name).ToList();
+        }
+
         #region Helpers
+
+        private const string TeamSelectCols = "Id, CompetitionId, TeamName, TeamClass, ClubId, CreatedBy, CreatedAt, IsRelay";
 
         private string GetCompetitionType(int competitionId)
         {
@@ -828,7 +885,7 @@ namespace HpskSite.Services
         /// Creates a competitionTeamRegistration Umbraco doc under the competition's registrations hub.
         /// </summary>
         private void CreateTeamRegistrationDoc(int competitionId, int teamId, string teamName, string teamClass,
-            int clubId, string clubName, List<string> memberNames)
+            int clubId, string clubName, List<string> memberNames, bool isRelay = false)
         {
             _logger.LogInformation("CreateTeamRegistrationDoc called - CompetitionId: {CompetitionId}, TeamId: {TeamId}", competitionId, teamId);
 
@@ -877,6 +934,7 @@ namespace HpskSite.Services
             doc.SetValue("clubId", clubId);
             doc.SetValue("clubName", clubName);
             doc.SetValue("members", string.Join(", ", memberNames));
+            doc.SetValue("isRelay", isRelay);
 
             var saveResult = _contentService.Save(doc);
             _logger.LogInformation("Save result: {Success}", saveResult.Success);
@@ -1015,6 +1073,12 @@ namespace HpskSite.Services
         public decimal TimeSeconds { get; set; }
         public bool HasResult { get; set; }
         public string? Status { get; set; }
+    }
+
+    public class ClubMemberInfo
+    {
+        public int MemberId { get; set; }
+        public string Name { get; set; } = "";
     }
 
     #endregion

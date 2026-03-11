@@ -788,7 +788,7 @@
 							}
 							@if (allowStafett)
 							{
-								<button class="btn btn-outline-success w-100 mt-2" disabled>
+								<button class="btn btn-success w-100 mt-2" disabled>
 									<i class="bi bi-people-fill me-1"></i>Anmäl stafettlag
 								</button>
 							}
@@ -809,7 +809,7 @@
 							}
 							@if (allowStafett)
 							{
-								<button class="btn btn-outline-success w-100 mt-2" data-bs-toggle="modal" data-bs-target="#registrationNotOpenModal">
+								<button class="btn btn-success w-100 mt-2" data-bs-toggle="modal" data-bs-target="#registrationNotOpenModal">
 									<i class="bi bi-people-fill me-1"></i>Anmäl stafettlag
 								</button>
 							}
@@ -830,7 +830,7 @@
 							}
 							@if (allowStafett)
 							{
-								<button type="button" class="btn btn-outline-success w-100 mt-2" data-bs-toggle="modal" data-bs-target="#stafettComingSoonModal">
+								<button type="button" class="btn btn-success w-100 mt-2" data-bs-toggle="modal" data-bs-target="#stafettRegistrationModal">
 									<i class="bi bi-people-fill me-1"></i>Anmäl stafettlag
 								</button>
 							}
@@ -852,37 +852,21 @@
 							}
 							@if (allowStafett)
 							{
-								<button class="btn btn-outline-success w-100 mt-2" disabled>
+								<button class="btn btn-success w-100 mt-2" disabled>
 									<i class="bi bi-people-fill me-1"></i>Anmäl stafettlag
 								</button>
 							}
 						}
+						@* Unpaid invoices button — shown/hidden by JS *@
+						<div id="unpaidInvoicesButtonContainer" style="display:none;" class="mt-2">
+							<button type="button" class="btn btn-warning w-100" data-bs-toggle="modal" data-bs-target="#unpaidInvoicesModal">
+								<i class="bi bi-wallet2 me-1"></i>Betala anmälningsavgift
+							</button>
+						</div>
 					</div>
 				</div>
 
-				@* ======================================== Stafett Coming Soon Modal ======================================== *@
-				@if (allowStafett)
-				{
-					<div class="modal fade" id="stafettComingSoonModal" tabindex="-1" aria-labelledby="stafettComingSoonModalLabel" aria-hidden="true">
-						<div class="modal-dialog modal-dialog-centered">
-							<div class="modal-content">
-								<div class="modal-header">
-									<h5 class="modal-title" id="stafettComingSoonModalLabel">
-										<i class="bi bi-people-fill me-2"></i>Stafettanmälan
-									</h5>
-									<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-								</div>
-								<div class="modal-body text-center py-4">
-									<i class="bi bi-tools display-4 text-muted mb-3 d-block"></i>
-									<p class="mb-0">Stafettanmälan är under utveckling och kommer snart.</p>
-								</div>
-								<div class="modal-footer">
-									<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
-								</div>
-							</div>
-						</div>
-					</div>
-				}
+
 
 				@* ======================================== Registration Not Open Modal ======================================== *@
 				<div class="modal fade" id="registrationNotOpenModal" tabindex="-1" aria-labelledby="registrationNotOpenModalLabel" aria-hidden="true">
@@ -1258,6 +1242,26 @@
 		})
 	}
 
+	@* Stafett Registration Modal *@
+	var stafettRegFeeStr = Model.Value<string>("stafettRegistrationFee") ?? "0";
+	decimal.TryParse(stafettRegFeeStr, out var stafettRegFee);
+	var stafettHasSwish = allowStafett && !string.IsNullOrWhiteSpace(Model.Value<string>("swishNumber")) && stafettRegFee > 0;
+	if (allowStafett)
+	{
+		@await Html.PartialAsync("StafettRegistrationModal", new ViewDataDictionary(ViewData)
+		{
+			{ "CompetitionId", Model.Id },
+			{ "CurrentMemberClubId", regClubId ?? 0 },
+			{ "CurrentMemberClubName", regClubName },
+			{ "CurrentMemberId", regMemberId },
+			{ "RegRole", regRole },
+			{ "RegRegionCode", regRegionCode },
+			{ "ClubsWithRegionsJson", clubsWithRegionsJson },
+			{ "StafettRegistrationFee", stafettRegFee },
+			{ "StafettHasSwish", stafettHasSwish }
+		})
+	}
+
 	@* Preference Modal *@
 	@await Html.PartialAsync("CompetitionPreferenceModal")
 
@@ -1390,6 +1394,161 @@ window.CompetitionConfig = {
     </div>
 </div>
 
+@* ======================================== Unpaid Invoices Modal ======================================== *@
+<div class="modal fade" id="unpaidInvoicesModal" tabindex="-1" aria-labelledby="unpaidInvoicesModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-warning text-dark">
+                <h5 class="modal-title" id="unpaidInvoicesModalLabel">
+                    <i class="bi bi-wallet2 me-2"></i>Obetalda avgifter
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body" id="unpaidInvoicesModalBody">
+                <div class="text-center py-3">
+                    <div class="spinner-border text-primary" role="status"></div>
+                    <p class="mt-2 text-muted">Laddar fakturor...</p>
+                </div>
+            </div>
+            <div class="modal-footer d-block">
+                <div class="alert alert-info small mb-2 py-2">
+                    <i class="bi bi-info-circle me-1"></i>
+                    Om du redan har betalat via Swish kan det ta tid innan betalningen har kontrollerats och registrerats. Betalningar visas som obetalda tills de har bekräftats av arrangören.
+                </div>
+                <button type="button" class="btn btn-secondary w-100" data-bs-dismiss="modal">Stäng</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@if (regMemberId > 0)
+{
+    <script>
+    (function() {
+        const unpaidCompetitionId = @Model.Id;
+        const unpaidHasSwish = @(hasSwishNumberValue.ToString().ToLower());
+        const unpaidFee = @(decimal.TryParse(registrationFee, out var _unpaidFee) ? _unpaidFee : 0m);
+
+        if (!unpaidHasSwish || unpaidFee <= 0) return;
+
+        fetch(`/umbraco/surface/Swish/GetUnpaidInvoices?competitionId=${unpaidCompetitionId}`)
+            .then(r => r.json())
+            .then(data => {
+                if (!data.success || !data.invoices || data.invoices.length === 0) return;
+                // Show the button in the Anmälan card
+                const btnContainer = document.getElementById('unpaidInvoicesButtonContainer');
+                if (btnContainer) btnContainer.style.display = 'block';
+
+                // Populate modal on open
+                document.getElementById('unpaidInvoicesModal')?.addEventListener('show.bs.modal', function() {
+                    renderUnpaidInvoices(data.invoices);
+                });
+            })
+            .catch(() => {});
+
+        function renderUnpaidInvoices(invoices) {
+            const body = document.getElementById('unpaidInvoicesModalBody');
+            if (!body) return;
+
+            let html = '<div class="list-group">';
+            invoices.forEach(inv => {
+                const typeLabel = inv.isTeam ? '<span class="badge bg-info me-1">Lag</span>' : '';
+                html += `
+                    <div class="list-group-item">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <div>
+                                ${typeLabel}<strong>${escapeHtmlUnpaid(inv.memberName)}</strong>
+                                <div class="text-muted small">${escapeHtmlUnpaid(inv.invoiceNumber)} &middot; ${inv.createdDate}</div>
+                            </div>
+                            <span class="badge bg-warning text-dark fs-6">${inv.amount.toFixed(0)} kr</span>
+                        </div>
+                        <button type="button" class="btn btn-primary btn-sm w-100" onclick="payUnpaidInvoice(${inv.id}, ${inv.isTeam}, ${inv.noInvoice || false})">
+                            <i class="bi bi-qr-code me-1"></i>Betala med Swish
+                        </button>
+                    </div>`;
+            });
+            html += '</div>';
+            body.innerHTML = html;
+        }
+
+        window.payUnpaidInvoice = function(invoiceId, isTeam, noInvoice) {
+            // Hide unpaid invoices modal
+            const unpaidModal = bootstrap.Modal.getInstance(document.getElementById('unpaidInvoicesModal'));
+            if (unpaidModal) unpaidModal.hide();
+
+            // Open Swish QR modal
+            const swishModalEl = document.getElementById('swishPaymentModal');
+            if (!swishModalEl) return;
+
+            const modalBody = document.getElementById('swishPaymentModalBody');
+            modalBody.innerHTML = `
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Laddar QR-kod...</span>
+                </div>
+                <p class="mt-2">Laddar betalningsinformation...</p>
+            `;
+
+            setTimeout(() => {
+                bootstrap.Modal.getOrCreateInstance(swishModalEl).show();
+            }, 200);
+
+            // For no-invoice or individual: use GeneratePaymentQR (creates invoice on-the-fly)
+            // For team invoices with existing invoice: use GenerateInvoiceQRCode
+            let url;
+            if (noInvoice || !isTeam) {
+                url = `/umbraco/surface/Swish/GeneratePaymentQR?competitionId=${unpaidCompetitionId}`;
+            } else {
+                url = `/umbraco/surface/InvoiceAdmin/GenerateInvoiceQRCode?invoiceId=${invoiceId}`;
+            }
+
+            fetch(url)
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        const qrSrc = data.qrCode || (data.qrCodeBase64 ? `data:image/png;base64,${data.qrCodeBase64}` : '');
+                        const invNum = data.invoiceNumber || '';
+                        const amount = data.amount || '';
+                        modalBody.innerHTML = `
+                            <div class="mb-3">
+                                <img src="${qrSrc}" alt="Swish QR Code" style="max-width: 300px; width: 100%;" class="img-fluid">
+                            </div>
+                            <div class="alert alert-info text-start mb-0">
+                                <p class="mb-1"><strong>Belopp:</strong> ${amount} kr</p>
+                                ${data.shootingClasses ? `<p class="mb-1"><strong>Klasser:</strong> ${data.shootingClasses}</p>` : ''}
+                                ${data.teamName ? `<p class="mb-1"><strong>Lag:</strong> ${data.teamName}</p>` : ''}
+                                <p class="mb-0"><strong>Fakturanummer:</strong> ${invNum}</p>
+                            </div>
+                            <p class="text-muted small mt-3 mb-0">
+                                <i class="bi bi-phone"></i> Scanna QR-koden med Swish-appen för att betala
+                            </p>
+                        `;
+                    } else {
+                        modalBody.innerHTML = `
+                            <div class="alert alert-danger mb-0">
+                                <i class="bi bi-exclamation-triangle me-1"></i>${data.message || 'Kunde inte skapa betalning.'}
+                            </div>
+                        `;
+                    }
+                })
+                .catch(() => {
+                    modalBody.innerHTML = `
+                        <div class="alert alert-danger mb-0">
+                            <i class="bi bi-exclamation-triangle me-1"></i>Ett nätverksfel uppstod.
+                        </div>
+                    `;
+                });
+        };
+
+        function escapeHtmlUnpaid(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    })();
+    </script>
+}
+
 @* Load external JavaScript file (not for Springskytte - it has its own registration modal) *@
 @if (!isSpringskytte)
 {
@@ -1504,8 +1663,9 @@ document.addEventListener('DOMContentLoaded', function() {
                             // Add all shooting classes from this registration's shootingClasses array
                             if (reg.shootingClasses && Array.isArray(reg.shootingClasses)) {
                                 reg.shootingClasses.forEach(sc => {
-                                    // Use className for display (e.g., "C Vet Ä")
-                                    shooterMap.get(key).classes.push(sc.className || sc.class);
+                                    // Use className for display, with age span for Springskytte
+                                    var cls = sc.className || sc.class;
+                                    shooterMap.get(key).classes.push(window.formatAgeSpan ? window.formatAgeSpan(cls) : cls);
                                 });
                             }
                         });

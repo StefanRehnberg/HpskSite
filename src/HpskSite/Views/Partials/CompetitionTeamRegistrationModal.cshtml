@@ -571,14 +571,17 @@ document.addEventListener('DOMContentLoaded', function() {
             const resp = await fetch(`/umbraco/surface/CompetitionTeam/GetTeamsForCompetition?competitionId=${competitionId}`);
             const data = await resp.json();
 
-            if (!data.success || !data.teams?.length) {
+            // Filter out relay (stafett) teams — they appear in the stafett modal instead
+            const nonRelayTeams = (data.teams || []).filter(t => !t.isRelay);
+
+            if (!data.success || !nonRelayTeams.length) {
                 container.innerHTML = '<div class="text-muted text-center py-3">Inga lag skapade ännu.</div>';
                 return;
             }
 
             let html = '';
             const teamsByClass = {};
-            data.teams.forEach(t => {
+            nonRelayTeams.forEach(t => {
                 if (!teamsByClass[t.teamClass]) teamsByClass[t.teamClass] = [];
                 teamsByClass[t.teamClass].push(t);
             });

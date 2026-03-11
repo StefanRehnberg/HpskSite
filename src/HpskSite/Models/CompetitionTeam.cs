@@ -13,6 +13,7 @@ namespace HpskSite.Models
         public int ClubId { get; set; }
         public int CreatedBy { get; set; }
         public DateTime CreatedAt { get; set; }
+        public bool IsRelay { get; set; }
     }
 
     [TableName("CompetitionTeamMember")]
@@ -63,6 +64,44 @@ namespace HpskSite.Models
         };
 
         private record SpringskytteTeamClassDef(string[] IndividualClasses, string? GenderRestriction);
+
+        // Stafett (relay) team class definitions per SHB 2026 §3 Stafettävling
+        // Always weapon class C. Members do NOT need to be individually registered.
+        private static readonly Dictionary<string, StafettTeamClassDef> StafettTeamClassMap = new()
+        {
+            ["Stafett Junior"] = new(2, 0, null, "Mixad, 15-20 år"),
+            ["Stafett Senior Herr"] = new(3, 0, "M", "Herrar, 21+ år"),
+            ["Stafett Senior Dam"] = new(2, 0, "F", "Damer, 21+ år"),
+            ["Stafett Veteran"] = new(2, 0, null, "Mixad, 50+ år"),
+        };
+
+        private record StafettTeamClassDef(int CoreMembers, int MaxSpares, string? GenderRestriction, string Description);
+
+        /// <summary>
+        /// Gets all stafett (relay) team classes with display metadata.
+        /// Always returns all 4 classes (no filtering — always weapon class C).
+        /// </summary>
+        public static List<StafettTeamClassInfo> GetStafettTeamClasses()
+        {
+            return StafettTeamClassMap.Select(kvp => new StafettTeamClassInfo
+            {
+                TeamClass = kvp.Key,
+                CoreMembers = kvp.Value.CoreMembers,
+                MaxSpares = kvp.Value.MaxSpares,
+                GenderRestriction = kvp.Value.GenderRestriction,
+                Description = kvp.Value.Description
+            }).ToList();
+        }
+
+        /// <summary>
+        /// Gets team size for a stafett class. Returns null if not a stafett class.
+        /// </summary>
+        public static (int coreMembers, int maxSpares)? GetStafettTeamSize(string teamClass)
+        {
+            return StafettTeamClassMap.TryGetValue(teamClass, out var def)
+                ? (def.CoreMembers, def.MaxSpares)
+                : null;
+        }
 
         /// <summary>
         /// Gets available team classes based on which individual classes exist in the competition.
@@ -120,6 +159,11 @@ namespace HpskSite.Models
         /// </summary>
         public static (int coreMembers, int maxSpares) GetTeamSize(string teamClass)
         {
+            // Check stafett classes first (they have their own sizes)
+            var stafettSize = GetStafettTeamSize(teamClass);
+            if (stafettSize.HasValue)
+                return stafettSize.Value;
+
             if (IsVeteranClass(teamClass) || IsJuniorClass(teamClass) || IsLadiesClass(teamClass))
                 return (2, 1);
             return (3, 1);
@@ -160,5 +204,14 @@ namespace HpskSite.Models
         public int CoreMembers { get; set; }
         public int MaxSpares { get; set; }
         public string[] CompatibleClasses { get; set; } = Array.Empty<string>();
+    }
+
+    public class StafettTeamClassInfo
+    {
+        public string TeamClass { get; set; } = "";
+        public int CoreMembers { get; set; }
+        public int MaxSpares { get; set; }
+        public string? GenderRestriction { get; set; }
+        public string Description { get; set; } = "";
     }
 }

@@ -491,6 +491,162 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// Get unpaid invoices for the current user in a competition.
+        /// Returns both individual and team invoices belonging to the user.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetUnpaidInvoices(int competitionId)
+        {
+            try
+            {
+                var currentMember = await _memberManager.GetCurrentMemberAsync();
+                if (currentMember == null)
+                    return Json(new { success = false, invoices = Array.Empty<object>() });
+
+                var competition = UmbracoContext?.Content?.GetById(competitionId);
+                if (competition == null)
+                    return Json(new { success = false, invoices = Array.Empty<object>() });
+
+                var memberId = currentMember.Id.ToString();
+                var feeStr = competition.Value<string>("registrationFee") ?? "0";
+                decimal.TryParse(feeStr, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var registrationFee);
+
+                var unpaid = new List<object>();
+                var hasIndividualInvoice = false;
+
+                // Check existing invoices
+                var invoicesHub = competition.Children()
+                    .FirstOrDefault(c => c.ContentType?.Alias == "registrationInvoicesHub");
+
+                if (invoicesHub != null)
+                {
+                    var allInvoices = invoicesHub.Children()
+                        .Where(c => c.ContentType?.Alias == "registrationInvoice")
+                        .ToList();
+
+                    foreach (var inv in allInvoices)
+                    {
+                        try
+                        {
+                            var invMemberId = inv.Value<string>("memberId") ?? "";
+
+                            // Read paymentStatus via raw source value — the Dropdown property editor's
+                            // FlexibleDropdownPropertyValueConverter crashes on plain strings like "Pending"
+                            var statusProp = inv.GetProperty("paymentStatus");
+                            var status = statusProp?.GetSourceValue()?.ToString()?.Trim('"', '\'', ' ') ?? "Pending";
+
+                            // Clean status (handle JSON array format)
+                            if (status.StartsWith("["))
+                            {
+                                try { status = System.Text.Json.JsonSerializer.Deserialize<string[]>(status)?[0] ?? "Pending"; }
+                                catch { status = status.Trim('[', ']', '"', ' '); }
+                            }
+                            status = status.Trim('"', '\'', ' ');
+
+                            // Track if this member has any invoice (paid or unpaid)
+                            if (invMemberId == memberId)
+                                hasIndividualInvoice = true;
+
+                            if (status.Equals("Paid", StringComparison.OrdinalIgnoreCase) ||
+                                status.Equals("Cancelled", StringComparison.OrdinalIgnoreCase))
+                                continue;
+
+                            // Parse amount as string first (Umbraco may store as string)
+                            var amountStr = inv.Value<string>("totalAmount") ?? "0";
+                            decimal.TryParse(amountStr, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var amount);
+
+                            // Include individual invoices for this member
+                            if (invMemberId == memberId)
+                            {
+                                unpaid.Add(new
+                                {
+                                    id = inv.Id,
+                                    invoiceNumber = inv.Value<string>("invoiceNumber") ?? "",
+                                    amount = amount,
+                                    memberName = inv.Value<string>("memberName") ?? "",
+                                    status = status,
+                                    createdDate = inv.CreateDate.ToString("yyyy-MM-dd"),
+                                    isTeam = false,
+                                    noInvoice = false
+                                });
+                            }
+                            // Include team invoices where the user created the team
+                            else if (invMemberId.StartsWith("team-"))
+                            {
+                                if (int.TryParse(invMemberId.Substring(5), out var teamId))
+                                {
+                                    using var db = _databaseFactory.CreateDatabase();
+                                    var team = db.SingleOrDefault<CompetitionTeamDto>(
+                                        "SELECT * FROM CompetitionTeam WHERE Id = @0 AND CompetitionId = @1", teamId, competitionId);
+                                    if (team != null && team.CreatedBy.ToString() == memberId)
+                                    {
+                                        unpaid.Add(new
+                                        {
+                                            id = inv.Id,
+                                            invoiceNumber = inv.Value<string>("invoiceNumber") ?? "",
+                                            amount = amount,
+                                            memberName = inv.Value<string>("memberName") ?? "",
+                                            status = status,
+                                            createdDate = inv.CreateDate.ToString("yyyy-MM-dd"),
+                                            isTeam = true,
+                                            noInvoice = false
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                        catch (Exception invEx)
+                        {
+                            _logger.LogError(invEx, "GetUnpaidInvoices: Error processing invoice {InvoiceId}", inv.Id);
+                        }
+                    }
+                }
+
+                // If the member is registered but has no invoice at all, include a "no invoice" entry
+                if (!hasIndividualInvoice && registrationFee > 0)
+                {
+                    var registrationsHub = competition.Children()
+                        .FirstOrDefault(c => c.ContentType?.Alias == "competitionRegistrationsHub");
+
+                    if (registrationsHub != null)
+                    {
+                        var userReg = registrationsHub.Children()
+                            .FirstOrDefault(r => r.ContentType?.Alias == "competitionRegistration"
+                                && (r.Value<string>("memberId") ?? "") == memberId
+                                && r.Value<bool>("isActive", fallback: Umbraco.Cms.Core.Models.PublishedContent.Fallback.ToDefaultValue, defaultValue: true));
+
+                        if (userReg != null)
+                        {
+                            var memberData = _memberService.GetById(currentMember.Key);
+                            var memberName = memberData != null
+                                ? $"{memberData.GetValue<string>("firstName")} {memberData.GetValue<string>("lastName")}"
+                                : currentMember.Email ?? "";
+
+                            unpaid.Add(new
+                            {
+                                id = 0,
+                                invoiceNumber = "",
+                                amount = registrationFee,
+                                memberName = memberName.Trim(),
+                                status = "Ej fakturerad",
+                                createdDate = userReg.CreateDate.ToString("yyyy-MM-dd"),
+                                isTeam = false,
+                                noInvoice = true
+                            });
+                        }
+                    }
+                }
+
+                return Json(new { success = true, invoices = unpaid });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting unpaid invoices for competition {CompetitionId}", competitionId);
+                return Json(new { success = false, invoices = Array.Empty<object>() });
+            }
+        }
+
+        /// <summary>
         /// Generate Swish QR code for team registration payment
         /// </summary>
         [HttpGet]
@@ -510,11 +666,7 @@ namespace HpskSite.Controllers
                 if (string.IsNullOrEmpty(swishNumber))
                     return Json(new { success = false, message = "Ingen Swish-nummer är konfigurerad." });
 
-                var feeStr = competition.Value<string>("teamRegistrationFee") ?? "0";
-                if (!decimal.TryParse(feeStr, out var teamFee) || teamFee <= 0)
-                    return Json(new { success = false, message = "Ingen lagavgift är konfigurerad." });
-
-                // Look up the team
+                // Look up the team first so we can determine relay vs regular fee
                 CompetitionTeamDto team;
                 using (var db = _databaseFactory.CreateDatabase())
                 {
@@ -524,6 +676,11 @@ namespace HpskSite.Controllers
 
                 if (team == null)
                     return Json(new { success = false, message = "Laget kunde inte hittas." });
+
+                var feeProperty = team.IsRelay ? "stafettRegistrationFee" : "teamRegistrationFee";
+                var feeStr = competition.Value<string>(feeProperty) ?? "0";
+                if (!decimal.TryParse(feeStr, out var teamFee) || teamFee <= 0)
+                    return Json(new { success = false, message = "Ingen lagavgift är konfigurerad." });
 
                 var clubName = _clubService.GetClubNameById(team.ClubId) ?? "Okänd förening";
                 var amountString = teamFee.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);

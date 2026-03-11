@@ -273,9 +273,9 @@ namespace HpskSite.Services
                 var members = _memberService.GetAll(pageIndex, pageSize, out totalRecords);
                 foreach (var member in members)
                 {
-                    var primaryClubIdStr = member.GetValue<string>("primaryClubId");
-                    if (!string.IsNullOrEmpty(primaryClubIdStr)
-                        && int.TryParse(primaryClubIdStr, out var memberClubId)
+                    var primaryClubIdRaw = member.GetValue("primaryClubId")?.ToString();
+                    if (!string.IsNullOrEmpty(primaryClubIdRaw)
+                        && int.TryParse(primaryClubIdRaw, out var memberClubId)
                         && memberClubId == clubId)
                     {
                         clubMemberIds.Add(member.Id.ToString());

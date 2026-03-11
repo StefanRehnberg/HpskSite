@@ -242,6 +242,7 @@ namespace HpskSite.Controllers
                 var isSpringskytte = GetCompetitionType(competitionId) == "Springskytte";
                 var competitionClassIds = GetCompetitionClassIds(competitionId);
                 var teamClasses = TeamClassHelper.GetTeamClasses(competitionClassIds, isSpringskytte);
+                var stafettTeamClasses = TeamClassHelper.GetStafettTeamClasses();
 
                 return Json(new
                 {
@@ -254,6 +255,7 @@ namespace HpskSite.Controllers
                         clubId = t.Team.ClubId,
                         clubName = t.ClubName,
                         createdBy = t.Team.CreatedBy,
+                        isRelay = t.Team.IsRelay,
                         members = t.Members.Select(m => new
                         {
                             memberId = m.MemberId,
@@ -267,6 +269,14 @@ namespace HpskSite.Controllers
                         coreMembers = tc.CoreMembers,
                         maxSpares = tc.MaxSpares,
                         compatibleClasses = tc.CompatibleClasses
+                    }),
+                    stafettTeamClasses = stafettTeamClasses.Select(sc => new
+                    {
+                        teamClass = sc.TeamClass,
+                        coreMembers = sc.CoreMembers,
+                        maxSpares = sc.MaxSpares,
+                        genderRestriction = sc.GenderRestriction,
+                        description = sc.Description
                     })
                 });
             }
@@ -383,6 +393,86 @@ namespace HpskSite.Controllers
             {
                 _logger.LogError(ex, "Error getting team results");
                 return Json(new { success = false, message = "Kunde inte beräkna lagresultat." });
+            }
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> GetClubMembersForRelay(int competitionId, int clubId)
+        {
+            try
+            {
+                var currentMember = await _memberManager.GetCurrentMemberAsync();
+                if (currentMember == null)
+                    return Json(new { success = false, message = "Du måste vara inloggad." });
+
+                var memberData = _memberService.GetByEmail(currentMember.Email ?? "");
+                if (memberData == null)
+                    return Json(new { success = false, message = "Kunde inte hitta din profil." });
+
+                // Auth: own club, club admin, or site admin
+                var isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
+                var isClubAdmin = await _authorizationService.IsClubAdminForClub(clubId);
+
+                if (!isSiteAdmin && !isClubAdmin)
+                {
+                    var primaryClubIdStr = memberData.GetValue<string>("primaryClubId");
+                    if (!int.TryParse(primaryClubIdStr, out int memberClubId) || memberClubId != clubId)
+                        return Json(new { success = false, message = "Ingen behörighet." });
+                }
+
+                var members = _teamService.GetClubMembers(clubId);
+                return Json(new
+                {
+                    success = true,
+                    members = members.Select(m => new
+                    {
+                        memberId = m.MemberId,
+                        name = m.Name
+                    })
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting club members for relay");
+                return Json(new { success = false, message = "Kunde inte hämta medlemmar." });
+            }
+        }
+
+        [HttpPost]
+        [IgnoreAntiforgeryToken]
+        public async Task<IActionResult> CreateStafettTeam([FromBody] CompetitionCreateTeamRequest request)
+        {
+            try
+            {
+                var currentMember = await _memberManager.GetCurrentMemberAsync();
+                if (currentMember == null)
+                    return Json(new { success = false, message = "Du måste vara inloggad." });
+
+                var memberData = _memberService.GetByEmail(currentMember.Email ?? "");
+                if (memberData == null)
+                    return Json(new { success = false, message = "Kunde inte hitta din profil." });
+
+                // Auth: member can create for own club, admin/regional admin for other clubs
+                var isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
+                var isClubAdmin = await _authorizationService.IsClubAdminForClub(request.ClubId);
+
+                if (!isSiteAdmin && !isClubAdmin)
+                {
+                    var primaryClubIdStr = memberData.GetValue<string>("primaryClubId");
+                    if (!int.TryParse(primaryClubIdStr, out int memberClubId) || memberClubId != request.ClubId)
+                        return Json(new { success = false, message = "Du kan bara skapa lag för din egen förening." });
+                }
+
+                var (success, message, teamId) = await _teamService.CreateTeamAsync(
+                    request.CompetitionId, request.TeamName, request.TeamClass,
+                    request.ClubId, request.MemberIds, request.SpareId, memberData.Id, isRelay: true);
+
+                return Json(new { success, message, teamId });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error creating stafett team");
+                return Json(new { success = false, message = "Ett fel uppstod vid skapande av stafettlag." });
             }
         }
 

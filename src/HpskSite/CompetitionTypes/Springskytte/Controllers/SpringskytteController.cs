@@ -726,12 +726,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                         startListContent.SetValue("teamFormat", "Springskytte");
                         startListContent.SetValue("generatedDate", DateTime.Now);
                         startListContent.SetValue("startListContent", BuildStartListHtml(starters));
-                        // Save() is only needed for newly created nodes (Create() only makes in-memory object).
-                        // For existing nodes, Publish() saves internally — calling both causes write lock contention.
-                        if (isNewNode)
-                        {
-                            _contentService.Save(startListContent);
-                        }
+                        _contentService.Save(startListContent);
                         _contentService.Publish(startListContent, new[] { "*" });
                     }
 
@@ -1052,10 +1047,14 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     }
 
                     // Save updated config back to node
-                    // Publish() saves internally — no Save() needed for existing nodes
                     node.SetValue("configurationData", JsonConvert.SerializeObject(config));
                     node.SetValue("startListContent", BuildStartListHtml(config.Starters));
-                    _contentService.Publish(node, new[] { "*" });
+                    _contentService.Save(node);
+                    var publishResult = _contentService.Publish(node, new[] { "*" });
+                    if (!publishResult.Success)
+                    {
+                        _logger.LogWarning("Failed to publish start list node {NodeId}: {Result}", node.Id, publishResult.Result);
+                    }
                 }
 
                 // Update DB result entries
@@ -1126,10 +1125,14 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     }
                     totalReset += config.Starters.Count;
 
-                    // Publish() saves internally — no Save() needed for existing nodes
                     node.SetValue("configurationData", JsonConvert.SerializeObject(config));
                     node.SetValue("startListContent", BuildStartListHtml(config.Starters));
-                    _contentService.Publish(node, new[] { "*" });
+                    _contentService.Save(node);
+                    var publishResult = _contentService.Publish(node, new[] { "*" });
+                    if (!publishResult.Success)
+                    {
+                        _logger.LogWarning("Failed to publish start list node {NodeId}: {Result}", node.Id, publishResult.Result);
+                    }
                 }
 
                 // Reset DB result entries
