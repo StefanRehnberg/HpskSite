@@ -92,7 +92,7 @@
                         <div id="createTeamError" class="alert alert-danger d-none mt-3"></div>
                         <div id="createTeamSuccess" class="alert alert-success d-none mt-3"></div>
 
-                        <button type="button" class="btn btn-primary w-100 mt-3" id="createTeamBtn" disabled>
+                        <button type="button" class="btn btn-primary w-100 mt-3" id="createTeamBtn">
                             <i class="bi bi-people-fill me-1"></i>Skapa lag
                         </button>
                     </div>
@@ -262,7 +262,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         if (!clubId) {
             memberArea.style.display = 'none';
-            updateCreateButton();
+            updateMemberCountInfo();
             return;
         }
         memberArea.style.display = 'block';
@@ -323,7 +323,8 @@ document.addEventListener('DOMContentLoaded', function() {
             availableTeamClasses.forEach(tc => {
                 const opt = document.createElement('option');
                 opt.value = tc.teamClass;
-                opt.textContent = `${tc.teamClass} - ${tc.coreMembers} skyttar + reserv`;
+                const sizeLabel = `${tc.coreMembers} skyttar + reserv`;
+                opt.textContent = `${tc.teamClass} (${sizeLabel})`;
                 select.appendChild(opt);
             });
         } catch(e) {
@@ -334,17 +335,21 @@ document.addEventListener('DOMContentLoaded', function() {
     function bindTeamClassSelect() {
         document.getElementById('teamClassSelect').addEventListener('change', function() {
             clearAllAlerts();
+            clearValidation();
             const teamClass = this.value;
             const info = document.getElementById('teamClassInfo');
             if (!teamClass) {
                 info.textContent = '';
             } else {
                 const tc = availableTeamClasses.find(t => t.teamClass === teamClass);
-                if (tc) info.textContent = `${tc.coreMembers} ordinarie + ${tc.maxSpares} reserv. Klasser: ${tc.compatibleClasses.join(', ')}`;
+                if (tc) {
+                    const fmtClasses = tc.compatibleClasses.map(c => window.formatAgeSpan ? window.formatAgeSpan(c) : c).join(', ');
+                    info.textContent = `${tc.coreMembers} ordinarie + ${tc.maxSpares} reserv. Klasser: ${fmtClasses}`;
+                }
             }
             selectedMembers.clear();
             selectedSpare = null;
-            renderMembersTable('membersTableBody', 'teamClassSelect', selectedMembers, s => selectedSpare = s, () => selectedSpare, () => updateCreateButton());
+            renderMembersTable('membersTableBody', 'teamClassSelect', selectedMembers, s => selectedSpare = s, () => selectedSpare, () => updateMemberCountInfo());
         });
     }
     bindTeamClassSelect();
@@ -359,11 +364,11 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!data.success || !data.members?.length) {
                 tbody.innerHTML = '<tr><td colspan="4" class="text-muted small">Inga anmälda skyttar från denna förening.</td></tr>';
                 allRegisteredMembers = [];
-                updateCreateButton();
+                updateMemberCountInfo();
                 return data.members || [];
             }
             allRegisteredMembers = data.members;
-            renderMembersTable(tbodyId, classSelectId, selectedMembers, s => selectedSpare = s, () => selectedSpare, () => updateCreateButton());
+            renderMembersTable(tbodyId, classSelectId, selectedMembers, s => selectedSpare = s, () => selectedSpare, () => updateMemberCountInfo());
             return data.members;
         } catch(e) {
             tbody.innerHTML = '<tr><td colspan="4" class="text-danger small">Fel vid laddning.</td></tr>';
@@ -402,10 +407,11 @@ document.addEventListener('DOMContentLoaded', function() {
             row.appendChild(tdName);
 
             const tdClasses = document.createElement('td');
+            const fmt = window.formatAgeSpan || (x => x);
             tdClasses.innerHTML = m.shootingClasses.map(c =>
                 (teamClass && compatibleClasses.includes(c))
-                    ? `<span class="badge bg-success me-1">${c}</span>`
-                    : `<span class="badge bg-secondary me-1">${c}</span>`
+                    ? `<span class="badge bg-success me-1">${fmt(c)}</span>`
+                    : `<span class="badge bg-secondary me-1">${fmt(c)}</span>`
             ).join('');
             row.appendChild(tdClasses);
 
@@ -430,23 +436,80 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // ==================== Create button validation ====================
-    function updateCreateButton() {
+    function clearValidation() {
+        document.querySelectorAll('#createTeamTab .is-invalid').forEach(el => el.classList.remove('is-invalid'));
+        document.querySelectorAll('#createTeamTab .invalid-feedback').forEach(el => el.remove());
+        document.getElementById('createTeamError').classList.add('d-none');
+    }
+
+    function markInvalid(el, msg) {
+        el.classList.add('is-invalid');
+        // Add feedback message if not already present
+        let fb = el.parentElement.querySelector('.invalid-feedback');
+        if (!fb) {
+            fb = document.createElement('div');
+            fb.className = 'invalid-feedback';
+            el.after(fb);
+        }
+        fb.textContent = msg;
+    }
+
+    function updateMemberCountInfo() {
         const teamClass = document.getElementById('teamClassSelect').value;
-        const teamName = document.getElementById('teamName').value.trim();
-        const clubId = clubSelect.value;
-        const tc = availableTeamClasses.find(t => t.teamClass === teamClass);
-        const btn = document.getElementById('createTeamBtn');
+        const tc = teamClass ? availableTeamClasses.find(t => t.teamClass === teamClass) : null;
         const countInfo = document.getElementById('memberCountInfo');
+        if (!tc) { countInfo.textContent = ''; return; }
+        const total = selectedMembers.size;
+        const hasSpare = selectedSpare && selectedMembers.has(selectedSpare);
+        const maxTotal = tc.coreMembers + tc.maxSpares;
+        countInfo.textContent = total > 0
+            ? `Valda: ${total} av ${tc.coreMembers}–${maxTotal}${hasSpare ? ' (1 reserv)' : ''}`
+            : `Välj ${tc.coreMembers} ordinarie skyttar${tc.maxSpares > 0 ? ' + ev. reserv' : ''}`;
+    }
 
-        if (!tc || !teamName || !clubId) { btn.disabled = true; countInfo.textContent = ''; return; }
+    /** Validates all fields; returns true if valid, false if errors shown. */
+    function validateCreateForm() {
+        clearValidation();
+        let valid = true;
+        const teamClassEl = document.getElementById('teamClassSelect');
+        const teamNameEl = document.getElementById('teamName');
+        const teamClass = teamClassEl.value;
+        const teamName = teamNameEl.value.trim();
+        const tc = teamClass ? availableTeamClasses.find(t => t.teamClass === teamClass) : null;
 
-        const nonSpareCount = selectedSpare ? selectedMembers.size - 1 : selectedMembers.size;
-        countInfo.textContent = `Valda: ${nonSpareCount} ordinarie${selectedSpare ? ' + 1 reserv' : ''} (behövs: ${tc.coreMembers} ordinarie)`;
-        btn.disabled = nonSpareCount !== tc.coreMembers;
+        if (!teamName) { markInvalid(teamNameEl, 'Ange ett lagnamn'); valid = false; }
+        if (!teamClass || !tc) { markInvalid(teamClassEl, 'Välj en lagklass'); valid = false; }
+
+        if (tc) {
+            const total = selectedMembers.size;
+            const hasSpare = selectedSpare && selectedMembers.has(selectedSpare);
+            const nonSpareCount = hasSpare ? total - 1 : total;
+            const maxTotal = tc.coreMembers + tc.maxSpares;
+            if (nonSpareCount < tc.coreMembers) {
+                const errorEl = document.getElementById('createTeamError');
+                errorEl.textContent = `Välj minst ${tc.coreMembers} ordinarie skyttar (${nonSpareCount} valda).`;
+                errorEl.classList.remove('d-none');
+                valid = false;
+            } else if (total > maxTotal) {
+                const errorEl = document.getElementById('createTeamError');
+                errorEl.textContent = `Max ${maxTotal} skyttar (${tc.coreMembers} ordinarie + ${tc.maxSpares} reserv).`;
+                errorEl.classList.remove('d-none');
+                valid = false;
+            }
+        }
+        if (!valid) {
+            // Scroll the first invalid field (or the error alert) into view within the modal
+            const firstInvalid = document.querySelector('#createTeamTab .is-invalid')
+                || document.querySelector('#createTeamError:not(.d-none)');
+            if (firstInvalid) {
+                firstInvalid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        }
+        return valid;
     }
 
     function bindCreateTabEvents() {
-        document.getElementById('teamName').addEventListener('input', () => { clearAllAlerts(); updateCreateButton(); });
+        document.getElementById('teamName').addEventListener('input', () => { clearValidation(); });
         document.getElementById('createTeamBtn').addEventListener('click', handleCreateTeam);
     }
     bindCreateTabEvents();
@@ -462,6 +525,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // ==================== Create team ====================
     async function handleCreateTeam() {
+        if (!validateCreateForm()) return;
         const btn = document.getElementById('createTeamBtn'); btn.disabled = true;
         const errorEl = document.getElementById('createTeamError');
         const successEl = document.getElementById('createTeamSuccess');
@@ -485,6 +549,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 document.getElementById('teamClassSelect').value = '';
                 document.getElementById('teamClassInfo').textContent = '';
                 selectedMembers.clear(); selectedSpare = null;
+                btn.disabled = false;
                 if (clubSelect.value) await loadRegisteredMembers(parseInt(clubSelect.value), 'membersTableBody', 'teamClassSelect');
                 loadExistingTeams();
                 // Show payment options if configured
@@ -522,7 +587,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 const tcInfo = (data.teamClasses || []).find(tc => tc.teamClass === cls);
                 const maxTotal = tcInfo ? tcInfo.coreMembers + tcInfo.maxSpares : 4;
 
-                html += `<h6 class="mt-3 mb-2">${cls}</h6>`;
+                const fmtCls = window.formatAgeSpan ? window.formatAgeSpan(cls) : cls;
+                html += `<h6 class="mt-3 mb-2">${fmtCls}</h6>`;
                 teams.forEach(team => {
                     const memberCount = team.members?.length || 0;
 
@@ -698,9 +764,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
         if (!tc || !teamName) { btn.disabled = true; countInfo.textContent = ''; return; }
 
-        const nonSpareCount = editSelectedSpare ? editSelectedMembers.size - 1 : editSelectedMembers.size;
-        countInfo.textContent = `Valda: ${nonSpareCount} ordinarie${editSelectedSpare ? ' + 1 reserv' : ''} (behövs: ${tc.coreMembers} ordinarie)`;
-        btn.disabled = nonSpareCount !== tc.coreMembers;
+        const total = editSelectedMembers.size;
+        const hasSpare = editSelectedSpare && editSelectedMembers.has(editSelectedSpare);
+        const nonSpareCount = hasSpare ? total - 1 : total;
+        const maxTotal = tc.coreMembers + tc.maxSpares;
+        countInfo.textContent = `Valda: ${total} av ${tc.coreMembers}–${maxTotal}${hasSpare ? ' (1 reserv)' : ''} (behövs: ${tc.coreMembers} ordinarie)`;
+        btn.disabled = nonSpareCount < tc.coreMembers || total > maxTotal;
     }
 
     document.getElementById('editTeamName').addEventListener('input', updateEditButton);

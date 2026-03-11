@@ -75,6 +75,22 @@
 </style>
 
 <script>
+// Format Springskytte age class with age span (e.g. "H 50" → "H 50-59")
+function formatAgeSpan(cls) {
+    if (!cls) return cls;
+    var inline = {'21':'21-34','35':'35-49','50':'50-59','60':'60-64','65':'65-69','70':'70+'};
+    var parens = {'15':'-15 år','18':'16-18 år','jun':'15-20 år'};
+    for (var code in inline) {
+        if (cls.endsWith(' ' + code) || cls.endsWith('-' + code))
+            return cls.substring(0, cls.length - code.length) + inline[code];
+    }
+    for (var code in parens) {
+        if (cls.endsWith(' ' + code) || cls.endsWith('-' + code))
+            return cls + ' (' + parens[code] + ')';
+    }
+    return cls;
+}
+
 const springCompId = parseInt('@competitionId');
 let springAvailableClasses = []; // loaded from server
 let springExistingLists = []; // loaded from server
@@ -192,7 +208,7 @@ function springRenderOneCard(card, assignedMap) {
                         value="${cls.classId}" ${checked} ${disabled}
                         onchange="springToggleClass('${card.tempId}', '${cls.classId}', this.checked)">
                     <label class="form-check-label ${labelClass}" for="cls_${card.tempId}_${cls.classId.replace(/\s/g,'_')}">
-                        ${cls.classId} <small class="text-muted">(${cls.count})</small>${otherName}
+                        ${formatAgeSpan(cls.classId)} <small class="text-muted">(${cls.count})</small>${otherName}
                     </label>
                 </div>`;
         }
@@ -291,7 +307,7 @@ function springBuildStartersTable(card) {
             <td>${escapeHtml(s.name)}</td>
             <td>${escapeHtml(s.club)}</td>
             <td><span class="badge bg-secondary">${s.weaponClass}</span></td>
-            <td>${s.ageGenderClass}</td>
+            <td>${formatAgeSpan(s.ageGenderClass)}</td>
         </tr>`;
         prevTime = s.startTime;
     }

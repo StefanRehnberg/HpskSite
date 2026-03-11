@@ -176,6 +176,22 @@
 </style>
 
 <script>
+// Format Springskytte age class with age span (e.g. "H 50" → "H 50-59")
+function formatAgeSpan(cls) {
+    if (!cls) return cls;
+    var inline = {'21':'21-34','35':'35-49','50':'50-59','60':'60-64','65':'65-69','70':'70+'};
+    var parens = {'15':'-15 år','18':'16-18 år','jun':'15-20 år'};
+    for (var code in inline) {
+        if (cls.endsWith(' ' + code) || cls.endsWith('-' + code))
+            return cls.substring(0, cls.length - code.length) + inline[code];
+    }
+    for (var code in parens) {
+        if (cls.endsWith(' ' + code) || cls.endsWith('-' + code))
+            return cls + ' (' + parens[code] + ')';
+    }
+    return cls;
+}
+
 // ===== Springskytte Results Management =====
 let springShooters = [];
 let springFilteredShooters = [];
@@ -276,7 +292,7 @@ function springUpdateNav() {
     const el = document.getElementById('springCurrentShooterInfo');
     if (!springFilteredShooters.length) { el.textContent = 'Inga skyttar'; return; }
     const s = springFilteredShooters[springCurrentIndex];
-    el.textContent = `${springCurrentIndex + 1}/${springFilteredShooters.length}: ${s.memberName} (${s.weaponClass} - ${s.ageGenderClass})`;
+    el.textContent = `${springCurrentIndex + 1}/${springFilteredShooters.length}: ${s.memberName} (${s.weaponClass} - ${formatAgeSpan(s.ageGenderClass)})`;
 }
 
 // ===== SHARED UTILITY =====
@@ -308,7 +324,7 @@ function springRenderEntry() {
             <div class="d-flex flex-wrap justify-content-between align-items-center mb-3">
                 <div>
                     <h5 class="mb-0">${shooter.memberName}</h5>
-                    <small class="text-muted">${shooter.memberClub} | Vapengrupp ${shooter.weaponClass} | Klass ${shooter.ageGenderClass}${shooter.startOrder ? ' | #' + shooter.startOrder : ''}</small>
+                    <small class="text-muted">${shooter.memberClub} | Vapengrupp ${shooter.weaponClass} | Klass ${formatAgeSpan(shooter.ageGenderClass)}${shooter.startOrder ? ' | #' + shooter.startOrder : ''}</small>
                 </div>
                 ${shooter.hasResult ? '<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Har resultat</span>' : '<span class="badge bg-secondary">Inget resultat</span>'}
             </div>
@@ -863,7 +879,7 @@ function springCRenderActiveCard(shooter) {
     let html = `
     <div class="card border-primary">
         <div class="card-header bg-primary text-white">
-            <h5 class="mb-0">#${shooter.startOrder} — ${shooter.memberName} <small class="opacity-75">(${shooter.registeredClass})</small></h5>
+            <h5 class="mb-0">#${shooter.startOrder} — ${shooter.memberName} <small class="opacity-75">(${formatAgeSpan(shooter.registeredClass)})</small></h5>
         </div>
         <div class="card-body">
             <!-- Stations: 6 x 5 shots, large buttons -->

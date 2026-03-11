@@ -454,7 +454,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                         var sorted = g.OrderBy(s => s, tieBreaker).ToList();
                         return new SpringskytteClassGroup
                         {
-                            ClassName = $"Vapengrupp {sorted.First().WeaponClass} - {sorted.First().AgeGenderClass}",
+                            ClassName = $"Vapengrupp {sorted.First().WeaponClass} - {SpringskytteClasses.FormatWithAgeSpan(sorted.First().AgeGenderClass)}",
                             Shooters = sorted
                         };
                     })
@@ -1309,7 +1309,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
             sb.AppendLine("<tbody>");
             foreach (var s in starters)
             {
-                sb.AppendLine($"<tr><td>{s.StartOrder}</td><td>{s.StartTime}</td><td>{s.Name}</td><td>{s.Club}</td><td>{s.WeaponClass}</td><td>{s.AgeGenderClass}</td></tr>");
+                sb.AppendLine($"<tr><td>{s.StartOrder}</td><td>{s.StartTime}</td><td>{s.Name}</td><td>{s.Club}</td><td>{s.WeaponClass}</td><td>{SpringskytteClasses.FormatWithAgeSpan(s.AgeGenderClass)}</td></tr>");
             }
             sb.AppendLine("</tbody></table>");
             return sb.ToString();

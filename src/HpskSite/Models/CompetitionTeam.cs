@@ -45,20 +45,21 @@ namespace HpskSite.Models
             ["L Dam"] = new[] { "L1_Dam", "L2_Dam", "L3_Dam" },
         };
 
-        // Springskytte team class definitions
-        // Senior: gender-separated; Junior/Veteran: mixed gender
-        // Older age groups can join younger team categories (except Junior)
-        // e.g. a veteran-age shooter (A-H 50) can join a Senior team
+        // Springskytte team class definitions per SHB 2026 rules (Lagtävling):
+        //   Herrar: Junior & Senior t.o.m. 64 år (klasser Jun, 21, 35, 50, 60), 3 skyttar, men only
+        //   Damer:  Junior & Senior t.o.m. 64 år (klasser Jun, 21, 35, 50, 60), 2 skyttar, women only
+        //   Veteran: fr.o.m. 65 år (klasser 65, 70), 2 skyttar, mixed gender
+        // Boundary: "Gränsen går mellan klass 60 och klass 65"
+        // Note: Junior team class only exists for Stafett, not Lagtävling
+        // Note: "Äldre löpare får ingå i yngre lag" only applies to Stafett
         private static readonly Dictionary<string, SpringskytteTeamClassDef> SpringskytteTeamClassMap = new()
         {
-            ["A-Herr Senior"] = new(new[] { "A-H 21", "A-H 35", "A-H 50", "A-H 60", "A-H 65", "A-H 70" }, "M"),
-            ["A-Dam Senior"] = new(new[] { "A-D 21", "A-D 35", "A-D 50", "A-D 60", "A-D 65", "A-D 70" }, "F"),
-            ["A-Junior"] = new(new[] { "A-H 15", "A-H 18", "A-H jun", "A-D 15", "A-D 18", "A-D jun" }, null),
-            ["A-Veteran"] = new(new[] { "A-H 50", "A-H 60", "A-H 65", "A-H 70", "A-D 50", "A-D 60", "A-D 65", "A-D 70" }, null),
-            ["C-Herr Senior"] = new(new[] { "C-H 21", "C-H 35", "C-H 50", "C-H 60", "C-H 65", "C-H 70" }, "M"),
-            ["C-Dam Senior"] = new(new[] { "C-D 21", "C-D 35", "C-D 50", "C-D 60", "C-D 65", "C-D 70" }, "F"),
-            ["C-Junior"] = new(new[] { "C-H 15", "C-H 18", "C-H jun", "C-D 15", "C-D 18", "C-D jun" }, null),
-            ["C-Veteran"] = new(new[] { "C-H 50", "C-H 60", "C-H 65", "C-H 70", "C-D 50", "C-D 60", "C-D 65", "C-D 70" }, null),
+            ["A-Herrar"] = new(new[] { "A-H 15", "A-H 18", "A-H jun", "A-H 21", "A-H 35", "A-H 50", "A-H 60" }, "M"),
+            ["A-Damer"] = new(new[] { "A-D 15", "A-D 18", "A-D jun", "A-D 21", "A-D 35", "A-D 50", "A-D 60" }, "F"),
+            ["A-Veteran"] = new(new[] { "A-H 65", "A-H 70", "A-D 65", "A-D 70" }, null),
+            ["C-Herrar"] = new(new[] { "C-H 15", "C-H 18", "C-H jun", "C-H 21", "C-H 35", "C-H 50", "C-H 60" }, "M"),
+            ["C-Damer"] = new(new[] { "C-D 15", "C-D 18", "C-D jun", "C-D 21", "C-D 35", "C-D 50", "C-D 60" }, "F"),
+            ["C-Veteran"] = new(new[] { "C-H 65", "C-H 70", "C-D 65", "C-D 70" }, null),
         };
 
         private record SpringskytteTeamClassDef(string[] IndividualClasses, string? GenderRestriction);

@@ -255,5 +255,36 @@ namespace HpskSite.CompetitionTypes.Springskytte.Models
                 return "Veteran";
             return "Okänd";
         }
+
+        /// <summary>
+        /// Maps an age code to display format: (replacement, useParentheses).
+        /// Codes where the range starts with the same number get inline replacement (e.g. "50" → "50-59").
+        /// Others get parenthesized format to preserve the original label (e.g. "15" → "15 (-15 år)").
+        /// </summary>
+        private static readonly Dictionary<string, (string span, bool parens)> AgeSpanMap = new()
+        {
+            { "15", ("-15 år", true) }, { "18", ("16-18 år", true) }, { "jun", ("15-20 år", true) },
+            { "21", ("21-34", false) }, { "35", ("35-49", false) },
+            { "50", ("50-59", false) }, { "60", ("60-64", false) }, { "65", ("65-69", false) }, { "70", ("70+", false) }
+        };
+
+        /// <summary>
+        /// Formats a class string with age span, e.g.:
+        /// "H 50" → "H 50-59", "A-D 21" → "A-D 21-34", "H 15" → "H 15 (-15 år)", "D jun" → "D jun (15-20 år)"
+        /// </summary>
+        public static string FormatWithAgeSpan(string classStr)
+        {
+            if (string.IsNullOrEmpty(classStr)) return classStr;
+            foreach (var (code, (span, parens)) in AgeSpanMap)
+            {
+                if (classStr.EndsWith(" " + code) || classStr.EndsWith("-" + code))
+                {
+                    if (parens)
+                        return classStr + " (" + span + ")";
+                    return classStr.Substring(0, classStr.Length - code.Length) + span;
+                }
+            }
+            return classStr;
+        }
     }
 }

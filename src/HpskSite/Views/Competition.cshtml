@@ -1,5 +1,6 @@
 @using HpskSite.Models
 @using HpskSite.Extensions
+@using HpskSite.CompetitionTypes.Springskytte.Models
 @using Umbraco.Cms.Web.Common.PublishedModels;
 @using System.Linq;
 @using System;
@@ -630,7 +631,7 @@
 									<div class="mb-2 d-flex flex-wrap gap-1">
 										@foreach (var cls in springClassIds)
 										{
-											<span class="badge bg-primary">@cls</span>
+											<span class="badge bg-primary">@SpringskytteClasses.FormatWithAgeSpan(cls)</span>
 										}
 									</div>
 								}
@@ -1428,6 +1429,22 @@ window.CompetitionConfig = {
 
 @* JavaScript for Information Sidebar *@
 <script>
+// Shared helper: format Springskytte age class with age span (e.g. "H 50" → "H 50-59")
+window.formatAgeSpan = function(cls) {
+    if (!cls) return cls;
+    var inline = {'21':'21-34','35':'35-49','50':'50-59','60':'60-64','65':'65-69','70':'70+'};
+    var parens = {'15':'-15 år','18':'16-18 år','jun':'15-20 år'};
+    for (var code in inline) {
+        if (cls.endsWith(' ' + code) || cls.endsWith('-' + code))
+            return cls.substring(0, cls.length - code.length) + inline[code];
+    }
+    for (var code in parens) {
+        if (cls.endsWith(' ' + code) || cls.endsWith('-' + code))
+            return cls + ' (' + parens[code] + ')';
+    }
+    return cls;
+};
+
 // Current user information for highlighting
 const currentUserName = '@Html.Raw(currentMemberName.Replace("'", "\\'"))';
 const currentUserClub = '@Html.Raw(currentMemberClub.Replace("'", "\\'"))';

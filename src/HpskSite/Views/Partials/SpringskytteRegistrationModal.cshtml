@@ -238,7 +238,7 @@ function springRegCheckExisting(memberId) {
     }
 
     const classes = springRegExistingRegistrations[memberId];
-    const badges = classes.map(c => `<span class="badge bg-warning text-dark me-1">${c}</span>`).join('');
+    const badges = classes.map(c => `<span class="badge bg-warning text-dark me-1">${window.formatAgeSpan ? formatAgeSpan(c) : c}</span>`).join('');
     text.innerHTML = `Redan anmäld i: ${badges} — ny anmälan uppdaterar befintlig.`;
     notice.style.display = 'block';
 }
