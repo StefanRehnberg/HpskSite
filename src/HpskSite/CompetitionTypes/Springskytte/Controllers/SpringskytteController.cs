@@ -698,6 +698,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 if (competition != null)
                 {
                     Umbraco.Cms.Core.Models.IContent? startListContent = null;
+                    bool isNewNode = false;
 
                     if (request.ExistingNodeId.HasValue && request.ExistingNodeId.Value > 0)
                     {
@@ -714,6 +715,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                         if (contentType != null)
                         {
                             startListContent = _contentService.Create(listName, competition, contentType.Alias);
+                            isNewNode = true;
                         }
                     }
 
@@ -724,22 +726,33 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                         startListContent.SetValue("teamFormat", "Springskytte");
                         startListContent.SetValue("generatedDate", DateTime.Now);
                         startListContent.SetValue("startListContent", BuildStartListHtml(starters));
-                        // Save first to persist new nodes (Create() only makes in-memory object),
-                        // then Publish to make it visible on the public site.
-                        _contentService.Save(startListContent);
+                        // Save() is only needed for newly created nodes (Create() only makes in-memory object).
+                        // For existing nodes, Publish() saves internally — calling both causes write lock contention.
+                        if (isNewNode)
+                        {
+                            _contentService.Save(startListContent);
+                        }
                         _contentService.Publish(startListContent, new[] { "*" });
                     }
 
                     // Update result entries with start order/time for this list's starters only
-                    using var db = _umbracoDatabaseFactory.CreateDatabase();
-                    foreach (var starter in starters)
+                    // (non-critical: entries may not exist yet if no results have been entered)
+                    try
                     {
-                        await db.ExecuteAsync(
-                            @"UPDATE SpringskytteResultEntry
-                              SET StartOrder = @0, StartTime = @1, LastModified = @2
-                              WHERE CompetitionId = @3 AND MemberId = @4 AND WeaponClass = @5",
-                            starter.StartOrder, starter.StartTime, DateTime.Now,
-                            request.CompetitionId, starter.MemberId, starter.WeaponClass);
+                        using var db = _umbracoDatabaseFactory.CreateDatabase();
+                        foreach (var starter in starters)
+                        {
+                            await db.ExecuteAsync(
+                                @"UPDATE SpringskytteResultEntry
+                                  SET StartOrder = @0, StartTime = @1, LastModified = @2
+                                  WHERE CompetitionId = @3 AND MemberId = @4 AND WeaponClass = @5",
+                                starter.StartOrder, starter.StartTime, DateTime.Now,
+                                request.CompetitionId, starter.MemberId, starter.WeaponClass);
+                        }
+                    }
+                    catch (Exception dbEx)
+                    {
+                        _logger.LogWarning(dbEx, "Failed to update StartOrder/StartTime in SpringskytteResultEntry for CompetitionId={CompetitionId} (non-critical)", request.CompetitionId);
                     }
 
                     _logger.LogInformation("Generated Springskytte start list '{ListName}' for CompetitionId={CompetitionId}, {Count} starters, NodeId={NodeId}",
@@ -880,17 +893,24 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     ? JsonConvert.DeserializeObject<SpringskytteStartListConfig>(configJson)
                     : null;
 
-                // Clear StartOrder/StartTime for affected result entries
+                // Clear StartOrder/StartTime for affected result entries (non-critical)
                 if (config?.Starters?.Any() == true)
                 {
-                    using var db = _umbracoDatabaseFactory.CreateDatabase();
-                    foreach (var starter in config.Starters)
+                    try
                     {
-                        await db.ExecuteAsync(
-                            @"UPDATE SpringskytteResultEntry
-                              SET StartOrder = 0, StartTime = NULL, LastModified = @0
-                              WHERE CompetitionId = @1 AND MemberId = @2 AND WeaponClass = @3",
-                            DateTime.Now, request.CompetitionId, starter.MemberId, starter.WeaponClass);
+                        using var db = _umbracoDatabaseFactory.CreateDatabase();
+                        foreach (var starter in config.Starters)
+                        {
+                            await db.ExecuteAsync(
+                                @"UPDATE SpringskytteResultEntry
+                                  SET StartOrder = 0, StartTime = NULL, LastModified = @0
+                                  WHERE CompetitionId = @1 AND MemberId = @2 AND WeaponClass = @3",
+                                DateTime.Now, request.CompetitionId, starter.MemberId, starter.WeaponClass);
+                        }
+                    }
+                    catch (Exception dbEx)
+                    {
+                        _logger.LogWarning(dbEx, "Failed to clear StartOrder/StartTime in SpringskytteResultEntry for CompetitionId={CompetitionId} (non-critical)", request.CompetitionId);
                     }
                 }
 
@@ -1032,9 +1052,9 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     }
 
                     // Save updated config back to node
+                    // Publish() saves internally — no Save() needed for existing nodes
                     node.SetValue("configurationData", JsonConvert.SerializeObject(config));
                     node.SetValue("startListContent", BuildStartListHtml(config.Starters));
-                    _contentService.Save(node);
                     _contentService.Publish(node, new[] { "*" });
                 }
 
@@ -1106,9 +1126,9 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     }
                     totalReset += config.Starters.Count;
 
+                    // Publish() saves internally — no Save() needed for existing nodes
                     node.SetValue("configurationData", JsonConvert.SerializeObject(config));
                     node.SetValue("startListContent", BuildStartListHtml(config.Starters));
-                    _contentService.Save(node);
                     _contentService.Publish(node, new[] { "*" });
                 }
 
