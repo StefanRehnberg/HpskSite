@@ -488,8 +488,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     resultPage.SetValue("resultType", "Final Results");
                     resultPage.SetValue("isOfficial", true);
 
-                    if (isNewNode)
-                        _contentService.Save(resultPage);  // New nodes need Save() before Publish()
+                    _contentService.Save(resultPage);
                     _contentService.Publish(resultPage, new[] { "*" });
 
                     _logger.LogInformation("Published Springskytte final results for CompetitionId={CompetitionId}, {Count} shooters",

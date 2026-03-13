@@ -45,11 +45,13 @@
             <div class="card-body">
                 <div class="row text-center">
                     <div class="col-md-4 mb-3 mb-md-0">
-                        <div class="d-flex flex-column align-items-center">
-                            <i class="bi bi-building fs-1 text-primary mb-2"></i>
-                            <h3 class="mb-0">@clubCount</h3>
-                            <small class="text-muted">Klubbar</small>
-                        </div>
+                        <a href="@clubsUrl" class="text-decoration-none region-stat-link">
+                            <div class="d-flex flex-column align-items-center">
+                                <i class="bi bi-building fs-1 text-primary mb-2"></i>
+                                <h3 class="mb-0">@clubCount</h3>
+                                <small class="text-muted">Klubbar</small>
+                            </div>
+                        </a>
                     </div>
                     <div class="col-md-4 mb-3 mb-md-0">
                         <div class="d-flex flex-column align-items-center">
@@ -59,11 +61,24 @@
                         </div>
                     </div>
                     <div class="col-md-4">
-                        <div class="d-flex flex-column align-items-center">
-                            <i class="bi bi-trophy fs-1 text-primary mb-2"></i>
-                            <h3 class="mb-0">@upcomingCompetitionsCount</h3>
-                            <small class="text-muted">Kommande tävlingar</small>
-                        </div>
+                        @if (competitionsHub != null)
+                        {
+                            <a href="@competitionsHub.Url()" class="text-decoration-none region-stat-link">
+                                <div class="d-flex flex-column align-items-center">
+                                    <i class="bi bi-trophy fs-1 text-primary mb-2"></i>
+                                    <h3 class="mb-0">@upcomingCompetitionsCount</h3>
+                                    <small class="text-muted">Kommande tävlingar</small>
+                                </div>
+                            </a>
+                        }
+                        else
+                        {
+                            <div class="d-flex flex-column align-items-center">
+                                <i class="bi bi-trophy fs-1 text-primary mb-2"></i>
+                                <h3 class="mb-0">@upcomingCompetitionsCount</h3>
+                                <small class="text-muted">Kommande tävlingar</small>
+                            </div>
+                        }
                     </div>
                 </div>
             </div>
@@ -324,3 +339,16 @@
         </div>
     </div>
 </div>
+
+<style>
+.region-stat-link {
+    display: block;
+    color: inherit;
+    border-radius: 0.5rem;
+    padding: 0.5rem;
+    transition: background-color 0.15s;
+}
+.region-stat-link:hover {
+    background-color: var(--bs-tertiary-bg);
+}
+</style>

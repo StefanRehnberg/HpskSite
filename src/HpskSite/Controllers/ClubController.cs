@@ -1312,6 +1312,7 @@ namespace HpskSite.Controllers
                 }
 
                 content.SetValue("featuredItems", string.Join(",", udiStrings));
+                _contentService.Save(content);
                 _contentService.Publish(content, Array.Empty<string>());
 
                 return Ok(new { success = true, message = "Featured items updated", count = udiStrings.Count });
