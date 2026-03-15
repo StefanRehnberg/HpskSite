@@ -95,14 +95,6 @@
                         </div>
                     </div>
 
-                    <!-- Class selector (shown if member registered in multiple classes) -->
-                    <div class="mb-3 d-none" id="dr-class-container">
-                        <label for="dr-class-select" class="form-label fw-bold">
-                            <i class="bi bi-bullseye me-1"></i>Klass
-                        </label>
-                        <select class="form-select" id="dr-class-select"></select>
-                    </div>
-
                     <!-- Series status badges -->
                     <div class="mb-3" id="dr-series-status-container" style="display:none;">
                         <label class="form-label fw-bold"><i class="bi bi-list-check me-1"></i>Serier</label>
@@ -349,10 +341,24 @@
     });
 
     function loadDistributedStatus() {
+        // Reset all state
+        drSelectedMemberId = null;
+        drSelectedClass = '';
+        drCurrentSeriesNumber = 1;
+        drShots = [];
+        drSaving = false;
+
+        // Reset UI elements
         document.getElementById('dr-loading').classList.remove('d-none');
         document.getElementById('dr-content').classList.add('d-none');
         document.getElementById('dr-not-active').classList.add('d-none');
         document.getElementById('dr-error').classList.add('d-none');
+        document.getElementById('dr-shot-entry').style.display = 'none';
+        document.getElementById('dr-series-status-container').style.display = 'none';
+        document.getElementById('dr-running-total').classList.add('d-none');
+        document.getElementById('dr-save-feedback').classList.add('d-none');
+        var qrForm = document.getElementById('dr-quickreg-form');
+        if (qrForm) qrForm.classList.add('d-none');
 
         fetch(`/umbraco/surface/CompetitionResults/GetDistributedStatus?competitionId=${DR_COMPETITION_ID}`)
             .then(r => r.json())
@@ -426,6 +432,10 @@
     }
 
     function onMemberSelected() {
+        // Collapse quick-register form if open
+        var qrForm = document.getElementById('dr-quickreg-form');
+        if (qrForm) qrForm.classList.add('d-none');
+
         const val = document.getElementById('dr-member-select').value;
         if (!val) {
             drSelectedMemberId = null;
@@ -439,29 +449,6 @@
         const parts = val.split('|');
         drSelectedMemberId = parseInt(parts[0]);
         drSelectedClass = parts[1];
-
-        // Check if member has multiple class registrations
-        const memberEntries = drMembers.filter(m => m.memberId === drSelectedMemberId);
-        const classContainer = document.getElementById('dr-class-container');
-        if (memberEntries.length > 1) {
-            const classSelect = document.getElementById('dr-class-select');
-            classSelect.innerHTML = '';
-            memberEntries.forEach(m => {
-                const opt = document.createElement('option');
-                opt.value = m.shootingClass;
-                opt.textContent = m.shootingClass;
-                if (m.shootingClass === drSelectedClass) opt.selected = true;
-                classSelect.appendChild(opt);
-            });
-            classSelect.onchange = function() {
-                drSelectedClass = this.value;
-                updateSeriesStatus();
-                startNextSeries();
-            };
-            classContainer.classList.remove('d-none');
-        } else {
-            classContainer.classList.add('d-none');
-        }
 
         updateSeriesStatus();
         startNextSeries();

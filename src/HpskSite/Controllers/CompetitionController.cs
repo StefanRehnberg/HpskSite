@@ -147,12 +147,21 @@ namespace HpskSite.Controllers
                     }
                     else
                     {
-                        // Club admin or skjutledare can register members from their clubs
-                        var targetMemberClubId = targetMember.GetValue<string>("primaryClubId");
-                        if (!string.IsNullOrEmpty(targetMemberClubId) && int.TryParse(targetMemberClubId, out int targetClubId))
+                        // Competition manager can register anyone for their managed competition
+                        bool isCompetitionManager = await _authorizationService.IsCompetitionManager(competitionId);
+                        if (isCompetitionManager)
                         {
-                            canRegisterTargetMember = await _authorizationService.IsClubAdminForClub(targetClubId)
-                                                   || await _authorizationService.IsSkjutledareForClub(targetClubId);
+                            canRegisterTargetMember = true;
+                        }
+                        else
+                        {
+                            // Club admin or skjutledare can register members from their clubs
+                            var targetMemberClubId = targetMember.GetValue<string>("primaryClubId");
+                            if (!string.IsNullOrEmpty(targetMemberClubId) && int.TryParse(targetMemberClubId, out int targetClubId))
+                            {
+                                canRegisterTargetMember = await _authorizationService.IsClubAdminForClub(targetClubId)
+                                                       || await _authorizationService.IsSkjutledareForClub(targetClubId);
+                            }
                         }
 
                         // Users can register themselves

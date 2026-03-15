@@ -1330,7 +1330,7 @@ async function setupRegistrationTargetUI(userInfo) {
     const clubSelect = document.getElementById('clubSelect');
     const memberSelect = document.getElementById('memberSelect');
 
-    if (userInfo.role === 'admin' || userInfo.role === 'clubAdmin' || userInfo.role === 'skjutledare') {
+    if (userInfo.role === 'admin' || userInfo.role === 'clubAdmin' || userInfo.role === 'skjutledare' || userInfo.role === 'competitionManager' || userInfo.role === 'regionalAdmin') {
         // Admin / Club Admin / Skjutledare: Enable both dropdowns, load all clubs
         await loadAllClubs();
 
