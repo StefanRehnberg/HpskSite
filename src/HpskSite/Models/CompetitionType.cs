@@ -39,5 +39,29 @@
             return All.FirstOrDefault(sc => sc.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
         }
 
+        /// <summary>
+        /// Fuzzy lookup: normalizes spaces and Swedish characters before matching against Id and Name.
+        /// Handles free-text values like "Magnum Fält" matching model Id "MagnumFalt".
+        /// </summary>
+        public static CompetitionType? GetFuzzy(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return null;
+            var normalized = Normalize(value);
+            return All.FirstOrDefault(sc =>
+                Normalize(sc.Id) == normalized
+                || Normalize(sc.Name) == normalized
+                || Normalize(sc.Id).StartsWith(normalized)
+                || Normalize(sc.Name).StartsWith(normalized));
+        }
+
+        private static string Normalize(string s)
+        {
+            return s.Replace(" ", "")
+                .Replace("å", "a").Replace("ä", "a").Replace("ö", "o")
+                .Replace("Å", "A").Replace("Ä", "A").Replace("Ö", "O")
+                .Replace("é", "e").Replace("É", "E")
+                .ToLowerInvariant();
+        }
+
     }
 }

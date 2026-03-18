@@ -27,6 +27,7 @@ namespace HpskSite.Controllers
         private readonly AdminAuthorizationService _authService;
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
         private readonly ILogger<ClubAdminController> _logger;
+        private readonly EmailService _emailService;
 
         private const string ClubMemberTypeAlias = "hpskClub";
 
@@ -41,7 +42,8 @@ namespace HpskSite.Controllers
             IMemberGroupService memberGroupService,
             IContentService contentService,
             AdminAuthorizationService authService,
-            ILogger<ClubAdminController> logger)
+            ILogger<ClubAdminController> logger,
+            EmailService emailService)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _memberService = memberService;
@@ -50,6 +52,7 @@ namespace HpskSite.Controllers
             _authService = authService;
             _umbracoContextAccessor = umbracoContextAccessor;
             _logger = logger;
+            _emailService = emailService;
         }
 
         #region Club CRUD Operations
@@ -2132,6 +2135,75 @@ namespace HpskSite.Controllers
             {
                 _logger.LogError(ex, "Error removing regional admin for {RegionCode}", regionCode);
                 return Json(new { success = false, message = "Error removing regional admin: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Sends a welcome email to a member for their admin role
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SendAdminRoleWelcomeEmail(int memberId, string roleType, string roleIdentifier)
+        {
+            bool isSiteAdmin = await _authService.IsCurrentUserAdminAsync();
+            if (!isSiteAdmin)
+            {
+                var managedRegions = await _authService.GetManagedRegions();
+                if (roleType == "regional" && !managedRegions.Contains(roleIdentifier))
+                    return Json(new { success = false, message = "Access denied" });
+                if (roleType == "club" && int.TryParse(roleIdentifier, out var clubId) && !await _authService.IsClubAdminForClub(clubId))
+                    return Json(new { success = false, message = "Access denied" });
+            }
+
+            try
+            {
+                var member = _memberService.GetById(memberId);
+                if (member == null)
+                    return Json(new { success = false, message = "Member not found" });
+
+                var memberEmail = member.Email;
+                if (string.IsNullOrEmpty(memberEmail))
+                    return Json(new { success = false, message = "Medlemmen har ingen e-postadress" });
+
+                var memberName = $"{member.GetValue("firstName")} {member.GetValue("lastName")}".Trim();
+                if (string.IsNullOrEmpty(memberName)) memberName = memberEmail;
+
+                string roleName;
+                string tutorialId;
+
+                if (roleType == "regional")
+                {
+                    tutorialId = "tutorial-06";
+                    if (Enum.TryParse<Federations.RegionalFederations>(roleIdentifier, out var federation))
+                        roleName = federation.GetDescription();
+                    else
+                        roleName = roleIdentifier;
+                }
+                else
+                {
+                    tutorialId = "tutorial-07";
+                    if (int.TryParse(roleIdentifier, out var cId))
+                    {
+                        var club = _contentService.GetById(cId);
+                        roleName = club?.GetValue<string>("clubName") ?? club?.Name ?? $"Klubb ({cId})";
+                    }
+                    else
+                    {
+                        roleName = roleIdentifier;
+                    }
+                }
+
+                await _emailService.SendAdminRoleWelcomeEmailAsync(memberEmail, memberName, roleType, roleName, tutorialId);
+
+                _logger.LogInformation("Sent admin role welcome email to {MemberName} ({Email}) for {RoleType} {RoleIdentifier}",
+                    memberName, memberEmail, roleType, roleIdentifier);
+
+                return Json(new { success = true, message = $"Välkomstmail skickat till {memberEmail}" });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error sending admin role welcome email");
+                return Json(new { success = false, message = "Fel vid skickande av e-post: " + ex.Message });
             }
         }
 

@@ -1270,5 +1270,61 @@ namespace HpskSite.Services
 
             await SendEmailAsync(recipientEmail, subject, body);
         }
+
+        /// <summary>
+        /// Sends a welcome email when a member is assigned an admin role (club admin or regional admin)
+        /// </summary>
+        public async Task SendAdminRoleWelcomeEmailAsync(
+            string memberEmail,
+            string memberName,
+            string roleType,
+            string roleName,
+            string tutorialId)
+        {
+            var roleLabel = roleType == "regional" ? "kretsadministratör" : "klubbadministratör";
+            var subject = $"Du har blivit {roleLabel} för {roleName}";
+            var siteUrl = _configuration["SiteUrl"] ?? "https://pistol.nu";
+
+            var tutorialSection = "";
+            if (!string.IsNullOrEmpty(tutorialId))
+            {
+                var guideLabel = roleType == "regional"
+                    ? "Guide f&ouml;r kretsadministrat&ouml;rer"
+                    : "Guide f&ouml;r klubbadministrat&ouml;rer";
+                var pageUrl = roleType == "regional"
+                    ? $"{siteUrl}/krets/"
+                    : $"{siteUrl}/klubb/";
+
+                tutorialSection = $@"
+    <div style='background-color: #e7f1ff; border-left: 4px solid #0d6efd; padding: 15px; margin: 20px 0;'>
+        <p style='margin: 0 0 10px 0;'><strong>Kom ig&aring;ng snabbt!</strong></p>
+        <p style='margin: 0;'>Vi har en instruktionsvideo som visar alla funktioner du har tillg&aring;ng till som {roleLabel}.</p>
+        <p style='text-align: center; margin: 15px 0 0 0;'>
+            <a href=""{pageUrl}"" style=""display: inline-block; background-color: #0d6efd; color: white !important; padding: 10px 20px; text-decoration: none; border-radius: 5px; font-weight: bold;"">{guideLabel}</a>
+        </p>
+    </div>";
+            }
+
+            var body = $@"
+<html>
+<head>
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+    </style>
+</head>
+<body>
+    <h2>Hej {memberName}!</h2>
+    <p>Du har tilldelats rollen som <strong>{roleLabel}</strong> f&ouml;r <strong>{roleName}</strong> p&aring; Pistol.nu.</p>
+
+    <p>Det inneb&auml;r att du nu har tillg&aring;ng till administrationsfunktioner f&ouml;r {roleName}.</p>
+    {tutorialSection}
+    <p>Om du har fr&aring;gor om din nya roll, kontakta oss via <a href=""mailto:admin@pistol.nu"">admin@pistol.nu</a>.</p>
+
+    <p>Med v&auml;nliga h&auml;lsningar,<br/>Pistol.nu</p>
+</body>
+</html>";
+
+            await SendEmailAsync(memberEmail, subject, body);
+        }
     }
 }

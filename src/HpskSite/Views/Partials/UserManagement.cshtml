@@ -2596,22 +2596,28 @@ function displayMemberAdminRoles(regionalRoles, clubRoles, managedRegions) {
     regionalRoles.forEach(function(role) {
         var canRemove = managedRegions && managedRegions.indexOf(role.regionCode) !== -1;
         html += '<div class="list-group-item d-flex justify-content-between align-items-center">' +
-            '<div><i class="bi bi-globe me-2"></i><strong>Kretsadmin:</strong> ' + escapeHtml(role.name) + '</div>';
+            '<div><i class="bi bi-globe me-2"></i><strong>Kretsadmin:</strong> ' + escapeHtml(role.name) + '</div>' +
+            '<div class="btn-group btn-group-sm">';
         if (canRemove) {
-            html += '<button class="btn btn-sm btn-outline-danger" onclick="removeMemberRegionalAdmin(\'' + escapeHtml(role.regionCode) + '\', \'' + escapeHtml(role.name) + '\')">Ta bort</button>';
+            html += '<button class="btn btn-outline-primary" title="Skicka välkomstmail" onclick="sendAdminRoleWelcomeEmail(\'regional\', \'' + escapeHtml(role.regionCode) + '\', \'' + escapeHtml(role.name) + '\')">' +
+                '<i class="bi bi-envelope me-1"></i>Välkomstmail</button>';
+            html += '<button class="btn btn-outline-danger" onclick="removeMemberRegionalAdmin(\'' + escapeHtml(role.regionCode) + '\', \'' + escapeHtml(role.name) + '\')">Ta bort</button>';
         }
-        html += '</div>';
+        html += '</div></div>';
     });
 
     clubRoles.forEach(function(role) {
         var canRemove = !managedRegions || managedRegions.length === allRegionalFederations.length ||
             (role.regionCode && managedRegions.indexOf(role.regionCode) !== -1);
         html += '<div class="list-group-item d-flex justify-content-between align-items-center">' +
-            '<div><i class="bi bi-building me-2"></i><strong>Klubbadmin:</strong> ' + escapeHtml(role.name) + '</div>';
+            '<div><i class="bi bi-building me-2"></i><strong>Klubbadmin:</strong> ' + escapeHtml(role.name) + '</div>' +
+            '<div class="btn-group btn-group-sm">';
         if (canRemove) {
-            html += '<button class="btn btn-sm btn-outline-danger" onclick="removeMemberClubAdmin(' + role.id + ', \'' + escapeHtml(role.name) + '\')">Ta bort</button>';
+            html += '<button class="btn btn-outline-primary" title="Skicka välkomstmail" onclick="sendAdminRoleWelcomeEmail(\'club\', \'' + role.id + '\', \'' + escapeHtml(role.name) + '\')">' +
+                '<i class="bi bi-envelope me-1"></i>Välkomstmail</button>';
+            html += '<button class="btn btn-outline-danger" onclick="removeMemberClubAdmin(' + role.id + ', \'' + escapeHtml(role.name) + '\')">Ta bort</button>';
         }
-        html += '</div>';
+        html += '</div></div>';
     });
 
     html += '</div>';
@@ -2656,6 +2662,7 @@ async function onMemberAdminRegionForClubChange() {
 
 async function assignMemberRegionalAdmin() {
     const regionCode = document.getElementById('memberAdminRegionSelect').value;
+    const regionName = document.getElementById('memberAdminRegionSelect').selectedOptions[0]?.text || regionCode;
     if (!regionCode || !currentMemberForAdminRoles) return;
 
     const formData = new FormData();
@@ -2670,6 +2677,9 @@ async function assignMemberRegionalAdmin() {
         if (data.success) {
             loadMemberAdminRoles(currentMemberForAdminRoles);
             loadUsers();
+            if (confirm('Rollen tilldelad! Vill du skicka ett välkomstmail med instruktioner?')) {
+                sendAdminRoleWelcomeEmail('regional', regionCode, regionName);
+            }
         } else {
             alert('Fel: ' + data.message);
         }
@@ -2680,6 +2690,7 @@ async function assignMemberRegionalAdmin() {
 
 async function assignMemberClubAdmin() {
     const clubId = document.getElementById('memberAdminClubSelect').value;
+    const clubName = document.getElementById('memberAdminClubSelect').selectedOptions[0]?.text || clubId;
     if (!clubId || !currentMemberForAdminRoles) return;
 
     const formData = new FormData();
@@ -2694,6 +2705,9 @@ async function assignMemberClubAdmin() {
         if (data.success) {
             loadMemberAdminRoles(currentMemberForAdminRoles);
             loadUsers();
+            if (confirm('Rollen tilldelad! Vill du skicka ett välkomstmail med instruktioner?')) {
+                sendAdminRoleWelcomeEmail('club', clubId, clubName);
+            }
         } else {
             alert('Fel: ' + data.message);
         }
@@ -2745,6 +2759,30 @@ async function removeMemberClubAdmin(clubId, clubName) {
         }
     } catch (error) {
         alert('Fel vid borttagning');
+    }
+}
+
+async function sendAdminRoleWelcomeEmail(roleType, roleIdentifier, roleName) {
+    if (!currentMemberForAdminRoles) return;
+    if (!confirm('Skicka välkomstmail för ' + roleName + '?')) return;
+
+    const formData = new FormData();
+    const token = document.querySelector('input[name="__RequestVerificationToken"]');
+    if (token) formData.append('__RequestVerificationToken', token.value);
+    formData.append('memberId', currentMemberForAdminRoles);
+    formData.append('roleType', roleType);
+    formData.append('roleIdentifier', roleIdentifier);
+
+    try {
+        const response = await fetch('/umbraco/surface/ClubAdmin/SendAdminRoleWelcomeEmail', { method: 'POST', body: formData });
+        const data = await response.json();
+        if (data.success) {
+            alert(data.message);
+        } else {
+            alert('Fel: ' + data.message);
+        }
+    } catch (error) {
+        alert('Fel vid skickande av e-post');
     }
 }
 

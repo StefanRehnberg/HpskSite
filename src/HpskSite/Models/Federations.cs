@@ -14,6 +14,9 @@
 
         public enum RegionalFederations
         {
+            [Description("Ankelands Pistolskyttekrets")]
+            Ankeland,
+
             [Description("Blekinge Pistolskyttekrets")]
             Blekinge,
 

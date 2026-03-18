@@ -421,23 +421,28 @@
                 var maxParticipants = competition.Value<int>("maxParticipants");
                 var registrationFee = competition.Value<string>("registrationFee");
                 var competitionTypeId = competition.Value<string>("competitionType") ?? "";
-                var competitionTypeObj = HpskSite.Models.CompetitionTypes.GetById(competitionTypeId);
+                var competitionTypeObj = HpskSite.Models.CompetitionTypes.GetById(competitionTypeId)
+                    ?? HpskSite.Models.CompetitionTypes.GetByName(competitionTypeId)
+                    ?? HpskSite.Models.CompetitionTypes.GetFuzzy(competitionTypeId);
                 var competitionTypeName = competitionTypeObj?.Name ?? (!string.IsNullOrEmpty(competitionTypeId) ? competitionTypeId : "Okänd typ");
                 var numberOfSeriesOrStations = competition.Value<int>("numberOfSeriesOrStations");
                 var numberOfFinalSeries = competition.Value<int>("numberOfFinalSeries");
 
                 // Build competition type display name with series info (skip for Springskytte)
                 var competitionTypeDisplayName = competitionTypeName;
+                var isFaltType = (competitionTypeObj?.Id ?? competitionTypeId).Contains("fält", StringComparison.OrdinalIgnoreCase)
+                    || (competitionTypeObj?.Name ?? "").Contains("fält", StringComparison.OrdinalIgnoreCase);
                 if (competitionTypeId != "Springskytte" && numberOfSeriesOrStations > 0)
                 {
+                    var seriesLabel = isFaltType ? "stationer" : "serier";
                     if (numberOfFinalSeries > 0)
                     {
                         var qualSeries = numberOfSeriesOrStations - numberOfFinalSeries;
-                        competitionTypeDisplayName += $" {qualSeries}+{numberOfFinalSeries} serier";
+                        competitionTypeDisplayName += $" {qualSeries}+{numberOfFinalSeries} {seriesLabel}";
                     }
                     else
                     {
-                        competitionTypeDisplayName += $" {numberOfSeriesOrStations} serier";
+                        competitionTypeDisplayName += $" {numberOfSeriesOrStations} {seriesLabel}";
                     }
                 }
 
@@ -608,7 +613,11 @@
                                 <div class="d-flex align-items-start ms-2">
                                     @if (!string.IsNullOrEmpty(competitionTypeId))
                                     {
-                                        <img src="/images/competition-types/@(competitionTypeId).png"
+                                        var iconName = competitionTypeObj?.Id ?? competitionTypeId
+                                            .Replace("å", "a").Replace("ä", "a").Replace("ö", "o")
+                                            .Replace("Å", "A").Replace("Ä", "A").Replace("Ö", "O")
+                                            .Replace("é", "e").Replace("É", "E");
+                                        <img src="/images/competition-types/@(iconName).png"
                                              alt="@competitionTypeName"
                                              title="@competitionTypeName"
                                              class="competition-type-icon"
@@ -843,23 +852,28 @@
                         var maxParticipants = competition.Value<int>("maxParticipants");
                         var registrationFee = competition.Value<string>("registrationFee");
                         var competitionTypeId = competition.Value<string>("competitionType") ?? "";
-                        var competitionTypeObj = HpskSite.Models.CompetitionTypes.GetById(competitionTypeId);
+                        var competitionTypeObj = HpskSite.Models.CompetitionTypes.GetById(competitionTypeId)
+                            ?? HpskSite.Models.CompetitionTypes.GetByName(competitionTypeId)
+                            ?? HpskSite.Models.CompetitionTypes.GetFuzzy(competitionTypeId);
                         var competitionTypeName = competitionTypeObj?.Name ?? (!string.IsNullOrEmpty(competitionTypeId) ? competitionTypeId : "Okänd typ");
                         var numberOfSeriesOrStations = competition.Value<int>("numberOfSeriesOrStations");
                         var numberOfFinalSeries = competition.Value<int>("numberOfFinalSeries");
 
                         // Build competition type display name with series info (skip for Springskytte)
                         var competitionTypeDisplayName = competitionTypeName;
+                        var isFaltType = (competitionTypeObj?.Id ?? competitionTypeId).Contains("fält", StringComparison.OrdinalIgnoreCase)
+                            || (competitionTypeObj?.Name ?? "").Contains("fält", StringComparison.OrdinalIgnoreCase);
                         if (competitionTypeId != "Springskytte" && numberOfSeriesOrStations > 0)
                         {
+                            var seriesLabel = isFaltType ? "stationer" : "serier";
                             if (numberOfFinalSeries > 0)
                             {
                                 var qualSeries = numberOfSeriesOrStations - numberOfFinalSeries;
-                                competitionTypeDisplayName += $" {qualSeries}+{numberOfFinalSeries} serier";
+                                competitionTypeDisplayName += $" {qualSeries}+{numberOfFinalSeries} {seriesLabel}";
                             }
                             else
                             {
-                                competitionTypeDisplayName += $" {numberOfSeriesOrStations} serier";
+                                competitionTypeDisplayName += $" {numberOfSeriesOrStations} {seriesLabel}";
                             }
                         }
 

@@ -16,6 +16,8 @@
     var profilePictureUrl = "";
     var isAdmin = false;
     var isRegionalAdmin = false;
+    var memberClubs = new List<(int Id, string Name, string ClubUrl)>();
+    var memberRegionPages = new List<(string Name, string RegionUrl)>();
     var hasAdminAccess = false; // True if site admin OR regional admin
 
     if (isLoggedIn && currentMember != null)
@@ -33,21 +35,69 @@
             userInitials += lastName.Substring(0, 1).ToUpper();
         }
 
-        // Get profile picture URL
+        // Get profile picture URL and club memberships
         var memberData = MemberService.GetByEmail(currentMember.Email ?? "");
+        int primaryClubIdValue = 0;
         if (memberData != null)
         {
             profilePictureUrl = memberData.GetValue<string>("profilePictureUrl") ?? "";
+
+            // Primary club
+            var primaryClubIdStr = memberData.GetValue<string>("primaryClubId") ?? "";
+            if (int.TryParse(primaryClubIdStr, out primaryClubIdValue) && primaryClubIdValue > 0)
+            {
+                var clubNode = Umbraco.Content(primaryClubIdValue);
+                if (clubNode != null)
+                {
+                    memberClubs.Add((primaryClubIdValue, clubNode.Name, ClubUrl: clubNode.Url()));
+                }
+            }
+
+            // Additional clubs
+            var memberClubIdsCsv = memberData.GetValue<string>("memberClubIds") ?? "";
+            if (!string.IsNullOrEmpty(memberClubIdsCsv))
+            {
+                foreach (var idStr in memberClubIdsCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    if (int.TryParse(idStr, out int clubId) && clubId > 0 && clubId != primaryClubIdValue)
+                    {
+                        var clubNode = Umbraco.Content(clubId);
+                        if (clubNode != null)
+                        {
+                            memberClubs.Add((clubId, clubNode.Name, ClubUrl: clubNode.Url()));
+                        }
+                    }
+                }
+            }
         }
 
         // Check if user is site administrator using centralized authorization service
         isAdmin = await AuthService.IsCurrentUserAdminAsync();
 
-        // Check if user is a regional admin (has any managed regions)
-        if (!isAdmin)
+        // Check if user is a regional admin and resolve region page links
+        if (memberData != null)
         {
-            var managedRegions = await AuthService.GetManagedRegions();
-            isRegionalAdmin = managedRegions.Any();
+            var memberRoles = MemberService.GetAllRoles(memberData.Id)?.ToList() ?? new List<string>();
+            var managedRegionCodes = memberRoles
+                .Where(r => r.StartsWith("RegionalAdmin_"))
+                .Select(r => r.Replace("RegionalAdmin_", ""))
+                .ToList();
+            isRegionalAdmin = managedRegionCodes.Any();
+
+            if (isRegionalAdmin)
+            {
+                var allRegionPages = Model.Root().Children.Where(x => x.ContentType.Alias == "regionalPage").ToList();
+                foreach (var regionCode in managedRegionCodes)
+                {
+                    var regionPage = allRegionPages.FirstOrDefault(r =>
+                        string.Equals(r.Value<string>("regionCode") ?? "", regionCode, StringComparison.OrdinalIgnoreCase));
+                    if (regionPage != null)
+                    {
+                        var regionName = regionPage.Value<string>("regionName") ?? regionPage.Name;
+                        memberRegionPages.Add((regionName, RegionUrl: regionPage.Url()));
+                    }
+                }
+            }
         }
 
         // User has admin access if they are a site admin OR regional admin
@@ -536,6 +586,20 @@
                                         var userProfileUrl = Model.Root().Children.FirstOrDefault(x => x.ContentType.Alias == "userProfile")?.Url() ?? "/user-profile";
                                     }
                                     <li><a class="dropdown-item" href="@userProfileUrl"><i class="bi bi-person"></i> Min Sida</a></li>
+                                    @if (memberClubs.Count > 0)
+                                    {
+                                        foreach (var club in memberClubs)
+                                        {
+                                            <li><a class="dropdown-item" href="@club.ClubUrl"><i class="bi bi-building"></i> @club.Name</a></li>
+                                        }
+                                    }
+                                    @if (memberRegionPages.Count > 0)
+                                    {
+                                        foreach (var region in memberRegionPages)
+                                        {
+                                            <li><a class="dropdown-item" href="@region.RegionUrl"><i class="bi bi-geo-alt"></i> @region.Name</a></li>
+                                        }
+                                    }
                                     @if (hasAdminAccess)
                                     {
                                         var adminPageUrl = Model.Root().Children.FirstOrDefault(x => x.ContentType.Alias == "adminPage")?.Url() ?? "/admin";
