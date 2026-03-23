@@ -1125,6 +1125,34 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// Export all active clubs as CSV for Brevo/email campaigns.
+        /// Site admin only.
+        /// GET /umbraco/surface/ClubAdmin/ExportClubEmailsCsv
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> ExportClubEmailsCsv()
+        {
+            if (!await _authService.IsCurrentUserAdminAsync())
+            {
+                return Unauthorized();
+            }
+
+            var clubs = GetClubsFromStorage()
+                .Where(c => c.IsActive && !string.IsNullOrWhiteSpace(c.ContactEmail))
+                .OrderBy(c => c.Name)
+                .ToList();
+
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine("ClubName,ContactEmail,ContactPerson,City,RegionalFederation");
+            foreach (var c in clubs)
+            {
+                sb.AppendLine($"\"{c.Name.Replace("\"", "\"\"")}\",\"{c.ContactEmail}\",\"{c.ContactPerson?.Replace("\"", "\"\"") ?? ""}\",\"{c.City?.Replace("\"", "\"\"") ?? ""}\",\"{c.RegionalFederation?.Replace("\"", "\"\"") ?? ""}\"");
+            }
+
+            return File(System.Text.Encoding.UTF8.GetBytes(sb.ToString()), "text/csv", "club-emails.csv");
+        }
+
+        /// <summary>
         /// ONE-TIME FIX: Resync clubs cache after direct SQL import
         /// Re-saves all clubs through Umbraco's content service to trigger cache refresh
         /// </summary>

@@ -37,6 +37,9 @@ const TutorialHelper = {
         // Check if first-time welcome should be shown
         this.checkFirstTimeWelcome();
 
+        // Check URL for ?tutorial= parameter (e.g. from welcome emails)
+        this.checkUrlTutorialParam();
+
         // Add keyboard support (ESC to close)
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
@@ -374,6 +377,21 @@ const TutorialHelper = {
 
         // Timeout after 5 seconds
         setTimeout(() => clearInterval(checkTutorials), 5000);
+    },
+
+    // Check URL for ?tutorial= query parameter and auto-open
+    checkUrlTutorialParam: function() {
+        const params = new URLSearchParams(window.location.search);
+        const tutorialId = params.get('tutorial');
+        if (tutorialId) {
+            // Clean URL without reloading
+            const url = new URL(window.location);
+            url.searchParams.delete('tutorial');
+            window.history.replaceState({}, '', url);
+
+            // Open after tutorials have loaded
+            this.open(tutorialId);
+        }
     },
 
     // Check if first-time welcome should be shown

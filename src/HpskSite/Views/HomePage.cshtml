@@ -347,6 +347,7 @@
                     var competitionsPage = Model.Children.FirstOrDefault(x => x.ContentType.Alias == "competitionsHub");
                     var trainingMatchPage = Model.Children.FirstOrDefault(x => x.Name?.ToLower().Contains("träningsmatch") == true || x.UrlSegment?.Contains("traningsmatch") == true);
                     var trainingPage = Model.Children.FirstOrDefault(x => x.ContentType.Alias == "trainingStairs" || x.Name?.ToLower().Contains("skyttetrappa") == true);
+                    var tutorialPage = Model.Children.FirstOrDefault(x => x.ContentType.Alias == "tutorialPage");
                 }
                 @if (competitionsPage != null)
                 {
@@ -375,6 +376,16 @@
                         <div>
                             <strong>Skyttetrappan</strong>
                             <small class="d-block text-muted">Träningsprogram för alla nivåer</small>
+                        </div>
+                    </a>
+                }
+                @if (tutorialPage != null)
+                {
+                    <a href="@tutorialPage.Url()" class="list-group-item list-group-item-action d-flex align-items-center">
+                        <i class="bi bi-camera-video me-3 text-primary"></i>
+                        <div>
+                            <strong>Videoguider</strong>
+                            <small class="d-block text-muted">Lär dig använda pistol.nu</small>
                         </div>
                     </a>
                 }

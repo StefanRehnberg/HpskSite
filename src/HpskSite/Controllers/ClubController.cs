@@ -385,7 +385,7 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> CreateClubEvent(int clubId, string eventName, string eventType = "Träning",
             string description = "", string venue = "", string contactPerson = "",
-            string contactEmail = "", string contactPhone = "", DateTime? eventDate = null,
+            string contactEmail = "", string contactPhone = "", string eventDate = "",
             string pageName = "")
         {
             try
@@ -430,9 +430,9 @@ namespace HpskSite.Controllers
                 newEvent.SetValue("contactPerson", contactPerson);
                 newEvent.SetValue("contactEmail", contactEmail);
                 newEvent.SetValue("contactPhone", contactPhone);
-                if (eventDate.HasValue)
+                if (!string.IsNullOrEmpty(eventDate) && DateTime.TryParse(eventDate, out var parsedEventDate))
                 {
-                    newEvent.SetValue("eventDate", eventDate.Value);
+                    newEvent.SetValue("eventDate", parsedEventDate);
                 }
                 newEvent.SetValue("isActive", true);
 
@@ -448,7 +448,7 @@ namespace HpskSite.Controllers
                     {
                         id = newEvent.Id,
                         name = eventName,
-                        date = eventDate ?? DateTime.Now,
+                        date = eventDate,
                         type = eventType
                     }
                 });
@@ -626,7 +626,7 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> EditClubEvent(int eventId, string eventName, string eventType = "Träning",
             string description = "", string venue = "", string contactPerson = "",
-            string contactEmail = "", string contactPhone = "", DateTime? eventDate = null,
+            string contactEmail = "", string contactPhone = "", string eventDate = "",
             string pageName = "")
         {
             try
@@ -661,9 +661,9 @@ namespace HpskSite.Controllers
                 eventContent.SetValue("contactPerson", contactPerson);
                 eventContent.SetValue("contactEmail", contactEmail);
                 eventContent.SetValue("contactPhone", contactPhone);
-                if (eventDate.HasValue)
+                if (!string.IsNullOrEmpty(eventDate) && DateTime.TryParse(eventDate, out var parsedEventDate))
                 {
-                    eventContent.SetValue("eventDate", eventDate.Value);
+                    eventContent.SetValue("eventDate", parsedEventDate);
                 }
                 else
                 {
@@ -1851,7 +1851,7 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> CreateRegionEvent(int regionId, string eventName, string eventType = "Träning",
             string description = "", string venue = "", string contactPerson = "",
-            string contactEmail = "", string contactPhone = "", DateTime? eventDate = null,
+            string contactEmail = "", string contactPhone = "", string eventDate = "",
             string pageName = "")
         {
             try
@@ -1892,9 +1892,9 @@ namespace HpskSite.Controllers
                 newEvent.SetValue("contactPerson", contactPerson);
                 newEvent.SetValue("contactEmail", contactEmail);
                 newEvent.SetValue("contactPhone", contactPhone);
-                if (eventDate.HasValue)
+                if (!string.IsNullOrEmpty(eventDate) && DateTime.TryParse(eventDate, out var parsedEventDate))
                 {
-                    newEvent.SetValue("eventDate", eventDate.Value);
+                    newEvent.SetValue("eventDate", parsedEventDate);
                 }
                 newEvent.SetValue("isActive", true);
 
@@ -1909,7 +1909,7 @@ namespace HpskSite.Controllers
                     {
                         id = newEvent.Id,
                         name = eventName,
-                        date = eventDate ?? DateTime.Now,
+                        date = eventDate,
                         type = eventType
                     }
                 });
@@ -1927,7 +1927,7 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> EditRegionEvent(int eventId, string eventName, string eventType = "Träning",
             string description = "", string venue = "", string contactPerson = "",
-            string contactEmail = "", string contactPhone = "", DateTime? eventDate = null,
+            string contactEmail = "", string contactPhone = "", string eventDate = "",
             string pageName = "")
         {
             try
@@ -1973,9 +1973,9 @@ namespace HpskSite.Controllers
                 eventContent.SetValue("contactPerson", contactPerson);
                 eventContent.SetValue("contactEmail", contactEmail);
                 eventContent.SetValue("contactPhone", contactPhone);
-                if (eventDate.HasValue)
+                if (!string.IsNullOrEmpty(eventDate) && DateTime.TryParse(eventDate, out var parsedEventDate))
                 {
-                    eventContent.SetValue("eventDate", eventDate.Value);
+                    eventContent.SetValue("eventDate", parsedEventDate);
                 }
                 else
                 {

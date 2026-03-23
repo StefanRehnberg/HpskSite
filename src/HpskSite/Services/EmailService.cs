@@ -1289,18 +1289,16 @@ namespace HpskSite.Services
             if (!string.IsNullOrEmpty(tutorialId))
             {
                 var guideLabel = roleType == "regional"
-                    ? "Guide f&ouml;r kretsadministrat&ouml;rer"
-                    : "Guide f&ouml;r klubbadministrat&ouml;rer";
-                var pageUrl = roleType == "regional"
-                    ? $"{siteUrl}/krets/"
-                    : $"{siteUrl}/klubb/";
+                    ? "Se guide f&ouml;r kretsadministrat&ouml;rer"
+                    : "Se guide f&ouml;r klubbadministrat&ouml;rer";
+                var tutorialUrl = $"{siteUrl}/?tutorial={tutorialId}";
 
                 tutorialSection = $@"
     <div style='background-color: #e7f1ff; border-left: 4px solid #0d6efd; padding: 15px; margin: 20px 0;'>
         <p style='margin: 0 0 10px 0;'><strong>Kom ig&aring;ng snabbt!</strong></p>
         <p style='margin: 0;'>Vi har en instruktionsvideo som visar alla funktioner du har tillg&aring;ng till som {roleLabel}.</p>
         <p style='text-align: center; margin: 15px 0 0 0;'>
-            <a href=""{pageUrl}"" style=""display: inline-block; background-color: #0d6efd; color: white !important; padding: 10px 20px; text-decoration: none; border-radius: 5px; font-weight: bold;"">{guideLabel}</a>
+            <a href=""{tutorialUrl}"" style=""display: inline-block; background-color: #0d6efd; color: white !important; padding: 10px 20px; text-decoration: none; border-radius: 5px; font-weight: bold;"">{guideLabel}</a>
         </p>
     </div>";
             }
