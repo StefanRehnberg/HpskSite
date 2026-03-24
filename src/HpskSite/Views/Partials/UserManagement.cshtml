@@ -1783,9 +1783,17 @@ function approvePendingMember(memberId) {
     })
     .then(data => {
         if (data.success) {
-            alert('✅ Medlem godkänd! Ett bekräftelsemail har skickats.');
-            loadPendingApprovals(); // Reload pending approvals
-            loadUsers(); // Reload users list
+            loadPendingApprovals();
+            loadUsers();
+
+            if (data.isFirstClubMember && data.firstMemberClubId) {
+                // First member in this club — offer to make them club admin
+                if (confirm(`✅ Medlem godkänd!\n\n${data.memberName} är den första medlemmen i ${data.firstMemberClubName}.\n\nVill du göra ${data.memberName} till klubbadmin för ${data.firstMemberClubName}?`)) {
+                    makeFirstMemberClubAdmin(memberId, data.firstMemberClubId, data.memberName, data.firstMemberClubName);
+                }
+            } else {
+                alert('✅ Medlem godkänd! Ett bekräftelsemail har skickats.');
+            }
         } else {
             alert('❌ Fel: ' + data.message);
         }
@@ -1793,6 +1801,53 @@ function approvePendingMember(memberId) {
     .catch(error => {
         console.error('Approval error:', error);
         alert('❌ Kunde inte godkänna medlem: ' + error.message);
+    });
+}
+
+function makeFirstMemberClubAdmin(memberId, clubId, memberName, clubName) {
+    const formData = new FormData();
+    const token = document.querySelector('input[name="__RequestVerificationToken"]');
+    if (token) formData.append('__RequestVerificationToken', token.value);
+    formData.append('memberId', memberId);
+    formData.append('clubId', clubId);
+
+    fetch('/umbraco/surface/ClubAdmin/AssignClubAdmin', {
+        method: 'POST',
+        body: formData
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            // Send club admin welcome email
+            const emailFormData = new FormData();
+            if (token) emailFormData.append('__RequestVerificationToken', token.value);
+            emailFormData.append('memberId', memberId);
+            emailFormData.append('roleType', 'club');
+            emailFormData.append('roleIdentifier', clubId);
+
+            fetch('/umbraco/surface/ClubAdmin/SendAdminRoleWelcomeEmail', {
+                method: 'POST',
+                body: emailFormData
+            })
+            .then(r => r.json())
+            .then(emailResult => {
+                if (emailResult.success) {
+                    alert(`✅ ${memberName} är nu klubbadmin för ${clubName}. Ett välkomstmail har skickats.`);
+                } else {
+                    alert(`✅ ${memberName} är nu klubbadmin för ${clubName}, men välkomstmailet kunde inte skickas.`);
+                }
+                loadUsers();
+            })
+            .catch(() => {
+                alert(`✅ ${memberName} är nu klubbadmin för ${clubName}.`);
+            });
+        } else {
+            alert('❌ Kunde inte tilldela klubbadmin: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Club admin assignment error:', error);
+        alert('❌ Kunde inte tilldela klubbadmin: ' + error.message);
     });
 }
 

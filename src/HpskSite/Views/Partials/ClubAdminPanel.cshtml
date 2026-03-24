@@ -1400,68 +1400,32 @@ function editClubCompetition(competitionId, competitionType) {
     }
 }
 
-// Copy club competition using edit modal
+// Copy club competition using CopyCompetition endpoint (server-side copy with +1 year dates)
 function copyClubCompetition(competitionId, competitionType) {
-    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+    if (!confirm('Kopiera tävlingen? Datum flyttas fram ett år.')) return;
 
-    fetch(`/umbraco/surface/CompetitionEdit/GetCompetitionData?competitionId=${competitionId}`, {
-        method: 'GET',
-        headers: { 'RequestVerificationToken': token },
-        credentials: 'same-origin'
+    const token = getAntiForgeryToken();
+
+    fetch('/umbraco/surface/CompetitionAdmin/CopyCompetition', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'RequestVerificationToken': token
+        },
+        body: JSON.stringify({ sourceCompetitionId: competitionId })
     })
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            window.currentCompetitionData = data.data;
-
-            // Clear ID to indicate this is a copy
-            document.getElementById('competitionId').value = '';
-            window.currentCompetitionData.id = 0;
-
-            // Clear all date fields
-            window.currentCompetitionData.competitionDate = null;
-            window.currentCompetitionData.competitionEndDate = null;
-            window.currentCompetitionData.registrationOpenDate = null;
-            window.currentCompetitionData.registrationCloseDate = null;
-
-            // Add " - Kopia" suffix
-            if (window.currentCompetitionData.competitionName &&
-                !window.currentCompetitionData.competitionName.includes('- Kopia')) {
-                window.currentCompetitionData.competitionName += ' - Kopia';
-            }
-
-            // Set reload callback for club page
-            window.onCompetitionSaved = function() { loadClubCompetitions(); };
-
-            // Update modal title and show
-            document.getElementById('competitionEditModalLabel').innerHTML =
-                '<i class="bi bi-files me-2"></i>Kopiera Tävling';
-            const modalElement = document.getElementById('competitionEditModal');
-            const modal = window.competitionEditModalInstance || new bootstrap.Modal(modalElement);
-            window.competitionEditModalInstance = modal;
-            modal.show();
-
-            // Populate after modal is shown
-            setTimeout(() => {
-                if (typeof window.populateEditModal === 'function') {
-                    populateEditModal(window.currentCompetitionData);
-                    loadEditModalShootingClasses();
-                } else {
-                    setTimeout(() => {
-                        if (typeof window.populateEditModal === 'function') {
-                            populateEditModal(window.currentCompetitionData);
-                            loadEditModalShootingClasses();
-                        }
-                    }, 500);
-                }
-            }, 100);
+            alert('✅ Tävlingen har kopierats! Datum har flyttats fram ett år.');
+            loadClubCompetitions();
         } else {
-            alert('Kunde inte ladda tävlingsdata: ' + (data.message || 'Okänt fel'));
+            alert('❌ Kunde inte kopiera: ' + (data.message || 'Okänt fel'));
         }
     })
     .catch(error => {
-        console.error('Error loading competition for copy:', error);
-        alert('Fel vid laddning av tävlingsdata');
+        console.error('Error copying competition:', error);
+        alert('❌ Fel vid kopiering av tävling');
     });
 }
 
@@ -1800,14 +1764,15 @@ let editMemberPreservedAdminGroups = []; // Preserve ClubAdmin_* and RegionalAdm
 // Initialize edit member data (load clubs and groups)
 async function initEditMemberData() {
     // Load clubs and member groups in parallel for faster loading
+    // Use GetClubsForRegistration (public) so club admins can populate the club dropdown
     const [clubsResult, groupsResult] = await Promise.allSettled([
-        fetch('/umbraco/surface/ClubAdmin/GetClubs').then(r => r.json()),
+        fetch('/umbraco/surface/ClubAdmin/GetClubsForRegistration').then(r => r.json()),
         fetch('/umbraco/surface/MemberAdmin/GetMemberGroups').then(r => r.json())
     ]);
 
     // Process clubs result
     if (clubsResult.status === 'fulfilled' && clubsResult.value.success) {
-        editMemberAvailableClubs = clubsResult.value.data.filter(c => c.isActive);
+        editMemberAvailableClubs = clubsResult.value.clubs || [];
     } else {
         console.error('Error loading clubs:', clubsResult.reason || 'Failed');
         editMemberAvailableClubs = [];

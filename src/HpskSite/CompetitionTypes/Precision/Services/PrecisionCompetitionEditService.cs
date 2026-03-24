@@ -491,8 +491,13 @@ namespace HpskSite.CompetitionTypes.Precision.Services
                 return "E-post är obligatorisk";
 
             var email = value.ToString().Trim();
+
+            // Allow non-email values like "Ingen" for contact fields
+            if (!email.Contains('@'))
+                return null;
+
             var emailPattern = @"^[^\s@]+@[^\s@]+\.[^\s@]+$";
-            
+
             if (!Regex.IsMatch(email, emailPattern))
                 return "Ogiltig e-postformat";
 

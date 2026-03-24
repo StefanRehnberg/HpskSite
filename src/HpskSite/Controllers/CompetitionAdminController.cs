@@ -1027,6 +1027,12 @@ namespace HpskSite.Controllers
                     }
                 }
 
+                // Ensure new competitions are active by default
+                if (!request.Fields.ContainsKey("isActive"))
+                {
+                    newCompetition.SetValue("isActive", true);
+                }
+
                 var saveResult = _contentService.Save(newCompetition);
                 if (!saveResult.Success)
                 {
@@ -1037,8 +1043,8 @@ namespace HpskSite.Controllers
                     });
                 }
 
-                // Publish the competition
-                var publishResult = _contentService.Publish(newCompetition, Array.Empty<string>());
+                // Publish the competition ("*" = publish invariant content)
+                var publishResult = _contentService.Publish(newCompetition, new[] { "*" });
                 if (!publishResult.Success)
                 {
                     return Ok(new
@@ -1061,7 +1067,7 @@ namespace HpskSite.Controllers
                         id = newCompetition.Id,
                         name = newCompetition.Name,
                         type = competitionTypeId,
-                        startDate = newCompetition.GetValue<DateTime?>("startDate"),
+                        startDate = newCompetition.GetValue<DateTime?>("competitionDate"),
                         status = GetCompetitionStatus(newCompetition),
                         registrationCount = 0 // New competition has no registrations
                     }
@@ -1721,6 +1727,9 @@ namespace HpskSite.Controllers
                     }
                 }
 
+                // Ensure copied competition is active (boolean properties may not copy correctly)
+                newCompetition.SetValue("isActive", true);
+
                 var saveResult = _contentService.Save(newCompetition);
                 if (!saveResult.Success)
                 {
@@ -1731,8 +1740,8 @@ namespace HpskSite.Controllers
                     });
                 }
 
-                // Publish the competition copy
-                var publishResult = _contentService.Publish(newCompetition, Array.Empty<string>());
+                // Publish the competition copy ("*" = publish invariant content)
+                var publishResult = _contentService.Publish(newCompetition, new[] { "*" });
                 if (!publishResult.Success)
                 {
                     return Ok(new
@@ -1755,7 +1764,7 @@ namespace HpskSite.Controllers
                         id = newCompetition.Id,
                         name = newCompetition.Name,
                         type = newCompetition.GetValue<string>("competitionType") ?? "Unknown",
-                        startDate = newCompetition.GetValue<DateTime?>("startDate"),
+                        startDate = newCompetition.GetValue<DateTime?>("competitionDate"),
                         status = GetCompetitionStatus(newCompetition),
                         registrationCount = 0, // Copied competition has no registrations
                         sourceId = sourceCompetition.Id
@@ -2176,8 +2185,8 @@ namespace HpskSite.Controllers
         {
             try
             {
-                var startDate = competition.GetValue<DateTime?>("startDate");
-                var endDate = competition.GetValue<DateTime?>("endDate");
+                var startDate = competition.GetValue<DateTime?>("competitionDate");
+                var endDate = competition.GetValue<DateTime?>("competitionEndDate");
 
                 if (!startDate.HasValue)
                     return "Draft";

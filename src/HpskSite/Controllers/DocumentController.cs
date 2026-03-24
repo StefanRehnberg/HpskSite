@@ -316,6 +316,20 @@ namespace HpskSite.Controllers
 
             _documentService.IncrementDownloadCount(id);
 
+            // Serve browser-viewable types inline (PDF, images), download the rest
+            var inlineTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "application/pdf",
+                "image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml",
+                "text/plain", "text/html"
+            };
+
+            if (inlineTypes.Contains(document.ContentType))
+            {
+                Response.Headers["Content-Disposition"] = $"inline; filename=\"{document.FileName}\"";
+                return PhysicalFile(filePath, document.ContentType);
+            }
+
             return PhysicalFile(filePath, document.ContentType, document.FileName);
         }
 
@@ -389,6 +403,10 @@ namespace HpskSite.Controllers
         {
             // Public documents are accessible to everyone
             if (document.AccessLevel == DocumentAccessLevel.Public)
+                return true;
+
+            // Quick link documents are intentionally exposed on public pages
+            if (document.ShowInQuickLinks)
                 return true;
 
             var currentMember = await _memberManager.GetCurrentMemberAsync();

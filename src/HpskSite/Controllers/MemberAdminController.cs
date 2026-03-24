@@ -1265,6 +1265,15 @@ namespace HpskSite.Controllers
                 _memberService.Save(member);
                 Console.WriteLine($"[ApproveMember] Auto-login token generated and saved for: {memberId}");
 
+                // Resolve club info (needed for email and first-member check)
+                var clubId = member.GetValue<int>("primaryClubId");
+                var clubName = "Ingen klubb";
+                if (clubId > 0)
+                {
+                    var clubNode = Services.ContentService?.GetById(clubId);
+                    clubName = clubNode?.GetValue<string>("clubName") ?? clubNode?.Name ?? $"Klubb (ID: {clubId})";
+                }
+
                 // Send approval email - use firstName + lastName as fallback if Name is empty
                 try
                 {
@@ -1295,14 +1304,6 @@ namespace HpskSite.Controllers
                     if (currentUser != null)
                         approvedBy = currentUser.Name ?? currentUser.Email ?? approvedBy;
 
-                    var clubId = member.GetValue<int>("primaryClubId");
-                    var clubName = "Ingen klubb";
-                    if (clubId > 0)
-                    {
-                        var clubNode = Services.ContentService?.GetById(clubId);
-                        clubName = clubNode?.GetValue<string>("clubName") ?? clubNode?.Name ?? $"Klubb (ID: {clubId})";
-                    }
-
                     await _emailService.SendApprovalConfirmationToAdminAsync(
                         memberName, member.Email, clubName, approvedBy);
                 }
@@ -1314,7 +1315,37 @@ namespace HpskSite.Controllers
                 }
 
                 Console.WriteLine($"[ApproveMember] Approval completed successfully for: {memberId}");
-                return Json(new { success = true, message = "Member approved successfully" });
+
+                // Check if this is the first approved member in their club
+                bool isFirstClubMember = false;
+                string firstMemberClubName = "";
+                int firstMemberClubId = 0;
+                if (clubId > 0)
+                {
+                    var allMembers = _memberService.GetAll(0, int.MaxValue, out _);
+                    var otherApprovedClubMembers = allMembers
+                        .Where(m => m.Id != memberId && m.IsApproved &&
+                                    m.GetValue("primaryClubId")?.ToString() == clubId.ToString())
+                        .Any();
+
+                    if (!otherApprovedClubMembers)
+                    {
+                        isFirstClubMember = true;
+                        firstMemberClubId = clubId;
+                        firstMemberClubName = clubName;
+                        Console.WriteLine($"[ApproveMember] First member in club {clubName} (ID: {clubId})");
+                    }
+                }
+
+                return Json(new
+                {
+                    success = true,
+                    message = "Member approved successfully",
+                    isFirstClubMember,
+                    firstMemberClubId,
+                    firstMemberClubName,
+                    memberName = member.Name ?? $"{member.GetValue<string>("firstName")} {member.GetValue<string>("lastName")}".Trim()
+                });
             }
             catch (Exception ex)
             {
