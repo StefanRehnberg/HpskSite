@@ -725,7 +725,7 @@ namespace HpskSite.Controllers
                 var newMember = _memberService.CreateMember(email, email, fullName, "hpskMember");
                 newMember.SetValue("firstName", firstName);
                 newMember.SetValue("lastName", lastName);
-                newMember.SetValue("primaryClubId", request.ClubId.ToString());
+                newMember.SetValue("primaryClubId", request.ClubId);
                 newMember.SetValue("invitationToken", invitationToken);
                 newMember.SetValue("invitationTokenExpiry", tokenExpiry.ToString("o"));
                 newMember.IsApproved = true;

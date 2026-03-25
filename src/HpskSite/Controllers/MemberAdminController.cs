@@ -754,6 +754,15 @@ namespace HpskSite.Controllers
                     }
                 }
 
+                // New member — require club selection
+                if (!id.HasValue || id.Value <= 0)
+                {
+                    if (!primaryClubId.HasValue || primaryClubId.Value <= 0)
+                    {
+                        return Json(new { success = false, message = "Du måste välja en klubb för ny medlem" });
+                    }
+                }
+
                 // Validate additional club IDs if provided
                 var additionalClubIdList = new List<int>();
                 if (!string.IsNullOrEmpty(additionalClubIds))

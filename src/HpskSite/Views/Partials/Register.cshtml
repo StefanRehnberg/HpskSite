@@ -86,7 +86,7 @@
         </div>
     </div>
 
-    <button type="submit" class="btn btn-primary w-100">Registrera</button>
+    <button type="submit" id="registerSubmitBtn" class="btn btn-primary w-100">Registrera</button>
 </form>
 
 @* Include the missing club request modal *@
@@ -141,10 +141,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
     async function loadClubsForRegion(region) {
         const clubSelect = document.getElementById('primaryClubId');
+        const submitBtn = document.getElementById('registerSubmitBtn');
 
-        // Show loading state
+        // Show loading state and disable submit
         clubSelect.innerHTML = '<option value="">Laddar klubbar...</option>';
         clubSelect.disabled = true;
+        submitBtn.disabled = true;
 
         try {
             const response = await fetch(`/umbraco/surface/ClubAdmin/GetClubsForRegion?region=${encodeURIComponent(region)}`);
@@ -162,12 +164,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
 
                 clubSelect.disabled = false;
+                submitBtn.disabled = false;
             } else {
                 clubSelect.innerHTML = '<option value="">Inga klubbar hittades</option>';
+                submitBtn.disabled = false;
             }
         } catch (error) {
             console.error('Error loading clubs:', error);
             clubSelect.innerHTML = '<option value="">Fel vid laddning av klubbar</option>';
+            submitBtn.disabled = false;
         }
     }
 
@@ -192,6 +197,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
         if (password.length < 6) {
             showError('Lösenordet måste vara minst 6 tecken långt');
+            return;
+        }
+
+        // Validate club selection
+        const clubId = parseInt(formData.get('primaryClubId'));
+        if (!clubId || clubId <= 0) {
+            showError('Du måste välja en klubb');
             return;
         }
 
