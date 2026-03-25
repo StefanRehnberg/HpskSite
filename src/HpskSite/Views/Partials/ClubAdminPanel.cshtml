@@ -345,6 +345,35 @@
     </div>
 </div>
 
+<!-- Copy Event Modal -->
+<div class="modal fade" id="copyEventModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Kopiera händelse</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="copyEventSourceId">
+                <div class="mb-3">
+                    <label class="form-label">Namn</label>
+                    <input type="text" class="form-control" id="copyEventName" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Nytt datum *</label>
+                    <input type="text" class="form-control" id="copyEventDate" required>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary btn-sm" onclick="saveCopyEvent()">
+                    <i class="bi bi-copy me-1"></i>Kopiera
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Delete Confirmation Modal -->
 <div class="modal fade" id="deleteConfirmModal" tabindex="-1">
     <div class="modal-dialog">
@@ -948,10 +977,13 @@ function displayEvents(events) {
                 <td>${date}</td>
                 <td>${event.venue || '-'}</td>
                 <td>
-                    <button class="btn btn-sm btn-outline-primary" onclick="editEvent(${event.id})">
+                    <button class="btn btn-sm btn-outline-primary" onclick="editEvent(${event.id})" title="Redigera">
                         <i class="bi bi-pencil"></i>
                     </button>
-                    <button class="btn btn-sm btn-outline-danger" onclick="deleteEvent(${event.id}, '${event.name}')">
+                    <button class="btn btn-sm btn-outline-secondary" onclick="copyEvent(${event.id})" title="Kopiera (+1 vecka)">
+                        <i class="bi bi-copy"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteEvent(${event.id}, '${event.name}')" title="Ta bort">
                         <i class="bi bi-trash"></i>
                     </button>
                 </td>
@@ -1250,6 +1282,87 @@ function deleteEvent(eventId, eventName) {
             console.error('Error deleting event:', error);
             alert('Fel vid radering av händelse.');
         });
+    });
+}
+
+// Copy Event
+var copyEventFlatpickr = null;
+
+function copyEvent(eventId) {
+    const event = allEvents.find(e => e.id === eventId);
+    if (!event) { alert('Händelse hittades inte'); return; }
+
+    document.getElementById('copyEventSourceId').value = eventId;
+    document.getElementById('copyEventName').value = event.name || '';
+
+    // Init flatpickr on first use
+    if (!copyEventFlatpickr) {
+        copyEventFlatpickr = flatpickr('#copyEventDate', {
+            locale: 'sv',
+            enableTime: true,
+            time_24hr: true,
+            dateFormat: 'Y-m-d H:i'
+        });
+    }
+
+    // Default to source date + 7 days
+    if (event.date) {
+        const newDate = new Date(event.date);
+        newDate.setDate(newDate.getDate() + 7);
+        copyEventFlatpickr.setDate(newDate);
+    } else {
+        copyEventFlatpickr.clear();
+    }
+
+    new bootstrap.Modal(document.getElementById('copyEventModal')).show();
+}
+
+function saveCopyEvent() {
+    const sourceId = parseInt(document.getElementById('copyEventSourceId').value);
+    const event = allEvents.find(e => e.id === sourceId);
+    if (!event) { alert('Källhändelse hittades inte'); return; }
+
+    const newDate = document.getElementById('copyEventDate').value;
+    if (!newDate) { alert('Ange ett datum'); return; }
+
+    const saveBtn = document.querySelector('#copyEventModal .modal-footer .btn-primary');
+    const originalBtnText = saveBtn.innerHTML;
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Kopierar...';
+
+    const formData = new FormData();
+    formData.append('clubId', clubId);
+    formData.append('eventName', document.getElementById('copyEventName').value || event.name || '');
+    formData.append('eventType', event.type || 'Träning');
+    formData.append('eventDate', newDate);
+    formData.append('venue', event.venue || '');
+    formData.append('description', event.description || '');
+    formData.append('contactPerson', event.contactPerson || '');
+    formData.append('contactEmail', event.contactEmail || '');
+    formData.append('contactPhone', event.contactPhone || '');
+    formData.append('__RequestVerificationToken', getAntiForgeryToken());
+
+    fetch('/umbraco/surface/Club/CreateClubEvent', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = originalBtnText;
+        if (data.success) {
+            bootstrap.Modal.getInstance(document.getElementById('copyEventModal')).hide();
+            loadEvents();
+            alert('Händelse kopierad!');
+        } else {
+            alert('Fel: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error copying event:', error);
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = originalBtnText;
+        alert('Fel vid kopiering av händelse.');
     });
 }
 

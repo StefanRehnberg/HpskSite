@@ -136,6 +136,9 @@
             <li class="nav-item" role="presentation">
                 <button class="nav-link" id="regions-tab" data-bs-toggle="tab" data-bs-target="#regions" type="button" role="tab">Kretsar</button>
             </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="statistics-tab" data-bs-toggle="tab" data-bs-target="#statistics" type="button" role="tab">Statistik</button>
+            </li>
         }
     </ul>
 
@@ -203,6 +206,13 @@
                 <div class="card mt-3">
                     <div class="card-body">
                         @await Html.PartialAsync("RegionalManagement")
+                    </div>
+                </div>
+            </div>
+            <div class="tab-pane fade" id="statistics" role="tabpanel">
+                <div class="card mt-3">
+                    <div class="card-body">
+                        @await Html.PartialAsync("AdminStatistics")
                     </div>
                 </div>
             </div>
