@@ -30,7 +30,11 @@
             <div class="col-md-3 col-sm-6">
                 <div class="card h-100 border-primary">
                     <div class="card-body text-center">
-                        <h6 class="card-subtitle mb-2 text-muted">Medlemmar</h6>
+                        <h6 class="card-subtitle mb-2 text-muted">
+                            Medlemmar
+                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
+                               title="Totalt antal godkända medlemmar. Nya = registrerade denna kalendermånad."></i>
+                        </h6>
                         <h2 class="card-title mb-1" id="statTotalMembers">—</h2>
                         <small class="text-success" id="statNewMembersMonth"></small>
                     </div>
@@ -39,7 +43,11 @@
             <div class="col-md-3 col-sm-6">
                 <div class="card h-100 border-success">
                     <div class="card-body text-center">
-                        <h6 class="card-subtitle mb-2 text-muted">Klubbar</h6>
+                        <h6 class="card-subtitle mb-2 text-muted">
+                            Klubbar
+                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
+                               title="Aktiva = klubbar med minst 1 medlem OCH ett event inom senaste 3 månaderna eller framåt. Nya = klubbar vars första medlem registrerades inom 30 dagar."></i>
+                        </h6>
                         <h2 class="card-title mb-1" id="statClubs">—</h2>
                         <small class="text-success" id="statNewClubs"></small>
                     </div>
@@ -48,7 +56,11 @@
             <div class="col-md-3 col-sm-6">
                 <div class="card h-100 border-info">
                     <div class="card-body text-center">
-                        <h6 class="card-subtitle mb-2 text-muted">Tävlingar i år</h6>
+                        <h6 class="card-subtitle mb-2 text-muted">
+                            Tävlingar i år
+                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
+                               title="Antal tävlingar med tävlingsdatum under innevarande kalenderår."></i>
+                        </h6>
                         <h2 class="card-title mb-1" id="statCompetitions">—</h2>
                     </div>
                 </div>
@@ -56,8 +68,13 @@
             <div class="col-md-3 col-sm-6">
                 <div class="card h-100 border-warning">
                     <div class="card-body text-center">
-                        <h6 class="card-subtitle mb-2 text-muted">Träningsmatcher (30d)</h6>
-                        <h2 class="card-title mb-1" id="statTrainingMatches30d">—</h2>
+                        <h6 class="card-subtitle mb-2 text-muted">
+                            Träningsmatcher
+                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
+                               title="Totalt antal träningsmatcher. Siffran under visar de senaste 30 dagarna."></i>
+                        </h6>
+                        <h2 class="card-title mb-1" id="statTrainingMatchesTotal">—</h2>
+                        <small class="text-success" id="statTrainingMatches30dBadge"></small>
                     </div>
                 </div>
             </div>
@@ -117,6 +134,67 @@
                                 </thead>
                                 <tbody id="topCompetitionsBody">
                                     <tr><td colspan="3" class="text-center text-muted">Laddar...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section C2: Klubbaktiviteter -->
+        <h5 class="mt-4 mb-3"><i class="bi bi-calendar-event me-2"></i>Klubbaktiviteter</h5>
+        <div class="row g-3 mb-4">
+            <div class="col-md-4 col-sm-6">
+                <div class="card h-100">
+                    <div class="card-body text-center">
+                        <small class="text-muted">
+                            Events i år
+                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
+                               title="Totalt antal klubbevent med eventdatum under respektive kalenderår."></i>
+                        </small>
+                        <h3 class="mb-1" id="statClubEventsYear">—</h3>
+                        <small class="text-success d-block" id="statClubEvents30d"></small>
+                        <hr class="my-2">
+                        <div class="d-flex justify-content-around text-muted small">
+                            <div><span id="statClubEventsLastYear">—</span><br><span class="text-muted" id="labelLastYear"></span></div>
+                            <div><span id="statClubEventsYearBefore">—</span><br><span class="text-muted" id="labelYearBefore"></span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-8">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">Events per typ</h6>
+                        <div style="position:relative;height:200px"><canvas id="chartClubEventsByType"></canvas></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="row g-3 mb-4">
+            <div class="col-md-7">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">Events per månad</h6>
+                        <div style="position:relative;height:220px"><canvas id="chartClubEventsPerMonth"></canvas></div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-5">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">Mest aktiva klubbar</h6>
+                        <div class="table-responsive">
+                            <table class="table table-sm table-hover mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Klubb</th>
+                                        <th class="text-end">Events</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="topClubsByEventsBody">
+                                    <tr><td colspan="2" class="text-center text-muted">Laddar...</td></tr>
                                 </tbody>
                             </table>
                         </div>
@@ -195,35 +273,146 @@
             </div>
         </div>
 
-        <!-- Section F: Aktivitet -->
-        <h5 class="mt-4 mb-3"><i class="bi bi-activity me-2"></i>Aktivitet</h5>
+        <!-- Section F: Aktivitet & Engagemang -->
+        <h5 class="mt-4 mb-3"><i class="bi bi-activity me-2"></i>Aktivitet & Engagemang</h5>
         <div class="row g-3 mb-4">
+            <div class="col-md-5">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">
+                            Träningsresultat
+                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
+                               title="Självregistrerade träningsresultat under innevarande kalenderår."></i>
+                        </h6>
+                        <div class="mb-3 text-center">
+                            <h3 class="mb-0" id="statTrainingScoresTotal">—</h3>
+                            <small class="text-muted">resultat i år</small>
+                        </div>
+                        <div class="row g-2">
+                            <div class="col-6">
+                                <h6 class="small text-muted mb-1">Per vapengrupp</h6>
+                                <div id="trainingByWeaponList" class="small">—</div>
+                            </div>
+                            <div class="col-6">
+                                <h6 class="small text-muted mb-1">Per disciplin</h6>
+                                <div id="trainingByDisciplineList" class="small">—</div>
+                            </div>
+                        </div>
+                        <hr class="my-2">
+                        <div class="text-center">
+                            <small class="text-muted">Unika tränande (30d)</small>
+                            <h4 class="mb-0" id="statUniqueTrainers30d">—</h4>
+                        </div>
+                    </div>
+                </div>
+            </div>
             <div class="col-md-7">
                 <div class="card h-100">
                     <div class="card-body">
                         <h6 class="card-title">Träningsresultat per månad</h6>
-                        <div style="position:relative;height:220px"><canvas id="chartTrainingScores"></canvas></div>
+                        <div style="position:relative;height:280px"><canvas id="chartTrainingScores"></canvas></div>
                     </div>
                 </div>
             </div>
-            <div class="col-md-5">
+        </div>
+        <div class="row g-3 mb-4">
+            <div class="col-md-4">
                 <div class="d-flex flex-column gap-3 h-100">
                     <div class="card flex-fill">
                         <div class="card-body text-center py-3">
-                            <small class="text-muted">Aktiva medlemmar (30d)</small>
-                            <h3 class="mb-0" id="statActive30d">—</h3>
+                            <small class="text-muted">
+                                Webb (30d)
+                                <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
+                                   title="Medlemmar som besökt webbplatsen senaste 30 dagarna."></i>
+                            </small>
+                            <h3 class="mb-0" id="statWebActive30d">—</h3>
                         </div>
                     </div>
                     <div class="card flex-fill">
                         <div class="card-body text-center py-3">
-                            <small class="text-muted">Aktiva medlemmar (90d)</small>
-                            <h3 class="mb-0" id="statActive90d">—</h3>
+                            <small class="text-muted">
+                                Mobilapp (30d)
+                                <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
+                                   title="Medlemmar som använt mobilappen senaste 30 dagarna."></i>
+                            </small>
+                            <h3 class="mb-0" id="statMobileActive30d">—</h3>
                         </div>
                     </div>
                     <div class="card flex-fill">
                         <div class="card-body text-center py-3">
-                            <small class="text-muted">Aktiva medlemmar (365d)</small>
-                            <h3 class="mb-0" id="statActive365d">—</h3>
+                            <small class="text-muted">Båda (30d)</small>
+                            <h3 class="mb-0" id="statBothActive30d">—</h3>
+                        </div>
+                    </div>
+                    <div class="card flex-fill">
+                        <div class="card-body text-center py-3">
+                            <small class="text-muted">
+                                Unika mobil-inloggningar (30d)
+                                <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
+                                   title="Unika medlemmar som loggat in via mobilappen (JWT-token) senaste 30 dagarna."></i>
+                            </small>
+                            <h3 class="mb-0" id="statUniqueLogins30d">—</h3>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">
+                            Medlemsengagemang
+                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
+                               title="Aktiv: senaste 30d. Tillfällig: 31-90d. Sällan: 91-365d. Vilande: >365d eller aldrig."></i>
+                        </h6>
+                        <div style="position:relative;height:240px"><canvas id="chartEngagementFunnel"></canvas></div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">Mobilapp-installationer</h6>
+                        <div style="position:relative;height:240px"><canvas id="chartDevicePlatforms"></canvas></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section G: Diskutrymme -->
+        <h5 class="mt-4 mb-3"><i class="bi bi-hdd me-2"></i>Diskutrymme</h5>
+        <div class="row g-3 mb-4">
+            <div class="col-md-5">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">Total användning</h6>
+                        <div class="text-center py-3">
+                            <h3 class="mb-1"><span id="statDiskUsed">—</span> / <span id="statDiskTotal">—</span> MB</h3>
+                            <div class="progress mt-2" style="height: 20px;">
+                                <div class="progress-bar" id="diskProgressBar" role="progressbar" style="width: 0%">0%</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-7">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">Användning per klubb/krets</h6>
+                        <div class="table-responsive" style="max-height: 260px; overflow-y: auto;">
+                            <table class="table table-sm table-hover mb-0">
+                                <thead class="table-light" style="position: sticky; top: 0;">
+                                    <tr>
+                                        <th>Namn</th>
+                                        <th>Typ</th>
+                                        <th class="text-end">Använt</th>
+                                        <th class="text-end">Gräns</th>
+                                        <th style="width: 100px;"></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="diskStorageBody">
+                                    <tr><td colspan="5" class="text-center text-muted">Laddar...</td></tr>
+                                </tbody>
+                            </table>
                         </div>
                     </div>
                 </div>
@@ -331,7 +520,9 @@
         document.getElementById('statNewClubs').textContent = d.newClubs30d > 0
             ? '+' + d.newClubs30d + ' nya' : '';
         document.getElementById('statCompetitions').textContent = d.competitionsThisYear;
-        document.getElementById('statTrainingMatches30d').textContent = d.trainingMatches30d;
+        document.getElementById('statTrainingMatchesTotal').textContent = d.trainingMatchesTotal;
+        document.getElementById('statTrainingMatches30dBadge').textContent = d.trainingMatches30d > 0
+            ? '+' + d.trainingMatches30d + ' senaste 30d' : '';
 
         // Section B: New members per month (bar chart)
         if (d.newMembersPerMonth && d.newMembersPerMonth.length) {
@@ -409,6 +600,68 @@
             ).join('');
         } else {
             tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">Inga tävlingar att visa</td></tr>';
+        }
+
+        // Section C2: Club activities
+        if (d.clubActivities) {
+            document.getElementById('statClubEventsYear').textContent = d.clubActivities.eventsThisYear;
+            document.getElementById('statClubEvents30d').textContent = d.clubActivities.events30d > 0
+                ? '+' + d.clubActivities.events30d + ' senaste 30d' : '';
+            var thisYear = new Date().getFullYear();
+            document.getElementById('statClubEventsLastYear').textContent = d.clubActivities.eventsLastYear;
+            document.getElementById('labelLastYear').textContent = thisYear - 1;
+            document.getElementById('statClubEventsYearBefore').textContent = d.clubActivities.eventsYearBefore;
+            document.getElementById('labelYearBefore').textContent = thisYear - 2;
+
+            // Events by type (doughnut)
+            if (d.clubActivities.byType && d.clubActivities.byType.length) {
+                var eventTypePalette = { 'Tävling': '#dc3545', 'Träning': '#198754', 'Städning': '#ffc107', 'Möte': '#0d6efd', 'Socialt': '#6f42c1', 'Annat': '#6c757d' };
+                destroyChart('chartClubEventsByType');
+                var ctx = document.getElementById('chartClubEventsByType').getContext('2d');
+                var etColors = d.clubActivities.byType.map(function (x, i) { return eventTypePalette[x.type] || chartPalette[i % chartPalette.length]; });
+                chartInstances['chartClubEventsByType'] = new Chart(ctx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: d.clubActivities.byType.map(function (x) { return x.type + ' (' + x.count + ')'; }),
+                        datasets: [{ data: d.clubActivities.byType.map(function (x) { return x.count; }), backgroundColor: etColors, borderWidth: 2 }]
+                    },
+                    options: {
+                        responsive: true, maintainAspectRatio: false,
+                        plugins: { legend: { position: 'bottom', labels: { color: colors.text, usePointStyle: true, pointStyle: 'circle', padding: 12 } } }
+                    }
+                });
+            }
+
+            // Events per month (bar chart)
+            if (d.clubActivities.perMonth && d.clubActivities.perMonth.length) {
+                destroyChart('chartClubEventsPerMonth');
+                var ctx = document.getElementById('chartClubEventsPerMonth').getContext('2d');
+                chartInstances['chartClubEventsPerMonth'] = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: d.clubActivities.perMonth.map(function (x) { return formatMonth(x.month); }),
+                        datasets: [{ label: 'Events', data: d.clubActivities.perMonth.map(function (x) { return x.count; }), backgroundColor: colors.success + 'cc', borderColor: colors.success, borderWidth: 1 }]
+                    },
+                    options: {
+                        responsive: true, maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        scales: {
+                            y: { beginAtZero: true, ticks: { precision: 0, color: colors.text }, grid: { color: colors.grid } },
+                            x: { ticks: { color: colors.text }, grid: { display: false } }
+                        }
+                    }
+                });
+            }
+
+            // Top clubs by events (table)
+            var evtBody = document.getElementById('topClubsByEventsBody');
+            if (d.clubActivities.topClubs && d.clubActivities.topClubs.length) {
+                evtBody.innerHTML = d.clubActivities.topClubs.map(function (c) {
+                    return '<tr><td>' + escapeHtml(c.club) + '</td><td class="text-end">' + c.count + '</td></tr>';
+                }).join('');
+            } else {
+                evtBody.innerHTML = '<tr><td colspan="2" class="text-center text-muted">Inga events att visa</td></tr>';
+            }
         }
 
         // Section D: Training matches per month (bar chart)
@@ -508,10 +761,131 @@
             });
         }
 
-        // Section F: Active members
-        document.getElementById('statActive30d').textContent = d.activeMembers30d;
-        document.getElementById('statActive90d').textContent = d.activeMembers90d;
-        document.getElementById('statActive365d').textContent = d.activeMembers365d;
+        // Section F: Training score breakdowns
+        document.getElementById('statTrainingScoresTotal').textContent = d.trainingScoresThisYear || 0;
+        document.getElementById('statUniqueTrainers30d').textContent = d.uniqueTrainers30d || 0;
+
+        var weaponList = document.getElementById('trainingByWeaponList');
+        if (d.scoresByWeaponClass && d.scoresByWeaponClass.length) {
+            weaponList.innerHTML = d.scoresByWeaponClass.map(function (x) {
+                return '<div class="d-flex justify-content-between"><span>' + escapeHtml(x.weaponClass) + '</span><span class="text-muted">' + x.count + '</span></div>';
+            }).join('');
+        } else {
+            weaponList.innerHTML = '<span class="text-muted">Inga</span>';
+        }
+
+        var discList = document.getElementById('trainingByDisciplineList');
+        if (d.scoresByDiscipline && d.scoresByDiscipline.length) {
+            discList.innerHTML = d.scoresByDiscipline.map(function (x) {
+                return '<div class="d-flex justify-content-between"><span>' + escapeHtml(x.discipline) + '</span><span class="text-muted">' + x.count + '</span></div>';
+            }).join('');
+        } else {
+            discList.innerHTML = '<span class="text-muted">Inga</span>';
+        }
+
+        // Section F2: Engagement
+        if (d.engagement) {
+            document.getElementById('statWebActive30d').textContent = d.engagement.webActive30d;
+            document.getElementById('statMobileActive30d').textContent = d.engagement.mobileActive30d;
+            document.getElementById('statBothActive30d').textContent = d.engagement.bothActive30d;
+            document.getElementById('statUniqueLogins30d').textContent = d.engagement.uniqueLogins30d;
+
+            // Engagement funnel (horizontal stacked bar)
+            if (d.engagement.funnel) {
+                var f = d.engagement.funnel;
+                destroyChart('chartEngagementFunnel');
+                var ctx = document.getElementById('chartEngagementFunnel').getContext('2d');
+                chartInstances['chartEngagementFunnel'] = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: ['Aktiv (0-30d)', 'Tillfällig (31-90d)', 'Sällan (91-365d)', 'Vilande (>365d)'],
+                        datasets: [{
+                            data: [f.active, f.occasional, f.infrequent, f.dormant],
+                            backgroundColor: [colors.success + 'cc', colors.primary + 'cc', colors.warning + 'cc', colors.danger + 'cc'],
+                            borderColor: [colors.success, colors.primary, colors.warning, colors.danger],
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true, maintainAspectRatio: false,
+                        indexAxis: 'y',
+                        plugins: { legend: { display: false } },
+                        scales: {
+                            x: { beginAtZero: true, ticks: { precision: 0, color: colors.text }, grid: { color: colors.grid } },
+                            y: { ticks: { color: colors.text }, grid: { display: false } }
+                        }
+                    }
+                });
+            }
+
+            // Device platforms (doughnut)
+            if (d.engagement.devicesByPlatform && d.engagement.devicesByPlatform.length) {
+                var platformColors = { 'Android': '#3ddc84', 'iOS': '#007aff' };
+                destroyChart('chartDevicePlatforms');
+                var ctx = document.getElementById('chartDevicePlatforms').getContext('2d');
+                var pColors = d.engagement.devicesByPlatform.map(function (x, i) { return platformColors[x.platform] || chartPalette[i % chartPalette.length]; });
+                chartInstances['chartDevicePlatforms'] = new Chart(ctx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: d.engagement.devicesByPlatform.map(function (x) { return x.platform + ' (' + x.count + ')'; }),
+                        datasets: [{ data: d.engagement.devicesByPlatform.map(function (x) { return x.count; }), backgroundColor: pColors, borderWidth: 2 }]
+                    },
+                    options: {
+                        responsive: true, maintainAspectRatio: false,
+                        plugins: { legend: { position: 'bottom', labels: { color: colors.text, usePointStyle: true, pointStyle: 'circle', padding: 12 } } }
+                    }
+                });
+            } else {
+                var canvas = document.getElementById('chartDevicePlatforms');
+                if (canvas) canvas.parentElement.innerHTML = '<div class="d-flex align-items-center justify-content-center h-100 text-muted">Inga registrerade enheter</div>';
+            }
+        }
+
+        // Section G: Disk space
+        if (d.diskSpace) {
+            document.getElementById('statDiskUsed').textContent = d.diskSpace.totalUsedMB;
+            document.getElementById('statDiskTotal').textContent = d.diskSpace.totalDiskSpaceMB;
+
+            var pct = d.diskSpace.totalDiskPercentage;
+            var bar = document.getElementById('diskProgressBar');
+            bar.style.width = pct + '%';
+            bar.textContent = pct + '%';
+            bar.className = 'progress-bar' + (pct > 80 ? ' bg-danger' : pct > 60 ? ' bg-warning' : ' bg-success');
+
+            var rows = [];
+            if (d.diskSpace.regionStorage) {
+                d.diskSpace.regionStorage.forEach(function (r) {
+                    rows.push({ name: r.name, type: 'Krets', usedMB: r.usedMB, limitMB: r.limitMB, percentage: r.percentage });
+                });
+            }
+            if (d.diskSpace.clubStorage) {
+                d.diskSpace.clubStorage.forEach(function (c) {
+                    rows.push({ name: c.name, type: 'Klubb', usedMB: c.usedMB, limitMB: c.limitMB, percentage: c.percentage });
+                });
+            }
+            rows.sort(function (a, b) { return b.usedMB - a.usedMB; });
+
+            var tbody = document.getElementById('diskStorageBody');
+            if (rows.length > 0) {
+                tbody.innerHTML = rows.map(function (r) {
+                    var barColor = r.percentage > 80 ? 'bg-danger' : r.percentage > 60 ? 'bg-warning' : 'bg-success';
+                    return '<tr>' +
+                        '<td>' + escapeHtml(r.name) + '</td>' +
+                        '<td><span class="badge ' + (r.type === 'Krets' ? 'bg-primary' : 'bg-secondary') + '">' + r.type + '</span></td>' +
+                        '<td class="text-end">' + r.usedMB + ' MB</td>' +
+                        '<td class="text-end">' + r.limitMB + ' MB</td>' +
+                        '<td><div class="progress" style="height:14px"><div class="progress-bar ' + barColor + '" style="width:' + r.percentage + '%"></div></div></td>' +
+                        '</tr>';
+                }).join('');
+            } else {
+                tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Inga dokument uppladdade</td></tr>';
+            }
+        }
+
+        // Initialize tooltips
+        document.querySelectorAll('#statisticsContainer [data-bs-toggle="tooltip"]').forEach(function (el) {
+            bootstrap.Tooltip.getOrCreateInstance(el);
+        });
     }
 
     const REGION_COLLAPSED_MAX = 7;
