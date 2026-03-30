@@ -148,12 +148,14 @@ namespace HpskSite.Controllers
                 var resultId = await SaveResultToDatabase(request);
                 _logger.LogInformation("Database save completed with resultId: {ResultId} for shooter {TeamNumber}-{Position}", resultId, request.TeamNumber, request.Position);
 
-                if (resultId == 0)
+                if (resultId <= 0)
                 {
                     return Json(new ResultEntryResponse
                     {
                         Success = false,
-                        Message = "Ett fel uppstod vid sparande av resultatet."
+                        Message = resultId == -1
+                            ? "Resultatet sparades redan av en annan funktionär. Försök igen."
+                            : "Ett fel uppstod vid sparande av resultatet."
                     });
                 }
 
@@ -348,9 +350,15 @@ namespace HpskSite.Controllers
                 };
 
                 var resultId = await SaveResultToDatabase(entryRequest);
-                if (resultId == 0)
+                if (resultId <= 0)
                 {
-                    return Json(new ResultEntryResponse { Success = false, Message = "Kunde inte spara resultatet." });
+                    return Json(new ResultEntryResponse
+                    {
+                        Success = false,
+                        Message = resultId == -1
+                            ? "Resultatet sparades redan av en annan funktionär. Försök igen."
+                            : "Kunde inte spara resultatet."
+                    });
                 }
 
                 // 7. Invalidate caches + update live leaderboard
@@ -1505,106 +1513,66 @@ namespace HpskSite.Controllers
         {
             try
             {
-                _logger.LogInformation("Starting to save result to database for competition {CompetitionId}", request.CompetitionId);
+                _logger.LogInformation("Starting to save result to database for competition {CompetitionId}, MemberId={MemberId}, ShootingClass={ShootingClass}, SeriesNumber={SeriesNumber}",
+                    request.CompetitionId, request.ShooterMemberId, request.ShooterClass, request.SeriesNumber);
 
-                // Use proper connection disposal
+                var compTypeId = GetCompetitionTypeId(request.CompetitionId);
+                var tableName = GetResultTableName(compTypeId);
+                var shotsJson = JsonConvert.SerializeObject(request.Shots);
+                var now = DateTime.Now;
+
+                // Atomic MERGE: eliminates race condition when multiple range masters save simultaneously
+                var mergeSql = $@"
+                    MERGE INTO [{tableName}] AS target
+                    USING (SELECT @0 AS CompetitionId, @1 AS MemberId, @2 AS ShootingClass, @3 AS SeriesNumber) AS source
+                    ON target.CompetitionId = source.CompetitionId
+                       AND target.MemberId = source.MemberId
+                       AND target.ShootingClass = source.ShootingClass
+                       AND target.SeriesNumber = source.SeriesNumber
+                    WHEN MATCHED THEN
+                        UPDATE SET Shots = @4, TeamNumber = @5, Position = @6,
+                                   EnteredBy = @7, LastModified = @8
+                    WHEN NOT MATCHED THEN
+                        INSERT (CompetitionId, SeriesNumber, MemberId, TeamNumber, Position,
+                                ShootingClass, Shots, EnteredBy, EnteredAt, LastModified)
+                        VALUES (@0, @3, @1, @5, @6, @2, @4, @7, @8, @8)
+                    OUTPUT INSERTED.Id;";
+
                 using var db = _umbracoDatabaseFactory.CreateDatabase();
                 using var transaction = db.GetTransaction();
 
                 try
                 {
-                    // IDENTITY-BASED LOOKUP: Query by (CompetitionId, MemberId, ShootingClass, SeriesNumber)
-                    // ShootingClass is required to distinguish multi-class shooters (e.g., A1 + C1)
-                    _logger.LogInformation("Checking for existing result with CompetitionId={CompetitionId}, MemberId={MemberId}, ShootingClass={ShootingClass}, SeriesNumber={SeriesNumber}",
-                        request.CompetitionId, request.ShooterMemberId, request.ShooterClass, request.SeriesNumber);
+                    var resultId = await db.ExecuteScalarAsync<int>(mergeSql,
+                        request.CompetitionId,      // @0
+                        request.ShooterMemberId,    // @1
+                        request.ShooterClass,       // @2
+                        request.SeriesNumber,       // @3
+                        shotsJson,                  // @4
+                        request.TeamNumber,         // @5
+                        request.Position,           // @6
+                        request.RangeOfficerId,     // @7
+                        now                         // @8
+                    );
 
-                    // Route to correct table based on competition type
-                    var compTypeId = GetCompetitionTypeId(request.CompetitionId);
-                    PrecisionResultEntry existingResult = compTypeId switch
-                    {
-                        "Milsnabb" => await db.FirstOrDefaultAsync<MilsnabbResultEntry>(
-                            "WHERE CompetitionId = @0 AND MemberId = @1 AND ShootingClass = @2 AND SeriesNumber = @3",
-                            request.CompetitionId, request.ShooterMemberId, request.ShooterClass, request.SeriesNumber),
-                        "Duell" => await db.FirstOrDefaultAsync<DuellResultEntry>(
-                            "WHERE CompetitionId = @0 AND MemberId = @1 AND ShootingClass = @2 AND SeriesNumber = @3",
-                            request.CompetitionId, request.ShooterMemberId, request.ShooterClass, request.SeriesNumber),
-                        "NationellHelmatch" => await db.FirstOrDefaultAsync<NationellHelmatchResultEntry>(
-                            "WHERE CompetitionId = @0 AND MemberId = @1 AND ShootingClass = @2 AND SeriesNumber = @3",
-                            request.CompetitionId, request.ShooterMemberId, request.ShooterClass, request.SeriesNumber),
-                        "MagnumPrecision" => await db.FirstOrDefaultAsync<MagnumPrecisionResultEntry>(
-                            "WHERE CompetitionId = @0 AND MemberId = @1 AND ShootingClass = @2 AND SeriesNumber = @3",
-                            request.CompetitionId, request.ShooterMemberId, request.ShooterClass, request.SeriesNumber),
-                        _ => await db.FirstOrDefaultAsync<PrecisionResultEntry>(
-                            "WHERE CompetitionId = @0 AND MemberId = @1 AND ShootingClass = @2 AND SeriesNumber = @3",
-                            request.CompetitionId, request.ShooterMemberId, request.ShooterClass, request.SeriesNumber)
-                    };
+                    transaction.Complete();
 
-                    var shotsJson = JsonConvert.SerializeObject(request.Shots);
-                    var now = DateTime.Now;
+                    _logger.LogInformation("Successfully saved result ID {ResultId} for MemberId {MemberId} (Team {Team}, Position {Position})",
+                        resultId, request.ShooterMemberId, request.TeamNumber, request.Position);
 
-                    if (existingResult != null)
-                    {
-                        // Update existing result (NPoco uses runtime type for table routing)
-                        _logger.LogInformation("Updating existing result ID {ResultId} for MemberId {MemberId}", existingResult.Id, request.ShooterMemberId);
-
-                        existingResult.Shots = shotsJson;
-                        existingResult.TeamNumber = request.TeamNumber; // Update informational field
-                        existingResult.Position = request.Position;     // Update informational field
-                        existingResult.ShootingClass = request.ShooterClass;
-                        existingResult.EnteredBy = request.RangeOfficerId;
-                        existingResult.LastModified = now;
-
-                        await db.UpdateAsync(existingResult);
-                        transaction.Complete();
-
-                        _logger.LogInformation("Successfully updated result for MemberId {MemberId} (Team {Team}, Position {Position})",
-                            request.ShooterMemberId, request.TeamNumber, request.Position);
-
-                        return existingResult.Id;
-                    }
-                    else
-                    {
-                        // Insert new result — create the right type for table routing
-                        _logger.LogInformation("Creating new result for MemberId {MemberId} (Team {Team}, Position {Position})",
-                            request.ShooterMemberId, request.TeamNumber, request.Position);
-
-                        PrecisionResultEntry newResult = compTypeId switch
-                        {
-                            "Milsnabb" => new MilsnabbResultEntry(),
-                            "Duell" => new DuellResultEntry(),
-                            "NationellHelmatch" => new NationellHelmatchResultEntry(),
-                            "MagnumPrecision" => new MagnumPrecisionResultEntry(),
-                            _ => new PrecisionResultEntry()
-                        };
-
-                        newResult.CompetitionId = request.CompetitionId;
-                        newResult.SeriesNumber = request.SeriesNumber;
-                        newResult.MemberId = request.ShooterMemberId;           // IDENTITY FIELD - Primary lookup
-                        newResult.TeamNumber = request.TeamNumber;              // INFORMATIONAL - Position at time of entry
-                        newResult.Position = request.Position;                  // INFORMATIONAL - Position at time of entry
-                        newResult.ShootingClass = request.ShooterClass;
-                        newResult.Shots = shotsJson;
-                        newResult.EnteredBy = request.RangeOfficerId;
-                        newResult.EnteredAt = now;
-                        newResult.LastModified = now;
-
-                        _logger.LogInformation("Attempting to insert result to database (table: {Table})", GetResultTableName(compTypeId));
-                        var resultId = await db.InsertAsync(newResult);
-                        _logger.LogInformation("Successfully inserted result with ID: {ResultId} for MemberId {MemberId}", resultId, request.ShooterMemberId);
-
-                        // Commit the transaction
-                        transaction.Complete();
-
-                        // Convert decimal to int (SQL Server returns decimal for auto-increment IDs)
-                        return Convert.ToInt32(resultId);
-                    }
+                    return resultId;
                 }
                 catch (Exception ex)
                 {
-                    // Rollback transaction on error
-                    _logger.LogError(ex, "Database operation failed, rolling back transaction. Exception: {ExceptionMessage}", ex.Message);
-                    throw; // Re-throw to be caught by outer catch
+                    _logger.LogError(ex, "Database MERGE failed, rolling back transaction. Exception: {ExceptionMessage}", ex.Message);
+                    throw;
                 }
+            }
+            catch (Microsoft.Data.SqlClient.SqlException sqlEx) when (sqlEx.Number == 2627 || sqlEx.Number == 2601)
+            {
+                _logger.LogWarning(sqlEx, "Unique constraint violation saving result for MemberId {MemberId} — likely concurrent save by another range master",
+                    request.ShooterMemberId);
+                return -1; // Signal constraint violation to caller
             }
             catch (Exception ex)
             {
@@ -1698,9 +1666,6 @@ namespace HpskSite.Controllers
         {
             try
             {
-                _logger.LogInformation("Starting to delete result from database for competition {CompetitionId}", request.CompetitionId);
-
-                // IDENTITY-BASED DELETE: Use MemberId directly from request
                 var memberId = request.MemberId;
 
                 if (memberId <= 0)
@@ -1710,72 +1675,33 @@ namespace HpskSite.Controllers
                     return false;
                 }
 
-                _logger.LogInformation("Deleting result for MemberId {MemberId}, SeriesNumber {SeriesNumber}",
-                    memberId, request.SeriesNumber);
+                _logger.LogInformation("Deleting result for CompetitionId={CompetitionId}, MemberId={MemberId}, ShootingClass={ShootingClass}, SeriesNumber={SeriesNumber}",
+                    request.CompetitionId, memberId, request.ShootingClass, request.SeriesNumber);
 
-                // Use proper connection disposal
+                var tableName = GetResultTableName(GetCompetitionTypeId(request.CompetitionId));
+
+                // Direct DELETE — no need for SELECT first, idempotent
                 using var db = _umbracoDatabaseFactory.CreateDatabase();
-                using var transaction = db.GetTransaction();
+                var rowsDeleted = await db.ExecuteAsync(
+                    $"DELETE FROM [{tableName}] WHERE CompetitionId = @0 AND MemberId = @1 AND ShootingClass = @2 AND SeriesNumber = @3",
+                    request.CompetitionId, memberId, request.ShootingClass, request.SeriesNumber);
 
-                try
+                if (rowsDeleted > 0)
                 {
-                    // IDENTITY-BASED LOOKUP: Query by (CompetitionId, MemberId, ShootingClass, SeriesNumber)
-                    // ShootingClass is required to distinguish multi-class shooters (e.g., A1 + C1)
-                    _logger.LogInformation("Checking for existing result to delete with CompetitionId={CompetitionId}, MemberId={MemberId}, ShootingClass={ShootingClass}, SeriesNumber={SeriesNumber}",
-                        request.CompetitionId, memberId, request.ShootingClass, request.SeriesNumber);
-
-                    // Route to correct table based on competition type (NPoco uses runtime type for delete)
-                    var deleteCompTypeId = GetCompetitionTypeId(request.CompetitionId);
-                    PrecisionResultEntry existingResult = deleteCompTypeId switch
-                    {
-                        "Milsnabb" => await db.FirstOrDefaultAsync<MilsnabbResultEntry>(
-                            "WHERE CompetitionId = @0 AND MemberId = @1 AND ShootingClass = @2 AND SeriesNumber = @3",
-                            request.CompetitionId, memberId, request.ShootingClass, request.SeriesNumber),
-                        "Duell" => await db.FirstOrDefaultAsync<DuellResultEntry>(
-                            "WHERE CompetitionId = @0 AND MemberId = @1 AND ShootingClass = @2 AND SeriesNumber = @3",
-                            request.CompetitionId, memberId, request.ShootingClass, request.SeriesNumber),
-                        "NationellHelmatch" => await db.FirstOrDefaultAsync<NationellHelmatchResultEntry>(
-                            "WHERE CompetitionId = @0 AND MemberId = @1 AND ShootingClass = @2 AND SeriesNumber = @3",
-                            request.CompetitionId, memberId, request.ShootingClass, request.SeriesNumber),
-                        "MagnumPrecision" => await db.FirstOrDefaultAsync<MagnumPrecisionResultEntry>(
-                            "WHERE CompetitionId = @0 AND MemberId = @1 AND ShootingClass = @2 AND SeriesNumber = @3",
-                            request.CompetitionId, memberId, request.ShootingClass, request.SeriesNumber),
-                        _ => await db.FirstOrDefaultAsync<PrecisionResultEntry>(
-                            "WHERE CompetitionId = @0 AND MemberId = @1 AND ShootingClass = @2 AND SeriesNumber = @3",
-                            request.CompetitionId, memberId, request.ShootingClass, request.SeriesNumber)
-                    };
-
-                    if (existingResult != null)
-                    {
-                        // Delete existing result (NPoco uses runtime type for table routing)
-                        _logger.LogInformation("Deleting result with ID: {ResultId} for MemberId {MemberId}", existingResult.Id, memberId);
-
-                        await db.DeleteAsync(existingResult);
-
-                        // Commit the transaction
-                        transaction.Complete();
-
-                        _logger.LogInformation("Successfully deleted result for MemberId {MemberId}, Series {SeriesNumber}", memberId, request.SeriesNumber);
-                        return true;
-                    }
-                    else
-                    {
-                        _logger.LogInformation("No result found to delete for MemberId {MemberId}, SeriesNumber {SeriesNumber}",
-                            memberId, request.SeriesNumber);
-                        return false;
-                    }
+                    _logger.LogInformation("Successfully deleted {RowsDeleted} result row(s) for MemberId {MemberId}, Series {SeriesNumber}",
+                        rowsDeleted, memberId, request.SeriesNumber);
+                    return true;
                 }
-                catch (Exception ex)
+                else
                 {
-                    // Rollback transaction on error
-                    _logger.LogError(ex, "Database operation failed, rolling back transaction. Exception: {ExceptionMessage}", ex.Message);
-                    throw; // Re-throw to be caught by outer catch
+                    _logger.LogInformation("No result found to delete for MemberId {MemberId}, SeriesNumber {SeriesNumber}",
+                        memberId, request.SeriesNumber);
+                    return false;
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Database error deleting result. Exception: {ExceptionMessage}. StackTrace: {StackTrace}",
-                    ex.Message, ex.StackTrace);
+                _logger.LogError(ex, "Database error deleting result. Exception: {ExceptionMessage}", ex.Message);
                 return false;
             }
         }

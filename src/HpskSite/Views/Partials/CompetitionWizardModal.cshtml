@@ -1270,12 +1270,16 @@ function loadSeriesForWizard() {
             if (data.success && data.data && data.data.length > 0) {
                 const select = document.getElementById('wizard_seriesId');
                 select.innerHTML = '<option value="">Ingen serie</option>';
-                data.data.forEach(series => {
-                    const option = document.createElement('option');
-                    option.value = series.id;
-                    option.textContent = series.name;
-                    select.appendChild(option);
-                });
+                // On club pages, only show series belonging to this club
+                const clubFilter = typeof window.currentClubId !== 'undefined' ? window.currentClubId : null;
+                data.data
+                    .filter(series => !clubFilter || series.clubId === clubFilter)
+                    .forEach(series => {
+                        const option = document.createElement('option');
+                        option.value = series.id;
+                        option.textContent = series.name;
+                        select.appendChild(option);
+                    });
             }
         })
         .catch(error => console.error('Error loading series:', error));

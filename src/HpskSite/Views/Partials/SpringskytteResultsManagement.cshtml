@@ -192,6 +192,23 @@ function formatAgeSpan(cls) {
     return cls;
 }
 
+// Retry helper for save operations (handles transient failures from concurrent saves)
+async function springFetchWithRetry(url, options, maxRetries = 1) {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+            const response = await fetch(url, options);
+            const data = await response.json();
+            if (data.success || attempt >= maxRetries) return data;
+            console.warn('Springskytte save failed, retrying...', data.message);
+            await new Promise(r => setTimeout(r, 500));
+        } catch (error) {
+            if (attempt >= maxRetries) throw error;
+            console.warn('Springskytte network error, retrying...', error);
+            await new Promise(r => setTimeout(r, 500));
+        }
+    }
+}
+
 // ===== Springskytte Results Management =====
 let springShooters = [];
 let springFilteredShooters = [];
@@ -692,7 +709,7 @@ async function springSaveResult() {
     };
 
     try {
-        const response = await fetch('/umbraco/surface/Springskytte/SaveSpringskytteResult', {
+        const data = await springFetchWithRetry('/umbraco/surface/Springskytte/SaveSpringskytteResult', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -700,7 +717,6 @@ async function springSaveResult() {
             },
             body: JSON.stringify(requestData)
         });
-        const data = await response.json();
 
         if (data.success) {
             // Use server-verified data (read-back from DB) — not local copies
@@ -1080,7 +1096,7 @@ async function springCSavePartial(onSuccess) {
     };
 
     try {
-        const response = await fetch('/umbraco/surface/Springskytte/SaveSpringskytteResult', {
+        const data = await springFetchWithRetry('/umbraco/surface/Springskytte/SaveSpringskytteResult', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -1088,7 +1104,6 @@ async function springCSavePartial(onSuccess) {
             },
             body: JSON.stringify(requestData)
         });
-        const data = await response.json();
 
         if (data.success) {
             // Use server-verified data (read-back from DB)
@@ -1283,7 +1298,7 @@ async function springCSave() {
     if (saveBtn) { saveBtn.disabled = true; saveBtn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Sparar...'; }
 
     try {
-        const response = await fetch('/umbraco/surface/Springskytte/SaveSpringskytteResult', {
+        const data = await springFetchWithRetry('/umbraco/surface/Springskytte/SaveSpringskytteResult', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -1291,7 +1306,6 @@ async function springCSave() {
             },
             body: JSON.stringify(requestData)
         });
-        const data = await response.json();
 
         if (data.success) {
             // Use server-verified data (read-back from DB)

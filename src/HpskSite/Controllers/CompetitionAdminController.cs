@@ -2216,12 +2216,10 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetSeriesList(string? region = null)
         {
-            // Allow site admins and regional admins
-            bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
-            var managedRegions = await _authorizationService.GetManagedRegions();
-            bool isRegionalAdmin = !isSiteAdmin && managedRegions.Any();
+            // Allow site admins, regional admins, and club admins
+            var (isSiteAdmin, isRegionalAdmin, isClubAdmin, managedClubIds) = await GetSeriesAuthContext();
 
-            if (!isSiteAdmin && !isRegionalAdmin)
+            if (!isSiteAdmin && !isRegionalAdmin && !isClubAdmin)
             {
                 return Ok(new { success = false, message = "Access denied" });
             }
@@ -2234,6 +2232,7 @@ namespace HpskSite.Controllers
 
                 if (isRegionalAdmin && !isSiteAdmin)
                 {
+                    var managedRegions = await _authorizationService.GetManagedRegions();
                     if (!string.IsNullOrEmpty(region) && managedRegions.Contains(region))
                     {
                         effectiveRegion = region;
@@ -2249,9 +2248,13 @@ namespace HpskSite.Controllers
                     }
                 }
 
-                // Check cache first (include effective region in cache key)
-                var cacheKeyRegion = effectiveRegion ?? (effectiveRegions != null ? string.Join("_", effectiveRegions) : "all");
-                var cacheKey = $"{SeriesListCacheKey}_{cacheKeyRegion}";
+                // Check cache first (include effective region or club IDs in cache key)
+                string cacheKeySuffix;
+                if (isClubAdmin && !isSiteAdmin && !isRegionalAdmin)
+                    cacheKeySuffix = "clubs_" + string.Join("_", managedClubIds.OrderBy(x => x));
+                else
+                    cacheKeySuffix = effectiveRegion ?? (effectiveRegions != null ? string.Join("_", effectiveRegions) : "all");
+                var cacheKey = $"{SeriesListCacheKey}_{cacheKeySuffix}";
                 var cachedResult = _appCaches.RuntimeCache.Get(cacheKey);
                 if (cachedResult != null)
                 {
@@ -2297,20 +2300,28 @@ namespace HpskSite.Controllers
                     .ToDictionary(g => g.Key, g => g.Count());
 
                 // Filter series by their OWN organizer properties (clubId / regionalFederation)
+                // Club admins only see series belonging to their managed clubs
                 var now = DateTime.Now;
                 var seriesData = allSeries
                     .Where(series =>
                     {
+                        // Club admins: only show series belonging to their clubs
+                        if (isClubAdmin && !isSiteAdmin && !isRegionalAdmin)
+                        {
+                            var seriesClubId = series.GetValue<int>("clubId");
+                            return seriesClubId > 0 && managedClubIds.Contains(seriesClubId);
+                        }
+
                         if (!needsRegionFilter)
                             return true; // No filter — show all
 
-                        var seriesClubId = series.GetValue<int>("clubId");
+                        var seriesClubIdForRegion = series.GetValue<int>("clubId");
                         var seriesRegion = series.GetValue<string>("regionalFederation") ?? "";
 
                         // Series with a club — look up the club's region
-                        if (seriesClubId > 0)
+                        if (seriesClubIdForRegion > 0)
                         {
-                            if (clubRegionLookup.TryGetValue(seriesClubId, out var clubRegion))
+                            if (clubRegionLookup.TryGetValue(seriesClubIdForRegion, out var clubRegion))
                             {
                                 if (!string.IsNullOrEmpty(effectiveRegion))
                                     return clubRegion.Equals(effectiveRegion, StringComparison.OrdinalIgnoreCase);
@@ -2369,7 +2380,8 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetSeriesCompetitions(int seriesId)
         {
-            if (!await _authorizationService.IsCurrentUserAdminAsync())
+            var (isSiteAdmin, isRegionalAdmin, isClubAdmin, managedClubIds) = await GetSeriesAuthContext();
+            if (!isSiteAdmin && !isRegionalAdmin && !isClubAdmin)
             {
                 return Ok(new { success = false, message = "Access denied" });
             }
@@ -2380,6 +2392,12 @@ namespace HpskSite.Controllers
                 if (series == null || series.ContentType.Alias != "competitionSeries")
                 {
                     return Ok(new { success = false, message = "Series not found" });
+                }
+
+                // Club admins can only view competitions for their club's series
+                if (isClubAdmin && !isSiteAdmin && !isRegionalAdmin && !IsSeriesOwnedByClubs(series, managedClubIds))
+                {
+                    return Ok(new { success = false, message = "Access denied" });
                 }
 
                 var competitions = _contentService.GetPagedChildren(seriesId, 0, int.MaxValue, out _)
@@ -2409,17 +2427,20 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> CreateSeries([FromBody] CreateSeriesRequest request)
         {
-            // AUTHORIZATION: Site Admin OR Regional Admin
-            bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
-            bool isRegionalAdmin = false;
-            if (!isSiteAdmin)
-            {
-                var managedRegions = await _authorizationService.GetManagedRegions();
-                isRegionalAdmin = managedRegions.Any();
-            }
-            if (!isSiteAdmin && !isRegionalAdmin)
+            // AUTHORIZATION: Site Admin OR Regional Admin OR Club Admin
+            var (isSiteAdmin, isRegionalAdmin, isClubAdmin, managedClubIds) = await GetSeriesAuthContext();
+            if (!isSiteAdmin && !isRegionalAdmin && !isClubAdmin)
             {
                 return Ok(new { success = false, message = "Access denied" });
+            }
+
+            // Club admins can only create series for their own club
+            if (isClubAdmin && !isSiteAdmin && !isRegionalAdmin)
+            {
+                if (string.IsNullOrEmpty(request.ClubId) || !int.TryParse(request.ClubId, out var reqClubId) || !managedClubIds.Contains(reqClubId))
+                {
+                    return Ok(new { success = false, message = "Access denied: you can only create series for your own club" });
+                }
             }
 
             if (string.IsNullOrEmpty(request.SeriesName))
@@ -2539,15 +2560,9 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> UpdateSeries([FromBody] UpdateSeriesRequest request)
         {
-            // AUTHORIZATION: Site Admin OR Regional Admin
-            bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
-            bool isRegionalAdmin = false;
-            if (!isSiteAdmin)
-            {
-                var managedRegions = await _authorizationService.GetManagedRegions();
-                isRegionalAdmin = managedRegions.Any();
-            }
-            if (!isSiteAdmin && !isRegionalAdmin)
+            // AUTHORIZATION: Site Admin OR Regional Admin OR Club Admin
+            var (isSiteAdmin, isRegionalAdmin, isClubAdmin, managedClubIds) = await GetSeriesAuthContext();
+            if (!isSiteAdmin && !isRegionalAdmin && !isClubAdmin)
             {
                 return Ok(new { success = false, message = "Access denied" });
             }
@@ -2558,6 +2573,20 @@ namespace HpskSite.Controllers
                 if (series == null || series.ContentType.Alias != "competitionSeries")
                 {
                     return Ok(new { success = false, message = "Series not found" });
+                }
+
+                // Club admins can only update their own club's series and cannot change the club
+                if (isClubAdmin && !isSiteAdmin && !isRegionalAdmin)
+                {
+                    if (!IsSeriesOwnedByClubs(series, managedClubIds))
+                    {
+                        return Ok(new { success = false, message = "Access denied" });
+                    }
+                    // Prevent club admin from changing clubId to a different club
+                    if (!string.IsNullOrEmpty(request.ClubId) && int.TryParse(request.ClubId, out var reqClubId) && !managedClubIds.Contains(reqClubId))
+                    {
+                        return Ok(new { success = false, message = "Access denied: cannot change series to a different club" });
+                    }
                 }
 
                 // Update properties
@@ -2619,15 +2648,9 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> DeleteSeries([FromBody] DeleteSeriesRequest request)
         {
-            // AUTHORIZATION: Site Admin OR Regional Admin
-            bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
-            bool isRegionalAdmin = false;
-            if (!isSiteAdmin)
-            {
-                var managedRegions = await _authorizationService.GetManagedRegions();
-                isRegionalAdmin = managedRegions.Any();
-            }
-            if (!isSiteAdmin && !isRegionalAdmin)
+            // AUTHORIZATION: Site Admin OR Regional Admin OR Club Admin
+            var (isSiteAdmin, isRegionalAdmin, isClubAdmin, managedClubIds) = await GetSeriesAuthContext();
+            if (!isSiteAdmin && !isRegionalAdmin && !isClubAdmin)
             {
                 return Ok(new { success = false, message = "Access denied" });
             }
@@ -2638,6 +2661,12 @@ namespace HpskSite.Controllers
                 if (series == null || series.ContentType.Alias != "competitionSeries")
                 {
                     return Ok(new { success = false, message = "Series not found" });
+                }
+
+                // Club admins can only delete their own club's series
+                if (isClubAdmin && !isSiteAdmin && !isRegionalAdmin && !IsSeriesOwnedByClubs(series, managedClubIds))
+                {
+                    return Ok(new { success = false, message = "Access denied" });
                 }
 
                 // Check if series has competitions
@@ -2681,15 +2710,9 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> CopySeriesWithCompetitions([FromBody] CopySeriesRequest request)
         {
-            // AUTHORIZATION: Site Admin OR Regional Admin
-            bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
-            bool isRegionalAdmin = false;
-            if (!isSiteAdmin)
-            {
-                var managedRegions = await _authorizationService.GetManagedRegions();
-                isRegionalAdmin = managedRegions.Any();
-            }
-            if (!isSiteAdmin && !isRegionalAdmin)
+            // AUTHORIZATION: Site Admin OR Regional Admin OR Club Admin
+            var (isSiteAdmin, isRegionalAdmin, isClubAdmin, managedClubIds) = await GetSeriesAuthContext();
+            if (!isSiteAdmin && !isRegionalAdmin && !isClubAdmin)
             {
                 return Ok(new { success = false, message = "Access denied" });
             }
@@ -2706,6 +2729,12 @@ namespace HpskSite.Controllers
                 if (sourceSeries == null || sourceSeries.ContentType.Alias != "competitionSeries")
                 {
                     return Ok(new { success = false, message = "Source series not found" });
+                }
+
+                // Club admins can only copy their own club's series
+                if (isClubAdmin && !isSiteAdmin && !isRegionalAdmin && !IsSeriesOwnedByClubs(sourceSeries, managedClubIds))
+                {
+                    return Ok(new { success = false, message = "Access denied" });
                 }
 
                 // Determine year folder based on StartDate
@@ -2926,6 +2955,41 @@ namespace HpskSite.Controllers
             {
                 return Ok(new { success = false, message = "Error calculating series results: " + ex.Message });
             }
+        }
+
+        /// <summary>
+        /// Get authorization context for series operations (site admin, regional admin, or club admin)
+        /// </summary>
+        private async Task<(bool isSiteAdmin, bool isRegionalAdmin, bool isClubAdmin, HashSet<int> managedClubIds)> GetSeriesAuthContext()
+        {
+            bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
+            bool isRegionalAdmin = false;
+            bool isClubAdmin = false;
+            var managedClubIds = new HashSet<int>();
+
+            if (!isSiteAdmin)
+            {
+                var managedRegions = await _authorizationService.GetManagedRegions();
+                isRegionalAdmin = managedRegions.Any();
+            }
+
+            if (!isSiteAdmin && !isRegionalAdmin)
+            {
+                var clubIds = await _authorizationService.GetManagedClubIds();
+                managedClubIds = clubIds.ToHashSet();
+                isClubAdmin = managedClubIds.Any();
+            }
+
+            return (isSiteAdmin, isRegionalAdmin, isClubAdmin, managedClubIds);
+        }
+
+        /// <summary>
+        /// Check if a series belongs to one of the given club IDs
+        /// </summary>
+        private bool IsSeriesOwnedByClubs(Umbraco.Cms.Core.Models.IContent series, HashSet<int> managedClubIds)
+        {
+            var seriesClubId = series.GetValue<int>("clubId");
+            return seriesClubId > 0 && managedClubIds.Contains(seriesClubId);
         }
 
         /// <summary>

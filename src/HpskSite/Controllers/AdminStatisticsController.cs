@@ -97,7 +97,7 @@ namespace HpskSite.Controllers
             var approvedMembers = allMembers.Where(m => m.IsApproved).ToList();
 
             int totalMembers = approvedMembers.Count;
-            int newMembersThisMonth = approvedMembers.Count(m => m.CreateDate >= currentMonthStart);
+            int newMembers30d = approvedMembers.Count(m => m.CreateDate >= thirtyDaysAgo);
 
             // New members per month (last 12 months)
             var newMembersPerMonth = Enumerable.Range(0, 12)
@@ -189,11 +189,12 @@ namespace HpskSite.Controllers
                         .GroupBy(cid => cid)
                         .ToDictionary(g => g.Key, g => g.Count());
 
+                    int clubsWithMembers = allClubNodes.Count(club => membersByClub.ContainsKey(club.Id));
+
                     var threeMonthsAgo = today.AddMonths(-3);
                     int activeClubs = allClubNodes.Count(club =>
                     {
                         if (!membersByClub.ContainsKey(club.Id)) return false;
-                        // Check for events
                         var hasRecentEvent = club.Children
                             .Where(c => c.ContentType.Alias == "clubSimpleEvent")
                             .Any(e =>
@@ -294,10 +295,10 @@ namespace HpskSite.Controllers
                         .Cast<object>()
                         .ToList();
 
-                    var clubEventsPerMonth = Enumerable.Range(0, 12)
-                        .Select(i =>
+                    var clubEventsPerMonth = Enumerable.Range(1, 12)
+                        .Select(m =>
                         {
-                            var monthStart = new DateTime(now.Year, now.Month, 1).AddMonths(-11 + i);
+                            var monthStart = new DateTime(now.Year, m, 1);
                             var monthEnd = monthStart.AddMonths(1);
                             return new
                             {
@@ -313,6 +314,15 @@ namespace HpskSite.Controllers
                         .GroupBy(e => e.clubName)
                         .Select(g => new { club = g.Key, count = g.Count() })
                         .OrderByDescending(g => g.count)
+                        .Take(5)
+                        .Cast<object>()
+                        .ToList();
+
+                    var clubNameLookup = allClubNodes.ToDictionary(c => c.Id, c => c.Name ?? "");
+                    var topClubsByMembers = membersByClub
+                        .Where(kvp => clubNameLookup.ContainsKey(kvp.Key))
+                        .Select(kvp => new { club = clubNameLookup[kvp.Key], count = kvp.Value })
+                        .OrderByDescending(x => x.count)
                         .Take(5)
                         .Cast<object>()
                         .ToList();
@@ -534,6 +544,7 @@ namespace HpskSite.Controllers
                     int engagementOccasional = 0;
                     int engagementInfrequent = 0;
                     int engagementDormant = 0;
+                    var activeCountByClub = new Dictionary<int, int>();
 
                     foreach (var m in approvedMembers)
                     {
@@ -581,7 +592,25 @@ namespace HpskSite.Controllers
                             engagementInfrequent++;
                         else
                             engagementDormant++;
+
+                        // Track active members per club (active = any activity within 30d)
+                        if (lastAny.HasValue && lastAny.Value >= thirtyDaysAgo)
+                        {
+                            var clubIdStr = m.GetValue<string>("primaryClubId");
+                            if (!string.IsNullOrEmpty(clubIdStr) && int.TryParse(clubIdStr, out var cid) && cid > 0)
+                            {
+                                activeCountByClub[cid] = activeCountByClub.GetValueOrDefault(cid, 0) + 1;
+                            }
+                        }
                     }
+
+                    var topClubsByActiveMembers = activeCountByClub
+                        .Where(kvp => clubNameLookup.ContainsKey(kvp.Key))
+                        .Select(kvp => new { club = clubNameLookup[kvp.Key], count = kvp.Value })
+                        .OrderByDescending(x => x.count)
+                        .Take(5)
+                        .Cast<object>()
+                        .ToList();
 
                     // ── 7. Disk space usage (from pre-fetched storageByOwner) ───────
                     var totalDiskSpaceMB = _configuration.GetValue<int>("SiteSettings:TotalDiskSpaceMB", 5000);
@@ -649,8 +678,9 @@ namespace HpskSite.Controllers
                     return new
                     {
                         totalMembers,
-                        newMembersThisMonth,
+                        newMembers30d,
                         totalClubs,
+                        clubsWithMembers,
                         activeClubs,
                         newClubs30d,
                         competitionsThisYear = competitionsThisYearCount,
@@ -683,7 +713,9 @@ namespace HpskSite.Controllers
                             events30d = clubEvents30d,
                             byType = clubEventsByType,
                             perMonth = clubEventsPerMonth,
-                            topClubs = topClubsByEvents
+                            topClubs = topClubsByEvents,
+                            topClubsByMembers,
+                            topClubsByActiveMembers
                         },
                         engagement = new
                         {
@@ -710,8 +742,9 @@ namespace HpskSite.Controllers
             return new
             {
                 totalMembers,
-                newMembersThisMonth,
+                newMembers30d,
                 totalClubs = 0,
+                clubsWithMembers = 0,
                 activeClubs = 0,
                 newClubs30d = 0,
                 competitionsThisYear = 0,
@@ -744,7 +777,9 @@ namespace HpskSite.Controllers
                     events30d = 0,
                     byType = new List<object>(),
                     perMonth = new List<object>(),
-                    topClubs = new List<object>()
+                    topClubs = new List<object>(),
+                    topClubsByMembers = new List<object>(),
+                    topClubsByActiveMembers = new List<object>()
                 },
                 engagement = new
                 {

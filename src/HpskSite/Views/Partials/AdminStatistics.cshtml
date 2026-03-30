@@ -33,7 +33,7 @@
                         <h6 class="card-subtitle mb-2 text-muted">
                             Medlemmar
                             <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
-                               title="Totalt antal godkända medlemmar. Nya = registrerade denna kalendermånad."></i>
+                               title="Totalt antal godkända medlemmar. Nya = registrerade senaste 30 dagarna."></i>
                         </h6>
                         <h2 class="card-title mb-1" id="statTotalMembers">—</h2>
                         <small class="text-success" id="statNewMembersMonth"></small>
@@ -46,10 +46,11 @@
                         <h6 class="card-subtitle mb-2 text-muted">
                             Klubbar
                             <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
-                               title="Aktiva = klubbar med minst 1 medlem OCH ett event inom senaste 3 månaderna eller framåt. Nya = klubbar vars första medlem registrerades inom 30 dagar."></i>
+                               title="Med medlemmar = minst 1 registrerad medlem. Aktiva = har dessutom ett event inom senaste 3 månaderna eller framåt."></i>
                         </h6>
-                        <h2 class="card-title mb-1" id="statClubs">—</h2>
-                        <small class="text-success" id="statNewClubs"></small>
+                        <h4 class="card-title mb-1" id="statClubsWithMembers">—</h4>
+                        <small class="d-block" id="statClubsActive"></small>
+                        <small class="d-block text-muted" id="statClubsTotal"></small>
                     </div>
                 </div>
             </div>
@@ -62,6 +63,7 @@
                                title="Antal tävlingar med tävlingsdatum under innevarande kalenderår."></i>
                         </h6>
                         <h2 class="card-title mb-1" id="statCompetitions">—</h2>
+                        <small class="text-muted" id="statDisciplineCount"></small>
                     </div>
                 </div>
             </div>
@@ -167,13 +169,13 @@
                 <div class="card h-100">
                     <div class="card-body">
                         <h6 class="card-title">Events per typ</h6>
-                        <div style="position:relative;height:200px"><canvas id="chartClubEventsByType"></canvas></div>
+                        <div style="position:relative;height:140px"><canvas id="chartClubEventsByType"></canvas></div>
                     </div>
                 </div>
             </div>
         </div>
         <div class="row g-3 mb-4">
-            <div class="col-md-7">
+            <div class="col-md-6">
                 <div class="card h-100">
                     <div class="card-body">
                         <h6 class="card-title">Events per månad</h6>
@@ -181,10 +183,36 @@
                     </div>
                 </div>
             </div>
-            <div class="col-md-5">
+            <div class="col-md-6">
                 <div class="card h-100">
                     <div class="card-body">
-                        <h6 class="card-title">Mest aktiva klubbar</h6>
+                        <h6 class="card-title">
+                            Mest aktiva klubbar (30d)
+                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
+                               title="Klubbar med flest medlemmar som varit aktiva (webb eller mobilapp) senaste 30 dagarna."></i>
+                        </h6>
+                        <div class="table-responsive">
+                            <table class="table table-sm table-hover mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Klubb</th>
+                                        <th class="text-end">Aktiva</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="topClubsByActiveMembersBody">
+                                    <tr><td colspan="2" class="text-center text-muted">Laddar...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="row g-3 mb-4">
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">Mest events</h6>
                         <div class="table-responsive">
                             <table class="table table-sm table-hover mb-0">
                                 <thead class="table-light">
@@ -194,6 +222,26 @@
                                     </tr>
                                 </thead>
                                 <tbody id="topClubsByEventsBody">
+                                    <tr><td colspan="2" class="text-center text-muted">Laddar...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">Flest medlemmar</h6>
+                        <div class="table-responsive">
+                            <table class="table table-sm table-hover mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Klubb</th>
+                                        <th class="text-end">Medlemmar</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="topClubsByMembersBody">
                                     <tr><td colspan="2" class="text-center text-muted">Laddar...</td></tr>
                                 </tbody>
                             </table>
@@ -514,12 +562,14 @@
 
         // Section A: Summary cards
         document.getElementById('statTotalMembers').textContent = d.totalMembers;
-        document.getElementById('statNewMembersMonth').textContent = d.newMembersThisMonth > 0
-            ? '+' + d.newMembersThisMonth + ' denna månad' : '';
-        document.getElementById('statClubs').textContent = d.activeClubs + ' aktiva / ' + d.totalClubs;
-        document.getElementById('statNewClubs').textContent = d.newClubs30d > 0
-            ? '+' + d.newClubs30d + ' nya' : '';
+        document.getElementById('statNewMembersMonth').textContent = d.newMembers30d > 0
+            ? '+' + d.newMembers30d + ' senaste 30d' : '';
+        document.getElementById('statClubsWithMembers').textContent = d.clubsWithMembers + ' har medlemmar';
+        document.getElementById('statClubsActive').textContent = 'varav ' + d.activeClubs + ' aktiva';
+        document.getElementById('statClubsTotal').textContent = 'av totalt ' + d.totalClubs;
         document.getElementById('statCompetitions').textContent = d.competitionsThisYear;
+        var discCount = d.competitionsByDiscipline ? d.competitionsByDiscipline.length : 0;
+        document.getElementById('statDisciplineCount').textContent = discCount > 0 ? discCount + ' discipliner' : '';
         document.getElementById('statTrainingMatchesTotal').textContent = d.trainingMatchesTotal;
         document.getElementById('statTrainingMatches30dBadge').textContent = d.trainingMatches30d > 0
             ? '+' + d.trainingMatches30d + ' senaste 30d' : '';
@@ -627,7 +677,7 @@
                     },
                     options: {
                         responsive: true, maintainAspectRatio: false,
-                        plugins: { legend: { position: 'bottom', labels: { color: colors.text, usePointStyle: true, pointStyle: 'circle', padding: 12 } } }
+                        plugins: { legend: { position: 'right', labels: { color: colors.text, usePointStyle: true, pointStyle: 'circle', padding: 8, font: { size: 11 } } } }
                     }
                 });
             }
@@ -661,6 +711,24 @@
                 }).join('');
             } else {
                 evtBody.innerHTML = '<tr><td colspan="2" class="text-center text-muted">Inga events att visa</td></tr>';
+            }
+
+            var memBody = document.getElementById('topClubsByMembersBody');
+            if (d.clubActivities.topClubsByMembers && d.clubActivities.topClubsByMembers.length) {
+                memBody.innerHTML = d.clubActivities.topClubsByMembers.map(function (c) {
+                    return '<tr><td>' + escapeHtml(c.club) + '</td><td class="text-end">' + c.count + '</td></tr>';
+                }).join('');
+            } else {
+                memBody.innerHTML = '<tr><td colspan="2" class="text-center text-muted">Inga klubbar att visa</td></tr>';
+            }
+
+            var actBody = document.getElementById('topClubsByActiveMembersBody');
+            if (d.clubActivities.topClubsByActiveMembers && d.clubActivities.topClubsByActiveMembers.length) {
+                actBody.innerHTML = d.clubActivities.topClubsByActiveMembers.map(function (c) {
+                    return '<tr><td>' + escapeHtml(c.club) + '</td><td class="text-end">' + c.count + '</td></tr>';
+                }).join('');
+            } else {
+                actBody.innerHTML = '<tr><td colspan="2" class="text-center text-muted">Inga aktiva klubbar</td></tr>';
             }
         }
 

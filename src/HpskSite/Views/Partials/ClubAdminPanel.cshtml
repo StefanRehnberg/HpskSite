@@ -27,6 +27,11 @@
             </button>
         </li>
         <li class="nav-item" role="presentation">
+            <button class="nav-link" id="clubseries-tab" data-bs-toggle="tab" data-bs-target="#clubSeriesTab" type="button">
+                <i class="bi bi-collection me-2"></i>Serier
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
             <button class="nav-link" id="members-tab" data-bs-toggle="tab" data-bs-target="#membersTab" type="button">
                 <i class="bi bi-people me-2"></i>Medlemmar
             </button>
@@ -88,6 +93,52 @@
                         <span class="visually-hidden">Laddar tävlingar...</span>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- Series Tab -->
+        <div class="tab-pane fade" id="clubSeriesTab">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5>Klubbserier</h5>
+                <button class="btn btn-primary" onclick="openCreateClubSeriesModal()">
+                    <i class="bi bi-plus-circle me-2"></i>Ny Serie
+                </button>
+            </div>
+
+            <!-- Loading State -->
+            <div class="spinner-border text-primary d-none" id="clubSeriesLoadingSpinner" role="status">
+                <span class="visually-hidden">Laddar...</span>
+            </div>
+
+            <!-- Series Table -->
+            <div class="table-responsive" id="clubSeriesTableContainer">
+                <table class="table table-hover">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Namn</th>
+                            <th>Period</th>
+                            <th>Status</th>
+                            <th class="text-center">Tävlingar</th>
+                            <th class="text-end">Åtgärder</th>
+                        </tr>
+                    </thead>
+                    <tbody id="clubSeriesTableBody">
+                        <tr class="text-muted">
+                            <td colspan="5" class="text-center py-4">Laddar serier...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Empty State -->
+            <div class="alert alert-info d-none text-center" id="noClubSeriesAlert">
+                <i class="bi bi-inbox me-2"></i>
+                Inga serier hittades. <a href="#" onclick="openCreateClubSeriesModal(); return false;">Skapa en nu</a>
+            </div>
+
+            <!-- Error Alert -->
+            <div class="alert alert-danger d-none" id="clubSeriesErrorAlert" role="alert">
+                <strong>Fel:</strong> <span id="clubSeriesErrorMessage"></span>
             </div>
         </div>
 
@@ -261,6 +312,12 @@
         </div>
     </div>
 </div>
+
+<!-- Series Modals (reused from admin page) -->
+@await Html.PartialAsync("SeriesEditModal")
+@await Html.PartialAsync("SeriesStrategyModal")
+@await Html.PartialAsync("SeriesCopyModal")
+@await Html.PartialAsync("SeriesDeleteConfirmModal")
 
 <!-- Event Create/Edit Modal -->
 <div class="modal fade" id="eventModal" tabindex="-1">
@@ -907,6 +964,328 @@ document.getElementById('invoices-tab').addEventListener('shown.bs.tab', functio
 
 document.getElementById('traininggroups-tab').addEventListener('shown.bs.tab', function () {
     loadClubTrainingGroups();
+});
+
+// ===== SERIES TAB =====
+let clubSeriesLoaded = false;
+let clubSeriesClubLookup = {};
+
+document.getElementById('clubseries-tab').addEventListener('shown.bs.tab', function () {
+    if (!clubSeriesLoaded) {
+        loadClubSeriesClubLookup();
+        loadClubSeriesList();
+        clubSeriesLoaded = true;
+    }
+});
+
+function loadClubSeriesClubLookup() {
+    fetch('/umbraco/surface/ClubAdmin/GetClubsForRegistration')
+        .then(r => r.json())
+        .then(data => {
+            if (data.success && data.clubs) {
+                data.clubs.forEach(c => { clubSeriesClubLookup[c.id] = c.name; });
+            }
+        })
+        .catch(err => console.error('Error loading clubs for series lookup:', err));
+}
+
+function loadClubSeriesList() {
+    const spinner = document.getElementById('clubSeriesLoadingSpinner');
+    const tableContainer = document.getElementById('clubSeriesTableContainer');
+    const tbody = document.getElementById('clubSeriesTableBody');
+    const errorAlert = document.getElementById('clubSeriesErrorAlert');
+    const errorMessage = document.getElementById('clubSeriesErrorMessage');
+    const noSeriesAlert = document.getElementById('noClubSeriesAlert');
+
+    spinner.classList.remove('d-none');
+    errorAlert.classList.add('d-none');
+    noSeriesAlert.classList.add('d-none');
+
+    const token = getAntiForgeryToken();
+
+    fetch('/umbraco/surface/CompetitionAdmin/GetSeriesList', {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+        credentials: 'include'
+    })
+    .then(r => r.json())
+    .then(data => {
+        spinner.classList.add('d-none');
+
+        if (!data.success) {
+            errorMessage.textContent = data.message || 'Kunde inte ladda serier';
+            errorAlert.classList.remove('d-none');
+            tbody.innerHTML = '<tr class="text-muted"><td colspan="5" class="text-center py-4">Fel vid laddning av serier</td></tr>';
+            return;
+        }
+
+        // Filter to only this club's series (server already filters for club admins, but double-check)
+        const clubSeries = (data.data || []).filter(s => s.clubId === @clubId);
+
+        if (clubSeries.length === 0) {
+            tableContainer.classList.add('d-none');
+            noSeriesAlert.classList.remove('d-none');
+            tbody.innerHTML = '';
+        } else {
+            tableContainer.classList.remove('d-none');
+            noSeriesAlert.classList.add('d-none');
+            renderClubSeries(clubSeries);
+        }
+    })
+    .catch(error => {
+        spinner.classList.add('d-none');
+        errorMessage.textContent = error.message || 'Nätverksfel';
+        errorAlert.classList.remove('d-none');
+    });
+}
+
+function renderClubSeries(seriesList) {
+    const tbody = document.getElementById('clubSeriesTableBody');
+    tbody.innerHTML = seriesList.map(series => {
+        const statusBadge = (series.isActive === true || series.isActive === 'true')
+            ? '<span class="badge bg-success">Aktiv</span>'
+            : '<span class="badge bg-secondary">Inaktiv</span>';
+        const strategyBadge = series.seriesCalculationStrategy
+            ? ' <span class="badge bg-info ms-1" title="Serieresultat konfigurerad"><i class="bi bi-bar-chart"></i></span>'
+            : '';
+        const start = series.startDate ? new Date(series.startDate).toLocaleDateString('sv-SE') : '-';
+        const end = series.endDate ? new Date(series.endDate).toLocaleDateString('sv-SE') : '-';
+        const dateRange = (start === '-' && end === '-') ? '-'
+            : (start !== '-' && end !== '-') ? `${start} - ${end}`
+            : (start !== '-') ? `Från ${start}` : `Till ${end}`;
+        const shortDesc = series.shortDescription ? clubSeriesEscapeHtml(series.shortDescription) : '<em>Ingen beskrivning</em>';
+        const nameEscaped = clubSeriesEscapeHtml(series.name).replace(/'/g, "\\'");
+
+        return `<tr data-series-id="${series.id}">
+            <td><strong>${clubSeriesEscapeHtml(series.name)}${strategyBadge}</strong><br><small class="text-muted">${shortDesc}</small></td>
+            <td><strong>${dateRange}</strong></td>
+            <td>${statusBadge}</td>
+            <td class="text-center"><span class="badge bg-info">${series.competitionCount || 0}</span></td>
+            <td class="text-end">
+                <button class="btn btn-sm btn-outline-primary" onclick="openSeriesEditModal(${series.id})" title="Redigera"><i class="bi bi-pencil"></i></button>
+                <button class="btn btn-sm btn-outline-info" onclick="openSeriesCopyModal(${series.id})" title="Kopiera"><i class="bi bi-files"></i></button>
+                <button class="btn btn-sm btn-outline-danger" onclick="openSeriesDeleteModal(${series.id}, '${nameEscaped}', ${series.competitionCount || 0})" title="Ta bort"><i class="bi bi-trash"></i></button>
+            </td>
+        </tr>`;
+    }).join('');
+}
+
+function clubSeriesEscapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// ---- Series modal opener functions (normally in AdminSeriesList.cshtml) ----
+
+function clubSeriesFormatDateForInput(dateStr) {
+    if (!dateStr) return '';
+    const date = new Date(dateStr);
+    return date.toISOString().split('T')[0];
+}
+
+function lockSeriesOrganizerToClub() {
+    const clubSelect = document.getElementById('seriesClubId');
+    const regionSelect = document.getElementById('seriesRegionalFederation');
+    if (clubSelect) {
+        clubSelect.value = '@clubId';
+        clubSelect.disabled = true;
+    }
+    if (regionSelect) {
+        regionSelect.value = '';
+        regionSelect.disabled = true;
+    }
+}
+
+// Create series modal
+function openCreateClubSeriesModal() {
+    document.getElementById('seriesId').value = '0';
+    document.getElementById('seriesName').value = '';
+    document.getElementById('seriesShortDescription').value = '';
+    document.getElementById('seriesDescription').value = '';
+    document.getElementById('seriesStartDate').value = '';
+    document.getElementById('seriesEndDate').value = '';
+    document.getElementById('showInMenu').checked = false;
+    document.getElementById('isActive').value = 'true';
+
+    // Reset strategy fields
+    if (typeof populateSeriesStrategy === 'function') {
+        populateSeriesStrategy('', '');
+    }
+
+    document.getElementById('seriesEditModalLabel').innerHTML = '<i class="bi bi-plus-circle me-2"></i>Ny serie';
+
+    const modalElement = document.getElementById('seriesEditModal');
+    const modal = window.seriesEditModalInstance || new bootstrap.Modal(modalElement);
+    window.seriesEditModalInstance = modal;
+    modal.show();
+
+    // Lock organizer after modal renders
+    lockSeriesOrganizerToClub();
+}
+
+// Edit series modal
+window.openSeriesEditModal = function(seriesId) {
+    const token = getAntiForgeryToken();
+
+    fetch('/umbraco/surface/CompetitionAdmin/GetSeriesList', {
+        method: 'GET',
+        headers: { 'RequestVerificationToken': token },
+        credentials: 'same-origin'
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success && data.data) {
+            const series = data.data.find(s => s.id === seriesId);
+            if (series) {
+                window.currentSeriesData = series;
+                document.getElementById('seriesId').value = series.id;
+                document.getElementById('seriesName').value = series.name || '';
+                document.getElementById('seriesShortDescription').value = series.shortDescription || '';
+
+                let descriptionContent = series.description || '';
+                if (descriptionContent && descriptionContent.startsWith('{')) {
+                    try {
+                        const parsed = JSON.parse(descriptionContent);
+                        descriptionContent = parsed.markup || descriptionContent;
+                    } catch (e) { }
+                }
+                document.getElementById('seriesDescription').value = descriptionContent;
+
+                if (series.startDate) {
+                    const startDateInput = document.getElementById('seriesStartDate');
+                    const formatted = clubSeriesFormatDateForInput(series.startDate);
+                    startDateInput.value = formatted;
+                    if (startDateInput._flatpickr) startDateInput._flatpickr.setDate(formatted);
+                }
+                if (series.endDate) {
+                    const endDateInput = document.getElementById('seriesEndDate');
+                    const formatted = clubSeriesFormatDateForInput(series.endDate);
+                    endDateInput.value = formatted;
+                    if (endDateInput._flatpickr) endDateInput._flatpickr.setDate(formatted);
+                }
+
+                document.getElementById('showInMenu').checked = series.showInMenu;
+                document.getElementById('isActive').value = series.isActive ? 'true' : 'false';
+
+                if (typeof populateSeriesStrategy === 'function') {
+                    populateSeriesStrategy(
+                        series.seriesCalculationStrategy || '',
+                        series.seriesCalculationConfig || ''
+                    );
+                }
+
+                document.getElementById('seriesEditModalLabel').innerHTML = '<i class="bi bi-pencil me-2"></i>Redigera serie';
+
+                const modalElement = document.getElementById('seriesEditModal');
+                const modal = window.seriesEditModalInstance || new bootstrap.Modal(modalElement);
+                window.seriesEditModalInstance = modal;
+                modal.show();
+
+                // Lock organizer after modal renders
+                lockSeriesOrganizerToClub();
+            }
+        }
+    })
+    .catch(error => {
+        console.error('Error loading series:', error);
+        alert('Fel vid laddning av seriedata');
+    });
+};
+
+// Copy series modal
+window.openSeriesCopyModal = function(seriesId) {
+    const token = getAntiForgeryToken();
+
+    fetch('/umbraco/surface/CompetitionAdmin/GetSeriesList', {
+        method: 'GET',
+        headers: { 'RequestVerificationToken': token },
+        credentials: 'same-origin'
+    })
+    .then(r => r.json())
+    .then(seriesData => {
+        if (seriesData.success && seriesData.data) {
+            const series = seriesData.data.find(s => s.id === seriesId);
+            if (!series) {
+                alert('Fel: Serie hittades inte');
+                return;
+            }
+
+            fetch(`/umbraco/surface/CompetitionAdmin/GetSeriesCompetitions?seriesId=${seriesId}`, {
+                method: 'GET',
+                headers: { 'RequestVerificationToken': token },
+                credentials: 'same-origin'
+            })
+            .then(r => r.json())
+            .then(competitionsData => {
+                if (competitionsData.success) {
+                    window.currentSeriesDataForCopy = {
+                        seriesId: seriesId,
+                        seriesName: series.name,
+                        competitions: competitionsData.data || []
+                    };
+
+                    const modalElement = document.getElementById('seriesCopyModal');
+                    if (!modalElement) { console.error('Copy modal not found'); return; }
+
+                    if (typeof populateCopyModal === 'function') {
+                        populateCopyModal(seriesId, window.currentSeriesDataForCopy.competitions);
+                    } else {
+                        console.error('populateCopyModal function not found');
+                        return;
+                    }
+
+                    const modal = window.seriesCopyModalInstance || new bootstrap.Modal(modalElement);
+                    window.seriesCopyModalInstance = modal;
+                    modal.show();
+                }
+            })
+            .catch(error => {
+                console.error('Error loading competitions:', error);
+                alert('Fel vid laddning av tävlingar');
+            });
+        }
+    })
+    .catch(error => {
+        console.error('Error loading series:', error);
+        alert('Fel vid laddning av seriedata');
+    });
+};
+
+// Delete series modal
+window.openSeriesDeleteModal = function(seriesId, seriesName, competitionCount) {
+    window.deleteSeriesId = seriesId;
+    const modal = new bootstrap.Modal(document.getElementById('seriesDeleteConfirmModal'));
+    document.getElementById('deleteSeriesName').textContent = seriesName;
+
+    const errorAlert = document.getElementById('seriesDeleteErrorAlert');
+    errorAlert.classList.add('d-none');
+
+    if (competitionCount > 0) {
+        errorAlert.classList.remove('d-none');
+        document.getElementById('seriesDeleteErrorMessage').textContent =
+            `Denna serie innehåller ${competitionCount} tävling(ar) och kan inte tas bort. Ta bort tävlingarna först.`;
+        document.getElementById('deleteSeriesBtn').disabled = true;
+    } else {
+        document.getElementById('deleteSeriesBtn').disabled = false;
+    }
+
+    modal.show();
+};
+
+// Override the global reload/callback functions so modals trigger our club-scoped reload
+window.loadSeriesList = loadClubSeriesList;
+window.reloadSeriesList = loadClubSeriesList;
+window.addSeriesToTable = function() { loadClubSeriesList(); };
+window.removeSeriesFromTable = function() { loadClubSeriesList(); };
+
+// Lock organizer fields whenever the series edit modal is shown
+document.addEventListener('DOMContentLoaded', function() {
+    const seriesEditModal = document.getElementById('seriesEditModal');
+    if (seriesEditModal) {
+        seriesEditModal.addEventListener('shown.bs.modal', lockSeriesOrganizerToClub);
+    }
 });
 
 // Load events initially

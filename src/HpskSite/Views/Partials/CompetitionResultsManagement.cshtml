@@ -1796,43 +1796,50 @@ function saveResults() {
         return;
     }
     
-    // Send to the new CompetitionResults controller
-    fetch('/umbraco/surface/CompetitionResults/SaveResult', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'RequestVerificationToken': token
-        },
-        body: JSON.stringify(resultsData)
-    })
-    .then(response => {
-        console.log('Server response status:', response.status);
-        console.log('Server response headers:', response.headers);
-        return response.json();
-    })
-    .then(data => {
-        console.log('Server response data:', data);
-        
-        if (data.success) {
-            // Show success message
-            showSaveMessage('Resultat sparade!', 'success');
-            
-            // Update overall totals after saving
-            updateOverallTotals();
-            
-            // Handle traversal after saving
-            setTimeout(() => {
-                handleTraversalAfterSave();
-            }, 1000);
-        } else {
-            console.error('Server returned error:', data);
-            showSaveMessage('Fel vid sparande: ' + data.message, 'error');
+    // Send to the new CompetitionResults controller (with retry for transient failures)
+    saveResultWithRetry('/umbraco/surface/CompetitionResults/SaveResult', resultsData, token);
+}
+
+async function saveResultWithRetry(url, data, token, maxRetries = 1) {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'RequestVerificationToken': token
+                },
+                body: JSON.stringify(data)
+            });
+            const result = await response.json();
+            console.log('Server response data (attempt ' + attempt + '):', result);
+
+            if (result.success) {
+                showSaveMessage('Resultat sparade!', 'success');
+                updateOverallTotals();
+                setTimeout(() => { handleTraversalAfterSave(); }, 1000);
+                return;
+            }
+
+            // On failure, retry once after a short delay
+            if (attempt < maxRetries) {
+                console.warn('Save failed, retrying in 500ms...', result.message);
+                await new Promise(r => setTimeout(r, 500));
+                continue;
+            }
+
+            console.error('Server returned error after retries:', result);
+            showSaveMessage('Fel vid sparande: ' + result.message, 'error');
+        } catch (error) {
+            if (attempt < maxRetries) {
+                console.warn('Network error, retrying in 500ms...', error);
+                await new Promise(r => setTimeout(r, 500));
+                continue;
+            }
+            console.error('Error saving results:', error);
+            showSaveMessage('Ett fel uppstod vid sparande av resultat.', 'error');
         }
-    })
-    .catch(error => {
-        console.error('Error saving results:', error);
-        showSaveMessage('Ett fel uppstod vid sparande av resultat.', 'error');
-    });
+    }
 }
 
 function handleTraversalAfterSave() {

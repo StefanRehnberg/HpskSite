@@ -162,58 +162,49 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 var now = DateTime.Now;
 
                 using var db = _umbracoDatabaseFactory.CreateDatabase();
+                using var transaction = db.GetTransaction();
 
-                // Check for existing result (upsert)
-                var existing = await db.FirstOrDefaultAsync<SpringskytteResultEntry>(
-                    "WHERE CompetitionId = @0 AND MemberId = @1 AND WeaponClass = @2",
-                    request.CompetitionId, request.MemberId, request.WeaponClass);
+                // Atomic MERGE: eliminates race condition when multiple range masters save simultaneously
+                var effectiveSprintTime = request.Status != null ? (decimal?)null : sprintTimeSeconds;
+                var effectiveShootingScore = request.Status != null ? (int?)null : shootingScore;
+                var effectiveTotalTime = request.Status != null ? (decimal?)null : totalTime;
 
-                int savedResultId;
-                if (existing != null)
-                {
-                    // Update
-                    existing.AgeGenderClass = request.AgeGenderClass;
-                    existing.SprintTimeSeconds = request.Status != null ? null : sprintTimeSeconds;
-                    existing.Shots = shotsJson;
-                    existing.ShootingScore = request.Status != null ? null : (int?)shootingScore;
-                    existing.PenaltyMultiplier = penaltyMultiplier;
-                    existing.TotalTimeSeconds = request.Status != null ? null : totalTime;
-                    existing.Status = request.Status;
-                    existing.EnteredBy = enteredBy;
-                    existing.LastModified = now;
-                    await db.UpdateAsync(existing);
-                    savedResultId = existing.Id;
+                var mergeSql = @"
+                    MERGE INTO [SpringskytteResultEntry] AS target
+                    USING (SELECT @0 AS CompetitionId, @1 AS MemberId, @2 AS WeaponClass) AS source
+                    ON target.CompetitionId = source.CompetitionId
+                       AND target.MemberId = source.MemberId
+                       AND target.WeaponClass = source.WeaponClass
+                    WHEN MATCHED THEN
+                        UPDATE SET AgeGenderClass = @3, SprintTimeSeconds = @4, Shots = @5,
+                                   ShootingScore = @6, PenaltyMultiplier = @7, TotalTimeSeconds = @8,
+                                   Status = @9, EnteredBy = @10, LastModified = @11
+                    WHEN NOT MATCHED THEN
+                        INSERT (CompetitionId, MemberId, WeaponClass, AgeGenderClass, StartOrder,
+                                SprintTimeSeconds, Shots, ShootingScore, PenaltyMultiplier, TotalTimeSeconds,
+                                Status, EnteredBy, EnteredAt, LastModified)
+                        VALUES (@0, @1, @2, @3, 0, @4, @5, @6, @7, @8, @9, @10, @11, @11)
+                    OUTPUT INSERTED.Id;";
 
-                    _logger.LogInformation("Updated Springskytte result for MemberId={MemberId}, CompetitionId={CompetitionId}, WeaponClass={WeaponClass}",
-                        request.MemberId, request.CompetitionId, request.WeaponClass);
-                }
-                else
-                {
-                    // Insert new
-                    var entry = new SpringskytteResultEntry
-                    {
-                        CompetitionId = request.CompetitionId,
-                        MemberId = request.MemberId,
-                        WeaponClass = request.WeaponClass,
-                        AgeGenderClass = request.AgeGenderClass,
-                        StartOrder = 0,
-                        SprintTimeSeconds = request.Status != null ? null : sprintTimeSeconds,
-                        Shots = shotsJson,
-                        ShootingScore = request.Status != null ? null : (int?)shootingScore,
-                        PenaltyMultiplier = penaltyMultiplier,
-                        TotalTimeSeconds = request.Status != null ? null : totalTime,
-                        Status = request.Status,
-                        EnteredBy = enteredBy,
-                        EnteredAt = now,
-                        LastModified = now
-                    };
+                var savedResultId = await db.ExecuteScalarAsync<int>(mergeSql,
+                    request.CompetitionId,           // @0
+                    request.MemberId,                // @1
+                    request.WeaponClass,             // @2
+                    request.AgeGenderClass,          // @3
+                    effectiveSprintTime,             // @4
+                    shotsJson,                       // @5
+                    effectiveShootingScore,          // @6
+                    penaltyMultiplier,               // @7
+                    effectiveTotalTime,              // @8
+                    request.Status,                  // @9
+                    enteredBy,                       // @10
+                    now                              // @11
+                );
 
-                    var rawId = await db.InsertAsync(entry);
-                    savedResultId = Convert.ToInt32(rawId);
+                transaction.Complete();
 
-                    _logger.LogInformation("Inserted Springskytte result Id={ResultId} for MemberId={MemberId}, CompetitionId={CompetitionId}",
-                        savedResultId, request.MemberId, request.CompetitionId);
-                }
+                _logger.LogInformation("Saved Springskytte result Id={ResultId} for MemberId={MemberId}, CompetitionId={CompetitionId}, WeaponClass={WeaponClass}",
+                    savedResultId, request.MemberId, request.CompetitionId, request.WeaponClass);
 
                 // === VERIFICATION READ-BACK ===
                 // Re-read the stored row from DB to verify data integrity
@@ -264,7 +255,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 return Json(new SpringskytteResultResponse
                 {
                     Success = true,
-                    Message = existing != null ? "Resultat uppdaterat." : "Resultat sparat.",
+                    Message = "Resultat sparat.",
                     ResultId = savedResultId,
                     ShootingScore = verification.ShootingScore ?? 0,
                     SprintTimeSeconds = verification.SprintTimeSeconds,

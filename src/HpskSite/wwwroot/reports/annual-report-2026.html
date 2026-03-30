@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HPSK Plattformsrapport - Pistol.nu</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: #f8f9fa; color: #212529; line-height: 1.6; }
+        .page { max-width: 960px; margin: 0 auto; background: #fff; }
+
+        /* Print styles */
+        @media print {
+            body { background: #fff; }
+            .page { max-width: 100%; box-shadow: none; }
+            .page-break { page-break-before: always; }
+            .no-print { display: none !important; }
+        }
+
+        /* Header */
+        .header {
+            background: linear-gradient(135deg, #1a365d 0%, #2563eb 100%);
+            color: #fff;
+            padding: 60px 48px 48px;
+            text-align: center;
+        }
+        .header h1 { font-size: 2.4rem; font-weight: 700; margin-bottom: 8px; letter-spacing: -0.5px; }
+        .header .subtitle { font-size: 1.15rem; opacity: 0.85; }
+        .header .date { margin-top: 16px; font-size: 0.95rem; opacity: 0.7; }
+        .header .logo { font-size: 3rem; margin-bottom: 16px; }
+
+        /* Content */
+        .content { padding: 48px; }
+
+        /* Section headers */
+        .section-title {
+            font-size: 1.4rem;
+            font-weight: 700;
+            color: #1a365d;
+            margin: 40px 0 20px;
+            padding-bottom: 8px;
+            border-bottom: 3px solid #2563eb;
+        }
+        .section-title:first-child { margin-top: 0; }
+
+        /* Summary cards */
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            margin-bottom: 32px;
+        }
+        .summary-card {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 20px 16px;
+            text-align: center;
+            border-left: 4px solid #2563eb;
+        }
+        .summary-card.green { border-left-color: #16a34a; }
+        .summary-card.amber { border-left-color: #f59e0b; }
+        .summary-card.red { border-left-color: #dc2626; }
+        .summary-card .value { font-size: 2rem; font-weight: 700; color: #1a365d; }
+        .summary-card .label { font-size: 0.85rem; color: #6b7280; margin-top: 4px; }
+        .summary-card .detail { font-size: 0.8rem; color: #9ca3af; margin-top: 2px; }
+
+        /* Two-column layout */
+        .row { display: flex; gap: 24px; margin-bottom: 24px; }
+        .col-6 { flex: 1; }
+        .col-7 { flex: 7; }
+        .col-5 { flex: 5; }
+
+        /* Chart containers */
+        .chart-box {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 20px;
+        }
+        .chart-box h3 { font-size: 0.95rem; color: #374151; margin-bottom: 12px; }
+        .chart-wrap { position: relative; height: 220px; }
+
+        /* Tables */
+        table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+        th { text-align: left; padding: 8px 12px; background: #f1f5f9; color: #475569; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; }
+        td { padding: 8px 12px; border-bottom: 1px solid #e5e7eb; }
+        tr:last-child td { border-bottom: none; }
+        .text-end { text-align: right; }
+
+        /* Highlight box */
+        .highlight {
+            background: linear-gradient(135deg, #eff6ff, #dbeafe);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .highlight h3 { color: #1a365d; margin-bottom: 8px; }
+        .highlight ul { margin-left: 20px; color: #374151; }
+        .highlight li { margin-bottom: 4px; }
+
+        /* Engagement bar */
+        .engagement-bar {
+            display: flex;
+            height: 36px;
+            border-radius: 8px;
+            overflow: hidden;
+            margin: 12px 0;
+        }
+        .engagement-bar .seg { display: flex; align-items: center; justify-content: center; color: #fff; font-size: 0.75rem; font-weight: 600; }
+
+        .legend { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 8px; }
+        .legend-item { display: flex; align-items: center; gap: 6px; font-size: 0.8rem; color: #6b7280; }
+        .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            padding: 32px 48px;
+            color: #9ca3af;
+            font-size: 0.8rem;
+            border-top: 1px solid #e5e7eb;
+        }
+
+        /* Responsive for smaller screens / print */
+        @media (max-width: 700px) {
+            .summary-grid { grid-template-columns: repeat(2, 1fr); }
+            .row { flex-direction: column; }
+            .content { padding: 24px; }
+            .header { padding: 32px 24px; }
+            .header h1 { font-size: 1.8rem; }
+        }
+    </style>
+</head>
+<body>
+<div class="page">
+
+    <!-- HEADER -->
+    <div class="header">
+        <div class="logo">&#127919;</div>
+        <h1>pistol.nu - Plattformsrapport</h1>
+        <div class="subtitle">Hallands Pistolskyttekrets &mdash; &Aring;rsm&ouml;te 2026</div>
+        <div class="date">Data per 29 mars 2026</div>
+    </div>
+
+    <div class="content">
+
+        <!-- SECTION: OVERVIEW -->
+        <div class="section-title">Sammanfattning</div>
+
+        <div class="summary-grid">
+            <div class="summary-card">
+                <div class="value">135</div>
+                <div class="label">Registrerade medlemmar</div>
+                <div class="detail">+59 senaste 30d</div>
+            </div>
+            <div class="summary-card green">
+                <div class="value" style="font-size:1.4rem;">35 klubbar har medlemmar</div>
+                <div class="detail">varav 6 aktiva &mdash; av totalt 501</div>
+            </div>
+            <div class="summary-card amber">
+                <div class="value">70</div>
+                <div class="label">T&auml;vlingar 2026</div>
+                <div class="detail">6 discipliner</div>
+            </div>
+            <div class="summary-card">
+                <div class="value">41</div>
+                <div class="label">Tr&auml;ningsmatcher</div>
+                <div class="detail">13 deltagare senaste 30d</div>
+            </div>
+        </div>
+
+        <!-- SECTION: MEMBERSHIP GROWTH -->
+        <div class="section-title">Medlemstillv&auml;xt</div>
+
+        <div class="row">
+            <div class="col-7">
+                <div class="chart-box">
+                    <h3>Nya medlemmar per m&aring;nad</h3>
+                    <div class="chart-wrap"><canvas id="chartMembers"></canvas></div>
+                </div>
+            </div>
+            <div class="col-5">
+                <div class="chart-box">
+                    <h3>Medlemmar per krets (topp 8)</h3>
+                    <div class="chart-wrap"><canvas id="chartRegions"></canvas></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="highlight">
+            <h3>Tillv&auml;xtanalys</h3>
+            <ul>
+                <li>Kraftig tillv&auml;xt sedan september 2025 d&aring; plattformen b&ouml;rjade anv&auml;ndas</li>
+                <li><strong>56 nya medlemmar enbart i mars 2026</strong> &mdash; h&ouml;gsta m&aring;naden hittills</li>
+                <li>Halland st&ouml;rst med 65 medlemmar (48%), f&ouml;ljt av V&auml;rmland (22) och J&ouml;nk&ouml;ping (16)</li>
+                <li>Medlemmar fr&aring;n 15 kretsar &mdash; geografisk spridning &ouml;kar stadigt</li>
+            </ul>
+        </div>
+
+        <!-- SECTION: ENGAGEMENT -->
+        <div class="section-title page-break">Anv&auml;ndaraktivitet &amp; Engagemang</div>
+
+        <div class="summary-grid">
+            <div class="summary-card green">
+                <div class="value">79</div>
+                <div class="label">Webb-aktiva (30d)</div>
+                <div class="detail">59% av alla medlemmar</div>
+            </div>
+            <div class="summary-card">
+                <div class="value">2</div>
+                <div class="label">Mobilapp-aktiva (30d)</div>
+                <div class="detail">Appen &auml;r ny</div>
+            </div>
+            <div class="summary-card amber">
+                <div class="value">18</div>
+                <div class="label">Unika tr&auml;nande (30d)</div>
+                <div class="detail">Loggat tr&auml;ningsresultat</div>
+            </div>
+            <div class="summary-card green">
+                <div class="value">3</div>
+                <div class="label">Mobilapp-enheter</div>
+                <div class="detail">Android</div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-6">
+                <div class="chart-box">
+                    <h3>Medlemsengagemang</h3>
+                    <p style="font-size:0.85rem;color:#6b7280;margin-bottom:12px;">F&ouml;rdelning av 135 medlemmar baserat p&aring; senaste aktivitet (webb eller mobil)</p>
+                    <div class="engagement-bar">
+                        <div class="seg" style="width:58.5%;background:#16a34a;">79</div>
+                        <div class="seg" style="width:17.0%;background:#2563eb;">23</div>
+                        <div class="seg" style="width:4.4%;background:#f59e0b;">6</div>
+                        <div class="seg" style="width:20.0%;background:#dc2626;">27</div>
+                    </div>
+                    <div class="legend">
+                        <div class="legend-item"><div class="legend-dot" style="background:#16a34a;"></div>Aktiv 0-30d (79)</div>
+                        <div class="legend-item"><div class="legend-dot" style="background:#2563eb;"></div>Tillf&auml;llig 31-90d (23)</div>
+                        <div class="legend-item"><div class="legend-dot" style="background:#f59e0b;"></div>S&auml;llan 91-365d (6)</div>
+                        <div class="legend-item"><div class="legend-dot" style="background:#dc2626;"></div>Vilande &gt;365d (27)</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-6">
+                <div class="chart-box">
+                    <h3>Tr&auml;ningsresultat per m&aring;nad</h3>
+                    <div class="chart-wrap"><canvas id="chartTraining"></canvas></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="highlight">
+            <h3>Engagemangsanalys</h3>
+            <ul>
+                <li><strong>59% av medlemmarna &auml;r aktiva</strong> (bes&ouml;kt sidan senaste 30 dagarna)</li>
+                <li>Ytterligare 17% har varit aktiva inom 90 dagar &mdash; sammanlagt 76% aktiva inom 3 m&aring;nader</li>
+                <li>20% vilande &mdash; majoriteten av dessa &auml;r sannolikt importerade fr&aring;n testdata/migrering</li>
+                <li>Tr&auml;ningsresultat har &ouml;kat kraftigt: fr&aring;n ~10/m&aring;nad till <strong>82 i januari 2026</strong></li>
+                <li>202 registrerade tr&auml;ningsresultat hittills i &aring;r</li>
+            </ul>
+        </div>
+
+        <!-- SECTION: COMPETITIONS -->
+        <div class="section-title">T&auml;vlingar</div>
+
+        <div class="row">
+            <div class="col-6">
+                <div class="chart-box">
+                    <h3>T&auml;vlingar per disciplin (2026)</h3>
+                    <div class="chart-wrap"><canvas id="chartDisciplines"></canvas></div>
+                </div>
+            </div>
+            <div class="col-6">
+                <div class="chart-box">
+                    <h3>St&ouml;rsta t&auml;vlingar (anm&auml;lda)</h3>
+                    <table>
+                        <thead><tr><th>T&auml;vling</th><th>Disciplin</th><th class="text-end">Anm.</th></tr></thead>
+                        <tbody>
+                            <tr><td>Duck Shoot</td><td>Precision</td><td class="text-end">11</td></tr>
+                            <tr><td>Testar Springskyttet&auml;vling</td><td>Springskytte</td><td class="text-end">8</td></tr>
+                            <tr><td>Luftpistol omg&aring;ng 4</td><td>Precision</td><td class="text-end">5</td></tr>
+                            <tr><td>Luftpistol omg&aring;ng 5</td><td>Precision</td><td class="text-end">2</td></tr>
+                            <tr><td>Klubbm&auml;sterskap Precision A</td><td>Precision</td><td class="text-end">1</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECTION: CLUB ACTIVITIES -->
+        <div class="section-title page-break">Klubbaktiviteter</div>
+
+        <div class="row">
+            <div class="col-6">
+                <div class="chart-box">
+                    <h3>Events per typ (2026)</h3>
+                    <div class="chart-wrap"><canvas id="chartEventTypes"></canvas></div>
+                </div>
+            </div>
+            <div class="col-6">
+                <div class="chart-box">
+                    <h3>Mest aktiva klubbar (30d)</h3>
+                    <p style="font-size:0.8rem;color:#9ca3af;margin-bottom:8px;">Klubbar med flest medlemmar aktiva p&aring; webb eller mobilapp senaste 30 dagarna</p>
+                    <table>
+                        <thead><tr><th>Klubb</th><th class="text-end">Aktiva</th></tr></thead>
+                        <tbody>
+                            <tr><td>Karlskoga PK</td><td class="text-end">17</td></tr>
+                            <tr><td>Varberg PK</td><td class="text-end">16</td></tr>
+                            <tr><td>Halmstad Sn&ouml;storp PSF</td><td class="text-end">11</td></tr>
+                            <tr><td>Harplinge PK</td><td class="text-end">8</td></tr>
+                            <tr><td>Falkenbergs PK</td><td class="text-end">3</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="row" style="margin-top:16px;">
+            <div class="col-5">
+                <div class="chart-box">
+                    <h3>Mest events</h3>
+                    <table>
+                        <thead><tr><th>Klubb</th><th class="text-end">Events</th></tr></thead>
+                        <tbody>
+                            <tr><td>Karlskoga PK</td><td class="text-end">48</td></tr>
+                            <tr><td>Falkenbergs PK</td><td class="text-end">14</td></tr>
+                            <tr><td>Ankeborg</td><td class="text-end">3</td></tr>
+                            <tr><td>Harplinge PK</td><td class="text-end">2</td></tr>
+                            <tr><td>Varberg PK</td><td class="text-end">2</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="col-5">
+                <div class="chart-box">
+                    <h3>Flest medlemmar</h3>
+                    <table>
+                        <thead><tr><th>Klubb</th><th class="text-end">Medl.</th></tr></thead>
+                        <tbody>
+                            <tr><td>Karlskoga PK</td><td class="text-end">22</td></tr>
+                            <tr><td>Harplinge PK</td><td class="text-end">21</td></tr>
+                            <tr><td>Varberg PK</td><td class="text-end">20</td></tr>
+                            <tr><td>Halmstad Sn&ouml;storp PSF</td><td class="text-end">14</td></tr>
+                            <tr><td>Ankeborg</td><td class="text-end">11</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="highlight">
+            <h3>Klubbaktivitet</h3>
+            <ul>
+                <li><strong>71 events</strong> planerade/genomf&ouml;rda under 2026</li>
+                <li>Tr&auml;ning dominerar (55 events, 79%) f&ouml;ljt av m&ouml;ten och st&auml;dning</li>
+                <li>Karlskoga PK mest aktiv med 48 events &mdash; en tydlig f&ouml;rebild</li>
+                <li>5 klubbar representerade i tr&auml;ningsmatcher senaste 30 dagarna</li>
+            </ul>
+        </div>
+
+        <!-- SECTION: TRAINING -->
+        <div class="section-title">Tr&auml;ning &amp; Skyttetrappan</div>
+
+        <div class="summary-grid">
+            <div class="summary-card green">
+                <div class="value">202</div>
+                <div class="label">Tr&auml;ningsresultat 2026</div>
+            </div>
+            <div class="summary-card">
+                <div class="value">8</div>
+                <div class="label">Aktiva elever</div>
+                <div class="detail">Skyttetrappan</div>
+            </div>
+            <div class="summary-card amber">
+                <div class="value">24</div>
+                <div class="label">Steg godk&auml;nda (30d)</div>
+            </div>
+            <div class="summary-card">
+                <div class="value">3</div>
+                <div class="label">Aktiva tr&auml;ningsgrupper</div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-6">
+                <div class="chart-box">
+                    <h3>Resultat per vapengrupp (2026)</h3>
+                    <div class="chart-wrap"><canvas id="chartWeapons"></canvas></div>
+                </div>
+            </div>
+            <div class="col-6">
+                <div class="chart-box">
+                    <h3>Resultat per disciplin (2026)</h3>
+                    <div class="chart-wrap"><canvas id="chartScoreDiscipline"></canvas></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-6">
+                <div class="chart-box">
+                    <h3>Tr&auml;ningsmatcher per m&aring;nad</h3>
+                    <div class="chart-wrap"><canvas id="chartMatches"></canvas></div>
+                </div>
+            </div>
+            <div class="col-6">
+                <div class="chart-box">
+                    <h3>Elever per niv&aring; (Skyttetrappan)</h3>
+                    <div class="chart-wrap"><canvas id="chartLevels"></canvas></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECTION: SUMMARY -->
+        <div class="section-title page-break">Sammanfattning &amp; V&auml;gen fram&aring;t</div>
+
+        <div class="highlight" style="background: linear-gradient(135deg, #f0fdf4, #dcfce7);">
+            <h3>Styrkor</h3>
+            <ul>
+                <li>Stark tillv&auml;xt &mdash; 59 nya medlemmar senaste 30 dagarna, accelererande trend</li>
+                <li>H&ouml;gt engagemang &mdash; 59% av medlemmarna aktiva senaste 30 dagarna</li>
+                <li>&Ouml;kande tr&auml;ningsanv&auml;ndning &mdash; fr&aring;n 7 resultat/m&aring;nad till 82 p&aring; 6 m&aring;nader</li>
+                <li>Geografisk spridning &mdash; 15 kretsar representerade</li>
+                <li>Aktiv t&auml;vlingsverksamhet &mdash; 70 t&auml;vlingar, 6 discipliner</li>
+            </ul>
+        </div>
+
+        <div class="highlight" style="background: linear-gradient(135deg, #fffbeb, #fef3c7);">
+            <h3>Utvecklingsomr&aring;den</h3>
+            <ul>
+                <li>Mobilappen &auml;r ny &mdash; 3 installationer hittills, potential att driva engagemang</li>
+                <li>Av 501 importerade klubbar &auml;r 6 aktiva &mdash; fler klubbar beh&ouml;ver b&ouml;rja anv&auml;nda plattformen</li>
+                <li>27 vilande medlemmar &mdash; m&ouml;jlighet att &aring;teraktivera med r&auml;tt kommunikation</li>
+                <li>Koncentration till f&aring; klubbar &mdash; Karlskoga PK st&aring;r f&ouml;r 69% av alla events</li>
+            </ul>
+        </div>
+
+    </div>
+
+    <div class="footer">
+        Pistol.nu &mdash; Hallandspistolskyttekrets digitala plattform &mdash; Data per 2026-03-29
+    </div>
+
+</div>
+
+<script>
+const blue = '#2563eb';
+const green = '#16a34a';
+const amber = '#f59e0b';
+const red = '#dc2626';
+const purple = '#7c3aed';
+const teal = '#0d9488';
+const gray = '#6b7280';
+const pink = '#db2777';
+
+const chartDefaults = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: {
+        y: { beginAtZero: true, ticks: { precision: 0 }, grid: { color: '#e5e7eb' } },
+        x: { grid: { display: false } }
+    }
+};
+
+// Members per month
+new Chart(document.getElementById('chartMembers'), {
+    type: 'bar',
+    data: {
+        labels: ['sep 25','okt','nov','dec','jan 26','feb','mar'],
+        datasets: [{ data: [6,0,11,16,16,30,56], backgroundColor: blue + 'cc', borderColor: blue, borderWidth: 1 }]
+    },
+    options: chartDefaults
+});
+
+// Members by region
+new Chart(document.getElementById('chartRegions'), {
+    type: 'bar',
+    data: {
+        labels: ['Halland','V\u00e4rmland','J\u00f6nk\u00f6ping','Ankeland','Malm\u00f6hus','Skaraborg','Kronoberg','Kristianstad'],
+        datasets: [{ data: [65,22,16,11,5,3,3,2], backgroundColor: green + 'cc', borderColor: green, borderWidth: 1, barThickness: 16 }]
+    },
+    options: { ...chartDefaults, indexAxis: 'y', scales: { x: { beginAtZero: true, ticks: { precision: 0 }, grid: { color: '#e5e7eb' } }, y: { grid: { display: false } } } }
+});
+
+// Training scores per month
+new Chart(document.getElementById('chartTraining'), {
+    type: 'line',
+    data: {
+        labels: ['apr 25','maj','jun','jul','aug','sep','okt','nov','dec','jan 26','feb','mar'],
+        datasets: [{ data: [7,15,14,13,10,7,0,8,26,82,59,61], borderColor: blue, backgroundColor: blue + '22', fill: true, tension: 0.3, pointRadius: 3 }]
+    },
+    options: chartDefaults
+});
+
+// Competitions by discipline
+new Chart(document.getElementById('chartDisciplines'), {
+    type: 'doughnut',
+    data: {
+        labels: ['Precision (48)','F\u00e4ltskytte (13)','Milsnabb (4)','Springskytte (2)','Nationell Helmatch (2)','Magnum F\u00e4lt (1)'],
+        datasets: [{ data: [48,13,4,2,2,1], backgroundColor: [blue, green, amber, red, purple, teal], borderWidth: 2 }]
+    },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, pointStyle: 'circle', padding: 8, font: { size: 11 } } } } }
+});
+
+// Event types
+new Chart(document.getElementById('chartEventTypes'), {
+    type: 'doughnut',
+    data: {
+        labels: ['Tr\u00e4ning (56)','M\u00f6te (6)','St\u00e4dning (5)','Socialt (2)','Annat (1)','IPSC (1)'],
+        datasets: [{ data: [56,6,5,2,1,1], backgroundColor: [green, blue, amber, purple, gray, pink], borderWidth: 2 }]
+    },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, pointStyle: 'circle', padding: 8, font: { size: 11 } } } } }
+});
+
+// Weapons
+new Chart(document.getElementById('chartWeapons'), {
+    type: 'doughnut',
+    data: {
+        labels: ['Luftpistol - L (107)','Grovpistol - C (86)','Finpistol - A (7)','Revolver - B (1)','Magnum - M (1)'],
+        datasets: [{ data: [107,86,7,1,1], backgroundColor: [blue, green, amber, purple, gray], borderWidth: 2 }]
+    },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, pointStyle: 'circle', padding: 8, font: { size: 11 } } } } }
+});
+
+// Score disciplines
+new Chart(document.getElementById('chartScoreDiscipline'), {
+    type: 'doughnut',
+    data: {
+        labels: ['Precision (184)','Milsnabb (18)'],
+        datasets: [{ data: [184,18], backgroundColor: [blue, amber], borderWidth: 2 }]
+    },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, pointStyle: 'circle', padding: 8, font: { size: 11 } } } } }
+});
+
+// Training matches per month
+new Chart(document.getElementById('chartMatches'), {
+    type: 'bar',
+    data: {
+        labels: ['dec 25','jan 26','feb','mar'],
+        datasets: [{ data: [8,17,10,6], backgroundColor: amber + 'cc', borderColor: amber, borderWidth: 1 }]
+    },
+    options: chartDefaults
+});
+
+// Training stairs levels
+new Chart(document.getElementById('chartLevels'), {
+    type: 'bar',
+    data: {
+        labels: ['Niv\u00e5 1','Niv\u00e5 3','Niv\u00e5 5'],
+        datasets: [{ data: [5,2,1], backgroundColor: teal + 'cc', borderColor: teal, borderWidth: 1, barThickness: 24 }]
+    },
+    options: { ...chartDefaults, indexAxis: 'y', scales: { x: { beginAtZero: true, ticks: { precision: 0 }, grid: { color: '#e5e7eb' } }, y: { grid: { display: false } } } }
+});
+</script>
+</body>
+</html>
