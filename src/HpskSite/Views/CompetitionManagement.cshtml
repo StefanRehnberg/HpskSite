@@ -473,6 +473,10 @@
                 {
                     @await Html.PartialAsync("SpringskytteStartListManagement", new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId } })
                 }
+                else if ((ViewData["CompetitionType"]?.ToString() ?? "Precision") is "Faltskytte" or "MagnumFalt")
+                {
+                    @await Html.PartialAsync("FaltskytteStartListManagement", new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId } })
+                }
                 else
                 {
                     @await Html.PartialAsync("CompetitionStartListManagement", new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId } })
@@ -492,6 +496,10 @@
                 @if ((ViewData["CompetitionType"]?.ToString() ?? "Precision") == "Springskytte")
                 {
                     @await Html.PartialAsync("SpringskytteResultsManagement", resultsViewData)
+                }
+                else if ((ViewData["CompetitionType"]?.ToString() ?? "Precision") is "Faltskytte" or "MagnumFalt")
+                {
+                    @await Html.PartialAsync("FaltskytteResultsManagement", resultsViewData)
                 }
                 else
                 {

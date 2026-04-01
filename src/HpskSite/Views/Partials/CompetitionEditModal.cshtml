@@ -369,6 +369,48 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                         </div>
                     </div>
 
+                    <!-- Fältskytte-specific fields (hidden unless type is Faltskytte/MagnumFalt) -->
+                    <div id="editFaltskytteSection" style="display:none">
+                        <hr>
+                        <h6 class="text-primary mb-3"><i class="bi bi-bullseye me-1"></i>Fältskytte-inställningar</h6>
+                        <div class="row">
+                            <div class="col-md-3">
+                                <div class="mb-3">
+                                    <label for="edit_scoringMode" class="form-label">Poängberäkning</label>
+                                    <select class="form-select" id="edit_scoringMode" name="scoringMode">
+                                        <option value="Normal">Normal (träff/figurer)</option>
+                                        <option value="Poang">Poängfält</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="mb-3">
+                                    <label for="edit_patrolSize" class="form-label">Patrullstorlek</label>
+                                    <input type="number" class="form-control" id="edit_patrolSize" name="patrolSize" min="2" max="12" value="6">
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="mb-3">
+                                    <label for="edit_patrolInterval" class="form-label">Intervall (min)</label>
+                                    <input type="number" class="form-control" id="edit_patrolInterval" name="patrolIntervalMinutes" min="5" max="60" value="15">
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="mb-3">
+                                    <label for="edit_maxReshoots" class="form-label">Max omskjutningar</label>
+                                    <input type="number" class="form-control" id="edit_maxReshoots" name="maxReshoots" min="0" max="10" value="1">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <button type="button" class="btn btn-outline-primary btn-sm" onclick="openEditFaltStationConfigurator()">
+                                <i class="bi bi-gear me-1"></i>Konfigurera stationer
+                            </button>
+                            <span class="text-muted small ms-2" id="edit_faltConfigSummary"></span>
+                            <input type="hidden" id="edit_faltStationConfigJson" name="stationConfig" value="">
+                        </div>
+                    </div>
+
                     <div class="row">
                         <div class="col-md-6">
                             <div class="mb-3">
@@ -596,6 +638,10 @@ editModal.addEventListener('show.bs.modal', function() {
 
 // Reset form when modal is hidden
 editModal.addEventListener('hidden.bs.modal', function() {
+    if (window._editModalSkipReset) {
+        window._editModalSkipReset = false;
+        return;
+    }
     document.getElementById('competitionEditForm').reset();
     editModalCurrentSelectedClasses = [];
     document.getElementById('shootingClassesContainer').innerHTML = '<div class="text-center text-muted"><small>Laddar klasser...</small></div>';
@@ -865,6 +911,29 @@ window.populateEditModal = function(competition) {
     const stafettGroup = document.getElementById('edit_stafettFeeGroup');
     if (stafettGroup) {
         stafettGroup.classList.toggle('d-none', !isSpringskytte);
+    }
+
+    // Fältskytte section
+    const isFaltskytte = (competition.competitionType === 'Faltskytte' || competition.competitionType === 'MagnumFalt');
+    const faltSection = document.getElementById('editFaltskytteSection');
+    if (faltSection) {
+        faltSection.style.display = isFaltskytte ? '' : 'none';
+    }
+    if (isFaltskytte) {
+        setFieldValue('edit_scoringMode', competition.scoringMode || 'Normal');
+        setFieldValue('edit_patrolSize', competition.patrolSize || 6);
+        setFieldValue('edit_patrolInterval', competition.patrolIntervalMinutes || 15);
+        setFieldValue('edit_maxReshoots', competition.maxReshoots || 1);
+        document.getElementById('edit_faltStationConfigJson').value = competition.stationConfig || '';
+        var cfgSummary = document.getElementById('edit_faltConfigSummary');
+        if (cfgSummary && competition.stationConfig) {
+            try {
+                var cfg = JSON.parse(competition.stationConfig);
+                var wcCount = Object.keys(cfg).length;
+                var stCount = Object.values(cfg)[0]?.stations?.length || 0;
+                cfgSummary.textContent = wcCount + ' vapenklass(er), ' + stCount + ' stationer';
+            } catch(e) { cfgSummary.textContent = 'Konfigurerad'; }
+        }
     }
 
     // Competition scope dropdown
@@ -1467,6 +1536,42 @@ window.populateEditModal = function(competition) {
         setFieldValue('externalRegistrationEmail', competition.externalRegistrationEmail || '');
         // Note: invitationFile cannot be pre-populated for security reasons (file inputs cannot be set programmatically)
     }
+}
+
+function openEditFaltStationConfigurator() {
+    // Get weapon classes from the competition's shooting classes
+    var weaponClasses = ['C'];
+    var classData = window.currentCompetitionData;
+    if (classData && classData.shootingClassIds) {
+        try {
+            var ids = typeof classData.shootingClassIds === 'string'
+                ? JSON.parse(classData.shootingClassIds)
+                : classData.shootingClassIds;
+            var wcs = [...new Set(ids.map(function(c) { return c.charAt(0); }))].filter(function(w) { return ['A','B','C','R','M'].indexOf(w) >= 0; });
+            if (wcs.length > 0) weaponClasses = wcs;
+        } catch(e) {}
+    }
+
+    var existingJson = document.getElementById('edit_faltStationConfigJson').value;
+    var existingConfig = {};
+    if (existingJson) {
+        try { existingConfig = JSON.parse(existingJson); } catch(e) {}
+    }
+
+    // Set the hidden field ID that the configurator should write to
+    window._faltCfgTargetField = 'edit_faltStationConfigJson';
+    window._faltCfgSummaryField = 'edit_faltConfigSummary';
+
+    // Hide edit modal, open configurator (skip form reset on hide)
+    window._editModalSkipReset = true;
+    var editEl = document.getElementById('competitionEditModal');
+    var editModal = bootstrap.Modal.getInstance(editEl);
+    function onEditHidden() {
+        editEl.removeEventListener('hidden.bs.modal', onEditHidden);
+        faltCfgOpen(weaponClasses, existingConfig);
+    }
+    editEl.addEventListener('hidden.bs.modal', onEditHidden);
+    editModal?.hide();
 }
 </script>
 

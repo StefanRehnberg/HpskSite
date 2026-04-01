@@ -1614,52 +1614,44 @@ namespace HpskSite.Controllers
 
         private async Task<List<PrecisionResultEntry>> GetCompetitionResultsInternal(int competitionId)
         {
-            try
+            using var db = _umbracoDatabaseFactory.CreateDatabase();
+            var compTypeId = GetCompetitionTypeId(competitionId);
+
+            if (compTypeId == "Milsnabb")
             {
-                using var db = _umbracoDatabaseFactory.CreateDatabase();
-                var compTypeId = GetCompetitionTypeId(competitionId);
-
-                if (compTypeId == "Milsnabb")
-                {
-                    var milsnabbResults = await db.FetchAsync<MilsnabbResultEntry>(
-                        "WHERE CompetitionId = @0 ORDER BY TeamNumber, Position, SeriesNumber",
-                        competitionId);
-                    return milsnabbResults.Cast<PrecisionResultEntry>().ToList();
-                }
-
-                if (compTypeId == "Duell")
-                {
-                    var duellResults = await db.FetchAsync<DuellResultEntry>(
-                        "WHERE CompetitionId = @0 ORDER BY TeamNumber, Position, SeriesNumber",
-                        competitionId);
-                    return duellResults.Cast<PrecisionResultEntry>().ToList();
-                }
-
-                if (compTypeId == "NationellHelmatch")
-                {
-                    var nhResults = await db.FetchAsync<NationellHelmatchResultEntry>(
-                        "WHERE CompetitionId = @0 ORDER BY TeamNumber, Position, SeriesNumber",
-                        competitionId);
-                    return nhResults.Cast<PrecisionResultEntry>().ToList();
-                }
-
-                if (compTypeId == "MagnumPrecision")
-                {
-                    var mpResults = await db.FetchAsync<MagnumPrecisionResultEntry>(
-                        "WHERE CompetitionId = @0 ORDER BY TeamNumber, Position, SeriesNumber",
-                        competitionId);
-                    return mpResults.Cast<PrecisionResultEntry>().ToList();
-                }
-
-                return await db.FetchAsync<PrecisionResultEntry>(
+                var milsnabbResults = await db.FetchAsync<MilsnabbResultEntry>(
                     "WHERE CompetitionId = @0 ORDER BY TeamNumber, Position, SeriesNumber",
                     competitionId);
+                return milsnabbResults.Cast<PrecisionResultEntry>().ToList();
             }
-            catch (Exception ex)
+
+            if (compTypeId == "Duell")
             {
-                _logger.LogError(ex, "Database error getting competition results");
-                return new List<PrecisionResultEntry>();
+                var duellResults = await db.FetchAsync<DuellResultEntry>(
+                    "WHERE CompetitionId = @0 ORDER BY TeamNumber, Position, SeriesNumber",
+                    competitionId);
+                return duellResults.Cast<PrecisionResultEntry>().ToList();
             }
+
+            if (compTypeId == "NationellHelmatch")
+            {
+                var nhResults = await db.FetchAsync<NationellHelmatchResultEntry>(
+                    "WHERE CompetitionId = @0 ORDER BY TeamNumber, Position, SeriesNumber",
+                    competitionId);
+                return nhResults.Cast<PrecisionResultEntry>().ToList();
+            }
+
+            if (compTypeId == "MagnumPrecision")
+            {
+                var mpResults = await db.FetchAsync<MagnumPrecisionResultEntry>(
+                    "WHERE CompetitionId = @0 ORDER BY TeamNumber, Position, SeriesNumber",
+                    competitionId);
+                return mpResults.Cast<PrecisionResultEntry>().ToList();
+            }
+
+            return await db.FetchAsync<PrecisionResultEntry>(
+                "WHERE CompetitionId = @0 ORDER BY TeamNumber, Position, SeriesNumber",
+                competitionId);
         }
 
         private async Task<bool> DeleteResultFromDatabase(DeleteResultRequest request)
@@ -2147,6 +2139,97 @@ namespace HpskSite.Controllers
             };
         }
 
+        [HttpGet]
+        public async Task<IActionResult> AnalyzeClassMerges(int competitionId)
+        {
+            try
+            {
+                if (competitionId <= 0)
+                    return Json(new { success = false, message = "Ogiltigt tävlings-ID." });
+
+                var competition = _contentService.GetById(competitionId);
+                if (competition == null)
+                    return Json(new { success = false, message = "Tävlingen hittades inte." });
+
+                var compTypeId = GetCompetitionTypeId(competitionId);
+
+                // Excluded types
+                if (compTypeId is "MagnumPrecision" or "Springskytte")
+                    return Json(new { success = true, suggestions = Array.Empty<object>(), classes = Array.Empty<object>() });
+
+                var results = await GetCompetitionResultsInternal(competitionId);
+
+                // Fallback to cached result data if DB is empty
+                if (!results.Any())
+                {
+                    var resultPage = _contentService.GetPagedChildren(competition.Id, 0, int.MaxValue, out long total)
+                        .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
+                    var existingJson = resultPage?.GetValue<string>("resultData");
+                    if (!string.IsNullOrEmpty(existingJson))
+                    {
+                        // Return analysis based on cached results
+                        var cached = JsonConvert.DeserializeObject<FinalResults>(existingJson);
+                        if (cached?.ClassGroups != null)
+                        {
+                            var classInfos = cached.ClassGroups.Select(g => new ClassInfo
+                            {
+                                ClassName = g.ClassName,
+                                WeaponGroup = g.ClassName.Length > 0 ? g.ClassName.Substring(0, 1) : "",
+                                ParticipantCount = g.Shooters.Count,
+                                BelowThreshold = g.Shooters.Count < 5,
+                                MedalImpact = g.Shooters.Count < 5
+                                    ? GetMedalImpactText(g.Shooters.Count, g.ClassName.Contains("Jun"))
+                                    : ""
+                            }).ToList();
+
+                            // Build suggestions from cached data by creating synthetic PrecisionResultEntry list
+                            var syntheticResults = new List<PrecisionResultEntry>();
+                            foreach (var cg in cached.ClassGroups)
+                            {
+                                foreach (var shooter in cg.Shooters)
+                                {
+                                    // Find the class ID from the name
+                                    var classId = ShootingClasses.GetByName(cg.ClassName)?.Id
+                                        ?? cg.ClassName.Replace(" ", "_");
+                                    syntheticResults.Add(new PrecisionResultEntry
+                                    {
+                                        CompetitionId = competitionId,
+                                        MemberId = shooter.MemberId,
+                                        ShootingClass = classId,
+                                        SeriesNumber = 1
+                                    });
+                                }
+                            }
+                            var svc = new ClassMergingService();
+                            var analysis = svc.Analyze(syntheticResults, compTypeId);
+                            return Json(new { success = true, analysis.Suggestions, analysis.Classes });
+                        }
+                    }
+                    return Json(new { success = true, suggestions = Array.Empty<object>(), classes = Array.Empty<object>() });
+                }
+
+                var service = new ClassMergingService();
+                var result = service.Analyze(results, compTypeId);
+                return Json(new { success = true, result.Suggestions, result.Classes });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error analyzing class merges for competition {CompetitionId}", competitionId);
+                return Json(new { success = false, message = "Fel vid analys: " + ex.Message });
+            }
+        }
+
+        private static string GetMedalImpactText(int count, bool isJunior)
+        {
+            if (isJunior) return "Alltid medaljer till topp 3";
+            return count switch
+            {
+                4 => "Guld + Silver",
+                3 => "Enbart Guld",
+                _ => "Inga medaljer"
+            };
+        }
+
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> CreateResultsList([FromBody] CreateResultsListRequest request)
@@ -2171,19 +2254,58 @@ namespace HpskSite.Controllers
                     return Json(new { Success = false, Message = "Detta är en extern tävling. Resultat kan inte skapas i systemet." });
                 }
 
-                // Get all results for this competition
-                var results = await GetCompetitionResultsInternal(request.CompetitionId);
-                if (!results.Any())
-                {
-                    return Json(new { Success = false, Message = "Inga resultat hittades för denna tävling." });
-                }
-
-                // Calculate final results with rankings
-                var finalResults = await CalculateFinalResults(results, competition.Id);
-
                 // Find or create result page as direct child of competition
                 var resultPage = _contentService.GetPagedChildren(competition.Id, 0, int.MaxValue, out long total)
                     .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
+
+                // Get all results for this competition
+                var results = await GetCompetitionResultsInternal(request.CompetitionId);
+
+                FinalResults finalResults;
+
+                if (results.Any())
+                {
+                    // Calculate fresh results from database
+                    finalResults = await CalculateFinalResults(results, competition.Id, request.Merges);
+                }
+                else if (resultPage != null)
+                {
+                    // No DB rows but cached result page exists — use existing snapshot
+                    var existingJson = resultPage.GetValue<string>("resultData");
+                    if (!string.IsNullOrEmpty(existingJson))
+                    {
+                        finalResults = JsonConvert.DeserializeObject<FinalResults>(existingJson);
+                        _logger.LogInformation(
+                            "No database results for competition {CompetitionId}, using existing result snapshot with {Count} class groups",
+                            request.CompetitionId, finalResults?.ClassGroups?.Count ?? 0);
+
+                        // Apply merges to cached data by re-grouping
+                        if (request.Merges?.Any() == true && finalResults?.ClassGroups != null)
+                        {
+                            var groupLookup = new Dictionary<string, string>();
+                            foreach (var m in request.Merges)
+                            {
+                                var combined = ClassMergingService.GetCombinedClassName(m.SourceClass, m.TargetClass);
+                                groupLookup[m.SourceClass] = combined;
+                                groupLookup[m.TargetClass] = combined;
+                            }
+
+                            var allShooters = finalResults.ClassGroups.SelectMany(g => g.Shooters).ToList();
+                            finalResults.ClassGroups = allShooters
+                                .GroupBy(s => groupLookup.TryGetValue(s.ShootingClass, out var grp) ? grp : s.ShootingClass)
+                                .Select(g => new ClassGroup { ClassName = g.Key, Shooters = g.ToList() })
+                                .ToList();
+                        }
+                    }
+                    else
+                    {
+                        return Json(new { Success = false, Message = "Inga resultat hittades för denna tävling." });
+                    }
+                }
+                else
+                {
+                    return Json(new { Success = false, Message = "Inga resultat hittades för denna tävling." });
+                }
 
                 if (resultPage == null)
                 {
@@ -2193,15 +2315,20 @@ namespace HpskSite.Controllers
                     resultPage.SetValue("isOfficial", false); // Start as preliminary
                     _logger.LogInformation("Created new result page for competition {CompetitionId}", request.CompetitionId);
                 }
-                
+
                 // Keep existing isOfficial status
                 var existingIsOfficial = resultPage.GetValue<bool>("isOfficial");
-                
+
                 // Update the result page
                 resultPage.SetValue("resultData", Newtonsoft.Json.JsonConvert.SerializeObject(finalResults));
                 resultPage.SetValue("lastUpdated", DateTime.Now);
                 resultPage.SetValue("isOfficial", existingIsOfficial); // Keep existing status
                 resultPage.SetValue("resultType", "Final Results");
+
+                // Persist merge config so GetResultsList can re-apply on preliminary reload
+                resultPage.SetValue("mergeConfig", request.Merges?.Any() == true
+                    ? Newtonsoft.Json.JsonConvert.SerializeObject(request.Merges)
+                    : "");
 
                 // Save and publish
                 _contentService.Save(resultPage);
@@ -2209,12 +2336,13 @@ namespace HpskSite.Controllers
 
                 _logger.LogInformation("Created/updated final results list for competition {CompetitionId}", request.CompetitionId);
 
-                var finalResultsData = finalResults;
                 var totalShooters = finalResults.ClassGroups.Sum(g => g.Shooters.Count);
-                
-                return Json(new { 
-                    Success = true, 
-                    Message = "Resultatlistan har skapats/uppdaterats framgångsrikt!",
+
+                return Json(new {
+                    Success = true,
+                    Message = results.Any()
+                        ? "Resultatlistan har skapats/uppdaterats framgångsrikt!"
+                        : "Resultatlistan har uppdaterats från befintlig data (inga nya resultat i databasen).",
                     ResultsCount = totalShooters,
                     ClassGroupsCount = finalResults.ClassGroups.Count,
                     IsOfficial = existingIsOfficial
@@ -2290,8 +2418,16 @@ namespace HpskSite.Controllers
                             return Json(new { Success = false, Message = "Inga resultat finns i databasen ännu.", Exists = false });
                         }
 
-                        // Generate fresh results from database
-                        resultData = await CalculateFinalResults(dbResults, competitionId);
+                        // Read stored merge config (if any) to re-apply on fresh generation
+                        var mergeConfigJson = finalResultsList.GetValue<string>("mergeConfig");
+                        List<ClassMergeAction>? storedMerges = null;
+                        if (!string.IsNullOrEmpty(mergeConfigJson))
+                        {
+                            storedMerges = JsonConvert.DeserializeObject<List<ClassMergeAction>>(mergeConfigJson);
+                        }
+
+                        // Generate fresh results from database (with merges if configured)
+                        resultData = await CalculateFinalResults(dbResults, competitionId, storedMerges);
                         lastUpdated = DateTime.Now;
 
                         _logger.LogInformation("Generated fresh preliminary results with {Count} shooters",
@@ -2441,7 +2577,7 @@ namespace HpskSite.Controllers
         }
 
 
-        private async Task<FinalResults> CalculateFinalResults(List<PrecisionResultEntry> results, int competitionId)
+        private async Task<FinalResults> CalculateFinalResults(List<PrecisionResultEntry> results, int competitionId, List<ClassMergeAction>? merges = null)
         {
             if (!results.Any())
             {
@@ -2498,6 +2634,21 @@ namespace HpskSite.Controllers
                 })
                 .ToList();
 
+            // Build merge group lookup: maps original class name → combined group name
+            var mergeGroupLookup = new Dictionary<string, string>();
+            if (merges?.Any() == true)
+            {
+                foreach (var merge in merges)
+                {
+                    var combinedName = ClassMergingService.GetCombinedClassName(merge.SourceClass, merge.TargetClass);
+                    mergeGroupLookup[merge.SourceClass] = combinedName;
+                    mergeGroupLookup[merge.TargetClass] = combinedName;
+                }
+            }
+            // Helper to resolve which group a shooter belongs to
+            string GetGroupName(string shootingClass) =>
+                mergeGroupLookup.TryGetValue(shootingClass, out var group) ? group : shootingClass;
+
             // Define class order (C classes first, then B, then A, then R)
             var classOrder = new Dictionary<string, int>
             {
@@ -2532,9 +2683,9 @@ namespace HpskSite.Controllers
                 ? new MilsnabbTieBreaker()
                 : new SeriesCountBackComparer(hasFinalsRound, qualificationSeriesCount, numberOfFinalSeries);
 
-            // Group by shooting class and order classes
+            // Group by shooting class (using merge lookup if merges were applied)
             var classGroups = shooterResults
-                .GroupBy(s => s.ShootingClass)
+                .GroupBy(s => GetGroupName(s.ShootingClass))
                 .OrderBy(g => classOrder.GetValueOrDefault(g.Key, 999)) // Unknown classes go last
                 .Select(classGroup => new ClassGroup
                 {
@@ -2956,6 +3107,7 @@ namespace HpskSite.Controllers
     public class CreateResultsListRequest
     {
         public int CompetitionId { get; set; }
+        public List<HpskSite.Services.ClassMergeAction>? Merges { get; set; }
     }
 
     public class ToggleResultsOfficialRequest

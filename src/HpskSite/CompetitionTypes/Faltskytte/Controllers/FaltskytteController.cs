@@ -1,0 +1,636 @@
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
+using Umbraco.Cms.Core.Cache;
+using Umbraco.Cms.Core.Logging;
+using Umbraco.Cms.Core.Routing;
+using Umbraco.Cms.Core.Services;
+using Umbraco.Cms.Core.Web;
+using Umbraco.Cms.Infrastructure.Persistence;
+using Umbraco.Cms.Web.Website.Controllers;
+using Umbraco.Extensions;
+using Umbraco.Cms.Core.Security;
+using HpskSite.CompetitionTypes.Faltskytte.Models;
+using HpskSite.CompetitionTypes.Precision.Controllers;
+using HpskSite.Services;
+using Newtonsoft.Json;
+
+namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
+{
+    public class FaltskytteController : SurfaceController
+    {
+        private readonly IContentService _contentService;
+        private readonly IMemberService _memberService;
+        private readonly IMemberManager _memberManager;
+        private readonly IUmbracoDatabaseFactory _umbracoDatabaseFactory;
+        private readonly ILogger<FaltskytteController> _logger;
+        private readonly ClubService _clubService;
+        private readonly AdminAuthorizationService _adminAuthorizationService;
+        private readonly UmbracoStartListRepository _startListRepository;
+
+        public FaltskytteController(
+            IUmbracoContextAccessor umbracoContextAccessor,
+            IUmbracoDatabaseFactory umbracoDatabaseFactory,
+            ServiceContext services,
+            AppCaches appCaches,
+            IProfilingLogger profilingLogger,
+            IPublishedUrlProvider publishedUrlProvider,
+            IContentService contentService,
+            IMemberService memberService,
+            IMemberManager memberManager,
+            ILogger<FaltskytteController> logger,
+            ClubService clubService,
+            AdminAuthorizationService adminAuthorizationService,
+            UmbracoStartListRepository startListRepository)
+            : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
+        {
+            _contentService = contentService;
+            _memberService = memberService;
+            _memberManager = memberManager;
+            _umbracoDatabaseFactory = umbracoDatabaseFactory;
+            _logger = logger;
+            _clubService = clubService;
+            _adminAuthorizationService = adminAuthorizationService;
+            _startListRepository = startListRepository;
+        }
+
+        // ── Authorization helper ────────────────────────────────────
+
+        private async Task<bool> IsAuthorizedForCompetition(int competitionId)
+        {
+            if (await _adminAuthorizationService.IsCurrentUserAdminAsync())
+                return true;
+            if (await _adminAuthorizationService.IsCompetitionManager(competitionId))
+                return true;
+
+            var competition = _contentService.GetById(competitionId);
+            var clubId = competition?.GetValue<int>("clubId") ?? 0;
+            if (clubId > 0)
+            {
+                if (await _adminAuthorizationService.IsClubAdminForClub(clubId))
+                    return true;
+                if (await _adminAuthorizationService.IsSkjutledareForClub(clubId))
+                    return true;
+            }
+            return false;
+        }
+
+        // ── Station Config ──────────────────────────────────────────
+
+        [HttpGet]
+        public IActionResult GetStationConfig(int competitionId)
+        {
+            var competition = _contentService.GetById(competitionId);
+            if (competition == null)
+                return Json(new { success = false, message = "Tävlingen hittades inte." });
+
+            var config = ParseCompetitionConfig(competition);
+            var scoringMode = competition.GetValue<string>("scoringMode") ?? "Normal";
+            var maxReshoots = competition.GetValue<int>("maxReshoots");
+
+            return Json(new { success = true, config, scoringMode, maxReshoots });
+        }
+
+        /// <summary>Parses the station config from competition, handling both old and new format.</summary>
+        private static FaltskytteCompetitionConfig ParseCompetitionConfig(Umbraco.Cms.Core.Models.IContent competition)
+        {
+            var configJson = competition.GetValue<string>("stationConfig");
+            return FaltskytteConfigParser.Parse(configJson);
+        }
+
+        /// <summary>Gets station config for a specific weapon class and station number.</summary>
+        private static FaltskytteStationConfig? GetStationForWeaponClass(
+            FaltskytteCompetitionConfig config, string weaponClass, int stationNumber)
+        {
+            var wcConfig = config.GetForWeaponClass(weaponClass);
+            return wcConfig?.Stations.FirstOrDefault(s => s.Station == stationNumber);
+        }
+
+        /// <summary>Saves station config directly to the competition content node.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveStationConfig([FromBody] SaveStationConfigRequest request)
+        {
+            try
+            {
+                if (!await IsAuthorizedForCompetition(request.CompetitionId))
+                    return Json(new { success = false, message = "Du har inte behörighet." });
+
+                var competition = _contentService.GetById(request.CompetitionId);
+                if (competition == null)
+                    return Json(new { success = false, message = "Tävlingen hittades inte." });
+
+                competition.SetValue("stationConfig", request.StationConfigJson ?? "");
+                _contentService.Save(competition);
+                _contentService.Publish(competition, Array.Empty<string>(), -1);
+
+                _logger.LogInformation("Saved Fältskytte station config for competition {CompId}", request.CompetitionId);
+                return Json(new { success = true, message = "Stationskonfiguration sparad." });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error saving station config");
+                return Json(new { success = false, message = "Fel: " + ex.Message });
+            }
+        }
+
+        // ── Station Entry View ──────────────────────────────────────
+
+        /// <summary>
+        /// Gets data for the station entry UI: station config + patrols with completion status.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetStationEntryData(int competitionId, int stationNumber)
+        {
+            if (!await IsAuthorizedForCompetition(competitionId))
+                return Json(new { success = false, message = "Du har inte behörighet." });
+
+            var competition = _contentService.GetById(competitionId);
+            if (competition == null)
+                return Json(new { success = false, message = "Tävlingen hittades inte." });
+
+            // Get station config (per-weapon-class)
+            var competitionConfig = ParseCompetitionConfig(competition);
+            var maxReshoots = competition.GetValue<int>("maxReshoots");
+
+            using var db = _umbracoDatabaseFactory.CreateDatabase();
+
+            // Get patrols
+            var patrols = await db.FetchAsync<FaltskyttePatrol>(
+                "WHERE CompetitionId = @0 ORDER BY PatrolNumber", competitionId);
+
+            // Get patrol members
+            var patrolIds = patrols.Select(p => p.Id).ToList();
+            var allMembers = patrolIds.Any()
+                ? await db.FetchAsync<FaltskyttePatrolMember>(
+                    $"WHERE PatrolId IN ({string.Join(",", patrolIds)}) ORDER BY Position")
+                : new List<FaltskyttePatrolMember>();
+
+            // Get existing results for this station
+            var existingResults = await db.FetchAsync<FaltskytteResultEntry>(
+                "WHERE CompetitionId = @0 AND StationNumber = @1", competitionId, stationNumber);
+            var completedMemberIds = new HashSet<int>(existingResults.Select(r => r.MemberId));
+
+            // Build response
+            var patrolViews = patrols.Select(p =>
+            {
+                var members = allMembers.Where(m => m.PatrolId == p.Id).ToList();
+                return new FaltskyttePatrolView
+                {
+                    PatrolNumber = p.PatrolNumber,
+                    StartTime = p.StartTime,
+                    WeaponGroup = p.WeaponGroup,
+                    Members = members.Select(m => new FaltskyttePatrolMemberView
+                    {
+                        MemberId = m.MemberId,
+                        Position = m.Position,
+                        Name = m.MemberName,
+                        Club = m.ClubName,
+                        ShootingClass = m.ShootingClass,
+                        HasResult = completedMemberIds.Contains(m.MemberId)
+                    }).ToList(),
+                    CompletedCount = members.Count(m => completedMemberIds.Contains(m.MemberId))
+                };
+            }).ToList();
+
+            // Build per-weapon-class station configs for this station number
+            var scoringMode = competition.GetValue<string>("scoringMode") ?? "Normal";
+            var wcStations = new Dictionary<string, FaltskytteStationConfig>();
+            foreach (var kvp in competitionConfig.WeaponConfigs)
+            {
+                var st = kvp.Value.Stations.FirstOrDefault(s => s.Station == stationNumber);
+                if (st != null) wcStations[kvp.Key] = st;
+            }
+
+            return Json(new
+            {
+                success = true,
+                data = new FaltskytteStationView
+                {
+                    CompetitionId = competitionId,
+                    StationNumber = stationNumber,
+                    MaxReshoots = maxReshoots,
+                    ScoringMode = scoringMode,
+                    WeaponClassStations = wcStations,
+                    Patrols = patrolViews
+                }
+            });
+        }
+
+        // ── Re-shoot Info ───────────────────────────────────────────
+
+        /// <summary>
+        /// Gets total re-shoots used by a shooter across all stations in this competition.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetReshootInfo(int competitionId, int memberId)
+        {
+            if (!await IsAuthorizedForCompetition(competitionId))
+                return Json(new { success = false, message = "Du har inte behörighet." });
+
+            var competition = _contentService.GetById(competitionId);
+            var maxReshoots = competition?.GetValue<int>("maxReshoots") ?? 0;
+
+            using var db = _umbracoDatabaseFactory.CreateDatabase();
+            var entries = await db.FetchAsync<FaltskytteResultEntry>(
+                "WHERE CompetitionId = @0 AND MemberId = @1 AND Reshoots > 0",
+                competitionId, memberId);
+
+            var totalReshoots = entries.Sum(e => e.Reshoots);
+
+            return Json(new
+            {
+                success = true,
+                info = new FaltskytteReshootInfo
+                {
+                    MemberId = memberId,
+                    TotalReshoots = totalReshoots,
+                    MaxReshoots = maxReshoots,
+                    LimitReached = maxReshoots > 0 && totalReshoots >= maxReshoots,
+                    ReshootStations = entries.Select(e => e.StationNumber).ToList()
+                }
+            });
+        }
+
+        // ── Save Result (per shooter) ───────────────────────────────
+
+        /// <summary>
+        /// Saves one shooter's result at one station.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveStationResult([FromBody] FaltskylteSaveResultRequest request)
+        {
+            try
+            {
+                if (!await IsAuthorizedForCompetition(request.CompetitionId))
+                    return Json(new FaltskylteSaveResultResponse { Success = false, Message = "Du har inte behörighet." });
+
+                var currentMember = await _memberManager.GetCurrentMemberAsync();
+                if (currentMember == null)
+                    return Json(new FaltskylteSaveResultResponse { Success = false, Message = "Du måste vara inloggad." });
+
+                var currentMemberData = _memberService.GetByEmail(currentMember.Email ?? "");
+                var enteredBy = currentMemberData?.Id ?? 0;
+
+                // Calculate hits and figures from HitsPerFigure array
+                var totalHits = request.HitsPerFigure.Sum();
+                var totalFigures = request.HitsPerFigure.Count(h => h > 0);
+                var hitDistJson = JsonConvert.SerializeObject(request.HitsPerFigure);
+
+                using var db = _umbracoDatabaseFactory.CreateDatabase();
+
+                // Check for existing entry (upsert)
+                var existing = await db.FirstOrDefaultAsync<FaltskytteResultEntry>(
+                    "WHERE CompetitionId = @0 AND StationNumber = @1 AND MemberId = @2",
+                    request.CompetitionId, request.StationNumber, request.MemberId);
+
+                if (existing != null)
+                {
+                    existing.Hits = totalHits;
+                    existing.Figures = totalFigures;
+                    existing.HitDistribution = hitDistJson;
+                    existing.TiebreakerScore = request.TiebreakerScore;
+                    existing.Reshoots = request.Reshoots;
+                    existing.EnteredBy = enteredBy;
+                    existing.LastModified = DateTime.UtcNow;
+                    await db.UpdateAsync(existing);
+
+                    return Json(new FaltskylteSaveResultResponse
+                    {
+                        Success = true,
+                        Message = "Resultat uppdaterat.",
+                        ResultId = existing.Id,
+                        TotalHits = totalHits,
+                        TotalFigures = totalFigures
+                    });
+                }
+
+                var entry = new FaltskytteResultEntry
+                {
+                    CompetitionId = request.CompetitionId,
+                    StationNumber = request.StationNumber,
+                    MemberId = request.MemberId,
+                    PatrolNumber = request.PatrolNumber,
+                    ShootingClass = request.ShootingClass,
+                    Hits = totalHits,
+                    Figures = totalFigures,
+                    HitDistribution = hitDistJson,
+                    TiebreakerScore = request.TiebreakerScore,
+                    Reshoots = request.Reshoots,
+                    EnteredBy = enteredBy,
+                    EnteredAt = DateTime.UtcNow,
+                    LastModified = DateTime.UtcNow
+                };
+
+                await db.InsertAsync(entry);
+
+                _logger.LogInformation(
+                    "Saved Fältskytte result: Competition={CompId}, Station={Station}, Member={Member}, Hits={Hits}/{Figures}",
+                    request.CompetitionId, request.StationNumber, request.MemberId, totalHits, totalFigures);
+
+                return Json(new FaltskylteSaveResultResponse
+                {
+                    Success = true,
+                    Message = "Resultat sparat.",
+                    ResultId = entry.Id,
+                    TotalHits = totalHits,
+                    TotalFigures = totalFigures
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error saving Fältskytte result");
+                return Json(new FaltskylteSaveResultResponse { Success = false, Message = "Fel: " + ex.Message });
+            }
+        }
+
+        // ── Get Results (for result list generation) ────────────────
+
+        /// <summary>
+        /// Gets all results for a competition, grouped by class.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetFaltskytteResults(int competitionId)
+        {
+            try
+            {
+                var competition = _contentService.GetById(competitionId);
+                if (competition == null)
+                    return Json(new { success = false, message = "Tävlingen hittades inte." });
+
+                var scoringMode = competition.GetValue<string>("scoringMode") ?? "Normal";
+                var competitionConfig = ParseCompetitionConfig(competition);
+                // For result display, use the first available weapon class config to determine station count
+                var firstWcConfig = competitionConfig.WeaponConfigs.Values.FirstOrDefault();
+                var stationCount = firstWcConfig?.Stations.Count ?? 0;
+
+                using var db = _umbracoDatabaseFactory.CreateDatabase();
+                var allResults = await db.FetchAsync<FaltskytteResultEntry>(
+                    "WHERE CompetitionId = @0 ORDER BY MemberId, StationNumber", competitionId);
+
+                if (!allResults.Any())
+                    return Json(new { success = false, message = "Inga resultat finns." });
+
+                // Get patrol members for name/club lookup
+                var patrols = await db.FetchAsync<FaltskyttePatrol>(
+                    "WHERE CompetitionId = @0", competitionId);
+                var patrolIds = patrols.Select(p => p.Id).ToList();
+                var allMembers = patrolIds.Any()
+                    ? await db.FetchAsync<FaltskyttePatrolMember>(
+                        $"WHERE PatrolId IN ({string.Join(",", patrolIds)})")
+                    : new List<FaltskyttePatrolMember>();
+                var memberLookup = allMembers
+                    .GroupBy(m => m.MemberId)
+                    .ToDictionary(g => g.Key, g => g.First());
+
+                // Build shooter results
+                var shooterResults = allResults
+                    .GroupBy(r => new { r.MemberId, r.ShootingClass })
+                    .Select(g =>
+                    {
+                        var memberId = g.Key.MemberId;
+                        var member = memberLookup.GetValueOrDefault(memberId);
+                        var stationResults = g.OrderBy(r => r.StationNumber)
+                            .Select(r => new FaltskytteStationResult
+                            {
+                                StationNumber = r.StationNumber,
+                                Hits = r.Hits,
+                                Figures = r.Figures,
+                                TiebreakerScore = r.TiebreakerScore
+                            }).ToList();
+
+                        var totalHits = stationResults.Sum(s => s.Hits);
+                        var totalFigures = stationResults.Sum(s => s.Figures);
+                        var totalPoints = stationResults.Sum(s => s.Points);
+                        var totalTiebreaker = stationResults.Where(s => s.TiebreakerScore.HasValue)
+                            .Sum(s => s.TiebreakerScore!.Value);
+
+                        return new FaltskytteShooterResult
+                        {
+                            MemberId = memberId,
+                            Name = member?.MemberName ?? "Okänd skytt",
+                            Club = member?.ClubName ?? "",
+                            ShootingClass = HpskSite.Models.ShootingClasses.GetById(g.Key.ShootingClass)?.Name
+                                ?? g.Key.ShootingClass,
+                            Stations = stationResults,
+                            TotalHits = totalHits,
+                            TotalFigures = totalFigures,
+                            TotalPoints = totalPoints,
+                            TotalTiebreakerScore = totalTiebreaker
+                        };
+                    }).ToList();
+
+                // Group by class and rank
+                var isPoang = scoringMode.Equals("Poang", StringComparison.OrdinalIgnoreCase);
+                var tieBreaker = new Services.FaltskylteTieBreaker(isPoang);
+                var classGroups = shooterResults
+                    .GroupBy(s => s.ShootingClass)
+                    .Select(g => new FaltskytteClassGroup
+                    {
+                        ClassName = g.Key,
+                        Shooters = g.OrderByDescending(s => s, tieBreaker).ToList()
+                    }).ToList();
+
+                return Json(new
+                {
+                    success = true,
+                    results = new FaltskylteFinalResults
+                    {
+                        CompetitionId = competitionId,
+                        UpdatedAt = DateTime.Now,
+                        IsOfficial = false,
+                        ScoringMode = scoringMode,
+                        StationCount = stationCount,
+                        Config = competitionConfig,
+                        ClassGroups = classGroups
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting Fältskytte results for competition {CompetitionId}", competitionId);
+                return Json(new { success = false, message = "Fel: " + ex.Message });
+            }
+        }
+
+        // ── Target Group Image Upload ────────────────────────────────
+
+        [HttpPost]
+        [IgnoreAntiforgeryToken]
+        public async Task<IActionResult> UploadTargetGroupImage(IFormFile file, int competitionId, string weaponClass, int stationNumber, int groupNumber)
+        {
+            try
+            {
+                if (!await IsAuthorizedForCompetition(competitionId))
+                    return Json(new { success = false, message = "Du har inte behörighet." });
+
+                if (file == null || file.Length == 0)
+                    return Json(new { success = false, message = "Ingen fil vald." });
+
+                if (file.Length > 5 * 1024 * 1024)
+                    return Json(new { success = false, message = "Filen är för stor (max 5 MB)." });
+
+                var ext = Path.GetExtension(file.FileName).ToLower();
+                if (ext != ".jpg" && ext != ".jpeg" && ext != ".png" && ext != ".webp")
+                    return Json(new { success = false, message = "Endast JPG, PNG eller WebP." });
+
+                var dir = Path.Combine("wwwroot", "images", "faltskytte", competitionId.ToString());
+                var fullDir = Path.Combine(Directory.GetCurrentDirectory(), dir);
+                Directory.CreateDirectory(fullDir);
+
+                var fileName = $"st{stationNumber}_{weaponClass}_tg{groupNumber}{ext}";
+                var filePath = Path.Combine(fullDir, fileName);
+
+                using (var stream = new FileStream(filePath, FileMode.Create))
+                {
+                    await file.CopyToAsync(stream);
+                }
+
+                var imageUrl = $"/images/faltskytte/{competitionId}/{fileName}";
+                _logger.LogInformation("Uploaded target group image: {Url}", imageUrl);
+
+                return Json(new { success = true, imageUrl });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error uploading target group image");
+                return Json(new { success = false, message = "Fel: " + ex.Message });
+            }
+        }
+
+        // ── Patrol Management ───────────────────────────────────────
+
+        /// <summary>Generates patrols from registrations.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> GeneratePatrols([FromBody] GeneratePatrolsRequest request)
+        {
+            try
+            {
+                if (!await IsAuthorizedForCompetition(request.CompetitionId))
+                    return Json(new { success = false, message = "Du har inte behörighet." });
+
+                var competition = _contentService.GetById(request.CompetitionId);
+                if (competition == null)
+                    return Json(new { success = false, message = "Tävlingen hittades inte." });
+
+                var patrolSize = request.PatrolSize > 0 ? request.PatrolSize
+                    : competition.GetValue<int>("patrolSize");
+                if (patrolSize <= 0) patrolSize = 6;
+
+                var intervalMinutes = request.PatrolIntervalMinutes > 0 ? request.PatrolIntervalMinutes
+                    : competition.GetValue<int>("patrolIntervalMinutes");
+                if (intervalMinutes <= 0) intervalMinutes = 15;
+
+                // Fetch registrations
+                var registrations = await _startListRepository.GetCompetitionRegistrations(request.CompetitionId);
+                if (!registrations.Any())
+                    return Json(new { success = false, message = "Inga anmälningar hittades." });
+
+                // Generate patrols
+                var generator = new Services.FaltskyttePatrolGenerator();
+                var result = generator.Generate(registrations, patrolSize, intervalMinutes, request.FirstStartTime);
+
+                if (!result.Patrols.Any())
+                    return Json(new { success = false, message = "Kunde inte skapa patruller." });
+
+                using var db = _umbracoDatabaseFactory.CreateDatabase();
+
+                // Delete existing patrols (cascade deletes members via FK)
+                await db.ExecuteAsync(
+                    "DELETE FROM FaltskyttePatrolMember WHERE PatrolId IN (SELECT Id FROM FaltskyttePatrol WHERE CompetitionId = @0)",
+                    request.CompetitionId);
+                await db.ExecuteAsync("DELETE FROM FaltskyttePatrol WHERE CompetitionId = @0", request.CompetitionId);
+
+                // Insert new patrols
+                foreach (var patrol in result.Patrols)
+                {
+                    var dbPatrol = new FaltskyttePatrol
+                    {
+                        CompetitionId = request.CompetitionId,
+                        PatrolNumber = patrol.PatrolNumber,
+                        StartTime = patrol.StartTime,
+                        WeaponGroup = patrol.WeaponGroup
+                    };
+                    await db.InsertAsync(dbPatrol);
+
+                    foreach (var member in patrol.Members)
+                    {
+                        await db.InsertAsync(new FaltskyttePatrolMember
+                        {
+                            PatrolId = dbPatrol.Id,
+                            MemberId = member.MemberId,
+                            Position = member.Position,
+                            ShootingClass = member.ShootingClass,
+                            MemberName = member.Name,
+                            ClubName = member.Club
+                        });
+                    }
+                }
+
+                _logger.LogInformation("Generated {PatrolCount} Fältskytte patrols for competition {CompId}",
+                    result.TotalPatrols, request.CompetitionId);
+
+                return Json(new { success = true, result.Message, result.TotalPatrols, result.TotalShooters });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error generating patrols for competition {CompetitionId}", request.CompetitionId);
+                return Json(new { success = false, message = "Fel: " + ex.Message });
+            }
+        }
+
+        /// <summary>Deletes all patrols for a competition.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeletePatrols([FromBody] DeletePatrolsRequest request)
+        {
+            if (!await IsAuthorizedForCompetition(request.CompetitionId))
+                return Json(new { success = false, message = "Du har inte behörighet." });
+
+            using var db = _umbracoDatabaseFactory.CreateDatabase();
+            await db.ExecuteAsync(
+                "DELETE FROM FaltskyttePatrolMember WHERE PatrolId IN (SELECT Id FROM FaltskyttePatrol WHERE CompetitionId = @0)",
+                request.CompetitionId);
+            var deleted = await db.ExecuteAsync("DELETE FROM FaltskyttePatrol WHERE CompetitionId = @0", request.CompetitionId);
+
+            return Json(new { success = true, message = $"{deleted} patruller borttagna." });
+        }
+
+        /// <summary>Gets all patrols for a competition.</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetPatrols(int competitionId)
+        {
+            if (!await IsAuthorizedForCompetition(competitionId))
+                return Json(new { success = false, message = "Du har inte behörighet." });
+
+            using var db = _umbracoDatabaseFactory.CreateDatabase();
+            var patrols = await db.FetchAsync<FaltskyttePatrol>(
+                "WHERE CompetitionId = @0 ORDER BY PatrolNumber", competitionId);
+
+            var patrolIds = patrols.Select(p => p.Id).ToList();
+            var allMembers = patrolIds.Any()
+                ? await db.FetchAsync<FaltskyttePatrolMember>(
+                    $"WHERE PatrolId IN ({string.Join(",", patrolIds)}) ORDER BY Position")
+                : new List<FaltskyttePatrolMember>();
+
+            var result = patrols.Select(p => new FaltskyttePatrolView
+            {
+                PatrolNumber = p.PatrolNumber,
+                StartTime = p.StartTime,
+                WeaponGroup = p.WeaponGroup,
+                Members = allMembers.Where(m => m.PatrolId == p.Id)
+                    .Select(m => new FaltskyttePatrolMemberView
+                    {
+                        MemberId = m.MemberId,
+                        Position = m.Position,
+                        Name = m.MemberName,
+                        Club = m.ClubName,
+                        ShootingClass = m.ShootingClass
+                    }).ToList()
+            }).ToList();
+
+            return Json(new { success = true, patrols = result });
+        }
+    }
+}

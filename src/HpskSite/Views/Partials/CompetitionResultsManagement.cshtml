@@ -213,6 +213,50 @@
     </div>
 </div>
 
+<!-- Class Merge Analysis Modal -->
+<div class="modal fade" id="classMergeModal" tabindex="-1" aria-labelledby="classMergeModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="classMergeModalLabel">
+                    <i class="bi bi-arrows-collapse me-2"></i>Klasssammanslagning
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small mb-3">
+                    Klasser med färre än 5 deltagare kan slås samman med närmaste klass. Avmarkera för att behålla klassen separat.
+                </p>
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle" id="classMergeTable">
+                        <thead>
+                            <tr>
+                                <th>Klass</th>
+                                <th class="text-center">Antal</th>
+                                <th>Sammanslagning</th>
+                                <th>Om ej sammanslagen</th>
+                            </tr>
+                        </thead>
+                        <tbody id="classMergeTableBody">
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">
+                    Avbryt
+                </button>
+                <button type="button" class="btn btn-outline-primary" onclick="submitCreateResultsListNoMerges()">
+                    <i class="bi bi-arrow-clockwise me-1"></i>Skapa utan sammanslagning
+                </button>
+                <button type="button" class="btn btn-primary" onclick="applyMergesAndCreateResults()">
+                    <i class="bi bi-check-circle me-1"></i>Skapa med sammanslagning
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 // Results Management JavaScript
 
@@ -237,56 +281,209 @@ function toggleResultsEntry(event) {
     }
 }
 
-function createResultsList(event) {
-    // Stop event propagation to prevent triggering parent click handlers
-    if (event) {
-        event.stopPropagation();
-    }
-    
+async function createResultsList(event) {
+    if (event) event.stopPropagation();
+
     const competitionId = $('.competition-results-management').data('competition-id');
-    if (!competitionId) {
-        alert('Ingen tävling vald.');
-        return;
-    }
-    
-    if (confirm('Vill du skapa/uppdatera resultatlistan för denna tävling?')) {
-        // Show loading state
-        const button = event?.target?.closest('button');
-        if (!button) return;
-        
-        const originalText = button.innerHTML;
-        button.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Skapar...';
-        button.disabled = true;
-        
-        // Call API to create results list
-        fetch('/umbraco/surface/CompetitionResults/CreateResultsList', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'RequestVerificationToken': $('input[name="__RequestVerificationToken"]').val()
-            },
-            body: JSON.stringify({ competitionId: parseInt(competitionId) })
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                showSaveMessage('Resultatlistan har skapats/uppdaterats framgångsrikt! (' + data.resultsCount + ' deltagare)', 'success');
-                // Load and show the results list
-                loadResultsList();
-            } else {
-                alert('Fel vid skapande av resultatlista: ' + (data.message || 'Okänt fel'));
+    if (!competitionId) { alert('Ingen tävling vald.'); return; }
+
+    const button = event?.target?.closest('button');
+    if (!button) return;
+    const originalText = button.innerHTML;
+    button.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Analyserar...';
+    button.disabled = true;
+
+    try {
+        // Step 1: Analyze classes for merge suggestions
+        const resp = await fetch(`/umbraco/surface/CompetitionResults/AnalyzeClassMerges?competitionId=${competitionId}`);
+        const data = await resp.json();
+
+        if (!data.success) {
+            alert('Fel vid analys: ' + (data.message || 'Okänt fel'));
+            return;
+        }
+
+        if (data.suggestions && data.suggestions.length > 0) {
+            // Show merge modal
+            renderMergeModal(data.classes, data.suggestions);
+            new bootstrap.Modal(document.getElementById('classMergeModal')).show();
+        } else {
+            // No merges needed — proceed directly
+            if (confirm('Alla klasser har minst 5 deltagare. Vill du skapa/uppdatera resultatlistan?')) {
+                submitCreateResultsList(competitionId, null);
             }
-        })
-        .catch(error => {
-            console.error('Error:', error);
-            alert('Ett fel uppstod vid skapande av resultatlista.');
-        })
-        .finally(() => {
-            // Restore button state
-            button.innerHTML = originalText;
-            button.disabled = false;
-        });
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Ett fel uppstod vid analys av klasser.');
+    } finally {
+        button.innerHTML = originalText;
+        button.disabled = false;
     }
+}
+
+function renderMergeModal(classes, suggestions) {
+    const tbody = document.getElementById('classMergeTableBody');
+    tbody.innerHTML = '';
+
+    // Build a lookup for quick access
+    const suggestionMap = {};
+    suggestions.forEach(s => { suggestionMap[s.sourceClass] = s; });
+
+    // Also track which classes are targets of other merges (to show "(ingår i sammanslagning ovan)")
+    const mergeTargets = new Set();
+    suggestions.forEach(s => {
+        if (s.defaultTarget) mergeTargets.add(s.defaultTarget);
+    });
+
+    classes.forEach(cls => {
+        const suggestion = suggestionMap[cls.className];
+        const isMergeTarget = mergeTargets.has(cls.className) && !suggestion;
+        const row = document.createElement('tr');
+
+        if (cls.belowThreshold) {
+            row.classList.add('table-warning');
+        }
+
+        // Class name
+        const tdClass = document.createElement('td');
+        tdClass.innerHTML = `<strong>${escapeHtml(cls.className)}</strong>`;
+        row.appendChild(tdClass);
+
+        // Count
+        const tdCount = document.createElement('td');
+        tdCount.className = 'text-center';
+        if (cls.belowThreshold) {
+            tdCount.innerHTML = `<span class="badge bg-warning text-dark">${cls.participantCount}</span>`;
+        } else {
+            tdCount.textContent = cls.participantCount;
+        }
+        row.appendChild(tdCount);
+
+        // Merge action
+        const tdMerge = document.createElement('td');
+        if (suggestion) {
+            const checkId = `merge_${cls.className.replace(/\s/g, '_')}`;
+            let mergeHtml = `<div class="form-check d-inline-block">`;
+            mergeHtml += `<input class="form-check-input merge-checkbox" type="checkbox" id="${checkId}" checked `;
+            mergeHtml += `data-source="${escapeAttr(cls.className)}" `;
+
+            if (suggestion.requiresAdminChoice) {
+                // Dropdown for admin-choice classes
+                mergeHtml += `data-requires-choice="true">`;
+                mergeHtml += `<label class="form-check-label" for="${checkId}">Slå samman med </label>`;
+                mergeHtml += `</div>`;
+                mergeHtml += `<select class="form-select form-select-sm d-inline-block ms-1 merge-target-select" style="width: auto;" data-source="${escapeAttr(cls.className)}">`;
+                suggestion.possibleTargets.forEach((t, i) => {
+                    mergeHtml += `<option value="${escapeAttr(t)}">${escapeHtml(t)}</option>`;
+                });
+                mergeHtml += `</select>`;
+            } else {
+                // Fixed target
+                mergeHtml += `data-target="${escapeAttr(suggestion.defaultTarget)}">`;
+                mergeHtml += `<label class="form-check-label" for="${checkId}">Slå samman med <strong>${escapeHtml(suggestion.defaultTarget)}</strong></label>`;
+                mergeHtml += `</div>`;
+            }
+
+            tdMerge.innerHTML = mergeHtml;
+        } else {
+            tdMerge.innerHTML = '<span class="text-muted">—</span>';
+        }
+        row.appendChild(tdMerge);
+
+        // Medal impact
+        const tdMedal = document.createElement('td');
+        if (cls.medalImpact) {
+            const isJunior = cls.className.includes('Jun');
+            const badgeClass = isJunior ? 'bg-info' : (cls.participantCount <= 2 ? 'bg-danger' : 'bg-warning text-dark');
+            tdMedal.innerHTML = `<span class="badge ${badgeClass} small">${escapeHtml(cls.medalImpact)}</span>`;
+        } else {
+            tdMedal.innerHTML = '<span class="text-muted">—</span>';
+        }
+        row.appendChild(tdMedal);
+
+        tbody.appendChild(row);
+    });
+}
+
+function collectMergeConfig() {
+    const merges = [];
+    document.querySelectorAll('.merge-checkbox:checked').forEach(cb => {
+        const source = cb.dataset.source;
+        let target;
+        if (cb.dataset.requiresChoice === 'true') {
+            const select = document.querySelector(`.merge-target-select[data-source="${source}"]`);
+            target = select ? select.value : null;
+        } else {
+            target = cb.dataset.target;
+        }
+        if (source && target) {
+            merges.push({ sourceClass: source, targetClass: target });
+        }
+    });
+    return merges;
+}
+
+function applyMergesAndCreateResults() {
+    const competitionId = $('.competition-results-management').data('competition-id');
+    const merges = collectMergeConfig();
+    bootstrap.Modal.getInstance(document.getElementById('classMergeModal')).hide();
+    submitCreateResultsList(competitionId, merges.length > 0 ? merges : null);
+}
+
+function submitCreateResultsListNoMerges() {
+    const competitionId = $('.competition-results-management').data('competition-id');
+    bootstrap.Modal.getInstance(document.getElementById('classMergeModal')).hide();
+    submitCreateResultsList(competitionId, null);
+}
+
+function submitCreateResultsList(competitionId, merges) {
+    const btn = document.getElementById('btnCreateResultsList');
+    if (btn) {
+        btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Skapar...';
+        btn.disabled = true;
+    }
+
+    const body = { competitionId: parseInt(competitionId) };
+    if (merges) body.merges = merges;
+
+    fetch('/umbraco/surface/CompetitionResults/CreateResultsList', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'RequestVerificationToken': $('input[name="__RequestVerificationToken"]').val()
+        },
+        body: JSON.stringify(body)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showSaveMessage('Resultatlistan har skapats/uppdaterats! (' + data.resultsCount + ' deltagare)', 'success');
+            loadResultsList();
+        } else {
+            alert('Fel vid skapande av resultatlista: ' + (data.message || 'Okänt fel'));
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Ett fel uppstod vid skapande av resultatlista.');
+    })
+    .finally(() => {
+        if (btn) {
+            btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Uppdatera';
+            btn.disabled = false;
+        }
+    });
+}
+
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+function escapeAttr(str) {
+    return str.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 // Global variables

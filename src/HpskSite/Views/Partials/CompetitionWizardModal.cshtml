@@ -315,6 +315,40 @@
                             </div>
                         </div>
 
+                        <!-- Fältskytte station config section -->
+                        <div id="wizard_faltskytteSection" style="display: none;">
+                            <div class="mb-3">
+                                <label for="wizard_scoringMode" class="form-label fw-bold">Poängberäkning</label>
+                                <select class="form-select" id="wizard_scoringMode" style="max-width: 200px;">
+                                    <option value="Normal" selected>Normal (träff/figurer)</option>
+                                    <option value="Poang">Poängfält (träff + figurer)</option>
+                                </select>
+                            </div>
+
+                            <div class="row mb-3">
+                                <div class="col-auto">
+                                    <label for="wizard_patrolSize" class="form-label fw-bold">Patrullstorlek</label>
+                                    <input type="number" class="form-control" id="wizard_patrolSize" min="2" max="12" value="6" style="max-width: 100px;">
+                                </div>
+                                <div class="col-auto">
+                                    <label for="wizard_patrolInterval" class="form-label fw-bold">Intervall (min)</label>
+                                    <input type="number" class="form-control" id="wizard_patrolInterval" min="5" max="60" value="15" style="max-width: 100px;">
+                                </div>
+                                <div class="col-auto">
+                                    <label for="wizard_maxReshoots" class="form-label fw-bold">Max omskjutningar</label>
+                                    <input type="number" class="form-control" id="wizard_maxReshoots" min="0" max="10" value="2" style="max-width: 100px;">
+                                </div>
+                            </div>
+
+                            <div class="mb-3">
+                                <button type="button" class="btn btn-outline-primary" onclick="openFaltStationConfigurator()">
+                                    <i class="bi bi-gear me-1"></i>Konfigurera stationer
+                                </button>
+                                <span class="text-muted small ms-2" id="wizard_faltConfigSummary">Ej konfigurerad</span>
+                                <input type="hidden" id="wizard_faltStationConfigJson" value="">
+                            </div>
+                        </div>
+
                         <hr class="my-4">
 
                         <div class="mb-3">
@@ -637,6 +671,8 @@
     </div>
 </div>
 
+@await Html.PartialAsync("FaltskytteStationConfigModal")
+
 <style>
 /* Wizard Progress Indicator */
 .wizard-progress {
@@ -893,16 +929,28 @@ function applySeriesDefaults() {
     const springSection = document.getElementById('wizard_springskytteSeriesSection');
     const isLocked = (typeId === 'Milsnabb' || typeId === 'NationellHelmatch');
     const isSpringskytte = (typeId === 'Springskytte');
+    const isFaltskytte = (typeId === 'Faltskytte' || typeId === 'MagnumFalt');
+    const faltSection = document.getElementById('wizard_faltskytteSection');
 
-    // Toggle standard vs Springskytte series sections
-    standardSection.style.display = isSpringskytte ? 'none' : '';
+    // Toggle standard vs Springskytte vs Fältskytte series sections
+    standardSection.style.display = (isSpringskytte || isFaltskytte) ? 'none' : '';
     springSection.style.display = isSpringskytte ? '' : 'none';
+    faltSection.style.display = isFaltskytte ? '' : 'none';
 
-    // Toggle special feature checkboxes irrelevant for Springskytte
-    document.getElementById('wizard_dualCClassGroup').style.display = isSpringskytte ? 'none' : '';
-    document.getElementById('wizard_selfReportingGroup').style.display = isSpringskytte ? 'none' : '';
+    // Toggle special feature checkboxes irrelevant for Springskytte/Fältskytte
+    document.getElementById('wizard_dualCClassGroup').style.display = (isSpringskytte || isFaltskytte) ? 'none' : '';
+    document.getElementById('wizard_selfReportingGroup').style.display = (isSpringskytte || isFaltskytte) ? 'none' : '';
 
-    if (isSpringskytte) {
+    if (isFaltskytte) {
+        // Fältskytte: set defaults
+        seriesInput.value = 8;
+        finalsInput.value = 0;
+        // Set max reshoots default based on subtype
+        var maxReshootsInput = document.getElementById('wizard_maxReshoots');
+        if (maxReshootsInput) {
+            maxReshootsInput.value = (typeId === 'MagnumFalt') ? 0 : 1;
+        }
+    } else if (isSpringskytte) {
         // Show/hide class A series dropdown based on whether A is selected
         const hasA = document.getElementById('springWeapon_A')?.checked;
         document.getElementById('wizard_springskytteClassASeriesGroup').style.display = hasA ? '' : 'none';
@@ -934,8 +982,59 @@ function springSeriesChanged() {
     seriesInput.value = document.getElementById('wizard_springskytteClassASeries').value;
 }
 
+function openFaltStationConfigurator() {
+    // Determine weapon classes from selected shooting classes
+    const checkedClasses = Array.from(document.querySelectorAll('.class-checkbox:checked')).map(cb => cb.value);
+    let weaponClasses = [...new Set(checkedClasses.map(c => c.charAt(0)))].filter(w => ['A','B','C','R','M'].includes(w));
+    if (weaponClasses.length === 0) weaponClasses = ['C'];
+
+    // Load existing config if any
+    const existingJson = document.getElementById('wizard_faltStationConfigJson').value;
+    let existingConfig = {};
+    if (existingJson) {
+        try { existingConfig = JSON.parse(existingJson); } catch(e) {}
+    }
+
+    // Hide wizard modal first, then open configurator after it's fully hidden
+    const wizardEl = document.getElementById('competitionWizardModal');
+    const wizardModal = bootstrap.Modal.getInstance(wizardEl);
+
+    function onWizardHidden() {
+        wizardEl.removeEventListener('hidden.bs.modal', onWizardHidden);
+        faltCfgOpen(weaponClasses, existingConfig);
+    }
+
+    wizardEl.addEventListener('hidden.bs.modal', onWizardHidden);
+    wizardModal?.hide();
+}
+
+// Update summary text when config modal saves
+const faltCfgObserver = new MutationObserver(() => {
+    const json = document.getElementById('wizard_faltStationConfigJson')?.value;
+    const summary = document.getElementById('wizard_faltConfigSummary');
+    if (json && summary) {
+        try {
+            const cfg = JSON.parse(json);
+            const wcCount = Object.keys(cfg).length;
+            const stCount = Object.values(cfg)[0]?.stations?.length || 0;
+            summary.textContent = `${wcCount} vapenklass(er), ${stCount} stationer`;
+            summary.classList.remove('text-muted');
+            summary.classList.add('text-success');
+            // Update series count
+            document.getElementById('wizard_numberOfSeries').value = stCount;
+        } catch(e) {}
+    }
+});
+const faltCfgHidden = document.getElementById('wizard_faltStationConfigJson');
+if (faltCfgHidden) faltCfgObserver.observe(faltCfgHidden, { attributes: true, attributeFilter: ['value'] });
+
 // Initialize wizard when modal opens
 document.getElementById('competitionWizardModal').addEventListener('show.bs.modal', function() {
+    // Skip reset when re-opening from station configurator (preserves wizard data)
+    if (window._wizardSkipReset) {
+        window._wizardSkipReset = false;
+        return;
+    }
     wizardCurrentStep = 0;
     resetWizard();
     detectContext();
@@ -1627,6 +1726,16 @@ function submitWizard() {
     const regionSelect = document.getElementById('wizard_regionalFederation');
     fields.clubId = clubSelect.value || '';
     fields.regionalFederation = regionSelect.value || '';
+
+    // Add Fältskytte-specific fields
+    const isFaltType = (fields.competitionType === 'Faltskytte' || fields.competitionType === 'MagnumFalt');
+    if (isFaltType) {
+        fields.scoringMode = document.getElementById('wizard_scoringMode').value;
+        fields.stationConfig = document.getElementById('wizard_faltStationConfigJson').value || '{}';
+        fields.patrolSize = document.getElementById('wizard_patrolSize').value;
+        fields.patrolIntervalMinutes = document.getElementById('wizard_patrolInterval').value;
+        fields.maxReshoots = document.getElementById('wizard_maxReshoots').value;
+    }
 
     const requestBody = { fields: fields };
 

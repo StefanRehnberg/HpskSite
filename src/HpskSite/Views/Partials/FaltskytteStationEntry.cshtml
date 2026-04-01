@@ -1,0 +1,345 @@
+@*
+ * Fältskytte Station Entry
+ * Range officer selects station → sees Förutsättningar → patrol → enters results per shooter.
+ * Per-weapon-class config with target groups and re-shoot tracking.
+ *@
+
+@{
+    var competitionId = ViewData["CompetitionId"]?.ToString() ?? "";
+}
+
+<div class="faltskytte-station-entry" data-competition-id="@competitionId">
+
+    <!-- Station Selector -->
+    <div class="row mb-3 align-items-end">
+        <div class="col-auto">
+            <label for="faltStationSelect" class="form-label fw-bold">Station</label>
+            <select class="form-select" id="faltStationSelect" onchange="faltLoadStation()" style="width: 120px;">
+                <option value="">Välj...</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Förutsättningar (rules) panel — shown per patrol's weapon class -->
+    <div id="faltForutsattningarPanel" class="alert alert-dark mb-3" style="display:none">
+        <div class="d-flex justify-content-between align-items-start">
+            <div>
+                <h6 class="mb-1" id="faltForutsattningarTitle"></h6>
+                <div id="faltForutsattningarBody"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Patrol List for Selected Station -->
+    <div id="faltPatrolListArea" style="display:none">
+        <h6 class="mb-2">Patruller</h6>
+        <div class="list-group mb-3" id="faltPatrolButtons"></div>
+    </div>
+
+    <!-- Shooter Entry for Selected Patrol -->
+    <div id="faltShooterEntryArea" style="display:none">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <h6 class="mb-0" id="faltPatrolTitle"></h6>
+            <button class="btn btn-outline-secondary btn-sm" onclick="faltBackToPatrols()">
+                <i class="bi bi-arrow-left me-1"></i>Tillbaka
+            </button>
+        </div>
+        <div id="faltShooterCards"></div>
+    </div>
+</div>
+
+<script>
+(function() {
+    const compId = document.querySelector('.faltskytte-station-entry')?.dataset.competitionId;
+    let stationData = null; // FaltskytteStationView from API
+    let competitionConfig = null; // FaltskytteCompetitionConfig
+    let maxReshoots = 0;
+    let scoringMode = 'Normal';
+    let currentPatrolWc = null;
+
+    // Load config on init
+    (async function init() {
+        const resp = await fetch(`/umbraco/surface/Faltskytte/GetStationConfig?competitionId=${compId}`);
+        const data = await resp.json();
+        if (data.success) {
+            competitionConfig = data.config;
+            maxReshoots = data.maxReshoots || 0;
+            scoringMode = data.scoringMode || 'Normal';
+            // Build station list from all weapon configs
+            const stationNums = new Set();
+            Object.values(competitionConfig.weaponConfigs || {}).forEach(wc => {
+                (wc.stations || []).forEach(s => stationNums.add(s.station));
+            });
+            const select = document.getElementById('faltStationSelect');
+            [...stationNums].sort((a,b) => a-b).forEach(n => {
+                const opt = document.createElement('option');
+                opt.value = n;
+                opt.textContent = `Station ${n}`;
+                select.appendChild(opt);
+            });
+        }
+    })();
+
+    window.faltLoadStation = async function() {
+        const stationNum = parseInt(document.getElementById('faltStationSelect').value);
+        if (!stationNum) {
+            document.getElementById('faltPatrolListArea').style.display = 'none';
+            document.getElementById('faltShooterEntryArea').style.display = 'none';
+            document.getElementById('faltForutsattningarPanel').style.display = 'none';
+            return;
+        }
+
+        const resp = await fetch(`/umbraco/surface/Faltskytte/GetStationEntryData?competitionId=${compId}&stationNumber=${stationNum}`);
+        const data = await resp.json();
+        if (!data.success) { alert(data.message); return; }
+
+        stationData = data.data;
+        document.getElementById('faltForutsattningarPanel').style.display = 'none';
+        renderPatrolList(data.data.patrols);
+    };
+
+    function renderPatrolList(patrols) {
+        document.getElementById('faltPatrolListArea').style.display = '';
+        document.getElementById('faltShooterEntryArea').style.display = 'none';
+        const container = document.getElementById('faltPatrolButtons');
+        container.innerHTML = '';
+
+        patrols.forEach(p => {
+            const total = p.members.length;
+            const done = p.completedCount;
+            const statusClass = done === 0 ? 'secondary' : (done >= total ? 'success' : 'warning');
+            const btn = document.createElement('a');
+            btn.className = 'list-group-item list-group-item-action d-flex justify-content-between align-items-center';
+            btn.href = '#';
+            btn.onclick = (e) => { e.preventDefault(); faltSelectPatrol(p); };
+            btn.innerHTML = `
+                <span>
+                    <strong>Patrull ${p.patrolNumber}</strong>
+                    <span class="badge bg-info ms-2">${p.weaponGroup || ''}</span>
+                </span>
+                <span class="badge bg-${statusClass}">${done}/${total}</span>
+            `;
+            container.appendChild(btn);
+        });
+    }
+
+    window.faltSelectPatrol = function(patrol) {
+        currentPatrolWc = patrol.weaponGroup || 'C';
+
+        // Get weapon-class-specific station config
+        const wcStationCfg = stationData.weaponClassStations?.[currentPatrolWc]
+            || Object.values(stationData.weaponClassStations || {})[0];
+
+        // Show Förutsättningar
+        if (wcStationCfg) {
+            showForutsattningar(wcStationCfg, currentPatrolWc, stationData.stationNumber);
+        }
+
+        document.getElementById('faltPatrolListArea').style.display = 'none';
+        document.getElementById('faltShooterEntryArea').style.display = '';
+        document.getElementById('faltPatrolTitle').textContent = `Patrull ${patrol.patrolNumber} — Station ${stationData.stationNumber}`;
+
+        const container = document.getElementById('faltShooterCards');
+        container.innerHTML = '';
+
+        patrol.members.forEach(member => {
+            const card = buildShooterCard(member, patrol.patrolNumber, wcStationCfg);
+            container.appendChild(card);
+            loadReshootInfo(member.memberId);
+        });
+    };
+
+    function describeTgBehavior(tg) {
+        if (tg.behavior === 'Framsvängande') {
+            let s = 'Framsvängande';
+            if (tg.delayBeforeShowSec > 0) s += `, fram efter ${tg.delayBeforeShowSec}s`;
+            if (tg.showTimeSec > 0) s += `, visas ${tg.showTimeSec}s`;
+            return s;
+        }
+        if (tg.behavior === 'Bortsvängande') {
+            let s = 'Bortsvängande';
+            if (tg.hideAfterSec > 0) s += `, bort efter ${tg.hideAfterSec}s`;
+            if (tg.reappearSec > 0) s += `, visar igen ${tg.reappearSec}s`;
+            return s;
+        }
+        return 'Fast';
+    }
+
+    function showForutsattningar(cfg, wc, stationNum) {
+        const panel = document.getElementById('faltForutsattningarPanel');
+        const title = document.getElementById('faltForutsattningarTitle');
+        const body = document.getElementById('faltForutsattningarBody');
+
+        title.textContent = `Station ${stationNum} — Vapenklass ${wc}`;
+
+        let html = `<div class="mb-1"><strong>Skjuttid:</strong> ${cfg.shootingTimeSec} sek &nbsp;|&nbsp; `;
+        html += `<strong>Utgångsläge:</strong> ${cfg.shooterStartPosition} &nbsp;|&nbsp; `;
+        html += `<strong>Vapenläge:</strong> ${cfg.weaponStartPosition} &nbsp;|&nbsp; `;
+        html += `${cfg.supportHand}</div>`;
+        if (scoringMode === 'Normal' && cfg.maxShotsPerFigure && cfg.maxShotsPerFigure < 6) {
+            html += `<div class="mb-1"><strong>Max skott per figur:</strong> ${cfg.maxShotsPerFigure}</div>`;
+        }
+
+        (cfg.targetGroups || []).forEach(tg => {
+            let desc = `<strong>Målgrupp ${tg.group}:</strong> ${tg.figures} figur${tg.figures > 1 ? 'er' : ''}`;
+            if (tg.poangmalCount > 0) desc += `, ${tg.poangmalCount} pm`;
+            desc += ` — ${describeTgBehavior(tg)}`;
+            if (scoringMode === 'Normal' && cfg.maxShotsPerFigure && cfg.maxShotsPerFigure < 6) desc += ` (max ${cfg.maxShotsPerFigure} skott/fig)`;
+            html += `<div class="small">${desc}`;
+            if (tg.imageUrl) html += ` <img src="${tg.imageUrl}" style="max-height:50px;vertical-align:middle;margin-left:8px;border-radius:4px">`;
+            html += `</div>`;
+        });
+
+        body.innerHTML = html;
+        panel.style.display = '';
+    }
+
+    function buildShooterCard(member, patrolNumber, stationCfg) {
+        const card = document.createElement('div');
+        card.className = `card mb-2 ${member.hasResult ? 'border-success' : ''}`;
+        card.id = `shooter_${member.memberId}`;
+
+        const targetGroups = stationCfg?.targetGroups || [{ group: 1, figures: 3, poangmalCount: 0 }];
+        const isNormal = scoringMode === 'Normal';
+        const stationMaxShots = stationCfg?.maxShotsPerFigure || 6;
+
+        // Build target group inputs
+        let tgHtml = '';
+        targetGroups.forEach(tg => {
+            let label = `Målgrupp ${tg.group} (${describeTgBehavior(tg)})`;
+            if (isNormal && stationMaxShots < 6) label += ` max ${stationMaxShots}/fig`;
+
+            tgHtml += `<div class="mb-1"><span class="small text-muted">${label}</span><div class="d-flex gap-1 flex-wrap">`;
+            for (let f = 0; f < tg.figures; f++) {
+                const max = isNormal ? stationMaxShots : 6;
+                tgHtml += `<input type="number" class="form-control form-control-sm fig-input" min="0" max="${max}" value="0" style="width:55px"
+                    data-member="${member.memberId}" data-tg="${tg.group}" data-fig="${f}" data-max="${max}"
+                    onchange="faltRecalcShooter(${member.memberId})">`;
+            }
+            // Poångmål inputs for this target group
+            for (let p = 0; p < tg.poangmalCount; p++) {
+                tgHtml += `<input type="number" class="form-control form-control-sm pm-input border-warning" min="0" max="50" value="" style="width:55px"
+                    data-member="${member.memberId}" placeholder="Pm" title="Poångmål ${p+1}">`;
+            }
+            tgHtml += `</div></div>`;
+        });
+
+        card.innerHTML = `
+            <div class="card-body py-2">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <div>
+                        <strong>${member.name}</strong>
+                        <span class="text-muted ms-2">${member.club}</span>
+                        <span class="badge bg-secondary ms-1">${member.shootingClass}</span>
+                    </div>
+                    <div>
+                        <span class="badge bg-dark" id="total_${member.memberId}">0/0</span>
+                        ${member.hasResult ? '<span class="badge bg-success ms-1">Sparad</span>' : ''}
+                    </div>
+                </div>
+                ${tgHtml}
+                <div class="d-flex gap-2 mt-2 align-items-end">
+                    <div>
+                        <label class="form-label small mb-0">Omskytt</label>
+                        <input type="number" class="form-control form-control-sm" min="0" max="5" value="0" id="reshoot_${member.memberId}" style="width:65px">
+                    </div>
+                    <button class="btn btn-primary btn-sm" onclick="faltSaveShooter(${member.memberId}, ${patrolNumber}, '${member.shootingClass}')">
+                        <i class="bi bi-check-lg me-1"></i>Spara
+                    </button>
+                </div>
+                <div id="reshootInfo_${member.memberId}" class="small mt-1"></div>
+            </div>
+        `;
+        return card;
+    }
+
+    window.faltRecalcShooter = function(memberId) {
+        const inputs = document.querySelectorAll(`.fig-input[data-member="${memberId}"]`);
+        let totalHits = 0, totalFigures = 0;
+        inputs.forEach(inp => {
+            const val = parseInt(inp.value) || 0;
+            const max = parseInt(inp.dataset.max) || 6;
+            if (val > max) { inp.value = max; }
+            totalHits += Math.min(val, max);
+            if (val > 0) totalFigures++;
+        });
+        const badge = document.getElementById(`total_${memberId}`);
+        if (totalHits > 6) {
+            badge.className = 'badge bg-danger';
+            badge.textContent = `${totalHits}/${totalFigures} (max 6!)`;
+        } else {
+            badge.className = 'badge bg-dark';
+            badge.textContent = `${totalHits}/${totalFigures}`;
+        }
+    };
+
+    async function loadReshootInfo(memberId) {
+        const resp = await fetch(`/umbraco/surface/Faltskytte/GetReshootInfo?competitionId=${compId}&memberId=${memberId}`);
+        const data = await resp.json();
+        if (!data.success) return;
+        const info = data.info;
+        const el = document.getElementById(`reshootInfo_${memberId}`);
+        if (info.totalReshoots > 0) {
+            const cls = info.limitReached ? 'text-danger fw-bold' : 'text-warning';
+            el.innerHTML = `<span class="${cls}"><i class="bi bi-exclamation-triangle me-1"></i>Omskjutningar: ${info.totalReshoots} av ${info.maxReshoots} tillåtna (station ${info.reshootStations.join(', ')})</span>`;
+        }
+    }
+
+    window.faltSaveShooter = async function(memberId, patrolNumber, shootingClass) {
+        const inputs = document.querySelectorAll(`.fig-input[data-member="${memberId}"]`);
+        const hitsPerFigure = [];
+        let totalHits = 0;
+        inputs.forEach(inp => {
+            const val = parseInt(inp.value) || 0;
+            hitsPerFigure.push(val);
+            totalHits += val;
+        });
+        if (totalHits > 6) { alert('Max 6 träff per station!'); return; }
+
+        // Sum poångmål
+        const pmInputs = document.querySelectorAll(`.pm-input[data-member="${memberId}"]`);
+        let tiebreakerScore = null;
+        if (pmInputs.length > 0) {
+            let total = 0, hasVal = false;
+            pmInputs.forEach(inp => { const v = parseInt(inp.value) || 0; if (v > 0) hasVal = true; total += v; });
+            tiebreakerScore = hasVal ? total : null;
+        }
+
+        const reshoots = parseInt(document.getElementById(`reshoot_${memberId}`)?.value) || 0;
+
+        const body = {
+            competitionId: parseInt(compId),
+            stationNumber: stationData.stationNumber,
+            memberId, patrolNumber, shootingClass,
+            hitsPerFigure, tiebreakerScore, reshoots
+        };
+
+        try {
+            const resp = await fetch('/umbraco/surface/Faltskytte/SaveStationResult', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value },
+                body: JSON.stringify(body)
+            });
+            const data = await resp.json();
+            if (data.success) {
+                const card = document.getElementById(`shooter_${memberId}`);
+                card.classList.add('border-success');
+                if (!card.querySelector('.badge.bg-success')) {
+                    document.getElementById(`total_${memberId}`).insertAdjacentHTML('afterend', '<span class="badge bg-success ms-1">Sparad</span>');
+                }
+                loadReshootInfo(memberId);
+            } else {
+                alert('Fel: ' + data.message);
+            }
+        } catch (err) {
+            alert('Nätverksfel vid sparande.');
+            console.error(err);
+        }
+    };
+
+    window.faltBackToPatrols = function() {
+        document.getElementById('faltForutsattningarPanel').style.display = 'none';
+        faltLoadStation();
+    };
+})();
+</script>

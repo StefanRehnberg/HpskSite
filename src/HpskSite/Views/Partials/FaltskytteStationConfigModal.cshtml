@@ -1,0 +1,624 @@
+@*
+ * Fältskytte Station Configurator Modal
+ * Per-weapon-class station config with Förutsättningar, Målgrupper, and print support.
+ * Opened from the competition wizard.
+ *@
+
+<div class="modal fade" id="faltStationConfigModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-gear me-2"></i>Stationskonfigurator</h5>
+                <button type="button" class="btn-close" onclick="faltCfgTryClose()"></button>
+            </div>
+            <div class="modal-body">
+
+                <!-- Station count -->
+                <div class="row mb-3 align-items-end">
+                    <div class="col-auto">
+                        <label class="form-label fw-bold">Antal stationer</label>
+                        <input type="number" class="form-control" id="faltCfg_stationCount" min="2" max="12" value="8" style="width:80px" onchange="faltCfgUpdateStations()">
+                    </div>
+                </div>
+
+                <!-- Weapon class tabs -->
+                <ul class="nav nav-tabs mb-3" id="faltCfgWeaponTabs" role="tablist">
+                </ul>
+
+                <!-- Copy button -->
+                <div class="mb-3">
+                    <div class="d-flex gap-2 align-items-center">
+                        <span class="text-muted small">Kopiera konfiguration från:</span>
+                        <select class="form-select form-select-sm" id="faltCfg_copySource" style="width:auto">
+                            <option value="">Välj...</option>
+                        </select>
+                        <button class="btn btn-outline-secondary btn-sm" onclick="faltCfgCopyFrom()">Kopiera</button>
+                    </div>
+                </div>
+
+                <!-- Tab content -->
+                <div class="tab-content" id="faltCfgTabContent">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline-info" onclick="faltCfgPrint()">
+                    <i class="bi bi-printer me-1"></i>Skriv ut stationskort
+                </button>
+                <button class="btn btn-primary" onclick="faltCfgTryClose()">
+                    <i class="bi bi-x-circle me-1"></i>Stäng
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Station Configurator State
+let faltCfgData = {}; // { "C": { stations: [...] }, "A": { ... } }
+let faltCfgWeaponClasses = ["C"]; // Active weapon classes
+let faltCfgActiveTab = "C";
+let faltCfgStationCount = 8;
+let faltCfgExpandedStation = 1; // Track which station card is open
+let faltCfgDirtyStations = new Set(); // Stations with unsaved changes
+const faltCfgScoringMode = () => document.getElementById('wizard_scoringMode')?.value || 'Normal';
+
+const SHOOTER_POSITIONS = ["Stående", "Knästående", "Sittande", "Liggande", "Valfri"];
+const WEAPON_POSITIONS = ["45 grader", "Riktning tillåten"];
+const SUPPORT_HAND = ["Ej stödhand", "Stödhand tillåten"];
+const TARGET_BEHAVIORS = ["Fast", "Framsvängande", "Bortsvängande"];
+
+function faltCfgOpen(weaponClasses, existingConfig) {
+    faltCfgWeaponClasses = weaponClasses || ["C"];
+    faltCfgData = existingConfig || {};
+    faltCfgDirtyStations = new Set();
+    faltCfgStationCount = parseInt(document.getElementById('faltCfg_stationCount').value) || 8;
+
+    // Detect station count from existing config
+    for (const wc of Object.keys(faltCfgData)) {
+        if (faltCfgData[wc]?.stations?.length > 0) {
+            faltCfgStationCount = faltCfgData[wc].stations.length;
+            document.getElementById('faltCfg_stationCount').value = faltCfgStationCount;
+            break;
+        }
+    }
+
+    // Ensure each weapon class has a config
+    faltCfgWeaponClasses.forEach(wc => {
+        if (!faltCfgData[wc]) faltCfgData[wc] = { stations: [] };
+        ensureStations(wc);
+    });
+
+    buildTabs();
+    faltCfgActiveTab = faltCfgWeaponClasses[0];
+    renderActiveTab();
+
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('faltStationConfigModal')).show();
+}
+
+function ensureStations(wc) {
+    const existing = faltCfgData[wc].stations || [];
+    const stations = [];
+    for (let i = 1; i <= faltCfgStationCount; i++) {
+        const ex = existing.find(s => s.station === i);
+        stations.push(ex || createDefaultStation(i));
+    }
+    faltCfgData[wc].stations = stations;
+}
+
+function createDefaultStation(num) {
+    return {
+        station: num,
+        shootingTimeSec: 30,
+        shooterStartPosition: "Stående",
+        weaponStartPosition: "45 grader",
+        supportHand: "Ej stödhand",
+        maxShotsPerFigure: 2,
+        targetGroups: [{ group: 1, figures: 3, poangmalCount: 0, behavior: "Fast" }]
+    };
+}
+
+function faltCfgUpdateStations() {
+    faltCfgStationCount = parseInt(document.getElementById('faltCfg_stationCount').value) || 8;
+    faltCfgWeaponClasses.forEach(wc => ensureStations(wc));
+    renderActiveTab();
+}
+
+function buildTabs() {
+    const tabsEl = document.getElementById('faltCfgWeaponTabs');
+    const copySelect = document.getElementById('faltCfg_copySource');
+    tabsEl.innerHTML = '';
+    copySelect.innerHTML = '<option value="">Välj...</option>';
+
+    faltCfgWeaponClasses.forEach((wc, idx) => {
+        const li = document.createElement('li');
+        li.className = 'nav-item';
+        li.innerHTML = `<button class="nav-link ${idx === 0 ? 'active' : ''}" onclick="faltCfgSwitchTab('${wc}', this)">${wc}</button>`;
+        tabsEl.appendChild(li);
+
+        const opt = document.createElement('option');
+        opt.value = wc;
+        opt.textContent = wc;
+        copySelect.appendChild(opt);
+    });
+}
+
+function faltCfgSwitchTab(wc, btn) {
+    // Save current tab data
+    collectTabData();
+    faltCfgActiveTab = wc;
+    document.querySelectorAll('#faltCfgWeaponTabs .nav-link').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    renderActiveTab();
+}
+
+function faltCfgCopyFrom() {
+    const source = document.getElementById('faltCfg_copySource').value;
+    if (!source || source === faltCfgActiveTab) return;
+    if (!confirm(`Kopiera all konfiguration från ${source} till ${faltCfgActiveTab}? Befintlig konfiguration skrivs över.`)) return;
+
+    faltCfgData[faltCfgActiveTab] = JSON.parse(JSON.stringify(faltCfgData[source]));
+    renderActiveTab();
+}
+
+function renderActiveTab() {
+    const container = document.getElementById('faltCfgTabContent');
+    const wc = faltCfgActiveTab;
+    const stations = faltCfgData[wc]?.stations || [];
+    const isPoang = faltCfgScoringMode() === 'Poang';
+
+    let html = '';
+    stations.forEach((st, idx) => {
+        const collapseId = `faltCfgStation_${wc}_${st.station}`;
+        html += `
+        <div class="card mb-2" data-station="${st.station}" data-wc="${wc}">
+            <div class="card-header py-2" role="button" data-bs-toggle="collapse" data-bs-target="#${collapseId}">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span>
+                        <strong>Station ${st.station}</strong>
+                        <span id="faltCfgSaved_${wc}_${st.station}" class="badge bg-success ms-2" style="display:none">Sparad</span>
+                        <span id="faltCfgDirty_${wc}_${st.station}" class="badge bg-warning text-dark ms-2" style="display:none">Osparad</span>
+                    </span>
+                    <span class="d-flex align-items-center gap-2">
+                        <span class="text-muted small">${st.shootingTimeSec}s | ${st.shooterStartPosition} | ${st.targetGroups.length} målgr.</span>
+                        <button class="btn btn-success btn-sm" onclick="event.stopPropagation(); faltCfgSaveStation(${st.station}, '${wc}')">
+                            <i class="bi bi-check-lg me-1"></i>Spara stationen
+                        </button>
+                    </span>
+                </div>
+            </div>
+            <div id="${collapseId}" class="collapse ${st.station === faltCfgExpandedStation ? 'show' : ''}">
+                <div class="card-body">
+                    <div class="row g-2 mb-3">
+                        <div class="col-auto">
+                            <label class="form-label small mb-0">Skjuttid (sek)</label>
+                            <input type="number" class="form-control form-control-sm st-shootingTime" min="5" max="120" value="${st.shootingTimeSec}" style="width:80px">
+                        </div>
+                        <div class="col-auto">
+                            <label class="form-label small mb-0">Utgångsläge</label>
+                            <select class="form-select form-select-sm st-shooterPos">${SHOOTER_POSITIONS.map(p => `<option ${p === st.shooterStartPosition ? 'selected' : ''}>${p}</option>`).join('')}</select>
+                        </div>
+                        <div class="col-auto">
+                            <label class="form-label small mb-0">Vapenläge</label>
+                            <select class="form-select form-select-sm st-weaponPos">${WEAPON_POSITIONS.map(p => `<option ${p === st.weaponStartPosition ? 'selected' : ''}>${p}</option>`).join('')}</select>
+                        </div>
+                        <div class="col-auto">
+                            <label class="form-label small mb-0">Stödhand</label>
+                            <select class="form-select form-select-sm st-supportHand">${SUPPORT_HAND.map(p => `<option ${p === st.supportHand ? 'selected' : ''}>${p}</option>`).join('')}</select>
+                        </div>
+                        ${!isPoang ? `<div class="col-auto">
+                            <label class="form-label small mb-0">Max skott/fig</label>
+                            <input type="number" class="form-control form-control-sm st-maxShots" min="1" max="6" value="${st.maxShotsPerFigure || 6}" style="width:65px">
+                        </div>` : ''}
+                    </div>
+                    <label class="form-label small fw-bold mb-1">Målgrupper</label>
+                    <div class="tg-container">
+        `;
+
+        st.targetGroups.forEach((tg, tgIdx) => {
+            var isLastGroup = st.targetGroups.length <= 1;
+            html += renderTargetGroup(tg, tgIdx, st.station, wc, isPoang, isLastGroup);
+        });
+
+        html += `
+                    </div>
+                    <button class="btn btn-outline-secondary btn-sm mt-2" onclick="faltCfgAddTargetGroup(${st.station}, '${wc}')">
+                        <i class="bi bi-plus-lg me-1"></i>Lägg till målgrupp
+                    </button>
+                </div>
+            </div>
+        </div>`;
+    });
+
+    container.innerHTML = html;
+
+    // Track which station the user expands manually
+    container.querySelectorAll('.collapse').forEach(el => {
+        el.addEventListener('shown.bs.collapse', function() {
+            const card = this.closest('.card[data-station]');
+            if (card) faltCfgExpandedStation = parseInt(card.dataset.station);
+        });
+    });
+
+    // Track dirty state on any input change
+    container.querySelectorAll('input, select').forEach(el => {
+        el.addEventListener('change', function() {
+            const card = this.closest('.card[data-station]');
+            if (card) {
+                const stNum = parseInt(card.dataset.station);
+                const wc = card.dataset.wc;
+                faltCfgDirtyStations.add(`${wc}_${stNum}`);
+                const dirtyBadge = document.getElementById(`faltCfgDirty_${wc}_${stNum}`);
+                const savedBadge = document.getElementById(`faltCfgSaved_${wc}_${stNum}`);
+                if (dirtyBadge) dirtyBadge.style.display = '';
+                if (savedBadge) savedBadge.style.display = 'none';
+            }
+        });
+    });
+
+    // Restore dirty/saved badge state after re-render
+    stations.forEach(st => {
+        const key = `${wc}_${st.station}`;
+        const dirtyBadge = document.getElementById(`faltCfgDirty_${wc}_${st.station}`);
+        const savedBadge = document.getElementById(`faltCfgSaved_${wc}_${st.station}`);
+        if (faltCfgDirtyStations.has(key)) {
+            if (dirtyBadge) dirtyBadge.style.display = '';
+        }
+    });
+}
+
+function renderTargetGroup(tg, tgIdx, stationNum, wc, isPoang, isLastGroup) {
+    var imageHtml = '';
+    if (tg.imageUrl) {
+        imageHtml = `<img src="${tg.imageUrl}" style="height:31px;border-radius:3px" alt="">
+            <button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="faltCfgRemoveImage(${stationNum}, '${wc}', ${tgIdx})" title="Ta bort bild"><i class="bi bi-x"></i></button>`;
+    } else {
+        imageHtml = `<label class="btn btn-outline-secondary btn-sm py-0 mb-0" title="Ladda upp bild">
+                <i class="bi bi-image"></i>
+                <input type="file" class="d-none tg-imageUpload" accept="image/*"
+                    data-station="${stationNum}" data-wc="${wc}" data-tg="${tgIdx}"
+                    onchange="faltCfgUploadImage(this)">
+            </label>
+            <span class="tg-imageStatus small text-muted"></span>`;
+    }
+
+    return `
+    <div class="border rounded p-2 mb-2 bg-light tg-row" data-tg="${tgIdx}">
+        <div class="d-flex align-items-center gap-2">
+            <span class="fw-bold small text-nowrap">Målgrupp ${tg.group}</span>
+            <div class="row g-2 flex-grow-1 align-items-end">
+                <div class="col-auto">
+                    <label class="form-label small mb-0">Figurer</label>
+                    <input type="number" class="form-control form-control-sm tg-figures" min="1" max="10" value="${tg.figures}" style="width:65px">
+                </div>
+                <div class="col-auto">
+                    <label class="form-label small mb-0">Poängmål</label>
+                    <input type="number" class="form-control form-control-sm tg-poangmal" min="0" max="10" value="${tg.poangmalCount}" style="width:65px">
+                </div>
+                <div class="col-auto">
+                    <label class="form-label small mb-0">Typ</label>
+                    <select class="form-select form-select-sm tg-behavior" onchange="faltCfgToggleBehavior(this)">
+                        ${TARGET_BEHAVIORS.map(b => `<option ${b === tg.behavior ? 'selected' : ''}>${b}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="col-auto tg-framCol" style="display:${tg.behavior === 'Framsvängande' ? '' : 'none'}">
+                    <label class="form-label small mb-0">Fram (sek)</label>
+                    <input type="number" class="form-control form-control-sm tg-delayBeforeShow" min="0" max="60" value="${tg.delayBeforeShowSec || 0}" style="width:60px">
+                </div>
+                <div class="col-auto tg-framCol" style="display:${tg.behavior === 'Framsvängande' ? '' : 'none'}">
+                    <label class="form-label small mb-0">Visas (sek)</label>
+                    <input type="number" class="form-control form-control-sm tg-showTime" min="1" max="60" value="${tg.showTimeSec || 8}" style="width:60px">
+                </div>
+                <div class="col-auto tg-bortCol" style="display:${tg.behavior === 'Bortsvängande' ? '' : 'none'}">
+                    <label class="form-label small mb-0">Bort (sek)</label>
+                    <input type="number" class="form-control form-control-sm tg-hideAfter" min="1" max="60" value="${tg.hideAfterSec || 8}" style="width:60px">
+                </div>
+                <div class="col-auto tg-bortCol" style="display:${tg.behavior === 'Bortsvängande' ? '' : 'none'}">
+                    <label class="form-label small mb-0">Igen (sek)</label>
+                    <input type="number" class="form-control form-control-sm tg-reappear" min="0" max="60" value="${tg.reappearSec || 0}" style="width:60px">
+                </div>
+            </div>
+            <div class="d-flex align-items-center gap-1 border rounded px-2 py-1 bg-white flex-shrink-0">
+                ${imageHtml}
+            </div>
+            ${!isLastGroup ? `<button class="btn btn-outline-danger btn-sm py-0 px-1 flex-shrink-0" onclick="faltCfgRemoveTargetGroup(${stationNum}, '${wc}', ${tgIdx})" title="Ta bort målgrupp">
+                <i class="bi bi-trash"></i>
+            </button>` : ''}
+        </div>
+    </div>`;
+}
+
+function faltCfgToggleBehavior(selectEl) {
+    const row = selectEl.closest('.tg-row');
+    const val = selectEl.value;
+    row.querySelectorAll('.tg-framCol').forEach(el => el.style.display = val === 'Framsvängande' ? '' : 'none');
+    row.querySelectorAll('.tg-bortCol').forEach(el => el.style.display = val === 'Bortsvängande' ? '' : 'none');
+}
+
+async function faltCfgUploadImage(inputEl) {
+    const file = inputEl.files[0];
+    if (!file) return;
+    const stationNum = parseInt(inputEl.dataset.station);
+    const wc = inputEl.dataset.wc;
+    const tgIdx = parseInt(inputEl.dataset.tg);
+    const statusEl = inputEl.closest('.d-flex').querySelector('.tg-imageStatus');
+
+    // Need a competitionId — try wizard or edit hidden field
+    const compIdEl = document.getElementById('editCompetitionId') || document.querySelector('input[name="competitionId"]');
+    let compId = compIdEl?.value || window.currentCompetitionData?.competitionId || 0;
+    if (!compId || compId === '0') {
+        // For new competitions not yet saved, use temp folder
+        compId = 'temp_' + Date.now();
+    }
+
+    statusEl.textContent = 'Laddar upp...';
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('competitionId', compId);
+    formData.append('weaponClass', wc);
+    formData.append('stationNumber', stationNum);
+    formData.append('groupNumber', tgIdx + 1);
+
+    // Add antiforgery token
+    const tokenEl = document.querySelector('input[name="__RequestVerificationToken"]');
+    if (tokenEl) formData.append('__RequestVerificationToken', tokenEl.value);
+
+    try {
+        const resp = await fetch('/umbraco/surface/Faltskytte/UploadTargetGroupImage', {
+            method: 'POST',
+            body: formData
+        });
+        if (!resp.ok) {
+            statusEl.textContent = 'Serverfel ' + resp.status;
+            return;
+        }
+        const data = await resp.json();
+        if (data.success) {
+            // Store URL in config data
+            collectTabData();
+            const station = faltCfgData[wc]?.stations?.find(s => s.station === stationNum);
+            if (station && station.targetGroups[tgIdx]) {
+                station.targetGroups[tgIdx].imageUrl = data.imageUrl;
+            }
+            statusEl.textContent = '';
+            faltCfgExpandedStation = stationNum;
+            renderActiveTab();
+        } else {
+            statusEl.textContent = data.message || 'Fel';
+        }
+    } catch(err) {
+        statusEl.textContent = 'Uppladdningsfel';
+        console.error(err);
+    }
+}
+
+function faltCfgRemoveImage(stationNum, wc, tgIdx) {
+    collectTabData();
+    const station = faltCfgData[wc]?.stations?.find(s => s.station === stationNum);
+    if (station && station.targetGroups[tgIdx]) {
+        station.targetGroups[tgIdx].imageUrl = null;
+    }
+    faltCfgExpandedStation = stationNum;
+    renderActiveTab();
+}
+
+function faltCfgAddTargetGroup(stationNum, wc) {
+    collectTabData();
+    faltCfgExpandedStation = stationNum;
+    const station = faltCfgData[wc].stations.find(s => s.station === stationNum);
+    if (!station) return;
+    station.targetGroups.push({
+        group: station.targetGroups.length + 1,
+        figures: 1, poangmalCount: 0,
+        behavior: "Fast"
+    });
+    renderActiveTab();
+}
+
+function faltCfgRemoveTargetGroup(stationNum, wc, tgIdx) {
+    collectTabData();
+    faltCfgExpandedStation = stationNum;
+    const station = faltCfgData[wc].stations.find(s => s.station === stationNum);
+    if (!station || station.targetGroups.length <= 1) return;
+    station.targetGroups.splice(tgIdx, 1);
+    station.targetGroups.forEach((tg, i) => tg.group = i + 1);
+    renderActiveTab();
+}
+
+function collectTabData() {
+    const wc = faltCfgActiveTab;
+    if (!faltCfgData[wc]) return;
+
+    document.querySelectorAll(`#faltCfgTabContent .card[data-wc="${wc}"]`).forEach(card => {
+        const stNum = parseInt(card.dataset.station);
+        const station = faltCfgData[wc].stations.find(s => s.station === stNum);
+        if (!station) return;
+
+        station.shootingTimeSec = parseInt(card.querySelector('.st-shootingTime')?.value) || 30;
+        station.shooterStartPosition = card.querySelector('.st-shooterPos')?.value || "Stående";
+        station.weaponStartPosition = card.querySelector('.st-weaponPos')?.value || "45 grader";
+        station.supportHand = card.querySelector('.st-supportHand')?.value || "Ej stödhand";
+        station.maxShotsPerFigure = parseInt(card.querySelector('.st-maxShots')?.value) || 6;
+
+        const tgRows = card.querySelectorAll('.tg-row');
+        const oldTargetGroups = station.targetGroups || [];
+        station.targetGroups = [];
+        tgRows.forEach((row, idx) => {
+            const behavior = row.querySelector('.tg-behavior')?.value || "Fast";
+            const tg = {
+                group: idx + 1,
+                figures: parseInt(row.querySelector('.tg-figures')?.value) || 1,
+                poangmalCount: parseInt(row.querySelector('.tg-poangmal')?.value) || 0,
+                behavior: behavior,
+                imageUrl: oldTargetGroups[idx]?.imageUrl || null
+            };
+            if (behavior === 'Framsvängande') {
+                tg.delayBeforeShowSec = parseInt(row.querySelector('.tg-delayBeforeShow')?.value) || 0;
+                tg.showTimeSec = parseInt(row.querySelector('.tg-showTime')?.value) || 8;
+            } else if (behavior === 'Bortsvängande') {
+                tg.hideAfterSec = parseInt(row.querySelector('.tg-hideAfter')?.value) || 8;
+                tg.reappearSec = parseInt(row.querySelector('.tg-reappear')?.value) || 0;
+            }
+            station.targetGroups.push(tg);
+        });
+    });
+}
+
+function faltCfgGetTargetFieldId() {
+    return window._faltCfgTargetField || 'wizard_faltStationConfigJson';
+}
+
+function faltCfgGetCompetitionId() {
+    // For edit mode: read from edit modal's hidden field
+    var el = document.getElementById('editCompetitionId');
+    if (el && el.value && el.value !== '0') return parseInt(el.value);
+    // Try from currentCompetitionData
+    if (window.currentCompetitionData?.id) return window.currentCompetitionData.id;
+    return null;
+}
+
+function faltCfgIsEditMode() {
+    return window._faltCfgTargetField === 'edit_faltStationConfigJson' && faltCfgGetCompetitionId();
+}
+
+async function faltCfgSaveStation(stationNum, wc) {
+    collectTabData();
+    var json = JSON.stringify(faltCfgData);
+    document.getElementById(faltCfgGetTargetFieldId()).value = json;
+
+    // In edit mode: save to server immediately
+    if (faltCfgIsEditMode()) {
+        var ok = await faltCfgSaveToServer(json);
+        if (!ok) return;
+    }
+
+    faltCfgDirtyStations.delete(`${wc}_${stationNum}`);
+    var savedBadge = document.getElementById(`faltCfgSaved_${wc}_${stationNum}`);
+    var dirtyBadge = document.getElementById(`faltCfgDirty_${wc}_${stationNum}`);
+    if (savedBadge) savedBadge.style.display = '';
+    if (dirtyBadge) dirtyBadge.style.display = 'none';
+}
+
+async function faltCfgSaveAll() {
+    collectTabData();
+    var json = JSON.stringify(faltCfgData);
+    document.getElementById(faltCfgGetTargetFieldId()).value = json;
+
+    if (faltCfgIsEditMode()) {
+        await faltCfgSaveToServer(json);
+    }
+
+    faltCfgDirtyStations.clear();
+}
+
+async function faltCfgSaveToServer(json) {
+    var compId = faltCfgGetCompetitionId();
+    if (!compId) return false;
+    try {
+        var resp = await fetch('/umbraco/surface/Faltskytte/SaveStationConfig', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value
+            },
+            body: JSON.stringify({ competitionId: compId, stationConfigJson: json })
+        });
+        var data = await resp.json();
+        if (!data.success) {
+            alert('Kunde inte spara: ' + (data.message || 'Okänt fel'));
+            return false;
+        }
+        return true;
+    } catch(err) {
+        alert('Nätverksfel vid sparande.');
+        console.error(err);
+        return false;
+    }
+}
+
+async function faltCfgTryClose() {
+    collectTabData();
+    if (faltCfgDirtyStations.size > 0) {
+        if (!confirm('Du har osparade ändringar på ' + faltCfgDirtyStations.size + ' station(er). Vill du spara och stänga?')) {
+            return;
+        }
+        await faltCfgSaveAll();
+    }
+    faltCfgClose();
+}
+
+function faltCfgClose() {
+    const cfgEl = document.getElementById('faltStationConfigModal');
+    const returnToEdit = window._faltCfgTargetField === 'edit_faltStationConfigJson';
+
+    function onCfgHidden() {
+        cfgEl.removeEventListener('hidden.bs.modal', onCfgHidden);
+        window._faltCfgTargetField = null;
+        if (returnToEdit) {
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('competitionEditModal')).show();
+        } else {
+            window._wizardSkipReset = true;
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('competitionWizardModal')).show();
+        }
+    }
+    cfgEl.addEventListener('hidden.bs.modal', onCfgHidden);
+    bootstrap.Modal.getInstance(cfgEl)?.hide();
+}
+
+function faltDescribeBehavior(tg) {
+    if (tg.behavior === 'Framsv\u00e4ngande') {
+        var s = 'Framsv\u00e4ngande';
+        if (tg.delayBeforeShowSec > 0) s += ', fram efter ' + tg.delayBeforeShowSec + ' sek';
+        if (tg.showTimeSec > 0) s += ', visas i ' + tg.showTimeSec + ' sek';
+        return s;
+    }
+    if (tg.behavior === 'Bortsv\u00e4ngande') {
+        var s = 'Bortsv\u00e4ngande';
+        if (tg.hideAfterSec > 0) s += ', bort efter ' + tg.hideAfterSec + ' sek';
+        if (tg.reappearSec > 0) s += ', visar igen efter ' + tg.reappearSec + ' sek';
+        return s;
+    }
+    return 'Fast';
+}
+
+function faltCfgPrint() {
+    collectTabData();
+    const w = window.open('', '_blank');
+    w.document.write('<html><head><title>Stationskort</title>');
+    w.document.write('<style>body{font-family:sans-serif;margin:20px}');
+    w.document.write('.card{border:2px solid #333;padding:20px;margin-bottom:20px;page-break-inside:avoid}');
+    w.document.write('.card h2{margin:0 0 10px;font-size:1.3em}');
+    w.document.write('.card .rule{margin:4px 0;font-size:0.95em}');
+    w.document.write('.card .tg{margin:8px 0 4px;padding:6px 10px;background:#f5f5f5;border-radius:4px}');
+    w.document.write('@@media print{.card{page-break-after:always}.card:last-child{page-break-after:avoid}}');
+    w.document.write('<' + '/style><' + '/head><body>');
+
+    Object.keys(faltCfgData).forEach(wc => {
+        (faltCfgData[wc].stations || []).forEach(st => {
+            w.document.write('<div class="card">');
+            w.document.write('<h2>Station ' + st.station + ' \u2014 Vapenklass ' + wc + '<' + '/h2>');
+            w.document.write('<div class="rule"><strong>Skjuttid:<' + '/strong> ' + st.shootingTimeSec + ' sek<' + '/div>');
+            w.document.write('<div class="rule"><strong>Utg\u00e5ngsl\u00e4ge:<' + '/strong> ' + st.shooterStartPosition + '<' + '/div>');
+            w.document.write('<div class="rule"><strong>Vapenl\u00e4ge:<' + '/strong> ' + st.weaponStartPosition + '<' + '/div>');
+            w.document.write('<div class="rule"><strong>' + st.supportHand + '<' + '/strong><' + '/div>');
+            w.document.write('<div class="rule"><strong>Antal skott:<' + '/strong> 6<' + '/div>');
+            if (st.maxShotsPerFigure && st.maxShotsPerFigure < 6) {
+                w.document.write('<div class="rule"><strong>Max skott per figur:<' + '/strong> ' + st.maxShotsPerFigure + '<' + '/div>');
+            }
+            st.targetGroups.forEach(function(tg) {
+                var desc = tg.figures + ' figur' + (tg.figures > 1 ? 'er' : '');
+                if (tg.poangmalCount > 0) desc += ', ' + tg.poangmalCount + ' po\u00e4ngm\u00e5l';
+                desc += ' \u2014 ' + faltDescribeBehavior(tg);
+                var tgHtml = '<div class="tg"><strong>M\u00e5lgrupp ' + tg.group + ':<' + '/strong> ' + desc;
+                if (tg.imageUrl) tgHtml += '<br><img src="' + tg.imageUrl + '" style="max-height:80px;margin-top:6px">';
+                tgHtml += '<' + '/div>';
+                w.document.write(tgHtml);
+            });
+            w.document.write('<' + '/div>');
+        });
+    });
+
+    w.document.write('<' + '/body><' + '/html>');
+    w.document.close();
+    w.print();
+}
+</script>

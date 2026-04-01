@@ -55,6 +55,7 @@
     var competitionType = Model.Value<IPublishedContent>("competitionType");
     var competitionTypeStr = Model.Value<string>("competitionType") ?? "Precision";
     var isSpringskytte = competitionTypeStr == "Springskytte";
+    var isFaltskytte = competitionTypeStr == "Faltskytte" || competitionTypeStr == "MagnumFalt";
     var numberOfSeriesOrStations = Model.Value<int>("numberOfSeriesOrStations");
     var numberOfFinalSeries = Model.Value<int>("numberOfFinalSeries");
 
@@ -1625,13 +1626,17 @@ document.addEventListener('DOMContentLoaded', function() {
     {
         @:fetch(`/umbraco/surface/Springskytte/GetSpringskytteResults?competitionId=${competitionId}`)
     }
+    else if (isFaltskytte)
+    {
+        @:fetch(`/umbraco/surface/Faltskytte/GetFaltskytteResults?competitionId=${competitionId}`)
+    }
     else
     {
         @:fetch(`/umbraco/surface/CompetitionResults/GetResultsStats?competitionId=${competitionId}`)
     }
         .then(response => response.json())
         .then(data => {
-            var hasResults = @Html.Raw(isSpringskytte ? "data.success && data.classGroups && data.classGroups.length > 0" : "data.Success && data.Count > 0");
+            var hasResults = @Html.Raw(isSpringskytte || isFaltskytte ? "data.success && data.results && data.results.classGroups && data.results.classGroups.length > 0" : "data.Success && data.Count > 0");
             if (hasResults) {
                 var container = document.getElementById('liveResultsCheck');
                 if (container) {

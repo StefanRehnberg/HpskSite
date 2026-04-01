@@ -125,7 +125,13 @@ namespace HpskSite.Controllers
                     stafettRegistrationFee = content.GetValue<string>("stafettRegistrationFee") ?? "0",
                     seriesId = isInSeries ? parent!.Id : (int?)null,
                     seriesName = isInSeries ? parent!.Name : null,
-                    competitionType = content.GetValue<string>("competitionType") ?? "Precision"
+                    competitionType = content.GetValue<string>("competitionType") ?? "Precision",
+                    // Fältskytte-specific fields
+                    scoringMode = content.GetValue<string>("scoringMode") ?? "Normal",
+                    stationConfig = content.GetValue<string>("stationConfig") ?? "",
+                    patrolSize = content.GetValue<int>("patrolSize"),
+                    patrolIntervalMinutes = content.GetValue<int>("patrolIntervalMinutes"),
+                    maxReshoots = content.GetValue<int>("maxReshoots")
                 };
 
                 Console.WriteLine($"Returning competition data for: {content.Name}");

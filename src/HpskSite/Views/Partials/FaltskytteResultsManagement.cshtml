@@ -1,0 +1,151 @@
+@*
+ * Fältskytte Results Management
+ * Admin overview: station entry + result list generation.
+ *@
+
+@{
+    var competitionId = ViewData["CompetitionId"]?.ToString() ?? "";
+    var competitionName = ViewData["CompetitionName"]?.ToString() ?? "Tävling";
+}
+
+<div class="faltskytte-results-management" data-competition-id="@competitionId">
+
+    <!-- Station Entry Card -->
+    <div class="card mb-3">
+        <div class="card-header" role="button" onclick="toggleFaltSection('faltEntryBody', 'faltEntryChevron')">
+            <div class="d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-pencil-square me-2"></i>Resultatinmatning</h5>
+                <i class="bi bi-chevron-down" id="faltEntryChevron"></i>
+            </div>
+        </div>
+        <div id="faltEntryBody" style="display: none;">
+            <div class="card-body">
+                @await Html.PartialAsync("FaltskytteStationEntry", new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId } })
+            </div>
+        </div>
+    </div>
+
+    <!-- Result List Card -->
+    <div class="card mb-3">
+        <div class="card-header" role="button" onclick="toggleFaltSection('faltResultBody', 'faltResultChevron')">
+            <div class="d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-trophy me-2"></i>Resultatlista</h5>
+                <div class="d-flex gap-2">
+                    <button class="btn btn-outline-primary btn-sm" onclick="faltGenerateResultList(event)">
+                        <i class="bi bi-arrow-clockwise me-1"></i>Uppdatera
+                    </button>
+                    <i class="bi bi-chevron-down" id="faltResultChevron"></i>
+                </div>
+            </div>
+        </div>
+        <div id="faltResultBody" style="display: none;">
+            <div class="card-body">
+                <div id="faltResultContent">
+                    <p class="text-muted text-center py-3">Klicka "Uppdatera" för att generera resultatlistan.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function toggleFaltSection(bodyId, chevronId) {
+    const body = document.getElementById(bodyId);
+    const chevron = document.getElementById(chevronId);
+    if (body.style.display === 'none') {
+        body.style.display = '';
+        chevron.classList.remove('bi-chevron-down');
+        chevron.classList.add('bi-chevron-up');
+    } else {
+        body.style.display = 'none';
+        chevron.classList.remove('bi-chevron-up');
+        chevron.classList.add('bi-chevron-down');
+    }
+}
+
+async function faltGenerateResultList(event) {
+    if (event) event.stopPropagation();
+    const compId = document.querySelector('.faltskytte-results-management')?.dataset.competitionId;
+    const container = document.getElementById('faltResultContent');
+
+    container.innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm"></div> Genererar...</div>';
+
+    // Show the results section
+    document.getElementById('faltResultBody').style.display = '';
+
+    try {
+        const resp = await fetch(`/umbraco/surface/Faltskytte/GetFaltskytteResults?competitionId=${compId}`);
+        const data = await resp.json();
+
+        if (!data.success) {
+            container.innerHTML = `<div class="alert alert-warning">${data.message || 'Inga resultat.'}</div>`;
+            return;
+        }
+
+        renderFaltResultList(data.results, container);
+    } catch (err) {
+        container.innerHTML = '<div class="alert alert-danger">Nätverksfel vid hämtning av resultat.</div>';
+        console.error(err);
+    }
+}
+
+function renderFaltResultList(results, container) {
+    const isPoang = results.scoringMode === 'Poang';
+    let html = '';
+
+    results.classGroups.forEach(group => {
+        html += `<h5 class="mt-4 mb-2">${group.className} (${group.shooters.length} deltagare)</h5>`;
+        html += '<div class="table-responsive"><table class="table table-sm table-striped">';
+        html += '<thead><tr><th>Plats</th><th>Namn</th><th>Förening</th><th>Klass</th>';
+
+        // Station headers
+        for (let i = 1; i <= results.stationCount; i++) {
+            const cfg = results.stationConfigs.find(s => s.station === i);
+            html += `<th class="text-center">${i}${cfg?.hasPoangmal ? '*' : ''}</th>`;
+        }
+
+        if (isPoang) {
+            html += '<th class="text-center fw-bold">Poäng</th>';
+        } else {
+            html += '<th class="text-center fw-bold">Träff/Fig</th>';
+        }
+        html += '<th class="text-center">Pm</th></tr></thead><tbody>';
+
+        group.shooters.forEach((shooter, idx) => {
+            html += `<tr>
+                <td class="text-center">${idx + 1}</td>
+                <td>${shooter.name}</td>
+                <td>${shooter.club}</td>
+                <td class="text-center">${shooter.shootingClass}</td>`;
+
+            // Station results
+            for (let i = 1; i <= results.stationCount; i++) {
+                const st = shooter.stations.find(s => s.stationNumber === i);
+                if (st) {
+                    let cellText = `${st.hits}/${st.figures}`;
+                    if (st.tiebreakerScore != null) cellText += ` <small class="text-muted">${st.tiebreakerScore}p</small>`;
+                    html += `<td class="text-center">${cellText}</td>`;
+                } else {
+                    html += '<td class="text-center text-muted">-</td>';
+                }
+            }
+
+            // Total
+            if (isPoang) {
+                html += `<td class="text-center fw-bold">${shooter.totalPoints}</td>`;
+            } else {
+                html += `<td class="text-center fw-bold">${shooter.totalHits}/${shooter.totalFigures}</td>`;
+            }
+
+            // Poångmål total
+            html += `<td class="text-center">${shooter.totalTiebreakerScore || ''}</td>`;
+            html += '</tr>';
+        });
+
+        html += '</tbody></table></div>';
+    });
+
+    if (!html) html = '<div class="alert alert-info">Inga resultat att visa.</div>';
+    container.innerHTML = html;
+}
+</script>

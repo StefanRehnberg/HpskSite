@@ -20,6 +20,7 @@
     var competitionTypeId = "";
     try { competitionTypeId = competition.Value<string>("competitionType") ?? "Precision"; } catch { competitionTypeId = "Precision"; }
     var isSpringskytte = competitionTypeId == "Springskytte";
+    var isFaltskytte = competitionTypeId == "Faltskytte" || competitionTypeId == "MagnumFalt";
 
     // Team results support
     var allowTeams = false;
@@ -245,6 +246,7 @@
     
     // Competition type
     const isSpringskytte = @(isSpringskytte.ToString().ToLower());
+    const isFaltskytte = @(isFaltskytte.ToString().ToLower());
 
     // Team results
     const allowTeams = @(allowTeams.ToString().ToLower());
@@ -260,6 +262,12 @@
             // Springskytte uses its own endpoint and rendering
             if (isSpringskytte) {
                 await loadSpringskytteResults(container);
+                return;
+            }
+
+            // Fältskytte uses its own endpoint and rendering
+            if (isFaltskytte) {
+                await loadFaltskytteResults(container);
                 return;
             }
 
@@ -542,6 +550,77 @@
                         <h4>Fel vid laddning av resultat</h4>
                         <p>${error.message}</p>
                     </div>`;
+            }
+        }
+
+        // Fältskytte results rendering
+        async function loadFaltskytteResults(container) {
+            try {
+                const response = await fetch(`/umbraco/surface/Faltskytte/GetFaltskytteResults?competitionId=${competitionId}`);
+                const data = await response.json();
+
+                if (!data.success) {
+                    container.innerHTML = `<div class="alert alert-info">${data.message || 'Inga resultat.'}</div>`;
+                    return;
+                }
+
+                const results = data.results;
+                const isPoang = results.scoringMode === 'Poang';
+                let html = '';
+
+                results.classGroups.forEach(group => {
+                    html += `<div class="mb-4">`;
+                    html += `<h4 class="border-bottom pb-2">${group.className} <small class="text-muted">(${group.shooters.length} deltagare)</small></h4>`;
+                    html += `<div class="table-responsive"><table class="table table-sm table-hover">`;
+                    html += `<thead class="table-light"><tr>
+                        <th style="width:50px" class="text-center">Plats</th>
+                        <th>Namn</th><th>Förening</th><th>Klass</th>`;
+
+                    for (let i = 1; i <= results.stationCount; i++) {
+                        const cfg = results.stationConfigs.find(s => s.station === i);
+                        html += `<th class="text-center">${i}${cfg?.hasPoangmal ? '*' : ''}</th>`;
+                    }
+
+                    html += isPoang
+                        ? `<th class="text-center fw-bold">Poäng</th>`
+                        : `<th class="text-center fw-bold">Tot</th>`;
+                    html += `<th class="text-center">Pm</th></tr></thead><tbody>`;
+
+                    group.shooters.forEach((shooter, idx) => {
+                        const isCurrentUser = shooter.name === currentUserName;
+                        const rowClass = isCurrentUser ? 'table-info fw-bold' : '';
+                        html += `<tr class="${rowClass}">
+                            <td class="text-center">${idx + 1}</td>
+                            <td>${shooter.name}</td>
+                            <td>${shooter.club}</td>
+                            <td class="text-center">${shooter.shootingClass}</td>`;
+
+                        for (let i = 1; i <= results.stationCount; i++) {
+                            const st = shooter.stations.find(s => s.stationNumber === i);
+                            if (st) {
+                                let cell = `${st.hits}/${st.figures}`;
+                                if (st.tiebreakerScore != null) cell += ` <small>${st.tiebreakerScore}p</small>`;
+                                html += `<td class="text-center">${cell}</td>`;
+                            } else {
+                                html += `<td class="text-center text-muted">-</td>`;
+                            }
+                        }
+
+                        html += isPoang
+                            ? `<td class="text-center fw-bold">${shooter.totalPoints}</td>`
+                            : `<td class="text-center fw-bold">${shooter.totalHits}/${shooter.totalFigures}</td>`;
+                        html += `<td class="text-center">${shooter.totalTiebreakerScore || ''}</td>`;
+                        html += `</tr>`;
+                    });
+
+                    html += `</tbody></table></div></div>`;
+                });
+
+                if (!html) html = '<div class="alert alert-info">Inga resultat att visa.</div>';
+                container.innerHTML = html;
+            } catch (error) {
+                console.error('Error loading Fältskytte results:', error);
+                container.innerHTML = `<div class="alert alert-danger"><p>${error.message}</p></div>`;
             }
         }
 

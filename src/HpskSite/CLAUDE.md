@@ -516,6 +516,22 @@ if (stringValue.TrimStart().StartsWith("[")) {
 - GET GetCompetitionsList - Returns all competitions (site admins) or filtered by managed clubs (club admins)
 - POST CreateCompetition, CopyCompetition, DeleteCompetition - Require appropriate authorization
 
+### Class Merging System ✅ COMPLETE (2026-03-31)
+**Location:** CompetitionResultsManagement.cshtml → "Uppdatera" button → merge modal
+
+**Overview:** When generating result lists, classes with < 5 participants can be merged with compatible classes per Swedish shooting sport rules. A modal shows merge suggestions; admin accepts/rejects each.
+
+**Key Files:**
+- `Services/ClassMergingService.cs` — rules engine, analysis, combined class naming
+- `Controllers/CompetitionResultsController.cs` — `AnalyzeClassMerges` GET endpoint, merge logic in `CalculateFinalResults`
+- `Views/Partials/CompetitionResultsManagement.cshtml` — modal UI + JS two-step flow
+
+**Rules:** Class 1 never merges. A/B class 2+3 can merge. C/L Dam→open class, Vet Ä→Vet Y→open (cascading), Jun→admin choice. R2+R3 for Milsnabb only. Never across weapon groups. MagnumPrecision/Springskytte excluded.
+
+**Implementation:** Merging at GroupBy level (shooter's ShootingClass untouched). Merge config persisted as `mergeConfig` property on `competitionResult` document type (Textarea). Re-applied on preliminary result reload.
+
+**Umbraco Setup:** `competitionResult` document type needs `mergeConfig` property (Textarea).
+
 ### CompetitionController (Public + Admin endpoints)
 **Location:** `Controllers/CompetitionController.cs`
 

@@ -339,6 +339,12 @@ namespace HpskSite.CompetitionTypes.Precision.Services
                 "teamRegistrationFee" => "teamRegistrationFee",
                 "allowStafett" => "allowStafett",
                 "stafettRegistrationFee" => "stafettRegistrationFee",
+                // Fältskytte fields
+                "scoringMode" => "scoringMode",
+                "stationConfig" => "stationConfig",
+                "patrolSize" => "patrolSize",
+                "patrolIntervalMinutes" => "patrolIntervalMinutes",
+                "maxReshoots" => "maxReshoots",
                 _ => null
             };
         }

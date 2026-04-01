@@ -1,0 +1,197 @@
+@*
+ * Fältskytte Patrol Management
+ * Generates patrols grouped by weapon class with timed start intervals.
+ *@
+
+@{
+    var competitionId = ViewData["CompetitionId"]?.ToString() ?? "";
+}
+
+<div class="faltskytte-startlist-management" data-competition-id="@competitionId">
+    <div class="card mb-3">
+        <div class="card-header">
+            <div class="d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-people me-2"></i>Patruller (Fältskytte)</h5>
+                <div class="d-flex gap-2">
+                    <button class="btn btn-primary btn-sm" onclick="faltGeneratePatrols()">
+                        <i class="bi bi-arrow-clockwise me-1"></i>Generera patruller
+                    </button>
+                    <button class="btn btn-outline-danger btn-sm" onclick="faltDeletePatrols()" id="faltDeleteBtn" style="display:none">
+                        <i class="bi bi-trash me-1"></i>Ta bort
+                    </button>
+                </div>
+            </div>
+        </div>
+        <div class="card-body">
+            <div id="faltPatrolsLoading" class="text-center py-4" style="display:none">
+                <div class="spinner-border spinner-border-sm" role="status"><span class="visually-hidden">Laddar...</span></div>
+            </div>
+            <div id="faltPatrolsEmpty" class="text-center py-4">
+                <p class="text-muted mb-0">Inga patruller genererade. Klicka "Generera patruller" för att skapa patruller från anmälningarna.</p>
+            </div>
+            <div id="faltPatrolsContainer" style="display:none">
+                <div class="row mb-3" id="faltPatrolsSummary"></div>
+                <div id="faltPatrolsList"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function() {
+    const compId = document.querySelector('.faltskytte-startlist-management')?.dataset.competitionId;
+    if (compId) loadFaltPatrols();
+
+    async function loadFaltPatrols() {
+        const loading = document.getElementById('faltPatrolsLoading');
+        const empty = document.getElementById('faltPatrolsEmpty');
+        const container = document.getElementById('faltPatrolsContainer');
+        const deleteBtn = document.getElementById('faltDeleteBtn');
+
+        loading.style.display = '';
+        empty.style.display = 'none';
+        container.style.display = 'none';
+
+        try {
+            const resp = await fetch(`/umbraco/surface/Faltskytte/GetPatrols?competitionId=${compId}`);
+            const data = await resp.json();
+
+            loading.style.display = 'none';
+
+            if (!data.success || !data.patrols || data.patrols.length === 0) {
+                empty.style.display = '';
+                deleteBtn.style.display = 'none';
+                return;
+            }
+
+            container.style.display = '';
+            deleteBtn.style.display = '';
+            renderPatrols(data.patrols);
+        } catch (err) {
+            loading.style.display = 'none';
+            empty.style.display = '';
+            console.error('Error loading patrols:', err);
+        }
+    }
+
+    function renderPatrols(patrols) {
+        const totalShooters = patrols.reduce((sum, p) => sum + p.members.length, 0);
+        const weaponGroups = [...new Set(patrols.map(p => p.weaponGroup || '?'))];
+
+        document.getElementById('faltPatrolsSummary').innerHTML = `
+            <div class="col-auto">
+                <span class="badge bg-primary fs-6">${patrols.length} patruller</span>
+            </div>
+            <div class="col-auto">
+                <span class="badge bg-secondary fs-6">${totalShooters} skyttar</span>
+            </div>
+            <div class="col-auto">
+                <span class="text-muted">Vapengrupper: ${weaponGroups.join(', ')}</span>
+            </div>
+        `;
+
+        const list = document.getElementById('faltPatrolsList');
+        list.innerHTML = '';
+
+        patrols.forEach(patrol => {
+            const startTimeStr = patrol.startTime
+                ? new Date(patrol.startTime).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })
+                : '';
+
+            let html = `
+                <div class="card mb-2">
+                    <div class="card-header py-2 d-flex justify-content-between align-items-center">
+                        <span>
+                            <strong>Patrull ${patrol.patrolNumber}</strong>
+                            <span class="badge bg-info ms-2">${patrol.weaponGroup || '?'}</span>
+                            ${startTimeStr ? `<span class="text-muted ms-2"><i class="bi bi-clock me-1"></i>${startTimeStr}</span>` : ''}
+                        </span>
+                        <span class="badge bg-secondary">${patrol.members.length} skyttar</span>
+                    </div>
+                    <div class="card-body p-0">
+                        <table class="table table-sm mb-0">
+                            <thead>
+                                <tr>
+                                    <th style="width:40px" class="text-center">#</th>
+                                    <th>Namn</th>
+                                    <th>Förening</th>
+                                    <th>Klass</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+            `;
+
+            patrol.members.forEach(m => {
+                html += `
+                    <tr>
+                        <td class="text-center">${m.position}</td>
+                        <td>${m.name}</td>
+                        <td>${m.club}</td>
+                        <td><span class="badge bg-secondary">${m.shootingClass}</span></td>
+                    </tr>
+                `;
+            });
+
+            html += `</tbody></table></div></div>`;
+            list.insertAdjacentHTML('beforeend', html);
+        });
+    }
+
+    window.faltGeneratePatrols = async function() {
+        if (!confirm('Vill du generera patruller? Befintliga patruller tas bort.')) return;
+
+        const btn = event.target.closest('button');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Genererar...';
+
+        try {
+            const resp = await fetch('/umbraco/surface/Faltskytte/GeneratePatrols', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value
+                },
+                body: JSON.stringify({ competitionId: parseInt(compId) })
+            });
+            const data = await resp.json();
+
+            if (data.success) {
+                loadFaltPatrols();
+            } else {
+                alert('Fel: ' + (data.message || 'Okänt fel'));
+            }
+        } catch (err) {
+            alert('Nätverksfel vid generering av patruller.');
+            console.error(err);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Generera patruller';
+        }
+    };
+
+    window.faltDeletePatrols = async function() {
+        if (!confirm('Vill du ta bort alla patruller?')) return;
+
+        try {
+            const resp = await fetch('/umbraco/surface/Faltskytte/DeletePatrols', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value
+                },
+                body: JSON.stringify({ competitionId: parseInt(compId) })
+            });
+            const data = await resp.json();
+
+            if (data.success) {
+                loadFaltPatrols();
+            } else {
+                alert('Fel: ' + (data.message || 'Okänt fel'));
+            }
+        } catch (err) {
+            alert('Nätverksfel.');
+            console.error(err);
+        }
+    };
+})();
+</script>
