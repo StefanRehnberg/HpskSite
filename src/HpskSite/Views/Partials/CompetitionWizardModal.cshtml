@@ -327,14 +327,6 @@
 
                             <div class="row mb-3">
                                 <div class="col-auto">
-                                    <label for="wizard_patrolSize" class="form-label fw-bold">Patrullstorlek</label>
-                                    <input type="number" class="form-control" id="wizard_patrolSize" min="2" max="12" value="6" style="max-width: 100px;">
-                                </div>
-                                <div class="col-auto">
-                                    <label for="wizard_patrolInterval" class="form-label fw-bold">Intervall (min)</label>
-                                    <input type="number" class="form-control" id="wizard_patrolInterval" min="5" max="60" value="15" style="max-width: 100px;">
-                                </div>
-                                <div class="col-auto">
                                     <label for="wizard_maxReshoots" class="form-label fw-bold">Max omskjutningar</label>
                                     <input type="number" class="form-control" id="wizard_maxReshoots" min="0" max="10" value="2" style="max-width: 100px;">
                                 </div>
@@ -1732,8 +1724,6 @@ function submitWizard() {
     if (isFaltType) {
         fields.scoringMode = document.getElementById('wizard_scoringMode').value;
         fields.stationConfig = document.getElementById('wizard_faltStationConfigJson').value || '{}';
-        fields.patrolSize = document.getElementById('wizard_patrolSize').value;
-        fields.patrolIntervalMinutes = document.getElementById('wizard_patrolInterval').value;
         fields.maxReshoots = document.getElementById('wizard_maxReshoots').value;
     }
 

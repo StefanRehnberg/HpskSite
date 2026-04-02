@@ -14,22 +14,39 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             List<CompetitionRegistration> registrations,
             int patrolSize,
             int patrolIntervalMinutes,
-            DateTime? firstStartTime)
+            DateTime? firstStartTime,
+            string weaponGrouping = "Separate")
         {
             if (!registrations.Any())
                 return new FaltskyttePatrolGenerationResult { Patrols = new(), Message = "Inga anmälningar." };
 
-            // Deduplicate: one entry per member (take first registration if multi-class)
-            var uniqueRegistrations = registrations
-                .GroupBy(r => r.MemberId)
-                .Select(g => g.First())
-                .ToList();
-
-            // Group by weapon group
-            var groups = uniqueRegistrations
-                .GroupBy(r => GetWeaponGroup(r.MemberClass))
-                .OrderBy(g => GetGroupSortOrder(g.Key))
-                .ToList();
+            // Each registration is a separate patrol entry (one per member per weapon class)
+            // Group by weapon group based on grouping strategy
+            IEnumerable<IGrouping<string, CompetitionRegistration>> groups;
+            if (weaponGrouping == "MixAll")
+            {
+                groups = registrations
+                    .GroupBy(r => "Alla")
+                    .ToList();
+            }
+            else if (weaponGrouping == "CombineAR")
+            {
+                groups = registrations
+                    .GroupBy(r =>
+                    {
+                        var wg = GetWeaponGroup(r.MemberClass);
+                        return (wg == "A" || wg == "R") ? "A+R" : wg;
+                    })
+                    .OrderBy(g => GetGroupSortOrder(g.Key))
+                    .ToList();
+            }
+            else
+            {
+                groups = registrations
+                    .GroupBy(r => GetWeaponGroup(r.MemberClass))
+                    .OrderBy(g => GetGroupSortOrder(g.Key))
+                    .ToList();
+            }
 
             var patrols = new List<FaltskytteGeneratedPatrol>();
             int patrolNumber = 1;
@@ -68,8 +85,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             {
                 Patrols = patrols,
                 TotalPatrols = patrols.Count,
-                TotalShooters = uniqueRegistrations.Count,
-                Message = $"{patrols.Count} patruller skapade med {uniqueRegistrations.Count} skyttar."
+                TotalShooters = registrations.Count,
+                Message = $"{patrols.Count} patruller skapade med {registrations.Count} starter."
             };
         }
 

@@ -453,6 +453,245 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             }
         }
 
+        // ── Target Catalog ───────────────────────────────────────────
+
+        /// <summary>Returns all field targets with variants for the target picker.</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetTargetCatalog()
+        {
+            try
+            {
+                using var db = _umbracoDatabaseFactory.CreateDatabase();
+                var targets = await db.FetchAsync<FieldTarget>("ORDER BY Name");
+                var allVariants = await db.FetchAsync<FieldTargetVariant>("ORDER BY TargetId, Color");
+
+                var variantsByTarget = allVariants.GroupBy(v => v.TargetId)
+                    .ToDictionary(g => g.Key, g => g.ToList());
+
+                var result = targets.Select(t => new FieldTargetView
+                {
+                    Id = t.Id,
+                    Name = t.Name,
+                    MaxDistanceC = t.MaxDistanceC,
+                    MaxDistanceB = t.MaxDistanceB,
+                    MaxDistanceA = t.MaxDistanceA,
+                    MaxDistanceR = t.MaxDistanceR,
+                    Variants = variantsByTarget.GetValueOrDefault(t.Id, new())
+                        .Select(v => new FieldTargetVariantView
+                        {
+                            Id = v.Id,
+                            FullName = v.FullName,
+                            ImageName = v.ImageName,
+                            Color = v.Color
+                        }).ToList()
+                }).ToList();
+
+                return Json(new { success = true, targets = result });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error loading target catalog");
+                return Json(new { success = false, message = "Fel: " + ex.Message });
+            }
+        }
+
+        /// <summary>Updates max distances for a field target. Admin only.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> UpdateTargetDistances([FromBody] UpdateTargetDistancesRequest request)
+        {
+            try
+            {
+                if (!await _adminAuthorizationService.IsCurrentUserAdminAsync())
+                    return Json(new { success = false, message = "Endast administratörer kan ändra avstånd." });
+
+                using var db = _umbracoDatabaseFactory.CreateDatabase();
+                var target = await db.FirstOrDefaultAsync<FieldTarget>("WHERE Id = @0", request.TargetId);
+                if (target == null)
+                    return Json(new { success = false, message = "Figuren hittades inte." });
+
+                target.MaxDistanceC = request.MaxDistanceC;
+                target.MaxDistanceB = request.MaxDistanceB;
+                target.MaxDistanceA = request.MaxDistanceA;
+                target.MaxDistanceR = request.MaxDistanceR;
+                await db.UpdateAsync(target);
+
+                return Json(new { success = true, message = "Avstånd uppdaterade." });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error updating target distances");
+                return Json(new { success = false, message = "Fel: " + ex.Message });
+            }
+        }
+
+        /// <summary>Updates a field target: name, distances, and variant names/colors. Admin only.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> UpdateTarget([FromBody] UpdateTargetRequest request)
+        {
+            try
+            {
+                if (!await _adminAuthorizationService.IsCurrentUserAdminAsync())
+                    return Json(new { success = false, message = "Endast administratörer." });
+
+                using var db = _umbracoDatabaseFactory.CreateDatabase();
+                var target = await db.FirstOrDefaultAsync<FieldTarget>("WHERE Id = @0", request.TargetId);
+                if (target == null)
+                    return Json(new { success = false, message = "Figuren hittades inte." });
+
+                if (!string.IsNullOrEmpty(request.Name)) target.Name = request.Name;
+                target.MaxDistanceC = request.MaxDistanceC;
+                target.MaxDistanceB = request.MaxDistanceB;
+                target.MaxDistanceA = request.MaxDistanceA;
+                target.MaxDistanceR = request.MaxDistanceR;
+                await db.UpdateAsync(target);
+
+                if (request.Variants != null)
+                {
+                    foreach (var vReq in request.Variants)
+                    {
+                        var variant = await db.FirstOrDefaultAsync<FieldTargetVariant>("WHERE Id = @0", vReq.Id);
+                        if (variant == null) continue;
+                        if (!string.IsNullOrEmpty(vReq.FullName)) variant.FullName = vReq.FullName;
+                        if (vReq.Color != null) variant.Color = vReq.Color;
+                        await db.UpdateAsync(variant);
+                    }
+                }
+
+                return Json(new { success = true, message = "Figur uppdaterad." });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error updating target");
+                return Json(new { success = false, message = "Fel: " + ex.Message });
+            }
+        }
+
+        /// <summary>Creates a new field target with optional variants. Admin only.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> CreateTarget([FromBody] CreateTargetRequest request)
+        {
+            try
+            {
+                if (!await _adminAuthorizationService.IsCurrentUserAdminAsync())
+                    return Json(new { success = false, message = "Endast administratörer." });
+
+                if (string.IsNullOrWhiteSpace(request.Name))
+                    return Json(new { success = false, message = "Namn krävs." });
+
+                using var db = _umbracoDatabaseFactory.CreateDatabase();
+                var target = new FieldTarget
+                {
+                    Name = request.Name,
+                    MaxDistanceC = request.MaxDistanceC,
+                    MaxDistanceB = request.MaxDistanceB,
+                    MaxDistanceA = request.MaxDistanceA,
+                    MaxDistanceR = request.MaxDistanceR
+                };
+                await db.InsertAsync(target);
+
+                if (request.Variants != null)
+                {
+                    foreach (var v in request.Variants)
+                    {
+                        await db.InsertAsync(new FieldTargetVariant
+                        {
+                            TargetId = target.Id,
+                            FullName = v.FullName,
+                            ImageName = v.ImageName,
+                            Color = v.Color
+                        });
+                    }
+                }
+
+                return Json(new { success = true, message = "Figur skapad.", targetId = target.Id });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error creating target");
+                return Json(new { success = false, message = "Fel: " + ex.Message });
+            }
+        }
+
+        /// <summary>Deletes a field target and all its variants. Admin only.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeleteTarget([FromBody] DeleteTargetRequest request)
+        {
+            try
+            {
+                if (!await _adminAuthorizationService.IsCurrentUserAdminAsync())
+                    return Json(new { success = false, message = "Endast administratörer." });
+
+                using var db = _umbracoDatabaseFactory.CreateDatabase();
+                // FK cascade deletes variants
+                var target = await db.FirstOrDefaultAsync<FieldTarget>("WHERE Id = @0", request.TargetId);
+                if (target == null)
+                    return Json(new { success = false, message = "Figuren hittades inte." });
+                await db.DeleteAsync(target);
+                return Json(new { success = true, message = "Figur borttagen." });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error deleting target");
+                return Json(new { success = false, message = "Fel: " + ex.Message });
+            }
+        }
+
+        /// <summary>Adds a variant to an existing target. Admin only.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> AddVariant([FromBody] AddVariantRequest request)
+        {
+            try
+            {
+                if (!await _adminAuthorizationService.IsCurrentUserAdminAsync())
+                    return Json(new { success = false, message = "Endast administratörer." });
+
+                using var db = _umbracoDatabaseFactory.CreateDatabase();
+                var variant = new FieldTargetVariant
+                {
+                    TargetId = request.TargetId,
+                    FullName = request.FullName,
+                    ImageName = request.ImageName,
+                    Color = request.Color
+                };
+                await db.InsertAsync(variant);
+                return Json(new { success = true, message = "Variant tillagd.", variantId = variant.Id });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error adding variant");
+                return Json(new { success = false, message = "Fel: " + ex.Message });
+            }
+        }
+
+        /// <summary>Deletes a variant. Admin only.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeleteVariant([FromBody] DeleteVariantRequest request)
+        {
+            try
+            {
+                if (!await _adminAuthorizationService.IsCurrentUserAdminAsync())
+                    return Json(new { success = false, message = "Endast administratörer." });
+
+                using var db = _umbracoDatabaseFactory.CreateDatabase();
+                var variant = await db.FirstOrDefaultAsync<FieldTargetVariant>("WHERE Id = @0", request.VariantId);
+                if (variant == null)
+                    return Json(new { success = false, message = "Varianten hittades inte." });
+                await db.DeleteAsync(variant);
+                return Json(new { success = true, message = "Variant borttagen." });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error deleting variant");
+                return Json(new { success = false, message = "Fel: " + ex.Message });
+            }
+        }
+
         // ── Target Group Image Upload ────────────────────────────────
 
         [HttpPost]
@@ -500,6 +739,45 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
 
         // ── Patrol Management ───────────────────────────────────────
 
+        /// <summary>Gets weapon classes that have registrations for this competition.</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetAvailableWeaponClasses(int competitionId)
+        {
+            try
+            {
+                var registrations = await _startListRepository.GetCompetitionRegistrations(competitionId);
+
+                var competition = _contentService.GetById(competitionId);
+                var compType = competition?.GetValue<string>("competitionType") ?? "Faltskytte";
+                var isMagnumFalt = compType == "MagnumFalt";
+
+                // Extract unique weapon classes/groups
+                var weaponClasses = registrations
+                    .Select(r => {
+                        if (isMagnumFalt)
+                        {
+                            // For MagnumFält: use full class ID (M1, M2, etc.)
+                            var sc = HpskSite.Models.ShootingClasses.GetById(r.MemberClass)
+                                ?? HpskSite.Models.ShootingClasses.GetByName(r.MemberClass);
+                            return sc?.Id ?? r.MemberClass;
+                        }
+                        // Standard: use weapon group letter (A, B, C, R)
+                        return !string.IsNullOrEmpty(r.MemberClass) ? r.MemberClass.Substring(0, 1) : "";
+                    })
+                    .Where(w => !string.IsNullOrEmpty(w))
+                    .Distinct()
+                    .OrderBy(w => w)
+                    .ToList();
+
+                return Json(new { success = true, weaponClasses });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting available weapon classes");
+                return Json(new { success = false, weaponClasses = new[] { "C" } });
+            }
+        }
+
         /// <summary>Generates patrols from registrations.</summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
@@ -514,35 +792,58 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 if (competition == null)
                     return Json(new { success = false, message = "Tävlingen hittades inte." });
 
-                var patrolSize = request.PatrolSize > 0 ? request.PatrolSize
-                    : competition.GetValue<int>("patrolSize");
-                if (patrolSize <= 0) patrolSize = 6;
-
-                var intervalMinutes = request.PatrolIntervalMinutes > 0 ? request.PatrolIntervalMinutes
-                    : competition.GetValue<int>("patrolIntervalMinutes");
-                if (intervalMinutes <= 0) intervalMinutes = 15;
+                var patrolSize = request.PatrolSize > 0 ? request.PatrolSize : 6;
+                var intervalMinutes = request.PatrolIntervalMinutes > 0 ? request.PatrolIntervalMinutes : 15;
 
                 // Fetch registrations
-                var registrations = await _startListRepository.GetCompetitionRegistrations(request.CompetitionId);
-                if (!registrations.Any())
+                var allRegistrations = await _startListRepository.GetCompetitionRegistrations(request.CompetitionId);
+                if (!allRegistrations.Any())
                     return Json(new { success = false, message = "Inga anmälningar hittades." });
+
+                // Filter by selected weapon classes
+                var registrations = allRegistrations;
+                if (request.WeaponClasses?.Any() == true)
+                {
+                    var selectedWcs = new HashSet<string>(request.WeaponClasses, StringComparer.OrdinalIgnoreCase);
+                    registrations = allRegistrations
+                        .Where(r =>
+                        {
+                            var wg = !string.IsNullOrEmpty(r.MemberClass) ? r.MemberClass.Substring(0, 1) : "";
+                            return selectedWcs.Contains(wg);
+                        })
+                        .ToList();
+                }
+
+                if (!registrations.Any())
+                    return Json(new { success = false, message = "Inga anmälningar för valda vapenklasser." });
+
+                using var db = _umbracoDatabaseFactory.CreateDatabase();
+
+                // Determine next patrol number (append to existing)
+                var existingMaxNumber = await db.ExecuteScalarAsync<int>(
+                    "SELECT ISNULL(MAX(PatrolNumber), 0) FROM FaltskyttePatrol WHERE CompetitionId = @0",
+                    request.CompetitionId);
+
+                // Determine weapon group label for these patrols
+                var weaponGroupLabel = request.WeaponClasses?.Any() == true
+                    ? string.Join("+", request.WeaponClasses.OrderBy(w => w))
+                    : "Alla";
 
                 // Generate patrols
                 var generator = new Services.FaltskyttePatrolGenerator();
-                var result = generator.Generate(registrations, patrolSize, intervalMinutes, request.FirstStartTime);
+                var result = generator.Generate(registrations, patrolSize, intervalMinutes, request.FirstStartTime, request.WeaponGrouping ?? "MixAll");
 
                 if (!result.Patrols.Any())
                     return Json(new { success = false, message = "Kunde inte skapa patruller." });
 
-                using var db = _umbracoDatabaseFactory.CreateDatabase();
+                // Override weapon group label and adjust patrol numbers
+                foreach (var patrol in result.Patrols)
+                {
+                    patrol.PatrolNumber += existingMaxNumber;
+                    patrol.WeaponGroup = weaponGroupLabel;
+                }
 
-                // Delete existing patrols (cascade deletes members via FK)
-                await db.ExecuteAsync(
-                    "DELETE FROM FaltskyttePatrolMember WHERE PatrolId IN (SELECT Id FROM FaltskyttePatrol WHERE CompetitionId = @0)",
-                    request.CompetitionId);
-                await db.ExecuteAsync("DELETE FROM FaltskyttePatrol WHERE CompetitionId = @0", request.CompetitionId);
-
-                // Insert new patrols
+                // Insert new patrols (append, don't delete existing)
                 foreach (var patrol in result.Patrols)
                 {
                     var dbPatrol = new FaltskyttePatrol
@@ -568,8 +869,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                     }
                 }
 
-                _logger.LogInformation("Generated {PatrolCount} Fältskytte patrols for competition {CompId}",
-                    result.TotalPatrols, request.CompetitionId);
+                _logger.LogInformation("Generated {PatrolCount} Fältskytte patrols ({Group}) for competition {CompId}",
+                    result.TotalPatrols, weaponGroupLabel, request.CompetitionId);
 
                 return Json(new { success = true, result.Message, result.TotalPatrols, result.TotalShooters });
             }
@@ -595,6 +896,25 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             var deleted = await db.ExecuteAsync("DELETE FROM FaltskyttePatrol WHERE CompetitionId = @0", request.CompetitionId);
 
             return Json(new { success = true, message = $"{deleted} patruller borttagna." });
+        }
+
+        /// <summary>Deletes patrols for a specific weapon group.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeletePatrolsByGroup([FromBody] DeletePatrolsByGroupRequest request)
+        {
+            if (!await IsAuthorizedForCompetition(request.CompetitionId))
+                return Json(new { success = false, message = "Du har inte behörighet." });
+
+            using var db = _umbracoDatabaseFactory.CreateDatabase();
+            await db.ExecuteAsync(
+                "DELETE FROM FaltskyttePatrolMember WHERE PatrolId IN (SELECT Id FROM FaltskyttePatrol WHERE CompetitionId = @0 AND WeaponGroup = @1)",
+                request.CompetitionId, request.WeaponGroup);
+            var deleted = await db.ExecuteAsync(
+                "DELETE FROM FaltskyttePatrol WHERE CompetitionId = @0 AND WeaponGroup = @1",
+                request.CompetitionId, request.WeaponGroup);
+
+            return Json(new { success = true, message = $"{deleted} patruller för {request.WeaponGroup} borttagna." });
         }
 
         /// <summary>Gets all patrols for a competition.</summary>

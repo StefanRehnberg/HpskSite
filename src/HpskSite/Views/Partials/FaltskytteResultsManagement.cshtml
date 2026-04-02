@@ -20,7 +20,7 @@
         </div>
         <div id="faltEntryBody" style="display: none;">
             <div class="card-body">
-                @await Html.PartialAsync("FaltskytteStationEntry", new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId } })
+                @await Html.PartialAsync("FaltskytteStationEntry", ViewData)
             </div>
         </div>
     </div>

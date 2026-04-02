@@ -181,13 +181,17 @@
         }
 
         (cfg.targetGroups || []).forEach(tg => {
-            let desc = `<strong>Målgrupp ${tg.group}:</strong> ${tg.figures} figur${tg.figures > 1 ? 'er' : ''}`;
-            if (tg.poangmalCount > 0) desc += `, ${tg.poangmalCount} pm`;
-            desc += ` — ${describeTgBehavior(tg)}`;
-            if (scoringMode === 'Normal' && cfg.maxShotsPerFigure && cfg.maxShotsPerFigure < 6) desc += ` (max ${cfg.maxShotsPerFigure} skott/fig)`;
-            html += `<div class="small">${desc}`;
-            if (tg.imageUrl) html += ` <img src="${tg.imageUrl}" style="max-height:50px;vertical-align:middle;margin-left:8px;border-radius:4px">`;
+            const figs = tg.figures || [];
+            html += `<div class="small"><strong>Målgrupp ${tg.group}:</strong> ${figs.length} figur${figs.length > 1 ? 'er' : ''}`;
+            if (tg.poangmalCount > 0) html += `, ${tg.poangmalCount} pm`;
             html += `</div>`;
+            figs.forEach(fig => {
+                let fdesc = `<span class="ms-3">Fig ${fig.figureNumber}: ${describeTgBehavior(fig)}`;
+                if (fig.isPoangmal) fdesc += ` <span class="badge bg-warning text-dark">Pm</span>`;
+                if (fig.imageUrl) fdesc += ` <img src="${fig.imageUrl}" style="max-height:40px;vertical-align:middle;margin-left:4px;border-radius:3px">`;
+                fdesc += `</span>`;
+                html += `<div class="small">${fdesc}</div>`;
+            });
         });
 
         body.innerHTML = html;
@@ -199,28 +203,34 @@
         card.className = `card mb-2 ${member.hasResult ? 'border-success' : ''}`;
         card.id = `shooter_${member.memberId}`;
 
-        const targetGroups = stationCfg?.targetGroups || [{ group: 1, figures: 3, poangmalCount: 0 }];
+        const targetGroups = stationCfg?.targetGroups || [{ group: 1, figures: [{ figureNumber: 1, isPoangmal: false, behavior: 'Fast' }] }];
         const isNormal = scoringMode === 'Normal';
         const stationMaxShots = stationCfg?.maxShotsPerFigure || 6;
 
-        // Build target group inputs
+        // Build per-figure inputs grouped by target group
         let tgHtml = '';
         targetGroups.forEach(tg => {
-            let label = `Målgrupp ${tg.group} (${describeTgBehavior(tg)})`;
+            const figs = tg.figures || [];
+            let label = `Målgrupp ${tg.group} (${figs.length} fig)`;
             if (isNormal && stationMaxShots < 6) label += ` max ${stationMaxShots}/fig`;
 
-            tgHtml += `<div class="mb-1"><span class="small text-muted">${label}</span><div class="d-flex gap-1 flex-wrap">`;
-            for (let f = 0; f < tg.figures; f++) {
+            tgHtml += `<div class="mb-1"><span class="small text-muted">${label}</span><div class="d-flex gap-1 flex-wrap align-items-center">`;
+            figs.forEach((fig, fIdx) => {
                 const max = isNormal ? stationMaxShots : 6;
-                tgHtml += `<input type="number" class="form-control form-control-sm fig-input" min="0" max="${max}" value="0" style="width:55px"
-                    data-member="${member.memberId}" data-tg="${tg.group}" data-fig="${f}" data-max="${max}"
-                    onchange="faltRecalcShooter(${member.memberId})">`;
-            }
-            // Poångmål inputs for this target group
-            for (let p = 0; p < tg.poangmalCount; p++) {
-                tgHtml += `<input type="number" class="form-control form-control-sm pm-input border-warning" min="0" max="50" value="" style="width:55px"
-                    data-member="${member.memberId}" placeholder="Pm" title="Poångmål ${p+1}">`;
-            }
+                const pmBadge = fig.isPoangmal ? ' border-warning' : '';
+                const title = `Fig ${fig.figureNumber}${fig.isPoangmal ? ' (Pm)' : ''} — ${fig.behavior}`;
+                tgHtml += `<div class="d-flex flex-column align-items-center">`;
+                if (fig.imageUrl) tgHtml += `<img src="${fig.imageUrl}" style="height:20px;border-radius:2px;margin-bottom:2px" alt="">`;
+                tgHtml += `<input type="number" class="form-control form-control-sm fig-input${pmBadge}" min="0" max="${max}" value="0" style="width:50px"
+                    data-member="${member.memberId}" data-tg="${tg.group}" data-fig="${fIdx}" data-max="${max}"
+                    onchange="faltRecalcShooter(${member.memberId})" title="${title}">`;
+                tgHtml += `</div>`;
+                // Pm score input right after the figure hit input
+                if (fig.isPoangmal) {
+                    tgHtml += `<input type="number" class="form-control form-control-sm pm-input border-warning" min="0" max="50" value="" style="width:50px"
+                        data-member="${member.memberId}" placeholder="Pm" title="Poängmål fig ${fig.figureNumber}">`;
+                }
+            });
             tgHtml += `</div></div>`;
         });
 

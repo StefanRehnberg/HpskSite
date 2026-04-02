@@ -5,9 +5,19 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
     public class GeneratePatrolsRequest
     {
         public int CompetitionId { get; set; }
-        public int PatrolSize { get; set; }
-        public int PatrolIntervalMinutes { get; set; }
+        public int PatrolSize { get; set; } = 6;
+        public int PatrolIntervalMinutes { get; set; } = 15;
         public DateTime? FirstStartTime { get; set; }
+        /// <summary>"Separate", "CombineAR", "MixAll"</summary>
+        public string WeaponGrouping { get; set; } = "MixAll";
+        /// <summary>Which weapon classes to include (e.g. ["C"], ["A","R"]). Null = all.</summary>
+        public List<string>? WeaponClasses { get; set; }
+    }
+
+    public class DeletePatrolsByGroupRequest
+    {
+        public int CompetitionId { get; set; }
+        public string WeaponGroup { get; set; } = "";
     }
 
     public class DeletePatrolsRequest

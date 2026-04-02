@@ -4,7 +4,9 @@
  * Opened from the competition wizard.
  *@
 
-<div class="modal fade" id="faltStationConfigModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false" aria-hidden="true">
+@await Html.PartialAsync("FaltskytteTargetPickerModal")
+
+<div class="modal fade" id="faltStationConfigModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false" aria-hidden="true" style="z-index:1060">
     <div class="modal-dialog modal-xl modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header">
@@ -113,8 +115,12 @@ function createDefaultStation(num) {
         weaponStartPosition: "45 grader",
         supportHand: "Ej stödhand",
         maxShotsPerFigure: 2,
-        targetGroups: [{ group: 1, figures: 3, poangmalCount: 0, behavior: "Fast" }]
+        targetGroups: [{ group: 1, figures: [createDefaultFigure(1)] }]
     };
+}
+
+function createDefaultFigure(num) {
+    return { figureNumber: num, isPoangmal: false, behavior: "Fast" };
 }
 
 function faltCfgUpdateStations() {
@@ -267,73 +273,161 @@ function renderActiveTab() {
 }
 
 function renderTargetGroup(tg, tgIdx, stationNum, wc, isPoang, isLastGroup) {
-    var imageHtml = '';
-    if (tg.imageUrl) {
-        imageHtml = `<img src="${tg.imageUrl}" style="height:31px;border-radius:3px" alt="">
-            <button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="faltCfgRemoveImage(${stationNum}, '${wc}', ${tgIdx})" title="Ta bort bild"><i class="bi bi-x"></i></button>`;
-    } else {
-        imageHtml = `<label class="btn btn-outline-secondary btn-sm py-0 mb-0" title="Ladda upp bild">
-                <i class="bi bi-image"></i>
-                <input type="file" class="d-none tg-imageUpload" accept="image/*"
-                    data-station="${stationNum}" data-wc="${wc}" data-tg="${tgIdx}"
-                    onchange="faltCfgUploadImage(this)">
-            </label>
-            <span class="tg-imageStatus small text-muted"></span>`;
+    const figures = tg.figures || [];
+    let figuresHtml = '';
+
+    figures.forEach((fig, fIdx) => {
+        const isLastFig = figures.length <= 1;
+        let imgHtml = '';
+        if (fig.imageUrl) {
+            imgHtml = '<img src="' + fig.imageUrl + '" style="height:28px;border-radius:3px" alt="">' +
+                (fig.targetName ? '<span class="small text-truncate" style="max-width:80px" title="' + fig.targetName + '">' + fig.targetName + '<\/span>' : '') +
+                '<button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="faltCfgRemoveFigImage(' + stationNum + ',' + "'" + wc + "'" + ',' + tgIdx + ',' + fIdx + ')" title="Ta bort bild"><i class="bi bi-trash"><\/i><\/button>';
+        } else {
+            imgHtml = '<button class="btn btn-outline-primary btn-sm py-0 mb-0" title="Figurkatalog" onclick="faltCfgPickTarget(' + stationNum + ',' + "'" + wc + "'" + ',' + tgIdx + ',' + fIdx + ')">' +
+                '<i class="bi bi-search"><\/i>' +
+                '<\/button>' +
+                '<label class="btn btn-outline-secondary btn-sm py-0 mb-0" title="Ladda upp bild">' +
+                '<i class="bi bi-upload"><\/i>' +
+                '<input type="file" class="d-none" accept="image/*"' +
+                ' data-station="' + stationNum + '" data-wc="' + wc + '" data-tg="' + tgIdx + '" data-fig="' + fIdx + '"' +
+                ' onchange="faltCfgUploadFigImage(this)">' +
+                '<\/label>';
+        }
+
+        var figLetter = String.fromCharCode(65 + fIdx);
+        figuresHtml += '<div class="d-flex align-items-center gap-2 fig-row ' + (fIdx > 0 ? 'mt-1' : '') + '" data-fig="' + fIdx + '">' +
+            (!isLastFig ? '<button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="faltCfgRemoveFigure(' + stationNum + ',' + "'" + wc + "'" + ',' + tgIdx + ',' + fIdx + ')" title="Ta bort figur"><i class="bi bi-trash"><\/i><\/button>' : '') +
+            '<span class="text-muted small text-nowrap" style="width:55px">Figur ' + figLetter + '<\/span>' +
+            '<div class="form-check mb-0">' +
+                '<input class="form-check-input fig-pm" type="checkbox"' + (fig.isPoangmal ? ' checked' : '') + '>' +
+                '<label class="form-check-label small text-nowrap">Po\u00e4ngr\u00e4kning<\/label>' +
+            '<\/div>' +
+            '<select class="form-select form-select-sm fig-behavior" style="width:auto" onchange="faltCfgToggleFigBehavior(this)">' +
+                TARGET_BEHAVIORS.map(function(b) { return '<option' + (b === fig.behavior ? ' selected' : '') + '>' + b + '<\/option>'; }).join('') +
+            '<\/select>' +
+            '<span class="fig-framCol" style="display:' + (fig.behavior === 'Framsv\u00e4ngande' ? '' : 'none') + '">' +
+                '<input type="number" class="form-control form-control-sm d-inline-block fig-delayBeforeShow" min="0" max="60" value="' + (fig.delayBeforeShowSec || 0) + '" style="width:50px" title="Fram efter (sek)">' +
+                '<input type="number" class="form-control form-control-sm d-inline-block fig-showTime" min="1" max="60" value="' + (fig.showTimeSec || 8) + '" style="width:50px" title="Visas (sek)">' +
+            '<\/span>' +
+            '<span class="fig-bortCol" style="display:' + (fig.behavior === 'Bortsv\u00e4ngande' ? '' : 'none') + '">' +
+                '<input type="number" class="form-control form-control-sm d-inline-block fig-hideAfter" min="1" max="60" value="' + (fig.hideAfterSec || 8) + '" style="width:50px" title="Bort efter (sek)">' +
+                '<input type="number" class="form-control form-control-sm d-inline-block fig-reappear" min="0" max="60" value="' + (fig.reappearSec || 0) + '" style="width:50px" title="Igen (sek)">' +
+            '<\/span>' +
+            '<div class="d-flex align-items-center gap-1 border rounded px-1 bg-body-secondary" style="height:30px">' + imgHtml + '<\/div>' +
+        '<\/div>';
+    });
+
+    return '<div class="border rounded p-2 mb-2 bg-body-tertiary tg-row" data-tg="' + tgIdx + '">' +
+        '<div class="d-flex justify-content-between align-items-center mb-1">' +
+            '<span class="fw-bold small">Målgrupp ' + tg.group + '<\/span>' +
+            '<span class="d-flex gap-1">' +
+                '<button class="btn btn-outline-primary btn-sm py-0 px-1" onclick="faltCfgAddFigure(' + stationNum + ',' + "'" + wc + "'" + ',' + tgIdx + ')" title="Lägg till figur"><i class="bi bi-plus"><\/i> Figur<\/button>' +
+                (!isLastGroup ? '<button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="faltCfgRemoveTargetGroup(' + stationNum + ',' + "'" + wc + "'" + ',' + tgIdx + ')" title="Ta bort målgrupp"><i class="bi bi-trash"><\/i><\/button>' : '') +
+            '<\/span>' +
+        '<\/div>' +
+        figuresHtml +
+    '<\/div>';
+}
+
+function faltCfgToggleFigBehavior(selectEl) {
+    var row = selectEl.closest('.fig-row');
+    var val = selectEl.value;
+    row.querySelector('.fig-framCol').style.display = val === 'Framsvängande' ? '' : 'none';
+    row.querySelector('.fig-bortCol').style.display = val === 'Bortsvängande' ? '' : 'none';
+}
+
+function faltCfgAddFigure(stationNum, wc, tgIdx) {
+    collectTabData();
+    faltCfgExpandedStation = stationNum;
+    var station = faltCfgData[wc] && faltCfgData[wc].stations ? faltCfgData[wc].stations.find(function(s) { return s.station === stationNum; }) : null;
+    if (!station) return;
+    var tg = station.targetGroups[tgIdx];
+    if (!tg) return;
+    tg.figures.push(createDefaultFigure(tg.figures.length + 1));
+    renderActiveTab();
+}
+
+function faltCfgRemoveFigure(stationNum, wc, tgIdx, fIdx) {
+    collectTabData();
+    faltCfgExpandedStation = stationNum;
+    var station = faltCfgData[wc] && faltCfgData[wc].stations ? faltCfgData[wc].stations.find(function(s) { return s.station === stationNum; }) : null;
+    if (!station) return;
+    var tg = station.targetGroups[tgIdx];
+    if (!tg || tg.figures.length <= 1) return;
+    tg.figures.splice(fIdx, 1);
+    tg.figures.forEach(function(f, i) { f.figureNumber = i + 1; });
+    renderActiveTab();
+}
+
+function faltCfgPickTarget(stationNum, wc, tgIdx, fIdx) {
+    collectTabData();
+    faltCfgExpandedStation = stationNum;
+
+    // Open picker on top of configurator (no hide/show needed)
+    faltPickerOpen(wc, function(result) {
+        // Apply selection to figure
+        var station = faltCfgData[wc] && faltCfgData[wc].stations
+            ? faltCfgData[wc].stations.find(function(s) { return s.station === stationNum; }) : null;
+        if (station && station.targetGroups[tgIdx] && station.targetGroups[tgIdx].figures[fIdx]) {
+            var fig = station.targetGroups[tgIdx].figures[fIdx];
+            fig.imageUrl = result.imageUrl;
+            fig.targetName = result.targetName;
+            fig.targetColor = result.targetColor;
+        }
+        renderActiveTab();
+    });
+}
+
+function faltCfgRemoveFigImage(stationNum, wc, tgIdx, fIdx) {
+    collectTabData();
+    faltCfgExpandedStation = stationNum;
+    var station = faltCfgData[wc] && faltCfgData[wc].stations ? faltCfgData[wc].stations.find(function(s) { return s.station === stationNum; }) : null;
+    if (station && station.targetGroups[tgIdx] && station.targetGroups[tgIdx].figures[fIdx]) {
+        station.targetGroups[tgIdx].figures[fIdx].imageUrl = null;
     }
-
-    return `
-    <div class="border rounded p-2 mb-2 bg-light tg-row" data-tg="${tgIdx}">
-        <div class="d-flex align-items-center gap-2">
-            <span class="fw-bold small text-nowrap">Målgrupp ${tg.group}</span>
-            <div class="row g-2 flex-grow-1 align-items-end">
-                <div class="col-auto">
-                    <label class="form-label small mb-0">Figurer</label>
-                    <input type="number" class="form-control form-control-sm tg-figures" min="1" max="10" value="${tg.figures}" style="width:65px">
-                </div>
-                <div class="col-auto">
-                    <label class="form-label small mb-0">Poängmål</label>
-                    <input type="number" class="form-control form-control-sm tg-poangmal" min="0" max="10" value="${tg.poangmalCount}" style="width:65px">
-                </div>
-                <div class="col-auto">
-                    <label class="form-label small mb-0">Typ</label>
-                    <select class="form-select form-select-sm tg-behavior" onchange="faltCfgToggleBehavior(this)">
-                        ${TARGET_BEHAVIORS.map(b => `<option ${b === tg.behavior ? 'selected' : ''}>${b}</option>`).join('')}
-                    </select>
-                </div>
-                <div class="col-auto tg-framCol" style="display:${tg.behavior === 'Framsvängande' ? '' : 'none'}">
-                    <label class="form-label small mb-0">Fram (sek)</label>
-                    <input type="number" class="form-control form-control-sm tg-delayBeforeShow" min="0" max="60" value="${tg.delayBeforeShowSec || 0}" style="width:60px">
-                </div>
-                <div class="col-auto tg-framCol" style="display:${tg.behavior === 'Framsvängande' ? '' : 'none'}">
-                    <label class="form-label small mb-0">Visas (sek)</label>
-                    <input type="number" class="form-control form-control-sm tg-showTime" min="1" max="60" value="${tg.showTimeSec || 8}" style="width:60px">
-                </div>
-                <div class="col-auto tg-bortCol" style="display:${tg.behavior === 'Bortsvängande' ? '' : 'none'}">
-                    <label class="form-label small mb-0">Bort (sek)</label>
-                    <input type="number" class="form-control form-control-sm tg-hideAfter" min="1" max="60" value="${tg.hideAfterSec || 8}" style="width:60px">
-                </div>
-                <div class="col-auto tg-bortCol" style="display:${tg.behavior === 'Bortsvängande' ? '' : 'none'}">
-                    <label class="form-label small mb-0">Igen (sek)</label>
-                    <input type="number" class="form-control form-control-sm tg-reappear" min="0" max="60" value="${tg.reappearSec || 0}" style="width:60px">
-                </div>
-            </div>
-            <div class="d-flex align-items-center gap-1 border rounded px-2 py-1 bg-white flex-shrink-0">
-                ${imageHtml}
-            </div>
-            ${!isLastGroup ? `<button class="btn btn-outline-danger btn-sm py-0 px-1 flex-shrink-0" onclick="faltCfgRemoveTargetGroup(${stationNum}, '${wc}', ${tgIdx})" title="Ta bort målgrupp">
-                <i class="bi bi-trash"></i>
-            </button>` : ''}
-        </div>
-    </div>`;
+    renderActiveTab();
 }
 
-function faltCfgToggleBehavior(selectEl) {
-    const row = selectEl.closest('.tg-row');
-    const val = selectEl.value;
-    row.querySelectorAll('.tg-framCol').forEach(el => el.style.display = val === 'Framsvängande' ? '' : 'none');
-    row.querySelectorAll('.tg-bortCol').forEach(el => el.style.display = val === 'Bortsvängande' ? '' : 'none');
+async function faltCfgUploadFigImage(inputEl) {
+    var file = inputEl.files[0];
+    if (!file) return;
+    var stationNum = parseInt(inputEl.dataset.station);
+    var wc = inputEl.dataset.wc;
+    var tgIdx = parseInt(inputEl.dataset.tg);
+    var fIdx = parseInt(inputEl.dataset.fig);
+
+    var compIdEl = document.getElementById('editCompetitionId') || document.querySelector('input[name="competitionId"]');
+    var compId = (compIdEl && compIdEl.value) || (window.currentCompetitionData && window.currentCompetitionData.competitionId) || 0;
+    if (!compId || compId === '0') compId = 'temp_' + Date.now();
+
+    var formData = new FormData();
+    formData.append('file', file);
+    formData.append('competitionId', compId);
+    formData.append('weaponClass', wc);
+    formData.append('stationNumber', stationNum);
+    formData.append('groupNumber', (tgIdx + 1) * 100 + (fIdx + 1));
+
+    try {
+        var resp = await fetch('/umbraco/surface/Faltskytte/UploadTargetGroupImage', {
+            method: 'POST',
+            body: formData
+        });
+        if (!resp.ok) return;
+        var data = await resp.json();
+        if (data.success) {
+            collectTabData();
+            var station = faltCfgData[wc] && faltCfgData[wc].stations ? faltCfgData[wc].stations.find(function(s) { return s.station === stationNum; }) : null;
+            if (station && station.targetGroups[tgIdx] && station.targetGroups[tgIdx].figures[fIdx]) {
+                station.targetGroups[tgIdx].figures[fIdx].imageUrl = data.imageUrl;
+            }
+            faltCfgExpandedStation = stationNum;
+            renderActiveTab();
+        }
+    } catch(err) { console.error(err); }
 }
 
+// Legacy — kept for backward compat
 async function faltCfgUploadImage(inputEl) {
     const file = inputEl.files[0];
     if (!file) return;
@@ -377,7 +471,8 @@ async function faltCfgUploadImage(inputEl) {
             collectTabData();
             const station = faltCfgData[wc]?.stations?.find(s => s.station === stationNum);
             if (station && station.targetGroups[tgIdx]) {
-                station.targetGroups[tgIdx].imageUrl = data.imageUrl;
+                // Legacy path
+            if (station && station.targetGroups[tgIdx]) { station.targetGroups[tgIdx].imageUrl = data.imageUrl; }
             }
             statusEl.textContent = '';
             faltCfgExpandedStation = stationNum;
@@ -408,8 +503,7 @@ function faltCfgAddTargetGroup(stationNum, wc) {
     if (!station) return;
     station.targetGroups.push({
         group: station.targetGroups.length + 1,
-        figures: 1, poangmalCount: 0,
-        behavior: "Fast"
+        figures: [createDefaultFigure(1)]
     });
     renderActiveTab();
 }
@@ -442,23 +536,32 @@ function collectTabData() {
         const tgRows = card.querySelectorAll('.tg-row');
         const oldTargetGroups = station.targetGroups || [];
         station.targetGroups = [];
-        tgRows.forEach((row, idx) => {
-            const behavior = row.querySelector('.tg-behavior')?.value || "Fast";
-            const tg = {
-                group: idx + 1,
-                figures: parseInt(row.querySelector('.tg-figures')?.value) || 1,
-                poangmalCount: parseInt(row.querySelector('.tg-poangmal')?.value) || 0,
-                behavior: behavior,
-                imageUrl: oldTargetGroups[idx]?.imageUrl || null
-            };
-            if (behavior === 'Framsvängande') {
-                tg.delayBeforeShowSec = parseInt(row.querySelector('.tg-delayBeforeShow')?.value) || 0;
-                tg.showTimeSec = parseInt(row.querySelector('.tg-showTime')?.value) || 8;
-            } else if (behavior === 'Bortsvängande') {
-                tg.hideAfterSec = parseInt(row.querySelector('.tg-hideAfter')?.value) || 8;
-                tg.reappearSec = parseInt(row.querySelector('.tg-reappear')?.value) || 0;
-            }
-            station.targetGroups.push(tg);
+        tgRows.forEach((tgRow, tgIdx) => {
+            const oldTg = oldTargetGroups[tgIdx] || {};
+            const oldFigures = oldTg.figures || [];
+            const figRows = tgRow.querySelectorAll('.fig-row');
+            const figures = [];
+            figRows.forEach((fRow, fIdx) => {
+                const oldFig = oldFigures[fIdx] || {};
+                const behavior = fRow.querySelector('.fig-behavior')?.value || "Fast";
+                const fig = {
+                    figureNumber: fIdx + 1,
+                    isPoangmal: fRow.querySelector('.fig-pm')?.checked || false,
+                    behavior: behavior,
+                    imageUrl: oldFig.imageUrl || null,
+                    targetName: oldFig.targetName || null,
+                    targetColor: oldFig.targetColor || null
+                };
+                if (behavior === 'Framsvängande') {
+                    fig.delayBeforeShowSec = parseInt(fRow.querySelector('.fig-delayBeforeShow')?.value) || 0;
+                    fig.showTimeSec = parseInt(fRow.querySelector('.fig-showTime')?.value) || 8;
+                } else if (behavior === 'Bortsvängande') {
+                    fig.hideAfterSec = parseInt(fRow.querySelector('.fig-hideAfter')?.value) || 8;
+                    fig.reappearSec = parseInt(fRow.querySelector('.fig-reappear')?.value) || 0;
+                }
+                figures.push(fig);
+            });
+            station.targetGroups.push({ group: tgIdx + 1, figures: figures });
         });
     });
 }
@@ -547,21 +650,26 @@ async function faltCfgTryClose() {
 }
 
 function faltCfgClose() {
-    const cfgEl = document.getElementById('faltStationConfigModal');
-    const returnToEdit = window._faltCfgTargetField === 'edit_faltStationConfigJson';
+    var cfgEl = document.getElementById('faltStationConfigModal');
+    var returnToEdit = window._faltCfgReturnToEditModal;
+    var returnToWizard = !returnToEdit && !window._faltCfgReturnToEditModal;
 
-    function onCfgHidden() {
-        cfgEl.removeEventListener('hidden.bs.modal', onCfgHidden);
-        window._faltCfgTargetField = null;
-        if (returnToEdit) {
-            bootstrap.Modal.getOrCreateInstance(document.getElementById('competitionEditModal')).show();
-        } else {
+    window._faltCfgTargetField = null;
+    window._faltCfgReturnToEditModal = false;
+
+    if (returnToEdit) {
+        // Just close configurator — edit modal is still open underneath
+        bootstrap.Modal.getInstance(cfgEl)?.hide();
+    } else {
+        // Return to wizard
+        var onCfgHidden = function() {
+            cfgEl.removeEventListener('hidden.bs.modal', onCfgHidden);
             window._wizardSkipReset = true;
             bootstrap.Modal.getOrCreateInstance(document.getElementById('competitionWizardModal')).show();
-        }
+        };
+        cfgEl.addEventListener('hidden.bs.modal', onCfgHidden);
+        bootstrap.Modal.getInstance(cfgEl)?.hide();
     }
-    cfgEl.addEventListener('hidden.bs.modal', onCfgHidden);
-    bootstrap.Modal.getInstance(cfgEl)?.hide();
 }
 
 function faltDescribeBehavior(tg) {
@@ -605,11 +713,14 @@ function faltCfgPrint() {
                 w.document.write('<div class="rule"><strong>Max skott per figur:<' + '/strong> ' + st.maxShotsPerFigure + '<' + '/div>');
             }
             st.targetGroups.forEach(function(tg) {
-                var desc = tg.figures + ' figur' + (tg.figures > 1 ? 'er' : '');
-                if (tg.poangmalCount > 0) desc += ', ' + tg.poangmalCount + ' po\u00e4ngm\u00e5l';
-                desc += ' \u2014 ' + faltDescribeBehavior(tg);
-                var tgHtml = '<div class="tg"><strong>M\u00e5lgrupp ' + tg.group + ':<' + '/strong> ' + desc;
-                if (tg.imageUrl) tgHtml += '<br><img src="' + tg.imageUrl + '" style="max-height:80px;margin-top:6px">';
+                var tgHtml = '<div class="tg"><strong>Målgrupp ' + tg.group + ':<' + '/strong>';
+                (tg.figures || []).forEach(function(fig) {
+                    tgHtml += '<div style="margin-left:10px">Figur ' + fig.figureNumber;
+                    if (fig.isPoangmal) tgHtml += ' <strong>(Poängmål)<' + '/strong>';
+                    tgHtml += ' — ' + faltDescribeBehavior(fig);
+                    if (fig.imageUrl) tgHtml += '<br><img src="' + fig.imageUrl + '" style="max-height:60px;margin-top:4px">';
+                    tgHtml += '<' + '/div>';
+                });
                 tgHtml += '<' + '/div>';
                 w.document.write(tgHtml);
             });

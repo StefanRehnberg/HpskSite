@@ -995,6 +995,14 @@ namespace HpskSite.Controllers
                                 value = boolValue;
                             }
                         }
+                        else if (field.Key == "stationConfig" && value != null)
+                        {
+                            // stationConfig is a JSON object — ensure stored as string
+                            if (value is System.Text.Json.JsonElement scJsonElement)
+                            {
+                                value = scJsonElement.GetRawText();
+                            }
+                        }
                         else if (field.Key == "shootingClassIds" && value != null)
                         {
                             // Convert to JSON array string for storage
@@ -1281,6 +1289,14 @@ namespace HpskSite.Controllers
                             if (DateTime.TryParse(value.ToString(), out DateTime dateValue))
                             {
                                 value = dateValue;
+                            }
+                        }
+                        else if (field.Key == "stationConfig" && value != null)
+                        {
+                            // stationConfig is a JSON object — ensure stored as string
+                            if (value is System.Text.Json.JsonElement scJsonElement)
+                            {
+                                value = scJsonElement.GetRawText();
                             }
                         }
                         else if (field.Key == "shootingClassIds" && value != null)

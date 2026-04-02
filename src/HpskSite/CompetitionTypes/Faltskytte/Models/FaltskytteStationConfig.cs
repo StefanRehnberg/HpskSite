@@ -8,17 +8,14 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
     /// </summary>
     public class FaltskytteCompetitionConfig
     {
-        /// <summary>
-        /// Keyed by weapon class: "A", "B", "C", "R", "M1"-"M9".
-        /// </summary>
+        /// <summary>Keyed by weapon class: "A", "B", "C", "R", "M1"-"M9".</summary>
         public Dictionary<string, FaltskytteWeaponClassConfig> WeaponConfigs { get; set; } = new();
 
-        /// <summary>Gets station config for a specific weapon class. Falls back to first available if not found.</summary>
+        /// <summary>Gets station config for a specific weapon class. Falls back to first available.</summary>
         public FaltskytteWeaponClassConfig? GetForWeaponClass(string weaponClass)
         {
             if (WeaponConfigs.TryGetValue(weaponClass, out var config))
                 return config;
-            // Try first character (e.g. "C2" → "C")
             if (weaponClass.Length > 0 && WeaponConfigs.TryGetValue(weaponClass.Substring(0, 1), out config))
                 return config;
             return WeaponConfigs.Values.FirstOrDefault();
@@ -32,36 +29,21 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
     }
 
     /// <summary>
-    /// Configuration for a single station in a Fältskytte competition.
-    /// Includes Förutsättningar (shooting rules) and Målgrupper (target groups).
+    /// Configuration for a single station. Includes Förutsättningar and Målgrupper.
     /// </summary>
     public class FaltskytteStationConfig
     {
-        /// <summary>Station number (1-based)</summary>
         public int Station { get; set; }
-
-        /// <summary>Shooting time in seconds (typically 10-45)</summary>
         public int ShootingTimeSec { get; set; }
-
-        /// <summary>Stående, Knästående, Sittande, Liggande, Valfri</summary>
         public string ShooterStartPosition { get; set; } = "";
-
-        /// <summary>45 grader, Riktning tillåten</summary>
         public string WeaponStartPosition { get; set; } = "";
-
-        /// <summary>Stödhand tillåten, Ej stödhand</summary>
         public string SupportHand { get; set; } = "";
-
-        /// <summary>Max counted shots per figure in Normal mode. Ignored in Poäng mode.</summary>
         public int MaxShotsPerFigure { get; set; } = 6;
-
-        /// <summary>Target groups at this station</summary>
         public List<FaltskytteTargetGroup> TargetGroups { get; set; } = new();
 
-        // Computed from target groups
         [System.Text.Json.Serialization.JsonIgnore]
         [JsonIgnore]
-        public int TotalFigures => TargetGroups.Sum(g => g.Figures);
+        public int TotalFigures => TargetGroups.Sum(g => g.FigureCount);
 
         [System.Text.Json.Serialization.JsonIgnore]
         [JsonIgnore]
@@ -72,47 +54,46 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public bool HasPoangmal => TotalPoangmal > 0;
     }
 
-    /// <summary>A target group (Målgrupp) within a station.</summary>
+    /// <summary>A target group (Målgrupp) containing one or more individual figures.</summary>
     public class FaltskytteTargetGroup
     {
-        /// <summary>Group number (1-based)</summary>
         public int Group { get; set; }
+        public List<FaltskytteFigure> Figures { get; set; } = new();
 
-        /// <summary>Number of target figures in this group</summary>
-        public int Figures { get; set; }
+        [System.Text.Json.Serialization.JsonIgnore]
+        [JsonIgnore]
+        public int FigureCount => Figures.Count;
 
-        /// <summary>How many figures have scoring rings (poångmål)</summary>
-        public int PoangmalCount { get; set; }
+        [System.Text.Json.Serialization.JsonIgnore]
+        [JsonIgnore]
+        public int PoangmalCount => Figures.Count(f => f.IsPoangmal);
 
-        /// <summary>Fast, Framsvängande, Bortsvängande</summary>
-        public string Behavior { get; set; } = "Fast";
-
-        // ── Framsvängande fields ──
-        /// <summary>Seconds delay before target appears (Framsvängande only)</summary>
-        public int? DelayBeforeShowSec { get; set; }
-
-        /// <summary>Seconds the target is visible (Framsvängande only)</summary>
-        public int? ShowTimeSec { get; set; }
-
-        // ── Bortsvängande fields ──
-        /// <summary>Seconds before target swings away (Bortsvängande only)</summary>
-        public int? HideAfterSec { get; set; }
-
-        /// <summary>Seconds until target reappears briefly (Bortsvängande, 0 or null = no reappear)</summary>
-        public int? ReappearSec { get; set; }
-
-        /// <summary>URL to uploaded image of the target figures used in this group</summary>
-        public string? ImageUrl { get; set; }
+        [System.Text.Json.Serialization.JsonIgnore]
+        [JsonIgnore]
+        public bool HasPoangmal => Figures.Any(f => f.IsPoangmal);
     }
 
-    /// <summary>
-    /// Helper to parse station config from JSON, handling both old flat format and new per-weapon-class format.
-    /// </summary>
+    /// <summary>An individual target figure within a Målgrupp.</summary>
+    public class FaltskytteFigure
+    {
+        public int FigureNumber { get; set; }
+        public bool IsPoangmal { get; set; }
+        /// <summary>Fast, Framsvängande, Bortsvängande</summary>
+        public string Behavior { get; set; } = "Fast";
+        public int? DelayBeforeShowSec { get; set; }
+        public int? ShowTimeSec { get; set; }
+        public int? HideAfterSec { get; set; }
+        public int? ReappearSec { get; set; }
+        public string? ImageUrl { get; set; }
+        /// <summary>Optional reference to a catalog target name</summary>
+        public string? TargetName { get; set; }
+        /// <summary>Optional color variant selected from catalog</summary>
+        public string? TargetColor { get; set; }
+    }
+
+    /// <summary>Parses station config JSON. Handles direct format from JS.</summary>
     public static class FaltskytteConfigParser
     {
-        /// <summary>
-        /// Parses the stationConfig JSON string, auto-migrating old flat format.
-        /// </summary>
         public static FaltskytteCompetitionConfig Parse(string? json)
         {
             if (string.IsNullOrEmpty(json))
@@ -120,87 +101,20 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
 
             var trimmed = json.TrimStart();
 
-            // Object format: starts with {
             if (trimmed.StartsWith("{"))
             {
-                // Try wrapped format first: { "WeaponConfigs": { "C": {...} } }
+                // Try wrapped format: { "WeaponConfigs": { "C": {...} } }
                 var wrapped = JsonConvert.DeserializeObject<FaltskytteCompetitionConfig>(json);
                 if (wrapped?.WeaponConfigs?.Any() == true)
                     return wrapped;
 
-                // Direct format from JS: { "C": { "stations": [...] }, "A": {...} }
+                // Direct format from JS: { "C": { "stations": [...] } }
                 var direct = JsonConvert.DeserializeObject<Dictionary<string, FaltskytteWeaponClassConfig>>(json);
                 if (direct?.Any() == true)
-                {
                     return new FaltskytteCompetitionConfig { WeaponConfigs = direct };
-                }
-
-                return new FaltskytteCompetitionConfig();
-            }
-
-            // Old flat format: starts with [ (array of stations)
-            if (trimmed.StartsWith("["))
-            {
-                // Try to deserialize as new-style station list first
-                var stations = JsonConvert.DeserializeObject<List<FaltskytteStationConfig>>(json);
-                if (stations != null && stations.Any())
-                {
-                    return new FaltskytteCompetitionConfig
-                    {
-                        WeaponConfigs = new Dictionary<string, FaltskytteWeaponClassConfig>
-                        {
-                            ["C"] = new FaltskytteWeaponClassConfig { Stations = stations }
-                        }
-                    };
-                }
-
-                // Try legacy flat format (just station number + figures + poangmalCount)
-                try
-                {
-                    var legacy = JsonConvert.DeserializeObject<List<LegacyStationConfig>>(json);
-                    if (legacy != null && legacy.Any())
-                    {
-                        var migrated = legacy.Select(l => new FaltskytteStationConfig
-                        {
-                            Station = l.Station,
-                            ShootingTimeSec = 30,
-                            ShooterStartPosition = "Valfri",
-                            WeaponStartPosition = "45 grader",
-                            SupportHand = "Ej stödhand",
-                            MaxShotsPerFigure = 6,
-                            TargetGroups = new List<FaltskytteTargetGroup>
-                            {
-                                new FaltskytteTargetGroup
-                                {
-                                    Group = 1,
-                                    Figures = l.Figures,
-                                    PoangmalCount = l.PoangmalCount,
-                                    Behavior = "Fast"
-                                }
-                            }
-                        }).ToList();
-
-                        return new FaltskytteCompetitionConfig
-                        {
-                            WeaponConfigs = new Dictionary<string, FaltskytteWeaponClassConfig>
-                            {
-                                ["C"] = new FaltskytteWeaponClassConfig { Stations = migrated }
-                            }
-                        };
-                    }
-                }
-                catch { }
             }
 
             return new FaltskytteCompetitionConfig();
-        }
-
-        // Legacy format from the original flat station config
-        private class LegacyStationConfig
-        {
-            public int Station { get; set; }
-            public int Figures { get; set; }
-            public int PoangmalCount { get; set; }
         }
     }
 }

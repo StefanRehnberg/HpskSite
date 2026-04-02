@@ -1,0 +1,110 @@
+using NPoco;
+
+namespace HpskSite.CompetitionTypes.Faltskytte.Models
+{
+    [TableName("FieldTarget")]
+    [PrimaryKey("Id", AutoIncrement = true)]
+    public class FieldTarget
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = "";
+        public int? MaxDistanceC { get; set; }
+        public int? MaxDistanceB { get; set; }
+        public int? MaxDistanceA { get; set; }
+        public int? MaxDistanceR { get; set; }
+    }
+
+    [TableName("FieldTargetVariant")]
+    [PrimaryKey("Id", AutoIncrement = true)]
+    public class FieldTargetVariant
+    {
+        public int Id { get; set; }
+        public int TargetId { get; set; }
+        public string FullName { get; set; } = "";
+        public string ImageName { get; set; } = "";
+        public string Color { get; set; } = "";
+    }
+
+    // View model for API response
+    public class FieldTargetView
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = "";
+        public int? MaxDistanceC { get; set; }
+        public int? MaxDistanceB { get; set; }
+        public int? MaxDistanceA { get; set; }
+        public int? MaxDistanceR { get; set; }
+        public List<FieldTargetVariantView> Variants { get; set; } = new();
+    }
+
+    public class FieldTargetVariantView
+    {
+        public int Id { get; set; }
+        public string FullName { get; set; } = "";
+        public string ImageName { get; set; } = "";
+        public string ImageUrl => $"/images/field-targets/{ImageName}";
+        public string Color { get; set; } = "";
+    }
+
+    public class UpdateTargetDistancesRequest
+    {
+        public int TargetId { get; set; }
+        public int? MaxDistanceC { get; set; }
+        public int? MaxDistanceB { get; set; }
+        public int? MaxDistanceA { get; set; }
+        public int? MaxDistanceR { get; set; }
+    }
+
+    public class UpdateTargetRequest
+    {
+        public int TargetId { get; set; }
+        public string? Name { get; set; }
+        public int? MaxDistanceC { get; set; }
+        public int? MaxDistanceB { get; set; }
+        public int? MaxDistanceA { get; set; }
+        public int? MaxDistanceR { get; set; }
+        public List<UpdateVariantRequest>? Variants { get; set; }
+    }
+
+    public class UpdateVariantRequest
+    {
+        public int Id { get; set; }
+        public string? FullName { get; set; }
+        public string? Color { get; set; }
+    }
+
+    public class CreateTargetRequest
+    {
+        public string Name { get; set; } = "";
+        public int? MaxDistanceC { get; set; }
+        public int? MaxDistanceB { get; set; }
+        public int? MaxDistanceA { get; set; }
+        public int? MaxDistanceR { get; set; }
+        public List<CreateVariantRequest>? Variants { get; set; }
+    }
+
+    public class CreateVariantRequest
+    {
+        public string FullName { get; set; } = "";
+        public string ImageName { get; set; } = "";
+        public string Color { get; set; } = "";
+    }
+
+    public class DeleteTargetRequest
+    {
+        public int TargetId { get; set; }
+    }
+
+    public class AddVariantRequest
+    {
+        public int TargetId { get; set; }
+        public string FullName { get; set; } = "";
+        public string ImageName { get; set; } = "";
+        public string Color { get; set; } = "";
+    }
+
+    public class DeleteVariantRequest
+    {
+        public int VariantId { get; set; }
+    }
+}
