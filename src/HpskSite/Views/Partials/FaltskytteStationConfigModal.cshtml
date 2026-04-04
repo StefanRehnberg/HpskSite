@@ -2,6 +2,8 @@
  * Fältskytte Station Configurator Modal
  * Per-weapon-class station config with Förutsättningar, Målgrupper, and print support.
  * Opened from the competition wizard.
+ * Architecture: Model-first — faltCfgData is the single source of truth.
+ * All form controls update the model directly via onchange handlers.
  *@
 
 @await Html.PartialAsync("FaltskytteTargetPickerModal")
@@ -27,14 +29,26 @@
                 <ul class="nav nav-tabs mb-3" id="faltCfgWeaponTabs" role="tablist">
                 </ul>
 
-                <!-- Copy button -->
-                <div class="mb-3">
+                <!-- Link / Copy controls -->
+                <div class="mb-3 d-flex flex-wrap gap-3 align-items-end">
                     <div class="d-flex gap-2 align-items-center">
-                        <span class="text-muted small">Kopiera konfiguration från:</span>
+                        <span class="text-muted small">Kopiera från:</span>
                         <select class="form-select form-select-sm" id="faltCfg_copySource" style="width:auto">
                             <option value="">Välj...</option>
                         </select>
+                        <div class="input-group input-group-sm" style="width:auto">
+                            <span class="input-group-text" title="Tidsskillnad per station (sek)">&#916;sek</span>
+                            <input type="number" class="form-control form-control-sm" id="faltCfg_copyTimeOffset" value="0" style="width:60px" title="Tidsskillnad (sek). T.ex. +5 ger 5 sek längre skjuttid.">
+                        </div>
                         <button class="btn btn-outline-secondary btn-sm" onclick="faltCfgCopyFrom()">Kopiera</button>
+                    </div>
+                    <div class="d-flex gap-2 align-items-center">
+                        <button class="btn btn-outline-primary btn-sm" onclick="faltCfgLinkTab()" id="faltCfg_linkBtn" title="Länka den aktiva fliken med en annan vapenklass">
+                            <i class="bi bi-link-45deg me-1"></i>Länka...
+                        </button>
+                        <button class="btn btn-outline-warning btn-sm" onclick="faltCfgUnlinkTab()" id="faltCfg_unlinkBtn" style="display:none" title="Avlänka den aktiva fliken">
+                            <i class="bi bi-x-circle me-1"></i>Avlänka
+                        </button>
                     </div>
                 </div>
 
@@ -43,9 +57,6 @@
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-outline-info" onclick="faltCfgPrint()">
-                    <i class="bi bi-printer me-1"></i>Skriv ut stationskort
-                </button>
                 <button class="btn btn-primary" onclick="faltCfgTryClose()">
                     <i class="bi bi-x-circle me-1"></i>Stäng
                 </button>
@@ -62,21 +73,80 @@ let faltCfgActiveTab = "C";
 let faltCfgStationCount = 8;
 let faltCfgExpandedStation = 1; // Track which station card is open
 let faltCfgDirtyStations = new Set(); // Stations with unsaved changes
+let faltCfgLinkedGroups = []; // e.g. [["A","R"], ["B","C"]] — linked weapon classes share configs
 const faltCfgScoringMode = () => document.getElementById('wizard_scoringMode')?.value || 'Normal';
+
+// Returns the linked group array that contains wc, or null
+function faltCfgGetLinkedGroup(wc) {
+    return faltCfgLinkedGroups.find(function(g) { return g.indexOf(wc) >= 0; }) || null;
+}
+
+// Returns the display label for a tab (e.g. "A, R" if linked)
+function faltCfgTabLabel(wc) {
+    var grp = faltCfgGetLinkedGroup(wc);
+    return grp ? grp.join(', ') : wc;
+}
+
+// Propagate data from wc to all its linked siblings
+function faltCfgSyncLinked(wc) {
+    var grp = faltCfgGetLinkedGroup(wc);
+    if (!grp) return;
+    var src = JSON.stringify(faltCfgData[wc]);
+    grp.forEach(function(other) {
+        if (other !== wc) faltCfgData[other] = JSON.parse(src);
+    });
+}
 
 const SHOOTER_POSITIONS = ["Stående", "Knästående", "Sittande", "Liggande", "Valfri"];
 const WEAPON_POSITIONS = ["45 grader", "Riktning tillåten"];
 const SUPPORT_HAND = ["Ej stödhand", "Stödhand tillåten"];
 const TARGET_BEHAVIORS = ["Fast", "Framsvängande", "Bortsvängande"];
 
+// ─── Model-update helpers ───────────────────────────────────────────
+// Every form control calls one of these on change. The model is always current.
+
+function faltCfgMarkDirty(wc, stationNum) {
+    // Sync linked classes and mark them all dirty
+    faltCfgSyncLinked(wc);
+    var grp = faltCfgGetLinkedGroup(wc);
+    var classes = grp || [wc];
+    classes.forEach(function(c) {
+        faltCfgDirtyStations.add(c + '_' + stationNum);
+    });
+    var d = document.getElementById('faltCfgDirty_' + wc + '_' + stationNum);
+    var s = document.getElementById('faltCfgSaved_' + wc + '_' + stationNum);
+    if (d) d.style.display = '';
+    if (s) s.style.display = 'none';
+}
+
+function faltCfgUpdateStation(wc, stationNum, field, value) {
+    var station = faltCfgData[wc]?.stations?.find(function(s) { return s.station === stationNum; });
+    if (station) { station[field] = value; faltCfgMarkDirty(wc, stationNum); }
+}
+
+function faltCfgUpdateGroup(wc, stationNum, tgIdx, field, value) {
+    var station = faltCfgData[wc]?.stations?.find(function(s) { return s.station === stationNum; });
+    if (station && station.targetGroups[tgIdx]) { station.targetGroups[tgIdx][field] = value; faltCfgMarkDirty(wc, stationNum); }
+}
+
+function faltCfgUpdateFigure(wc, stationNum, tgIdx, fIdx, field, value) {
+    var station = faltCfgData[wc]?.stations?.find(function(s) { return s.station === stationNum; });
+    var fig = station?.targetGroups[tgIdx]?.figures[fIdx];
+    if (fig) { fig[field] = value; faltCfgMarkDirty(wc, stationNum); }
+}
+
+// ─── Initialization ─────────────────────────────────────────────────
+
 function faltCfgOpen(weaponClasses, existingConfig) {
     faltCfgWeaponClasses = weaponClasses || ["C"];
     faltCfgData = existingConfig || {};
     faltCfgDirtyStations = new Set();
+    faltCfgLinkedGroups = faltCfgData._linkedGroups || [];
     faltCfgStationCount = parseInt(document.getElementById('faltCfg_stationCount').value) || 8;
 
     // Detect station count from existing config
     for (const wc of Object.keys(faltCfgData)) {
+        if (wc === '_linkedGroups') continue;
         if (faltCfgData[wc]?.stations?.length > 0) {
             faltCfgStationCount = faltCfgData[wc].stations.length;
             document.getElementById('faltCfg_stationCount').value = faltCfgStationCount;
@@ -91,10 +161,29 @@ function faltCfgOpen(weaponClasses, existingConfig) {
     });
 
     buildTabs();
-    faltCfgActiveTab = faltCfgWeaponClasses[0];
+    faltCfgActiveTab = faltCfgGetVisibleTabs()[0] || faltCfgWeaponClasses[0];
+    faltCfgUpdateLinkButtons();
     renderActiveTab();
 
     bootstrap.Modal.getOrCreateInstance(document.getElementById('faltStationConfigModal')).show();
+}
+
+// Returns the list of "visible" tab weapon classes (one per linked group, plus unlinked)
+function faltCfgGetVisibleTabs() {
+    var seen = new Set();
+    var tabs = [];
+    faltCfgWeaponClasses.forEach(function(wc) {
+        if (seen.has(wc)) return;
+        var grp = faltCfgGetLinkedGroup(wc);
+        if (grp) {
+            tabs.push(grp[0]); // first in group is the "representative"
+            grp.forEach(function(g) { seen.add(g); });
+        } else {
+            tabs.push(wc);
+            seen.add(wc);
+        }
+    });
+    return tabs;
 }
 
 function ensureStations(wc) {
@@ -135,12 +224,17 @@ function buildTabs() {
     tabsEl.innerHTML = '';
     copySelect.innerHTML = '<option value="">Välj...</option>';
 
-    faltCfgWeaponClasses.forEach((wc, idx) => {
+    var visibleTabs = faltCfgGetVisibleTabs();
+    visibleTabs.forEach((wc, idx) => {
+        var label = faltCfgTabLabel(wc);
         const li = document.createElement('li');
         li.className = 'nav-item';
-        li.innerHTML = `<button class="nav-link ${idx === 0 ? 'active' : ''}" onclick="faltCfgSwitchTab('${wc}', this)">${wc}</button>`;
+        li.innerHTML = `<button class="nav-link ${idx === 0 ? 'active' : ''}" onclick="faltCfgSwitchTab('${wc}', this)">${label}</button>`;
         tabsEl.appendChild(li);
+    });
 
+    // Copy source: show all individual weapon classes (not grouped)
+    faltCfgWeaponClasses.forEach(function(wc) {
         const opt = document.createElement('option');
         opt.value = wc;
         opt.textContent = wc;
@@ -149,22 +243,133 @@ function buildTabs() {
 }
 
 function faltCfgSwitchTab(wc, btn) {
-    // Save current tab data
-    collectTabData();
     faltCfgActiveTab = wc;
     document.querySelectorAll('#faltCfgWeaponTabs .nav-link').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
+    faltCfgUpdateLinkButtons();
     renderActiveTab();
+}
+
+function faltCfgUpdateLinkButtons() {
+    var linkBtn = document.getElementById('faltCfg_linkBtn');
+    var unlinkBtn = document.getElementById('faltCfg_unlinkBtn');
+    var grp = faltCfgGetLinkedGroup(faltCfgActiveTab);
+    if (grp) {
+        if (linkBtn) linkBtn.style.display = 'none';
+        if (unlinkBtn) unlinkBtn.style.display = '';
+    } else {
+        if (linkBtn) linkBtn.style.display = '';
+        if (unlinkBtn) unlinkBtn.style.display = 'none';
+    }
+}
+
+function faltCfgLinkTab() {
+    var wc = faltCfgActiveTab;
+    // Build list of other unlinked weapon classes
+    var others = faltCfgWeaponClasses.filter(function(c) {
+        return c !== wc && !faltCfgGetLinkedGroup(c);
+    });
+    if (others.length === 0) { alert('Inga tillgängliga vapenklasser att länka med.'); return; }
+    var choice = prompt('Länka ' + wc + ' med vilken vapenklass?\nTillgängliga: ' + others.join(', ') +
+        '\n\nDe kommer dela samma konfiguration. ' + wc + ':s konfiguration används.');
+    if (!choice) return;
+    choice = choice.trim().toUpperCase();
+    if (others.indexOf(choice) < 0) { alert('"' + choice + '" är inte tillgänglig.'); return; }
+
+    // Check if wc is already in a group
+    var existingGrp = faltCfgGetLinkedGroup(wc);
+    if (existingGrp) {
+        existingGrp.push(choice);
+    } else {
+        faltCfgLinkedGroups.push([wc, choice]);
+    }
+    // Copy wc's config to the linked class
+    faltCfgData[choice] = JSON.parse(JSON.stringify(faltCfgData[wc]));
+    faltCfgSaveLinkedGroups();
+    buildTabs();
+    faltCfgUpdateLinkButtons();
+    renderActiveTab();
+}
+
+function faltCfgUnlinkTab() {
+    var wc = faltCfgActiveTab;
+    var grp = faltCfgGetLinkedGroup(wc);
+    if (!grp) return;
+    if (!confirm('Avlänka ' + wc + ' från ' + grp.join(', ') + '? ' + wc + ' behåller en kopia av konfigurationen.')) return;
+
+    // Remove wc from its group
+    var idx = grp.indexOf(wc);
+    if (idx >= 0) grp.splice(idx, 1);
+    // If group has only 1 left, remove the group entirely
+    if (grp.length <= 1) {
+        faltCfgLinkedGroups = faltCfgLinkedGroups.filter(function(g) { return g.length > 1; });
+    }
+    faltCfgSaveLinkedGroups();
+    buildTabs();
+    faltCfgUpdateLinkButtons();
+    renderActiveTab();
+}
+
+function faltCfgSaveLinkedGroups() {
+    // Store in data so it persists with the config JSON
+    if (faltCfgLinkedGroups.length > 0) {
+        faltCfgData._linkedGroups = faltCfgLinkedGroups;
+    } else {
+        delete faltCfgData._linkedGroups;
+    }
 }
 
 function faltCfgCopyFrom() {
     const source = document.getElementById('faltCfg_copySource').value;
     if (!source || source === faltCfgActiveTab) return;
-    if (!confirm(`Kopiera all konfiguration från ${source} till ${faltCfgActiveTab}? Befintlig konfiguration skrivs över.`)) return;
+    var offset = parseInt(document.getElementById('faltCfg_copyTimeOffset').value) || 0;
+    var label = offset ? ' med ' + (offset > 0 ? '+' : '') + offset + ' sek tidsskillnad' : '';
+    if (!confirm('Kopiera all konfiguration från ' + source + ' till ' + faltCfgTabLabel(faltCfgActiveTab) + label + '? Befintlig konfiguration skrivs över.')) return;
 
-    faltCfgData[faltCfgActiveTab] = JSON.parse(JSON.stringify(faltCfgData[source]));
+    var copy = JSON.parse(JSON.stringify(faltCfgData[source]));
+    if (offset && copy.stations) {
+        copy.stations.forEach(function(st) {
+            var origTime = st.shootingTimeSec || 30;
+            var newTime = Math.max(1, origTime + offset);
+            var ratio = origTime > 0 ? newTime / origTime : 1;
+            st.shootingTimeSec = newTime;
+            // Scale figure timing proportionally to the new station time
+            (st.targetGroups || []).forEach(function(tg) {
+                (tg.figures || []).forEach(function(fig) {
+                    if (fig.delayBeforeShowSec) fig.delayBeforeShowSec = Math.max(0, Math.round(fig.delayBeforeShowSec * ratio));
+                    if (fig.showTimeSec) fig.showTimeSec = Math.max(1, Math.round(fig.showTimeSec * ratio));
+                    if (fig.hideAfterSec) fig.hideAfterSec = Math.max(1, Math.round(fig.hideAfterSec * ratio));
+                    if (fig.reappearSec) fig.reappearSec = Math.max(0, Math.round(fig.reappearSec * ratio));
+                });
+            });
+        });
+    }
+    faltCfgData[faltCfgActiveTab] = copy;
+    faltCfgSyncLinked(faltCfgActiveTab);
+    // Mark all stations dirty
+    (copy.stations || []).forEach(function(st) { faltCfgMarkDirty(faltCfgActiveTab, st.station); });
     renderActiveTab();
 }
+
+function faltCfgCopyStation(stationNum, wc) {
+    var others = faltCfgWeaponClasses.filter(function(c) { return c !== wc; });
+    if (others.length === 0) return;
+    var choice = prompt('Kopiera station ' + stationNum + ' från vilken vapenklass?\nTillgängliga: ' + others.join(', '));
+    if (!choice) return;
+    choice = choice.trim().toUpperCase();
+    if (others.indexOf(choice) < 0) { alert('"' + choice + '" är inte tillgänglig.'); return; }
+    var srcStation = faltCfgData[choice]?.stations?.find(function(s) { return s.station === stationNum; });
+    if (!srcStation) { alert('Station ' + stationNum + ' finns inte för ' + choice + '.'); return; }
+    var copy = JSON.parse(JSON.stringify(srcStation));
+    var stations = faltCfgData[wc].stations;
+    var idx = stations.findIndex(function(s) { return s.station === stationNum; });
+    if (idx >= 0) stations[idx] = copy; else stations.push(copy);
+    faltCfgMarkDirty(wc, stationNum);
+    faltCfgExpandedStation = stationNum;
+    renderActiveTab();
+}
+
+// ─── Rendering ──────────────────────────────────────────────────────
 
 function renderActiveTab() {
     const container = document.getElementById('faltCfgTabContent');
@@ -189,6 +394,12 @@ function renderActiveTab() {
                         <button class="btn btn-success btn-sm" onclick="event.stopPropagation(); faltCfgSaveStation(${st.station}, '${wc}')">
                             <i class="bi bi-check-lg me-1"></i>Spara stationen
                         </button>
+                        <button class="btn btn-outline-secondary btn-sm" onclick="event.stopPropagation(); faltCfgCopyStation(${st.station}, '${wc}')" title="Kopiera denna station från annan vapenklass">
+                            <i class="bi bi-copy"></i>
+                        </button>
+                        <button class="btn btn-outline-info btn-sm" onclick="event.stopPropagation(); faltCfgPrintStation(${st.station}, '${wc}')" title="Skriv ut stationskort">
+                            <i class="bi bi-printer"></i>
+                        </button>
                     </span>
                 </div>
             </div>
@@ -197,23 +408,28 @@ function renderActiveTab() {
                     <div class="row g-2 mb-3">
                         <div class="col-auto">
                             <label class="form-label small mb-0">Skjuttid (sek)</label>
-                            <input type="number" class="form-control form-control-sm st-shootingTime" min="5" max="120" value="${st.shootingTimeSec}" style="width:80px">
+                            <input type="number" class="form-control form-control-sm" min="5" max="120" value="${st.shootingTimeSec}" style="width:80px"
+                                onchange="faltCfgUpdateStation('${wc}',${st.station},'shootingTimeSec',parseInt(this.value)||30)">
                         </div>
                         <div class="col-auto">
                             <label class="form-label small mb-0">Utgångsläge</label>
-                            <select class="form-select form-select-sm st-shooterPos">${SHOOTER_POSITIONS.map(p => `<option ${p === st.shooterStartPosition ? 'selected' : ''}>${p}</option>`).join('')}</select>
+                            <select class="form-select form-select-sm"
+                                onchange="faltCfgUpdateStation('${wc}',${st.station},'shooterStartPosition',this.value)">${SHOOTER_POSITIONS.map(p => `<option ${p === st.shooterStartPosition ? 'selected' : ''}>${p}</option>`).join('')}</select>
                         </div>
                         <div class="col-auto">
                             <label class="form-label small mb-0">Vapenläge</label>
-                            <select class="form-select form-select-sm st-weaponPos">${WEAPON_POSITIONS.map(p => `<option ${p === st.weaponStartPosition ? 'selected' : ''}>${p}</option>`).join('')}</select>
+                            <select class="form-select form-select-sm"
+                                onchange="faltCfgUpdateStation('${wc}',${st.station},'weaponStartPosition',this.value)">${WEAPON_POSITIONS.map(p => `<option ${p === st.weaponStartPosition ? 'selected' : ''}>${p}</option>`).join('')}</select>
                         </div>
                         <div class="col-auto">
                             <label class="form-label small mb-0">Stödhand</label>
-                            <select class="form-select form-select-sm st-supportHand">${SUPPORT_HAND.map(p => `<option ${p === st.supportHand ? 'selected' : ''}>${p}</option>`).join('')}</select>
+                            <select class="form-select form-select-sm"
+                                onchange="faltCfgUpdateStation('${wc}',${st.station},'supportHand',this.value)">${SUPPORT_HAND.map(p => `<option ${p === st.supportHand ? 'selected' : ''}>${p}</option>`).join('')}</select>
                         </div>
                         ${!isPoang ? `<div class="col-auto">
                             <label class="form-label small mb-0">Max skott/fig</label>
-                            <input type="number" class="form-control form-control-sm st-maxShots" min="1" max="6" value="${st.maxShotsPerFigure || 6}" style="width:65px">
+                            <input type="number" class="form-control form-control-sm" min="1" max="6" value="${st.maxShotsPerFigure || 6}" style="width:65px"
+                                onchange="faltCfgUpdateStation('${wc}',${st.station},'maxShotsPerFigure',parseInt(this.value)||6)">
                         </div>` : ''}
                     </div>
                     <label class="form-label small fw-bold mb-1">Målgrupper</label>
@@ -245,27 +461,10 @@ function renderActiveTab() {
         });
     });
 
-    // Track dirty state on any input change
-    container.querySelectorAll('input, select').forEach(el => {
-        el.addEventListener('change', function() {
-            const card = this.closest('.card[data-station]');
-            if (card) {
-                const stNum = parseInt(card.dataset.station);
-                const wc = card.dataset.wc;
-                faltCfgDirtyStations.add(`${wc}_${stNum}`);
-                const dirtyBadge = document.getElementById(`faltCfgDirty_${wc}_${stNum}`);
-                const savedBadge = document.getElementById(`faltCfgSaved_${wc}_${stNum}`);
-                if (dirtyBadge) dirtyBadge.style.display = '';
-                if (savedBadge) savedBadge.style.display = 'none';
-            }
-        });
-    });
-
     // Restore dirty/saved badge state after re-render
     stations.forEach(st => {
         const key = `${wc}_${st.station}`;
         const dirtyBadge = document.getElementById(`faltCfgDirty_${wc}_${st.station}`);
-        const savedBadge = document.getElementById(`faltCfgSaved_${wc}_${st.station}`);
         if (faltCfgDirtyStations.has(key)) {
             if (dirtyBadge) dirtyBadge.style.display = '';
         }
@@ -273,62 +472,84 @@ function renderActiveTab() {
 }
 
 function renderTargetGroup(tg, tgIdx, stationNum, wc, isPoang, isLastGroup) {
-    const figures = tg.figures || [];
-    let figuresHtml = '';
+    var figures = tg.figures || [];
+    var figuresHtml = '';
+    var tgLetter = String.fromCharCode(64 + tg.group);
 
-    figures.forEach((fig, fIdx) => {
-        const isLastFig = figures.length <= 1;
-        let imgHtml = '';
+    figures.forEach(function(fig, fIdx) {
+        var isLastFig = figures.length <= 1;
+        var imgHtml = '';
         if (fig.imageUrl) {
             imgHtml = '<img src="' + fig.imageUrl + '" style="height:28px;border-radius:3px" alt="">' +
                 (fig.targetName ? '<span class="small text-truncate" style="max-width:80px" title="' + fig.targetName + '">' + fig.targetName + '<\/span>' : '') +
                 '<button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="faltCfgRemoveFigImage(' + stationNum + ',' + "'" + wc + "'" + ',' + tgIdx + ',' + fIdx + ')" title="Ta bort bild"><i class="bi bi-trash"><\/i><\/button>';
         } else {
             imgHtml = '<button class="btn btn-outline-primary btn-sm py-0 mb-0" title="Figurkatalog" onclick="faltCfgPickTarget(' + stationNum + ',' + "'" + wc + "'" + ',' + tgIdx + ',' + fIdx + ')">' +
-                '<i class="bi bi-search"><\/i>' +
-                '<\/button>' +
-                '<label class="btn btn-outline-secondary btn-sm py-0 mb-0" title="Ladda upp bild">' +
-                '<i class="bi bi-upload"><\/i>' +
-                '<input type="file" class="d-none" accept="image/*"' +
-                ' data-station="' + stationNum + '" data-wc="' + wc + '" data-tg="' + tgIdx + '" data-fig="' + fIdx + '"' +
-                ' onchange="faltCfgUploadFigImage(this)">' +
-                '<\/label>';
+                '<i class="bi bi-search"><\/i><\/button>' +
+                '<button class="btn btn-outline-secondary btn-sm py-0 mb-0" title="Ladda upp bild"' +
+                ' onclick="faltCfgChooseFigPhoto(' + stationNum + ',' + "'" + wc + "'" + ',' + tgIdx + ',' + fIdx + ')">' +
+                '<i class="bi bi-upload"><\/i><\/button>';
         }
 
-        var figLetter = String.fromCharCode(65 + fIdx);
-        figuresHtml += '<div class="d-flex align-items-center gap-2 fig-row ' + (fIdx > 0 ? 'mt-1' : '') + '" data-fig="' + fIdx + '">' +
+        var figLabel = fig.figureNumber;
+        figuresHtml += '<div class="d-flex align-items-center gap-2 fig-row ' + (fIdx > 0 ? 'mt-1' : '') + '">' +
             (!isLastFig ? '<button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="faltCfgRemoveFigure(' + stationNum + ',' + "'" + wc + "'" + ',' + tgIdx + ',' + fIdx + ')" title="Ta bort figur"><i class="bi bi-trash"><\/i><\/button>' : '') +
-            '<span class="text-muted small text-nowrap" style="width:55px">Figur ' + figLetter + '<\/span>' +
-            '<div class="form-check mb-0">' +
-                '<input class="form-check-input fig-pm" type="checkbox"' + (fig.isPoangmal ? ' checked' : '') + '>' +
-                '<label class="form-check-label small text-nowrap">Po\u00e4ngr\u00e4kning<\/label>' +
-            '<\/div>' +
-            '<select class="form-select form-select-sm fig-behavior" style="width:auto" onchange="faltCfgToggleFigBehavior(this)">' +
+            '<span class="text-muted small text-nowrap" style="width:55px">Figur ' + figLabel + '<\/span>' +
+            '<div class="form-check mb-0"><input class="form-check-input" type="checkbox"' + (fig.isPoangmal ? ' checked' : '') +
+                ' onchange="faltCfgUpdateFigure(' + "'" + wc + "'" + ',' + stationNum + ',' + tgIdx + ',' + fIdx + ',' + "'isPoangmal'" + ',this.checked)">' +
+                '<label class="form-check-label small text-nowrap">Po\u00e4ngr\u00e4kning<\/label><\/div>' +
+            '<select class="form-select form-select-sm" style="width:auto"' +
+                ' onchange="faltCfgUpdateFigure(' + "'" + wc + "'" + ',' + stationNum + ',' + tgIdx + ',' + fIdx + ',' + "'behavior'" + ',this.value); faltCfgToggleFigBehavior(this)">' +
                 TARGET_BEHAVIORS.map(function(b) { return '<option' + (b === fig.behavior ? ' selected' : '') + '>' + b + '<\/option>'; }).join('') +
             '<\/select>' +
             '<span class="fig-framCol" style="display:' + (fig.behavior === 'Framsv\u00e4ngande' ? '' : 'none') + '">' +
-                '<input type="number" class="form-control form-control-sm d-inline-block fig-delayBeforeShow" min="0" max="60" value="' + (fig.delayBeforeShowSec || 0) + '" style="width:50px" title="Fram efter (sek)">' +
-                '<input type="number" class="form-control form-control-sm d-inline-block fig-showTime" min="1" max="60" value="' + (fig.showTimeSec || 8) + '" style="width:50px" title="Visas (sek)">' +
-            '<\/span>' +
+                '<input type="number" class="form-control form-control-sm d-inline-block" min="0" max="60" value="' + (fig.delayBeforeShowSec || 0) + '" style="width:50px" title="Fram efter (sek)"' +
+                    ' onchange="faltCfgUpdateFigure(' + "'" + wc + "'" + ',' + stationNum + ',' + tgIdx + ',' + fIdx + ',' + "'delayBeforeShowSec'" + ',parseInt(this.value)||0)">' +
+                '<input type="number" class="form-control form-control-sm d-inline-block" min="1" max="60" value="' + (fig.showTimeSec || 8) + '" style="width:50px" title="Visas (sek)"' +
+                    ' onchange="faltCfgUpdateFigure(' + "'" + wc + "'" + ',' + stationNum + ',' + tgIdx + ',' + fIdx + ',' + "'showTimeSec'" + ',parseInt(this.value)||8)"><\/span>' +
             '<span class="fig-bortCol" style="display:' + (fig.behavior === 'Bortsv\u00e4ngande' ? '' : 'none') + '">' +
-                '<input type="number" class="form-control form-control-sm d-inline-block fig-hideAfter" min="1" max="60" value="' + (fig.hideAfterSec || 8) + '" style="width:50px" title="Bort efter (sek)">' +
-                '<input type="number" class="form-control form-control-sm d-inline-block fig-reappear" min="0" max="60" value="' + (fig.reappearSec || 0) + '" style="width:50px" title="Igen (sek)">' +
-            '<\/span>' +
+                '<input type="number" class="form-control form-control-sm d-inline-block" min="1" max="60" value="' + (fig.hideAfterSec || 8) + '" style="width:50px" title="Bort efter (sek)"' +
+                    ' onchange="faltCfgUpdateFigure(' + "'" + wc + "'" + ',' + stationNum + ',' + tgIdx + ',' + fIdx + ',' + "'hideAfterSec'" + ',parseInt(this.value)||8)">' +
+                '<input type="number" class="form-control form-control-sm d-inline-block" min="0" max="60" value="' + (fig.reappearSec || 0) + '" style="width:50px" title="Igen (sek)"' +
+                    ' onchange="faltCfgUpdateFigure(' + "'" + wc + "'" + ',' + stationNum + ',' + tgIdx + ',' + fIdx + ',' + "'reappearSec'" + ',parseInt(this.value)||0)"><\/span>' +
             '<div class="d-flex align-items-center gap-1 border rounded px-1 bg-body-secondary" style="height:30px">' + imgHtml + '<\/div>' +
         '<\/div>';
     });
 
+    // Group photo
+    var groupImgHtml = '';
+    if (tg.imageUrl) {
+        groupImgHtml = '<div class="text-center"><img src="' + tg.imageUrl + '" style="max-height:120px;max-width:100%;border-radius:6px" alt="">' +
+            '<div class="mt-1"><button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="faltCfgRemoveGroupImage(' + stationNum + ',' + "'" + wc + "'" + ',' + tgIdx + ')" title="Ta bort foto"><i class="bi bi-trash me-1"><\/i>Foto<\/button><\/div><\/div>';
+    } else {
+        groupImgHtml = '<div class="text-center"><button class="btn btn-outline-secondary btn-sm mb-0" title="Ladda upp foto av m\u00e5lgruppen"' +
+            ' onclick="faltCfgChooseGroupPhoto(' + stationNum + ',' + "'" + wc + "'" + ',' + tgIdx + ')">' +
+            '<i class="bi bi-camera me-1"><\/i>Foto<\/button><\/div>';
+    }
+
+    var descVal = (tg.description || '').replace(/"/g, '&quot;').replace(/\n/g, '&#10;');
+
     return '<div class="border rounded p-2 mb-2 bg-body-tertiary tg-row" data-tg="' + tgIdx + '">' +
         '<div class="d-flex justify-content-between align-items-center mb-1">' +
-            '<span class="fw-bold small">Målgrupp ' + tg.group + '<\/span>' +
-            '<span class="d-flex gap-1">' +
-                '<button class="btn btn-outline-primary btn-sm py-0 px-1" onclick="faltCfgAddFigure(' + stationNum + ',' + "'" + wc + "'" + ',' + tgIdx + ')" title="Lägg till figur"><i class="bi bi-plus"><\/i> Figur<\/button>' +
-                (!isLastGroup ? '<button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="faltCfgRemoveTargetGroup(' + stationNum + ',' + "'" + wc + "'" + ',' + tgIdx + ')" title="Ta bort målgrupp"><i class="bi bi-trash"><\/i><\/button>' : '') +
-            '<\/span>' +
+            '<span class="fw-bold small">M\u00e5lgrupp ' + tgLetter + '<\/span>' +
+            (!isLastGroup ? '<button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="faltCfgRemoveTargetGroup(' + stationNum + ',' + "'" + wc + "'" + ',' + tgIdx + ')" title="Ta bort m\u00e5lgrupp"><i class="bi bi-trash"><\/i><\/button>' : '') +
         '<\/div>' +
-        figuresHtml +
+        '<div class="d-flex gap-2">' +
+            '<div class="flex-grow-1">' +
+                figuresHtml +
+                '<button class="btn btn-outline-primary btn-sm py-0 px-1 mt-1" onclick="faltCfgAddFigure(' + stationNum + ',' + "'" + wc + "'" + ',' + tgIdx + ')"><i class="bi bi-plus me-1"><\/i>Figur<\/button>' +
+            '<\/div>' +
+            '<div class="flex-shrink-0" style="width:140px">' + groupImgHtml + '<\/div>' +
+        '<\/div>' +
+        '<div class="d-flex gap-1 mt-2 align-items-start">' +
+            '<textarea class="form-control form-control-sm" rows="3" placeholder="Beskrivning av m\u00e5lgruppen..." autocomplete="off" data-1p-ignore="true"' +
+                ' oninput="faltCfgUpdateGroup(' + "'" + wc + "'" + ',' + stationNum + ',' + tgIdx + ',' + "'description'" + ',this.value)">' + descVal + '<\/textarea>' +
+            '<button class="btn btn-outline-secondary btn-sm text-nowrap" onclick="faltCfgAutoDescription(' + stationNum + ',' + "'" + wc + "'" + ',' + tgIdx + ')" title="Generera beskrivning"><i class="bi bi-magic me-1"><\/i>Auto<\/button>' +
+        '<\/div>' +
     '<\/div>';
 }
+
+// ─── Figure behavior toggle (visual only) ───────────────────────────
 
 function faltCfgToggleFigBehavior(selectEl) {
     var row = selectEl.closest('.fig-row');
@@ -337,69 +558,171 @@ function faltCfgToggleFigBehavior(selectEl) {
     row.querySelector('.fig-bortCol').style.display = val === 'Bortsvängande' ? '' : 'none';
 }
 
+// ─── Add / Remove figures and groups ────────────────────────────────
+
 function faltCfgAddFigure(stationNum, wc, tgIdx) {
-    collectTabData();
     faltCfgExpandedStation = stationNum;
-    var station = faltCfgData[wc] && faltCfgData[wc].stations ? faltCfgData[wc].stations.find(function(s) { return s.station === stationNum; }) : null;
+    var station = faltCfgData[wc]?.stations?.find(function(s) { return s.station === stationNum; });
     if (!station) return;
     var tg = station.targetGroups[tgIdx];
     if (!tg) return;
     tg.figures.push(createDefaultFigure(tg.figures.length + 1));
+    faltCfgMarkDirty(wc, stationNum);
     renderActiveTab();
 }
 
 function faltCfgRemoveFigure(stationNum, wc, tgIdx, fIdx) {
-    collectTabData();
     faltCfgExpandedStation = stationNum;
-    var station = faltCfgData[wc] && faltCfgData[wc].stations ? faltCfgData[wc].stations.find(function(s) { return s.station === stationNum; }) : null;
+    var station = faltCfgData[wc]?.stations?.find(function(s) { return s.station === stationNum; });
     if (!station) return;
     var tg = station.targetGroups[tgIdx];
     if (!tg || tg.figures.length <= 1) return;
     tg.figures.splice(fIdx, 1);
     tg.figures.forEach(function(f, i) { f.figureNumber = i + 1; });
+    faltCfgMarkDirty(wc, stationNum);
     renderActiveTab();
 }
 
+function faltCfgAddTargetGroup(stationNum, wc) {
+    faltCfgExpandedStation = stationNum;
+    const station = faltCfgData[wc]?.stations?.find(s => s.station === stationNum);
+    if (!station) return;
+    station.targetGroups.push({
+        group: station.targetGroups.length + 1,
+        figures: [createDefaultFigure(1)]
+    });
+    faltCfgMarkDirty(wc, stationNum);
+    renderActiveTab();
+}
+
+function faltCfgRemoveTargetGroup(stationNum, wc, tgIdx) {
+    faltCfgExpandedStation = stationNum;
+    const station = faltCfgData[wc]?.stations?.find(s => s.station === stationNum);
+    if (!station || station.targetGroups.length <= 1) return;
+    station.targetGroups.splice(tgIdx, 1);
+    station.targetGroups.forEach((tg, i) => tg.group = i + 1);
+    faltCfgMarkDirty(wc, stationNum);
+    renderActiveTab();
+}
+
+// ─── Target picker ──────────────────────────────────────────────────
+
 function faltCfgPickTarget(stationNum, wc, tgIdx, fIdx) {
-    collectTabData();
     faltCfgExpandedStation = stationNum;
 
     // Open picker on top of configurator (no hide/show needed)
     faltPickerOpen(wc, function(result) {
         // Apply selection to figure
-        var station = faltCfgData[wc] && faltCfgData[wc].stations
-            ? faltCfgData[wc].stations.find(function(s) { return s.station === stationNum; }) : null;
+        var station = faltCfgData[wc]?.stations?.find(function(s) { return s.station === stationNum; });
         if (station && station.targetGroups[tgIdx] && station.targetGroups[tgIdx].figures[fIdx]) {
             var fig = station.targetGroups[tgIdx].figures[fIdx];
             fig.imageUrl = result.imageUrl;
             fig.targetName = result.targetName;
             fig.targetColor = result.targetColor;
         }
+        faltCfgMarkDirty(wc, stationNum);
         renderActiveTab();
     });
 }
 
-function faltCfgRemoveFigImage(stationNum, wc, tgIdx, fIdx) {
-    collectTabData();
+// ─── File chooser (dynamic input — avoids label/hidden-input browser issues) ─
+
+function faltCfgChooseGroupPhoto(stationNum, wc, tgIdx) {
+    var input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = function() { faltCfgUploadGroupImage(input, stationNum, wc, tgIdx); };
+    input.click();
+}
+
+function faltCfgChooseFigPhoto(stationNum, wc, tgIdx, fIdx) {
+    var input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = function() { faltCfgUploadFigImage2(input, stationNum, wc, tgIdx, fIdx); };
+    input.click();
+}
+
+// ─── Image upload / remove ──────────────────────────────────────────
+
+async function faltCfgUploadGroupImage(inputEl, stationNum, wc, tgIdx) {
+    var file = inputEl.files[0];
+    if (!file) return;
+
+    var compId = faltCfgGetCompetitionId() || ('temp_' + Date.now());
+    var formData = new FormData();
+    formData.append('file', file);
+    formData.append('competitionId', compId);
+    formData.append('weaponClass', wc);
+    formData.append('stationNumber', stationNum);
+    formData.append('groupNumber', tgIdx + 1);
+    try {
+        var resp = await fetch('/umbraco/surface/Faltskytte/UploadTargetGroupImage', { method: 'POST', body: formData });
+        var data = await resp.json();
+        if (data.success) {
+            var station = faltCfgData[wc]?.stations?.find(function(s){return s.station===stationNum;});
+            if (station && station.targetGroups[tgIdx]) {
+                station.targetGroups[tgIdx].imageUrl = data.imageUrl;
+            }
+            faltCfgMarkDirty(wc, stationNum);
+            faltCfgExpandedStation = stationNum;
+            renderActiveTab();
+        }
+    } catch(e) { console.error(e); }
+}
+
+function faltCfgRemoveGroupImage(stationNum, wc, tgIdx) {
+    var station = faltCfgData[wc]?.stations?.find(function(s){return s.station===stationNum;});
+    if (station && station.targetGroups[tgIdx]) station.targetGroups[tgIdx].imageUrl = null;
+    faltCfgMarkDirty(wc, stationNum);
     faltCfgExpandedStation = stationNum;
-    var station = faltCfgData[wc] && faltCfgData[wc].stations ? faltCfgData[wc].stations.find(function(s) { return s.station === stationNum; }) : null;
-    if (station && station.targetGroups[tgIdx] && station.targetGroups[tgIdx].figures[fIdx]) {
-        station.targetGroups[tgIdx].figures[fIdx].imageUrl = null;
-    }
     renderActiveTab();
 }
 
-async function faltCfgUploadFigImage(inputEl) {
+function faltCfgAutoDescription(stationNum, wc, tgIdx) {
+    var station = faltCfgData[wc]?.stations?.find(function(s){return s.station===stationNum;});
+    if (!station) return;
+    var tg = station.targetGroups[tgIdx];
+    if (!tg) return;
+    var figs = tg.figures || [];
+    var desc = figs.length + ' figur' + (figs.length > 1 ? 'er' : '') + '. ';
+    figs.forEach(function(fig) {
+        desc += 'Figur ' + fig.figureNumber;
+        if (fig.targetName) desc += ' (' + fig.targetName + (fig.targetColor ? ', ' + fig.targetColor : '') + ')';
+        desc += ': ' + fig.behavior;
+        if (fig.behavior === 'Framsv\u00e4ngande') {
+            if (fig.delayBeforeShowSec) desc += ', sv\u00e4nger fram efter ' + fig.delayBeforeShowSec + ' sek';
+            if (fig.showTimeSec) desc += ' och visas i ' + fig.showTimeSec + ' sek';
+        } else if (fig.behavior === 'Bortsv\u00e4ngande') {
+            if (fig.hideAfterSec) desc += ', sv\u00e4nger bort efter ' + fig.hideAfterSec + ' sek';
+            if (fig.reappearSec) desc += ', visar igen efter ' + fig.reappearSec + ' sek';
+        }
+        if (fig.isPoangmal) desc += ', po\u00e4ngr\u00e4kning';
+        desc += '. ';
+    });
+    tg.description = desc.trim();
+    faltCfgMarkDirty(wc, stationNum);
+    faltCfgExpandedStation = stationNum;
+    renderActiveTab();
+}
+
+function faltCfgRemoveFigImage(stationNum, wc, tgIdx, fIdx) {
+    faltCfgExpandedStation = stationNum;
+    var station = faltCfgData[wc]?.stations?.find(function(s) { return s.station === stationNum; });
+    if (station && station.targetGroups[tgIdx] && station.targetGroups[tgIdx].figures[fIdx]) {
+        station.targetGroups[tgIdx].figures[fIdx].imageUrl = null;
+        station.targetGroups[tgIdx].figures[fIdx].targetName = null;
+        station.targetGroups[tgIdx].figures[fIdx].targetColor = null;
+    }
+    faltCfgMarkDirty(wc, stationNum);
+    renderActiveTab();
+}
+
+async function faltCfgUploadFigImage2(inputEl, stationNum, wc, tgIdx, fIdx) {
     var file = inputEl.files[0];
     if (!file) return;
-    var stationNum = parseInt(inputEl.dataset.station);
-    var wc = inputEl.dataset.wc;
-    var tgIdx = parseInt(inputEl.dataset.tg);
-    var fIdx = parseInt(inputEl.dataset.fig);
 
-    var compIdEl = document.getElementById('editCompetitionId') || document.querySelector('input[name="competitionId"]');
-    var compId = (compIdEl && compIdEl.value) || (window.currentCompetitionData && window.currentCompetitionData.competitionId) || 0;
-    if (!compId || compId === '0') compId = 'temp_' + Date.now();
+    var compId = faltCfgGetCompetitionId() || ('temp_' + Date.now());
 
     var formData = new FormData();
     formData.append('file', file);
@@ -416,155 +739,18 @@ async function faltCfgUploadFigImage(inputEl) {
         if (!resp.ok) return;
         var data = await resp.json();
         if (data.success) {
-            collectTabData();
-            var station = faltCfgData[wc] && faltCfgData[wc].stations ? faltCfgData[wc].stations.find(function(s) { return s.station === stationNum; }) : null;
+            var station = faltCfgData[wc]?.stations?.find(function(s) { return s.station === stationNum; });
             if (station && station.targetGroups[tgIdx] && station.targetGroups[tgIdx].figures[fIdx]) {
                 station.targetGroups[tgIdx].figures[fIdx].imageUrl = data.imageUrl;
             }
+            faltCfgMarkDirty(wc, stationNum);
             faltCfgExpandedStation = stationNum;
             renderActiveTab();
         }
     } catch(err) { console.error(err); }
 }
 
-// Legacy — kept for backward compat
-async function faltCfgUploadImage(inputEl) {
-    const file = inputEl.files[0];
-    if (!file) return;
-    const stationNum = parseInt(inputEl.dataset.station);
-    const wc = inputEl.dataset.wc;
-    const tgIdx = parseInt(inputEl.dataset.tg);
-    const statusEl = inputEl.closest('.d-flex').querySelector('.tg-imageStatus');
-
-    // Need a competitionId — try wizard or edit hidden field
-    const compIdEl = document.getElementById('editCompetitionId') || document.querySelector('input[name="competitionId"]');
-    let compId = compIdEl?.value || window.currentCompetitionData?.competitionId || 0;
-    if (!compId || compId === '0') {
-        // For new competitions not yet saved, use temp folder
-        compId = 'temp_' + Date.now();
-    }
-
-    statusEl.textContent = 'Laddar upp...';
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('competitionId', compId);
-    formData.append('weaponClass', wc);
-    formData.append('stationNumber', stationNum);
-    formData.append('groupNumber', tgIdx + 1);
-
-    // Add antiforgery token
-    const tokenEl = document.querySelector('input[name="__RequestVerificationToken"]');
-    if (tokenEl) formData.append('__RequestVerificationToken', tokenEl.value);
-
-    try {
-        const resp = await fetch('/umbraco/surface/Faltskytte/UploadTargetGroupImage', {
-            method: 'POST',
-            body: formData
-        });
-        if (!resp.ok) {
-            statusEl.textContent = 'Serverfel ' + resp.status;
-            return;
-        }
-        const data = await resp.json();
-        if (data.success) {
-            // Store URL in config data
-            collectTabData();
-            const station = faltCfgData[wc]?.stations?.find(s => s.station === stationNum);
-            if (station && station.targetGroups[tgIdx]) {
-                // Legacy path
-            if (station && station.targetGroups[tgIdx]) { station.targetGroups[tgIdx].imageUrl = data.imageUrl; }
-            }
-            statusEl.textContent = '';
-            faltCfgExpandedStation = stationNum;
-            renderActiveTab();
-        } else {
-            statusEl.textContent = data.message || 'Fel';
-        }
-    } catch(err) {
-        statusEl.textContent = 'Uppladdningsfel';
-        console.error(err);
-    }
-}
-
-function faltCfgRemoveImage(stationNum, wc, tgIdx) {
-    collectTabData();
-    const station = faltCfgData[wc]?.stations?.find(s => s.station === stationNum);
-    if (station && station.targetGroups[tgIdx]) {
-        station.targetGroups[tgIdx].imageUrl = null;
-    }
-    faltCfgExpandedStation = stationNum;
-    renderActiveTab();
-}
-
-function faltCfgAddTargetGroup(stationNum, wc) {
-    collectTabData();
-    faltCfgExpandedStation = stationNum;
-    const station = faltCfgData[wc].stations.find(s => s.station === stationNum);
-    if (!station) return;
-    station.targetGroups.push({
-        group: station.targetGroups.length + 1,
-        figures: [createDefaultFigure(1)]
-    });
-    renderActiveTab();
-}
-
-function faltCfgRemoveTargetGroup(stationNum, wc, tgIdx) {
-    collectTabData();
-    faltCfgExpandedStation = stationNum;
-    const station = faltCfgData[wc].stations.find(s => s.station === stationNum);
-    if (!station || station.targetGroups.length <= 1) return;
-    station.targetGroups.splice(tgIdx, 1);
-    station.targetGroups.forEach((tg, i) => tg.group = i + 1);
-    renderActiveTab();
-}
-
-function collectTabData() {
-    const wc = faltCfgActiveTab;
-    if (!faltCfgData[wc]) return;
-
-    document.querySelectorAll(`#faltCfgTabContent .card[data-wc="${wc}"]`).forEach(card => {
-        const stNum = parseInt(card.dataset.station);
-        const station = faltCfgData[wc].stations.find(s => s.station === stNum);
-        if (!station) return;
-
-        station.shootingTimeSec = parseInt(card.querySelector('.st-shootingTime')?.value) || 30;
-        station.shooterStartPosition = card.querySelector('.st-shooterPos')?.value || "Stående";
-        station.weaponStartPosition = card.querySelector('.st-weaponPos')?.value || "45 grader";
-        station.supportHand = card.querySelector('.st-supportHand')?.value || "Ej stödhand";
-        station.maxShotsPerFigure = parseInt(card.querySelector('.st-maxShots')?.value) || 6;
-
-        const tgRows = card.querySelectorAll('.tg-row');
-        const oldTargetGroups = station.targetGroups || [];
-        station.targetGroups = [];
-        tgRows.forEach((tgRow, tgIdx) => {
-            const oldTg = oldTargetGroups[tgIdx] || {};
-            const oldFigures = oldTg.figures || [];
-            const figRows = tgRow.querySelectorAll('.fig-row');
-            const figures = [];
-            figRows.forEach((fRow, fIdx) => {
-                const oldFig = oldFigures[fIdx] || {};
-                const behavior = fRow.querySelector('.fig-behavior')?.value || "Fast";
-                const fig = {
-                    figureNumber: fIdx + 1,
-                    isPoangmal: fRow.querySelector('.fig-pm')?.checked || false,
-                    behavior: behavior,
-                    imageUrl: oldFig.imageUrl || null,
-                    targetName: oldFig.targetName || null,
-                    targetColor: oldFig.targetColor || null
-                };
-                if (behavior === 'Framsvängande') {
-                    fig.delayBeforeShowSec = parseInt(fRow.querySelector('.fig-delayBeforeShow')?.value) || 0;
-                    fig.showTimeSec = parseInt(fRow.querySelector('.fig-showTime')?.value) || 8;
-                } else if (behavior === 'Bortsvängande') {
-                    fig.hideAfterSec = parseInt(fRow.querySelector('.fig-hideAfter')?.value) || 8;
-                    fig.reappearSec = parseInt(fRow.querySelector('.fig-reappear')?.value) || 0;
-                }
-                figures.push(fig);
-            });
-            station.targetGroups.push({ group: tgIdx + 1, figures: figures });
-        });
-    });
-}
+// ─── Save / Close ───────────────────────────────────────────────────
 
 function faltCfgGetTargetFieldId() {
     return window._faltCfgTargetField || 'wizard_faltStationConfigJson';
@@ -584,7 +770,8 @@ function faltCfgIsEditMode() {
 }
 
 async function faltCfgSaveStation(stationNum, wc) {
-    collectTabData();
+    faltCfgSyncLinked(wc);
+    faltCfgSaveLinkedGroups();
     var json = JSON.stringify(faltCfgData);
     document.getElementById(faltCfgGetTargetFieldId()).value = json;
 
@@ -594,7 +781,9 @@ async function faltCfgSaveStation(stationNum, wc) {
         if (!ok) return;
     }
 
-    faltCfgDirtyStations.delete(`${wc}_${stationNum}`);
+    // Clear dirty for this station on all linked classes
+    var grp = faltCfgGetLinkedGroup(wc);
+    (grp || [wc]).forEach(function(c) { faltCfgDirtyStations.delete(c + '_' + stationNum); });
     var savedBadge = document.getElementById(`faltCfgSaved_${wc}_${stationNum}`);
     var dirtyBadge = document.getElementById(`faltCfgDirty_${wc}_${stationNum}`);
     if (savedBadge) savedBadge.style.display = '';
@@ -602,7 +791,11 @@ async function faltCfgSaveStation(stationNum, wc) {
 }
 
 async function faltCfgSaveAll() {
-    collectTabData();
+    // Sync all linked groups before saving
+    faltCfgLinkedGroups.forEach(function(grp) {
+        if (grp.length > 1) faltCfgSyncLinked(grp[0]);
+    });
+    faltCfgSaveLinkedGroups();
     var json = JSON.stringify(faltCfgData);
     document.getElementById(faltCfgGetTargetFieldId()).value = json;
 
@@ -639,12 +832,13 @@ async function faltCfgSaveToServer(json) {
 }
 
 async function faltCfgTryClose() {
-    collectTabData();
     if (faltCfgDirtyStations.size > 0) {
-        if (!confirm('Du har osparade ändringar på ' + faltCfgDirtyStations.size + ' station(er). Vill du spara och stänga?')) {
-            return;
+        var choice = prompt('Du har osparade \u00e4ndringar p\u00e5 ' + faltCfgDirtyStations.size + ' station(er).\n\nSkriv "spara" f\u00f6r att spara och st\u00e4nga, eller "st\u00e4ng" f\u00f6r att st\u00e4nga utan att spara.\nAvbryt f\u00f6r att g\u00e5 tillbaka.', 'spara');
+        if (choice === null) return; // Cancel — stay in modal
+        if (choice.toLowerCase().indexOf('spara') >= 0) {
+            await faltCfgSaveAll();
         }
-        await faltCfgSaveAll();
+        // "stäng" or anything else — close without saving
     }
     faltCfgClose();
 }
@@ -672,6 +866,8 @@ function faltCfgClose() {
     }
 }
 
+// ─── Print ──────────────────────────────────────────────────────────
+
 function faltDescribeBehavior(tg) {
     if (tg.behavior === 'Framsv\u00e4ngande') {
         var s = 'Framsv\u00e4ngande';
@@ -688,48 +884,149 @@ function faltDescribeBehavior(tg) {
     return 'Fast';
 }
 
-function faltCfgPrint() {
-    collectTabData();
-    const w = window.open('', '_blank');
-    w.document.write('<html><head><title>Stationskort</title>');
-    w.document.write('<style>body{font-family:sans-serif;margin:20px}');
-    w.document.write('.card{border:2px solid #333;padding:20px;margin-bottom:20px;page-break-inside:avoid}');
-    w.document.write('.card h2{margin:0 0 10px;font-size:1.3em}');
-    w.document.write('.card .rule{margin:4px 0;font-size:0.95em}');
-    w.document.write('.card .tg{margin:8px 0 4px;padding:6px 10px;background:#f5f5f5;border-radius:4px}');
-    w.document.write('@@media print{.card{page-break-after:always}.card:last-child{page-break-after:avoid}}');
+// Compare two station configs ignoring timing fields. Returns true if structure is identical.
+function faltCfgStationsStructurallyEqual(a, b) {
+    if (!a || !b) return false;
+    if (a.shooterStartPosition !== b.shooterStartPosition) return false;
+    if (a.weaponStartPosition !== b.weaponStartPosition) return false;
+    if (a.supportHand !== b.supportHand) return false;
+    if (a.maxShotsPerFigure !== b.maxShotsPerFigure) return false;
+    if ((a.targetGroups||[]).length !== (b.targetGroups||[]).length) return false;
+    for (var g = 0; g < a.targetGroups.length; g++) {
+        var ga = a.targetGroups[g], gb = b.targetGroups[g];
+        if ((ga.figures||[]).length !== (gb.figures||[]).length) return false;
+        for (var f = 0; f < ga.figures.length; f++) {
+            var fa = ga.figures[f], fb = gb.figures[f];
+            if (fa.isPoangmal !== fb.isPoangmal) return false;
+            if (fa.behavior !== fb.behavior) return false;
+        }
+    }
+    return true;
+}
+
+function faltCfgPrintStation(stationNum, wc) {
+    var station = faltCfgData[wc]?.stations?.find(function(s){return s.station===stationNum;});
+    if (!station) return;
+
+    // Collect all weapon classes that have this station and are structurally equal
+    var combinedClasses = {};  // { wc: stationConfig }
+    faltCfgWeaponClasses.forEach(function(c) {
+        var st = faltCfgData[c]?.stations?.find(function(s){return s.station===stationNum;});
+        if (st && faltCfgStationsStructurallyEqual(station, st)) combinedClasses[c] = st;
+    });
+    var classKeys = Object.keys(combinedClasses);
+    var isCombined = classKeys.length > 1;
+
+    // Group classes with identical shooting times for compact display
+    function groupByTime(classes, field) {
+        var groups = {};
+        classes.forEach(function(c) {
+            var val = combinedClasses[c][field] || combinedClasses[c].shootingTimeSec;
+            if (!groups[val]) groups[val] = [];
+            groups[val].push(c);
+        });
+        return Object.keys(groups).map(function(v) { return groups[v].join(',') + ': ' + v + ' sek'; }).join(' &nbsp;|&nbsp; ');
+    }
+
+    var w = window.open('', '_blank');
+    w.document.write('<html><head><title>Station ' + stationNum + (isCombined ? '' : ' \u2014 ' + wc) + '<' + '/title>');
+    w.document.write('<style>');
+    w.document.write('body{font-family:sans-serif;margin:30px;max-width:210mm}');
+    w.document.write('h1{font-size:1.8em;border-bottom:3px solid #333;padding-bottom:8px}');
+    w.document.write('.rules{background:#f0f0f0;padding:12px;border-radius:6px;margin:15px 0;font-size:0.95em}');
+    w.document.write('.tg{border:2px solid #666;border-radius:8px;padding:15px;margin:20px 0;page-break-inside:avoid}');
+    w.document.write('.tg h3{margin:0 0 10px;font-size:1.2em}');
+    w.document.write('.tg-desc{font-style:italic;margin:10px 0;font-size:0.95em;line-height:1.4}');
+    w.document.write('.tg-img{text-align:center;margin:10px 0}');
+    w.document.write('.tg-img img{max-width:80%;max-height:200px;border-radius:6px}');
+    w.document.write('.fig{margin:8px 0;padding:8px;background:#fafafa;border-radius:4px;display:flex;align-items:center;gap:12px}');
+    w.document.write('.fig img{height:50px;border-radius:4px}');
+    w.document.write('.fig-info{flex:1}');
+    w.document.write('.pm-badge{background:#ffc107;color:#000;padding:2px 8px;border-radius:4px;font-weight:bold;font-size:0.85em}');
+    w.document.write('.time-variants{margin:2px 0 2px 20px;font-size:0.9em;color:#444}');
+    w.document.write('@@media print{body{margin:15mm}}');
     w.document.write('<' + '/style><' + '/head><body>');
 
-    Object.keys(faltCfgData).forEach(wc => {
-        (faltCfgData[wc].stations || []).forEach(st => {
-            w.document.write('<div class="card">');
-            w.document.write('<h2>Station ' + st.station + ' \u2014 Vapenklass ' + wc + '<' + '/h2>');
-            w.document.write('<div class="rule"><strong>Skjuttid:<' + '/strong> ' + st.shootingTimeSec + ' sek<' + '/div>');
-            w.document.write('<div class="rule"><strong>Utg\u00e5ngsl\u00e4ge:<' + '/strong> ' + st.shooterStartPosition + '<' + '/div>');
-            w.document.write('<div class="rule"><strong>Vapenl\u00e4ge:<' + '/strong> ' + st.weaponStartPosition + '<' + '/div>');
-            w.document.write('<div class="rule"><strong>' + st.supportHand + '<' + '/strong><' + '/div>');
-            w.document.write('<div class="rule"><strong>Antal skott:<' + '/strong> 6<' + '/div>');
-            if (st.maxShotsPerFigure && st.maxShotsPerFigure < 6) {
-                w.document.write('<div class="rule"><strong>Max skott per figur:<' + '/strong> ' + st.maxShotsPerFigure + '<' + '/div>');
-            }
-            st.targetGroups.forEach(function(tg) {
-                var tgHtml = '<div class="tg"><strong>Målgrupp ' + tg.group + ':<' + '/strong>';
-                (tg.figures || []).forEach(function(fig) {
-                    tgHtml += '<div style="margin-left:10px">Figur ' + fig.figureNumber;
-                    if (fig.isPoangmal) tgHtml += ' <strong>(Poängmål)<' + '/strong>';
-                    tgHtml += ' — ' + faltDescribeBehavior(fig);
-                    if (fig.imageUrl) tgHtml += '<br><img src="' + fig.imageUrl + '" style="max-height:60px;margin-top:4px">';
-                    tgHtml += '<' + '/div>';
+    // Header
+    if (isCombined) {
+        w.document.write('<h1>Station ' + stationNum + '<' + '/h1>');
+    } else {
+        w.document.write('<h1>Station ' + stationNum + ' \u2014 Vapenklass ' + wc + '<' + '/h1>');
+    }
+
+    // Förutsättningar
+    w.document.write('<div class="rules">');
+    if (isCombined) {
+        w.document.write('<strong>Skjuttid:<' + '/strong> ' + groupByTime(classKeys, 'shootingTimeSec'));
+    } else {
+        w.document.write('<strong>Skjuttid:<' + '/strong> ' + station.shootingTimeSec + ' sek');
+    }
+    w.document.write(' &nbsp;|&nbsp; <strong>Utg\u00e5ngsl\u00e4ge:<' + '/strong> ' + station.shooterStartPosition);
+    w.document.write(' &nbsp;|&nbsp; <strong>Vapenl\u00e4ge:<' + '/strong> ' + station.weaponStartPosition);
+    w.document.write(' &nbsp;|&nbsp; <strong>' + station.supportHand + '<' + '/strong>');
+    if (station.maxShotsPerFigure && station.maxShotsPerFigure < 6) w.document.write('<br><strong>Max skott per figur:<' + '/strong> ' + station.maxShotsPerFigure);
+    w.document.write('<' + '/div>');
+
+    // Target groups and figures
+    (station.targetGroups || []).forEach(function(tg, tgIdx) {
+        var tgLetter = String.fromCharCode(64 + tg.group);
+        w.document.write('<div class="tg">');
+        w.document.write('<h3>M\u00e5lgrupp ' + tgLetter + '<' + '/h3>');
+        if (tg.description) w.document.write('<div class="tg-desc">' + tg.description.replace(/\n/g, '<br>') + '<' + '/div>');
+        if (tg.imageUrl) w.document.write('<div class="tg-img"><img src="' + tg.imageUrl + '" alt="M\u00e5lgrupp ' + tgLetter + '"><' + '/div>');
+        (tg.figures || []).forEach(function(fig, fIdx) {
+            w.document.write('<div class="fig">');
+            if (fig.imageUrl) w.document.write('<img src="' + fig.imageUrl + '" alt="">');
+            w.document.write('<div class="fig-info">');
+            w.document.write('<strong>Figur ' + fig.figureNumber + '<' + '/strong>');
+            if (fig.isPoangmal) w.document.write(' <span class="pm-badge">Po\u00e4ngr\u00e4kning<' + '/span>');
+
+            // For moving figures in combined mode: show per-class timing
+            if (isCombined && fig.behavior !== 'Fast') {
+                w.document.write(' \u2014 ' + fig.behavior);
+                // Group classes by their timing for this figure
+                var timingGroups = {};
+                classKeys.forEach(function(c) {
+                    var cFig = combinedClasses[c].targetGroups[tgIdx].figures[fIdx];
+                    var desc = faltDescribeBehavior(cFig);
+                    // Strip the behavior name prefix since we already printed it
+                    desc = desc.replace(/^(Framsv\u00e4ngande|Bortsv\u00e4ngande)/, '').replace(/^,\s*/, '');
+                    if (!timingGroups[desc]) timingGroups[desc] = [];
+                    timingGroups[desc].push(c);
                 });
-                tgHtml += '<' + '/div>';
-                w.document.write(tgHtml);
-            });
-            w.document.write('<' + '/div>');
+                var tKeys = Object.keys(timingGroups);
+                if (tKeys.length === 1) {
+                    // All classes have same timing — show once
+                    if (tKeys[0]) w.document.write(', ' + tKeys[0]);
+                } else {
+                    // Different timing per class group
+                    w.document.write('<br>');
+                    tKeys.forEach(function(desc) {
+                        w.document.write('<div class="time-variants">' + timingGroups[desc].join(',') + ': ' + (desc || 'inga tider') + '<' + '/div>');
+                    });
+                }
+            } else {
+                w.document.write(' \u2014 ' + faltDescribeBehavior(fig));
+            }
+
+            w.document.write('<' + '/div><' + '/div>');
         });
+        w.document.write('<' + '/div>');
     });
 
     w.document.write('<' + '/body><' + '/html>');
     w.document.close();
-    w.print();
+    faltCfgPrintWhenReady(w);
+}
+
+function faltCfgPrintWhenReady(w) {
+    var imgs = w.document.querySelectorAll('img');
+    if (imgs.length === 0) { w.print(); return; }
+    var remaining = imgs.length;
+    function done() { remaining--; if (remaining <= 0) w.print(); }
+    imgs.forEach(function(img) {
+        if (img.complete) { done(); }
+        else { img.onload = done; img.onerror = done; }
+    });
 }
 </script>

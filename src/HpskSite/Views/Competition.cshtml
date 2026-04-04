@@ -601,8 +601,8 @@
 				@* Management button (admin/competition manager only) - Bulls eye icon only *@
 				@if (canManageCompetition)
 				{
-				<a href="/competitionmanagement?competitionId=@Model.Id" class="btn btn-outline-secondary" title="Hantera tävling">
-				<i class="bi bi-bullseye"></i>
+				<a href="/competitionmanagement?competitionId=@Model.Id" class="btn btn-outline-secondary" title="Administrera tävling">
+				<i class="bi bi-bullseye me-1"></i>Administrera tävling
 				</a>
 				}
 			}
@@ -1007,7 +1007,75 @@
 
 						<!-- Start List Section -->
 						<div class="mb-2">
-							@if (isSpringskytte)
+							@if (isFaltskytte)
+							{
+								<div id="faltPublicPatrols_@Model.Id">
+									<p class="text-muted small mb-0">
+										<i class="bi bi-hourglass-split me-1"></i> Patrullista har inte publicerats än.
+									</p>
+								</div>
+								<script>
+								(function() {
+									var container = document.getElementById('faltPublicPatrols_@Model.Id');
+									fetch('/umbraco/surface/Faltskytte/GetPublicPatrols?competitionId=@Model.Id')
+										.then(function(r) { return r.json(); })
+										.then(function(data) {
+											if (!data.success || !data.published || !data.patrols || data.patrols.length === 0) return;
+											container.innerHTML = '<button class="btn btn-info w-100" onclick="faltShowPublicPatrols_@(Model.Id)()">' +
+												'<i class="bi bi-people me-1"><\/i> Visa patrullista<\/button>';
+											window['faltShowPublicPatrols_@(Model.Id)'] = function() {
+												var byGroup = {};
+												data.patrols.forEach(function(p) {
+													var wg = p.weaponGroup || '?';
+													if (!byGroup[wg]) byGroup[wg] = [];
+													byGroup[wg].push(p);
+												});
+												var body = '';
+												Object.keys(byGroup).forEach(function(wg) {
+													var grp = byGroup[wg];
+													var total = grp.reduce(function(s,p){return s+p.members.length;},0);
+													body += '<div class="card mb-3"><div class="card-header py-2">' +
+														'<strong>Vapengrupp ' + wg + '<\/strong>' +
+														'<span class="badge bg-primary ms-2">' + grp.length + ' patruller<\/span>' +
+														'<span class="badge bg-secondary ms-2">' + total + ' skyttar<\/span>' +
+														'<\/div><div class="card-body p-0">';
+													grp.forEach(function(p) {
+														var t = p.startTime ? new Date(p.startTime).toLocaleTimeString('sv-SE',{hour:'2-digit',minute:'2-digit'}) : '';
+														body += '<div class="border-bottom px-3 py-2">' +
+															'<div class="mb-1"><strong>Patrull ' + p.patrolNumber + '<\/strong>' +
+															(t ? '<span class="text-muted ms-2"><i class="bi bi-clock me-1"><\/i>' + t + '<\/span>' : '') +
+															'<span class="badge bg-secondary ms-2">' + p.members.length + '<\/span><\/div>';
+														p.members.forEach(function(m) {
+															body += '<div class="small ms-2">' + m.name +
+																' <span class="text-muted">(' + (m.club || '') + ')<\/span>' +
+																' <span class="badge bg-body-secondary text-body">' + m.shootingClass + '<\/span><\/div>';
+														});
+														body += '<\/div>';
+													});
+													body += '<\/div><\/div>';
+												});
+												var modalId = 'faltPatrolModal_@(Model.Id)';
+												var existing = document.getElementById(modalId);
+												if (existing) existing.remove();
+												var modal = document.createElement('div');
+												modal.id = modalId;
+												modal.className = 'modal fade';
+												modal.tabIndex = -1;
+												modal.innerHTML = '<div class="modal-dialog modal-lg modal-dialog-scrollable">' +
+													'<div class="modal-content"><div class="modal-header">' +
+													'<h5 class="modal-title"><i class="bi bi-people me-2"><\/i>Patrullista<\/h5>' +
+													'<button type="button" class="btn-close" data-bs-dismiss="modal"><\/button>' +
+													'<\/div><div class="modal-body">' + body + '<\/div>' +
+													'<div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Stäng<\/button><\/div>' +
+													'<\/div><\/div>';
+												document.body.appendChild(modal);
+												bootstrap.Modal.getOrCreateInstance(modal).show();
+											};
+										}).catch(function() {});
+								})();
+								</script>
+							}
+							else if (isSpringskytte)
 							{
 								@* Springskytte: start lists are precisionStartList children directly under competition *@
 								var springStartLists = competitionChildren

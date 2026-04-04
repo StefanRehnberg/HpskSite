@@ -176,11 +176,13 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 var members = allMembers.Where(m => m.PatrolId == p.Id).ToList();
                 return new FaltskyttePatrolView
                 {
+                    PatrolId = p.Id,
                     PatrolNumber = p.PatrolNumber,
                     StartTime = p.StartTime,
                     WeaponGroup = p.WeaponGroup,
                     Members = members.Select(m => new FaltskyttePatrolMemberView
                     {
+                        PatrolMemberId = m.Id,
                         MemberId = m.MemberId,
                         Position = m.Position,
                         Name = m.MemberName,
@@ -253,6 +255,29 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
 
         // ── Save Result (per shooter) ───────────────────────────────
 
+        /// <summary>Gets a single shooter's saved result at a station.</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetShooterStationResult(int competitionId, int stationNumber, int memberId)
+        {
+            try
+            {
+                using var db = _umbracoDatabaseFactory.CreateDatabase();
+                var result = await db.FirstOrDefaultAsync<FaltskytteResultEntry>(
+                    "WHERE CompetitionId = @0 AND StationNumber = @1 AND MemberId = @2",
+                    competitionId, stationNumber, memberId);
+
+                if (result == null)
+                    return Json(new { success = false });
+
+                return Json(new { success = true, result });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting shooter station result");
+                return Json(new { success = false });
+            }
+        }
+
         /// <summary>
         /// Saves one shooter's result at one station.
         /// </summary>
@@ -290,6 +315,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                     existing.Figures = totalFigures;
                     existing.HitDistribution = hitDistJson;
                     existing.TiebreakerScore = request.TiebreakerScore;
+                    existing.PoangmalScores = request.PoangmalScores != null ? JsonConvert.SerializeObject(request.PoangmalScores) : null;
                     existing.Reshoots = request.Reshoots;
                     existing.EnteredBy = enteredBy;
                     existing.LastModified = DateTime.UtcNow;
@@ -316,6 +342,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                     Figures = totalFigures,
                     HitDistribution = hitDistJson,
                     TiebreakerScore = request.TiebreakerScore,
+                    PoangmalScores = request.PoangmalScores != null ? JsonConvert.SerializeObject(request.PoangmalScores) : null,
                     Reshoots = request.Reshoots,
                     EnteredBy = enteredBy,
                     EnteredAt = DateTime.UtcNow,
@@ -692,6 +719,89 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             }
         }
 
+        /// <summary>Moves a variant to a different target. Admin only.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> MoveVariant([FromBody] MoveVariantRequest request)
+        {
+            try
+            {
+                if (!await _adminAuthorizationService.IsCurrentUserAdminAsync())
+                    return Json(new { success = false, message = "Endast administratörer." });
+
+                using var db = _umbracoDatabaseFactory.CreateDatabase();
+                var variant = await db.FirstOrDefaultAsync<FieldTargetVariant>("WHERE Id = @0", request.VariantId);
+                if (variant == null)
+                    return Json(new { success = false, message = "Varianten hittades inte." });
+
+                var newTarget = await db.FirstOrDefaultAsync<FieldTarget>("WHERE Id = @0", request.NewTargetId);
+                if (newTarget == null)
+                    return Json(new { success = false, message = "Målfiguren hittades inte." });
+
+                var oldTargetId = variant.TargetId;
+                variant.TargetId = request.NewTargetId;
+                await db.UpdateAsync(variant);
+
+                // If old target now has no variants, optionally clean up
+                var remainingCount = await db.ExecuteScalarAsync<int>(
+                    "SELECT COUNT(*) FROM FieldTargetVariant WHERE TargetId = @0", oldTargetId);
+
+                return Json(new { success = true, message = "Variant flyttad till " + newTarget.Name + ".", oldTargetEmpty = remainingCount == 0, oldTargetId });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error moving variant");
+                return Json(new { success = false, message = "Fel: " + ex.Message });
+            }
+        }
+
+        /// <summary>Uploads an image for a catalog variant, saves to wwwroot/images/field-targets/.</summary>
+        [HttpPost]
+        [IgnoreAntiforgeryToken]
+        public async Task<IActionResult> UploadVariantImage(IFormFile file, int variantId)
+        {
+            try
+            {
+                if (file == null || file.Length == 0)
+                    return Json(new { success = false, message = "Ingen fil vald." });
+                if (file.Length > 5 * 1024 * 1024)
+                    return Json(new { success = false, message = "Max 5 MB." });
+
+                var ext = Path.GetExtension(file.FileName).ToLower();
+                if (ext != ".jpg" && ext != ".jpeg" && ext != ".png" && ext != ".webp" && ext != ".gif")
+                    return Json(new { success = false, message = "Endast JPG, PNG, WebP eller GIF." });
+
+                using var db = _umbracoDatabaseFactory.CreateDatabase();
+                var variant = await db.FirstOrDefaultAsync<FieldTargetVariant>("WHERE Id = @0", variantId);
+                if (variant == null)
+                    return Json(new { success = false, message = "Varianten hittades inte." });
+
+                var dir = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "images", "field-targets");
+                Directory.CreateDirectory(dir);
+
+                // Use a clean filename
+                var fileName = $"target_{variant.TargetId}_v{variant.Id}{ext}";
+                var filePath = Path.Combine(dir, fileName);
+
+                using (var stream = new FileStream(filePath, FileMode.Create))
+                {
+                    await file.CopyToAsync(stream);
+                }
+
+                // Update variant's ImageName in DB
+                variant.ImageName = fileName;
+                await db.UpdateAsync(variant);
+
+                var imageUrl = $"/images/field-targets/{fileName}";
+                return Json(new { success = true, imageUrl, imageName = fileName });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error uploading variant image");
+                return Json(new { success = false, message = "Fel: " + ex.Message });
+            }
+        }
+
         // ── Target Group Image Upload ────────────────────────────────
 
         [HttpPost]
@@ -831,7 +941,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
 
                 // Generate patrols
                 var generator = new Services.FaltskyttePatrolGenerator();
-                var result = generator.Generate(registrations, patrolSize, intervalMinutes, request.FirstStartTime, request.WeaponGrouping ?? "MixAll");
+                var result = generator.Generate(registrations, patrolSize, intervalMinutes, request.FirstStartTime, request.WeaponGrouping ?? "MixAll", request.MultiClassGapMinutes);
 
                 if (!result.Patrols.Any())
                     return Json(new { success = false, message = "Kunde inte skapa patruller." });
@@ -936,12 +1046,14 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
 
             var result = patrols.Select(p => new FaltskyttePatrolView
             {
+                PatrolId = p.Id,
                 PatrolNumber = p.PatrolNumber,
                 StartTime = p.StartTime,
                 WeaponGroup = p.WeaponGroup,
                 Members = allMembers.Where(m => m.PatrolId == p.Id)
                     .Select(m => new FaltskyttePatrolMemberView
                     {
+                        PatrolMemberId = m.Id,
                         MemberId = m.MemberId,
                         Position = m.Position,
                         Name = m.MemberName,
@@ -951,6 +1063,302 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             }).ToList();
 
             return Json(new { success = true, patrols = result });
+        }
+
+        // ── Patrol Editing ─────────────────────────────────────────────
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> CreatePatrol([FromBody] CreatePatrolRequest request)
+        {
+            if (!await IsAuthorizedForCompetition(request.CompetitionId))
+                return Json(new { success = false, message = "Du har inte behörighet." });
+
+            using var db = _umbracoDatabaseFactory.CreateDatabase();
+
+            int newPatrolNumber;
+            if (request.AfterPatrolNumber.HasValue && request.AfterPatrolNumber.Value > 0)
+            {
+                // Insert after specified patrol number
+                newPatrolNumber = request.AfterPatrolNumber.Value + 1;
+                // Shift subsequent patrols up by 1
+                await db.ExecuteAsync(
+                    "UPDATE FaltskyttePatrol SET PatrolNumber = PatrolNumber + 1 WHERE CompetitionId = @0 AND PatrolNumber >= @1",
+                    request.CompetitionId, newPatrolNumber);
+            }
+            else
+            {
+                var maxNum = await db.ExecuteScalarAsync<int>(
+                    "SELECT ISNULL(MAX(PatrolNumber), 0) FROM FaltskyttePatrol WHERE CompetitionId = @0", request.CompetitionId);
+                newPatrolNumber = maxNum + 1;
+            }
+
+            var patrol = new FaltskyttePatrol
+            {
+                CompetitionId = request.CompetitionId,
+                PatrolNumber = newPatrolNumber,
+                StartTime = request.StartTime,
+                WeaponGroup = request.WeaponGroup
+            };
+            await db.InsertAsync(patrol);
+
+            // Renumber all patrols sequentially to close any gaps
+            var allPatrols = await db.FetchAsync<FaltskyttePatrol>(
+                "WHERE CompetitionId = @0 ORDER BY PatrolNumber, Id", request.CompetitionId);
+            for (int i = 0; i < allPatrols.Count; i++)
+            {
+                if (allPatrols[i].PatrolNumber != i + 1)
+                {
+                    allPatrols[i].PatrolNumber = i + 1;
+                    await db.UpdateAsync(allPatrols[i]);
+                }
+            }
+
+            return Json(new { success = true, patrolId = patrol.Id, patrolNumber = patrol.PatrolNumber });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeletePatrol([FromBody] DeletePatrolRequest request)
+        {
+            if (!await IsAuthorizedForCompetition(request.CompetitionId))
+                return Json(new { success = false, message = "Du har inte behörighet." });
+
+            using var db = _umbracoDatabaseFactory.CreateDatabase();
+            await db.ExecuteAsync("DELETE FROM FaltskyttePatrolMember WHERE PatrolId = @0", request.PatrolId);
+            await db.ExecuteAsync("DELETE FROM FaltskyttePatrol WHERE Id = @0 AND CompetitionId = @1", request.PatrolId, request.CompetitionId);
+
+            return Json(new { success = true });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> AddShooterToPatrol([FromBody] AddShooterToPatrolRequest request)
+        {
+            if (!await IsAuthorizedForCompetition(request.CompetitionId))
+                return Json(new { success = false, message = "Du har inte behörighet." });
+
+            using var db = _umbracoDatabaseFactory.CreateDatabase();
+
+            // Remove from any existing patrol with the same weapon group prefix (allows "move" via add)
+            // A shooter in a C patrol should not be removed when adding to an A patrol
+            var classPrefix = request.ShootingClass.Length > 0 ? request.ShootingClass.Substring(0, 1) : "";
+            if (!string.IsNullOrEmpty(classPrefix))
+            {
+                await db.ExecuteAsync(
+                    @"DELETE FROM FaltskyttePatrolMember WHERE MemberId = @0
+                      AND LEFT(ShootingClass, 1) = @2
+                      AND PatrolId IN (SELECT Id FROM FaltskyttePatrol WHERE CompetitionId = @1)",
+                    request.MemberId, request.CompetitionId, classPrefix);
+            }
+
+            var maxPos = await db.ExecuteScalarAsync<int>(
+                "SELECT ISNULL(MAX(Position), 0) FROM FaltskyttePatrolMember WHERE PatrolId = @0", request.PatrolId);
+
+            var member = new FaltskyttePatrolMember
+            {
+                PatrolId = request.PatrolId,
+                MemberId = request.MemberId,
+                Position = maxPos + 1,
+                ShootingClass = request.ShootingClass,
+                MemberName = request.MemberName,
+                ClubName = request.ClubName
+            };
+            await db.InsertAsync(member);
+
+            return Json(new { success = true, patrolMemberId = member.Id });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> RemoveShooterFromPatrol([FromBody] RemoveShooterFromPatrolRequest request)
+        {
+            if (!await IsAuthorizedForCompetition(request.CompetitionId))
+                return Json(new { success = false, message = "Du har inte behörighet." });
+
+            using var db = _umbracoDatabaseFactory.CreateDatabase();
+            await db.ExecuteAsync("DELETE FROM FaltskyttePatrolMember WHERE Id = @0", request.PatrolMemberId);
+
+            return Json(new { success = true });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> MoveShooterToPatrol([FromBody] MoveShooterToPatrolRequest request)
+        {
+            if (!await IsAuthorizedForCompetition(request.CompetitionId))
+                return Json(new { success = false, message = "Du har inte behörighet." });
+
+            using var db = _umbracoDatabaseFactory.CreateDatabase();
+            var maxPos = await db.ExecuteScalarAsync<int>(
+                "SELECT ISNULL(MAX(Position), 0) FROM FaltskyttePatrolMember WHERE PatrolId = @0", request.TargetPatrolId);
+
+            await db.ExecuteAsync(
+                "UPDATE FaltskyttePatrolMember SET PatrolId = @0, Position = @1 WHERE Id = @2",
+                request.TargetPatrolId, maxPos + 1, request.PatrolMemberId);
+
+            return Json(new { success = true });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> BulkMoveShooters([FromBody] FaltskylteBulkMoveShootersRequest request)
+        {
+            if (!await IsAuthorizedForCompetition(request.CompetitionId))
+                return Json(new { success = false, message = "Du har inte behörighet." });
+
+            using var db = _umbracoDatabaseFactory.CreateDatabase();
+            var maxPos = await db.ExecuteScalarAsync<int>(
+                "SELECT ISNULL(MAX(Position), 0) FROM FaltskyttePatrolMember WHERE PatrolId = @0", request.TargetPatrolId);
+
+            foreach (var pmId in request.PatrolMemberIds)
+            {
+                maxPos++;
+                await db.ExecuteAsync(
+                    "UPDATE FaltskyttePatrolMember SET PatrolId = @0, Position = @1 WHERE Id = @2",
+                    request.TargetPatrolId, maxPos, pmId);
+            }
+
+            return Json(new { success = true, moved = request.PatrolMemberIds.Count });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> UpdatePatrolTime([FromBody] UpdatePatrolTimeRequest request)
+        {
+            if (!await IsAuthorizedForCompetition(request.CompetitionId))
+                return Json(new { success = false, message = "Du har inte behörighet." });
+
+            using var db = _umbracoDatabaseFactory.CreateDatabase();
+            await db.ExecuteAsync(
+                "UPDATE FaltskyttePatrol SET StartTime = @0 WHERE Id = @1 AND CompetitionId = @2",
+                request.StartTime, request.PatrolId, request.CompetitionId);
+
+            return Json(new { success = true });
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> SearchAvailableShooters(int competitionId, string? query, string? weaponGroup, bool showAll = false)
+        {
+            if (!await IsAuthorizedForCompetition(competitionId))
+                return Json(new { success = false, message = "Du har inte behörighet." });
+
+            var registrations = await _startListRepository.GetCompetitionRegistrations(competitionId);
+
+            using var db = _umbracoDatabaseFactory.CreateDatabase();
+
+            // Build assigned lookup: (memberId, classPrefix) pairs — a shooter in a C patrol is NOT assigned for A
+            var assignedMembers = await db.FetchAsync<FaltskyttePatrolMember>(
+                "SELECT pm.* FROM FaltskyttePatrolMember pm INNER JOIN FaltskyttePatrol p ON pm.PatrolId = p.Id WHERE p.CompetitionId = @0",
+                competitionId);
+            var assignedPairs = new HashSet<string>(
+                assignedMembers.Select(m => m.MemberId + "_" + (m.ShootingClass.Length > 0 ? m.ShootingClass.Substring(0, 1) : "")));
+
+            // Build patrol lookup for display: (memberId, classPrefix) → patrolNumber
+            var patrols = await db.FetchAsync<FaltskyttePatrol>("WHERE CompetitionId = @0", competitionId);
+            var patrolDict = patrols.ToDictionary(p => p.Id, p => p.PatrolNumber);
+            var patrolLookup = new Dictionary<string, int>(); // "memberId_prefix" → patrolNumber
+            foreach (var am in assignedMembers)
+            {
+                var key = am.MemberId + "_" + (am.ShootingClass.Length > 0 ? am.ShootingClass.Substring(0, 1) : "");
+                if (patrolDict.TryGetValue(am.PatrolId, out var pn))
+                    patrolLookup[key] = pn;
+            }
+
+            // Parse weapon group into allowed first-letter prefixes (e.g. "A+R" → ["A","R"])
+            HashSet<string>? allowedPrefixes = null;
+            if (!string.IsNullOrWhiteSpace(weaponGroup))
+            {
+                allowedPrefixes = new HashSet<string>(
+                    weaponGroup.Split('+').Select(w => w.Trim()).Where(w => w.Length > 0),
+                    StringComparer.OrdinalIgnoreCase);
+            }
+
+            var available = registrations
+                .Where(r =>
+                {
+                    if (showAll) return true;
+                    var prefix = (r.MemberClass ?? "").Length > 0 ? r.MemberClass!.Substring(0, 1) : "";
+                    return !assignedPairs.Contains(r.MemberId + "_" + prefix);
+                })
+                .Where(r =>
+                {
+                    if (allowedPrefixes == null) return true;
+                    var cls = r.MemberClass ?? "";
+                    return cls.Length > 0 && allowedPrefixes.Contains(cls.Substring(0, 1));
+                })
+                .Select(r => new
+                {
+                    memberId = r.MemberId,
+                    name = r.MemberName ?? "",
+                    club = r.MemberClub ?? "",
+                    shootingClass = r.MemberClass ?? "",
+                    assignedToPatrol = patrolLookup.TryGetValue(
+                        r.MemberId + "_" + ((r.MemberClass ?? "").Length > 0 ? r.MemberClass!.Substring(0, 1) : ""),
+                        out var pn) ? (int?)pn : null
+                })
+                .ToList();
+
+            if (!string.IsNullOrWhiteSpace(query))
+            {
+                var q = query.Trim().ToLower();
+                available = available.Where(a => a.name.ToLower().Contains(q) || a.club.ToLower().Contains(q)).ToList();
+            }
+
+            return Json(new { success = true, shooters = available });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> PublishPatrolList([FromBody] PublishPatrolListRequest request)
+        {
+            if (!await IsAuthorizedForCompetition(request.CompetitionId))
+                return Json(new { success = false, message = "Du har inte behörighet." });
+
+            var competition = _contentService.GetById(request.CompetitionId);
+            if (competition == null)
+                return Json(new { success = false, message = "Tävlingen hittades inte." });
+
+            competition.SetValue("faltskyttePatrolsPublished", request.Publish);
+            _contentService.Save(competition);
+            _contentService.Publish(competition, Array.Empty<string>());
+
+            return Json(new { success = true, published = request.Publish });
+        }
+
+        /// <summary>Public endpoint — returns patrols only if published.</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetPublicPatrols(int competitionId)
+        {
+            var competition = _contentService.GetById(competitionId);
+            if (competition == null)
+                return Json(new { success = false, message = "Tävlingen hittades inte." });
+
+            var published = competition.HasProperty("faltskyttePatrolsPublished")
+                && competition.GetValue<bool>("faltskyttePatrolsPublished");
+            if (!published)
+                return Json(new { success = true, published = false, patrols = Array.Empty<object>() });
+
+            using var db = _umbracoDatabaseFactory.CreateDatabase();
+            var patrols = await db.FetchAsync<FaltskyttePatrol>(
+                "WHERE CompetitionId = @0 ORDER BY PatrolNumber", competitionId);
+
+            var patrolIds = patrols.Select(p => p.Id).ToList();
+            var allMembers = patrolIds.Any()
+                ? await db.FetchAsync<FaltskyttePatrolMember>(
+                    $"WHERE PatrolId IN ({string.Join(",", patrolIds)}) ORDER BY Position")
+                : new List<FaltskyttePatrolMember>();
+
+            var result = patrols.Select(p => new
+            {
+                patrolNumber = p.PatrolNumber,
+                startTime = p.StartTime,
+                weaponGroup = p.WeaponGroup,
+                members = allMembers.Where(m => m.PatrolId == p.Id)
+                    .Select(m => new { name = m.MemberName, club = m.ClubName, shootingClass = m.ShootingClass }).ToList()
+            }).ToList();
+
+            return Json(new { success = true, published = true, patrols = result });
         }
     }
 }

@@ -905,7 +905,7 @@ window.populateEditModal = function(competition) {
     }
     if (isFaltskytte) {
         setFieldValue('edit_scoringMode', competition.scoringMode || 'Normal');
-        setFieldValue('edit_maxReshoots', competition.maxReshoots || 1);
+        setFieldValue('edit_maxReshoots', competition.maxReshoots != null ? competition.maxReshoots : 1);
         document.getElementById('edit_faltStationConfigJson').value = competition.stationConfig || '';
         var cfgSummary = document.getElementById('edit_faltConfigSummary');
         if (cfgSummary && competition.stationConfig) {

@@ -12,6 +12,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public string WeaponGrouping { get; set; } = "MixAll";
         /// <summary>Which weapon classes to include (e.g. ["C"], ["A","R"]). Null = all.</summary>
         public List<string>? WeaponClasses { get; set; }
+        /// <summary>Minimum minutes between patrols for a shooter with multiple weapon classes. 0 = no separation.</summary>
+        public int MultiClassGapMinutes { get; set; }
     }
 
     public class DeletePatrolsByGroupRequest
@@ -23,6 +25,66 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
     public class DeletePatrolsRequest
     {
         public int CompetitionId { get; set; }
+    }
+
+    // ── Patrol Editing ────────────────────────────────────────────
+
+    public class CreatePatrolRequest
+    {
+        public int CompetitionId { get; set; }
+        public DateTime? StartTime { get; set; }
+        public string WeaponGroup { get; set; } = "";
+        /// <summary>Insert after this patrol number. Null or 0 = append at end.</summary>
+        public int? AfterPatrolNumber { get; set; }
+    }
+
+    public class DeletePatrolRequest
+    {
+        public int CompetitionId { get; set; }
+        public int PatrolId { get; set; }
+    }
+
+    public class AddShooterToPatrolRequest
+    {
+        public int CompetitionId { get; set; }
+        public int PatrolId { get; set; }
+        public int MemberId { get; set; }
+        public string ShootingClass { get; set; } = "";
+        public string MemberName { get; set; } = "";
+        public string ClubName { get; set; } = "";
+    }
+
+    public class RemoveShooterFromPatrolRequest
+    {
+        public int CompetitionId { get; set; }
+        public int PatrolMemberId { get; set; }
+    }
+
+    public class MoveShooterToPatrolRequest
+    {
+        public int CompetitionId { get; set; }
+        public int PatrolMemberId { get; set; }
+        public int TargetPatrolId { get; set; }
+    }
+
+    public class FaltskylteBulkMoveShootersRequest
+    {
+        public int CompetitionId { get; set; }
+        public List<int> PatrolMemberIds { get; set; } = new();
+        public int TargetPatrolId { get; set; }
+    }
+
+    public class UpdatePatrolTimeRequest
+    {
+        public int CompetitionId { get; set; }
+        public int PatrolId { get; set; }
+        public DateTime? StartTime { get; set; }
+    }
+
+    public class PublishPatrolListRequest
+    {
+        public int CompetitionId { get; set; }
+        public bool Publish { get; set; }
     }
 
     // ── Station Config ────────────────────────────────────────────
@@ -45,8 +107,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public string ShootingClass { get; set; } = "";
         /// <summary>Hits per figure, e.g. [3, 2, 1]</summary>
         public int[] HitsPerFigure { get; set; } = Array.Empty<int>();
-        /// <summary>Poångmål score (null if station has no poångmål)</summary>
+        /// <summary>Poångmål total score (null if station has no poångmål)</summary>
         public int? TiebreakerScore { get; set; }
+        /// <summary>Individual poångmål scores, e.g. [24, 20]</summary>
+        public int[]? PoangmalScores { get; set; }
         /// <summary>Number of re-shoots at this station</summary>
         public int Reshoots { get; set; }
     }
@@ -65,6 +129,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
 
     public class FaltskyttePatrolView
     {
+        public int PatrolId { get; set; }
         public int PatrolNumber { get; set; }
         public DateTime? StartTime { get; set; }
         public string? WeaponGroup { get; set; }
@@ -75,6 +140,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
 
     public class FaltskyttePatrolMemberView
     {
+        public int PatrolMemberId { get; set; }
         public int MemberId { get; set; }
         public int Position { get; set; }
         public string Name { get; set; } = "";

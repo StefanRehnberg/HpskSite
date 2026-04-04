@@ -1,6 +1,6 @@
 @*
  * Fältskytte Patrol Management
- * Generates patrols per weapon class group with independent start times.
+ * Full CRUD for patrols and shooters, with publish mechanism.
  *@
 
 @{
@@ -10,11 +10,23 @@
 <div class="faltskytte-startlist-management" data-competition-id="@competitionId">
     <div class="card mb-3">
         <div class="card-header">
-            <div class="d-flex justify-content-between align-items-center">
-                <h5 class="mb-0"><i class="bi bi-people me-2"></i>Patruller (Fältskytte)</h5>
-                <div class="d-flex gap-2">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <div>
+                    <h5 class="mb-0 d-inline"><i class="bi bi-people me-2"></i>Patrullista</h5>
+                    <span class="badge ms-2" id="faltPublishBadge">Preliminär</span>
+                </div>
+                <div class="d-flex gap-2 flex-wrap">
                     <button class="btn btn-primary btn-sm" onclick="faltShowGenerateModal()">
                         <i class="bi bi-plus-lg me-1"></i>Generera patruller
+                    </button>
+                    <button class="btn btn-outline-primary btn-sm" onclick="faltCreatePatrol()">
+                        <i class="bi bi-plus-circle me-1"></i>Skapa patrull
+                    </button>
+                    <button class="btn btn-success btn-sm" onclick="faltPublish(true)" id="faltPublishBtn" style="display:none">
+                        <i class="bi bi-globe me-1"></i>Publicera
+                    </button>
+                    <button class="btn btn-outline-warning btn-sm" onclick="faltPublish(false)" id="faltUnpublishBtn" style="display:none">
+                        <i class="bi bi-eye-slash me-1"></i>Avpublicera
                     </button>
                     <button class="btn btn-outline-danger btn-sm" onclick="faltDeleteAllPatrols()" id="faltDeleteAllBtn" style="display:none">
                         <i class="bi bi-trash me-1"></i>Ta bort alla
@@ -23,11 +35,22 @@
             </div>
         </div>
         <div class="card-body">
+            <!-- Bulk action bar (visible when shooters selected) -->
+            <div class="alert alert-info py-2 d-flex gap-2 align-items-center" id="faltBulkBar" style="display:none">
+                <span id="faltBulkCount">0</span> markerade
+                <select class="form-select form-select-sm" id="faltBulkTarget" style="width:auto">
+                    <option value="">Flytta till patrull...</option>
+                </select>
+                <button class="btn btn-sm btn-outline-primary" onclick="faltBulkMove()">Flytta</button>
+                <button class="btn btn-sm btn-outline-danger" onclick="faltBulkRemove()">Ta bort</button>
+                <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="faltClearSelection()">Avmarkera</button>
+            </div>
+
             <div id="faltPatrolsLoading" class="text-center py-4" style="display:none">
                 <div class="spinner-border spinner-border-sm" role="status"><span class="visually-hidden">Laddar...</span></div>
             </div>
             <div id="faltPatrolsEmpty" class="text-center py-4">
-                <p class="text-muted mb-0">Inga patruller genererade. Klicka "Generera patruller" för att skapa patruller.</p>
+                <p class="text-muted mb-0">Inga patruller skapade. Generera patruller eller skapa manuellt.</p>
             </div>
             <div id="faltPatrolsContainer" style="display:none">
                 <div id="faltPatrolGroups"></div>
@@ -70,6 +93,11 @@
                         </div>
                     </div>
                 </div>
+                <div class="mb-3">
+                    <label for="faltGenMultiClassGap" class="form-label fw-bold">Tid mellan vapenklasser (min)</label>
+                    <input type="number" class="form-control" id="faltGenMultiClassGap" min="0" max="300" value="0" style="max-width:100px">
+                    <div class="form-text">Minsta tid mellan patruller för skyttar som skjuter flera vapenklasser. 0 = ingen separering.</div>
+                </div>
                 <div class="alert alert-secondary small mb-0">
                     <i class="bi bi-info-circle me-1"></i>Patruller läggs till befintliga. Generera för varje vapenklassgrupp separat med olika tider.
                 </div>
@@ -84,6 +112,60 @@
     </div>
 </div>
 
+<!-- Add Shooter Modal -->
+<div class="modal fade" id="faltAddShooterModal" tabindex="-1" style="z-index:1065">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-person-plus me-2"></i>Lägg till skytt</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="faltAddShooterPatrolId">
+                <input type="hidden" id="faltAddShooterWeaponGroup">
+                <div class="mb-3">
+                    <label class="form-label">Sök bland anmälda skyttar <span class="text-muted small" id="faltAddShooterWgLabel"></span></label>
+                    <input type="text" class="form-control" id="faltAddShooterSearch" placeholder="Sök namn eller klubb..." autocomplete="off" data-1p-ignore="true" oninput="faltSearchShooters()">
+                    <div class="form-check mt-1">
+                        <input class="form-check-input" type="checkbox" id="faltAddShooterShowAll" onchange="faltSearchShooters()">
+                        <label class="form-check-label small text-muted" for="faltAddShooterShowAll">Visa alla anmälda (även de som redan är i en patrull)</label>
+                    </div>
+                </div>
+                <div id="faltAddShooterResults" style="max-height:300px;overflow-y:auto"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Create Patrol Modal -->
+<div class="modal fade" id="faltCreatePatrolModal" tabindex="-1" style="z-index:1065">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-plus-circle me-2"></i>Skapa patrull</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Vapengrupp</label>
+                    <input type="text" class="form-control" id="faltNewPatrolWg" value="C" autocomplete="off" data-1p-ignore="true">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Position</label>
+                    <select class="form-select" id="faltNewPatrolAfter">
+                        <option value="0">Sist</option>
+                    </select>
+                    <div class="form-text">Övriga patruller numreras om.</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button class="btn btn-primary" onclick="faltDoCreatePatrol()">Skapa</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Flatpickr for time picker -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
 <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
@@ -92,11 +174,30 @@
 <script>
 (function() {
     var compId = document.querySelector('.faltskytte-startlist-management')?.dataset.competitionId;
+    var allPatrols = []; // Cache for rendering
+    var isPublished = false;
+    var faltPatrolSize = 6; // Default; updated when generating
+
     if (compId) loadFaltPatrols();
 
     setTimeout(function() {
         flatpickr('#faltGenStartTime', { locale: 'sv', enableTime: true, noCalendar: true, dateFormat: 'H:i', time_24hr: true, defaultHour: 9, defaultMinute: 0 });
     }, 100);
+
+    function apiPost(endpoint, body) {
+        return fetch('/umbraco/surface/Faltskytte/' + endpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value
+            },
+            body: JSON.stringify(body)
+        }).then(function(r) { return r.json(); });
+    }
+
+    function apiGet(endpoint) {
+        return fetch('/umbraco/surface/Faltskytte/' + endpoint).then(function(r) { return r.json(); });
+    }
 
     async function loadFaltPatrols() {
         var loading = document.getElementById('faltPatrolsLoading');
@@ -109,29 +210,56 @@
         container.style.display = 'none';
 
         try {
-            var resp = await fetch('/umbraco/surface/Faltskytte/GetPatrols?competitionId=' + compId);
-            var data = await resp.json();
+            var data = await apiGet('GetPatrols?competitionId=' + compId);
             loading.style.display = 'none';
 
-            if (!data.success || !data.patrols || data.patrols.length === 0) {
+            allPatrols = (data.success && data.patrols) ? data.patrols : [];
+
+            if (allPatrols.length === 0) {
                 empty.style.display = '';
                 deleteAllBtn.style.display = 'none';
-                return;
+            } else {
+                container.style.display = '';
+                deleteAllBtn.style.display = '';
+                renderPatrols();
             }
 
-            container.style.display = '';
-            deleteAllBtn.style.display = '';
-            renderPatrolGroups(data.patrols);
+            // Check publish status
+            updatePublishUI();
+            updateBulkBar();
         } catch (err) {
             loading.style.display = 'none';
             empty.style.display = '';
         }
     }
 
-    function renderPatrolGroups(patrols) {
-        // Group patrols by weapon group
+    async function updatePublishUI() {
+        // Read publish status from a data attribute or API; for now check competition property
+        try {
+            var data = await apiGet('GetPublicPatrols?competitionId=' + compId);
+            isPublished = data.published || false;
+        } catch(e) { isPublished = false; }
+
+        var badge = document.getElementById('faltPublishBadge');
+        var pubBtn = document.getElementById('faltPublishBtn');
+        var unpubBtn = document.getElementById('faltUnpublishBtn');
+        if (isPublished) {
+            badge.className = 'badge bg-success ms-2';
+            badge.textContent = 'Publicerad';
+            pubBtn.style.display = 'none';
+            unpubBtn.style.display = allPatrols.length > 0 ? '' : 'none';
+        } else {
+            badge.className = 'badge bg-warning text-dark ms-2';
+            badge.textContent = 'Preliminär';
+            pubBtn.style.display = allPatrols.length > 0 ? '' : 'none';
+            unpubBtn.style.display = 'none';
+        }
+    }
+
+    function renderPatrols() {
+        // Group by weapon group
         var byGroup = {};
-        patrols.forEach(function(p) {
+        allPatrols.forEach(function(p) {
             var wg = p.weaponGroup || '?';
             if (!byGroup[wg]) byGroup[wg] = [];
             byGroup[wg].push(p);
@@ -143,65 +271,255 @@
         Object.keys(byGroup).forEach(function(wg) {
             var grpPatrols = byGroup[wg];
             var totalShooters = grpPatrols.reduce(function(s, p) { return s + p.members.length; }, 0);
-            var firstTime = grpPatrols[0].startTime ? new Date(grpPatrols[0].startTime).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }) : '';
-            var lastTime = grpPatrols[grpPatrols.length - 1].startTime ? new Date(grpPatrols[grpPatrols.length - 1].startTime).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }) : '';
 
             var html = '<div class="card mb-3">' +
                 '<div class="card-header py-2 d-flex justify-content-between align-items-center">' +
                 '<span><strong>Vapengrupp ' + wg + '</strong>' +
                 '<span class="badge bg-primary ms-2">' + grpPatrols.length + ' patruller</span>' +
-                '<span class="badge bg-secondary ms-2">' + totalShooters + ' starter</span>' +
-                (firstTime ? '<span class="text-muted ms-2">' + firstTime + ' — ' + lastTime + '</span>' : '') +
-                '</span>' +
-                '<button class="btn btn-outline-danger btn-sm py-0" onclick="faltDeleteGroupPatrols(\'' + wg + '\')" title="Ta bort patruller för ' + wg + '">' +
-                '<i class="bi bi-trash me-1"></i>' + wg + '</button>' +
+                '<span class="badge bg-secondary ms-2">' + totalShooters + ' skyttar</span></span>' +
+                '<button class="btn btn-outline-danger btn-sm py-0" onclick="faltDeleteGroupPatrols(\'' + wg.replace(/'/g, "\\'") + '\')" title="Ta bort">' +
+                '<i class="bi bi-trash"></i></button>' +
                 '</div><div class="card-body p-0">';
 
             grpPatrols.forEach(function(patrol) {
                 var startTimeStr = patrol.startTime ? new Date(patrol.startTime).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }) : '';
-                html += '<div class="border-bottom px-3 py-2">' +
+                var wgEsc = (wg || '').replace(/'/g, "\\'");
+                html += '<div class="border-bottom px-3 py-2" data-patrol-id="' + patrol.patrolId + '">' +
                     '<div class="d-flex justify-content-between align-items-center mb-1">' +
-                    '<span><strong>Patrull ' + patrol.patrolNumber + '</strong>' +
-                    (startTimeStr ? '<span class="text-muted ms-2"><i class="bi bi-clock me-1"></i>' + startTimeStr + '</span>' : '') +
+                    '<span>' +
+                    '<strong>Patrull ' + patrol.patrolNumber + '</strong>' +
+                    (startTimeStr ? '<span class="text-muted ms-2"><i class="bi bi-clock me-1"></i>' + startTimeStr +
+                        ' <button class="btn btn-link btn-sm p-0 text-muted" onclick="faltEditPatrolTime(' + patrol.patrolId + ',\'' + startTimeStr + '\')" title="Ändra starttid"><i class="bi bi-pencil" style="font-size:0.7em"></i></button></span>' : '') +
+                    '<span class="badge bg-secondary ms-2">' + patrol.members.length + '</span>' +
                     '</span>' +
-                    '<span class="badge bg-secondary">' + patrol.members.length + '</span>' +
-                    '</div>' +
-                    '<div class="d-flex flex-wrap gap-2">';
-                patrol.members.forEach(function(m) {
-                    html += '<span class="small">' + m.name + ' <span class="badge bg-body-secondary text-body">' + m.shootingClass + '</span></span>';
-                });
-                html += '</div></div>';
+                    '<span class="d-flex gap-1">' +
+                    '<button class="btn btn-outline-primary btn-sm py-0 px-1" onclick="faltShowAddShooter(' + patrol.patrolId + ',\'' + wgEsc + '\')" title="Lägg till skytt"><i class="bi bi-person-plus"></i></button>' +
+                    '<button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="faltDeletePatrol(' + patrol.patrolId + ')" title="Ta bort patrull"><i class="bi bi-trash"></i></button>' +
+                    '</span></div>';
+
+                if (patrol.members.length === 0) {
+                    html += '<div class="text-muted small fst-italic">Tom patrull</div>';
+                } else {
+                    patrol.members.forEach(function(m) {
+                        html += '<div class="d-flex align-items-center gap-2 py-1 falt-member-row" data-pm-id="' + m.patrolMemberId + '">' +
+                            '<input type="checkbox" class="form-check-input falt-member-check" data-pm-id="' + m.patrolMemberId + '" onchange="faltUpdateBulkBar()">' +
+                            '<span class="flex-grow-1 small">' + m.name + ' <span class="text-muted">(' + m.club + ')</span>' +
+                            ' <span class="badge bg-body-secondary text-body">' + m.shootingClass + '</span></span>' +
+                            '<button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="faltRemoveShooter(' + m.patrolMemberId + ')" title="Ta bort"><i class="bi bi-x"></i></button>' +
+                            '</div>';
+                    });
+                }
+                html += '</div>';
             });
 
             html += '</div></div>';
             groupsEl.insertAdjacentHTML('beforeend', html);
         });
+
+        // Update bulk move target dropdown
+        var bulkTarget = document.getElementById('faltBulkTarget');
+        bulkTarget.innerHTML = '<option value="">Flytta till patrull...</option>';
+        allPatrols.forEach(function(p) {
+            bulkTarget.innerHTML += '<option value="' + p.patrolId + '">Patrull ' + p.patrolNumber + '</option>';
+        });
     }
 
+    function updateBulkBar() {
+        var checked = document.querySelectorAll('.falt-member-check:checked');
+        var bar = document.getElementById('faltBulkBar');
+        var countEl = document.getElementById('faltBulkCount');
+        if (checked.length > 0) {
+            bar.style.display = '';
+            countEl.textContent = checked.length;
+        } else {
+            bar.style.display = 'none';
+        }
+    }
+    window.faltUpdateBulkBar = updateBulkBar;
+
+    window.faltClearSelection = function() {
+        document.querySelectorAll('.falt-member-check:checked').forEach(function(cb) { cb.checked = false; });
+        updateBulkBar();
+    };
+
+    window.faltBulkMove = async function() {
+        var targetId = parseInt(document.getElementById('faltBulkTarget').value);
+        if (!targetId) { alert('Välj en målpatrull.'); return; }
+        var ids = [];
+        document.querySelectorAll('.falt-member-check:checked').forEach(function(cb) { ids.push(parseInt(cb.dataset.pmId)); });
+        if (ids.length === 0) return;
+        var data = await apiPost('BulkMoveShooters', { competitionId: parseInt(compId), patrolMemberIds: ids, targetPatrolId: targetId });
+        if (data.success) loadFaltPatrols();
+        else alert('Fel: ' + (data.message || 'Okänt fel'));
+    };
+
+    window.faltBulkRemove = async function() {
+        var ids = [];
+        document.querySelectorAll('.falt-member-check:checked').forEach(function(cb) { ids.push(parseInt(cb.dataset.pmId)); });
+        if (ids.length === 0) return;
+        if (!confirm('Ta bort ' + ids.length + ' markerade skyttar från patrullerna?')) return;
+        for (var i = 0; i < ids.length; i++) {
+            await apiPost('RemoveShooterFromPatrol', { competitionId: parseInt(compId), patrolMemberId: ids[i] });
+        }
+        loadFaltPatrols();
+    };
+
+    window.faltRemoveShooter = async function(pmId) {
+        if (!confirm('Ta bort skytten från patrullen?')) return;
+        var data = await apiPost('RemoveShooterFromPatrol', { competitionId: parseInt(compId), patrolMemberId: pmId });
+        if (data.success) loadFaltPatrols();
+        else alert('Fel: ' + (data.message || 'Okänt fel'));
+    };
+
+    window.faltDeletePatrol = async function(patrolId) {
+        if (!confirm('Ta bort hela patrullen och alla dess skyttar?')) return;
+        var data = await apiPost('DeletePatrol', { competitionId: parseInt(compId), patrolId: patrolId });
+        if (data.success) loadFaltPatrols();
+        else alert('Fel: ' + (data.message || 'Okänt fel'));
+    };
+
+    window.faltCreatePatrol = function() {
+        // Populate position dropdown
+        var sel = document.getElementById('faltNewPatrolAfter');
+        sel.innerHTML = '<option value="0">Sist</option>';
+        allPatrols.forEach(function(p) {
+            sel.innerHTML += '<option value="' + p.patrolNumber + '">Efter patrull ' + p.patrolNumber + '</option>';
+        });
+        // Default weapon group from most common existing
+        var wgCounts = {};
+        allPatrols.forEach(function(p) { var w = p.weaponGroup || 'C'; wgCounts[w] = (wgCounts[w]||0) + 1; });
+        var defaultWg = 'C';
+        var maxCount = 0;
+        Object.keys(wgCounts).forEach(function(w) { if (wgCounts[w] > maxCount) { maxCount = wgCounts[w]; defaultWg = w; } });
+        document.getElementById('faltNewPatrolWg').value = defaultWg;
+
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('faltCreatePatrolModal')).show();
+    };
+
+    window.faltDoCreatePatrol = async function() {
+        var wg = (document.getElementById('faltNewPatrolWg').value || 'C').trim().toUpperCase();
+        var afterNum = parseInt(document.getElementById('faltNewPatrolAfter').value) || 0;
+
+        if (afterNum > 0 && allPatrols.length > 0) {
+            if (!confirm('Patrullerna efter position ' + afterNum + ' numreras om. Fortsätt?')) return;
+        }
+
+        bootstrap.Modal.getInstance(document.getElementById('faltCreatePatrolModal'))?.hide();
+        var data = await apiPost('CreatePatrol', { competitionId: parseInt(compId), weaponGroup: wg, afterPatrolNumber: afterNum > 0 ? afterNum : null });
+        if (data.success) loadFaltPatrols();
+        else alert('Fel: ' + (data.message || 'Okänt fel'));
+    };
+
+    window.faltEditPatrolTime = async function(patrolId, currentTime) {
+        var newTime = prompt('Ny starttid (HH:mm):', currentTime || '09:00');
+        if (!newTime) return;
+        var parts = newTime.split(':');
+        if (parts.length !== 2) { alert('Ogiltig tid. Använd HH:mm-format.'); return; }
+        var dt = new Date();
+        dt.setHours(parseInt(parts[0]) || 9, parseInt(parts[1]) || 0, 0, 0);
+        var data = await apiPost('UpdatePatrolTime', { competitionId: parseInt(compId), patrolId: patrolId, startTime: dt.toISOString() });
+        if (data.success) loadFaltPatrols();
+        else alert('Fel: ' + (data.message || 'Okänt fel'));
+    };
+
+    window.faltPublish = async function(pub) {
+        var msg = pub ? 'Publicera patrullistan? Den blir synlig för alla på tävlingssidan.' : 'Avpublicera patrullistan?';
+        if (!confirm(msg)) return;
+        var data = await apiPost('PublishPatrolList', { competitionId: parseInt(compId), publish: pub });
+        if (data.success) {
+            isPublished = pub;
+            updatePublishUI();
+        } else { alert('Fel: ' + (data.message || 'Okänt fel')); }
+    };
+
+    // Add Shooter modal
+    window.faltShowAddShooter = function(patrolId, weaponGroup) {
+        document.getElementById('faltAddShooterPatrolId').value = patrolId;
+        document.getElementById('faltAddShooterWeaponGroup').value = weaponGroup || '';
+        document.getElementById('faltAddShooterWgLabel').textContent = weaponGroup ? '(vapengrupp ' + weaponGroup + ')' : '';
+        document.getElementById('faltAddShooterSearch').value = '';
+        document.getElementById('faltAddShooterShowAll').checked = false;
+        document.getElementById('faltAddShooterResults').innerHTML = '';
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('faltAddShooterModal')).show();
+        faltSearchShooters();
+    };
+
+    var _searchTimeout = null;
+    window.faltSearchShooters = function() {
+        clearTimeout(_searchTimeout);
+        _searchTimeout = setTimeout(async function() {
+            var q = document.getElementById('faltAddShooterSearch').value;
+            var wg = document.getElementById('faltAddShooterWeaponGroup').value;
+            var showAll = document.getElementById('faltAddShooterShowAll').checked;
+            var url = 'SearchAvailableShooters?competitionId=' + compId + '&query=' + encodeURIComponent(q);
+            if (wg) url += '&weaponGroup=' + encodeURIComponent(wg);
+            if (showAll) url += '&showAll=true';
+            var data = await apiGet(url);
+            var container = document.getElementById('faltAddShooterResults');
+            if (!data.success || !data.shooters || data.shooters.length === 0) {
+                container.innerHTML = '<div class="text-muted small py-2">' +
+                    (showAll ? 'Inga anmälda skyttar hittades.' : 'Alla anmälda skyttar är redan tilldelade en patrull. Markera "Visa alla" för att se dem.') +
+                    '</div>';
+                return;
+            }
+            container.innerHTML = '';
+            data.shooters.forEach(function(s) {
+                var assigned = s.assignedToPatrol != null;
+                container.innerHTML += '<div class="d-flex align-items-center justify-content-between py-1 border-bottom' + (assigned ? ' bg-body-tertiary' : '') + '">' +
+                    '<span class="small">' + s.name + ' <span class="text-muted">(' + s.club + ')</span>' +
+                    ' <span class="badge bg-body-secondary text-body">' + s.shootingClass + '</span>' +
+                    (assigned ? ' <span class="badge bg-info text-dark">Patrull ' + s.assignedToPatrol + '</span>' : '') +
+                    '</span>' +
+                    '<button class="btn btn-sm btn-outline-primary py-0" onclick="faltAddShooter(' + s.memberId + ',' +
+                    "'" + s.name.replace(/'/g, "\\'") + "'" + ',' +
+                    "'" + s.club.replace(/'/g, "\\'") + "'" + ',' +
+                    "'" + s.shootingClass.replace(/'/g, "\\'") + "'" +
+                    ')" title="' + (assigned ? 'Flytta till denna patrull' : 'Lägg till') + '">' +
+                    '<i class="bi bi-' + (assigned ? 'arrow-right' : 'plus') + '"></i></button></div>';
+            });
+        }, 200);
+    };
+
+    window.faltAddShooter = async function(memberId, name, club, shootingClass) {
+        var patrolId = parseInt(document.getElementById('faltAddShooterPatrolId').value);
+        // Check patrol size
+        var patrol = allPatrols.find(function(p) { return p.patrolId === patrolId; });
+        if (patrol && patrol.members.length >= faltPatrolSize) {
+            if (!confirm('Patrullen har redan ' + patrol.members.length + ' skyttar (max ' + faltPatrolSize + '). Lägg till ändå?')) return;
+        }
+        var data = await apiPost('AddShooterToPatrol', {
+            competitionId: parseInt(compId),
+            patrolId: patrolId,
+            memberId: memberId,
+            shootingClass: shootingClass,
+            memberName: name,
+            clubName: club
+        });
+        if (data.success) {
+            faltSearchShooters(); // Refresh available list
+            loadFaltPatrols();
+        } else { alert('Fel: ' + (data.message || 'Okänt fel')); }
+    };
+
+    // Existing functions (generate, delete all, delete by group)
     var _faltAvailableWcs = null;
 
     async function loadAvailableWeaponClasses() {
-        _faltAvailableWcs = null; // Always reload to get fresh data
+        _faltAvailableWcs = null;
         try {
-            var resp = await fetch('/umbraco/surface/Faltskytte/GetAvailableWeaponClasses?competitionId=' + compId);
-            var data = await resp.json();
+            var data = await apiGet('GetAvailableWeaponClasses?competitionId=' + compId);
             if (data.success) _faltAvailableWcs = data.weaponClasses;
         } catch(e) {}
         return _faltAvailableWcs || ['C'];
     }
 
     async function getGeneratedWeaponGroups() {
-        try {
-            var resp = await fetch('/umbraco/surface/Faltskytte/GetPatrols?competitionId=' + compId);
-            var data = await resp.json();
-            if (!data.success || !data.patrols) return [];
-            var groups = {};
-            data.patrols.forEach(function(p) {
-                var wg = p.weaponGroup || '';
-                wg.split('+').forEach(function(w) { if (w) groups[w] = true; });
-            });
-            return Object.keys(groups);
-        } catch(e) { return []; }
+        var groups = {};
+        allPatrols.forEach(function(p) {
+            var wg = p.weaponGroup || '';
+            wg.split('+').forEach(function(w) { if (w) groups[w] = true; });
+        });
+        return Object.keys(groups);
     }
 
     window.faltShowGenerateModal = async function() {
@@ -238,6 +556,7 @@
         if (selectedWcs.length === 0) { alert('Välj minst en vapenklass.'); return; }
 
         var patrolSize = parseInt(document.getElementById('faltGenPatrolSize').value) || 6;
+        faltPatrolSize = patrolSize; // Store for size warnings
         var interval = parseInt(document.getElementById('faltGenInterval').value) || 15;
         var startTimeStr = document.getElementById('faltGenStartTime').value || '09:00';
         var parts = startTimeStr.split(':');
@@ -246,60 +565,32 @@
 
         bootstrap.Modal.getInstance(document.getElementById('faltGenerateModal'))?.hide();
 
-        try {
-            var resp = await fetch('/umbraco/surface/Faltskytte/GeneratePatrols', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value
-                },
-                body: JSON.stringify({
-                    competitionId: parseInt(compId),
-                    patrolSize: patrolSize,
-                    patrolIntervalMinutes: interval,
-                    firstStartTime: firstStart.toISOString(),
-                    weaponGrouping: 'MixAll',
-                    weaponClasses: selectedWcs
-                })
-            });
-            var data = await resp.json();
-            if (data.success) { loadFaltPatrols(); }
-            else { alert('Fel: ' + (data.message || 'Okänt fel')); }
-        } catch (err) { alert('Nätverksfel.'); }
+        var multiClassGap = parseInt(document.getElementById('faltGenMultiClassGap').value) || 0;
+        var data = await apiPost('GeneratePatrols', {
+            competitionId: parseInt(compId),
+            patrolSize: patrolSize,
+            patrolIntervalMinutes: interval,
+            firstStartTime: firstStart.toISOString(),
+            weaponGrouping: 'MixAll',
+            weaponClasses: selectedWcs,
+            multiClassGapMinutes: multiClassGap
+        });
+        if (data.success) loadFaltPatrols();
+        else alert('Fel: ' + (data.message || 'Okänt fel'));
     };
 
     window.faltDeleteGroupPatrols = async function(weaponGroup) {
         if (!confirm('Ta bort alla patruller för vapengrupp ' + weaponGroup + '?')) return;
-        try {
-            var resp = await fetch('/umbraco/surface/Faltskytte/DeletePatrolsByGroup', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value
-                },
-                body: JSON.stringify({ competitionId: parseInt(compId), weaponGroup: weaponGroup })
-            });
-            var data = await resp.json();
-            if (data.success) { loadFaltPatrols(); }
-            else { alert('Fel: ' + (data.message || 'Okänt fel')); }
-        } catch (err) { alert('Nätverksfel.'); }
+        var data = await apiPost('DeletePatrolsByGroup', { competitionId: parseInt(compId), weaponGroup: weaponGroup });
+        if (data.success) loadFaltPatrols();
+        else alert('Fel: ' + (data.message || 'Okänt fel'));
     };
 
     window.faltDeleteAllPatrols = async function() {
         if (!confirm('Ta bort ALLA patruller?')) return;
-        try {
-            var resp = await fetch('/umbraco/surface/Faltskytte/DeletePatrols', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value
-                },
-                body: JSON.stringify({ competitionId: parseInt(compId) })
-            });
-            var data = await resp.json();
-            if (data.success) { loadFaltPatrols(); }
-            else { alert('Fel: ' + (data.message || 'Okänt fel')); }
-        } catch (err) { alert('Nätverksfel.'); }
+        var data = await apiPost('DeletePatrols', { competitionId: parseInt(compId) });
+        if (data.success) loadFaltPatrols();
+        else alert('Fel: ' + (data.message || 'Okänt fel'));
     };
 })();
 </script>

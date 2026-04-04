@@ -39,8 +39,8 @@
                                 <select class="form-select form-select-sm" id="faltPickerColorSelect" onchange="faltPickerColorChanged()"></select>
                             </div>
 
-                            <!-- Distances display -->
-                            <div class="mb-3">
+                            <!-- Distances display (non-admin only) -->
+                            <div class="mb-3" id="faltPickerDistancesSection">
                                 <label class="form-label small mb-1 fw-bold">Max avstånd (meter)</label>
                                 <div id="faltPickerDistances" class="d-flex gap-2"></div>
                             </div>
@@ -49,8 +49,8 @@
                             <div id="faltPickerAdminSection" style="display:none">
                                 <hr>
                                 <div class="mb-2">
-                                    <label class="form-label small mb-1 fw-bold">Redigera figur</label>
-                                    <input type="text" class="form-control form-control-sm" id="faltPickerEditName" placeholder="Namn">
+                                    <label class="form-label small mb-1 fw-bold">Namn</label>
+                                    <input type="text" class="form-control form-control-sm" id="faltPickerEditName" placeholder="Namn" autocomplete="off" data-1p-ignore="true">
                                 </div>
                                 <div class="row g-1 mb-2">
                                     <div class="col-3"><label class="form-label small mb-0">A (m)</label><input type="number" class="form-control form-control-sm" id="faltPickerEditDistA" min="0" max="500"></div>
@@ -60,10 +60,10 @@
                                 </div>
                                 <!-- Variant editing -->
                                 <div id="faltPickerVariantEdits" class="mb-2"></div>
-                                <button class="btn btn-outline-primary btn-sm" onclick="faltPickerAddVariant()">
-                                    <i class="bi bi-plus me-1"></i>Ny variant
-                                </button>
-                                <div class="d-flex gap-2 mt-2">
+                                <div class="d-flex gap-2">
+                                    <button class="btn btn-outline-primary btn-sm" onclick="faltPickerAddVariant()">
+                                        <i class="bi bi-plus me-1"></i>Ny variant
+                                    </button>
                                     <button class="btn btn-sm btn-primary flex-grow-1" onclick="faltPickerSaveTarget()">
                                         <i class="bi bi-check-lg me-1"></i>Spara
                                     </button>
@@ -73,10 +73,12 @@
                                 </div>
                             </div>
 
-                            <hr>
-                            <button class="btn btn-primary w-100" onclick="faltPickerSelect()">
-                                <i class="bi bi-check-circle me-1"></i>Välj denna figur
-                            </button>
+                            <div id="faltPickerSelectSection" style="display:none">
+                                <hr>
+                                <button class="btn btn-primary w-100" onclick="faltPickerSelect()">
+                                    <i class="bi bi-check-circle me-1"></i>Välj denna figur
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -99,6 +101,7 @@ async function faltPickerOpen(weaponClass, callback) {
     _faltPickerSelected = null;
     _faltPickerSelectedVariant = null;
     document.getElementById('faltPickerDetail').style.display = 'none';
+    document.getElementById('faltPickerSelectSection').style.display = callback ? '' : 'none';
     document.getElementById('faltPickerNoSelection').style.display = '';
     document.getElementById('faltPickerSearch').value = '';
 
@@ -191,26 +194,36 @@ function faltPickerSelectTarget(targetId) {
 
     // Admin section
     var adminSection = document.getElementById('faltPickerAdminSection');
+    var distSection = document.getElementById('faltPickerDistancesSection');
     if (_faltPickerIsAdmin) {
         adminSection.style.display = '';
+        distSection.style.display = 'none';
         document.getElementById('faltPickerEditName').value = _faltPickerSelected.name;
         document.getElementById('faltPickerEditDistC').value = _faltPickerSelected.maxDistanceC || '';
         document.getElementById('faltPickerEditDistB').value = _faltPickerSelected.maxDistanceB || '';
         document.getElementById('faltPickerEditDistA').value = _faltPickerSelected.maxDistanceA || '';
         document.getElementById('faltPickerEditDistR').value = _faltPickerSelected.maxDistanceR || '';
 
-        // Variant edits
+        // Variant edits with image upload
         var varEdits = document.getElementById('faltPickerVariantEdits');
         varEdits.innerHTML = '<label class="form-label small mb-1 fw-bold">Varianter</label>';
         _faltPickerSelected.variants.forEach(function(v) {
-            varEdits.innerHTML += '<div class="d-flex gap-1 mb-1" data-variant-id="' + v.id + '">' +
-                '<input type="text" class="form-control form-control-sm variant-fullname" value="' + (v.fullName || '').replace(/"/g, '&quot;') + '" placeholder="Namn" style="flex:2">' +
-                '<input type="text" class="form-control form-control-sm variant-color" value="' + (v.color || '').replace(/"/g, '&quot;') + '" placeholder="Färg" style="flex:1">' +
+            var imgPreview = v.imageUrl ? '<img src="' + v.imageUrl + '" style="height:24px;border-radius:3px" alt="">' : '';
+            varEdits.innerHTML += '<div class="d-flex gap-1 mb-1 align-items-center" data-variant-id="' + v.id + '">' +
+                '<input type="text" class="form-control form-control-sm variant-fullname" value="' + (v.fullName || '').replace(/"/g, '&quot;') + '" placeholder="Namn" style="flex:2" autocomplete="off" data-1p-ignore="true">' +
+                '<input type="text" class="form-control form-control-sm variant-color" value="' + (v.color || '').replace(/"/g, '&quot;') + '" placeholder="Färg" style="flex:1" autocomplete="off" data-1p-ignore="true">' +
+                imgPreview +
+                '<label class="btn btn-outline-secondary btn-sm py-0 px-1 mb-0" title="Ladda upp bild">' +
+                '<i class="bi bi-image"></i>' +
+                '<input type="file" class="d-none" accept="image/*" onchange="faltPickerUploadVariantImage(this,' + v.id + ')">' +
+                '</label>' +
+                '<button class="btn btn-outline-info btn-sm py-0 px-1" onclick="faltPickerMoveVariant(' + v.id + ')" title="Flytta till annan figur"><i class="bi bi-arrow-right-circle"></i></button>' +
                 '<button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="faltPickerDeleteVariant(' + v.id + ')" title="Ta bort variant"><i class="bi bi-trash"></i></button>' +
                 '</div>';
         });
     } else {
         adminSection.style.display = 'none';
+        distSection.style.display = '';
     }
 
     // Highlight in grid
@@ -224,8 +237,13 @@ function faltPickerSelectTarget(targetId) {
 function faltPickerColorChanged() {
     var color = document.getElementById('faltPickerColorSelect').value;
     _faltPickerSelectedVariant = _faltPickerSelected.variants.find(function(v) { return v.color === color; });
-    if (_faltPickerSelectedVariant) {
-        document.getElementById('faltPickerDetailImg').src = _faltPickerSelectedVariant.imageUrl;
+    var img = document.getElementById('faltPickerDetailImg');
+    if (_faltPickerSelectedVariant && _faltPickerSelectedVariant.imageUrl) {
+        img.src = _faltPickerSelectedVariant.imageUrl;
+        img.style.display = '';
+    } else {
+        img.src = '';
+        img.style.display = 'none';
     }
 }
 
@@ -271,6 +289,7 @@ async function faltPickerSaveTarget() {
             var v = _faltPickerSelected.variants.find(function(x) { return x.id === vReq.id; });
             if (v) { v.fullName = vReq.fullName; v.color = vReq.color; }
         });
+        faltPickerRenderGrid(_faltPickerCatalog);
         faltPickerSelectTarget(_faltPickerSelected.id);
     } else {
         alert(data.message || 'Fel');
@@ -335,24 +354,22 @@ async function faltPickerDeleteTarget() {
 
 async function faltPickerAddVariant() {
     if (!_faltPickerSelected) return;
-    var fullName = prompt('Namn på ny variant (t.ex. "' + _faltPickerSelected.name + ' svart"):');
+    var fullName = prompt('Namn på ny variant:');
     if (!fullName) return;
-    var color = prompt('Färg (t.ex. svart, blå, grön):') || '';
-    var imageName = prompt('Bildfilnamn (t.ex. "figur svart.jpg", lämna tomt om ingen bild):') || '';
 
     var resp = await fetch('/umbraco/surface/Faltskytte/AddVariant', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value },
-        body: JSON.stringify({ targetId: _faltPickerSelected.id, fullName: fullName, imageName: imageName, color: color })
+        body: JSON.stringify({ targetId: _faltPickerSelected.id, fullName: fullName, imageName: '', color: '' })
     });
     var data = await resp.json();
     if (data.success) {
         _faltPickerSelected.variants.push({
             id: data.variantId,
             fullName: fullName,
-            imageName: imageName,
-            imageUrl: imageName ? '/images/field-targets/' + imageName : '',
-            color: color
+            imageName: '',
+            imageUrl: '',
+            color: ''
         });
         faltPickerSelectTarget(_faltPickerSelected.id);
     } else {
@@ -376,6 +393,96 @@ async function faltPickerDeleteVariant(variantId) {
         }
     } else {
         alert(data.message || 'Fel');
+    }
+}
+
+async function faltPickerMoveVariant(variantId) {
+    if (!_faltPickerSelected) return;
+    // Build a list of other targets to choose from
+    var options = _faltPickerCatalog
+        .filter(function(t) { return t.id !== _faltPickerSelected.id; })
+        .map(function(t) { return t.name + ' (ID:' + t.id + ')'; });
+
+    var choice = prompt('Flytta variant till vilken figur?\n\nSkriv figurens namn (eller del av namnet):');
+    if (!choice) return;
+
+    var searchLower = choice.toLowerCase();
+    var matches = _faltPickerCatalog.filter(function(t) {
+        return t.id !== _faltPickerSelected.id && t.name.toLowerCase().indexOf(searchLower) >= 0;
+    });
+
+    if (matches.length === 0) {
+        alert('Ingen figur hittades med namnet "' + choice + '"');
+        return;
+    }
+    var target = matches[0];
+    if (matches.length > 1) {
+        var names = matches.map(function(t,i) { return (i+1) + '. ' + t.name; }).join('\n');
+        var idx = prompt('Flera träffar:\n' + names + '\n\nVälj nummer:');
+        if (!idx) return;
+        target = matches[parseInt(idx) - 1];
+        if (!target) { alert('Ogiltigt val.'); return; }
+    }
+
+    if (!confirm('Flytta varianten till "' + target.name + '"?')) return;
+
+    var resp = await fetch('/umbraco/surface/Faltskytte/MoveVariant', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value },
+        body: JSON.stringify({ variantId: variantId, newTargetId: target.id })
+    });
+    var data = await resp.json();
+    if (data.success) {
+        // Move variant in local cache
+        var movedVariant = null;
+        _faltPickerSelected.variants = _faltPickerSelected.variants.filter(function(v) {
+            if (v.id === variantId) { movedVariant = v; return false; }
+            return true;
+        });
+        if (movedVariant) {
+            var destTarget = _faltPickerCatalog.find(function(t) { return t.id === target.id; });
+            if (destTarget) destTarget.variants.push(movedVariant);
+        }
+        // Remove source target if now empty
+        if (data.oldTargetEmpty) {
+            if (confirm('"' + _faltPickerSelected.name + '" har inga varianter kvar. Ta bort den?')) {
+                await faltPickerDeleteTarget();
+                return;
+            }
+        }
+        faltPickerRenderGrid(_faltPickerCatalog);
+        faltPickerSelectTarget(_faltPickerSelected.id);
+    } else {
+        alert(data.message || 'Fel');
+    }
+}
+
+async function faltPickerUploadVariantImage(inputEl, variantId) {
+    var file = inputEl.files[0];
+    if (!file) return;
+
+    var formData = new FormData();
+    formData.append('file', file);
+    formData.append('variantId', variantId);
+
+    try {
+        var resp = await fetch('/umbraco/surface/Faltskytte/UploadVariantImage', {
+            method: 'POST',
+            body: formData
+        });
+        var data = await resp.json();
+        if (data.success && _faltPickerSelected) {
+            var v = _faltPickerSelected.variants.find(function(x) { return x.id === variantId; });
+            if (v) {
+                v.imageUrl = data.imageUrl;
+                v.imageName = data.imageName;
+            }
+            faltPickerSelectTarget(_faltPickerSelected.id);
+        } else {
+            alert(data.message || 'Uppladdningsfel');
+        }
+    } catch(e) {
+        alert('Nätverksfel.');
     }
 }
 </script>

@@ -107,4 +107,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
     {
         public int VariantId { get; set; }
     }
+
+    public class MoveVariantRequest
+    {
+        public int VariantId { get; set; }
+        public int NewTargetId { get; set; }
+    }
 }

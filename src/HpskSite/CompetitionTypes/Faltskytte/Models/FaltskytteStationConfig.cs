@@ -59,6 +59,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
     {
         public int Group { get; set; }
         public List<FaltskytteFigure> Figures { get; set; } = new();
+        /// <summary>Photo of the complete target group setup</summary>
+        public string? ImageUrl { get; set; }
+        /// <summary>Descriptive text about this target group (for station cards)</summary>
+        public string? Description { get; set; }
 
         [System.Text.Json.Serialization.JsonIgnore]
         [JsonIgnore]
@@ -111,7 +115,12 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
                 // Direct format from JS: { "C": { "stations": [...] } }
                 var direct = JsonConvert.DeserializeObject<Dictionary<string, FaltskytteWeaponClassConfig>>(json);
                 if (direct?.Any() == true)
+                {
+                    // Remove metadata keys (e.g. _linkedGroups from configurator UI)
+                    foreach (var key in direct.Keys.Where(k => k.StartsWith("_")).ToList())
+                        direct.Remove(key);
                     return new FaltskytteCompetitionConfig { WeaponConfigs = direct };
+                }
             }
 
             return new FaltskytteCompetitionConfig();

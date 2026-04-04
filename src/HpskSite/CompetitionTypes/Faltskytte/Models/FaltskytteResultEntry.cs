@@ -36,6 +36,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         /// <summary>Score from poångmål (ringed figures) for tiebreaking. Null if station has no poångmål.</summary>
         public int? TiebreakerScore { get; set; }
 
+        /// <summary>JSON array of individual poångmål scores, e.g. [24,20]. Null if no poångmål.</summary>
+        public string? PoangmalScores { get; set; }
+
         /// <summary>Number of re-shoots (malfunction) used at this station</summary>
         public int Reshoots { get; set; }
 
