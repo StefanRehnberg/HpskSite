@@ -1,0 +1,173 @@
+@*
+ * Station Info Card — Read-only station information for public/unauthorized users.
+ * Shows Förutsättningar, Målgrupper, descriptions, and photos.
+ * Loaded via JS from GetStationConfig endpoint.
+ *@
+
+@{
+    var competitionId = ViewData["CompetitionId"]?.ToString() ?? "0";
+    var competitionName = ViewData["CompetitionName"]?.ToString() ?? "";
+    var competitionType = ViewData["CompetitionType"]?.ToString() ?? "";
+    var stationNumber = ViewData["StationNumber"]?.ToString() ?? "0";
+    var isLoggedIn = (bool)(ViewData["IsLoggedIn"] ?? false);
+    var isFaltskytte = competitionType is "Faltskytte" or "MagnumFalt";
+}
+
+<div class="station-info-card">
+    <div class="card">
+        <div class="card-header">
+            <h5 class="mb-0">
+                <i class="bi bi-bullseye me-2"></i>Station @stationNumber
+                @if (!string.IsNullOrEmpty(competitionName))
+                {
+                    <span class="text-muted"> — @competitionName</span>
+                }
+            </h5>
+        </div>
+        <div class="card-body">
+            @if (isFaltskytte)
+            {
+                <div id="stationInfoContent">
+                    <div class="text-center py-3">
+                        <div class="spinner-border spinner-border-sm" role="status"></div>
+                        <span class="ms-2 text-muted">Laddar stationsinformation...</span>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <p class="text-muted">Stationsinformation är inte tillgänglig för denna tävlingstyp.</p>
+            }
+
+            @if (!isLoggedIn)
+            {
+                <div class="mt-3 pt-3 border-top">
+                    <a href="/login-register?returnUrl=/station?c=@(competitionId)%26s=@(stationNumber)" class="btn btn-outline-primary btn-sm">
+                        <i class="bi bi-box-arrow-in-right me-1"></i>Logga in för resultatinmatning
+                    </a>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@if (isFaltskytte)
+{
+<script>
+(function() {
+    var compId = '@competitionId';
+    var stNum = parseInt('@stationNumber');
+
+    fetch('/umbraco/surface/Faltskytte/GetStationConfig?competitionId=' + compId)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data.success || !data.config) {
+                document.getElementById('stationInfoContent').innerHTML = '<p class="text-muted">Stationskonfiguration saknas.</p>';
+                return;
+            }
+
+            // Find station config for any weapon class (they share structure, differ in time)
+            var config = data.config.weaponConfigs || data.config;
+            var station = null;
+            var allStations = {}; // wc → station config (for combined time display)
+
+            Object.keys(config).forEach(function(wc) {
+                var wcCfg = config[wc];
+                var stations = wcCfg.stations || wcCfg.Stations || [];
+                var st = stations.find(function(s) { return (s.station || s.Station) === stNum; });
+                if (st) {
+                    allStations[wc] = st;
+                    if (!station) station = st;
+                }
+            });
+
+            if (!station) {
+                document.getElementById('stationInfoContent').innerHTML = '<p class="text-muted">Station ' + stNum + ' hittades inte i konfigurationen.</p>';
+                return;
+            }
+
+            var html = '';
+
+            // Förutsättningar
+            var wcKeys = Object.keys(allStations);
+            var timesMatch = wcKeys.length <= 1 || wcKeys.every(function(wc) {
+                return (allStations[wc].shootingTimeSec || allStations[wc].ShootingTimeSec) === (station.shootingTimeSec || station.ShootingTimeSec);
+            });
+
+            html += '<div class="bg-body-tertiary rounded p-3 mb-3">';
+            html += '<h6 class="fw-bold mb-2"><i class="bi bi-clipboard-check me-1"></i>F\u00f6ruts\u00e4ttningar</h6>';
+
+            if (timesMatch || wcKeys.length <= 1) {
+                html += '<div><strong>Skjuttid:</strong> ' + (station.shootingTimeSec || station.ShootingTimeSec) + ' sek</div>';
+            } else {
+                html += '<div><strong>Skjuttid:</strong> ';
+                html += wcKeys.map(function(wc) {
+                    return wc + ': ' + (allStations[wc].shootingTimeSec || allStations[wc].ShootingTimeSec) + ' sek';
+                }).join(' | ');
+                html += '</div>';
+            }
+
+            html += '<div><strong>Utg\u00e5ngsl\u00e4ge:</strong> ' + (station.shooterStartPosition || station.ShooterStartPosition || '') + '</div>';
+            html += '<div><strong>Vapenl\u00e4ge:</strong> ' + (station.weaponStartPosition || station.WeaponStartPosition || '') + '</div>';
+            html += '<div><strong>' + (station.supportHand || station.SupportHand || '') + '</strong></div>';
+            html += '</div>';
+
+            // Target groups
+            var groups = station.targetGroups || station.TargetGroups || [];
+            groups.forEach(function(tg) {
+                var groupNum = tg.group || tg.Group || 1;
+                var tgLetter = String.fromCharCode(64 + groupNum);
+                var figures = tg.figures || tg.Figures || [];
+
+                html += '<div class="border rounded p-3 mb-3">';
+                html += '<h6 class="fw-bold">M\u00e5lgrupp ' + tgLetter + '</h6>';
+
+                // Description
+                var desc = tg.description || tg.Description || '';
+                if (desc) {
+                    html += '<p class="text-muted fst-italic mb-2">' + desc.replace(/</g, '&lt;').replace(/\n/g, '<br>') + '</p>';
+                }
+
+                // Group photo
+                var imgUrl = tg.imageUrl || tg.ImageUrl || '';
+                if (imgUrl) {
+                    html += '<div class="text-center mb-2"><img src="' + imgUrl + '" style="max-width:100%;max-height:250px;border-radius:8px" alt="M\u00e5lgrupp ' + tgLetter + '"></div>';
+                }
+
+                // Figures
+                figures.forEach(function(fig) {
+                    var figNum = fig.figureNumber || fig.FigureNumber || 0;
+                    var behavior = fig.behavior || fig.Behavior || 'Fast';
+                    var isPoangmal = fig.isPoangmal || fig.IsPoangmal || false;
+                    var figImg = fig.imageUrl || fig.ImageUrl || '';
+
+                    html += '<div class="d-flex align-items-center gap-2 py-1 border-top">';
+                    if (figImg) html += '<img src="' + figImg + '" style="height:40px;border-radius:4px" alt="">';
+                    html += '<div>';
+                    html += '<strong>Figur ' + figNum + '</strong> \u2014 ' + behavior;
+                    if (behavior === 'Framsv\u00e4ngande') {
+                        var delay = fig.delayBeforeShowSec || fig.DelayBeforeShowSec || 0;
+                        var show = fig.showTimeSec || fig.ShowTimeSec || 0;
+                        if (delay > 0) html += ', fram efter ' + delay + ' sek';
+                        if (show > 0) html += ', visas i ' + show + ' sek';
+                    } else if (behavior === 'Bortsv\u00e4ngande') {
+                        var hide = fig.hideAfterSec || fig.HideAfterSec || 0;
+                        var reappear = fig.reappearSec || fig.ReappearSec || 0;
+                        if (hide > 0) html += ', bort efter ' + hide + ' sek';
+                        if (reappear > 0) html += ', visar igen efter ' + reappear + ' sek';
+                    }
+                    if (isPoangmal) html += ' <span class="badge bg-warning text-dark">Po\u00e4ngr\u00e4kning</span>';
+                    html += '</div></div>';
+                });
+
+                html += '</div>';
+            });
+
+            document.getElementById('stationInfoContent').innerHTML = html;
+        })
+        .catch(function() {
+            document.getElementById('stationInfoContent').innerHTML = '<p class="text-muted">Kunde inte ladda stationsinformation.</p>';
+        });
+})();
+</script>
+}

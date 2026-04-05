@@ -192,11 +192,17 @@
                 'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value
             },
             body: JSON.stringify(body)
-        }).then(function(r) { return r.json(); });
+        }).then(function(r) {
+            if (!r.ok) return r.text().then(function(t) { throw new Error('Server ' + r.status + ': ' + t.substring(0, 200)); });
+            return r.json();
+        });
     }
 
     function apiGet(endpoint) {
-        return fetch('/umbraco/surface/Faltskytte/' + endpoint).then(function(r) { return r.json(); });
+        return fetch('/umbraco/surface/Faltskytte/' + endpoint).then(function(r) {
+            if (!r.ok) return r.text().then(function(t) { throw new Error('Server ' + r.status + ': ' + t.substring(0, 200)); });
+            return r.json();
+        });
     }
 
     async function loadFaltPatrols() {
@@ -566,17 +572,19 @@
         bootstrap.Modal.getInstance(document.getElementById('faltGenerateModal'))?.hide();
 
         var multiClassGap = parseInt(document.getElementById('faltGenMultiClassGap').value) || 0;
-        var data = await apiPost('GeneratePatrols', {
-            competitionId: parseInt(compId),
-            patrolSize: patrolSize,
-            patrolIntervalMinutes: interval,
-            firstStartTime: firstStart.toISOString(),
-            weaponGrouping: 'MixAll',
-            weaponClasses: selectedWcs,
-            multiClassGapMinutes: multiClassGap
-        });
-        if (data.success) loadFaltPatrols();
-        else alert('Fel: ' + (data.message || 'Okänt fel'));
+        try {
+            var data = await apiPost('GeneratePatrols', {
+                competitionId: parseInt(compId),
+                patrolSize: patrolSize,
+                patrolIntervalMinutes: interval,
+                firstStartTime: firstStart.toISOString(),
+                weaponGrouping: 'MixAll',
+                weaponClasses: selectedWcs,
+                multiClassGapMinutes: multiClassGap
+            });
+            if (data.success) { loadFaltPatrols(); }
+            else { console.error('Generate error:', data.message, data.stackTrace); alert('Fel: ' + (data.message || 'Okänt fel')); }
+        } catch(err) { console.error('Generate exception:', err); alert('Fel: ' + err.message); }
     };
 
     window.faltDeleteGroupPatrols = async function(weaponGroup) {

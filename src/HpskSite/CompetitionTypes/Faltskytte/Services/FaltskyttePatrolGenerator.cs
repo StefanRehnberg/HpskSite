@@ -8,8 +8,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
     {
         /// <summary>
         /// Generates patrols from competition registrations.
-        /// Groups by weapon group, fills patrols up to patrolSize, assigns start times.
-        /// Multi-class shooters are separated by at least multiClassGapMinutes.
+        /// Respects multiClassGapMinutes between patrols for multi-class shooters,
+        /// including existing patrols from previous generation runs.
         /// </summary>
         public FaltskyttePatrolGenerationResult Generate(
             List<CompetitionRegistration> registrations,
@@ -17,192 +17,145 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             int patrolIntervalMinutes,
             DateTime? firstStartTime,
             string weaponGrouping = "Separate",
-            int multiClassGapMinutes = 0)
+            int multiClassGapMinutes = 0,
+            Dictionary<int, List<DateTime>>? existingMemberStartTimes = null)
         {
+            if (patrolSize < 1) patrolSize = 6;
+            if (patrolIntervalMinutes < 1) patrolIntervalMinutes = 15;
+
             if (!registrations.Any())
                 return new FaltskyttePatrolGenerationResult { Patrols = new(), Message = "Inga anmälningar." };
 
-            // Each registration is a separate patrol entry (one per member per weapon class)
-            // Group by weapon group based on grouping strategy
+            // Group by weapon group
             IEnumerable<IGrouping<string, CompetitionRegistration>> groups;
             if (weaponGrouping == "MixAll")
             {
-                groups = registrations
-                    .GroupBy(r => "Alla")
-                    .ToList();
+                groups = registrations.GroupBy(r => "Alla").ToList();
             }
             else if (weaponGrouping == "CombineAR")
             {
                 groups = registrations
-                    .GroupBy(r =>
-                    {
-                        var wg = GetWeaponGroup(r.MemberClass);
-                        return (wg == "A" || wg == "R") ? "A+R" : wg;
-                    })
-                    .OrderBy(g => GetGroupSortOrder(g.Key))
-                    .ToList();
+                    .GroupBy(r => { var wg = GetWeaponGroup(r.MemberClass); return (wg == "A" || wg == "R") ? "A+R" : wg; })
+                    .OrderBy(g => GetGroupSortOrder(g.Key)).ToList();
             }
             else
             {
                 groups = registrations
                     .GroupBy(r => GetWeaponGroup(r.MemberClass))
-                    .OrderBy(g => GetGroupSortOrder(g.Key))
-                    .ToList();
+                    .OrderBy(g => GetGroupSortOrder(g.Key)).ToList();
             }
 
-            // Identify multi-class shooters (same MemberId in multiple registrations)
-            var multiClassMembers = registrations
-                .GroupBy(r => r.MemberId)
-                .Where(g => g.Count() > 1)
-                .ToDictionary(g => g.Key, g => g.Select(r => r.MemberClass).ToList());
+            var startTime = firstStartTime ?? DateTime.Today.AddHours(9);
+            var gapMinutes = multiClassGapMinutes > 0 ? multiClassGapMinutes : 0;
 
-            // Minimum patrol gap for multi-class shooters
-            int minPatrolGap = multiClassGapMinutes > 0 && patrolIntervalMinutes > 0
-                ? (int)Math.Ceiling((double)multiClassGapMinutes / patrolIntervalMinutes)
-                : 0;
+            // Build a mutable copy of known member times (existing + placed during this run)
+            var memberTimes = new Dictionary<int, List<DateTime>>();
+            if (existingMemberStartTimes != null)
+            {
+                foreach (var kvp in existingMemberStartTimes)
+                    memberTimes[kvp.Key] = new List<DateTime>(kvp.Value);
+            }
+
+            // Identify members that appear more than once (across all registrations or have existing times)
+            var memberRegCount = registrations.GroupBy(r => r.MemberId).ToDictionary(g => g.Key, g => g.Count());
+            bool NeedsGap(int memberId) => gapMinutes > 0 && (memberRegCount.GetValueOrDefault(memberId, 0) > 1 || memberTimes.ContainsKey(memberId));
 
             var patrols = new List<FaltskytteGeneratedPatrol>();
             int patrolNumber = 1;
-            var currentTime = firstStartTime ?? DateTime.Today.AddHours(9);
+            var currentTime = startTime;
 
             foreach (var group in groups)
             {
                 var allMembers = group.OrderBy(r => r.MemberName).ToList();
                 var weaponGroup = group.Key;
 
-                // Check if this group actually has multi-class shooters
-                var groupMultiClass = allMembers.Where(r => multiClassMembers.ContainsKey(r.MemberId)).ToList();
-                var groupMultiByMember = groupMultiClass
-                    .GroupBy(r => r.MemberId)
-                    .Where(g => g.Count() > 1) // Only members with 2+ registrations IN THIS GROUP
-                    .ToDictionary(g => g.Key, g => g.OrderBy(r => GetGroupSortOrder(GetWeaponGroup(r.MemberClass))).ToList());
+                // Split: unconstrained first (fill normally), then constrained (need gap check)
+                var unconstrained = allMembers.Where(r => !NeedsGap(r.MemberId)).ToList();
+                var constrained = allMembers.Where(r => NeedsGap(r.MemberId)).ToList();
 
-                if (minPatrolGap > 0 && groupMultiByMember.Any())
+                // Sort constrained by weapon priority so first weapon class goes early
+                constrained = constrained
+                    .OrderBy(r => GetGroupSortOrder(GetWeaponGroup(r.MemberClass)))
+                    .ThenBy(r => r.MemberName)
+                    .ToList();
+
+                var patrolSlots = new List<List<CompetitionRegistration>>();
+
+                int FindNextSlot(int from)
                 {
-                    // Separation-aware patrol filling:
-                    var singleClass = allMembers.Where(r => !groupMultiByMember.ContainsKey(r.MemberId)).ToList();
-                    var multiClass = allMembers.Where(r => groupMultiByMember.ContainsKey(r.MemberId)).ToList();
+                    while (from < patrolSlots.Count && patrolSlots[from].Count >= patrolSize)
+                        from++;
+                    while (patrolSlots.Count <= from)
+                        patrolSlots.Add(new List<CompetitionRegistration>());
+                    return from;
+                }
 
-                    var multiByMember = groupMultiByMember;
+                // Place unconstrained shooters first
+                foreach (var reg in unconstrained)
+                {
+                    var slot = FindNextSlot(0);
+                    patrolSlots[slot].Add(reg);
+                }
 
-                    // Split into rounds: round 0 = each member's first weapon, round 1 = second weapon, etc.
-                    int maxRounds = multiByMember.Values.Max(v => v.Count);
-                    var rounds = new List<List<CompetitionRegistration>>();
-                    for (int round = 0; round < maxRounds; round++)
+                // Place constrained shooters respecting time gap
+                foreach (var reg in constrained)
+                {
+                    var myTimes = memberTimes.TryGetValue(reg.MemberId, out var t) ? t : null;
+
+                    int bestSlot = -1;
+                    for (int s = 0; ; s++)
                     {
-                        var batch = new List<CompetitionRegistration>();
-                        foreach (var kvp in multiByMember)
-                        {
-                            if (round < kvp.Value.Count)
-                                batch.Add(kvp.Value[round]);
-                        }
-                        rounds.Add(batch.OrderBy(r => r.MemberName).ToList());
-                    }
-
-                    var patrolSlots = new List<List<CompetitionRegistration>>();
-
-                    // Helper: ensure slot exists and find next with space at or after 'from'
-                    int FindSlot(int from)
-                    {
-                        while (from < patrolSlots.Count && patrolSlots[from].Count >= patrolSize)
-                            from++;
-                        if (from >= patrolSlots.Count)
+                        while (patrolSlots.Count <= s)
                             patrolSlots.Add(new List<CompetitionRegistration>());
-                        return from;
-                    }
+                        if (patrolSlots[s].Count >= patrolSize) continue;
 
-                    // Place round 0 (first weapon) interleaved with single-class shooters
-                    var firstRound = rounds.Count > 0 ? rounds[0] : new List<CompetitionRegistration>();
-                    var combined = new List<CompetitionRegistration>();
-                    combined.AddRange(singleClass);
-                    combined.AddRange(firstRound);
-                    combined = combined.OrderBy(r => r.MemberName).ToList();
-
-                    foreach (var reg in combined)
-                    {
-                        var slot = FindSlot(0);
-                        patrolSlots[slot].Add(reg);
-                    }
-
-                    // Track where each member's first weapon landed
-                    var memberFirstSlot = new Dictionary<int, int>();
-                    for (int s = 0; s < patrolSlots.Count; s++)
-                    {
-                        foreach (var reg in patrolSlots[s])
+                        var slotTime = currentTime.AddMinutes(s * patrolIntervalMinutes);
+                        bool ok = true;
+                        if (myTimes != null)
                         {
-                            if (multiByMember.ContainsKey(reg.MemberId) && !memberFirstSlot.ContainsKey(reg.MemberId))
-                                memberFirstSlot[reg.MemberId] = s;
-                        }
-                    }
-
-                    // Place subsequent rounds as batches, respecting gap from each member's previous placement
-                    var memberLastSlot = new Dictionary<int, int>(memberFirstSlot);
-                    for (int round = 1; round < rounds.Count; round++)
-                    {
-                        var batch = rounds[round];
-                        // Find the earliest slot any member in this batch can go
-                        int batchEarliest = 0;
-                        foreach (var reg in batch)
-                        {
-                            if (memberLastSlot.TryGetValue(reg.MemberId, out var last))
-                                batchEarliest = Math.Max(batchEarliest, last + minPatrolGap);
-                        }
-
-                        // Place the entire batch together, filling patrols sequentially from batchEarliest
-                        foreach (var reg in batch)
-                        {
-                            var slot = FindSlot(batchEarliest);
-                            patrolSlots[slot].Add(reg);
-                            memberLastSlot[reg.MemberId] = slot;
-                        }
-                    }
-
-                    // Convert non-empty slots to patrols
-                    foreach (var slot in patrolSlots)
-                    {
-                        if (slot.Count == 0) continue;
-                        patrols.Add(new FaltskytteGeneratedPatrol
-                        {
-                            PatrolNumber = patrolNumber,
-                            StartTime = currentTime,
-                            WeaponGroup = weaponGroup,
-                            Members = slot.Select((r, idx) => new FaltskytteGeneratedPatrolMember
+                            foreach (var et in myTimes)
                             {
-                                MemberId = r.MemberId,
-                                Position = idx + 1,
-                                Name = r.MemberName ?? "Okänd",
-                                Club = r.MemberClub ?? "",
-                                ShootingClass = r.MemberClass
-                            }).ToList()
-                        });
-                        patrolNumber++;
-                        currentTime = currentTime.AddMinutes(patrolIntervalMinutes);
+                                if (Math.Abs((slotTime - et).TotalMinutes) < gapMinutes)
+                                { ok = false; break; }
+                            }
+                        }
+                        if (ok) { bestSlot = s; break; }
                     }
+
+                    patrolSlots[bestSlot].Add(reg);
+
+                    // Record this placement so subsequent registrations for the same member see it
+                    var placedTime = currentTime.AddMinutes(bestSlot * patrolIntervalMinutes);
+                    if (!memberTimes.ContainsKey(reg.MemberId))
+                        memberTimes[reg.MemberId] = new List<DateTime>();
+                    memberTimes[reg.MemberId].Add(placedTime);
                 }
-                else
+
+                // Convert non-empty slots to patrols
+                for (int s = 0; s < patrolSlots.Count; s++)
                 {
-                    // Simple sequential filling (no multi-class separation needed)
-                    for (int i = 0; i < allMembers.Count; i += patrolSize)
+                    if (patrolSlots[s].Count == 0) continue;
+                    var slotTime = currentTime.AddMinutes(s * patrolIntervalMinutes);
+                    patrols.Add(new FaltskytteGeneratedPatrol
                     {
-                        var patrolMembers = allMembers.Skip(i).Take(patrolSize).ToList();
-                        patrols.Add(new FaltskytteGeneratedPatrol
+                        PatrolNumber = patrolNumber,
+                        StartTime = slotTime,
+                        WeaponGroup = weaponGroup,
+                        Members = patrolSlots[s].Select((r, idx) => new FaltskytteGeneratedPatrolMember
                         {
-                            PatrolNumber = patrolNumber,
-                            StartTime = currentTime,
-                            WeaponGroup = weaponGroup,
-                            Members = patrolMembers.Select((r, idx) => new FaltskytteGeneratedPatrolMember
-                            {
-                                MemberId = r.MemberId,
-                                Position = idx + 1,
-                                Name = r.MemberName ?? "Okänd",
-                                Club = r.MemberClub ?? "",
-                                ShootingClass = r.MemberClass
-                            }).ToList()
-                        });
-                        patrolNumber++;
-                        currentTime = currentTime.AddMinutes(patrolIntervalMinutes);
-                    }
+                            MemberId = r.MemberId,
+                            Position = idx + 1,
+                            Name = r.MemberName ?? "Okänd",
+                            Club = r.MemberClub ?? "",
+                            ShootingClass = r.MemberClass
+                        }).ToList()
+                    });
+                    patrolNumber++;
                 }
+
+                // Advance currentTime past the last slot
+                if (patrolSlots.Count > 0)
+                    currentTime = currentTime.AddMinutes(patrolSlots.Count * patrolIntervalMinutes);
             }
 
             return new FaltskyttePatrolGenerationResult
@@ -219,8 +172,6 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             var sc = ShootingClasses.GetByName(shootingClass)
                 ?? ShootingClasses.GetById(shootingClass);
             if (sc != null) return sc.Weapon.ToString();
-
-            // Fallback: first letter
             if (!string.IsNullOrEmpty(shootingClass))
                 return shootingClass.Substring(0, 1);
             return "?";
@@ -228,12 +179,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
 
         private static int GetGroupSortOrder(string weaponGroup) => weaponGroup switch
         {
-            "C" => 1,
-            "B" => 2,
-            "A" => 3,
-            "R" => 4,
-            "M" => 5,
-            _ => 99
+            "C" => 1, "B" => 2, "A" => 3, "R" => 4, "M" => 5, _ => 99
         };
     }
 

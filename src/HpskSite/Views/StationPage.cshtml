@@ -1,0 +1,171 @@
+﻿@using Umbraco.Cms.Web.Common.PublishedModels
+@using Newtonsoft.Json
+@inject Umbraco.Cms.Core.Services.IMemberService MemberService
+@inject Umbraco.Cms.Core.Security.IMemberManager MemberManager
+@inject Umbraco.Cms.Core.Services.IContentService ContentService
+@inject HpskSite.Services.ClubService ClubService
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+
+    // Read query params: c = competitionId, s = stationNumber
+    var cStr = Context.Request.Query["c"].FirstOrDefault();
+    var sStr = Context.Request.Query["s"].FirstOrDefault();
+    int competitionId = 0;
+    int stationNumber = 0;
+    int.TryParse(cStr, out competitionId);
+    int.TryParse(sStr, out stationNumber);
+
+    // Load competition
+    IPublishedContent? competition = null;
+    string competitionName = "";
+    string competitionType = "";
+    int competitionClubId = 0;
+
+    if (competitionId > 0)
+    {
+        var node = Umbraco.Content(competitionId);
+        if (node != null && node.ContentType.Alias == "competition")
+        {
+            competition = node;
+            competitionName = node.Value<string>("competitionName") ?? "";
+            competitionType = node.Value<string>("competitionType") ?? "Precision";
+            competitionClubId = node.Value<int>("clubId");
+        }
+    }
+
+    // Check authorization
+    var currentMember = await MemberManager.GetCurrentMemberAsync();
+    bool canEnterResults = false;
+    bool isLoggedIn = currentMember != null;
+
+    if (currentMember != null && competition != null)
+    {
+        var memberData = MemberService.GetByEmail(currentMember.Email ?? "");
+        if (memberData != null)
+        {
+            var roles = MemberService.GetAllRoles(memberData.Id)?.ToList() ?? new List<string>();
+            bool isSiteAdmin = roles.Contains("Administrators");
+
+            // Competition manager
+            var cmJson = competition.Value<string>("competitionManagers") ?? "[]";
+            int[] cmIds;
+            try { cmIds = JsonConvert.DeserializeObject<int[]>(cmJson) ?? Array.Empty<int>(); }
+            catch { cmIds = Array.Empty<int>(); }
+            bool isCompetitionManager = cmIds.Contains(memberData.Id);
+
+            // Club admin or skjutledare for competition's club
+            bool isClubStaff = false;
+            if (competitionClubId > 0)
+            {
+                isClubStaff = roles.Contains($"ClubAdmin_{competitionClubId}")
+                    || roles.Contains($"Skjutledare_{competitionClubId}");
+            }
+
+            canEnterResults = isSiteAdmin || isCompetitionManager || isClubStaff;
+        }
+    }
+
+    bool isFaltskytte = competitionType is "Faltskytte" or "MagnumFalt";
+    bool isSpringskytte = competitionType == "Springskytte";
+    bool isPrecision = !isFaltskytte && !isSpringskytte;
+
+    ViewBag.Title = competition != null
+        ? $"Station {stationNumber} — {competitionName}"
+        : "Station";
+}
+
+<div class="container-fluid mt-3">
+
+    @if (competitionId == 0 || stationNumber == 0)
+    {
+        <!-- No params — show resume prompt or landing -->
+        <div class="text-center py-5">
+            <h4><i class="bi bi-qr-code me-2"></i>Stationssida</h4>
+            <p class="text-muted">Skanna QR-koden på ett stationskort för att komma till rätt station.</p>
+            <div id="stationResumePrompt" style="display:none" class="mt-3">
+                <div class="alert alert-info d-inline-block">
+                    <strong>Fortsätt där du slutade?</strong>
+                    <div id="stationResumeInfo" class="mt-1"></div>
+                    <div class="mt-2">
+                        <button class="btn btn-primary btn-sm" onclick="stationResume()">Ja, fortsätt</button>
+                        <button class="btn btn-outline-secondary btn-sm" onclick="document.getElementById('stationResumePrompt').style.display='none'">Nej</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <script>
+        (function() {
+            try {
+                var saved = JSON.parse(localStorage.getItem('hpsk_station_resume') || 'null');
+                if (saved && saved.competitionId && saved.stationNumber) {
+                    var age = (Date.now() - new Date(saved.timestamp).getTime()) / 1000 / 60 / 60;
+                    if (age < 24) {
+                        document.getElementById('stationResumeInfo').textContent = 'Station ' + saved.stationNumber + (saved.competitionName ? ' — ' + saved.competitionName : '');
+                        document.getElementById('stationResumePrompt').style.display = '';
+                    }
+                }
+            } catch(e) {}
+            window.stationResume = function() {
+                var saved = JSON.parse(localStorage.getItem('hpsk_station_resume') || 'null');
+                if (saved) window.location.href = '/station?c=' + saved.competitionId + '&s=' + saved.stationNumber;
+            };
+        })();
+        </script>
+    }
+    else if (competition == null)
+    {
+        <div class="alert alert-warning">
+            <i class="bi bi-exclamation-triangle me-2"></i>Tävlingen hittades inte.
+        </div>
+    }
+    else if (canEnterResults)
+    {
+        <!-- Authorized: Show result entry UI -->
+        <script>
+        try {
+            localStorage.setItem('hpsk_station_resume', JSON.stringify({
+                competitionId: @competitionId,
+                stationNumber: @stationNumber,
+                competitionName: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(competitionName)),
+                timestamp: new Date().toISOString()
+            }));
+        } catch(e) {}
+        </script>
+
+        @if (isFaltskytte)
+        {
+            var entryViewData = new ViewDataDictionary(ViewData);
+            entryViewData["CompetitionId"] = competitionId;
+            entryViewData["CompetitionName"] = competitionName;
+            entryViewData["PresetStationNumber"] = stationNumber;
+            @await Html.PartialAsync("FaltskytteStationEntry", entryViewData)
+        }
+        else if (isSpringskytte)
+        {
+            <div class="alert alert-info">
+                <i class="bi bi-info-circle me-2"></i>Resultatinmatning för Springskytte via stationssidan kommer snart.
+                <a href="/competitionmanagement?competitionId=@competitionId" class="btn btn-outline-primary btn-sm ms-2">Gå till tävlingshantering</a>
+            </div>
+        }
+        else
+        {
+            <div class="alert alert-info">
+                <i class="bi bi-info-circle me-2"></i>Resultatinmatning för @competitionType via stationssidan kommer snart.
+                <a href="/competitionmanagement?competitionId=@competitionId" class="btn btn-outline-primary btn-sm ms-2">Gå till tävlingshantering</a>
+            </div>
+        }
+    }
+    else
+    {
+        <!-- Not authorized: Show station info card -->
+        var infoViewData = new ViewDataDictionary(ViewData);
+        infoViewData["CompetitionId"] = competitionId;
+        infoViewData["CompetitionName"] = competitionName;
+        infoViewData["CompetitionType"] = competitionType;
+        infoViewData["StationNumber"] = stationNumber;
+        infoViewData["IsLoggedIn"] = isLoggedIn;
+        @await Html.PartialAsync("StationInfoCard", infoViewData)
+    }
+
+</div>

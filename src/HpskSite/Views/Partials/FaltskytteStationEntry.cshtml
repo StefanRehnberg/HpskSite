@@ -15,9 +15,40 @@
     .fse-patrol-row { min-height:60px; cursor:pointer; }
     .fse-pm-input { height:48px; font-size:1.2em; }
     .fse-figure-card { border:1px solid var(--bs-border-color); border-radius:8px; padding:12px; margin-bottom:8px; background:var(--bs-body-bg); }
+    .fse-pm-tap { min-width:60px; min-height:44px; font-size:1.2em; font-weight:bold; }
+    #fseKeypad { position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:1080; display:none; align-items:center; justify-content:center; }
+    #fseKeypad.show { display:flex; }
+    #fseKeypad .kp-body { background:var(--bs-body-bg); border-radius:12px; padding:20px; max-width:300px; width:90%; box-shadow:0 8px 32px rgba(0,0,0,0.3); }
+    #fseKeypad .kp-display { font-size:2.5em; font-weight:bold; text-align:center; min-height:60px; line-height:60px; border-bottom:2px solid var(--bs-border-color); margin-bottom:12px; }
+    #fseKeypad .kp-btn { width:70px; height:60px; font-size:1.5em; font-weight:bold; border-radius:8px; }
 </style>
 
-<div class="faltskytte-station-entry" data-competition-id="@competitionId">
+@{
+    var presetStation = ViewData["PresetStationNumber"]?.ToString() ?? "";
+}
+<div class="faltskytte-station-entry" data-competition-id="@competitionId" data-preset-station="@presetStation">
+
+<!-- Numeric keypad overlay for Poängräkning -->
+<div id="fseKeypad" onclick="if(event.target===this)fseKeypadCancel()">
+    <div class="kp-body">
+        <div class="text-center small fw-bold text-muted mb-1">Po&auml;ngr&auml;kning</div>
+        <div class="kp-display" id="fseKpDisplay">0</div>
+        <div class="d-flex flex-wrap justify-content-center gap-2">
+            <button class="btn btn-outline-secondary kp-btn" onclick="fseKeypadDigit(1)">1</button>
+            <button class="btn btn-outline-secondary kp-btn" onclick="fseKeypadDigit(2)">2</button>
+            <button class="btn btn-outline-secondary kp-btn" onclick="fseKeypadDigit(3)">3</button>
+            <button class="btn btn-outline-secondary kp-btn" onclick="fseKeypadDigit(4)">4</button>
+            <button class="btn btn-outline-secondary kp-btn" onclick="fseKeypadDigit(5)">5</button>
+            <button class="btn btn-outline-secondary kp-btn" onclick="fseKeypadDigit(6)">6</button>
+            <button class="btn btn-outline-secondary kp-btn" onclick="fseKeypadDigit(7)">7</button>
+            <button class="btn btn-outline-secondary kp-btn" onclick="fseKeypadDigit(8)">8</button>
+            <button class="btn btn-outline-secondary kp-btn" onclick="fseKeypadDigit(9)">9</button>
+            <button class="btn btn-outline-warning kp-btn" onclick="fseKeypadBackspace()"><i class="bi bi-backspace"></i></button>
+            <button class="btn btn-outline-secondary kp-btn" onclick="fseKeypadDigit(0)">0</button>
+            <button class="btn btn-success kp-btn" onclick="fseKeypadOk()">OK</button>
+        </div>
+    </div>
+</div>
 
     <!-- Screen 1: Station + Patrol Selection -->
     <div id="fseSelectScreen">
@@ -30,13 +61,45 @@
         <div id="fsePatrolList"></div>
     </div>
 
+    <!-- Screen 1.5: Roll Call -->
+    <div id="fseRollCallScreen" style="display:none">
+        <div class="d-flex align-items-center justify-content-between mb-3 p-2 rounded" style="background:var(--bs-warning-bg-subtle); border:2px solid var(--bs-warning-border-subtle)">
+            <button class="btn btn-outline-secondary btn-sm" onclick="fseBackFromRollCall()">
+                <i class="bi bi-arrow-left me-1"></i>Patrullistan
+            </button>
+            <span class="fw-bold fs-5" id="fseRcStationLabel"></span>
+            <span class="badge bg-info fs-6" id="fseRcPatrolLabel"></span>
+        </div>
+
+        <!-- Förutsättningar (shown during roll call for station chief to read aloud) -->
+        <div class="card mb-3">
+            <div class="card-header py-2">
+                <span class="fw-bold small"><i class="bi bi-clipboard-check me-1"></i>Förutsättningar</span>
+            </div>
+            <div id="fseRcFpBody" class="card-body py-2 small"></div>
+        </div>
+
+        <!-- Roll call list -->
+        <div class="card mb-3">
+            <div class="card-header py-2">
+                <span class="fw-bold small"><i class="bi bi-people me-1"></i>Upprop</span>
+                <span class="small text-muted ms-2" id="fseRcCount"></span>
+            </div>
+            <div class="card-body p-0" id="fseRcList"></div>
+        </div>
+
+        <button class="btn btn-primary w-100 fse-save-btn" onclick="fseStartEntry()">
+            <i class="bi bi-pencil-square me-1"></i>Starta resultatinmatning
+        </button>
+    </div>
+
     <!-- Screen 2: Shooter Entry -->
     <div id="fseEntryScreen" style="display:none">
 
         <!-- Station header + back button -->
         <div class="d-flex align-items-center justify-content-between mb-2 p-2 rounded" style="background:var(--bs-warning-bg-subtle); border:2px solid var(--bs-warning-border-subtle)">
-            <button class="btn btn-outline-secondary btn-sm" onclick="fseBackToPatrols()">
-                <i class="bi bi-arrow-left me-1"></i>Patrullistan
+            <button class="btn btn-outline-secondary btn-sm" onclick="fseBackToRollCall()">
+                <i class="bi bi-arrow-left me-1"></i>Upprop
             </button>
             <span class="fw-bold fs-5" id="fseStationLabel"></span>
             <span class="badge bg-info fs-6" id="fsePatrolLabel"></span>
@@ -54,20 +117,10 @@
             </div>
             <span id="fseRunningTotal" class="fw-bold text-nowrap mx-auto" style="font-size:2.5em;line-height:1">0/0</span>
             <span id="fseShooterSavedBadge" class="badge bg-success flex-shrink-0 me-2" style="display:none">Sparad</span>
+            <span id="fseShooterDirtyBadge" class="badge bg-warning text-dark flex-shrink-0 me-2" style="display:none">Osparad</span>
             <button class="btn btn-outline-secondary fse-nav-btn flex-shrink-0" onclick="fseNavNext()" id="fseNextBtn">
                 <i class="bi bi-chevron-right"></i>
             </button>
-        </div>
-
-        <!-- Förutsättningar (collapsible) -->
-        <div class="card mb-3" id="fseFpCard">
-            <div class="card-header py-2" role="button" onclick="document.getElementById('fseFpBody').style.display = document.getElementById('fseFpBody').style.display === 'none' ? '' : 'none'">
-                <div class="d-flex justify-content-between align-items-center">
-                    <span class="fw-bold small"><i class="bi bi-info-circle me-1"></i>Förutsättningar</span>
-                    <i class="bi bi-chevron-down small"></i>
-                </div>
-            </div>
-            <div id="fseFpBody" class="card-body py-2 small" style="display:none"></div>
         </div>
 
         <!-- Figure entry area -->
@@ -92,7 +145,9 @@
 
 <script>
 (function() {
-    var compId = document.querySelector('.faltskytte-station-entry')?.dataset.competitionId;
+    var containerEl = document.querySelector('.faltskytte-station-entry');
+    var compId = containerEl?.dataset.competitionId;
+    var presetStation = parseInt(containerEl?.dataset.presetStation) || 0;
     var competitionConfig = null;
     var maxReshoots = 0;
     var scoringMode = 'Normal';
@@ -101,7 +156,7 @@
     var currentPatrolWc = null;
     var currentShooterIdx = 0;
     var shooterHits = {};
-    var fpShownOnce = false;
+    var presentMembers = new Set(); // Members checked as present in roll call
 
     // Init
     (async function() {
@@ -121,6 +176,12 @@
                 opt.value = n; opt.textContent = 'Station ' + n;
                 select.appendChild(opt);
             });
+
+            // Auto-select preset station (from QR code / station page)
+            if (presetStation > 0 && stationNums.has(presetStation)) {
+                select.value = presetStation;
+                fseLoadStation();
+            }
         }
     })();
 
@@ -160,16 +221,81 @@
         currentPatrol = (stationData.patrols || []).find(function(p) { return p.patrolNumber === patrolNum; });
         if (!currentPatrol) return;
         currentPatrolWc = currentPatrol.weaponGroup || 'C';
-        currentShooterIdx = 0;
-        fpShownOnce = false;
 
-        // Set station/patrol labels
+        // Show roll call screen
+        document.getElementById('fseRcStationLabel').textContent = 'Station ' + stationData.stationNumber;
+        document.getElementById('fseRcPatrolLabel').textContent = 'Patrull ' + currentPatrol.patrolNumber;
+
+        // Render Förutsättningar on roll call screen
+        var wcCfg = stationData.weaponClassStations?.[currentPatrolWc] || Object.values(stationData.weaponClassStations || {})[0];
+        if (wcCfg) {
+            var fpHtml = wcCfg.shootingTimeSec + 's \u00b7 ' + wcCfg.shooterStartPosition + ' \u00b7 ' + wcCfg.weaponStartPosition + ' \u00b7 ' + wcCfg.supportHand;
+            if (scoringMode === 'Normal' && wcCfg.maxShotsPerFigure < 6) fpHtml += ' \u00b7 Max ' + wcCfg.maxShotsPerFigure + ' skott/fig';
+            (wcCfg.targetGroups || []).forEach(function(tg) {
+                if (tg.description) {
+                    var tgLetter = String.fromCharCode(64 + tg.group);
+                    fpHtml += '<div class="mt-1 border-top pt-1"><strong>M\u00e5lgrupp ' + tgLetter + ':</strong> ' +
+                        tg.description.replace(/</g, '&lt;').replace(/\n/g, '<br>') + '</div>';
+                }
+            });
+            document.getElementById('fseRcFpBody').innerHTML = fpHtml;
+        }
+
+        // Render roll call list
+        presentMembers = new Set();
+        var rcHtml = '';
+        (currentPatrol.members || []).forEach(function(m, idx) {
+            presentMembers.add(m.memberId);
+            rcHtml += '<div class="d-flex align-items-center gap-2 px-3 py-2 border-bottom">' +
+                '<input type="checkbox" class="form-check-input fse-rc-check" data-member-id="' + m.memberId + '" checked onchange="fseRcToggle(this)">' +
+                '<span class="flex-grow-1">' + m.name + ' <span class="text-muted small">(' + m.club + ')</span>' +
+                ' <span class="badge bg-body-secondary text-body">' + m.shootingClass + '</span></span>' +
+                (m.hasResult ? '<i class="bi bi-check-circle-fill text-success"></i>' : '') +
+                '</div>';
+        });
+        document.getElementById('fseRcList').innerHTML = rcHtml;
+        fseUpdateRcCount();
+
+        document.getElementById('fseSelectScreen').style.display = 'none';
+        document.getElementById('fseRollCallScreen').style.display = '';
+    };
+
+    window.fseRcToggle = function(cb) {
+        var memberId = parseInt(cb.dataset.memberId);
+        if (cb.checked) presentMembers.add(memberId); else presentMembers.delete(memberId);
+        fseUpdateRcCount();
+    };
+
+    function fseUpdateRcCount() {
+        var total = currentPatrol?.members?.length || 0;
+        document.getElementById('fseRcCount').textContent = presentMembers.size + ' av ' + total + ' n\u00e4rvarande';
+    }
+
+    window.fseStartEntry = function() {
+        if (presentMembers.size === 0) { alert('Minst en skytt m\u00e5ste vara n\u00e4rvarande.'); return; }
+        currentShooterIdx = 0;
+        // Find first present member
+        var members = currentPatrol.members || [];
+        while (currentShooterIdx < members.length && !presentMembers.has(members[currentShooterIdx].memberId))
+            currentShooterIdx++;
+
         document.getElementById('fseStationLabel').textContent = 'Station ' + stationData.stationNumber;
         document.getElementById('fsePatrolLabel').textContent = 'Patrull ' + currentPatrol.patrolNumber;
 
-        document.getElementById('fseSelectScreen').style.display = 'none';
+        document.getElementById('fseRollCallScreen').style.display = 'none';
         document.getElementById('fseEntryScreen').style.display = '';
         fseLoadAndRenderShooter();
+    };
+
+    window.fseBackFromRollCall = function() {
+        document.getElementById('fseRollCallScreen').style.display = 'none';
+        document.getElementById('fseSelectScreen').style.display = '';
+    };
+
+    window.fseBackToRollCall = function() {
+        if (!fseCheckUnsaved()) return;
+        document.getElementById('fseEntryScreen').style.display = 'none';
+        document.getElementById('fseRollCallScreen').style.display = '';
     };
 
     async function fseLoadAndRenderShooter() {
@@ -224,7 +350,9 @@
                 shooterHits[member.memberId] = {
                     figHits: hitDist.map(function(v) { return parseInt(v) || 0; }),
                     pmScores: pmScores,
-                    reshoots: data.result.reshoots || 0
+                    pmTouched: pmScores.map(function(v) { return v > 0; }),
+                    reshoots: data.result.reshoots || 0,
+                    _dirty: false
                 };
             } else {
                 fseInitShooterState(member.memberId);
@@ -243,7 +371,7 @@
                 if (fig.isPoangmal) totalPm++;
             });
         });
-        shooterHits[memberId] = { figHits: new Array(totalFigs).fill(null), pmScores: new Array(totalPm).fill(0), reshoots: 0 };
+        shooterHits[memberId] = { figHits: new Array(totalFigs).fill(null), pmScores: new Array(totalPm).fill(0), pmTouched: new Array(totalPm).fill(false), reshoots: 0, _dirty: false };
     }
 
     function fseRenderShooter() {
@@ -260,7 +388,8 @@
         document.getElementById('fseShooterInfo').textContent = m.shootingClass + ' \u00b7 ' + m.club;
         document.getElementById('fsePrevBtn').disabled = currentShooterIdx === 0;
         document.getElementById('fseNextBtn').disabled = currentShooterIdx >= members.length - 1;
-        document.getElementById('fseShooterSavedBadge').style.display = m.hasResult ? '' : 'none';
+        document.getElementById('fseShooterSavedBadge').style.display = m.hasResult && !state._dirty ? '' : 'none';
+        document.getElementById('fseShooterDirtyBadge').style.display = state._dirty ? '' : 'none';
 
         // Save button state
         var saveBtn = document.getElementById('fseSaveBtn');
@@ -268,17 +397,8 @@
         saveBtn.className = 'btn btn-success w-100 fse-save-btn mb-2';
         saveBtn.innerHTML = '<i class="bi bi-check-circle me-1"></i>SPARA RESULTAT';
 
-        // Förutsättningar
+        // Station config for figure entry
         var wcCfg = stationData.weaponClassStations?.[currentPatrolWc] || Object.values(stationData.weaponClassStations || {})[0];
-        if (wcCfg && !fpShownOnce) {
-            document.getElementById('fseFpBody').style.display = '';
-            fpShownOnce = true;
-        }
-        if (wcCfg) {
-            var fpHtml = wcCfg.shootingTimeSec + 's \u00b7 ' + wcCfg.shooterStartPosition + ' \u00b7 ' + wcCfg.weaponStartPosition + ' \u00b7 ' + wcCfg.supportHand;
-            if (scoringMode === 'Normal' && wcCfg.maxShotsPerFigure < 6) fpHtml += ' \u00b7 Max ' + wcCfg.maxShotsPerFigure + ' skott/fig';
-            document.getElementById('fseFpBody').innerHTML = fpHtml;
-        }
 
         // Build figure entry
         var figArea = document.getElementById('fseFigureArea');
@@ -318,12 +438,11 @@
 
                 if (fig.isPoangmal) {
                     var pi = pmIdx;
-                    var pmVal = state.pmScores[pi] || '';
+                    var pmVal = state.pmScores[pi] || 0;
                     html += '<div class="d-flex align-items-center gap-2 mt-2">' +
                         '<span class="badge bg-warning text-dark" style="font-size:0.85em">Po\u00e4ngr\u00e4kning</span>' +
-                        '<input type="number" class="form-control" inputmode="numeric" min="0" max="50" value="' + pmVal + '" ' +
-                        'style="width:80px;height:40px;font-size:1.1em" ' +
-                        'onchange="fseSetPm(' + m.memberId + ',' + pi + ',this.value)"></div>';
+                        '<button class="btn btn-outline-primary fse-pm-tap" onclick="fseOpenKeypad(' + m.memberId + ',' + pi + ')">' +
+                        (pmVal > 0 ? pmVal : '&mdash;') + '</button></div>';
                     pmIdx++;
                 }
 
@@ -344,6 +463,7 @@
         var state = shooterHits[memberId];
         if (!state) return;
         state.figHits[figIdx] = value;
+        state._dirty = true;
         fseRenderShooter();
     };
 
@@ -351,12 +471,48 @@
         var state = shooterHits[memberId];
         if (!state) return;
         state.pmScores[pmIdx] = parseInt(value) || 0;
+        state.pmTouched[pmIdx] = true;
+        state._dirty = true;
+    };
+
+    // ─── Numeric keypad for Poängräkning ─────────────────────────
+    var _kpMemberId = 0, _kpPmIdx = 0, _kpValue = '';
+    window.fseOpenKeypad = function(memberId, pmIdx) {
+        _kpMemberId = memberId;
+        _kpPmIdx = pmIdx;
+        var state = shooterHits[memberId];
+        var current = state ? (state.pmScores[pmIdx] || 0) : 0;
+        _kpValue = current > 0 ? String(current) : '';
+        document.getElementById('fseKpDisplay').textContent = _kpValue || '0';
+        document.getElementById('fseKeypad').classList.add('show');
+    };
+    window.fseKeypadDigit = function(d) {
+        if (_kpValue.length >= 2) return; // max 2 digits
+        _kpValue += String(d);
+        var num = parseInt(_kpValue) || 0;
+        if (num > 50) { _kpValue = '50'; num = 50; }
+        document.getElementById('fseKpDisplay').textContent = _kpValue || '0';
+    };
+    window.fseKeypadBackspace = function() {
+        _kpValue = _kpValue.slice(0, -1);
+        document.getElementById('fseKpDisplay').textContent = _kpValue || '0';
+    };
+    window.fseKeypadOk = function() {
+        var val = parseInt(_kpValue) || 0;
+        if (val > 50) val = 50;
+        fseSetPm(_kpMemberId, _kpPmIdx, val);
+        document.getElementById('fseKeypad').classList.remove('show');
+        fseRenderShooter();
+    };
+    window.fseKeypadCancel = function() {
+        document.getElementById('fseKeypad').classList.remove('show');
     };
 
     window.fseSetReshoot = function(memberId, value) {
         var state = shooterHits[memberId];
         if (!state) return;
         state.reshoots = value;
+        state._dirty = true;
         fseRenderShooter();
     };
 
@@ -436,27 +592,31 @@
 
         // Toggle: if already at this value, go back to previous; otherwise set to value
         state.reshoots = state.reshoots === value ? value - 1 : value;
+        state._dirty = true;
 
-        // Save immediately to server so other stations see it
-        try {
-            await fetch('/umbraco/surface/Faltskytte/SaveStationResult', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value },
-                body: JSON.stringify({
-                    competitionId: parseInt(compId),
-                    stationNumber: stationData.stationNumber,
-                    memberId: memberId,
-                    patrolNumber: currentPatrol.patrolNumber,
-                    shootingClass: m.shootingClass,
-                    hitsPerFigure: state.figHits.map(function(v){return v||0;}),
-                    tiebreakerScore: state.pmScores.some(function(v){return v>0;}) ? state.pmScores.reduce(function(s,v){return s+v;},0) : null,
-                    poangmalScores: state.pmScores.some(function(v){return v>0;}) ? state.pmScores : null,
-                    reshoots: state.reshoots
-                })
-            });
-            m.hasResult = true;
-        } catch(e) {}
+        // Only auto-save reshoot if shooter already has a saved result (avoids saving incomplete data)
+        if (m.hasResult) {
+            try {
+                await fetch('/umbraco/surface/Faltskytte/SaveStationResult', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value },
+                    body: JSON.stringify({
+                        competitionId: parseInt(compId),
+                        stationNumber: stationData.stationNumber,
+                        memberId: memberId,
+                        patrolNumber: currentPatrol.patrolNumber,
+                        shootingClass: m.shootingClass,
+                        hitsPerFigure: state.figHits.map(function(v){return v||0;}),
+                        tiebreakerScore: state.pmScores.some(function(v){return v>0;}) ? state.pmScores.reduce(function(s,v){return s+v;},0) : null,
+                        poangmalScores: state.pmScores.some(function(v){return v>0;}) ? state.pmScores : null,
+                        reshoots: state.reshoots
+                    })
+                });
+                state._dirty = false;
+            } catch(e) {}
+        }
 
+        fseRenderShooter();
         fseRenderReshoots(memberId, state);
     };
 
@@ -464,6 +624,21 @@
         var m = currentPatrol.members[currentShooterIdx];
         var state = shooterHits[m.memberId];
         if (!state) return;
+
+        // Validate: check for unscored figures (still null)
+        var unscoredFigs = state.figHits.filter(function(v) { return v === null; }).length;
+        if (unscoredFigs > 0) {
+            if (!confirm(unscoredFigs + ' figur(er) har inte f\u00e5tt resultat. Spara \u00e4nd\u00e5?')) return;
+        }
+
+        // Validate: check for untouched poångmål
+        var untouchedPm = 0;
+        for (var pi = 0; pi < state.pmTouched.length; pi++) {
+            if (!state.pmTouched[pi]) untouchedPm++;
+        }
+        if (untouchedPm > 0) {
+            if (!confirm('Po\u00e4ngr\u00e4kning saknas f\u00f6r ' + untouchedPm + ' figur(er). Spara \u00e4nd\u00e5?')) return;
+        }
 
         var hitsToSave = state.figHits.map(function(v){return v || 0;});
         var totalHits = hitsToSave.reduce(function(s,v){return s+v;}, 0);
@@ -495,15 +670,21 @@
             });
             var data = await resp.json();
             if (data.success) {
+                state._dirty = false;
                 m.hasResult = true;
                 currentPatrol.completedCount = currentPatrol.members.filter(function(mm){return mm.hasResult;}).length;
                 document.getElementById('fseShooterSavedBadge').style.display = '';
+                document.getElementById('fseShooterDirtyBadge').style.display = 'none';
 
                 btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>SPARAD!';
 
                 setTimeout(function() {
-                    if (currentShooterIdx < currentPatrol.members.length - 1) {
-                        currentShooterIdx++;
+                    // Find next present member
+                    var members = currentPatrol.members || [];
+                    var nextIdx = currentShooterIdx + 1;
+                    while (nextIdx < members.length && !presentMembers.has(members[nextIdx].memberId)) nextIdx++;
+                    if (nextIdx < members.length) {
+                        currentShooterIdx = nextIdx;
                         fseLoadAndRenderShooter();
                     } else {
                         btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>ALLA SPARADE';
@@ -522,13 +703,32 @@
         }
     };
 
+    function fseCheckUnsaved() {
+        var m = currentPatrol?.members?.[currentShooterIdx];
+        if (!m) return true;
+        var state = shooterHits[m.memberId];
+        if (state && state._dirty) {
+            return confirm('Du har osparade \u00e4ndringar. Vill du forts\u00e4tta utan att spara?');
+        }
+        return true;
+    }
+
     window.fseNavPrev = function() {
-        if (currentShooterIdx > 0) { currentShooterIdx--; fseLoadAndRenderShooter(); }
+        if (!fseCheckUnsaved()) return;
+        var members = currentPatrol.members || [];
+        var idx = currentShooterIdx - 1;
+        while (idx >= 0 && !presentMembers.has(members[idx].memberId)) idx--;
+        if (idx >= 0) { currentShooterIdx = idx; fseLoadAndRenderShooter(); }
     };
     window.fseNavNext = function() {
-        if (currentShooterIdx < currentPatrol.members.length - 1) { currentShooterIdx++; fseLoadAndRenderShooter(); }
+        if (!fseCheckUnsaved()) return;
+        var members = currentPatrol.members || [];
+        var idx = currentShooterIdx + 1;
+        while (idx < members.length && !presentMembers.has(members[idx].memberId)) idx++;
+        if (idx < members.length) { currentShooterIdx = idx; fseLoadAndRenderShooter(); }
     };
     window.fseBackToPatrols = function() {
+        if (!fseCheckUnsaved()) return;
         document.getElementById('fseEntryScreen').style.display = 'none';
         document.getElementById('fseSelectScreen').style.display = '';
         fseLoadStation();

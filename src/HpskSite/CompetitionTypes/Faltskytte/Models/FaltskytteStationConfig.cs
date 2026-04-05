@@ -1,4 +1,5 @@
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace HpskSite.CompetitionTypes.Faltskytte.Models
 {
@@ -113,14 +114,13 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
                     return wrapped;
 
                 // Direct format from JS: { "C": { "stations": [...] } }
-                var direct = JsonConvert.DeserializeObject<Dictionary<string, FaltskytteWeaponClassConfig>>(json);
+                // Strip metadata keys (e.g. _linkedGroups) before deserializing — they aren't weapon configs
+                var jobj = JObject.Parse(json);
+                foreach (var key in jobj.Properties().Where(p => p.Name.StartsWith("_")).Select(p => p.Name).ToList())
+                    jobj.Remove(key);
+                var direct = jobj.ToObject<Dictionary<string, FaltskytteWeaponClassConfig>>();
                 if (direct?.Any() == true)
-                {
-                    // Remove metadata keys (e.g. _linkedGroups from configurator UI)
-                    foreach (var key in direct.Keys.Where(k => k.StartsWith("_")).ToList())
-                        direct.Remove(key);
                     return new FaltskytteCompetitionConfig { WeaponConfigs = direct };
-                }
             }
 
             return new FaltskytteCompetitionConfig();

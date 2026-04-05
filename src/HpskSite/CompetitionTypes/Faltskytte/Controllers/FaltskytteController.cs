@@ -847,6 +847,35 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             }
         }
 
+        // ── QR Code Generation ─────────────────────────────────────
+
+        /// <summary>Generates a QR code PNG for the given URL text.</summary>
+        [HttpGet]
+        public IActionResult GenerateQrCode(string url)
+        {
+            if (string.IsNullOrWhiteSpace(url))
+                return BadRequest("URL required");
+            try
+            {
+                var gen = new QRCoder.QRCodeGenerator();
+                using var data = gen.CreateQrCode(url, QRCoder.QRCodeGenerator.ECCLevel.Q);
+                var qr = new QRCoder.QRCode(data);
+                using var img = qr.GetGraphic(
+                    pixelsPerModule: 10,
+                    darkColor: SixLabors.ImageSharp.Color.Black,
+                    lightColor: SixLabors.ImageSharp.Color.White,
+                    drawQuietZones: true);
+                using var ms = new System.IO.MemoryStream();
+                img.Save(ms, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
+                return File(ms.ToArray(), "image/png");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error generating QR code");
+                return StatusCode(500);
+            }
+        }
+
         // ── Patrol Management ───────────────────────────────────────
 
         /// <summary>Gets weapon classes that have registrations for this competition.</summary>
@@ -939,9 +968,32 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                     ? string.Join("+", request.WeaponClasses.OrderBy(w => w))
                     : "Alla";
 
+                // Load existing patrol start times for members being generated
+                // This ensures gap enforcement across separate generation runs
+                var memberIds = registrations.Select(r => r.MemberId).Distinct().ToList();
+                var existingMemberTimes = new Dictionary<int, List<DateTime>>();
+                if (request.MultiClassGapMinutes > 0 && memberIds.Any())
+                {
+                    var existingPatrols = await db.FetchAsync<FaltskyttePatrol>(
+                        "WHERE CompetitionId = @0 AND StartTime IS NOT NULL", request.CompetitionId);
+                    var existingMembers = await db.FetchAsync<FaltskyttePatrolMember>(
+                        $"WHERE PatrolId IN (SELECT Id FROM FaltskyttePatrol WHERE CompetitionId = @0)", request.CompetitionId);
+                    var patrolTimeMap = existingPatrols.ToDictionary(p => p.Id, p => p.StartTime!.Value);
+
+                    foreach (var pm in existingMembers)
+                    {
+                        if (patrolTimeMap.TryGetValue(pm.PatrolId, out var startTime))
+                        {
+                            if (!existingMemberTimes.ContainsKey(pm.MemberId))
+                                existingMemberTimes[pm.MemberId] = new List<DateTime>();
+                            existingMemberTimes[pm.MemberId].Add(startTime);
+                        }
+                    }
+                }
+
                 // Generate patrols
                 var generator = new Services.FaltskyttePatrolGenerator();
-                var result = generator.Generate(registrations, patrolSize, intervalMinutes, request.FirstStartTime, request.WeaponGrouping ?? "MixAll", request.MultiClassGapMinutes);
+                var result = generator.Generate(registrations, patrolSize, intervalMinutes, request.FirstStartTime, request.WeaponGrouping ?? "MixAll", request.MultiClassGapMinutes, existingMemberTimes);
 
                 if (!result.Patrols.Any())
                     return Json(new { success = false, message = "Kunde inte skapa patruller." });

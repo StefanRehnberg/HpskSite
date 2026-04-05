@@ -1014,6 +1014,17 @@ function faltCfgPrintStation(stationNum, wc) {
         w.document.write('<' + '/div>');
     });
 
+    // QR code for station page
+    var compId = faltCfgGetCompetitionId();
+    if (compId) {
+        var stationUrl = window.location.origin + '/station?c=' + compId + '&s=' + stationNum;
+        var qrSrc = '/umbraco/surface/Faltskytte/GenerateQrCode?url=' + encodeURIComponent(stationUrl);
+        w.document.write('<div style="margin-top:20px;text-align:center;page-break-inside:avoid">');
+        w.document.write('<img src="' + qrSrc + '" alt="QR" style="width:120px;height:120px">');
+        w.document.write('<div style="font-size:0.8em;color:#666;margin-top:4px">Skanna f\u00f6r stationsinfo<' + '/div>');
+        w.document.write('<' + '/div>');
+    }
+
     w.document.write('<' + '/body><' + '/html>');
     w.document.close();
     faltCfgPrintWhenReady(w);
