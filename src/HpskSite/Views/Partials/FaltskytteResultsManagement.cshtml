@@ -10,38 +10,75 @@
 
 <div class="faltskytte-results-management" data-competition-id="@competitionId">
 
-    <!-- Station Entry Card -->
+    <!-- Station Entry Links -->
     <div class="card mb-3">
-        <div class="card-header" role="button" onclick="toggleFaltSection('faltEntryBody', 'faltEntryChevron')">
+        <div class="card-header py-2">
             <div class="d-flex justify-content-between align-items-center">
-                <h5 class="mb-0"><i class="bi bi-pencil-square me-2"></i>Resultatinmatning</h5>
-                <i class="bi bi-chevron-down" id="faltEntryChevron"></i>
+                <span class="fw-bold small"><i class="bi bi-pencil-square me-2"></i>Resultatinmatning</span>
             </div>
         </div>
-        <div id="faltEntryBody" style="display: none;">
-            <div class="card-body">
-                @await Html.PartialAsync("FaltskytteStationEntry", ViewData)
+        <div class="card-body py-2">
+            <div class="d-flex flex-wrap gap-2" id="faltStationLinks">
+                <span class="text-muted small">Laddar stationer...</span>
             </div>
         </div>
     </div>
+    <script>
+    (function() {
+        var compId = '@competitionId';
+        fetch('/umbraco/surface/Faltskytte/GetStationConfig?competitionId=' + compId)
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (!data.success || !data.config) return;
+                var wc = data.config.weaponConfigs || data.config.WeaponConfigs || {};
+                var first = Object.values(wc)[0];
+                if (!first) return;
+                var stations = first.stations || first.Stations || [];
+                var el = document.getElementById('faltStationLinks');
+                if (stations.length === 0) { el.innerHTML = '<span class="text-muted small">Inga stationer konfigurerade.</span>'; return; }
+                el.innerHTML = '';
+                stations.forEach(function(st) {
+                    var num = st.station || st.Station;
+                    var a = document.createElement('a');
+                    a.href = '/station?c=' + compId + '&s=' + num;
+                    a.className = 'btn btn-outline-primary btn-sm';
+                    a.target = '_blank';
+                    a.innerHTML = '<i class="bi bi-bullseye me-1"></i>Station ' + num;
+                    el.appendChild(a);
+                });
+            });
+    })();
+    </script>
 
     <!-- Result List Card -->
     <div class="card mb-3">
         <div class="card-header" role="button" onclick="toggleFaltSection('faltResultBody', 'faltResultChevron')">
             <div class="d-flex justify-content-between align-items-center">
-                <h5 class="mb-0"><i class="bi bi-trophy me-2"></i>Resultatlista</h5>
+                <div>
+                    <h5 class="mb-0 d-inline"><i class="bi bi-trophy me-2"></i>Resultatlista</h5>
+                    <span class="badge ms-2" id="faltResultStatusBadge">Preliminär</span>
+                </div>
                 <div class="d-flex gap-2">
-                    <button class="btn btn-outline-primary btn-sm" onclick="faltGenerateResultList(event)">
+                    <button class="btn btn-outline-primary btn-sm" onclick="faltRefreshResults(event)">
                         <i class="bi bi-arrow-clockwise me-1"></i>Uppdatera
+                    </button>
+                    <button class="btn btn-outline-secondary btn-sm" onclick="faltShowMergeConfig(event)">
+                        <i class="bi bi-intersect me-1"></i>Sammanslagning...
+                    </button>
+                    <button class="btn btn-success btn-sm" id="faltPublishResultsBtn" style="display:none" onclick="faltPublishResults(true, event)">
+                        <i class="bi bi-globe me-1"></i>Officiell
+                    </button>
+                    <button class="btn btn-outline-warning btn-sm" id="faltUnpublishResultsBtn" style="display:none" onclick="faltPublishResults(false, event)">
+                        <i class="bi bi-eye-slash me-1"></i>Preliminär
                     </button>
                     <i class="bi bi-chevron-down" id="faltResultChevron"></i>
                 </div>
             </div>
         </div>
-        <div id="faltResultBody" style="display: none;">
+        <div id="faltResultBody">
             <div class="card-body">
                 <div id="faltResultContent">
-                    <p class="text-muted text-center py-3">Klicka "Uppdatera" för att generera resultatlistan.</p>
+                    <div class="text-center py-3"><div class="spinner-border spinner-border-sm"></div> Laddar resultat...</div>
                 </div>
             </div>
         </div>
@@ -63,25 +100,139 @@ function toggleFaltSection(bodyId, chevronId) {
     }
 }
 
-async function faltGenerateResultList(event) {
+var _faltMergeConfig = null; // Current merge config JSON string
+
+// Simple refresh — uses saved merge config, no questions asked
+async function faltRefreshResults(event) {
+    if (event) event.stopPropagation();
+    var compId = document.querySelector('.faltskytte-results-management')?.dataset.competitionId;
+    await faltLoadResults(compId, document.getElementById('faltResultContent'));
+}
+
+// Opens merge configuration flow
+async function faltShowMergeConfig(event) {
     if (event) event.stopPropagation();
     const compId = document.querySelector('.faltskytte-results-management')?.dataset.competitionId;
     const container = document.getElementById('faltResultContent');
 
-    container.innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm"></div> Genererar...</div>';
-
-    // Show the results section
+    container.innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm"></div> Analyserar klasser...</div>';
     document.getElementById('faltResultBody').style.display = '';
 
     try {
-        const resp = await fetch(`/umbraco/surface/Faltskytte/GetFaltskytteResults?competitionId=${compId}`);
+        var mergeResp = await fetch('/umbraco/surface/Faltskytte/AnalyzeFaltskytteMerges?competitionId=' + compId);
+        var mergeData = await mergeResp.json();
+
+        if (mergeData.success && mergeData.analysis) {
+            _faltMergeConfig = mergeData.savedConfig || null;
+            if (mergeData.analysis.suggestions && mergeData.analysis.suggestions.length > 0) {
+                faltShowMergeModal(mergeData.analysis, mergeData.savedConfig);
+            } else {
+                container.innerHTML = '<div class="alert alert-info">Alla klasser har 5 eller fler deltagare — ingen sammanslagning behövs.</div>';
+                setTimeout(function() { faltLoadResults(compId, container); }, 1500);
+            }
+        }
+    } catch (err) {
+        container.innerHTML = '<div class="alert alert-danger">Nätverksfel.</div>';
+        console.error(err);
+    }
+}
+
+function faltShowMergeModal(analysis, savedConfig) {
+    var savedActions = [];
+    if (savedConfig) try { savedActions = JSON.parse(savedConfig); } catch(e) {}
+    var savedMap = {};
+    savedActions.forEach(function(a) { savedMap[a.sourceClass] = a.targetClass; });
+
+    var html = '<div class="mb-3"><p class="small text-muted">Följande klasser har färre än 5 deltagare och kan slås samman:</p></div>';
+    analysis.suggestions.forEach(function(s) {
+        var checked = savedMap[s.sourceClass] ? ' checked' : '';
+        var targetVal = savedMap[s.sourceClass] || s.defaultTarget || '';
+        var targetHtml = '';
+        if (s.requiresAdminChoice && s.possibleTargets && s.possibleTargets.length > 0) {
+            targetHtml = '<select class="form-select form-select-sm d-inline-block falt-merge-target" data-source="' + s.sourceClass + '" style="width:auto">';
+            s.possibleTargets.forEach(function(t) {
+                targetHtml += '<option value="' + t + '"' + (t === targetVal ? ' selected' : '') + '>' + t + '</option>';
+            });
+            targetHtml += '</select>';
+        } else {
+            targetHtml = '<strong>' + (s.defaultTarget || '') + '</strong>';
+        }
+        html += '<div class="form-check mb-2">' +
+            '<input class="form-check-input falt-merge-check" type="checkbox" value="' + s.sourceClass + '"' +
+            ' data-target="' + targetVal + '"' + checked + '>' +
+            '<label class="form-check-label">' +
+            '<strong>' + s.sourceClass + '</strong> (' + s.sourceCount + ' st) → ' + targetHtml +
+            '<br><small class="text-muted">' + s.reason + '</small></label></div>';
+    });
+
+    // Show classes info
+    html += '<div class="mt-3 small"><table class="table table-sm"><thead><tr><th>Klass</th><th>Antal</th><th>Medaljer</th></tr></thead><tbody>';
+    analysis.classes.forEach(function(c) {
+        html += '<tr class="' + (c.belowThreshold ? 'table-warning' : '') + '">' +
+            '<td>' + c.className + '</td><td>' + c.participantCount + '</td><td>' + (c.medalImpact || 'Alla') + '</td></tr>';
+    });
+    html += '</tbody></table></div>';
+
+    var container = document.getElementById('faltResultContent');
+    container.innerHTML = '<div class="card"><div class="card-header"><strong>Sammanslagning av klasser</strong></div>' +
+        '<div class="card-body">' + html +
+        '<div class="d-flex gap-2 mt-3">' +
+        '<button class="btn btn-primary" onclick="faltApplyMerges()"><i class="bi bi-check-lg me-1"></i>Skapa med sammanslagning</button>' +
+        '<button class="btn btn-outline-secondary" onclick="faltSkipMerges()">Skapa utan sammanslagning</button>' +
+        '</div></div></div>';
+}
+
+window.faltApplyMerges = async function() {
+    var actions = [];
+    document.querySelectorAll('.falt-merge-check:checked').forEach(function(cb) {
+        var source = cb.value;
+        // Check if there's a dropdown for this source (admin choice)
+        var dropdown = document.querySelector('.falt-merge-target[data-source="' + source + '"]');
+        var target = dropdown ? dropdown.value : cb.dataset.target;
+        if (target) actions.push({ sourceClass: source, targetClass: target });
+    });
+    _faltMergeConfig = actions.length > 0 ? JSON.stringify(actions) : null;
+
+    // Save merge config to competition
+    var compId = document.querySelector('.faltskytte-results-management')?.dataset.competitionId;
+    if (_faltMergeConfig) {
+        await fetch('/umbraco/surface/Faltskytte/SaveMergeConfig', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value },
+            body: JSON.stringify({ competitionId: parseInt(compId), mergeConfig: _faltMergeConfig })
+        });
+    }
+
+    await faltLoadResults(compId, document.getElementById('faltResultContent'));
+};
+
+window.faltSkipMerges = async function() {
+    _faltMergeConfig = null;
+    var compId = document.querySelector('.faltskytte-results-management')?.dataset.competitionId;
+    // Clear saved merge config
+    await fetch('/umbraco/surface/Faltskytte/SaveMergeConfig', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value },
+        body: JSON.stringify({ competitionId: parseInt(compId), mergeConfig: '' })
+    });
+    await faltLoadResults(compId, document.getElementById('faltResultContent'));
+};
+
+async function faltLoadResults(compId, container) {
+    container.innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm"></div> Genererar...</div>';
+    try {
+        var url = '/umbraco/surface/Faltskytte/GetFaltskytteResults?competitionId=' + compId;
+        if (_faltMergeConfig) url += '&mergeConfig=' + encodeURIComponent(_faltMergeConfig);
+        const resp = await fetch(url);
         const data = await resp.json();
 
         if (!data.success) {
-            container.innerHTML = `<div class="alert alert-warning">${data.message || 'Inga resultat.'}</div>`;
+            container.innerHTML = '<div class="alert alert-warning">' + (data.message || 'Inga resultat.') + '</div>';
+            faltUpdateResultStatus(false);
             return;
         }
 
+        faltUpdateResultStatus(data.results.isOfficial);
         renderFaltResultList(data.results, container);
     } catch (err) {
         container.innerHTML = '<div class="alert alert-danger">Nätverksfel vid hämtning av resultat.</div>';
@@ -89,8 +240,59 @@ async function faltGenerateResultList(event) {
     }
 }
 
+function faltUpdateResultStatus(isOfficial) {
+    var badge = document.getElementById('faltResultStatusBadge');
+    var pubBtn = document.getElementById('faltPublishResultsBtn');
+    var unpubBtn = document.getElementById('faltUnpublishResultsBtn');
+    if (isOfficial) {
+        badge.className = 'badge bg-success ms-2'; badge.textContent = 'Officiell';
+        pubBtn.style.display = 'none'; unpubBtn.style.display = '';
+    } else {
+        badge.className = 'badge bg-warning text-dark ms-2'; badge.textContent = 'Preliminär';
+        pubBtn.style.display = ''; unpubBtn.style.display = 'none';
+    }
+}
+
+async function faltPublishResults(official, event) {
+    if (event) event.stopPropagation();
+    var msg = official ? 'Markera resultatlistan som officiell?' : 'Ändra resultatlistan till preliminär?';
+    if (!confirm(msg)) return;
+    var compId = document.querySelector('.faltskytte-results-management')?.dataset.competitionId;
+    try {
+        var resp = await fetch('/umbraco/surface/Faltskytte/PublishResults', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value },
+            body: JSON.stringify({ competitionId: parseInt(compId), isOfficial: official })
+        });
+        var data = await resp.json();
+        if (data.success) faltUpdateResultStatus(official);
+        else alert('Fel: ' + (data.message || 'Okänt fel'));
+    } catch(e) { alert('Nätverksfel.'); }
+}
+
+function faltExtractStationConfigs(results) {
+    // Build station configs array from the full config object
+    var configs = [];
+    var wc = results.config?.weaponConfigs || results.config?.WeaponConfigs || {};
+    var firstWc = Object.values(wc)[0];
+    if (firstWc) {
+        (firstWc.stations || firstWc.Stations || []).forEach(function(st) {
+            var stNum = st.station || st.Station;
+            var hasPm = false;
+            (st.targetGroups || st.TargetGroups || []).forEach(function(tg) {
+                (tg.figures || tg.Figures || []).forEach(function(fig) {
+                    if (fig.isPoangmal || fig.IsPoangmal) hasPm = true;
+                });
+            });
+            configs.push({ station: stNum, hasPoangmal: hasPm });
+        });
+    }
+    return configs;
+}
+
 function renderFaltResultList(results, container) {
     const isPoang = results.scoringMode === 'Poang';
+    const stationConfigs = faltExtractStationConfigs(results);
     let html = '';
 
     results.classGroups.forEach(group => {
@@ -100,7 +302,7 @@ function renderFaltResultList(results, container) {
 
         // Station headers
         for (let i = 1; i <= results.stationCount; i++) {
-            const cfg = results.stationConfigs.find(s => s.station === i);
+            const cfg = stationConfigs.find(s => s.station === i);
             html += `<th class="text-center">${i}${cfg?.hasPoangmal ? '*' : ''}</th>`;
         }
 
@@ -148,4 +350,10 @@ function renderFaltResultList(results, container) {
     if (!html) html = '<div class="alert alert-info">Inga resultat att visa.</div>';
     container.innerHTML = html;
 }
+
+// Auto-load results on page load (using saved merge config if any)
+(function() {
+    var compId = document.querySelector('.faltskytte-results-management')?.dataset.competitionId;
+    if (compId) faltLoadResults(compId, document.getElementById('faltResultContent'));
+})();
 </script>

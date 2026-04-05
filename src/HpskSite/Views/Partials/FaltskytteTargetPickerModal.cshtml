@@ -58,6 +58,11 @@
                                     <div class="col-3"><label class="form-label small mb-0">B (m)</label><input type="number" class="form-control form-control-sm" id="faltPickerEditDistB" min="0" max="500"></div>
                                     <div class="col-3"><label class="form-label small mb-0">C (m)</label><input type="number" class="form-control form-control-sm" id="faltPickerEditDistC" min="0" max="500"></div>
                                 </div>
+                                <div class="mb-2">
+                                    <label class="form-label small mb-1 fw-bold">Antal m&aring;l i figuren</label>
+                                    <input type="number" class="form-control form-control-sm" id="faltPickerEditTargetsPerFig" min="1" max="6" value="1" style="width:80px">
+                                    <div class="form-text small">Flerm&aring;lsfigurer (ex. Ballongmål) har fler &auml;n 1.</div>
+                                </div>
                                 <!-- Variant editing -->
                                 <div id="faltPickerVariantEdits" class="mb-2"></div>
                                 <div class="d-flex gap-2">
@@ -203,6 +208,7 @@ function faltPickerSelectTarget(targetId) {
         document.getElementById('faltPickerEditDistB').value = _faltPickerSelected.maxDistanceB || '';
         document.getElementById('faltPickerEditDistA').value = _faltPickerSelected.maxDistanceA || '';
         document.getElementById('faltPickerEditDistR').value = _faltPickerSelected.maxDistanceR || '';
+        document.getElementById('faltPickerEditTargetsPerFig').value = _faltPickerSelected.targetsPerFigure || 1;
 
         // Variant edits with image upload
         var varEdits = document.getElementById('faltPickerVariantEdits');
@@ -266,6 +272,7 @@ async function faltPickerSaveTarget() {
         maxDistanceB: parseInt(document.getElementById('faltPickerEditDistB').value) || null,
         maxDistanceA: parseInt(document.getElementById('faltPickerEditDistA').value) || null,
         maxDistanceR: parseInt(document.getElementById('faltPickerEditDistR').value) || null,
+        targetsPerFigure: parseInt(document.getElementById('faltPickerEditTargetsPerFig').value) || 1,
         variants: variants
     };
 
@@ -285,6 +292,7 @@ async function faltPickerSaveTarget() {
         _faltPickerSelected.maxDistanceB = body.maxDistanceB;
         _faltPickerSelected.maxDistanceA = body.maxDistanceA;
         _faltPickerSelected.maxDistanceR = body.maxDistanceR;
+        _faltPickerSelected.targetsPerFigure = body.targetsPerFigure;
         variants.forEach(function(vReq) {
             var v = _faltPickerSelected.variants.find(function(x) { return x.id === vReq.id; });
             if (v) { v.fullName = vReq.fullName; v.color = vReq.color; }
@@ -302,7 +310,8 @@ function faltPickerSelect() {
         _faltPickerCallback({
             imageUrl: _faltPickerSelectedVariant.imageUrl,
             targetName: _faltPickerSelected.name,
-            targetColor: _faltPickerSelectedVariant.color
+            targetColor: _faltPickerSelectedVariant.color,
+            targetsPerFigure: _faltPickerSelected.targetsPerFigure || 1
         });
     }
     faltPickerClose();
@@ -320,7 +329,7 @@ async function faltPickerCreateNew() {
     var data = await resp.json();
     if (data.success) {
         // Add to local cache and select it
-        var newTarget = { id: data.targetId, name: name, variants: [], maxDistanceC: null, maxDistanceB: null, maxDistanceA: null, maxDistanceR: null };
+        var newTarget = { id: data.targetId, name: name, variants: [], maxDistanceC: null, maxDistanceB: null, maxDistanceA: null, maxDistanceR: null, targetsPerFigure: 1 };
         _faltPickerCatalog.push(newTarget);
         _faltPickerCatalog.sort(function(a, b) { return a.name.localeCompare(b.name); });
         faltPickerRenderGrid(_faltPickerCatalog);

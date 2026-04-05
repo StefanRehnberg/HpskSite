@@ -46,6 +46,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         [JsonIgnore]
         public int TotalFigures => TargetGroups.Sum(g => g.FigureCount);
 
+        /// <summary>Total scoring slots (accounts for multi-target figures)</summary>
+        [System.Text.Json.Serialization.JsonIgnore]
+        [JsonIgnore]
+        public int TotalTargets => TargetGroups.Sum(g => g.TargetCount);
+
         [System.Text.Json.Serialization.JsonIgnore]
         [JsonIgnore]
         public int TotalPoangmal => TargetGroups.Sum(g => g.PoangmalCount);
@@ -68,6 +73,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         [System.Text.Json.Serialization.JsonIgnore]
         [JsonIgnore]
         public int FigureCount => Figures.Count;
+
+        /// <summary>Total scoring slots (accounts for multi-target figures)</summary>
+        [System.Text.Json.Serialization.JsonIgnore]
+        [JsonIgnore]
+        public int TargetCount => Figures.Sum(f => Math.Max(1, f.TargetsPerFigure));
 
         [System.Text.Json.Serialization.JsonIgnore]
         [JsonIgnore]
@@ -94,6 +104,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public string? TargetName { get; set; }
         /// <summary>Optional color variant selected from catalog</summary>
         public string? TargetColor { get; set; }
+        /// <summary>Number of individual targets in this figure. Default 1. A multi-target figure (e.g. 3 silhouettes) creates multiple scoring slots.</summary>
+        public int TargetsPerFigure { get; set; } = 1;
     }
 
     /// <summary>Parses station config JSON. Handles direct format from JS.</summary>

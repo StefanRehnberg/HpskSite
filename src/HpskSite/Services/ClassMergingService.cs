@@ -54,6 +54,14 @@ namespace HpskSite.Services
                 .GroupBy(k => ShootingClasses.GetById(k.ShootingClass)?.Name ?? k.ShootingClass)
                 .ToDictionary(g => g.Key, g => g.Count());
 
+            return AnalyzeFromCounts(classCounts, competitionType);
+        }
+
+        /// <summary>
+        /// Analyzes class counts from any discipline and generates merge suggestions.
+        /// </summary>
+        public ClassMergeAnalysis AnalyzeFromCounts(Dictionary<string, int> classCounts, string competitionType)
+        {
             var analysis = new ClassMergeAnalysis();
 
             // Build ClassInfo list
@@ -73,11 +81,13 @@ namespace HpskSite.Services
             }
 
             // Generate suggestions for classes below threshold
-            var isMilsnabb = competitionType.Equals("Milsnabb", StringComparison.OrdinalIgnoreCase);
+            var allowR23Merge = competitionType.Equals("Milsnabb", StringComparison.OrdinalIgnoreCase)
+                || competitionType.Equals("Faltskytte", StringComparison.OrdinalIgnoreCase)
+                || competitionType.Equals("MagnumFalt", StringComparison.OrdinalIgnoreCase);
 
             foreach (var cls in analysis.Classes.Where(c => c.BelowThreshold))
             {
-                var suggestion = BuildSuggestion(cls.ClassName, cls.ParticipantCount, classCounts, isMilsnabb);
+                var suggestion = BuildSuggestion(cls.ClassName, cls.ParticipantCount, classCounts, allowR23Merge);
                 if (suggestion != null)
                     analysis.Suggestions.Add(suggestion);
             }
@@ -142,7 +152,7 @@ namespace HpskSite.Services
         // ── Rule engine ─────────────────────────────────────────────
 
         private MergeSuggestion? BuildSuggestion(string className, int count,
-            Dictionary<string, int> classCounts, bool isMilsnabb)
+            Dictionary<string, int> classCounts, bool allowR23Merge)
         {
             var weaponGroup = GetWeaponGroup(className);
 
@@ -162,8 +172,8 @@ namespace HpskSite.Services
             if (weaponGroup == "A" || weaponGroup == "B")
                 return BuildLevel23Suggestion(className, count, classCounts, weaponGroup);
 
-            // ── Weapon group R (Milsnabb only): class 2 ↔ 3 ──
-            if (weaponGroup == "R" && isMilsnabb)
+            // ── Weapon group R: class 2 ↔ 3 (Milsnabb, Fältskytte, MagnumFält) ──
+            if (weaponGroup == "R" && allowR23Merge)
                 return BuildLevel23Suggestion(className, count, classCounts, weaponGroup);
 
             // ── Weapon groups C and L: special rules ──

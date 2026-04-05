@@ -10,6 +10,7 @@ using Umbraco.Cms.Web.Website.Controllers;
 using Umbraco.Extensions;
 using Umbraco.Cms.Core.Security;
 using HpskSite.CompetitionTypes.Faltskytte.Models;
+using HpskSite.Services;
 using HpskSite.CompetitionTypes.Precision.Controllers;
 using HpskSite.Services;
 using Newtonsoft.Json;
@@ -377,7 +378,44 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         /// Gets all results for a competition, grouped by class.
         /// </summary>
         [HttpGet]
-        public async Task<IActionResult> GetFaltskytteResults(int competitionId)
+        public async Task<IActionResult> AnalyzeFaltskytteMerges(int competitionId)
+        {
+            try
+            {
+                var competition = _contentService.GetById(competitionId);
+                if (competition == null)
+                    return Json(new { success = false, message = "Tävlingen hittades inte." });
+
+                var compType = competition.GetValue<string>("competitionType") ?? "Faltskytte";
+
+                using var db = _umbracoDatabaseFactory.CreateDatabase();
+
+                // Count distinct members per class from result entries (a participant = has at least one station result)
+                var allResults = await db.FetchAsync<FaltskytteResultEntry>(
+                    "WHERE CompetitionId = @0", competitionId);
+                var classCounts = allResults
+                    .GroupBy(r => new { r.MemberId, r.ShootingClass })
+                    .Select(g => g.Key)
+                    .GroupBy(k => HpskSite.Models.ShootingClasses.GetById(k.ShootingClass)?.Name ?? k.ShootingClass)
+                    .ToDictionary(g => g.Key, g => g.Count());
+
+                var service = new ClassMergingService();
+                var analysis = service.AnalyzeFromCounts(classCounts, compType);
+
+                // Load saved merge config
+                var savedConfig = competition.GetValue<string>("mergeConfig") ?? "";
+
+                return Json(new { success = true, analysis, savedConfig });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error analyzing merges for competition {CompetitionId}", competitionId);
+                return Json(new { success = false, message = "Fel: " + ex.Message });
+            }
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> GetFaltskytteResults(int competitionId, string? mergeConfig = null)
         {
             try
             {
@@ -447,11 +485,37 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                         };
                     }).ToList();
 
-                // Group by class and rank
+                // Build merge lookup from config (if provided)
+                var mergeLookup = new Dictionary<string, string>(); // source class → combined group name
+                if (string.IsNullOrEmpty(mergeConfig))
+                {
+                    // Try loading saved merge config from competition
+                    mergeConfig = competition.GetValue<string>("mergeConfig") ?? "";
+                }
+                if (!string.IsNullOrEmpty(mergeConfig))
+                {
+                    try
+                    {
+                        var mergeActions = Newtonsoft.Json.JsonConvert.DeserializeObject<List<ClassMergeAction>>(mergeConfig);
+                        if (mergeActions != null)
+                        {
+                            foreach (var action in mergeActions)
+                            {
+                                var combinedName = ClassMergingService.GetCombinedClassName(action.SourceClass, action.TargetClass);
+                                mergeLookup[action.SourceClass] = combinedName;
+                                if (!mergeLookup.ContainsKey(action.TargetClass))
+                                    mergeLookup[action.TargetClass] = combinedName;
+                            }
+                        }
+                    }
+                    catch { /* ignore invalid merge config */ }
+                }
+
+                // Group by class (applying merge lookup) and rank
                 var isPoang = scoringMode.Equals("Poang", StringComparison.OrdinalIgnoreCase);
                 var tieBreaker = new Services.FaltskylteTieBreaker(isPoang);
                 var classGroups = shooterResults
-                    .GroupBy(s => s.ShootingClass)
+                    .GroupBy(s => mergeLookup.GetValueOrDefault(s.ShootingClass, s.ShootingClass))
                     .Select(g => new FaltskytteClassGroup
                     {
                         ClassName = g.Key,
@@ -465,7 +529,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                     {
                         CompetitionId = competitionId,
                         UpdatedAt = DateTime.Now,
-                        IsOfficial = false,
+                        IsOfficial = competition.HasProperty("faltskytteResultsOfficial") && competition.GetValue<bool>("faltskytteResultsOfficial"),
                         ScoringMode = scoringMode,
                         StationCount = stationCount,
                         Config = competitionConfig,
@@ -478,6 +542,44 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 _logger.LogError(ex, "Error getting Fältskytte results for competition {CompetitionId}", competitionId);
                 return Json(new { success = false, message = "Fel: " + ex.Message });
             }
+        }
+
+        /// <summary>Saves merge config for Fältskytte results.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveMergeConfig([FromBody] SaveMergeConfigRequest request)
+        {
+            if (!await IsAuthorizedForCompetition(request.CompetitionId))
+                return Json(new { success = false, message = "Du har inte behörighet." });
+
+            var competition = _contentService.GetById(request.CompetitionId);
+            if (competition == null)
+                return Json(new { success = false, message = "Tävlingen hittades inte." });
+
+            competition.SetValue("mergeConfig", request.MergeConfig ?? "");
+            _contentService.Save(competition);
+            _contentService.Publish(competition, Array.Empty<string>());
+
+            return Json(new { success = true });
+        }
+
+        /// <summary>Marks Fältskytte results as official or preliminary.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> PublishResults([FromBody] PublishResultsRequest request)
+        {
+            if (!await IsAuthorizedForCompetition(request.CompetitionId))
+                return Json(new { success = false, message = "Du har inte behörighet." });
+
+            var competition = _contentService.GetById(request.CompetitionId);
+            if (competition == null)
+                return Json(new { success = false, message = "Tävlingen hittades inte." });
+
+            competition.SetValue("faltskytteResultsOfficial", request.IsOfficial);
+            _contentService.Save(competition);
+            _contentService.Publish(competition, Array.Empty<string>());
+
+            return Json(new { success = true });
         }
 
         // ── Target Catalog ───────────────────────────────────────────
@@ -503,6 +605,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                     MaxDistanceB = t.MaxDistanceB,
                     MaxDistanceA = t.MaxDistanceA,
                     MaxDistanceR = t.MaxDistanceR,
+                    TargetsPerFigure = t.TargetsPerFigure,
                     Variants = variantsByTarget.GetValueOrDefault(t.Id, new())
                         .Select(v => new FieldTargetVariantView
                         {
@@ -572,6 +675,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 target.MaxDistanceB = request.MaxDistanceB;
                 target.MaxDistanceA = request.MaxDistanceA;
                 target.MaxDistanceR = request.MaxDistanceR;
+                if (request.TargetsPerFigure.HasValue) target.TargetsPerFigure = request.TargetsPerFigure.Value;
                 await db.UpdateAsync(target);
 
                 if (request.Variants != null)
@@ -615,7 +719,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                     MaxDistanceC = request.MaxDistanceC,
                     MaxDistanceB = request.MaxDistanceB,
                     MaxDistanceA = request.MaxDistanceA,
-                    MaxDistanceR = request.MaxDistanceR
+                    MaxDistanceR = request.MaxDistanceR,
+                    TargetsPerFigure = request.TargetsPerFigure
                 };
                 await db.InsertAsync(target);
 

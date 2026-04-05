@@ -554,6 +554,25 @@
         }
 
         // Fältskytte results rendering
+        function faltExtractStationConfigs(results) {
+            var configs = [];
+            var wc = results.config?.weaponConfigs || results.config?.WeaponConfigs || {};
+            var firstWc = Object.values(wc)[0];
+            if (firstWc) {
+                (firstWc.stations || firstWc.Stations || []).forEach(function(st) {
+                    var stNum = st.station || st.Station;
+                    var hasPm = false;
+                    (st.targetGroups || st.TargetGroups || []).forEach(function(tg) {
+                        (tg.figures || tg.Figures || []).forEach(function(fig) {
+                            if (fig.isPoangmal || fig.IsPoangmal) hasPm = true;
+                        });
+                    });
+                    configs.push({ station: stNum, hasPoangmal: hasPm });
+                });
+            }
+            return configs;
+        }
+
         async function loadFaltskytteResults(container) {
             try {
                 const response = await fetch(`/umbraco/surface/Faltskytte/GetFaltskytteResults?competitionId=${competitionId}`);
@@ -566,6 +585,7 @@
 
                 const results = data.results;
                 const isPoang = results.scoringMode === 'Poang';
+                const stationConfigs = faltExtractStationConfigs(results);
                 let html = '';
 
                 results.classGroups.forEach(group => {
@@ -577,7 +597,7 @@
                         <th>Namn</th><th>Förening</th><th>Klass</th>`;
 
                     for (let i = 1; i <= results.stationCount; i++) {
-                        const cfg = results.stationConfigs.find(s => s.station === i);
+                        const cfg = stationConfigs.find(s => s.station === i);
                         html += `<th class="text-center">${i}${cfg?.hasPoangmal ? '*' : ''}</th>`;
                     }
 

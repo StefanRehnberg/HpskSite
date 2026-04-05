@@ -290,10 +290,24 @@
     window.fseBackFromRollCall = function() {
         document.getElementById('fseRollCallScreen').style.display = 'none';
         document.getElementById('fseSelectScreen').style.display = '';
+        fseLoadStation(); // Refresh patrol data (updates green checkmarks)
     };
 
     window.fseBackToRollCall = function() {
         if (!fseCheckUnsaved()) return;
+        // Re-render roll call list to update green checkmarks
+        var rcHtml = '';
+        (currentPatrol.members || []).forEach(function(m) {
+            var isPresent = presentMembers.has(m.memberId);
+            rcHtml += '<div class="d-flex align-items-center gap-2 px-3 py-2 border-bottom">' +
+                '<input type="checkbox" class="form-check-input fse-rc-check" data-member-id="' + m.memberId + '"' + (isPresent ? ' checked' : '') + ' onchange="fseRcToggle(this)">' +
+                '<span class="flex-grow-1">' + m.name + ' <span class="text-muted small">(' + m.club + ')</span>' +
+                ' <span class="badge bg-body-secondary text-body">' + m.shootingClass + '</span></span>' +
+                (m.hasResult ? '<i class="bi bi-check-circle-fill text-success"></i>' : '') +
+                '</div>';
+        });
+        document.getElementById('fseRcList').innerHTML = rcHtml;
+        fseUpdateRcCount();
         document.getElementById('fseEntryScreen').style.display = 'none';
         document.getElementById('fseRollCallScreen').style.display = '';
     };
@@ -364,14 +378,14 @@
 
     function fseInitShooterState(memberId) {
         var wcCfg = stationData.weaponClassStations?.[currentPatrolWc] || Object.values(stationData.weaponClassStations || {})[0];
-        var totalFigs = 0, totalPm = 0;
+        var totalTargets = 0, totalPm = 0;
         (wcCfg?.targetGroups || []).forEach(function(tg) {
             (tg.figures || []).forEach(function(fig) {
-                totalFigs++;
+                totalTargets += Math.max(1, fig.targetsPerFigure || fig.TargetsPerFigure || 1);
                 if (fig.isPoangmal) totalPm++;
             });
         });
-        shooterHits[memberId] = { figHits: new Array(totalFigs).fill(null), pmScores: new Array(totalPm).fill(0), pmTouched: new Array(totalPm).fill(false), reshoots: 0, _dirty: false };
+        shooterHits[memberId] = { figHits: new Array(totalTargets).fill(null), pmScores: new Array(totalPm).fill(0), pmTouched: new Array(totalPm).fill(false), reshoots: 0, _dirty: false };
     }
 
     function fseRenderShooter() {
@@ -413,13 +427,13 @@
             figArea.insertAdjacentHTML('beforeend', '<div class="fw-bold small text-muted mb-1 mt-2">' + tgLabel + '</div>');
 
             (tg.figures || []).forEach(function(fig) {
-                var fi = figIdx;
+                var targetsInFig = Math.max(1, fig.targetsPerFigure || fig.TargetsPerFigure || 1);
                 var figLabel = fig.figureNumber;
-                var currentVal = state.figHits[fi];
 
                 var html = '<div class="fse-figure-card">';
                 html += '<div class="d-flex align-items-center mb-2">';
                 html += '<span class="fw-bold">Figur ' + figLabel + '</span>';
+                if (targetsInFig > 1) html += '<span class="badge bg-secondary ms-1">' + targetsInFig + ' m\u00e5l</span>';
                 if (fig.imageUrl || fig.targetName) {
                     html += '<span class="d-flex align-items-center gap-1 mx-auto">';
                     if (fig.imageUrl) html += '<img src="' + fig.imageUrl + '" style="height:32px;border-radius:4px" alt="">';
@@ -428,13 +442,19 @@
                 }
                 html += '</div>';
 
-                html += '<div class="d-flex gap-1 flex-wrap">';
-                for (var v = 0; v <= Math.min(maxPerFig, 6); v++) {
-                    var isActive = v === currentVal;
-                    html += '<button class="btn ' + (isActive ? 'btn-primary' : 'btn-outline-secondary') + ' fse-hit-btn flex-fill" ' +
-                        'onclick="fseSetHit(' + m.memberId + ',' + fi + ',' + v + ')">' + v + '</button>';
+                // Render one hit-button row per target in the figure
+                for (var t = 0; t < targetsInFig; t++) {
+                    var fi = figIdx + t;
+                    var currentVal = state.figHits[fi];
+                    if (targetsInFig > 1) html += '<div class="small text-muted mb-1">M\u00e5l ' + (t + 1) + '</div>';
+                    html += '<div class="d-flex gap-1 flex-wrap' + (t < targetsInFig - 1 ? ' mb-2' : '') + '">';
+                    for (var v = 0; v <= Math.min(maxPerFig, 6); v++) {
+                        var isActive = v === currentVal;
+                        html += '<button class="btn ' + (isActive ? 'btn-primary' : 'btn-outline-secondary') + ' fse-hit-btn flex-fill" ' +
+                            'onclick="fseSetHit(' + m.memberId + ',' + fi + ',' + v + ')">' + v + '</button>';
+                    }
+                    html += '</div>';
                 }
-                html += '</div>';
 
                 if (fig.isPoangmal) {
                     var pi = pmIdx;
@@ -448,7 +468,7 @@
 
                 html += '</div>';
                 figArea.insertAdjacentHTML('beforeend', html);
-                figIdx++;
+                figIdx += targetsInFig;
             });
         });
 

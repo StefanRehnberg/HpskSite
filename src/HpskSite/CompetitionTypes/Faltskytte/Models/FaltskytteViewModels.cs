@@ -87,6 +87,18 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public bool Publish { get; set; }
     }
 
+    public class SaveMergeConfigRequest
+    {
+        public int CompetitionId { get; set; }
+        public string? MergeConfig { get; set; }
+    }
+
+    public class PublishResultsRequest
+    {
+        public int CompetitionId { get; set; }
+        public bool IsOfficial { get; set; }
+    }
+
     // ── Station Config ────────────────────────────────────────────
 
     public class SaveStationConfigRequest
