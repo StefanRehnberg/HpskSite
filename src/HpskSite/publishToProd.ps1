@@ -121,4 +121,9 @@ Write-Host "PRESERVED ON SERVER (not in package):" -ForegroundColor Yellow
 Write-Host "  - wwwroot/media/  (user uploads)" -ForegroundColor Gray
 Write-Host "  - App_Data/       (Firebase credentials)" -ForegroundColor Gray
 Write-Host ""
+Write-Host "NOTE: wwwroot/images/field-targets/ IS included." -ForegroundColor Yellow
+Write-Host "  First deploy: upload it (282 target images)." -ForegroundColor Gray
+Write-Host "  Future deploys: SKIP this folder if targets" -ForegroundColor Gray
+Write-Host "  have been modified in production via Figurkatalog." -ForegroundColor Gray
+Write-Host ""
 Write-Host "Deployment package ready!" -ForegroundColor Green

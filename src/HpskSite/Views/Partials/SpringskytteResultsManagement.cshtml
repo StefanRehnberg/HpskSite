@@ -16,6 +16,8 @@
     var competitionType = ViewData["CompetitionType"]?.ToString() ?? "Springskytte";
     var numberOfSeries = ViewData["NumberOfSeriesOrStations"] as int? ?? 6;
     var competitionName = ViewData["CompetitionName"]?.ToString() ?? "Springskytte";
+    var isStationPage = ViewData["IsStationPage"] != null && (bool)ViewData["IsStationPage"];
+    var presetWeaponClass = ViewData["PresetWeaponClass"]?.ToString() ?? "";
 }
 
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
@@ -23,21 +25,55 @@
 <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
 
 <div class="springskytte-results-management" data-competition-id="@competitionId" data-number-of-series="@numberOfSeries">
-    <!-- Results Entry Section -->
-    <div class="card">
-        <div class="card-header" style="cursor: pointer;" onclick="toggleSpringskytteEntry(event)">
-            <div class="d-flex justify-content-between align-items-center">
-                <div class="d-flex align-items-center">
-                    <i class="bi bi-chevron-down me-2" id="springEntryChevron"></i>
-                    <h5 class="mb-0"><i class="bi bi-stopwatch me-2"></i>Registrera Resultat</h5>
-                </div>
-                <span class="text-muted small">
-                    <i class="bi bi-info-circle me-1"></i>Ange måltid och skjutresultat per skytt
-                </span>
+    @if (!isStationPage)
+    {
+    <!-- Links to station page for result entry -->
+    <div class="card mb-3">
+        <div class="card-header py-2">
+            <span class="fw-bold small"><i class="bi bi-pencil-square me-2"></i>Resultatinmatning</span>
+        </div>
+        <div class="card-body py-2">
+            <div class="d-flex gap-2">
+                <a href="/station?c=@competitionId&s=A" class="btn btn-outline-primary btn-sm" target="_blank">
+                    <i class="bi bi-card-list me-1"></i>Vapengrupp A
+                </a>
+                <a href="/station?c=@competitionId&s=C" class="btn btn-outline-primary btn-sm" target="_blank">
+                    <i class="bi bi-phone me-1"></i>Vapengrupp C
+                </a>
             </div>
         </div>
+    </div>
+    }
+
+    <!-- Results Entry Section -->
+    <div class="card" style="@(!isStationPage ? "display:none" : "")">
+        @if (isStationPage)
+        {
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-stopwatch me-2"></i>Registrera Resultat — @competitionName
+                    @if (presetWeaponClass == "A") { <span class="badge bg-primary ms-2">Vapengrupp A</span> }
+                    else if (presetWeaponClass == "C") { <span class="badge bg-primary ms-2">Vapengrupp C</span> }
+                </h5>
+            </div>
+        }
+        else
+        {
+            <div class="card-header" style="cursor: pointer;" onclick="toggleSpringskytteEntry(event)">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div class="d-flex align-items-center">
+                        <i class="bi bi-chevron-down me-2" id="springEntryChevron"></i>
+                        <h5 class="mb-0"><i class="bi bi-stopwatch me-2"></i>Registrera Resultat</h5>
+                    </div>
+                    <span class="text-muted small">
+                        <i class="bi bi-info-circle me-1"></i>Ange måltid och skjutresultat per skytt
+                    </span>
+                </div>
+            </div>
+        }
         <div class="card-body" id="springEntryBody">
-            <!-- Tabs for Class A / Class C -->
+            <!-- Tabs for Class A / Class C (hidden on station page where only one class is shown) -->
+            @if (!isStationPage || string.IsNullOrEmpty(presetWeaponClass))
+            {
             <ul class="nav nav-tabs mb-3" id="springEntryTabs" role="tablist">
                 <li class="nav-item" role="presentation">
                     <button class="nav-link active" id="springTabA-tab" data-bs-toggle="tab" data-bs-target="#springTabA"
@@ -52,10 +88,13 @@
                     </button>
                 </li>
             </ul>
+            }
 
             <div class="tab-content" id="springEntryTabContent">
                 <!-- ===== TAB 1: CLASS A — Sequential Entry ===== -->
-                <div class="tab-pane fade show active" id="springTabA" role="tabpanel" aria-labelledby="springTabA-tab">
+                @if (!(isStationPage && presetWeaponClass == "C"))
+                {
+                <div class="tab-pane fade @(presetWeaponClass != "C" ? "show active" : "")" id="springTabA" role="tabpanel" aria-labelledby="springTabA-tab">
                     <!-- Shooter Navigation -->
                     <div class="d-flex flex-wrap align-items-center gap-2 mb-3 sticky-top bg-body py-2" style="z-index: 10;">
                         <button class="btn btn-sm btn-outline-secondary" onclick="springANavigate(springFirstShooter)" title="Forsta skytten">
@@ -87,9 +126,12 @@
                         </div>
                     </div>
                 </div>
+                } @* end if not preset C *@
 
                 <!-- ===== TAB 2: CLASS C — Range Officer Mode ===== -->
-                <div class="tab-pane fade" id="springTabC" role="tabpanel" aria-labelledby="springTabC-tab">
+                @if (!(isStationPage && presetWeaponClass == "A"))
+                {
+                <div class="tab-pane fade @(presetWeaponClass == "C" ? "show active" : "")" id="springTabC" role="tabpanel" aria-labelledby="springTabC-tab">
                     <!-- Top bar -->
                     <div class="d-flex justify-content-between align-items-center mb-3 sticky-top bg-body py-2" style="z-index: 10;">
                         <small class="text-muted">@competitionName</small>
@@ -117,35 +159,30 @@
                     <!-- Recently entered list -->
                     <div id="springCRecentList" class="mt-3"></div>
                 </div>
+                } @* end if not preset A *@
             </div>
         </div>
     </div>
 
+    @if (!isStationPage)
+    {
     <!-- Results List Section -->
-    <div class="card mt-4">
-        <div class="card-header" style="cursor: pointer;" onclick="toggleSpringskytteResultsList(event)">
-            <div class="d-flex justify-content-between align-items-center">
-                <div class="d-flex align-items-center">
-                    <i class="bi bi-chevron-right me-2" id="springResultsChevron"></i>
-                    <h5 class="mb-0"><i class="bi bi-trophy me-2"></i>Resultatlista</h5>
-                </div>
-                <div class="d-flex align-items-center gap-2" onclick="event.stopPropagation()">
-                    <button class="btn btn-outline-primary btn-sm" onclick="springCreateResultsList(event)">
-                        <i class="bi bi-arrow-clockwise me-1"></i>Uppdatera
-                    </button>
-                    <span class="badge bg-secondary" id="springResultsStatusBadge" style="display:none;"></span>
-                </div>
-            </div>
+    <div class="mt-3" id="springResultsListSection">
+        <div class="d-flex align-items-center gap-2 mb-2">
+            <button class="btn btn-outline-primary btn-sm" onclick="springCreateResultsList(event)">
+                <i class="bi bi-arrow-clockwise me-1"></i>Uppdatera
+            </button>
+            <span class="badge bg-secondary" id="springResultsStatusBadge" style="display:none;"></span>
         </div>
-        <div class="card-body" id="springResultsBody" style="display: none;">
+        <div id="springResultsBody">
             <div id="springResultsContent">
                 <div class="text-center py-4 text-muted">
-                    <i class="bi bi-file-earmark-text display-4"></i>
-                    <p class="mt-2">Klicka "Uppdatera" for att skapa resultatlista</p>
+                    <p class="mt-2">Klicka "Uppdatera" för att skapa resultatlista</p>
                 </div>
             </div>
         </div>
     </div>
+    }
 </div>
 
 <style>
@@ -1438,13 +1475,10 @@ async function springLoadResultsList() {
         const data = await response.json();
 
         const body = document.getElementById('springResultsBody');
-        const chevron = document.getElementById('springResultsChevron');
         const content = document.getElementById('springResultsContent');
 
         if (data.success && data.classGroups?.length > 0) {
-            body.style.display = 'block';
-            chevron.classList.remove('bi-chevron-right');
-            chevron.classList.add('bi-chevron-down');
+            if (body) body.style.display = 'block';
 
             let html = '';
             for (const group of data.classGroups) {
@@ -1462,7 +1496,7 @@ async function springLoadResultsList() {
                                     <th>Skjutp.</th>
                                     <th class="time-col">Tillägg</th>
                                     <th class="time-col fw-bold">Sluttid</th>
-                                    <th>Medalj</th>
+                                    <th>Std</th>
                                 </tr>
                             </thead>
                             <tbody>`;

@@ -77,9 +77,9 @@
 
 <div class="container-fluid mt-3">
 
-    @if (competitionId == 0 || stationNumber == 0)
+    @if (competitionId == 0 || (stationNumber == 0 && isFaltskytte))
     {
-        <!-- No params — show resume prompt or landing -->
+        <!-- No params (or no station for Fältskytte) — show resume prompt or landing -->
         <div class="text-center py-5">
             <h4><i class="bi bi-qr-code me-2"></i>Stationssida</h4>
             <p class="text-muted">Skanna QR-koden på ett stationskort för att komma till rätt station.</p>
@@ -143,17 +143,26 @@
         }
         else if (isSpringskytte)
         {
-            <div class="alert alert-info">
-                <i class="bi bi-info-circle me-2"></i>Resultatinmatning för Springskytte via stationssidan kommer snart.
-                <a href="/competitionmanagement?competitionId=@competitionId" class="btn btn-outline-primary btn-sm ms-2">Gå till tävlingshantering</a>
-            </div>
+            var entryViewData = new ViewDataDictionary(ViewData);
+            entryViewData["CompetitionId"] = competitionId;
+            entryViewData["CompetitionName"] = competitionName;
+            entryViewData["NumberOfSeriesOrStations"] = competition.Value<int>("numberOfSeriesOrStations");
+            entryViewData["CompetitionType"] = competitionType;
+            entryViewData["IsStationPage"] = true;
+            entryViewData["PresetWeaponClass"] = sStr ?? "";
+            @await Html.PartialAsync("SpringskytteResultsManagement", entryViewData)
         }
         else
         {
-            <div class="alert alert-info">
-                <i class="bi bi-info-circle me-2"></i>Resultatinmatning för @competitionType via stationssidan kommer snart.
-                <a href="/competitionmanagement?competitionId=@competitionId" class="btn btn-outline-primary btn-sm ms-2">Gå till tävlingshantering</a>
-            </div>
+            var entryViewData = new ViewDataDictionary(ViewData);
+            entryViewData["CompetitionId"] = competitionId;
+            entryViewData["CompetitionName"] = competitionName;
+            entryViewData["NumberOfSeriesOrStations"] = competition.Value<int>("numberOfSeriesOrStations");
+            entryViewData["NumberOfFinalSeries"] = competition.Value<int>("numberOfFinalSeries");
+            entryViewData["CompetitionType"] = competitionType;
+            entryViewData["IsStationPage"] = true;
+            entryViewData["PresetTeamNumber"] = stationNumber;
+            @await Html.PartialAsync("CompetitionResultsManagement", entryViewData)
         }
     }
     else

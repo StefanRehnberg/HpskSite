@@ -25,7 +25,9 @@
     
     var hasFinalsRound = numberOfFinalSeries > 0;
     var qualificationSeriesCount = hasFinalsRound ? (numberOfSeriesOrStations.Value - numberOfFinalSeries.Value) : numberOfSeriesOrStations.Value;
-    
+    var isStationPage = ViewData["IsStationPage"] != null && (bool)ViewData["IsStationPage"];
+    var presetTeamNumber = ViewData["PresetTeamNumber"] as int? ?? 0;
+
     // Debug output
     System.Diagnostics.Debug.WriteLine($"CompetitionResultsManagement - Competition: {competitionId}");
     System.Diagnostics.Debug.WriteLine($"  numberOfSeriesOrStations: {numberOfSeriesOrStations}");
@@ -35,21 +37,90 @@
 }
 
 <div class="competition-results-management" data-competition-id="@competitionId">
-    <!-- Precision Results Entry Section (Collapsible) -->
-    <div class="card">
-        <div class="card-header" style="cursor: pointer;" onclick="toggleResultsEntry(event)">
+    @if (!isStationPage)
+    {
+    <!-- Team Links — navigate to station page for result entry -->
+    <div class="card mb-3">
+        <div class="card-header py-2">
             <div class="d-flex justify-content-between align-items-center">
-                <div class="d-flex align-items-center">
-                    <i class="bi bi-chevron-down me-2" id="resultsEntryChevron"></i>
-                    <h5 class="mb-0"><i class="bi bi-bullseye me-2"></i>Registrera Resultat</h5>
-                </div>
-                <div>
-                    <span class="text-muted">
-                        <small><i class="bi bi-keyboard me-1"></i>Använd tangentbordet eller klicka på knapparna</small>
-                    </span>
-                </div>
+                <span class="fw-bold small"><i class="bi bi-pencil-square me-2"></i>Resultatinmatning</span>
             </div>
         </div>
+        <div class="card-body py-2">
+            <div class="d-flex flex-wrap gap-2" id="precisionTeamLinks">
+                <span class="text-muted small">Laddar skjutlag...</span>
+            </div>
+        </div>
+    </div>
+    <script>
+    (function() {
+        var cid = '@competitionId';
+        fetch('/umbraco/surface/PrecisionStartList/GetOfficialStartList?competitionId=' + cid)
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                var el = document.getElementById('precisionTeamLinks');
+                var ok = data.Success || data.success;
+                var sl = data.StartList || data.startList;
+                if (!ok || !sl) {
+                    el.innerHTML = '<span class="text-muted small">Ingen startlista publicerad. Skapa och publicera en startlista f\u00f6rst.</span>';
+                    return;
+                }
+                // Load the full start list to get team details
+                var slId = sl.Id || sl.id;
+                return fetch('/umbraco/surface/PrecisionStartList/GetStartListForEditing?startListId=' + slId)
+                    .then(function(r) { return r.json(); })
+                    .then(function(slData) {
+                        var cfg = slData.configuration || slData.Configuration;
+                        var teams = cfg?.teams || cfg?.Teams;
+                        if (!(slData.success || slData.Success) || !teams) {
+                            el.innerHTML = '<span class="text-muted small">Kunde inte ladda skjutlag.</span>';
+                            return;
+                        }
+                        el.innerHTML = '';
+                        teams.forEach(function(team) {
+                            var teamNum = team.teamNumber || team.TeamNumber;
+                            var startTime = team.startTime || team.StartTime || '';
+                            var timeStr = startTime;
+                            var a = document.createElement('a');
+                            a.href = '/station?c=' + cid + '&s=' + teamNum;
+                            a.className = 'btn btn-outline-primary btn-sm';
+                            a.target = '_blank';
+                            a.innerHTML = '<i class="bi bi-people me-1"></i>Lag ' + teamNum + (timeStr ? ' <small class="text-muted">(' + timeStr + ')</small>' : '');
+                            el.appendChild(a);
+                        });
+                    });
+            })
+            .catch(function() {
+                document.getElementById('precisionTeamLinks').innerHTML = '<span class="text-muted small">Kunde inte ladda skjutlag.</span>';
+            });
+    })();
+    </script>
+    }
+
+    <!-- Precision Results Entry Section -->
+    <div class="card" style="@(!isStationPage ? "display:none" : "")">
+        @if (isStationPage)
+        {
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-bullseye me-2"></i>Registrera Resultat — <span id="presetTeamLabel">Lag @presetTeamNumber</span></h5>
+            </div>
+        }
+        else
+        {
+            <div class="card-header" style="cursor: pointer;" onclick="toggleResultsEntry(event)">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div class="d-flex align-items-center">
+                        <i class="bi bi-chevron-down me-2" id="resultsEntryChevron"></i>
+                        <h5 class="mb-0"><i class="bi bi-bullseye me-2"></i>Registrera Resultat</h5>
+                    </div>
+                    <div>
+                        <span class="text-muted">
+                            <small><i class="bi bi-keyboard me-1"></i>Använd tangentbordet eller klicka på knapparna</small>
+                        </span>
+                    </div>
+                </div>
+            </div>
+        }
         <div class="card-body" id="resultsEntryBody">
             <!-- Controls Row: Entry Order, Phase Selector, and Traversal Mode -->
             <div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-3">
@@ -57,8 +128,16 @@
                 <div>
                     <label for="entryOrderSelect" class="form-label mb-1 small">Ordning</label>
                     <select class="form-select form-select-sm" id="entryOrderSelect" onchange="changeEntryOrder()">
-                        <option value="registration">Anmälningsordning (klass/namn)</option>
-                        <option value="startlist">Startlisteordning (lag/tid)</option>
+                        @if (isStationPage)
+                        {
+                            <option value="registration">Anmälningsordning (klass/namn)</option>
+                            <option value="startlist" selected>Startlisteordning (lag/tid)</option>
+                        }
+                        else
+                        {
+                            <option value="registration" selected>Anmälningsordning (klass/namn)</option>
+                            <option value="startlist">Startlisteordning (lag/tid)</option>
+                        }
                     </select>
                 </div>
 
@@ -96,68 +175,48 @@
 
             <div id="resultsEntryContainer">
                 <div class="text-center py-4">
-                    <i class="bi bi-arrow-up-circle display-1 text-muted"></i>
-                    <p class="text-muted mt-2">Select a shooter above to start entering results</p>
+                    <div class="spinner-border spinner-border-sm text-muted" role="status"></div>
+                    <p class="text-muted mt-2">Laddar skyttar...</p>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Results List Section (Collapsible) -->
-    <div class="card mt-4" id="resultsListSection">
-        <div class="card-header" style="cursor: pointer;" onclick="toggleResultsList(event)">
-            <div class="d-flex justify-content-between align-items-center">
-                <div class="d-flex align-items-center">
-                    <i class="bi bi-chevron-right me-2" id="resultsListChevron"></i>
-                    <h5 class="mb-0"><i class="bi bi-file-earmark-text me-2"></i>Resultatlista</h5>
-                </div>
-                <div class="d-flex align-items-center gap-2" onclick="event.stopPropagation()" id="resultsListActions">
-                    <!-- Create/Update Results List Button -->
-                    <button class="btn btn-outline-primary btn-sm" onclick="createResultsList(event)" id="btnCreateResultsList">
-                        <i class="bi bi-arrow-clockwise me-1"></i>Uppdatera
-                    </button>
-                    <!-- Status Badge -->
-                    <span class="badge bg-warning fs-6 px-3 py-2" id="resultsListStatusBadge" style="display: none;">
-                        <i class="bi bi-exclamation-triangle me-1"></i>Preliminär
-                    </span>
-                    <!-- Publish Action Buttons -->
-                    <button class="btn btn-success btn-sm" id="btnMarkOfficial" onclick="markResultsOfficial(event)" style="display: none;">
-                        <i class="bi bi-check-circle me-1"></i>Publicera
-                    </button>
-                    <button class="btn btn-outline-warning btn-sm" id="btnMarkPreliminary" onclick="markResultsPreliminary(event)" style="display: none;">
-                        <i class="bi bi-arrow-counterclockwise me-1"></i>Avpublicera
-                    </button>
-                    <!-- Summary -->
-                    <span class="text-muted" id="resultsListSummary" style="display: none;">
-                        <small><i class="bi bi-people me-1"></i><span id="resultsListCount">0</span> deltagare</small>
-                    </span>
-                </div>
+    <!-- Results List Section (Collapsible) — hidden on station page -->
+    @if (!isStationPage)
+    {
+    <div class="mt-3" id="resultsListSection">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <div class="d-flex align-items-center gap-2" id="resultsListActions">
+                <button class="btn btn-outline-primary btn-sm" onclick="createResultsList(event)" id="btnCreateResultsList">
+                    <i class="bi bi-arrow-clockwise me-1"></i>Uppdatera
+                </button>
+                <span class="badge bg-warning fs-6 px-3 py-2" id="resultsListStatusBadge" style="display: none;">
+                    <i class="bi bi-exclamation-triangle me-1"></i>Preliminär
+                </span>
+                <button class="btn btn-success btn-sm" id="btnMarkOfficial" onclick="markResultsOfficial(event)" style="display: none;">
+                    <i class="bi bi-check-circle me-1"></i>Publicera
+                </button>
+                <button class="btn btn-outline-warning btn-sm" id="btnMarkPreliminary" onclick="markResultsPreliminary(event)" style="display: none;">
+                    <i class="bi bi-arrow-counterclockwise me-1"></i>Avpublicera
+                </button>
+                <span class="text-muted" id="resultsListSummary" style="display: none;">
+                    <small><i class="bi bi-people me-1"></i><span id="resultsListCount">0</span> deltagare</small>
+                </span>
             </div>
         </div>
-        <div class="card-body" id="resultsListBody" style="display: none;">
-            <!-- No Results Message (shown when no results list exists) -->
-            <div id="noResultsMessage" class="text-center py-5" style="display: none;">
-                <i class="bi bi-file-earmark-text display-1 text-muted"></i>
-                <h5 class="mt-3 mb-2">Ingen resultatlista skapad ännu</h5>
-                <p class="text-muted">Klicka på knappen "Uppdatera" ovan för att skapa en resultatlista baserad på de registrerade resultaten.</p>
+        <div id="resultsListBody">
+            <div id="noResultsMessage" class="text-center py-4" style="display: none;">
+                <p class="text-muted">Klicka "Uppdatera" för att skapa en resultatlista.</p>
             </div>
-
-            <!-- Results Display (shown when results list exists) -->
             <div id="resultsDisplay" style="display: none;">
-                <!-- Action Button -->
-                <div class="d-flex justify-content-end mb-3">
-                    <button type="button" class="btn btn-outline-primary btn-sm" onclick="openResultsInNewTab(event)">
-                        <i class="bi bi-box-arrow-up-right"></i> Öppna i ny flik
-                    </button>
-                </div>
-
-                <!-- Results Display (iframe) -->
                 <div id="resultsIframeContainer">
                     <iframe id="resultsManagementIframe" src="" style="width: 100%; height: 800px; border: 1px solid #dee2e6; border-radius: 0.375rem;"></iframe>
                 </div>
             </div>
         </div>
     </div>
+    } @* end if !isStationPage *@
 </div>
 
 <!-- Change Shooter Class Modal -->
@@ -518,10 +577,9 @@ async function loadResultsList() {
         if (data.success && data.exists) {
             currentResultsListData = data.results;
 
-            // Show results list section (always visible now)
-            if (section) {
+            // Show results list section (unless hidden by d-none class on station page)
+            if (section && !section.classList.contains('d-none')) {
                 section.style.display = 'block';
-                console.log('Results list section shown');
 
                 // Auto-expand the section
                 if (body && chevron) {
@@ -783,7 +841,8 @@ if (competitionData.hasFinalsRound) {
 let shootersData = [];       // All shooters (from registrations)
 let currentShooterIndex = 0; // Current position in shootersData
 let hasStartList = false;    // Whether start list exists
-let currentEntryOrder = 'registration'; // 'registration' or 'startlist'
+let currentEntryOrder = @(isStationPage ? Html.Raw("'startlist'") : Html.Raw("'registration'")); // 'registration' or 'startlist'
+let presetTeamNumber = @presetTeamNumber; // 0 = no preset, >0 = filter to this team on station page
 let currentSeries = 1;
 let currentUserId = null;    // Will be set when page loads
 
@@ -843,8 +902,24 @@ function loadShooters(orderBy = 'registration') {
                     currentEntryOrder = 'registration';
                 }
 
-                // Restore last session or start from first shooter
-                restoreLastSession();
+                // Station page: filter to preset team and update header
+                if (presetTeamNumber > 0 && shootersData.length > 0) {
+                    var teamShooters = shootersData.filter(function(s) { return s.teamNumber === presetTeamNumber; });
+                    if (teamShooters.length > 0) {
+                        shootersData = teamShooters;
+                        // Update header with team info
+                        var labelEl = document.getElementById('presetTeamLabel');
+                        if (labelEl) {
+                            var startTime = teamShooters[0].startTime || '';
+                            labelEl.textContent = 'Lag ' + presetTeamNumber + (startTime ? ' (' + startTime + ')' : '');
+                        }
+                    }
+                    currentShooterIndex = 0;
+                }
+                else {
+                    // Restore last session or start from first shooter
+                    restoreLastSession();
+                }
 
                 // Update display
                 updateShooterDisplay();
@@ -1869,6 +1944,12 @@ $(document).ready(function() {
     // Also trigger load on document ready if this tab is active
     if ($('#results').hasClass('active') || $('#results').hasClass('show')) {
         console.log('Results tab is active on page load');
+        loadCompetitionData();
+    }
+
+    // Station page: no tabs — load immediately if no results tab exists
+    if ($('button[data-bs-target="#results"]').length === 0 && $('#results').length === 0) {
+        console.log('No results tab found (station page) — loading competition data directly');
         loadCompetitionData();
     }
 });
