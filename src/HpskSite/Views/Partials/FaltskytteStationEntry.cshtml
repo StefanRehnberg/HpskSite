@@ -126,20 +126,16 @@
         <!-- Figure entry area -->
         <div id="fseFigureArea"></div>
 
-
-        <!-- Reshoot -->
-        <div id="fseReshootArea" class="mb-3">
-            <div class="d-flex align-items-center gap-2">
-                <span class="fw-bold">Omskjutning</span>
-                <div class="d-flex gap-1" id="fseReshootBtns"></div>
-            </div>
-            <div id="fseReshootInfo" class="small mt-1"></div>
-        </div>
-
         <!-- Save button -->
         <button class="btn btn-success w-100 fse-save-btn mb-2" onclick="fseSave()" id="fseSaveBtn">
             <i class="bi bi-check-circle me-1"></i>SPARA RESULTAT
         </button>
+
+        <!-- Reshoot (below save — single toggle button) -->
+        <div id="fseReshootArea" class="mt-3" style="display:none">
+            <button class="btn w-100" id="fseReshootBtn" onclick="fseChangeReshoot()" style="height:48px"></button>
+            <div id="fseReshootInfo" class="small mt-1 text-muted text-center"></div>
+        </div>
     </div>
 </div>
 
@@ -334,7 +330,8 @@
 
         try {
             var resp = await fetch('/umbraco/surface/Faltskytte/GetShooterStationResult?competitionId=' + compId +
-                '&stationNumber=' + stationData.stationNumber + '&memberId=' + member.memberId);
+                '&stationNumber=' + stationData.stationNumber + '&memberId=' + member.memberId +
+                '&shootingClass=' + encodeURIComponent(member.shootingClass));
             var data = await resp.json();
             if (data.success && data.result) {
                 var hitDist = data.result.hitDistribution ? JSON.parse(data.result.hitDistribution) : [];
@@ -551,12 +548,12 @@
         }
     }
 
+    var _fseReshootRemaining = 0;
+
     async function fseRenderReshoots(memberId, state) {
-        var btnArea = document.getElementById('fseReshootBtns');
+        var btn = document.getElementById('fseReshootBtn');
         var infoEl = document.getElementById('fseReshootInfo');
         var sectionEl = document.getElementById('fseReshootArea');
-        btnArea.innerHTML = '';
-        infoEl.innerHTML = '';
 
         if (maxReshoots <= 0) {
             sectionEl.style.display = 'none';
@@ -564,80 +561,94 @@
         }
         sectionEl.style.display = '';
 
-        // Load cross-station reshoot usage
-        var otherStationReshoots = 0;
-        var reshootStations = [];
+        // Load cross-station reshoot usage for this weapon class
+        var otherReshoots = 0;
         try {
-            var resp = await fetch('/umbraco/surface/Faltskytte/GetReshootInfo?competitionId=' + compId + '&memberId=' + memberId);
+            var m = currentPatrol.members[currentShooterIdx];
+            var scParam = m ? '&shootingClass=' + encodeURIComponent(m.shootingClass) : '';
+            var resp = await fetch('/umbraco/surface/Faltskytte/GetReshootInfo?competitionId=' + compId + '&memberId=' + memberId + scParam);
             var data = await resp.json();
             if (data.success) {
-                // Subtract this station's reshoots (we manage those locally)
-                var thisStationReshoots = state.reshoots || 0;
-                otherStationReshoots = data.info.totalReshoots - thisStationReshoots;
-                if (otherStationReshoots < 0) otherStationReshoots = 0;
-                reshootStations = (data.info.reshootStations || []).filter(function(s) { return s !== stationData.stationNumber; });
+                otherReshoots = data.info.totalReshoots - (state.reshoots || 0);
+                if (otherReshoots < 0) otherReshoots = 0;
             }
         } catch(e) {}
 
-        var totalUsed = otherStationReshoots + (state.reshoots || 0);
-        var remaining = maxReshoots - otherStationReshoots;
-        if (remaining < 0) remaining = 0;
+        _fseReshootRemaining = maxReshoots - otherReshoots;
+        if (_fseReshootRemaining < 0) _fseReshootRemaining = 0;
+        var totalUsed = otherReshoots + (state.reshoots || 0);
 
-        if (remaining <= 0) {
-            // All reshoots used on other stations — show blocked state
-            btnArea.innerHTML = '<span class="badge bg-danger fs-6">Inga omskjutningar kvar</span>';
-            state.reshoots = 0;
-            return;
+        // Button: shows current state, click to change
+        if (state.reshoots > 0) {
+            btn.className = 'btn btn-warning w-100';
+            btn.innerHTML = '<i class="bi bi-arrow-repeat me-2"></i>Omskjutning registrerad (' + state.reshoots + ')';
+        } else {
+            btn.className = 'btn btn-outline-secondary w-100';
+            btn.innerHTML = '<i class="bi bi-arrow-repeat me-2"></i>Registrera omskjutning';
         }
 
-        // Show toggle buttons: one per allowed reshoot at THIS station
-        // Each button represents "this shooter used N reshoots at this station"
-        for (var r = 1; r <= remaining; r++) {
-            var isActive = state.reshoots >= r;
-            btnArea.innerHTML += '<button class="btn ' + (isActive ? 'btn-warning' : 'btn-outline-secondary') + ' fse-hit-btn" ' +
-                'onclick="fseToggleReshoot(' + memberId + ',' + r + ')">' + r + '</button>';
-        }
+        // Disable if no reshoots remaining and current is 0
+        btn.disabled = _fseReshootRemaining <= 0 && state.reshoots === 0;
 
-        // Show total summary
-        if (totalUsed > 0) {
-            var summaryClass = totalUsed >= maxReshoots ? 'text-danger fw-bold' : 'text-muted';
-            infoEl.innerHTML += '<div class="' + summaryClass + ' small mt-1">Totalt: ' + totalUsed + ' av ' + maxReshoots + ' omskjutningar anv\u00e4nda</div>';
+        // Info text
+        if (totalUsed > 0 || _fseReshootRemaining < maxReshoots) {
+            var cls = totalUsed >= maxReshoots ? 'text-danger fw-bold' : 'text-muted';
+            infoEl.innerHTML = '<span class="' + cls + '">' + totalUsed + ' av ' + maxReshoots + ' omskjutningar anv\u00e4nda f\u00f6r denna vapenklass</span>';
+        } else {
+            infoEl.innerHTML = '';
         }
     }
 
-    window.fseToggleReshoot = async function(memberId, value) {
-        var state = shooterHits[memberId];
-        if (!state) return;
+    window.fseChangeReshoot = async function() {
         var m = currentPatrol.members[currentShooterIdx];
+        var state = shooterHits[m.memberId];
+        if (!state) return;
 
-        // Toggle: if already at this value, go back to previous; otherwise set to value
-        state.reshoots = state.reshoots === value ? value - 1 : value;
-        state._dirty = true;
+        var current = state.reshoots || 0;
+        var newVal;
 
-        // Only auto-save reshoot if shooter already has a saved result (avoids saving incomplete data)
-        if (m.hasResult) {
-            try {
-                await fetch('/umbraco/surface/Faltskytte/SaveStationResult', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value },
-                    body: JSON.stringify({
-                        competitionId: parseInt(compId),
-                        stationNumber: stationData.stationNumber,
-                        memberId: memberId,
-                        patrolNumber: currentPatrol.patrolNumber,
-                        shootingClass: m.shootingClass,
-                        hitsPerFigure: state.figHits.map(function(v){return v||0;}),
-                        tiebreakerScore: state.pmScores.some(function(v){return v>0;}) ? state.pmScores.reduce(function(s,v){return s+v;},0) : null,
-                        poangmalScores: state.pmScores.some(function(v){return v>0;}) ? state.pmScores : null,
-                        reshoots: state.reshoots
-                    })
-                });
-                state._dirty = false;
-            } catch(e) {}
+        if (_fseReshootRemaining <= 1 && current === 0) {
+            // Simple case: only 0 or 1 allowed — toggle to 1 with confirm
+            if (!confirm('Registrera omskjutning f\u00f6r ' + m.name + ' vid denna station?')) return;
+            newVal = 1;
+        } else if (current > 0 && _fseReshootRemaining <= current) {
+            // At max or only option is to reset — toggle to 0
+            if (!confirm('\u00c5terst\u00e4ll omskjutning f\u00f6r ' + m.name + ' vid denna station?')) return;
+            newVal = 0;
+        } else {
+            // Multiple values possible — cycle: current → current+1, or back to 0 if at max
+            newVal = current + 1;
+            if (newVal > _fseReshootRemaining) newVal = 0;
+            var msg = newVal === 0
+                ? '\u00c5terst\u00e4ll omskjutning f\u00f6r ' + m.name + '?'
+                : 'S\u00e4tt omskjutning till ' + newVal + ' f\u00f6r ' + m.name + ' vid denna station?';
+            if (!confirm(msg)) return;
         }
 
-        fseRenderShooter();
-        fseRenderReshoots(memberId, state);
+        state.reshoots = newVal;
+        state._dirty = true;
+        fseRenderReshoots(m.memberId, state);
+
+        // Auto-save immediately
+        try {
+            await fetch('/umbraco/surface/Faltskytte/SaveStationResult', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value },
+                body: JSON.stringify({
+                    competitionId: parseInt(compId),
+                    stationNumber: stationData.stationNumber,
+                    memberId: m.memberId,
+                    patrolNumber: currentPatrol.patrolNumber,
+                    shootingClass: m.shootingClass,
+                    hitsPerFigure: state.figHits.map(function(v){return v||0;}),
+                    tiebreakerScore: state.pmScores.some(function(v){return v>0;}) ? state.pmScores.reduce(function(s,v){return s+v;},0) : null,
+                    poangmalScores: state.pmScores.some(function(v){return v>0;}) ? state.pmScores : null,
+                    reshoots: state.reshoots
+                })
+            });
+            state._dirty = false;
+            m.hasResult = true;
+        } catch(e) { console.error('Reshoot save failed:', e); }
     };
 
     window.fseSave = async function() {

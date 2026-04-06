@@ -28,6 +28,9 @@
                     <button class="btn btn-outline-warning btn-sm" onclick="faltPublish(false)" id="faltUnpublishBtn" style="display:none">
                         <i class="bi bi-eye-slash me-1"></i>Avpublicera
                     </button>
+                    <button class="btn btn-outline-info btn-sm" onclick="faltPrintPatrolList()" id="faltPrintBtn" style="display:none">
+                        <i class="bi bi-printer me-1"></i>Skriv ut
+                    </button>
                     <button class="btn btn-outline-danger btn-sm" onclick="faltDeleteAllPatrols()" id="faltDeleteAllBtn" style="display:none">
                         <i class="bi bi-trash me-1"></i>Ta bort alla
                     </button>
@@ -177,8 +180,20 @@
     var allPatrols = []; // Cache for rendering
     var isPublished = false;
     var faltPatrolSize = 6; // Default; updated when generating
+    var _faltHasResults = false;
 
-    if (compId) loadFaltPatrols();
+    if (compId) {
+        // Check if results exist (for modification warning)
+        apiGet('HasResults?competitionId=' + compId).then(function(d) {
+            _faltHasResults = d.hasResults || false;
+        }).catch(function() {});
+        loadFaltPatrols();
+    }
+
+    function confirmIfResultsExist(action) {
+        if (!_faltHasResults) return true;
+        return confirm('OBS! Det finns redan registrerade resultat f\u00f6r denna t\u00e4vling.\n\n\u00c4ndring av patrullistan kan p\u00e5verka p\u00e5g\u00e5ende t\u00e4vling.\n\nVill du forts\u00e4tta med: ' + action + '?');
+    }
 
     setTimeout(function() {
         flatpickr('#faltGenStartTime', { locale: 'sv', enableTime: true, noCalendar: true, dateFormat: 'H:i', time_24hr: true, defaultHour: 9, defaultMinute: 0 });
@@ -210,6 +225,7 @@
         var empty = document.getElementById('faltPatrolsEmpty');
         var container = document.getElementById('faltPatrolsContainer');
         var deleteAllBtn = document.getElementById('faltDeleteAllBtn');
+        var printBtn = document.getElementById('faltPrintBtn');
 
         loading.style.display = '';
         empty.style.display = 'none';
@@ -224,9 +240,11 @@
             if (allPatrols.length === 0) {
                 empty.style.display = '';
                 deleteAllBtn.style.display = 'none';
+                printBtn.style.display = 'none';
             } else {
                 container.style.display = '';
                 deleteAllBtn.style.display = '';
+                printBtn.style.display = '';
                 renderPatrols();
             }
 
@@ -349,6 +367,7 @@
     };
 
     window.faltBulkMove = async function() {
+        if (!confirmIfResultsExist('Flytta skyttar')) return;
         var targetId = parseInt(document.getElementById('faltBulkTarget').value);
         if (!targetId) { alert('Välj en målpatrull.'); return; }
         var ids = [];
@@ -360,6 +379,7 @@
     };
 
     window.faltBulkRemove = async function() {
+        if (!confirmIfResultsExist('Ta bort skyttar')) return;
         var ids = [];
         document.querySelectorAll('.falt-member-check:checked').forEach(function(cb) { ids.push(parseInt(cb.dataset.pmId)); });
         if (ids.length === 0) return;
@@ -371,6 +391,7 @@
     };
 
     window.faltRemoveShooter = async function(pmId) {
+        if (!confirmIfResultsExist('Ta bort skytt')) return;
         if (!confirm('Ta bort skytten från patrullen?')) return;
         var data = await apiPost('RemoveShooterFromPatrol', { competitionId: parseInt(compId), patrolMemberId: pmId });
         if (data.success) loadFaltPatrols();
@@ -378,6 +399,7 @@
     };
 
     window.faltDeletePatrol = async function(patrolId) {
+        if (!confirmIfResultsExist('Ta bort patrull')) return;
         if (!confirm('Ta bort hela patrullen och alla dess skyttar?')) return;
         var data = await apiPost('DeletePatrol', { competitionId: parseInt(compId), patrolId: patrolId });
         if (data.success) loadFaltPatrols();
@@ -403,6 +425,7 @@
     };
 
     window.faltDoCreatePatrol = async function() {
+        if (!confirmIfResultsExist('Skapa patrull')) return;
         var wg = (document.getElementById('faltNewPatrolWg').value || 'C').trim().toUpperCase();
         var afterNum = parseInt(document.getElementById('faltNewPatrolAfter').value) || 0;
 
@@ -417,6 +440,7 @@
     };
 
     window.faltEditPatrolTime = async function(patrolId, currentTime) {
+        if (!confirmIfResultsExist('\u00c4ndra starttid')) return;
         var newTime = prompt('Ny starttid (HH:mm):', currentTime || '09:00');
         if (!newTime) return;
         var parts = newTime.split(':');
@@ -487,6 +511,7 @@
     };
 
     window.faltAddShooter = async function(memberId, name, club, shootingClass) {
+        if (!confirmIfResultsExist('L\u00e4gg till skytt')) return;
         var patrolId = parseInt(document.getElementById('faltAddShooterPatrolId').value);
         // Check patrol size
         var patrol = allPatrols.find(function(p) { return p.patrolId === patrolId; });
@@ -557,6 +582,7 @@
     };
 
     window.faltGeneratePatrols = async function() {
+        if (!confirmIfResultsExist('Generera patruller')) return;
         var selectedWcs = [];
         document.querySelectorAll('.faltGenWc:checked').forEach(function(cb) { selectedWcs.push(cb.value); });
         if (selectedWcs.length === 0) { alert('Välj minst en vapenklass.'); return; }
@@ -588,6 +614,7 @@
     };
 
     window.faltDeleteGroupPatrols = async function(weaponGroup) {
+        if (!confirmIfResultsExist('Ta bort patruller f\u00f6r ' + weaponGroup)) return;
         if (!confirm('Ta bort alla patruller för vapengrupp ' + weaponGroup + '?')) return;
         var data = await apiPost('DeletePatrolsByGroup', { competitionId: parseInt(compId), weaponGroup: weaponGroup });
         if (data.success) loadFaltPatrols();
@@ -595,10 +622,56 @@
     };
 
     window.faltDeleteAllPatrols = async function() {
+        if (!confirmIfResultsExist('Ta bort alla patruller')) return;
         if (!confirm('Ta bort ALLA patruller?')) return;
         var data = await apiPost('DeletePatrols', { competitionId: parseInt(compId) });
         if (data.success) loadFaltPatrols();
         else alert('Fel: ' + (data.message || 'Okänt fel'));
+    };
+    window.faltPrintPatrolList = function() {
+        if (allPatrols.length === 0) return;
+
+        var byGroup = {};
+        allPatrols.forEach(function(p) {
+            var wg = p.weaponGroup || '?';
+            if (!byGroup[wg]) byGroup[wg] = [];
+            byGroup[wg].push(p);
+        });
+
+        var w = window.open('', '_blank');
+        w.document.write('<html><head><title>Patrullista</title>');
+        w.document.write('<style>');
+        w.document.write('body{font-family:sans-serif;margin:20px;max-width:210mm}');
+        w.document.write('h1{font-size:1.5em;border-bottom:2px solid #333;padding-bottom:6px;margin-bottom:12px}');
+        w.document.write('h2{font-size:1.2em;margin:16px 0 8px;color:#333}');
+        w.document.write('.patrol{margin:8px 0;padding:8px 12px;border:1px solid #ccc;border-radius:6px;page-break-inside:avoid}');
+        w.document.write('.patrol-header{font-weight:bold;margin-bottom:4px}');
+        w.document.write('.patrol-time{color:#666;font-weight:normal;margin-left:8px}');
+        w.document.write('.member{margin:2px 0 2px 16px;font-size:0.9em}');
+        w.document.write('.member-class{color:#666;font-size:0.85em}');
+        w.document.write('.summary{font-size:0.85em;color:#666;margin-top:4px}');
+        w.document.write('@@media print{body{margin:15mm}h2{page-break-after:avoid}}');
+        w.document.write('<' + '/style><' + '/head><body>');
+        w.document.write('<h1>Patrullista</h1>');
+
+        Object.keys(byGroup).forEach(function(wg) {
+            var grp = byGroup[wg];
+            var total = grp.reduce(function(s,p){return s+p.members.length;},0);
+            w.document.write('<h2>Vapengrupp ' + wg + ' \u2014 ' + grp.length + ' patruller, ' + total + ' skyttar</h2>');
+            grp.forEach(function(p) {
+                var t = p.startTime ? new Date(p.startTime).toLocaleTimeString('sv-SE',{hour:'2-digit',minute:'2-digit'}) : '';
+                w.document.write('<div class="patrol">');
+                w.document.write('<div class="patrol-header">Patrull ' + p.patrolNumber + (t ? '<span class="patrol-time">' + t + '</span>' : '') + '</div>');
+                p.members.forEach(function(m) {
+                    w.document.write('<div class="member">' + m.name + ' <span class="member-class">(' + m.club + ') ' + m.shootingClass + '</span></div>');
+                });
+                w.document.write('</div>');
+            });
+        });
+
+        w.document.write('<' + '/body><' + '/html>');
+        w.document.close();
+        w.print();
     };
 })();
 </script>

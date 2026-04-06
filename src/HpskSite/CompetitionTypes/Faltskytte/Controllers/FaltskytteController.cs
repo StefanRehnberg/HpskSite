@@ -92,6 +92,28 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         }
 
         /// <summary>Parses the station config from competition, handling both old and new format.</summary>
+        /// <summary>Sort order for class names in result lists: C→B→A→R→M, then by level and variant.</summary>
+        private static int GetClassSortOrder(string className)
+        {
+            if (string.IsNullOrEmpty(className)) return 9999;
+            // Weapon group order
+            var weaponOrder = className[0] switch { 'C' => 100, 'L' => 200, 'B' => 300, 'A' => 400, 'R' => 500, 'M' => 600, _ => 800 };
+            // Sub-order within weapon group: class number, then variant
+            var sub = 0;
+            if (className.Contains("1")) sub = 10;
+            else if (className.Contains("2")) sub = 20;
+            else if (className.Contains("3")) sub = 30;
+            // Variant suffix
+            if (className.Contains("Dam")) sub += 1;
+            else if (className.Contains("Vet Y")) sub += 2;
+            else if (className.Contains("Vet \u00c4")) sub += 3;
+            else if (className.Contains("Vet")) sub += 2;
+            else if (className.Contains("Jun")) sub += 4;
+            // Merged classes (contain +) sort after their base
+            if (className.Contains("+")) sub += 5;
+            return weaponOrder + sub;
+        }
+
         private static FaltskytteCompetitionConfig ParseCompetitionConfig(Umbraco.Cms.Core.Models.IContent competition)
         {
             var configJson = competition.GetValue<string>("stationConfig");
@@ -169,7 +191,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             // Get existing results for this station
             var existingResults = await db.FetchAsync<FaltskytteResultEntry>(
                 "WHERE CompetitionId = @0 AND StationNumber = @1", competitionId, stationNumber);
-            var completedMemberIds = new HashSet<int>(existingResults.Select(r => r.MemberId));
+            // Track completion by (MemberId, ShootingClass) to support multi-class shooters
+            var completedKeys = new HashSet<string>(existingResults.Select(r => r.MemberId + "_" + r.ShootingClass));
 
             // Build response
             var patrolViews = patrols.Select(p =>
@@ -189,9 +212,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                         Name = m.MemberName,
                         Club = m.ClubName,
                         ShootingClass = m.ShootingClass,
-                        HasResult = completedMemberIds.Contains(m.MemberId)
+                        HasResult = completedKeys.Contains(m.MemberId + "_" + m.ShootingClass)
                     }).ToList(),
-                    CompletedCount = members.Count(m => completedMemberIds.Contains(m.MemberId))
+                    CompletedCount = members.Count(m => completedKeys.Contains(m.MemberId + "_" + m.ShootingClass))
                 };
             }).ToList();
 
@@ -225,7 +248,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         /// Gets total re-shoots used by a shooter across all stations in this competition.
         /// </summary>
         [HttpGet]
-        public async Task<IActionResult> GetReshootInfo(int competitionId, int memberId)
+        public async Task<IActionResult> GetReshootInfo(int competitionId, int memberId, string? shootingClass = null)
         {
             if (!await IsAuthorizedForCompetition(competitionId))
                 return Json(new { success = false, message = "Du har inte behörighet." });
@@ -234,9 +257,21 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             var maxReshoots = competition?.GetValue<int>("maxReshoots") ?? 0;
 
             using var db = _umbracoDatabaseFactory.CreateDatabase();
-            var entries = await db.FetchAsync<FaltskytteResultEntry>(
-                "WHERE CompetitionId = @0 AND MemberId = @1 AND Reshoots > 0",
-                competitionId, memberId);
+            List<FaltskytteResultEntry> entries;
+            if (!string.IsNullOrEmpty(shootingClass))
+            {
+                // Filter by weapon group prefix (A, B, C, R) — reshoots are per weapon class
+                var prefix = shootingClass.Substring(0, 1);
+                entries = await db.FetchAsync<FaltskytteResultEntry>(
+                    "WHERE CompetitionId = @0 AND MemberId = @1 AND Reshoots > 0 AND LEFT(ShootingClass, 1) = @2",
+                    competitionId, memberId, prefix);
+            }
+            else
+            {
+                entries = await db.FetchAsync<FaltskytteResultEntry>(
+                    "WHERE CompetitionId = @0 AND MemberId = @1 AND Reshoots > 0",
+                    competitionId, memberId);
+            }
 
             var totalReshoots = entries.Sum(e => e.Reshoots);
 
@@ -258,14 +293,24 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
 
         /// <summary>Gets a single shooter's saved result at a station.</summary>
         [HttpGet]
-        public async Task<IActionResult> GetShooterStationResult(int competitionId, int stationNumber, int memberId)
+        public async Task<IActionResult> GetShooterStationResult(int competitionId, int stationNumber, int memberId, string? shootingClass = null)
         {
             try
             {
                 using var db = _umbracoDatabaseFactory.CreateDatabase();
-                var result = await db.FirstOrDefaultAsync<FaltskytteResultEntry>(
-                    "WHERE CompetitionId = @0 AND StationNumber = @1 AND MemberId = @2",
-                    competitionId, stationNumber, memberId);
+                FaltskytteResultEntry? result;
+                if (!string.IsNullOrEmpty(shootingClass))
+                {
+                    result = await db.FirstOrDefaultAsync<FaltskytteResultEntry>(
+                        "WHERE CompetitionId = @0 AND StationNumber = @1 AND MemberId = @2 AND ShootingClass = @3",
+                        competitionId, stationNumber, memberId, shootingClass);
+                }
+                else
+                {
+                    result = await db.FirstOrDefaultAsync<FaltskytteResultEntry>(
+                        "WHERE CompetitionId = @0 AND StationNumber = @1 AND MemberId = @2",
+                        competitionId, stationNumber, memberId);
+                }
 
                 if (result == null)
                     return Json(new { success = false });
@@ -305,10 +350,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
 
                 using var db = _umbracoDatabaseFactory.CreateDatabase();
 
-                // Check for existing entry (upsert)
+                // Check for existing entry (upsert) — includes ShootingClass to support multi-class shooters
                 var existing = await db.FirstOrDefaultAsync<FaltskytteResultEntry>(
-                    "WHERE CompetitionId = @0 AND StationNumber = @1 AND MemberId = @2",
-                    request.CompetitionId, request.StationNumber, request.MemberId);
+                    "WHERE CompetitionId = @0 AND StationNumber = @1 AND MemberId = @2 AND ShootingClass = @3",
+                    request.CompetitionId, request.StationNumber, request.MemberId, request.ShootingClass);
 
                 if (existing != null)
                 {
@@ -403,7 +448,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 var analysis = service.AnalyzeFromCounts(classCounts, compType);
 
                 // Load saved merge config
-                var savedConfig = competition.GetValue<string>("mergeConfig") ?? "";
+                var savedConfig = competition.HasProperty("mergeConfig") ? competition.GetValue<string>("mergeConfig") ?? "" : "";
 
                 return Json(new { success = true, analysis, savedConfig });
             }
@@ -490,7 +535,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 if (string.IsNullOrEmpty(mergeConfig))
                 {
                     // Try loading saved merge config from competition
-                    mergeConfig = competition.GetValue<string>("mergeConfig") ?? "";
+                    mergeConfig = competition.HasProperty("mergeConfig") ? competition.GetValue<string>("mergeConfig") ?? "" : "";
                 }
                 if (!string.IsNullOrEmpty(mergeConfig))
                 {
@@ -520,7 +565,15 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                     {
                         ClassName = g.Key,
                         Shooters = g.OrderByDescending(s => s, tieBreaker).ToList()
-                    }).ToList();
+                    })
+                    .OrderBy(g => GetClassSortOrder(g.ClassName))
+                    .ToList();
+
+                // Calculate standard medals
+                var medalService = new Services.FaltskytteStandardMedalService();
+                var scope = competition.GetValue<string>("competitionScope") ?? "";
+                var isChampionship = scope == "Svenskt Mästerskap" || scope == "Landsdelsmästerskap";
+                medalService.CalculateStandardMedals(shooterResults, scoringMode, stationCount, isChampionship);
 
                 return Json(new
                 {
@@ -556,9 +609,16 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             if (competition == null)
                 return Json(new { success = false, message = "Tävlingen hittades inte." });
 
-            competition.SetValue("mergeConfig", request.MergeConfig ?? "");
-            _contentService.Save(competition);
-            _contentService.Publish(competition, Array.Empty<string>());
+            if (competition.HasProperty("mergeConfig"))
+            {
+                competition.SetValue("mergeConfig", request.MergeConfig ?? "");
+                _contentService.Save(competition);
+                _contentService.Publish(competition, Array.Empty<string>());
+            }
+            else
+            {
+                _logger.LogWarning("Competition {CompId} missing 'mergeConfig' property — merge config not saved. Add this property to the competition document type.", request.CompetitionId);
+            }
 
             return Json(new { success = true });
         }
@@ -574,6 +634,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             var competition = _contentService.GetById(request.CompetitionId);
             if (competition == null)
                 return Json(new { success = false, message = "Tävlingen hittades inte." });
+
+            if (!competition.HasProperty("faltskytteResultsOfficial"))
+                return Json(new { success = false, message = "Egenskapen 'faltskytteResultsOfficial' saknas på tävlingens dokumenttyp. Lägg till den i Umbraco backoffice (True/False)." });
 
             competition.SetValue("faltskytteResultsOfficial", request.IsOfficial);
             _contentService.Save(competition);
@@ -950,6 +1013,18 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 _logger.LogError(ex, "Error uploading target group image");
                 return Json(new { success = false, message = "Fel: " + ex.Message });
             }
+        }
+
+        // ── Has Results Check ───────────────────────────────────────
+
+        /// <summary>Checks if any results exist for this competition.</summary>
+        [HttpGet]
+        public async Task<IActionResult> HasResults(int competitionId)
+        {
+            using var db = _umbracoDatabaseFactory.CreateDatabase();
+            var count = await db.ExecuteScalarAsync<int>(
+                "SELECT COUNT(*) FROM FaltskytteResultEntry WHERE CompetitionId = @0", competitionId);
+            return Json(new { success = true, hasResults = count > 0, resultCount = count });
         }
 
         // ── QR Code Generation ─────────────────────────────────────

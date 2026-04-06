@@ -598,6 +598,15 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
 
         // ===== START LIST =====
 
+        [HttpGet]
+        public async Task<IActionResult> HasResults(int competitionId)
+        {
+            using var db = _umbracoDatabaseFactory.CreateDatabase();
+            var count = await db.ExecuteScalarAsync<int>(
+                "SELECT COUNT(*) FROM SpringskytteResultEntry WHERE CompetitionId = @0", competitionId);
+            return Json(new { success = true, hasResults = count > 0, resultCount = count });
+        }
+
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> GenerateSpringskytteStartList([FromBody] SpringskytteStartListRequest request)

@@ -630,6 +630,22 @@
 // Global state to track if a published start list exists
 let hasPublishedStartList = false;
 
+// Check if results exist (for modification warning)
+let _slHasResults = false;
+(function() {
+    var cid = document.querySelector('.competition-startlist-management')?.dataset.competitionId;
+    if (cid) {
+        fetch('/umbraco/surface/PrecisionStartList/HasResults?competitionId=' + cid)
+            .then(function(r) { return r.json(); })
+            .then(function(d) { _slHasResults = d.hasResults || false; })
+            .catch(function() {});
+    }
+})();
+function confirmIfResultsExist(action) {
+    if (!_slHasResults) return true;
+    return confirm('OBS! Det finns redan registrerade resultat f\u00f6r denna t\u00e4vling.\n\n\u00c4ndring av startlistan kan p\u00e5verka p\u00e5g\u00e5ende t\u00e4vling.\n\nVill du forts\u00e4tta med: ' + action + '?');
+}
+
 // Open generate start list modal
 function openGenerateStartListModal() {
     // Initialize flatpickr for time input
@@ -737,6 +753,7 @@ function loadWeaponClassOptions() {
 }
 
 function generateNewStartList() {
+    if (!confirmIfResultsExist('Generera ny startlista')) return;
     // CRITICAL: Check if published start list exists
     if (hasPublishedStartList) {
         const confirmMessage = `⚠️ VARNING: En publicerad startlista finns redan!\n\n` +
@@ -1322,6 +1339,7 @@ function showExistingFinalsList(data) {
 }
 
 function generateFinalsStartList() {
+    if (!confirmIfResultsExist('Generera finalstartlista')) return;
     const competitionId = $('.competition-startlist-management').data('competition-id');
     const maxShootersPerTeam = parseInt(document.getElementById('finalsMaxShootersPerTeam').value) || 20;
     
@@ -1691,6 +1709,7 @@ function openMoveShooterModal(memberId, name, currentTeam) {
 }
 
 function confirmMoveShooters() {
+    if (!confirmIfResultsExist('Flytta skyttar')) return;
     const targetTeam = parseInt(document.getElementById('moveTargetTeamSelect').value);
     if (!targetTeam) {
         showAlert('warning', 'Välj ett lag att flytta till.');
@@ -1758,6 +1777,7 @@ function openEditWeaponClassModal(memberId, name, currentClass, teamNumber) {
 }
 
 function confirmUpdateWeaponClass() {
+    if (!confirmIfResultsExist('\u00c4ndra vapenklass')) return;
     const newClass = document.getElementById('editWeaponClassSelect').value;
     if (!newClass || !currentEditMemberId) {
         showAlert('warning', 'Välj en vapenklass.');
@@ -1809,6 +1829,7 @@ function confirmUpdateWeaponClass() {
 
 // Delete team
 function deleteTeam(teamNumber) {
+    if (!confirmIfResultsExist('Ta bort skjutlag')) return;
     if (!confirm(`Är du säker på att du vill ta bort Lag ${teamNumber}?\n\nOBS: Laget måste vara tomt.`)) {
         return;
     }
@@ -1864,6 +1885,7 @@ function openAddShooterToTeamModal(teamNumber) {
 
 // Remove shooter from team
 function removeShooterFromTeam(startListId, memberId, shooterName) {
+    if (!confirmIfResultsExist('Ta bort skytt fr\u00e5n lag')) return;
     if (!confirm(`Är du säker på att du vill ta bort ${shooterName} från startlistan?\n\nOBS: Detta går inte att ångra.`)) {
         return;
     }
@@ -2075,6 +2097,7 @@ function validateAddShooterForm() {
 
 // Confirm add shooter
 function confirmAddShooter() {
+    if (!confirmIfResultsExist('L\u00e4gg till skytt')) return;
     const teamNumber = parseInt(document.getElementById('targetTeam').value);
     const weaponClass = document.getElementById('targetWeaponClass').value;
 
@@ -2150,6 +2173,7 @@ function openCreateTeamModal() {
 
 // Confirm create team
 function confirmCreateTeam() {
+    if (!confirmIfResultsExist('Skapa nytt skjutlag')) return;
     const startTime = document.getElementById('newTeamStartTime').value;
     const endTime = document.getElementById('newTeamEndTime').value;
 

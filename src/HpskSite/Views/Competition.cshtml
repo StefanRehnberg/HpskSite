@@ -1127,25 +1127,60 @@
 
 						<!-- Results Section -->
 						<div class="mt-2">
-							@if (hasResultPage && isResultsOfficial)
+							@if (isFaltskytte || isSpringskytte)
+							{
+								@* Fältskytte/Springskytte: results via API, check official status dynamically *@
+								<div id="faltResultSection_@Model.Id">
+									<p class="text-muted small mb-0">
+										<i class="bi bi-hourglass-split me-1"></i> Resultat har inte publicerats än.
+									</p>
+								</div>
+								<script>
+								(function() {
+									var endpoint = @(isFaltskytte ? Html.Raw("'GetFaltskytteResults'") : Html.Raw("'GetSpringskytteResults'"));
+									var controller = @(isFaltskytte ? Html.Raw("'Faltskytte'") : Html.Raw("'Springskytte'"));
+									fetch('/umbraco/surface/' + controller + '/' + endpoint + '?competitionId=@Model.Id')
+										.then(function(r) { return r.json(); })
+										.then(function(data) {
+											var el = document.getElementById('faltResultSection_@Model.Id');
+											if (!data.success || !data.results) return;
+											var hasResults = data.results.classGroups && data.results.classGroups.length > 0;
+											if (!hasResults) return;
+											var html = '';
+											if (data.results.isOfficial) {
+												html += '<button class="btn btn-warning w-100" onclick="openResultBoard()"><i class="bi bi-trophy me-1"><\/i> Visa resultat<\/button>';
+											} else {
+												html += '<p class="text-muted small mb-1"><i class="bi bi-hourglass-split me-1"><\/i> Resultatlistan \u00e4r prelimin\u00e4r.<\/p>';
+											}
+											html += '<button class="btn btn-outline-light w-100 mt-1" onclick="openResultBoard()"><i class="bi bi-tv me-1"><\/i> Resultattavla<\/button>';
+											el.innerHTML = html;
+										}).catch(function() {});
+								})();
+								</script>
+							}
+							else if (hasResultPage && isResultsOfficial)
 							{
 								<a href="@resultsUrl" class="btn btn-warning w-100" target="_blank">
 									<i class="bi bi-trophy me-1"></i> Visa resultat
 								</a>
-							}
 
-							@if (showLiveResults)
+								@if (showLiveResults)
+								{
+									<button class="btn btn-outline-light w-100 mt-2" onclick="openResultBoard()">
+										<i class="bi bi-tv me-1"></i> Resultattavla
+									</button>
+								}
+							}
+							else if (showLiveResults)
 							{
 								@if (hasResultPage)
 								{
-									@* Results exist in DB — show Resultattavla directly *@
 									<button class="btn btn-outline-light w-100 mt-2" onclick="openResultBoard()">
 										<i class="bi bi-tv me-1"></i> Resultattavla
 									</button>
 								}
 								else
 								{
-									@* No result page — lightweight AJAX check for DB results *@
 									<div id="liveResultsCheck">
 										<p class="text-muted small mb-0" id="noResultsText">
 											<i class="bi bi-hourglass-split me-1"></i> Resultat har inte publicerats än.
@@ -1153,7 +1188,7 @@
 									</div>
 								}
 							}
-							else if (!hasResultPage || !isResultsOfficial)
+							else
 							{
 								<p class="text-muted small mb-0">
 									<i class="bi bi-hourglass-split me-1"></i> Resultat har inte publicerats än.

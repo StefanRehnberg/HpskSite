@@ -1911,6 +1911,18 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         }
 
         /// <summary>
+        /// Checks if any results exist for this competition.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> HasResults(int competitionId)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            var count = await db.ExecuteScalarAsync<int>(
+                "SELECT COUNT(*) FROM PrecisionResultEntry WHERE CompetitionId = @0", competitionId);
+            return Json(new { success = true, hasResults = count > 0, resultCount = count });
+        }
+
+        /// <summary>
         /// Generate and save finals start list
         /// </summary>
         [HttpPost]

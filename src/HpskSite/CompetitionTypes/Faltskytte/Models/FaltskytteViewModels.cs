@@ -202,6 +202,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public int TotalPoints { get; set; }
         /// <summary>Sum of poångmål scores across all stations</summary>
         public int TotalTiebreakerScore { get; set; }
+        /// <summary>Standard medal: "S" (silver), "B" (bronze), or null</summary>
+        public string? StandardMedal { get; set; }
     }
 
     public class FaltskytteStationResult

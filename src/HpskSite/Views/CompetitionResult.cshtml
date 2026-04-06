@@ -604,7 +604,7 @@
                     html += isPoang
                         ? `<th class="text-center fw-bold">Poäng</th>`
                         : `<th class="text-center fw-bold">Tot</th>`;
-                    html += `<th class="text-center">Pm</th></tr></thead><tbody>`;
+                    html += `<th class="text-center">Pm</th><th class="text-center">Std</th></tr></thead><tbody>`;
 
                     group.shooters.forEach((shooter, idx) => {
                         const isCurrentUser = shooter.name === currentUserName;
@@ -630,6 +630,8 @@
                             ? `<td class="text-center fw-bold">${shooter.totalPoints}</td>`
                             : `<td class="text-center fw-bold">${shooter.totalHits}/${shooter.totalFigures}</td>`;
                         html += `<td class="text-center">${shooter.totalTiebreakerScore || ''}</td>`;
+                        var stdM = shooter.standardMedal || '';
+                        html += `<td class="text-center fw-bold${stdM === 'S' ? ' text-primary' : stdM === 'B' ? ' text-warning' : ''}">${stdM}</td>`;
                         html += `</tr>`;
                     });
 

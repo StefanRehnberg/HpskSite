@@ -94,6 +94,18 @@ function formatAgeSpan(cls) {
 const springCompId = parseInt('@competitionId');
 let springAvailableClasses = []; // loaded from server
 let springExistingLists = []; // loaded from server
+let _springHasResults = false;
+
+// Check if results exist
+fetch('/umbraco/surface/Springskytte/HasResults?competitionId=' + springCompId)
+    .then(function(r) { return r.json(); })
+    .then(function(d) { _springHasResults = d.hasResults || false; })
+    .catch(function() {});
+
+function confirmIfResultsExist(action) {
+    if (!_springHasResults) return true;
+    return confirm('OBS! Det finns redan registrerade resultat f\u00f6r denna t\u00e4vling.\n\n\u00c4ndring av startlistan kan p\u00e5verka p\u00e5g\u00e5ende t\u00e4vling.\n\nVill du forts\u00e4tta med: ' + action + '?');
+}
 let springLocalCards = []; // client-side card state: { tempId, nodeId, listName, coveredClasses, firstStartTime, defaultInterval, breakAfterEvery, breakDuration, starters, generatedDate }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -321,6 +333,7 @@ function springBuildStartersTable(card) {
 let springTempIdCounter = 0;
 
 function springAddNewList() {
+    if (!confirmIfResultsExist('L\u00e4gg till startlista')) return;
     const tempId = 'new_' + (++springTempIdCounter);
     springLocalCards.push({
         tempId,
@@ -359,6 +372,7 @@ function springToggleClass(tempId, classId, checked) {
 // ===== Generate & Delete =====
 
 async function springGenerateList(tempId) {
+    if (!confirmIfResultsExist('Generera startlista')) return;
     const card = springLocalCards.find(c => c.tempId === tempId);
     if (!card) return;
 
@@ -422,6 +436,7 @@ async function springGenerateList(tempId) {
 }
 
 async function springDeleteList(tempId) {
+    if (!confirmIfResultsExist('Ta bort startlista')) return;
     const card = springLocalCards.find(c => c.tempId === tempId);
     if (!card) return;
 
@@ -458,6 +473,7 @@ async function springDeleteList(tempId) {
 // ===== Renumber & Reset =====
 
 async function springRenumberAll() {
+    if (!confirmIfResultsExist('Numrera om startlistor')) return;
     if (!confirm('Tilldela löpande startnummer per vapengrupp över alla genererade listor?')) return;
 
     const btn = document.getElementById('springRenumberBtn');
@@ -490,6 +506,7 @@ async function springRenumberAll() {
 }
 
 async function springResetNumbers() {
+    if (!confirmIfResultsExist('\u00c5terst\u00e4ll startnummer')) return;
     if (!confirm('Återställ alla startnummer till listnumrering (1, 2, 3... per lista)?')) return;
 
     const btn = document.getElementById('springResetBtn');
