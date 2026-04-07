@@ -475,7 +475,10 @@
                 }
                 else if ((ViewData["CompetitionType"]?.ToString() ?? "Precision") is "Faltskytte" or "MagnumFalt")
                 {
-                    @await Html.PartialAsync("FaltskytteStartListManagement", new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId } })
+                    var slViewData = new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId } };
+                    var rsJsonStr = competition?.Value<string>("rollingStart") ?? "";
+                    slViewData["RollingStart"] = rsJsonStr;
+                    @await Html.PartialAsync("FaltskytteStartListManagement", slViewData)
                 }
                 else
                 {

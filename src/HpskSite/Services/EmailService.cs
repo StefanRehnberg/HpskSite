@@ -302,6 +302,33 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// Send welcome email for quick-created members (created by admin at competition).
+        /// Includes temporary password.
+        /// </summary>
+        public async Task SendQuickCreateWelcomeEmailAsync(string memberEmail, string memberName, string creatorName, string clubName, string tempPassword)
+        {
+            var siteUrl = _configuration["SiteUrl"] ?? "https://pistol.nu";
+            var subject = "Ditt konto på Pistol.nu har skapats";
+            var body = $@"
+<html>
+<body style=""font-family: Arial, sans-serif; line-height: 1.6; color: #333;"">
+    <h2>Hej {memberName}!</h2>
+    <p>Ditt konto på Pistol.nu har skapats av {creatorName}.</p>
+    <p><strong>Dina inloggningsuppgifter:</strong></p>
+    <ul>
+        <li><strong>E-post:</strong> {memberEmail}</li>
+        <li><strong>Tillfälligt lösenord:</strong> {tempPassword}</li>
+    </ul>
+    <p>Du har registrerats som medlem i <strong>{clubName}</strong>.</p>
+    <p><strong>Viktigt:</strong> Logga in på <a href=""{siteUrl}/login-register"">{siteUrl}</a> och byt ditt lösenord så snart som möjligt.</p>
+    <p>Med vänliga hälsningar,<br/>Pistol.nu</p>
+</body>
+</html>";
+
+            await SendEmailAsync(memberEmail, subject, body);
+        }
+
+        /// <summary>
         /// Send email when a member's registration is approved
         /// Includes auto-login token for one-click login
         /// </summary>

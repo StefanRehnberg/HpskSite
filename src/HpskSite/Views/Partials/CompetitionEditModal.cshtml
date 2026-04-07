@@ -390,11 +390,20 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                                 </div>
                             </div>
                         </div>
+                        <div class="form-check mb-3">
+                            <input class="form-check-input" type="checkbox" id="edit_rollingStartEnabled" onchange="document.getElementById('edit_rollingStartSettings').style.display = this.checked ? '' : 'none'">
+                            <label class="form-check-label fw-bold" for="edit_rollingStartEnabled">Rullande start</label>
+                            <div class="form-text small mt-1">Patrulltilldelning på plats. Typiskt för banfält och drop-in.</div>
+                        </div>
+                        <div id="edit_rollingStartSettings" style="display:none" class="ms-4 mb-3">
+                            <label for="edit_patrolSize" class="form-label small">Patrullstorlek</label>
+                            <input type="number" class="form-control form-control-sm" id="edit_patrolSize" min="2" max="12" value="2" style="max-width: 80px;">
+                        </div>
+                        <input type="hidden" id="edit_rollingStart" name="rollingStart">
                         <div class="mb-3">
                             <button type="button" class="btn btn-outline-primary btn-sm" onclick="openEditFaltStationConfigurator()">
                                 <i class="bi bi-gear me-1"></i>Konfigurera stationer
                             </button>
-                            <span class="text-muted small ms-2" id="edit_faltConfigSummary"></span>
                             <input type="hidden" id="edit_faltStationConfigJson" name="stationConfig" value="">
                         </div>
                     </div>
@@ -906,6 +915,14 @@ window.populateEditModal = function(competition) {
     if (isFaltskytte) {
         setFieldValue('edit_scoringMode', competition.scoringMode || 'Normal');
         setFieldValue('edit_maxReshoots', competition.maxReshoots != null ? competition.maxReshoots : 1);
+        // Parse rolling start JSON config
+        var rsConfig = null;
+        try { rsConfig = competition.rollingStart ? (typeof competition.rollingStart === 'string' ? JSON.parse(competition.rollingStart) : competition.rollingStart) : null; } catch(e) {}
+        var rsEnabled = rsConfig && rsConfig.enabled;
+        document.getElementById('edit_rollingStartEnabled').checked = rsEnabled;
+        document.getElementById('edit_rollingStartSettings').style.display = rsEnabled ? '' : 'none';
+        document.getElementById('edit_patrolSize').value = (rsConfig && rsConfig.patrolSize) || 2;
+        document.getElementById('edit_rollingStart').value = competition.rollingStart || '';
         document.getElementById('edit_faltStationConfigJson').value = competition.stationConfig || '';
         var cfgSummary = document.getElementById('edit_faltConfigSummary');
         if (cfgSummary && competition.stationConfig) {
@@ -1023,6 +1040,13 @@ function saveCompetition() {
     if (!form.checkValidity()) {
         form.reportValidity();
         return;
+    }
+
+    // Sync rolling start JSON before collecting form data
+    var rsCheckbox = document.getElementById('edit_rollingStartEnabled');
+    var rsHidden = document.getElementById('edit_rollingStart');
+    if (rsCheckbox && rsHidden) {
+        rsHidden.value = rsCheckbox.checked ? JSON.stringify({ enabled: true, patrolSize: parseInt(document.getElementById('edit_patrolSize').value) || 2 }) : '';
     }
 
     // Temporarily enable disabled fields so they're included in FormData
@@ -1545,7 +1569,12 @@ function openEditFaltStationConfigurator() {
     var existingJson = document.getElementById('edit_faltStationConfigJson').value;
     var existingConfig = {};
     if (existingJson) {
-        try { existingConfig = JSON.parse(existingJson); } catch(e) {}
+        try {
+            var parsed = JSON.parse(existingJson);
+            // Handle double-encoded JSON (string instead of object)
+            if (typeof parsed === 'string') parsed = JSON.parse(parsed);
+            if (typeof parsed === 'object' && parsed !== null) existingConfig = parsed;
+        } catch(e) {}
     }
 
     // Set the hidden field ID that the configurator should write to

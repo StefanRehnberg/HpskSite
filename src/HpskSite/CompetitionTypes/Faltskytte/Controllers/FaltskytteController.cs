@@ -1027,6 +1027,85 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             return Json(new { success = true, hasResults = count > 0, resultCount = count });
         }
 
+        // ── Rolling Start ───────────────────────────────────────────
+
+        /// <summary>Adds a shooter to the next available patrol, creating one if needed.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> JoinNextPatrol([FromBody] JoinNextPatrolRequest request)
+        {
+            try
+            {
+            if (!await IsAuthorizedForCompetition(request.CompetitionId))
+                return Json(new { success = false, message = "Du har inte behörighet." });
+
+            var weaponGroup = !string.IsNullOrEmpty(request.ShootingClass)
+                ? request.ShootingClass.Substring(0, 1) : "C";
+            var patrolSize = request.PatrolSize > 0 ? request.PatrolSize : 2;
+
+            using var db = _umbracoDatabaseFactory.CreateDatabase();
+
+            // Check if shooter is already in a patrol for this weapon group
+            var existingAssignment = await db.FirstOrDefaultAsync<FaltskyttePatrolMember>(
+                @"SELECT pm.* FROM FaltskyttePatrolMember pm
+                  INNER JOIN FaltskyttePatrol p ON pm.PatrolId = p.Id
+                  WHERE p.CompetitionId = @0 AND pm.MemberId = @1 AND LEFT(pm.ShootingClass, 1) = @2",
+                request.CompetitionId, request.MemberId, weaponGroup);
+            if (existingAssignment != null)
+            {
+                var existingPatrol = await db.FirstOrDefaultAsync<FaltskyttePatrol>("WHERE Id = @0", existingAssignment.PatrolId);
+                return Json(new { success = true, patrolNumber = existingPatrol?.PatrolNumber ?? 0, alreadyAssigned = true,
+                    message = "Skytten finns redan i patrull " + (existingPatrol?.PatrolNumber ?? 0) });
+            }
+
+            // Find latest patrol for this weapon group with space
+            var openPatrol = await db.FirstOrDefaultAsync<FaltskyttePatrol>(
+                @"SELECT p.* FROM FaltskyttePatrol p
+                  WHERE p.CompetitionId = @0 AND p.WeaponGroup = @1
+                  AND (SELECT COUNT(*) FROM FaltskyttePatrolMember WHERE PatrolId = p.Id) < @2
+                  ORDER BY p.PatrolNumber DESC",
+                request.CompetitionId, weaponGroup, patrolSize);
+
+            if (openPatrol == null)
+            {
+                // Create new patrol — number within weapon group for rolling start
+                var maxNum = await db.ExecuteScalarAsync<int>(
+                    "SELECT ISNULL(MAX(PatrolNumber), 0) FROM FaltskyttePatrol WHERE CompetitionId = @0 AND WeaponGroup = @1",
+                    request.CompetitionId, weaponGroup);
+                openPatrol = new FaltskyttePatrol
+                {
+                    CompetitionId = request.CompetitionId,
+                    PatrolNumber = maxNum + 1,
+                    StartTime = null,
+                    WeaponGroup = weaponGroup
+                };
+                await db.InsertAsync(openPatrol);
+            }
+
+            // Add shooter to patrol
+            var maxPos = await db.ExecuteScalarAsync<int>(
+                "SELECT ISNULL(MAX(Position), 0) FROM FaltskyttePatrolMember WHERE PatrolId = @0", openPatrol.Id);
+            await db.InsertAsync(new FaltskyttePatrolMember
+            {
+                PatrolId = openPatrol.Id,
+                MemberId = request.MemberId,
+                Position = maxPos + 1,
+                ShootingClass = request.ShootingClass,
+                MemberName = request.MemberName,
+                ClubName = request.ClubName
+            });
+
+            var memberCount = await db.ExecuteScalarAsync<int>(
+                "SELECT COUNT(*) FROM FaltskyttePatrolMember WHERE PatrolId = @0", openPatrol.Id);
+
+            return Json(new { success = true, patrolNumber = openPatrol.PatrolNumber, memberCount, patrolSize, weaponGroup });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = "Fel: " + ex.Message });
+            }
+        }
+
         // ── QR Code Generation ─────────────────────────────────────
 
         /// <summary>Generates a QR code PNG for the given URL text.</summary>

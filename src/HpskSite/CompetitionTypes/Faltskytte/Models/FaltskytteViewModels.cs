@@ -99,6 +99,16 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public bool IsOfficial { get; set; }
     }
 
+    public class JoinNextPatrolRequest
+    {
+        public int CompetitionId { get; set; }
+        public int MemberId { get; set; }
+        public string ShootingClass { get; set; } = "";
+        public string MemberName { get; set; } = "";
+        public string ClubName { get; set; } = "";
+        public int PatrolSize { get; set; } = 6;
+    }
+
     // ── Station Config ────────────────────────────────────────────
 
     public class SaveStationConfigRequest

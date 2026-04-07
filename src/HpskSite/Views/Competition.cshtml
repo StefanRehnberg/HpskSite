@@ -56,6 +56,9 @@
     var competitionTypeStr = Model.Value<string>("competitionType") ?? "Precision";
     var isSpringskytte = competitionTypeStr == "Springskytte";
     var isFaltskytte = competitionTypeStr == "Faltskytte" || competitionTypeStr == "MagnumFalt";
+    var rsJson = Model.HasProperty("rollingStart") ? Model.Value<string>("rollingStart") : "";
+    object rsConfig = null;
+    if (!string.IsNullOrEmpty(rsJson)) { try { rsConfig = Newtonsoft.Json.JsonConvert.DeserializeObject(rsJson); } catch {} }
     var numberOfSeriesOrStations = Model.Value<int>("numberOfSeriesOrStations");
     var numberOfFinalSeries = Model.Value<int>("numberOfFinalSeries");
 
@@ -677,7 +680,17 @@
 							<ul class="list-unstyled">
 								@if (!isExternal)
 								{
-									<li><i class="bi bi-people"></i> Max antal deltagare: <strong>@maxParticipants</strong></li>
+									@if (isFaltskytte)
+									{
+										@if (rsConfig != null)
+										{
+											<li><i class="bi bi-arrow-repeat"></i> <strong>Rullande start</strong> — anmälan på plats</li>
+										}
+										else
+										{
+											<li><i class="bi bi-pencil-square"></i> Föranmälan krävs</li>
+										}
+									}
 									<li><i class="bi bi-currency-dollar"></i> Avgift: <strong>@registrationFee</strong></li>
 								}
 								<li><i class="bi bi-calendar-check"></i> Öppnar: @registrationOpenDate.ToString("d MMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))</li>
@@ -1148,12 +1161,56 @@
 											if (!hasResults) return;
 											var html = '';
 											if (data.results.isOfficial) {
-												html += '<button class="btn btn-warning w-100" onclick="openResultBoard()"><i class="bi bi-trophy me-1"><\/i> Visa resultat<\/button>';
+												html += '<button class="btn btn-warning w-100" onclick="faltShowResultsModal_@(Model.Id)()"><i class="bi bi-trophy me-1"><\/i> Visa resultat<\/button>';
 											} else {
 												html += '<p class="text-muted small mb-1"><i class="bi bi-hourglass-split me-1"><\/i> Resultatlistan \u00e4r prelimin\u00e4r.<\/p>';
+												html += '<button class="btn btn-outline-light w-100" onclick="faltShowResultsModal_@(Model.Id)()"><i class="bi bi-trophy me-1"><\/i> Visa resultat<\/button>';
 											}
 											html += '<button class="btn btn-outline-light w-100 mt-1" onclick="openResultBoard()"><i class="bi bi-tv me-1"><\/i> Resultattavla<\/button>';
 											el.innerHTML = html;
+											// Store results for modal
+											window['faltResultsData_@(Model.Id)'] = data.results;
+											window['faltShowResultsModal_@(Model.Id)'] = function() {
+												var results = window['faltResultsData_@(Model.Id)'];
+												if (!results) return;
+												var isPoang = results.scoringMode === 'Poang';
+												var body = '';
+												(results.classGroups || []).forEach(function(group) {
+													body += '<div class="mb-4"><h5 class="border-bottom pb-2">' + group.className + ' <small class="text-muted">(' + group.shooters.length + ')<\/small><\/h5>';
+													body += '<div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-light"><tr>';
+													body += '<th class="text-center" style="width:40px">Pl<\/th><th>Namn<\/th><th>Förening<\/th><th>Klass<\/th>';
+													for (var i = 1; i <= results.stationCount; i++) body += '<th class="text-center">' + i + '<\/th>';
+													body += isPoang ? '<th class="text-center fw-bold">Poäng<\/th>' : '<th class="text-center fw-bold">Tot<\/th>';
+													body += '<th class="text-center">Pm<\/th><th class="text-center">Std<\/th><\/tr><\/thead><tbody>';
+													group.shooters.forEach(function(s, idx) {
+														body += '<tr><td class="text-center">' + (idx+1) + '<\/td><td>' + s.name + '<\/td><td>' + s.club + '<\/td><td>' + s.shootingClass + '<\/td>';
+														for (var i = 1; i <= results.stationCount; i++) {
+															var st = s.stations.find(function(x){return x.stationNumber===i;});
+															body += '<td class="text-center">' + (st ? st.hits+'/'+st.figures + (st.tiebreakerScore != null ? ' <small>'+st.tiebreakerScore+'p<\/small>' : '') : '-') + '<\/td>';
+														}
+														body += isPoang ? '<td class="text-center fw-bold">'+s.totalPoints+'<\/td>' : '<td class="text-center fw-bold">'+s.totalHits+'/'+s.totalFigures+'<\/td>';
+														body += '<td class="text-center">'+(s.totalTiebreakerScore||'')+'<\/td>';
+														var sm = s.standardMedal || '';
+														body += '<td class="text-center fw-bold'+(sm==='S'?' text-primary':sm==='B'?' text-warning':'')+'">'+sm+'<\/td><\/tr>';
+													});
+													body += '<\/tbody><\/table><\/div><\/div>';
+												});
+												var modalId = 'faltResultModal_@(Model.Id)';
+												var existing = document.getElementById(modalId);
+												if (existing) existing.remove();
+												var modal = document.createElement('div');
+												modal.id = modalId;
+												modal.className = 'modal fade';
+												modal.tabIndex = -1;
+												modal.innerHTML = '<div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content">' +
+													'<div class="modal-header"><h5 class="modal-title"><i class="bi bi-trophy me-2"><\/i>Resultat' + (results.isOfficial ? ' <span class="badge bg-success">Officiell<\/span>' : ' <span class="badge bg-warning text-dark">Preliminär<\/span>') + '<\/h5>' +
+													'<button type="button" class="btn-close" data-bs-dismiss="modal"><\/button><\/div>' +
+													'<div class="modal-body">' + body + '<\/div>' +
+													'<div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Stäng<\/button><\/div>' +
+													'<\/div><\/div>';
+												document.body.appendChild(modal);
+												bootstrap.Modal.getOrCreateInstance(modal).show();
+											};
 										}).catch(function() {});
 								})();
 								</script>
@@ -1416,7 +1473,9 @@ window.CompetitionConfig = {
         clubId: @(regClubId.HasValue ? regClubId.Value.ToString() : "null"),
         clubName: '@Html.Raw(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(regClubName))'
     },
-    clubs: @Html.Raw(allClubsJson)
+    clubs: @Html.Raw(allClubsJson),
+    competitionType: '@competitionTypeStr',
+    rollingStart: @(rsConfig != null ? Html.Raw(rsJson) : Html.Raw("null"))
 };
 
 // Show success/error messages from server

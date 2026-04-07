@@ -141,14 +141,25 @@ function faltCfgOpen(weaponClasses, existingConfig) {
     faltCfgWeaponClasses = weaponClasses || ["C"];
     faltCfgData = existingConfig || {};
     faltCfgDirtyStations = new Set();
+
+    // Handle wrapped format from server: { WeaponConfigs: { C: {...} } } or { weaponConfigs: { C: {...} } }
+    if (faltCfgData.WeaponConfigs || faltCfgData.weaponConfigs) {
+        var wc = faltCfgData.WeaponConfigs || faltCfgData.weaponConfigs;
+        var linked = faltCfgData._linkedGroups;
+        faltCfgData = {};
+        Object.keys(wc).forEach(function(k) { faltCfgData[k] = wc[k]; });
+        if (linked) faltCfgData._linkedGroups = linked;
+    }
+
     faltCfgLinkedGroups = faltCfgData._linkedGroups || [];
     faltCfgStationCount = parseInt(document.getElementById('faltCfg_stationCount').value) || 8;
 
-    // Detect station count from existing config
+    // Detect station count from existing config (handle both camelCase and PascalCase)
     for (const wc of Object.keys(faltCfgData)) {
         if (wc === '_linkedGroups') continue;
-        if (faltCfgData[wc]?.stations?.length > 0) {
-            faltCfgStationCount = faltCfgData[wc].stations.length;
+        var st = faltCfgData[wc]?.stations || faltCfgData[wc]?.Stations;
+        if (st?.length > 0) {
+            faltCfgStationCount = st.length;
             document.getElementById('faltCfg_stationCount').value = faltCfgStationCount;
             break;
         }
@@ -187,10 +198,15 @@ function faltCfgGetVisibleTabs() {
 }
 
 function ensureStations(wc) {
+    // Handle both camelCase and PascalCase from server
+    if (!faltCfgData[wc].stations && faltCfgData[wc].Stations) {
+        faltCfgData[wc].stations = faltCfgData[wc].Stations;
+        delete faltCfgData[wc].Stations;
+    }
     const existing = faltCfgData[wc].stations || [];
     const stations = [];
     for (let i = 1; i <= faltCfgStationCount; i++) {
-        const ex = existing.find(s => s.station === i);
+        const ex = existing.find(s => s.station || s.Station ? (s.station || s.Station) === i : false);
         stations.push(ex || createDefaultStation(i));
     }
     faltCfgData[wc].stations = stations;

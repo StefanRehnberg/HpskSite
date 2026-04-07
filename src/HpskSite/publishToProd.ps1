@@ -69,6 +69,14 @@ if (Test-Path 'C:\temp\publish\App_Data') {
 } else {
     Write-Host "  - App_Data folder not found (OK)" -ForegroundColor Gray
 }
+
+# Remove field-targets images (managed in production via Figurkatalog)
+if (Test-Path 'C:\temp\publish\wwwroot\images\field-targets') {
+    Remove-Item -Path 'C:\temp\publish\wwwroot\images\field-targets' -Recurse -Force
+    Write-Host "  - Field-targets images folder removed (preserved on server)" -ForegroundColor Green
+} else {
+    Write-Host "  - Field-targets folder not found (OK)" -ForegroundColor Gray
+}
 Write-Host ""
 
 # Step 7: Create app_offline.htm (for graceful deployment)
@@ -118,12 +126,8 @@ Write-Host "     (This brings the site back online)" -ForegroundColor Gray
 Write-Host "  5. Test the site" -ForegroundColor White
 Write-Host ""
 Write-Host "PRESERVED ON SERVER (not in package):" -ForegroundColor Yellow
-Write-Host "  - wwwroot/media/  (user uploads)" -ForegroundColor Gray
-Write-Host "  - App_Data/       (Firebase credentials)" -ForegroundColor Gray
-Write-Host ""
-Write-Host "NOTE: wwwroot/images/field-targets/ IS included." -ForegroundColor Yellow
-Write-Host "  First deploy: upload it (282 target images)." -ForegroundColor Gray
-Write-Host "  Future deploys: SKIP this folder if targets" -ForegroundColor Gray
-Write-Host "  have been modified in production via Figurkatalog." -ForegroundColor Gray
+Write-Host "  - wwwroot/media/              (user uploads)" -ForegroundColor Gray
+Write-Host "  - wwwroot/images/field-targets/ (Figurkatalog images)" -ForegroundColor Gray
+Write-Host "  - App_Data/                   (Firebase credentials)" -ForegroundColor Gray
 Write-Host ""
 Write-Host "Deployment package ready!" -ForegroundColor Green

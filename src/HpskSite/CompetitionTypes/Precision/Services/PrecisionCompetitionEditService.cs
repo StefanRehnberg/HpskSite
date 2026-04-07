@@ -345,6 +345,7 @@ namespace HpskSite.CompetitionTypes.Precision.Services
                 "patrolSize" => "patrolSize",
                 "patrolIntervalMinutes" => "patrolIntervalMinutes",
                 "maxReshoots" => "maxReshoots",
+                "rollingStart" => "rollingStart",
                 _ => null
             };
         }

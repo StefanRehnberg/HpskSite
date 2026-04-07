@@ -1335,6 +1335,12 @@ async function setupRegistrationTargetUI(userInfo) {
         await loadAllClubs();
 
         clubSelect.disabled = false;
+        // Show quick-create button for admin roles
+        var qcSection = document.getElementById('quickCreateSection');
+        if (qcSection) qcSection.style.display = '';
+        // Show rolling start button if enabled
+        var joinBtn = document.getElementById('modalRegisterAndJoinBtn');
+        if (joinBtn && window.CompetitionConfig?.rollingStart?.enabled) joinBtn.style.display = '';
         memberSelect.disabled = false;
         memberSelect.innerHTML = '<option value="">Välj klubb först...</option>';
 
@@ -1343,6 +1349,9 @@ async function setupRegistrationTargetUI(userInfo) {
             const clubOption = clubSelect.querySelector(`option[value="${userInfo.clubId}"]`);
             if (clubOption) {
                 clubSelect.value = userInfo.clubId;
+                // Update quick-create button with pre-selected club name
+                var qcBtnText = document.getElementById('quickCreateBtnText');
+                if (qcBtnText && clubOption.text) qcBtnText.textContent = 'Lägg till ny medlem i ' + clubOption.text;
                 await loadClubMembers(userInfo.clubId);
                 // Pre-select current user
                 if (userInfo.memberId) {
@@ -1488,6 +1497,13 @@ function handleClubSelection() {
     selectedTargetMemberId = null;
     updateRegistrationButton();
 
+    // Update quick-create button text with selected club name
+    var qcBtnText = document.getElementById('quickCreateBtnText');
+    if (qcBtnText) {
+        var clubName = clubSelect.options[clubSelect.selectedIndex]?.text || '';
+        qcBtnText.textContent = selectedClubId && clubName ? 'Lägg till ny medlem i ' + clubName : 'Lägg till ny medlem';
+    }
+
     if (selectedClubId) {
         loadClubMembers(selectedClubId);
     } else {
@@ -1496,7 +1512,17 @@ function handleClubSelection() {
     }
 }
 
+function clearAllClassSelections() {
+    var container = document.getElementById('classSelections');
+    if (!container) return;
+    container.querySelectorAll('input[type="radio"]:checked').forEach(function(r) { r.checked = false; });
+    container.querySelectorAll('input[type="checkbox"]:checked').forEach(function(c) { c.checked = false; });
+}
+
 async function handleMemberSelection() {
+    // Clear previous class selections when switching members
+    clearAllClassSelections();
+
     const memberSelect = document.getElementById('memberSelect');
     const selectedMemberId = memberSelect.value;
 
@@ -2168,5 +2194,200 @@ async function sendSwishQRCodeEmail(competitionId, targetMemberId = '') {
         alert('Ett fel uppstod när e-posten skulle skickas. Försök igen.');
         event.target.innerHTML = '<i class="bi bi-envelope"></i> Skicka QR-kod via e-post';
         event.target.disabled = false;
+    }
+}
+
+// ── Rolling Start — Register & Join Patrol ──────────────────────
+
+async function registerAndJoinPatrol() {
+    var btn = document.getElementById('modalRegisterAndJoinBtn');
+    var origHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Anmäler...';
+
+    try {
+        // Collect selected classes (same logic as submitRegistrationForm)
+        var radioGroups = ['selectedAClass', 'selectedBClass', 'selectedRClass', 'selectedCRegular', 'selectedCVet', 'selectedCDam', 'selectedCJun', 'selectedLRegular', 'selectedLVet', 'selectedLDam', 'selectedLJun', 'selectedMClass'];
+        var selectedClasses = [];
+        radioGroups.forEach(function(groupName) {
+            var checked = document.querySelector('input[name="' + groupName + '"]:checked');
+            if (checked) selectedClasses.push(checked.value);
+        });
+
+        if (selectedClasses.length === 0) {
+            alert('Välj minst en skytteklass.');
+            btn.disabled = false;
+            btn.innerHTML = origHtml;
+            return;
+        }
+
+        var memberId = document.getElementById('onBehalfOfMemberId').value || selectedTargetMemberId;
+        if (!memberId) {
+            alert('Ingen skytt vald.');
+            btn.disabled = false;
+            btn.innerHTML = origHtml;
+            return;
+        }
+
+        // Register via the same API as normal registration
+        var regFormData = new FormData();
+        regFormData.append('competitionId', window.CompetitionConfig.competitionId);
+        regFormData.append('selectedClasses', selectedClasses.join(','));
+        regFormData.append('targetMemberId', memberId);
+        regFormData.append('startPreference', 'Inget');
+
+        var resp = await fetch('/umbraco/surface/Competition/RegisterForCompetition', {
+            method: 'POST',
+            body: regFormData,
+            headers: {
+                'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value,
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        });
+        var result = await resp.json();
+
+        if (!result.success && !result.Success) {
+            var msg = result.message || result.Message || '';
+            // If already registered, proceed to patrol assignment anyway
+            if (!msg.toLowerCase().includes('redan') && !msg.toLowerCase().includes('already') && !msg.toLowerCase().includes('uppdaterad')) {
+                alert('Anmälan misslyckades: ' + msg);
+                btn.disabled = false;
+                btn.innerHTML = origHtml;
+                return;
+            }
+        }
+
+        // Now join patrol
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Lägger till i patrull...';
+
+        // Get member info for the patrol assignment
+        var memberSelect = document.getElementById('memberSelect');
+        var memberName = memberSelect.options[memberSelect.selectedIndex]?.text?.split('(')[0]?.trim() || '';
+        var clubSelect = document.getElementById('clubSelect');
+        var clubName = clubSelect.options[clubSelect.selectedIndex]?.text || '';
+
+        // Join patrol for each selected class
+        var patrolResults = [];
+        var token = document.querySelector('input[name="__RequestVerificationToken"]')?.value;
+        for (var sc of selectedClasses) {
+            var joinResp = await fetch('/umbraco/surface/Faltskytte/JoinNextPatrol', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+                body: JSON.stringify({
+                    competitionId: window.CompetitionConfig.competitionId,
+                    memberId: parseInt(memberId),
+                    shootingClass: sc,
+                    memberName: memberName,
+                    clubName: clubName,
+                    patrolSize: window.CompetitionConfig?.rollingStart?.patrolSize || 2
+                })
+            });
+            var joinData = await joinResp.json();
+            if (joinData.success) {
+                var msg = joinData.alreadyAssigned
+                    ? sc + ': redan i patrull ' + (joinData.weaponGroup || '') + '-' + joinData.patrolNumber
+                    : sc + ': patrull ' + (joinData.weaponGroup || '') + '-' + joinData.patrolNumber + ' (' + joinData.memberCount + '/' + joinData.patrolSize + ')';
+                patrolResults.push(msg);
+            }
+        }
+
+        if (patrolResults.length > 0) {
+            alert('Anmäld och tilldelad patrull!\n\n' + patrolResults.join('\n'));
+        }
+
+        // Close modal
+        var modal = bootstrap.Modal.getInstance(document.getElementById('registrationModal'));
+        if (modal) modal.hide();
+
+        // Reload page to reflect changes
+        setTimeout(function() { location.reload(); }, 500);
+    } catch (err) {
+        console.error('registerAndJoinPatrol error:', err);
+        alert('Ett fel uppstod: ' + err.message);
+        btn.disabled = false;
+        btn.innerHTML = origHtml;
+    }
+}
+
+// ── Quick Create Member ─────────────────────────────────────────
+
+function toggleQuickCreateForm() {
+    var form = document.getElementById('quickCreateForm');
+    if (form.style.display === 'none') {
+        form.style.display = '';
+        document.getElementById('qcFirstName').focus();
+    } else {
+        form.style.display = 'none';
+        document.getElementById('qcMessage').innerHTML = '';
+    }
+}
+
+async function quickCreateMember() {
+    var firstName = document.getElementById('qcFirstName').value.trim();
+    var lastName = document.getElementById('qcLastName').value.trim();
+    var email = document.getElementById('qcEmail').value.trim();
+    var clubId = document.getElementById('clubSelect').value;
+    var autoApprove = document.getElementById('qcAutoApprove').checked;
+    var msgEl = document.getElementById('qcMessage');
+
+    if (!firstName || !lastName) { msgEl.innerHTML = '<span class="text-danger">Ange för- och efternamn.</span>'; return; }
+    if (!email || !email.includes('@')) { msgEl.innerHTML = '<span class="text-danger">Ange en giltig e-postadress.</span>'; return; }
+    if (!clubId) { msgEl.innerHTML = '<span class="text-danger">Välj en klubb först.</span>'; return; }
+
+    msgEl.innerHTML = '<span class="text-muted">Skapar...</span>';
+
+    try {
+        var token = document.querySelector('input[name="__RequestVerificationToken"]')?.value;
+        var resp = await fetch('/umbraco/surface/Member/QuickCreateMember', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+            body: JSON.stringify({ firstName: firstName, lastName: lastName, email: email, clubId: parseInt(clubId), autoApprove: autoApprove })
+        });
+        var data = await resp.json();
+
+        if (data.success) {
+            var actionText = data.alreadyExisted ? ' hittad (redan registrerad)!' : ' skapad!';
+            msgEl.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>' + data.memberName + actionText + '</span>';
+
+            // If existing member is in a different club, switch to their club first
+            if (data.alreadyExisted && data.clubId && data.clubId.toString() !== document.getElementById('clubSelect').value) {
+                document.getElementById('clubSelect').value = data.clubId;
+                await loadClubMembers(data.clubId);
+                // Update quick-create button text
+                var qcBtnText = document.getElementById('quickCreateBtnText');
+                var clubOpt = document.getElementById('clubSelect').options[document.getElementById('clubSelect').selectedIndex];
+                if (qcBtnText && clubOpt) qcBtnText.textContent = 'Lägg till ny medlem i ' + clubOpt.text;
+            }
+
+            // Select the member in the dropdown (add if not present)
+            var memberSelect = document.getElementById('memberSelect');
+            if (!memberSelect.querySelector('option[value="' + data.memberId + '"]')) {
+                var opt = document.createElement('option');
+                opt.value = data.memberId;
+                opt.textContent = data.memberName + ' (' + email + ')';
+                memberSelect.appendChild(opt);
+            }
+            memberSelect.value = data.memberId;
+
+            // Set as registration target and trigger member selection flow
+            document.getElementById('onBehalfOfMemberId').value = data.memberId;
+            selectedTargetMemberId = data.memberId;
+            handleMemberSelection();
+
+            // Clear form and collapse after delay
+            setTimeout(function() {
+                document.getElementById('qcFirstName').value = '';
+                document.getElementById('qcLastName').value = '';
+                document.getElementById('qcEmail').value = '';
+                document.getElementById('quickCreateForm').style.display = 'none';
+                msgEl.innerHTML = '';
+            }, 1500);
+        } else {
+            msgEl.innerHTML = '<span class="text-danger">' + (data.message || 'Fel vid skapande.') + '</span>';
+        }
+    } catch (err) {
+        msgEl.innerHTML = '<span class="text-danger">Nätverksfel.</span>';
+        console.error('QuickCreateMember error:', err);
     }
 }

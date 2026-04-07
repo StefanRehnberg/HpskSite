@@ -332,6 +332,17 @@
                                 </div>
                             </div>
 
+                            <div class="form-check mb-3">
+                                <input class="form-check-input" type="checkbox" id="wizard_rollingStart" onchange="document.getElementById('wizard_rollingStartSettings').style.display = this.checked ? '' : 'none'">
+                                <label class="form-check-label fw-bold" for="wizard_rollingStart">Rullande start</label>
+                                <div class="form-text small mt-1">Anmälan och patrulltilldelning sker på plats vid tävlingen. Patruller skapas automatiskt allt eftersom skyttar anmäls. Används typiskt vid banfält och klubbtävlingar med drop-in.</div>
+                            </div>
+                            <div id="wizard_rollingStartSettings" style="display:none" class="ms-4 mb-3">
+                                <label for="wizard_patrolSize" class="form-label small">Patrullstorlek</label>
+                                <input type="number" class="form-control form-control-sm" id="wizard_patrolSize" min="2" max="12" value="2" style="max-width: 80px;">
+                                <div class="form-text small">Antal skyttar per patrull. Ny patrull skapas automatiskt när föregående är full.</div>
+                            </div>
+
                             <div class="mb-3">
                                 <button type="button" class="btn btn-outline-primary" onclick="openFaltStationConfigurator()">
                                     <i class="bi bi-gear me-1"></i>Konfigurera stationer
@@ -1725,6 +1736,8 @@ function submitWizard() {
         fields.scoringMode = document.getElementById('wizard_scoringMode').value;
         fields.stationConfig = document.getElementById('wizard_faltStationConfigJson').value || '{}';
         fields.maxReshoots = document.getElementById('wizard_maxReshoots').value;
+        var rsEnabled = document.getElementById('wizard_rollingStart').checked;
+        fields.rollingStart = rsEnabled ? JSON.stringify({ enabled: true, patrolSize: parseInt(document.getElementById('wizard_patrolSize').value) || 2 }) : '';
     }
 
     const requestBody = { fields: fields };

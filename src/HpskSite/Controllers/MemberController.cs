@@ -341,6 +341,117 @@ namespace HpskSite.Controllers
             }
         }
 
+        /// <summary>Quick-create a member from the competition registration modal (admin only).</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> QuickCreateMember([FromBody] QuickCreateMemberRequest request)
+        {
+            try
+            {
+                // Auth check: must be admin, club admin, skjutledare, or competition manager
+                var currentMember = await _memberManager.GetCurrentMemberAsync();
+                if (currentMember == null)
+                    return Json(new { success = false, message = "Du måste vara inloggad." });
+
+                var currentMemberData = _memberService.GetByEmail(currentMember.Email ?? "");
+                if (currentMemberData == null)
+                    return Json(new { success = false, message = "Medlemsdata hittades inte." });
+
+                var roles = _memberService.GetAllRoles(currentMemberData.Id)?.ToList() ?? new List<string>();
+                bool isAdmin = roles.Contains("Administrators");
+                bool isClubAdmin = roles.Any(r => r.StartsWith("ClubAdmin_"));
+                bool isSkjutledare = roles.Any(r => r.StartsWith("Skjutledare_"));
+
+                if (!isAdmin && !isClubAdmin && !isSkjutledare)
+                    return Json(new { success = false, message = "Du har inte behörighet att skapa medlemmar." });
+
+                // Validate
+                if (string.IsNullOrWhiteSpace(request.FirstName) || string.IsNullOrWhiteSpace(request.LastName))
+                    return Json(new { success = false, message = "Förnamn och efternamn krävs." });
+                if (string.IsNullOrWhiteSpace(request.Email) || !request.Email.Contains("@"))
+                    return Json(new { success = false, message = "Ogiltig e-postadress." });
+                if (request.ClubId <= 0)
+                    return Json(new { success = false, message = "Klubb krävs." });
+
+                var clubName = _clubService.GetClubNameById(request.ClubId);
+                if (clubName == null)
+                    return Json(new { success = false, message = "Klubben hittades inte." });
+
+                // Check if email already exists — return the existing member so they can be selected
+                var existingMember = _memberService.GetByEmail(request.Email);
+                if (existingMember != null)
+                {
+                    var existingName = $"{existingMember.GetValue<string>("firstName")} {existingMember.GetValue<string>("lastName")}".Trim();
+                    if (string.IsNullOrEmpty(existingName)) existingName = existingMember.Name ?? request.Email;
+                    var existingClubId = 0;
+                    var existingClubIdStr = existingMember.GetValue<string>("primaryClubId");
+                    if (!string.IsNullOrEmpty(existingClubIdStr)) int.TryParse(existingClubIdStr, out existingClubId);
+                    return Json(new { success = true, memberId = existingMember.Id, memberName = existingName, alreadyExisted = true, clubId = existingClubId });
+                }
+
+                // Create member with temp password
+                var fullName = $"{request.FirstName.Trim()} {request.LastName.Trim()}";
+                var tempPassword = "pistol.nu";
+
+                var identityUser = Umbraco.Cms.Core.Security.MemberIdentityUser.CreateNew(
+                    request.Email.Trim(), request.Email.Trim(), "hpskMember", true, fullName);
+                var createResult = await _memberManager.CreateAsync(identityUser, tempPassword);
+
+                if (!createResult.Succeeded)
+                {
+                    var errors = string.Join(", ", createResult.Errors.Select(e => e.Description));
+                    return Json(new { success = false, message = "Kunde inte skapa konto: " + errors });
+                }
+
+                // Set member properties
+                var member = _memberService.GetByEmail(request.Email.Trim());
+                if (member == null)
+                    return Json(new { success = false, message = "Konto skapades men medlemsdata hittades inte." });
+
+                member.SetValue("firstName", request.FirstName.Trim());
+                member.SetValue("lastName", request.LastName.Trim());
+                member.SetValue("primaryClubId", request.ClubId);
+
+                if (request.AutoApprove)
+                {
+                    _memberService.AssignRole(member.Id, "Users");
+                    member.IsApproved = true;
+                }
+                else
+                {
+                    _memberService.AssignRole(member.Id, "PendingApproval");
+                    member.IsApproved = false;
+                }
+
+                _memberService.Save(member);
+
+                // Send welcome email
+                var creatorName = currentMemberData.Name ?? "En administratör";
+                try
+                {
+                    await _emailService.SendQuickCreateWelcomeEmailAsync(
+                        request.Email.Trim(), fullName, creatorName, clubName, tempPassword);
+                }
+                catch (Exception)
+                {
+                    // Email failure is non-critical — member was still created
+                }
+
+                // Note: Club admin notification skipped in quick-create to avoid timeout
+                // from GetAdminContactsForClub (N+1 query). Club admins see pending members
+                // in their admin panel. The welcome email to the new member is sufficient.
+
+                System.Diagnostics.Debug.WriteLine($"Quick-created member {fullName} ({request.Email}) for club {clubName} by {creatorName}");
+
+                return Json(new { success = true, memberId = member.Id, memberName = fullName });
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Error in QuickCreateMember: {ex.Message}");
+                return Json(new { success = false, message = "Fel: " + ex.Message });
+            }
+        }
+
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> RegisterMember(string firstName, string lastName, string email,
@@ -3176,5 +3287,14 @@ namespace HpskSite.Controllers
         public decimal RegistrationFee { get; set; }
         public bool CanUnregister { get; set; }
         public DateTime RegistrationDate { get; set; }
+    }
+
+    public class QuickCreateMemberRequest
+    {
+        public string FirstName { get; set; } = "";
+        public string LastName { get; set; } = "";
+        public string Email { get; set; } = "";
+        public int ClubId { get; set; }
+        public bool AutoApprove { get; set; }
     }
 }

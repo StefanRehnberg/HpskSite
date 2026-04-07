@@ -131,7 +131,8 @@ namespace HpskSite.Controllers
                     stationConfig = content.GetValue<string>("stationConfig") ?? "",
                     patrolSize = content.GetValue<int>("patrolSize"),
                     patrolIntervalMinutes = content.GetValue<int>("patrolIntervalMinutes"),
-                    maxReshoots = content.GetValue<int>("maxReshoots")
+                    maxReshoots = content.GetValue<int>("maxReshoots"),
+                    rollingStart = content.HasProperty("rollingStart") ? content.GetValue<string>("rollingStart") ?? "" : ""
                 };
 
                 Console.WriteLine($"Returning competition data for: {content.Name}");

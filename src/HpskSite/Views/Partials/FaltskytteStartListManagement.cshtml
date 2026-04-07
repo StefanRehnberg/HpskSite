@@ -5,6 +5,14 @@
 
 @{
     var competitionId = ViewData["CompetitionId"]?.ToString() ?? "";
+    var rollingStartJson = ViewData["RollingStart"]?.ToString() ?? "";
+    var isRollingStart = false;
+    if (!string.IsNullOrEmpty(rollingStartJson)) {
+        try {
+            var rsObj = Newtonsoft.Json.JsonConvert.DeserializeObject<dynamic>(rollingStartJson);
+            isRollingStart = rsObj?.enabled == true;
+        } catch {}
+    }
 }
 
 <div class="faltskytte-startlist-management" data-competition-id="@competitionId">
@@ -16,12 +24,15 @@
                     <span class="badge ms-2" id="faltPublishBadge">Preliminär</span>
                 </div>
                 <div class="d-flex gap-2 flex-wrap">
+                    @if (!isRollingStart)
+                    {
                     <button class="btn btn-primary btn-sm" onclick="faltShowGenerateModal()">
                         <i class="bi bi-plus-lg me-1"></i>Generera patruller
                     </button>
                     <button class="btn btn-outline-primary btn-sm" onclick="faltCreatePatrol()">
                         <i class="bi bi-plus-circle me-1"></i>Skapa patrull
                     </button>
+                    }
                     <button class="btn btn-success btn-sm" onclick="faltPublish(true)" id="faltPublishBtn" style="display:none">
                         <i class="bi bi-globe me-1"></i>Publicera
                     </button>
@@ -53,7 +64,14 @@
                 <div class="spinner-border spinner-border-sm" role="status"><span class="visually-hidden">Laddar...</span></div>
             </div>
             <div id="faltPatrolsEmpty" class="text-center py-4">
+                @if (isRollingStart)
+                {
+                <p class="text-muted mb-0">Rullande start aktiverad. Patruller skapas automatiskt vid anmälan.</p>
+                }
+                else
+                {
                 <p class="text-muted mb-0">Inga patruller skapade. Generera patruller eller skapa manuellt.</p>
+                }
             </div>
             <div id="faltPatrolsContainer" style="display:none">
                 <div id="faltPatrolGroups"></div>
