@@ -39,13 +39,20 @@
                                 <select class="form-select form-select-sm" id="faltPickerColorSelect" onchange="faltPickerColorChanged()"></select>
                             </div>
 
-                            <!-- Distances display (non-admin only) -->
+                            <!-- Pick button (shown in pick mode, right below color selector) -->
+                            <div id="faltPickerSelectSection" style="display:none" class="mb-3">
+                                <button class="btn btn-primary w-100" onclick="faltPickerSelect()">
+                                    <i class="bi bi-check-circle me-1"></i>Välj denna figur
+                                </button>
+                            </div>
+
+                            <!-- Distances display (non-admin only, hidden in pick mode) -->
                             <div class="mb-3" id="faltPickerDistancesSection">
                                 <label class="form-label small mb-1 fw-bold">Max avstånd (meter)</label>
                                 <div id="faltPickerDistances" class="d-flex gap-2"></div>
                             </div>
 
-                            <!-- Admin edit section -->
+                            <!-- Admin edit section (hidden in pick mode) -->
                             <div id="faltPickerAdminSection" style="display:none">
                                 <hr>
                                 <div class="mb-2">
@@ -78,12 +85,6 @@
                                 </div>
                             </div>
 
-                            <div id="faltPickerSelectSection" style="display:none">
-                                <hr>
-                                <button class="btn btn-primary w-100" onclick="faltPickerSelect()">
-                                    <i class="bi bi-check-circle me-1"></i>Välj denna figur
-                                </button>
-                            </div>
                         </div>
                     </div>
                 </div>
@@ -109,6 +110,8 @@ async function faltPickerOpen(weaponClass, callback) {
     document.getElementById('faltPickerSelectSection').style.display = callback ? '' : 'none';
     document.getElementById('faltPickerNoSelection').style.display = '';
     document.getElementById('faltPickerSearch').value = '';
+
+    _faltPickerIsPickMode = !!callback;
 
     _faltPickerIsAdmin = true; // Edit UI shown to all; server validates admin on save
 
@@ -197,10 +200,10 @@ function faltPickerSelectTarget(targetId) {
         distEl.appendChild(badge);
     });
 
-    // Admin section
+    // Admin section (hidden in pick mode)
     var adminSection = document.getElementById('faltPickerAdminSection');
     var distSection = document.getElementById('faltPickerDistancesSection');
-    if (_faltPickerIsAdmin) {
+    if (_faltPickerIsAdmin && !_faltPickerIsPickMode) {
         adminSection.style.display = '';
         distSection.style.display = 'none';
         document.getElementById('faltPickerEditName').value = _faltPickerSelected.name;

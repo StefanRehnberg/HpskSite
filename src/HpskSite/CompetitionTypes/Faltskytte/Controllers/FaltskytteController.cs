@@ -54,13 +54,25 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             _startListRepository = startListRepository;
         }
 
-        // ── Authorization helper ────────────────────────────────────
+        // ── Authorization helpers ───────────────────────────────────
+
+        private async Task<bool> IsAuthorizedForCatalog()
+        {
+            if (await _adminAuthorizationService.IsCurrentUserAdminAsync()) return true;
+            var regions = await _adminAuthorizationService.GetManagedRegions();
+            return regions.Any();
+        }
 
         private async Task<bool> IsAuthorizedForCompetition(int competitionId)
         {
             if (await _adminAuthorizationService.IsCurrentUserAdminAsync())
                 return true;
             if (await _adminAuthorizationService.IsCompetitionManager(competitionId))
+                return true;
+
+            // Regional admins can manage any competition
+            var regions = await _adminAuthorizationService.GetManagedRegions();
+            if (regions.Any())
                 return true;
 
             var competition = _contentService.GetById(competitionId);
@@ -695,8 +707,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         {
             try
             {
-                if (!await _adminAuthorizationService.IsCurrentUserAdminAsync())
-                    return Json(new { success = false, message = "Endast administratörer kan ändra avstånd." });
+                if (!await IsAuthorizedForCatalog())
+                    return Json(new { success = false, message = "Endast administratörer och kretsadministratörer." });
 
                 using var db = _umbracoDatabaseFactory.CreateDatabase();
                 var target = await db.FirstOrDefaultAsync<FieldTarget>("WHERE Id = @0", request.TargetId);
@@ -725,8 +737,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         {
             try
             {
-                if (!await _adminAuthorizationService.IsCurrentUserAdminAsync())
-                    return Json(new { success = false, message = "Endast administratörer." });
+                if (!await IsAuthorizedForCatalog())
+                    return Json(new { success = false, message = "Endast administratörer och kretsadministratörer." });
 
                 using var db = _umbracoDatabaseFactory.CreateDatabase();
                 var target = await db.FirstOrDefaultAsync<FieldTarget>("WHERE Id = @0", request.TargetId);
@@ -769,8 +781,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         {
             try
             {
-                if (!await _adminAuthorizationService.IsCurrentUserAdminAsync())
-                    return Json(new { success = false, message = "Endast administratörer." });
+                if (!await IsAuthorizedForCatalog())
+                    return Json(new { success = false, message = "Endast administratörer och kretsadministratörer." });
 
                 if (string.IsNullOrWhiteSpace(request.Name))
                     return Json(new { success = false, message = "Namn krävs." });
@@ -817,8 +829,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         {
             try
             {
-                if (!await _adminAuthorizationService.IsCurrentUserAdminAsync())
-                    return Json(new { success = false, message = "Endast administratörer." });
+                if (!await IsAuthorizedForCatalog())
+                    return Json(new { success = false, message = "Endast administratörer och kretsadministratörer." });
 
                 using var db = _umbracoDatabaseFactory.CreateDatabase();
                 // FK cascade deletes variants
@@ -842,8 +854,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         {
             try
             {
-                if (!await _adminAuthorizationService.IsCurrentUserAdminAsync())
-                    return Json(new { success = false, message = "Endast administratörer." });
+                if (!await IsAuthorizedForCatalog())
+                    return Json(new { success = false, message = "Endast administratörer och kretsadministratörer." });
 
                 using var db = _umbracoDatabaseFactory.CreateDatabase();
                 var variant = new FieldTargetVariant
@@ -870,8 +882,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         {
             try
             {
-                if (!await _adminAuthorizationService.IsCurrentUserAdminAsync())
-                    return Json(new { success = false, message = "Endast administratörer." });
+                if (!await IsAuthorizedForCatalog())
+                    return Json(new { success = false, message = "Endast administratörer och kretsadministratörer." });
 
                 using var db = _umbracoDatabaseFactory.CreateDatabase();
                 var variant = await db.FirstOrDefaultAsync<FieldTargetVariant>("WHERE Id = @0", request.VariantId);
@@ -894,8 +906,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         {
             try
             {
-                if (!await _adminAuthorizationService.IsCurrentUserAdminAsync())
-                    return Json(new { success = false, message = "Endast administratörer." });
+                if (!await IsAuthorizedForCatalog())
+                    return Json(new { success = false, message = "Endast administratörer och kretsadministratörer." });
 
                 using var db = _umbracoDatabaseFactory.CreateDatabase();
                 var variant = await db.FirstOrDefaultAsync<FieldTargetVariant>("WHERE Id = @0", request.VariantId);
