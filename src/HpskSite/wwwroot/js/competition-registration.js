@@ -1298,6 +1298,18 @@ async function initializeRegistrationTarget() {
             currentClubId = info.clubId;
 
             await setupRegistrationTargetUI(info);
+
+            // Show sub-competition checkbox if configured
+            var subCompName = window.CompetitionConfig?.subCompetitionName;
+            if (subCompName) {
+                var subSection = document.getElementById('subCompetitionSection');
+                var subLabel = document.getElementById('subCompetitionLabel');
+                if (subSection && subLabel) {
+                    subLabel.textContent = subCompName;
+                    subSection.style.display = '';
+                }
+            }
+
             registrationTargetInitialized = true;
             return;
         }
@@ -2235,6 +2247,8 @@ async function registerAndJoinPatrol() {
         regFormData.append('selectedClasses', selectedClasses.join(','));
         regFormData.append('targetMemberId', memberId);
         regFormData.append('startPreference', 'Inget');
+        var subCompCheckbox = document.getElementById('subCompetitionCheckbox');
+        if (subCompCheckbox && subCompCheckbox.checked) regFormData.append('isSubCompetition', 'true');
 
         var resp = await fetch('/umbraco/surface/Competition/RegisterForCompetition', {
             method: 'POST',

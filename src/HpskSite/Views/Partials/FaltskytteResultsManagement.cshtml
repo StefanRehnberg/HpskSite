@@ -6,6 +6,7 @@
 @{
     var competitionId = ViewData["CompetitionId"]?.ToString() ?? "";
     var competitionName = ViewData["CompetitionName"]?.ToString() ?? "Tävling";
+    var subCompetitionName = ViewData["SubCompetitionName"]?.ToString() ?? "";
 }
 
 <div class="faltskytte-results-management" data-competition-id="@competitionId">
@@ -86,6 +87,31 @@
             </div>
         </div>
     </div>
+
+    @if (!string.IsNullOrEmpty(subCompetitionName))
+    {
+    <!-- Sub-Competition Results -->
+    <div class="card mt-3">
+        <div class="card-header py-2">
+            <div class="d-flex justify-content-between align-items-center">
+                <h6 class="mb-0"><i class="bi bi-trophy me-2"></i>@subCompetitionName</h6>
+                <div class="d-flex gap-2">
+                    <button class="btn btn-outline-primary btn-sm" onclick="var c=document.querySelector('.faltskytte-results-management')?.dataset.competitionId; if(c) faltLoadSubCompResults(c, document.getElementById('faltSubCompResultContent'));">
+                        <i class="bi bi-arrow-clockwise me-1"></i>Uppdatera
+                    </button>
+                    <button class="btn btn-outline-info btn-sm" onclick="faltPrintSubCompResultList(event)">
+                        <i class="bi bi-printer me-1"></i>Skriv ut
+                    </button>
+                </div>
+            </div>
+        </div>
+        <div class="card-body">
+            <div id="faltSubCompResultContent">
+                <div class="text-muted small py-2">Laddar deltävlingsresultat...</div>
+            </div>
+        </div>
+    </div>
+    }
 </div>
 
 <script>
@@ -436,5 +462,92 @@ function faltPrintResultList(event) {
 (function() {
     var compId = document.querySelector('.faltskytte-results-management')?.dataset.competitionId;
     if (compId) faltLoadResults(compId, document.getElementById('faltResultContent'));
+    // Auto-load sub-competition results if configured
+    var subCompContainer = document.getElementById('faltSubCompResultContent');
+    if (compId && subCompContainer) faltLoadSubCompResults(compId, subCompContainer);
 })();
+
+var _faltSubCompResults = null;
+
+function faltPrintSubCompResultList(event) {
+    if (event) event.stopPropagation();
+    var results = _faltSubCompResults;
+    if (!results || !results.classGroups || results.classGroups.length === 0) {
+        alert('Inga deltävlingsresultat att skriva ut. Klicka Uppdatera först.');
+        return;
+    }
+
+    var isPoang = results.scoringMode === 'Poang';
+    var stationConfigs = faltExtractStationConfigs(results);
+
+    var w = window.open('', '_blank');
+    w.document.write('<html><head><title>@Html.Raw(subCompetitionName)</title>');
+    w.document.write('<style>');
+    w.document.write('body{font-family:sans-serif;margin:15px;font-size:11px}');
+    w.document.write('h1{font-size:1.4em;margin:0 0 10px}');
+    w.document.write('h2{font-size:1.1em;margin:14px 0 4px;border-bottom:1px solid #999;padding-bottom:2px}');
+    w.document.write('table{width:100%;border-collapse:collapse;margin-bottom:10px}');
+    w.document.write('th,td{padding:2px 4px;text-align:center;border:1px solid #ddd;white-space:nowrap}');
+    w.document.write('th{background:#f0f0f0;font-size:0.9em}');
+    w.document.write('td:nth-child(2),td:nth-child(3){text-align:left}');
+    w.document.write('th:nth-child(2),th:nth-child(3){text-align:left}');
+    w.document.write('@@media print{body{margin:10mm}h2{page-break-after:avoid}table{page-break-inside:avoid}}');
+    w.document.write('<' + '/style><' + '/head><body>');
+    w.document.write('<h1>@Html.Raw(subCompetitionName)</h1>');
+
+    results.classGroups.forEach(function(group) {
+        w.document.write('<h2>' + group.className + ' (' + group.shooters.length + ' deltagare)</h2>');
+        w.document.write('<table><thead><tr><th>Pl</th><th>Namn</th><th>F\u00f6rening</th><th>Klass</th>');
+        for (var i = 1; i <= results.stationCount; i++) {
+            var cfg = stationConfigs.find(function(s){return s.station===i;});
+            w.document.write('<th>' + i + (cfg && cfg.hasPoangmal ? '*' : '') + '</th>');
+        }
+        w.document.write(isPoang ? '<th><b>Po\u00e4ng</b></th>' : '<th><b>Tot</b></th>');
+        w.document.write('<th>Pm</th></tr></thead><tbody>');
+
+        group.shooters.forEach(function(shooter, idx) {
+            w.document.write('<tr><td>' + (idx+1) + '</td>');
+            w.document.write('<td>' + shooter.name + '</td>');
+            w.document.write('<td>' + shooter.club + '</td>');
+            w.document.write('<td>' + shooter.shootingClass + '</td>');
+            for (var i = 1; i <= results.stationCount; i++) {
+                var st = shooter.stations.find(function(s){return s.stationNumber===i;});
+                if (st) {
+                    var cell = st.hits + '/' + st.figures;
+                    if (st.tiebreakerScore != null) cell += ' ' + st.tiebreakerScore + 'p';
+                    w.document.write('<td>' + cell + '</td>');
+                } else {
+                    w.document.write('<td>-</td>');
+                }
+            }
+            w.document.write(isPoang
+                ? '<td><b>' + shooter.totalPoints + '</b></td>'
+                : '<td><b>' + shooter.totalHits + '/' + shooter.totalFigures + '</b></td>');
+            w.document.write('<td>' + (shooter.totalTiebreakerScore || '') + '</td>');
+            w.document.write('</tr>');
+        });
+
+        w.document.write('</tbody></table>');
+    });
+
+    w.document.write('<' + '/body><' + '/html>');
+    w.document.close();
+    w.print();
+}
+async function faltLoadSubCompResults(compId, container) {
+    container.innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm"></div> Laddar...</div>';
+    try {
+        var url = '/umbraco/surface/Faltskytte/GetFaltskytteResults?competitionId=' + compId + '&subCompetitionOnly=true';
+        var resp = await fetch(url);
+        var data = await resp.json();
+        if (!data.success || !data.results?.classGroups?.length) {
+            container.innerHTML = '<div class="text-muted small py-2">Inga resultat för deltävlingen.</div>';
+            return;
+        }
+        _faltSubCompResults = data.results;
+        renderFaltResultList(data.results, container);
+    } catch(e) {
+        container.innerHTML = '<div class="text-muted small">Kunde inte ladda deltävlingsresultat.</div>';
+    }
+}
 </script>

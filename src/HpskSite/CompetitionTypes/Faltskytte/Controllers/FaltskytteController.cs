@@ -472,7 +472,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         }
 
         [HttpGet]
-        public async Task<IActionResult> GetFaltskytteResults(int competitionId, string? mergeConfig = null)
+        public async Task<IActionResult> GetFaltskytteResults(int competitionId, string? mergeConfig = null, bool subCompetitionOnly = false)
         {
             try
             {
@@ -542,6 +542,15 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                         };
                     }).ToList();
 
+                // Filter for sub-competition if requested
+                if (subCompetitionOnly)
+                {
+                    var registrations = await _startListRepository.GetCompetitionRegistrations(competitionId);
+                    var subCompMemberIds = new HashSet<int>(
+                        registrations.Where(r => r.IsSubCompetition).Select(r => r.MemberId));
+                    shooterResults = shooterResults.Where(s => subCompMemberIds.Contains(s.MemberId)).ToList();
+                }
+
                 // Build merge lookup from config (if provided)
                 var mergeLookup = new Dictionary<string, string>(); // source class → combined group name
                 if (string.IsNullOrEmpty(mergeConfig))
@@ -581,11 +590,14 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                     .OrderBy(g => GetClassSortOrder(g.ClassName))
                     .ToList();
 
-                // Calculate standard medals
-                var medalService = new Services.FaltskytteStandardMedalService();
-                var scope = competition.GetValue<string>("competitionScope") ?? "";
-                var isChampionship = scope == "Svenskt Mästerskap" || scope == "Landsdelsmästerskap";
-                medalService.CalculateStandardMedals(shooterResults, scoringMode, stationCount, isChampionship);
+                // Calculate standard medals (not for sub-competitions)
+                if (!subCompetitionOnly)
+                {
+                    var medalService = new Services.FaltskytteStandardMedalService();
+                    var scope = competition.GetValue<string>("competitionScope") ?? "";
+                    var isChampionship = scope == "Svenskt Mästerskap" || scope == "Landsdelsmästerskap";
+                    medalService.CalculateStandardMedals(shooterResults, scoringMode, stationCount, isChampionship);
+                }
 
                 return Json(new
                 {

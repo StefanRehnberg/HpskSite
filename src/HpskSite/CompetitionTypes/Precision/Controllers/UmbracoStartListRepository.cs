@@ -154,7 +154,8 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                             MemberClass = classEntry.Class,
                             MemberClub = clubName,
                             RegistrationDate = registrationDate,
-                            IsActive = true
+                            IsActive = true,
+                            IsSubCompetition = content.HasProperty("isSubCompetition") && content.GetValue<bool>("isSubCompetition")
                         });
 
                         _logger.LogDebug($"Added registration: {memberName} ({classEntry.Class}) from {clubName}");

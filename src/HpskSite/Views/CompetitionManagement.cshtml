@@ -494,6 +494,7 @@
                     var resultsViewData = new ViewDataDictionary(ViewData);
                     resultsViewData["CompetitionId"] = competitionId;
                     resultsViewData["CompetitionName"] = competition?.Value<string>("competitionName") ?? "Tävling";
+                    resultsViewData["SubCompetitionName"] = competition?.HasProperty("subCompetitionName") == true ? competition.Value<string>("subCompetitionName") ?? "" : "";
                     // NumberOfSeriesOrStations is already in ViewData from line 39
                 }
                 @if ((ViewData["CompetitionType"]?.ToString() ?? "Precision") == "Springskytte")

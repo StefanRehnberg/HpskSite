@@ -1475,7 +1475,8 @@ window.CompetitionConfig = {
     },
     clubs: @Html.Raw(allClubsJson),
     competitionType: '@competitionTypeStr',
-    rollingStart: @(rsConfig != null ? Html.Raw(rsJson) : Html.Raw("null"))
+    rollingStart: @(rsConfig != null ? Html.Raw(rsJson) : Html.Raw("null")),
+    subCompetitionName: '@Html.Raw(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(Model.HasProperty("subCompetitionName") ? Model.Value<string>("subCompetitionName") ?? "" : ""))'
 };
 
 // Show success/error messages from server

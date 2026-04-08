@@ -132,7 +132,8 @@ namespace HpskSite.Controllers
                     patrolSize = content.GetValue<int>("patrolSize"),
                     patrolIntervalMinutes = content.GetValue<int>("patrolIntervalMinutes"),
                     maxReshoots = content.GetValue<int>("maxReshoots"),
-                    rollingStart = content.HasProperty("rollingStart") ? content.GetValue<string>("rollingStart") ?? "" : ""
+                    rollingStart = content.HasProperty("rollingStart") ? content.GetValue<string>("rollingStart") ?? "" : "",
+                    subCompetitionName = content.HasProperty("subCompetitionName") ? content.GetValue<string>("subCompetitionName") ?? "" : ""
                 };
 
                 Console.WriteLine($"Returning competition data for: {content.Name}");

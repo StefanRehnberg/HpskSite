@@ -12,6 +12,7 @@ namespace HpskSite.Models.ViewModels.Competition
         public int? StartNumber { get; set; }
         public string? Notes { get; set; }
         public bool IsActive { get; set; } = true;
+        public bool IsSubCompetition { get; set; }
 
         public override string ToString()
         {

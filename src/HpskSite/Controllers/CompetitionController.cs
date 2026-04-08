@@ -64,7 +64,7 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> RegisterForCompetition(int competitionId,
             string selectedClasses = "", string startPreference = "Inget", int? targetMemberId = null,
-            string startPreferencesJson = "")
+            string startPreferencesJson = "", bool isSubCompetition = false)
         {
             try
             {
@@ -398,6 +398,8 @@ namespace HpskSite.Controllers
                 registration.SetValue("shootingClasses", shootingClassesJson);
                 registration.SetValue("registrationDate", DateTime.Now); // Update to current timestamp
                 registration.SetValue("registeredBy", currentMemberData.Name); // Track who performed the registration/update
+                if (registration.HasProperty("isSubCompetition"))
+                    registration.SetValue("isSubCompetition", isSubCompetition);
 
                 // Save content — the DB transaction commits before notifications fire,
                 // so even if DocumentUrlService times out, the data IS persisted.
