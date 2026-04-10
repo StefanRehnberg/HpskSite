@@ -1,3 +1,4 @@
+using System.Globalization;
 using HpskSite.Services.AiChat;
 using Microsoft.AspNetCore.Mvc;
 using Umbraco.Cms.Core.Cache;
@@ -16,6 +17,8 @@ namespace HpskSite.Controllers
         private readonly AiChatService _chatService;
         private readonly IMemberManager _memberManager;
         private readonly IMemberService _memberService;
+        private readonly IWebHostEnvironment _env;
+
         public AiChatController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory databaseFactory,
@@ -25,12 +28,14 @@ namespace HpskSite.Controllers
             IPublishedUrlProvider publishedUrlProvider,
             AiChatService chatService,
             IMemberManager memberManager,
-            IMemberService memberService)
+            IMemberService memberService,
+            IWebHostEnvironment env)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _chatService = chatService;
             _memberManager = memberManager;
             _memberService = memberService;
+            _env = env;
         }
 
         [HttpPost]
@@ -56,6 +61,8 @@ namespace HpskSite.Controllers
 
                 var response = await _chatService.GetResponseAsync(request.Message, history, roles);
 
+                LogChat(currentMember.Email ?? currentMember.UserName ?? "unknown", request.Message, response);
+
                 return Json(new { success = true, response });
             }
             catch (Exception ex)
@@ -76,6 +83,22 @@ namespace HpskSite.Controllers
                 loggedIn = true;
 
             return Json(new { enabled, loggedIn });
+        }
+
+        private void LogChat(string user, string question, string answer)
+        {
+            try
+            {
+                var logDir = Path.Combine(_env.ContentRootPath, "App_Data", "AiChatLogs");
+                Directory.CreateDirectory(logDir);
+
+                var logFile = Path.Combine(logDir, $"chat-{DateTime.UtcNow:yyyy-MM}.log");
+                var timestamp = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+                var entry = $"[{timestamp}] {user}\nQ: {question}\nA: {answer}\n---\n";
+
+                System.IO.File.AppendAllText(logFile, entry);
+            }
+            catch { /* don't let logging break the chat */ }
         }
 
         private List<string> GetUserRoles(MemberIdentityUser member)
