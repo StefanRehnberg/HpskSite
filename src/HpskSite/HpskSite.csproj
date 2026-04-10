@@ -40,6 +40,11 @@
     <None Remove="Swish Logo.png" />
   </ItemGroup>
 
+  <!-- Include knowledge base docs in published output -->
+  <ItemGroup>
+    <Content Include="KnowledgeBase\**\*.md" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <ItemGroup>
     <Content Include="Properties\wwwroot\css\site.css" />
     <Content Include="Properties\wwwroot\favicon.ico" />

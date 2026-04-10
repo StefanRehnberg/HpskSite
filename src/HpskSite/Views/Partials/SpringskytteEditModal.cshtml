@@ -1,3 +1,7 @@
+@inject HpskSite.Services.AdminAuthorizationService SpringEditAuthService
+@{
+    var springEditIsSiteAdmin = await SpringEditAuthService.IsCurrentUserAdminAsync();
+}
 @*
  * Springskytte Competition Edit Modal
  * Replaces CompetitionEditModal for Springskytte competitions.
@@ -40,6 +44,13 @@
                             <option value="Klubbmasterskap">Klubbmasterskap</option>
                         </select>
                         <small class="form-text text-muted">Avgor hur standardmedaljer beraknas</small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="springEdit_subCompetitionName" class="form-label">Deltävling i tävlingen (valfritt)</label>
+                        <input type="text" class="form-control" id="springEdit_subCompetitionName" name="subCompetitionName"
+                               placeholder="T.ex. Svenska Polismästerskapet 2026" autocomplete="off" data-1p-ignore="true">
+                        <small class="form-text text-muted">Om ifyllt visas en kryssruta vid anmälan.</small>
                     </div>
 
                     <div class="mb-3">
@@ -277,31 +288,24 @@
                         </div>
                     </div>
 
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="springEdit_isClubOnly" name="isClubOnly">
-                                    <label class="form-check-label" for="springEdit_isClubOnly">
-                                        <i class="bi bi-shield-check me-1"></i>Endast for specifik klubb
-                                    </label>
-                                </div>
-                                <small class="form-text text-muted d-block mt-1">Begransa denna tavling till medlemmar fran en specifik klubb</small>
-                            </div>
-                        </div>
-                    </div>
-
                     <!-- Organizer Section -->
                     <div class="card mb-3 border-info">
                         <div class="card-header bg-info bg-opacity-10">
-                            <i class="bi bi-building me-1"></i>Arrangor / Synlighet
+                            <i class="bi bi-building me-1"></i>Arrangör / Synlighet
                         </div>
                         <div class="card-body">
                             <p class="text-muted small mb-3">
-                                Valj <strong>klubb</strong> om tavlingen arrangeras av en specifik klubb.
-                                Valj <strong>krets</strong> om tavlingen arrangeras av en krets.
-                                Lamna bada tomma for nationella tavlingar.
+                                Välj <strong>klubb</strong> om tävlingen arrangeras av en specifik klubb.
+                                Välj <strong>krets</strong> om tävlingen arrangeras av en krets.
+                                Lämna båda tomma för nationella tävlingar.
                             </p>
+                            <div class="form-check mb-3">
+                                <input class="form-check-input" type="checkbox" id="springEdit_isClubOnly" name="isClubOnly">
+                                <label class="form-check-label" for="springEdit_isClubOnly">
+                                    <i class="bi bi-shield-check me-1"></i>Endast för specifik klubb
+                                </label>
+                                <small class="form-text text-muted d-block mt-1">Begränsa denna tävling till medlemmar från en specifik klubb</small>
+                            </div>
                             <div class="row">
                                 <div class="col-md-6">
                                     <div class="mb-3">
@@ -369,14 +373,17 @@
                         <input type="text" class="form-control" id="springEdit_swishNumber" name="swishNumber" placeholder="1123456789">
                     </div>
 
+                    @if (springEditIsSiteAdmin)
+                    {
                     <div class="mb-3">
                         <div class="form-check">
                             <input class="form-check-input" type="checkbox" id="springEdit_addToMenu" name="addToMenu">
                             <label class="form-check-label" for="springEdit_addToMenu">
-                                Lagg till genvag till tavlingen i menyn
+                                Lägg till genväg till tävlingen i menyn
                             </label>
                         </div>
                     </div>
+                    }
                 </form>
 
                 <div id="springEditFormErrors" class="alert alert-danger d-none mb-0 mt-3" role="alert">
@@ -559,6 +566,7 @@ window.populateSpringEditModal = function(comp) {
     setCheck('springEdit_isAwardingStandardMedals', comp.isAwardingStandardMedals);
     setCheck('springEdit_addToMenu', comp.addToMenu);
     setCheck('springEdit_isClubOnly', comp.isClubOnly);
+    setVal('springEdit_subCompetitionName', comp.subCompetitionName || '');
 
     // Managers
     const managerIds = Array.isArray(comp.competitionManagers) ? comp.competitionManagers : [];

@@ -1,7 +1,10 @@
-# Claude Development Notes - HPSK Site
+# Claude Development Notes - pistol.nu
 
 ## Project Overview
-Umbraco v16.2 project for HPSK shooting club featuring member management, club administration, training system (Skyttetrappan), and competition management.
+Umbraco v16.2 project for pistol.nu (formerly HPSK) featuring member management, club administration, training system (Skyttetrappan), and competition management.
+
+## Knowledge Base Maintenance
+When making changes to **user-facing features** (views, controllers that affect UI/workflows, button labels, new features, removed features), check if the knowledge base at `src/HpskSite/KnowledgeBase/docs/` needs to be updated. The knowledge base is used by an AI chat assistant on the site to help users. Each doc has a `roles` frontmatter tag — update the role list if access control changes.
 
 ## Core Architecture Principles
 

@@ -1,0 +1,109 @@
+---
+title: Sajtadministratör - Fullständig systemhantering
+roles: [admin]
+features: [competition-crud, series-management, user-management, invoices, statistics, clubs, regions]
+---
+
+# Sajtadministration
+
+Som sajtadministratör har du tillgång till alla funktioner på pistol.nu, inklusive systemövergripande administration.
+
+## Adminpanelen
+
+Gå till **Admin** i menyn. Panelen har följande flikar:
+
+- **Tävlingar** — skapa, redigera, kopiera, ta bort tävlingar
+- **Serier** — hantera tävlingsserier
+- **Användare** — medlemshantering
+- **Klubbar** — klubbadministration
+- **Fakturor** — betalningshantering
+- **Kretsar** — regional administration (bara sajtadmin)
+- **Statistik** — systemstatistik (bara sajtadmin)
+- **Figurkatalog** — figurhantering för fältskytte
+
+Kretsadmins har också tillgång till adminpanelen men ser bara data från sin region och saknar Kretsar- och Statistik-flikarna.
+
+## Tävlingshantering
+
+### Skapa tävling
+1. Klicka **"Skapa tävling"** — öppnar tävlingsguiden
+2. Fyll i steg för steg:
+   - **Grundinfo** — namn, typ, datum, plats, klubb
+   - **Skytteklasser** — vilka klasser som är tillgängliga
+   - **Anmälan** — öppnings-/stängningsdatum, maxantal deltagare
+   - **Avgift** — belopp och Swish-konfiguration (om tillämpligt)
+   - **Serier** — antal omgångar
+   - **Finaler** — aktivera/avaktivera
+   - **Kontaktinfo** — tävlingsledare, e-post, telefon
+   - **Tävlingsledare** — tilldela ansvariga medlemmar
+3. Klicka **"Skapa"**
+
+### Redigera och kopiera tävlingar
+- Öppna en befintlig tävling och klicka **"Redigera"**
+- Kopiera en tävling som mall (datum justeras +1 år)
+
+## Seriehantering
+
+Serier är en samling tävlingar som räknas ihop (t.ex. Hallandsserien):
+1. **Skapa serie** — namn, säsong, beskrivning
+2. **Lägg till tävlingar** i serien
+3. **Konfigurera poängberäkning** — hur resultat från deltävlingar räknas ihop
+4. **Publicera serieställning**
+
+Du kan kopiera serier från föregående år som mall.
+
+## Användarhantering
+
+Under fliken **Användare**:
+- **Sök** bland alla medlemmar (namn, e-post)
+- **Godkänn/Avslå** väntande registreringar
+- **Redigera** medlemsinformation
+- **Tilldela roller:**
+  - Kretsadmin — via rolldialogen
+  - Klubbadmin — via rolldialogen
+  - (Skjutledare tilldelas via klubbens Admin-panel, inte härifrån)
+- **Lås upp** konton (konton låses automatiskt efter misslyckade inloggningar — det finns ingen manuell låsningsfunktion)
+- **Ta bort** medlemmar
+- **Exportera** medlemsdata (CSV)
+- **Bjud in** nya medlemmar via e-post — mottagaren får en länk för att aktivera sitt konto
+
+Godkännandemail till klubbadmins innehåller en **"Godkänn direkt"**-länk för snabb godkänning utan att logga in.
+
+## Klubbhantering
+
+Under fliken **Klubbar**:
+- Se alla klubbar i systemet
+- Skapa nya klubbar
+- Redigera klubbinformation
+- Tilldela klubbadministratörer
+- Verifiera och granska klubbdata
+
+## Fakturahantering
+
+Under fliken **Fakturor**:
+- Se alla utställda fakturor för tävlingsanmälningar
+- Filtrera på betalningsstatus, tävling, klubb, region, datum
+- **Markera som betald** när betalning inkommit
+- **Makulera** fakturor
+- **Skicka om** faktura-e-post med Swish QR-kod
+- **Generera ny QR-kod** för en faktura
+
+## Kretshantering
+
+Under fliken **Kretsar** (bara sajtadmin):
+- Hantera regionala förbund
+- Tilldela kretsadministratörer
+
+## Statistik
+
+Under fliken **Statistik** (bara sajtadmin):
+- **Antal medlemmar**, nya medlemmar denna månad
+- **Aktiva klubbar** och klubbar med senaste aktivitet
+- **Tävlingsstatistik** — antal tävlingar i år, fördelning per disciplin
+- **Träningsmatcher** — totalt och senaste 30 dagarna
+- **Diagram:**
+  - Nya medlemmar per månad
+  - Medlemmar per krets
+  - Medlemmar per klubb
+  - Registreringstrend
+  - Aktiva/inaktiva medlemmar

@@ -1361,7 +1361,8 @@
 			{ "RegClubName", regClubName },
 			{ "AllClubsJson", allClubsJson },
 			{ "HasSwish", !string.IsNullOrWhiteSpace(Model.Value<string>("swishNumber")) && decimal.TryParse(registrationFee, out var _springFee) && _springFee > 0 },
-			{ "RegistrationFee", decimal.TryParse(registrationFee, out var _springFeeVal) ? _springFeeVal : 0m }
+			{ "RegistrationFee", decimal.TryParse(registrationFee, out var _springFeeVal) ? _springFeeVal : 0m },
+			{ "SubCompetitionName", Model.HasProperty("subCompetitionName") ? Model.Value<string>("subCompetitionName") ?? "" : "" }
 		})
 	}
 	else

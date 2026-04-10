@@ -175,6 +175,22 @@
 
                 </div><!-- /springRegFormBody -->
 
+                <!-- Sub-competition checkbox -->
+                @{
+                    var springSubCompName = ViewData["SubCompetitionName"]?.ToString() ?? "";
+                }
+                @if (!string.IsNullOrEmpty(springSubCompName))
+                {
+                <div class="mb-3 p-3 rounded border" style="background-color: var(--bs-info-bg-subtle);">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="springRegSubCompetition">
+                        <label class="form-check-label" for="springRegSubCompetition">
+                            Jag anmäler mig även till <strong>@springSubCompName</strong>
+                        </label>
+                    </div>
+                </div>
+                }
+
                 <!-- Error message -->
                 <div id="springRegError" class="alert alert-danger" style="display: none;"></div>
                 <div id="springRegSuccess" style="display: none;"></div>
@@ -402,6 +418,12 @@ async function springRegSubmit() {
         // Pass target member if registering someone else
         if (springRegSelectedTargetMemberId && springRegSelectedTargetMemberId !== springRegConfig.memberId) {
             formData.append('targetMemberId', springRegSelectedTargetMemberId);
+        }
+
+        // Pass sub-competition flag
+        var subCompCheck = document.getElementById('springRegSubCompetition');
+        if (subCompCheck && subCompCheck.checked) {
+            formData.append('isSubCompetition', 'true');
         }
 
         const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value;

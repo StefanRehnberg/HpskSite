@@ -131,7 +131,7 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
     <link href="~/css/theme.css" rel="stylesheet" asp-append-version="true">
-    <link href="~/css/tutorial.css" rel="stylesheet" asp-append-version="true">
+    <link href="~/css/chat-widget.css" rel="stylesheet" asp-append-version="true">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.4/jquery.min.js"></script>
     <style>
         .navbar-brand { font-weight: bold; font-size: 1.5rem; }
@@ -634,9 +634,6 @@
     </header>
 
     <main class="container mt-4">
-        <!-- Tutorial Icon & Banner (Auto-detected per page) -->
-        @await Html.PartialAsync("TutorialHelpers")
-
         @RenderBody()
     </main>
 
@@ -924,11 +921,7 @@
     })();
     </script>
 
-    <!-- Tutorial System JavaScript -->
-    <script src="~/js/tutorialHelper.js" asp-append-version="true"></script>
-
-    <!-- Tutorial Modal Partial -->
-    @await Html.PartialAsync("TutorialModal")
+    <!-- Tutorial Modal Partial (video page only, not global) -->
 
     <!-- Cookie Consent Banner -->
     <div id="cookieConsentBanner" class="position-fixed bottom-0 start-0 end-0 p-3 bg-dark text-white"
@@ -957,5 +950,8 @@
         document.getElementById('cookieConsentBanner').style.display = 'none';
     }
     </script>
+
+    <!-- AI Chat Widget -->
+    <script src="~/js/chat-widget.js" asp-append-version="true"></script>
 </body>
 </html>
