@@ -467,6 +467,81 @@
             </div>
         </div>
 
+        <!-- Section H: AI Chat -->
+        <h5 class="mt-4 mb-3"><i class="bi bi-chat-dots me-2"></i>AI-Chatt</h5>
+        <div class="row g-3 mb-3">
+            <div class="col-md-3">
+                <div class="card h-100">
+                    <div class="card-body text-center py-3">
+                        <small class="text-muted">Meddelanden totalt</small>
+                        <h3 class="mb-0" id="statAiChatTotal">—</h3>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card h-100">
+                    <div class="card-body text-center py-3">
+                        <small class="text-muted">Senaste 30 dagarna</small>
+                        <h3 class="mb-0" id="statAiChat30d">—</h3>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card h-100">
+                    <div class="card-body text-center py-3">
+                        <small class="text-muted">Unika användare</small>
+                        <h3 class="mb-0" id="statAiChatUsers">—</h3>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card h-100">
+                    <div class="card-body text-center py-3">
+                        <small class="text-muted">Unika (30d)</small>
+                        <h3 class="mb-0" id="statAiChatUsers30d">—</h3>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="row g-3 mb-3">
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">Meddelanden per månad</h6>
+                        <div style="position:relative;height:220px">
+                            <canvas id="chartAiChatPerMonth"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">Mest aktiva användare</h6>
+                        <table class="table table-sm mb-0">
+                            <thead><tr><th>Användare</th><th class="text-end">Frågor</th></tr></thead>
+                            <tbody id="aiChatTopUsersBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="row g-3 mb-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-body">
+                        <h6 class="card-title">Senaste frågor</h6>
+                        <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                            <table class="table table-sm table-hover mb-0">
+                                <thead><tr><th style="width:130px">Tid</th><th style="width:180px">Användare</th><th>Fråga</th><th>Svar (utdrag)</th></tr></thead>
+                                <tbody id="aiChatRecentBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
     </div>
 </div>
 
@@ -947,6 +1022,66 @@
                 }).join('');
             } else {
                 tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Inga dokument uppladdade</td></tr>';
+            }
+        }
+
+        // Section H: AI Chat
+        if (d.aiChat) {
+            document.getElementById('statAiChatTotal').textContent = d.aiChat.totalMessages;
+            document.getElementById('statAiChat30d').textContent = d.aiChat.messages30d;
+            document.getElementById('statAiChatUsers').textContent = d.aiChat.uniqueUsers;
+            document.getElementById('statAiChatUsers30d').textContent = d.aiChat.uniqueUsers30d;
+
+            // Messages per month chart
+            if (d.aiChat.perMonth && d.aiChat.perMonth.length > 0) {
+                destroyChart('chartAiChatPerMonth');
+                chartInstances['chartAiChatPerMonth'] = new Chart(
+                    document.getElementById('chartAiChatPerMonth'),
+                    {
+                        type: 'bar',
+                        data: {
+                            labels: d.aiChat.perMonth.map(function (m) { return formatMonth(m.month); }),
+                            datasets: [{
+                                label: 'Meddelanden',
+                                data: d.aiChat.perMonth.map(function (m) { return m.count; }),
+                                backgroundColor: colors.primary
+                            }]
+                        },
+                        options: {
+                            responsive: true, maintainAspectRatio: false,
+                            plugins: { legend: { display: false } },
+                            scales: {
+                                y: { beginAtZero: true, ticks: { precision: 0, color: colors.text }, grid: { color: colors.grid } },
+                                x: { ticks: { color: colors.text }, grid: { display: false } }
+                            }
+                        }
+                    }
+                );
+            }
+
+            // Top users table
+            var topBody = document.getElementById('aiChatTopUsersBody');
+            topBody.innerHTML = '';
+            if (d.aiChat.topUsers) {
+                d.aiChat.topUsers.forEach(function (u) {
+                    var tr = document.createElement('tr');
+                    tr.innerHTML = '<td>' + u.user + '</td><td class="text-end">' + u.count + '</td>';
+                    topBody.appendChild(tr);
+                });
+            }
+
+            // Recent questions table
+            var recentBody = document.getElementById('aiChatRecentBody');
+            recentBody.innerHTML = '';
+            if (d.aiChat.recentEntries) {
+                d.aiChat.recentEntries.forEach(function (e) {
+                    var tr = document.createElement('tr');
+                    tr.innerHTML = '<td><small class="text-muted">' + e.timestamp + '</small></td>'
+                        + '<td><small>' + e.user + '</small></td>'
+                        + '<td>' + e.question + '</td>'
+                        + '<td><small class="text-muted">' + e.answer + '</small></td>';
+                    recentBody.appendChild(tr);
+                });
             }
         }
 

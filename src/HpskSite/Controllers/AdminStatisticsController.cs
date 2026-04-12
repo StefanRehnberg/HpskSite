@@ -1,3 +1,6 @@
+using System.Globalization;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Caching.Memory;
 using Umbraco.Cms.Core.Cache;
@@ -10,7 +13,6 @@ using Umbraco.Cms.Web.Website.Controllers;
 using Umbraco.Extensions;
 using HpskSite.Services;
 using HpskSite.Models;
-using System.Text.Json;
 
 namespace HpskSite.Controllers
 {
@@ -24,6 +26,7 @@ namespace HpskSite.Controllers
         private readonly ILogger<AdminStatisticsController> _logger;
         private readonly DocumentService _documentService;
         private readonly IConfiguration _configuration;
+        private readonly IWebHostEnvironment _env;
 
         private const string CacheKey = "admin_statistics";
         private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(10);
@@ -40,7 +43,8 @@ namespace HpskSite.Controllers
             IMemoryCache memoryCache,
             ILogger<AdminStatisticsController> logger,
             DocumentService documentService,
-            IConfiguration configuration)
+            IConfiguration configuration,
+            IWebHostEnvironment env)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _memberService = memberService;
@@ -51,6 +55,7 @@ namespace HpskSite.Controllers
             _logger = logger;
             _documentService = documentService;
             _configuration = configuration;
+            _env = env;
         }
 
         [HttpGet]
@@ -733,7 +738,8 @@ namespace HpskSite.Controllers
                             totalDiskPercentage,
                             clubStorage = clubStorageList,
                             regionStorage = regionStorageList
-                        }
+                        },
+                        aiChat = BuildAiChatStats()
                     };
                 }
             }
@@ -797,8 +803,101 @@ namespace HpskSite.Controllers
                     totalDiskPercentage = 0.0,
                     clubStorage = new List<object>(),
                     regionStorage = new List<object>()
-                }
+                },
+                aiChat = BuildAiChatStats()
             };
+        }
+
+        private object BuildAiChatStats()
+        {
+            var entries = ParseChatLogs();
+            var now = DateTime.UtcNow;
+            var thirtyDaysAgo = now.AddDays(-30);
+
+            var totalMessages = entries.Count;
+            var messages30d = entries.Count(e => e.Timestamp >= thirtyDaysAgo);
+            var uniqueUsers = entries.Select(e => e.User).Distinct().Count();
+            var uniqueUsers30d = entries.Where(e => e.Timestamp >= thirtyDaysAgo).Select(e => e.User).Distinct().Count();
+
+            var perMonth = entries
+                .GroupBy(e => e.Timestamp.ToString("yyyy-MM"))
+                .OrderBy(g => g.Key)
+                .Select(g => new { month = g.Key, count = g.Count() })
+                .ToList();
+
+            var topUsers = entries
+                .GroupBy(e => e.User)
+                .OrderByDescending(g => g.Count())
+                .Take(10)
+                .Select(g => new { user = g.Key, count = g.Count() })
+                .ToList();
+
+            var recentEntries = entries
+                .OrderByDescending(e => e.Timestamp)
+                .Take(50)
+                .Select(e => new { timestamp = e.Timestamp.ToString("yyyy-MM-dd HH:mm"), user = e.User, question = e.Question, answer = Truncate(e.Answer, 200) })
+                .ToList();
+
+            return new { totalMessages, messages30d, uniqueUsers, uniqueUsers30d, perMonth, topUsers, recentEntries };
+        }
+
+        private List<ChatLogEntry> ParseChatLogs()
+        {
+            var entries = new List<ChatLogEntry>();
+            var logDirs = new[]
+            {
+                Path.Combine(_env.ContentRootPath, "App_Data", "AiChatLogs"),
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "App_Data", "AiChatLogs"),
+            };
+
+            var logDir = logDirs.FirstOrDefault(Directory.Exists);
+            if (logDir == null) return entries;
+
+            foreach (var file in Directory.GetFiles(logDir, "chat-*.log"))
+            {
+                try
+                {
+                    var content = System.IO.File.ReadAllText(file);
+                    var blocks = content.Split("\n---\n", StringSplitOptions.RemoveEmptyEntries);
+
+                    foreach (var block in blocks)
+                    {
+                        var lines = block.Trim().Split('\n');
+                        if (lines.Length < 3) continue;
+
+                        // Parse: [2026-04-10 14:32:15] user@example.com
+                        var headerMatch = Regex.Match(lines[0], @"\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]\s+(.+)");
+                        if (!headerMatch.Success) continue;
+
+                        if (!DateTime.TryParseExact(headerMatch.Groups[1].Value, "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture, DateTimeStyles.None, out var timestamp))
+                            continue;
+
+                        var user = headerMatch.Groups[2].Value.Trim();
+                        var question = lines.Length > 1 && lines[1].StartsWith("Q: ") ? lines[1].Substring(3) : "";
+                        var answerLines = lines.Skip(2).Where(l => l.StartsWith("A: ") || !l.StartsWith("Q: ")).ToList();
+                        var answer = string.Join(" ", answerLines).Replace("A: ", "");
+
+                        entries.Add(new ChatLogEntry { Timestamp = timestamp, User = user, Question = question, Answer = answer });
+                    }
+                }
+                catch { }
+            }
+
+            return entries;
+        }
+
+        private static string Truncate(string text, int maxLength)
+        {
+            if (string.IsNullOrEmpty(text) || text.Length <= maxLength) return text;
+            return text.Substring(0, maxLength) + "...";
+        }
+
+        private class ChatLogEntry
+        {
+            public DateTime Timestamp { get; set; }
+            public string User { get; set; } = "";
+            public string Question { get; set; } = "";
+            public string Answer { get; set; } = "";
         }
     }
 }
