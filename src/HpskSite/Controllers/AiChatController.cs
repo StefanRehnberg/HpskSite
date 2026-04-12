@@ -89,8 +89,26 @@ namespace HpskSite.Controllers
         {
             try
             {
-                var logDir = Path.Combine(_env.ContentRootPath, "App_Data", "AiChatLogs");
-                Directory.CreateDirectory(logDir);
+                // Try multiple paths - shared hosting may have different root
+                var candidates = new[]
+                {
+                    Path.Combine(_env.ContentRootPath, "App_Data", "AiChatLogs"),
+                    Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "App_Data", "AiChatLogs"),
+                };
+
+                string? logDir = null;
+                foreach (var candidate in candidates)
+                {
+                    try
+                    {
+                        Directory.CreateDirectory(candidate);
+                        logDir = candidate;
+                        break;
+                    }
+                    catch { }
+                }
+
+                if (logDir == null) return;
 
                 var logFile = Path.Combine(logDir, $"chat-{DateTime.UtcNow:yyyy-MM}.log");
                 var timestamp = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
@@ -98,7 +116,7 @@ namespace HpskSite.Controllers
 
                 System.IO.File.AppendAllText(logFile, entry);
             }
-            catch { /* don't let logging break the chat */ }
+            catch { }
         }
 
         private List<string> GetUserRoles(MemberIdentityUser member)
