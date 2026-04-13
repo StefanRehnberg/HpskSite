@@ -783,8 +783,12 @@ namespace HpskSite.Controllers
                 }
 
                 var allMembersForClubList = _memberService.GetAll(0, int.MaxValue, out var totalRecords);
+                var clubIdStr = clubId.ToString();
                 var members = allMembersForClubList.Where(m => m.ContentType.Alias != ClubMemberTypeAlias)
-                    .Where(m => m.GetValue("primaryClubId")?.ToString() == clubId.ToString())
+                    .Where(m => m.GetValue("primaryClubId")?.ToString() == clubIdStr ||
+                        (m.GetValue("memberClubIds")?.ToString()?.Split(',')
+                            .Select(s => s.Trim())
+                            .Contains(clubIdStr) ?? false))
                     .Select(m => new
                     {
                         id = m.Id,
