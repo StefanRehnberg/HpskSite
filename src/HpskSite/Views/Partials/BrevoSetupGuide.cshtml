@@ -1,0 +1,80 @@
+@*
+ * Brevo Setup Guide - Step-by-step instructions for setting up a Brevo account.
+ * Shown as a modal triggered from the Brevo API key field.
+ *@
+
+<div class="modal fade" id="brevoSetupGuideModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-info text-white">
+                <h5 class="modal-title"><i class="bi bi-question-circle me-2"></i>Konfigurera Brevo e-postutskick</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Med en egen Brevo-nyckel kan din klubb skicka e-post direkt till medlemmar via pistol.nu. Brevo erbjuder gratis utskick till upp till 300 mottagare per dag.</p>
+
+                <div class="alert alert-info py-2 small">
+                    <i class="bi bi-info-circle me-1"></i>Utan Brevo-nyckel kan du fortfarande använda "Kopiera e-postadresser" och "Öppna i e-postklient" — detta kräver ingen konfiguration.
+                </div>
+
+                <h6 class="fw-bold mt-4">Steg 1: Skapa ett Brevo-konto</h6>
+                <ol>
+                    <li>Gå till <strong>brevo.com</strong> och klicka "Sign Up Free"</li>
+                    <li>Fyll i e-postadress och lösenord</li>
+                    <li>Välj det gratis kontot (Free plan — 300 mail/dag)</li>
+                    <li>Bekräfta din e-postadress via länken i bekräftelsemailet</li>
+                </ol>
+
+                <h6 class="fw-bold mt-4">Steg 2: Verifiera din avsändaradress</h6>
+                <ol>
+                    <li>Logga in på Brevo</li>
+                    <li>Gå till <strong>Settings</strong> (kugghjulet) &rarr; <strong>Senders, Domains & Dedicated IPs</strong></li>
+                    <li>Under <strong>Senders</strong>, klicka <strong>"Add a sender"</strong></li>
+                    <li>Ange klubbens namn och kontakt-e-postadress (samma som i klubbinställningarna på pistol.nu)</li>
+                    <li>Klicka <strong>"Save"</strong> och bekräfta via verifieringsmailet</li>
+                </ol>
+
+                <div class="alert alert-warning py-2 small">
+                    <i class="bi bi-exclamation-triangle me-1"></i><strong>Viktigt:</strong> Avsändaradressen i Brevo <strong>måste matcha</strong> klubbens kontakt-e-postadress i klubbinställningarna. Annars kommer mail inte att kunna skickas.
+                </div>
+
+                <h6 class="fw-bold mt-4">Steg 3: Skapa en API-nyckel</h6>
+                <ol>
+                    <li>Gå till <strong>Settings</strong> &rarr; <strong>SMTP & API</strong></li>
+                    <li>Klicka på fliken <strong>"API Keys"</strong></li>
+                    <li>Klicka <strong>"Generate a new API key"</strong></li>
+                    <li>Ge nyckeln ett namn (t.ex. "pistol.nu")</li>
+                    <li>Kopiera nyckeln — den visas bara en gång!</li>
+                </ol>
+
+                <h6 class="fw-bold mt-4">Steg 4: Klistra in nyckeln</h6>
+                <ol>
+                    <li>Gå tillbaka till klubbens <strong>Admin</strong> &rarr; <strong>Inställningar</strong></li>
+                    <li>Klistra in API-nyckeln i fältet <strong>"Brevo API-nyckel"</strong></li>
+                    <li>Klicka <strong>"Testa"</strong> för att verifiera att nyckeln fungerar</li>
+                    <li>Klicka <strong>"Spara Inställningar"</strong></li>
+                </ol>
+
+                <div class="alert alert-success py-2 small mt-3">
+                    <i class="bi bi-check-circle me-1"></i>Klart! Nu kan du använda knappen <strong>"Skicka via Brevo"</strong> i e-postmodalen under Medlemmar-fliken.
+                </div>
+
+                <h6 class="fw-bold mt-4">Begränsningar</h6>
+                <ul>
+                    <li><strong>300 mail per dag</strong> på gratisplanen (räcker för de flesta klubbar)</li>
+                    <li>E-post märks med "Sent with Brevo" i sidfoten</li>
+                    <li>Varje klubb behöver sitt eget Brevo-konto och API-nyckel</li>
+                </ul>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function showBrevoSetupGuide() {
+    new bootstrap.Modal(document.getElementById('brevoSetupGuideModal')).show();
+}
+</script>

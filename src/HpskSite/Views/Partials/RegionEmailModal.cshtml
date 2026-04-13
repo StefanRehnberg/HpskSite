@@ -1,0 +1,375 @@
+@*
+ * Region Email Modal - Send email to board members and club contacts.
+ * Standard: clipboard + mailto. Optional: Brevo API.
+ * Requires ViewBag: regionContentId (int)
+ *@
+
+@{
+    var emailRegionId = ViewBag.regionContentId as int? ?? 0;
+}
+
+<style>
+/* CKEditor dark mode */
+[data-bs-theme="dark"] #regionEmailModal .ck.ck-editor__main > .ck-editor__editable {
+    background-color: var(--bs-body-bg);
+    color: var(--bs-body-color);
+    border-color: var(--bs-border-color);
+}
+[data-bs-theme="dark"] #regionEmailModal .ck.ck-toolbar {
+    background-color: var(--bs-tertiary-bg);
+    border-color: var(--bs-border-color);
+}
+[data-bs-theme="dark"] #regionEmailModal .ck.ck-toolbar .ck-button {
+    color: var(--bs-body-color);
+}
+[data-bs-theme="dark"] #regionEmailModal .ck.ck-toolbar .ck-button:hover {
+    background-color: var(--bs-secondary-bg);
+}
+#regionEmailModal .ck-editor__editable {
+    min-height: 150px;
+}
+#regionEmailModal .ck-editor__editable img {
+    max-width: 100%;
+    height: auto;
+}
+/* Modal and recipient list dark mode */
+[data-bs-theme="dark"] #regionEmailModal .modal-content {
+    background-color: var(--bs-body-bg);
+    color: var(--bs-body-color);
+}
+[data-bs-theme="dark"] #regionEmailModal .table {
+    color: var(--bs-body-color);
+}
+[data-bs-theme="dark"] #regionEmailModal .table-hover > tbody > tr:hover {
+    background-color: var(--bs-tertiary-bg);
+}
+[data-bs-theme="dark"] #regionEmailModal .bg-light {
+    background-color: var(--bs-tertiary-bg) !important;
+    color: var(--bs-body-color);
+}
+</style>
+
+<div class="modal fade" id="regionEmailModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-info text-white">
+                <h5 class="modal-title"><i class="bi bi-envelope me-2"></i>Skicka mail</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <!-- Recipients -->
+                <div class="mb-3">
+                    <label class="form-label fw-semibold mb-2">Mottagare</label>
+                    <div id="regionEmailRecipientsList" style="max-height: 300px; overflow-y: auto; border: 1px solid var(--bs-border-color); border-radius: 0.375rem;">
+                        <div class="text-center py-3 text-muted">Laddar...</div>
+                    </div>
+                    <small class="text-muted" id="regionEmailRecipientCount"></small>
+                </div>
+
+                <!-- Subject -->
+                <div class="mb-3">
+                    <label class="form-label fw-semibold" for="regionEmailSubject">Ämne</label>
+                    <input type="text" class="form-control" id="regionEmailSubject" placeholder="Ämne för mailet">
+                </div>
+
+                <!-- Body (CKEditor) -->
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">Meddelande</label>
+                    <div id="regionEmailBodyEditor"></div>
+                </div>
+
+                <!-- Status -->
+                <div id="regionEmailStatus" class="d-none"></div>
+
+                <!-- Action buttons -->
+                <div class="d-flex flex-wrap gap-2">
+                    <button class="btn btn-outline-secondary" onclick="regionEmailCopyEmails()">
+                        <i class="bi bi-clipboard me-1"></i>Kopiera e-postadresser
+                    </button>
+                    <button class="btn btn-outline-primary" onclick="regionEmailOpenMailto()">
+                        <i class="bi bi-box-arrow-up-right me-1"></i>Öppna i e-postklient
+                    </button>
+                    <button class="btn btn-primary" id="regionEmailBrevoBtn" onclick="regionEmailSendViaBrevo()">
+                        <i class="bi bi-send me-1"></i>Skicka med Brevo
+                    </button>
+                </div>
+                <small class="text-muted d-block mt-2">
+                    <strong>Tips:</strong> "Kopiera e-postadresser" kopierar alla valda e-postadresser till urklipp.
+                    Klistra sedan in dem i BCC-fältet i din e-postklient.
+                    "Öppna i e-postklient" stöder inte HTML-formatering — använd Brevo för formaterade utskick.
+                </small>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function() {
+    const reRegionId = @emailRegionId;
+    let reHasBrevoKey = false;
+    let reEditor = null;
+
+    function initRegionCKEditor() {
+        if (reEditor) return;
+        const el = document.getElementById('regionEmailBodyEditor');
+        if (!el) return;
+
+        function RegionEmailImageUploadAdapter(editor) {
+            editor.plugins.get('FileRepository').createUploadAdapter = (loader) => {
+                return {
+                    upload() {
+                        return loader.file.then(file => {
+                            return new Promise((resolve, reject) => {
+                                const formData = new FormData();
+                                formData.append('upload', file);
+                                const token = document.querySelector('input[name="__RequestVerificationToken"]');
+                                fetch('/umbraco/surface/ImageUpload/Upload', {
+                                    method: 'POST',
+                                    headers: token ? { 'RequestVerificationToken': token.value } : {},
+                                    body: formData
+                                })
+                                .then(r => r.json())
+                                .then(data => {
+                                    if (data.error) reject(data.error.message);
+                                    else resolve({ default: data.url });
+                                })
+                                .catch(err => reject(err.message || 'Uppladdning misslyckades'));
+                            });
+                        });
+                    },
+                    abort() {}
+                };
+            };
+        }
+
+        ClassicEditor.create(el, {
+            extraPlugins: [RegionEmailImageUploadAdapter],
+            toolbar: [
+                'heading', '|',
+                'bold', 'italic', 'underline', '|',
+                'link', 'uploadImage', 'blockQuote', '|',
+                'bulletedList', 'numberedList', '|',
+                'undo', 'redo'
+            ],
+            language: 'sv'
+        })
+        .then(editor => { reEditor = editor; })
+        .catch(err => console.error('CKEditor init error:', err));
+    }
+
+    function getRegionEditorHtml() {
+        return reEditor ? reEditor.getData() : '';
+    }
+
+    function getRegionEditorPlainText() {
+        if (!reEditor) return '';
+        const tmp = document.createElement('div');
+        tmp.innerHTML = reEditor.getData();
+        return tmp.textContent || tmp.innerText || '';
+    }
+
+    window.showRegionEmailModal = function() {
+        const modal = new bootstrap.Modal(document.getElementById('regionEmailModal'));
+        modal.show();
+        loadRegionEmailRecipients();
+        document.getElementById('regionEmailSubject').value = '';
+        if (reEditor) reEditor.setData('');
+        document.getElementById('regionEmailStatus').classList.add('d-none');
+        setTimeout(initRegionCKEditor, 200);
+    };
+
+    function loadRegionEmailRecipients() {
+        const container = document.getElementById('regionEmailRecipientsList');
+        container.innerHTML = '<div class="text-center py-3 text-muted"><div class="spinner-border spinner-border-sm"></div> Laddar...</div>';
+
+        fetch(`/umbraco/surface/ClubEmail/GetRegionEmailRecipients?regionContentId=${reRegionId}`)
+            .then(r => r.json())
+            .then(data => {
+                if (!data.success) {
+                    container.innerHTML = '<div class="text-danger p-2">Kunde inte ladda mottagare.</div>';
+                    return;
+                }
+
+                reHasBrevoKey = data.hasBrevoKey;
+
+                const boardMembers = data.boardMembers || [];
+                const clubContacts = data.clubContacts || [];
+
+                if (boardMembers.length === 0 && clubContacts.length === 0) {
+                    container.innerHTML = '<div class="text-muted p-2">Inga mottagare tillgängliga.</div>';
+                    return;
+                }
+
+                let html = '';
+
+                if (boardMembers.length > 0) {
+                    html += `<div class="p-2 bg-light border-bottom">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <strong class="small"><i class="bi bi-award me-1"></i>Styrelsemedlemmar</strong>
+                            <div class="form-check form-check-inline mb-0">
+                                <input class="form-check-input" type="checkbox" id="reSelectAllBoard" checked onchange="toggleRegionGroup('board')">
+                                <label class="form-check-label small" for="reSelectAllBoard">Alla</label>
+                            </div>
+                        </div>
+                    </div>`;
+                    html += '<table class="table table-sm mb-0"><tbody>';
+                    boardMembers.forEach(m => {
+                        html += `<tr>
+                            <td style="width: 30px;"><input class="form-check-input re-cb re-board-cb" type="checkbox" data-email="${esc(m.email)}" data-name="${esc(m.name)}" checked onchange="updateRegionEmailCount()"></td>
+                            <td>${esc(m.name)} <span class="badge bg-primary">${esc(m.role)}</span></td>
+                            <td class="text-muted small">${esc(m.email)}</td>
+                        </tr>`;
+                    });
+                    html += '</tbody></table>';
+                }
+
+                if (clubContacts.length > 0) {
+                    html += `<div class="p-2 bg-light border-bottom border-top">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <strong class="small"><i class="bi bi-building me-1"></i>Klubbkontakter</strong>
+                            <div class="form-check form-check-inline mb-0">
+                                <input class="form-check-input" type="checkbox" id="reSelectAllClubs" checked onchange="toggleRegionGroup('club')">
+                                <label class="form-check-label small" for="reSelectAllClubs">Alla</label>
+                            </div>
+                        </div>
+                    </div>`;
+                    html += '<table class="table table-sm mb-0"><tbody>';
+                    clubContacts.forEach(c => {
+                        html += `<tr>
+                            <td style="width: 30px;"><input class="form-check-input re-cb re-club-cb" type="checkbox" data-email="${esc(c.email)}" data-name="${esc(c.clubName)}" checked onchange="updateRegionEmailCount()"></td>
+                            <td>${esc(c.clubName)}</td>
+                            <td class="text-muted small">${esc(c.email)}</td>
+                        </tr>`;
+                    });
+                    html += '</tbody></table>';
+                }
+
+                container.innerHTML = html;
+                updateRegionEmailCount();
+            })
+            .catch(() => {
+                container.innerHTML = '<div class="text-danger p-2">Fel vid laddning.</div>';
+            });
+    }
+
+    window.toggleRegionGroup = function(group) {
+        const selector = group === 'board' ? '.re-board-cb' : '.re-club-cb';
+        const toggle = group === 'board' ? document.getElementById('reSelectAllBoard') : document.getElementById('reSelectAllClubs');
+        document.querySelectorAll(selector).forEach(cb => cb.checked = toggle.checked);
+        updateRegionEmailCount();
+    };
+
+    window.updateRegionEmailCount = function() {
+        const checked = document.querySelectorAll('.re-cb:checked').length;
+        const total = document.querySelectorAll('.re-cb').length;
+        document.getElementById('regionEmailRecipientCount').textContent = `${checked} av ${total} valda`;
+    };
+
+    function getSelectedEmails() {
+        const selected = [];
+        document.querySelectorAll('.re-cb:checked').forEach(cb => {
+            selected.push({ email: cb.dataset.email, name: cb.dataset.name });
+        });
+        return selected;
+    }
+
+    window.regionEmailCopyEmails = function() {
+        const selected = getSelectedEmails();
+        if (selected.length === 0) { alert('Välj minst en mottagare'); return; }
+        const emails = selected.map(r => r.email).join('; ');
+        navigator.clipboard.writeText(emails).then(() => {
+            showReStatus('success', `${selected.length} e-postadresser kopierade till urklipp!`);
+        }).catch(() => {
+            const ta = document.createElement('textarea');
+            ta.value = emails;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+            showReStatus('success', `${selected.length} e-postadresser kopierade till urklipp!`);
+        });
+    };
+
+    window.regionEmailOpenMailto = function() {
+        const selected = getSelectedEmails();
+        if (selected.length === 0) { alert('Välj minst en mottagare'); return; }
+        const subject = document.getElementById('regionEmailSubject').value.trim();
+        const body = getRegionEditorPlainText();
+        const bcc = selected.map(r => r.email).join(',');
+        const mailtoUrl = `mailto:?bcc=${encodeURIComponent(bcc)}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+
+        if (mailtoUrl.length > 2000) {
+            navigator.clipboard.writeText(selected.map(r => r.email).join('; ')).catch(() => {});
+            showReStatus('warning', `${selected.length} mottagare — för många för mailto-länken. E-postadresserna har kopierats till urklipp. Klistra in dem i BCC-fältet.`);
+            window.location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+        } else {
+            window.location.href = mailtoUrl;
+        }
+    };
+
+    window.regionEmailSendViaBrevo = function() {
+        if (!reHasBrevoKey) {
+            showReStatus('info',
+                'Brevo är en gratis e-posttjänst som gör det möjligt att skicka formaterade mail med bilder direkt från pistol.nu. ' +
+                'För att aktivera, gå till Administration \u2192 Inställningar och ange din Brevo API-nyckel. ' +
+                'Klicka på "Hjälp med Brevo"-knappen där för en steg-för-steg-guide.');
+            return;
+        }
+
+        const selected = getSelectedEmails();
+        if (selected.length === 0) { alert('Välj minst en mottagare'); return; }
+        const subject = document.getElementById('regionEmailSubject').value.trim();
+        const htmlBody = getRegionEditorHtml();
+        if (!subject) { alert('Ange ett ämne'); return; }
+        if (!htmlBody) { alert('Skriv ett meddelande'); return; }
+        if (!confirm(`Skicka mail till ${selected.length} mottagare via Brevo?`)) return;
+
+        const btn = document.getElementById('regionEmailBrevoBtn');
+        const origText = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Skickar...';
+
+        const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+        const recipientEmails = selected.map(r => `${r.email}|${r.name}`).join(',');
+        const params = new URLSearchParams({
+            regionContentId: reRegionId,
+            subject: subject,
+            body: htmlBody,
+            recipientEmails: recipientEmails
+        });
+
+        fetch('/umbraco/surface/ClubEmail/SendRegionEmailViaBrevo', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'RequestVerificationToken': token },
+            body: params.toString()
+        })
+        .then(r => r.json())
+        .then(data => {
+            btn.disabled = false;
+            btn.innerHTML = origText;
+            showReStatus(data.success ? 'success' : 'danger', data.message || 'Fel');
+        })
+        .catch(() => {
+            btn.disabled = false;
+            btn.innerHTML = origText;
+            showReStatus('danger', 'Nätverksfel vid skickning');
+        });
+    };
+
+    function showReStatus(type, message) {
+        const el = document.getElementById('regionEmailStatus');
+        el.className = `alert alert-${type} py-2 small`;
+        el.textContent = message;
+        el.classList.remove('d-none');
+    }
+
+    function esc(str) {
+        if (!str) return '';
+        const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+        return str.toString().replace(/[&<>"']/g, m => map[m]);
+    }
+})();
+</script>

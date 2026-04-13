@@ -156,6 +156,9 @@
                     <button class="btn btn-outline-primary" onclick="showBoardRolesModal()">
                         <i class="bi bi-award me-2"></i>Roller
                     </button>
+                    <button class="btn btn-outline-info" onclick="showClubEmailModal()">
+                        <i class="bi bi-envelope me-2"></i>Skicka mail
+                    </button>
                     <button class="btn btn-success" onclick="showAddClubMemberModal()">
                         <i class="bi bi-person-plus-fill me-2"></i>Lägg till ny klubbmedlem
                     </button>
@@ -271,6 +274,32 @@
                             <label class="form-label">Utförlig Information (Om Klubben)</label>
                             <textarea class="form-control" id="aboutClub" name="aboutClub" rows="8" placeholder="Utförlig information om klubben, historia, verksamhet, etc. (kan innehålla HTML)"></textarea>
                             <small class="text-muted">Visas på klubbsidan under "Om Klubben". Stöder grundläggande HTML-formatering.</small>
+                        </div>
+
+                        <hr class="my-4">
+
+                        <!-- Brevo Email Integration -->
+                        <h6 class="text-muted mb-3">
+                            <i class="bi bi-envelope me-2"></i>E-postutskick (Brevo)
+                            <button type="button" class="btn btn-sm btn-outline-info ms-2" onclick="showBrevoSetupGuide()">
+                                <i class="bi bi-question-circle me-1"></i>Hjälp med Brevo
+                            </button>
+                        </h6>
+                        <div class="row">
+                            <div class="col-md-8 mb-3">
+                                <label class="form-label">Brevo API-nyckel <small class="text-muted">(valfritt)</small></label>
+                                <div class="input-group">
+                                    <input type="password" class="form-control" id="brevoApiKey" name="brevoApiKey" placeholder="xkeysib-..." autocomplete="off">
+                                    <button class="btn btn-outline-secondary" type="button" onclick="toggleBrevoKeyVisibility()">
+                                        <i class="bi bi-eye" id="brevoKeyToggleIcon"></i>
+                                    </button>
+                                    <button class="btn btn-outline-success" type="button" onclick="testBrevoApiKey()">
+                                        <i class="bi bi-check-circle me-1"></i>Testa
+                                    </button>
+                                </div>
+                                <small class="text-muted">Aktiverar "Skicka via Brevo" i e-postmodalen. Varje klubb använder sin egen Brevo-nyckel.</small>
+                                <div id="brevoKeyTestResult" class="mt-1 d-none"></div>
+                            </div>
                         </div>
 
                         <hr class="my-4">
@@ -561,6 +590,13 @@
     ViewBag.BoardOwnerId = clubId;
 }
 @await Html.PartialAsync("BoardRolesManagement")
+
+<!-- Club Email Modal -->
+@{
+    ViewBag.clubId = clubId;
+}
+@await Html.PartialAsync("ClubEmailModal")
+@await Html.PartialAsync("BrevoSetupGuide")
 
 <!-- Skjutledare Management Modal -->
 <div class="modal fade" id="skjutledareModal" tabindex="-1">
@@ -1411,6 +1447,10 @@ function loadClubSettings() {
                 } else {
                     document.getElementById('aboutClub').value = aboutClubContent;
                 }
+
+                // Brevo API key
+                var brevoField = document.getElementById('brevoApiKey');
+                if (brevoField) brevoField.value = data.data.brevoApiKey || '';
 
                 // Logo preview
                 if (data.data.logoUrl) {
@@ -3324,6 +3364,56 @@ async function removeClubTgMember(groupId, memberId, memberName) {
         console.error('Error removing member:', error);
         alert('Ett fel uppstod');
     }
+}
+
+// ========== BREVO API KEY ==========
+
+function toggleBrevoKeyVisibility() {
+    const input = document.getElementById('brevoApiKey');
+    const icon = document.getElementById('brevoKeyToggleIcon');
+    if (input.type === 'password') {
+        input.type = 'text';
+        icon.className = 'bi bi-eye-slash';
+    } else {
+        input.type = 'password';
+        icon.className = 'bi bi-eye';
+    }
+}
+
+function testBrevoApiKey() {
+    const apiKey = document.getElementById('brevoApiKey').value.trim();
+    const resultEl = document.getElementById('brevoKeyTestResult');
+    if (!apiKey) {
+        resultEl.className = 'mt-1 alert alert-warning py-1 small';
+        resultEl.textContent = 'Ange en API-nyckel först';
+        resultEl.classList.remove('d-none');
+        return;
+    }
+
+    resultEl.className = 'mt-1 text-muted small';
+    resultEl.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Testar...';
+    resultEl.classList.remove('d-none');
+
+    const token = getAntiForgeryToken();
+    fetch('/umbraco/surface/ClubEmail/TestBrevoApiKey', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'RequestVerificationToken': token },
+        body: `apiKey=${encodeURIComponent(apiKey)}`
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            resultEl.className = 'mt-1 alert alert-success py-1 small';
+            resultEl.textContent = data.message;
+        } else {
+            resultEl.className = 'mt-1 alert alert-danger py-1 small';
+            resultEl.textContent = data.message;
+        }
+    })
+    .catch(() => {
+        resultEl.className = 'mt-1 alert alert-danger py-1 small';
+        resultEl.textContent = 'Nätverksfel vid test';
+    });
 }
 
 // ========== SKJUTLEDARE MANAGEMENT ==========

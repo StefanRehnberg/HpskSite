@@ -1,0 +1,358 @@
+@*
+ * Club Email Modal - Send email to club members.
+ * Standard: clipboard + mailto. Optional: Brevo API.
+ * Requires ViewBag: clubId (int)
+ *@
+
+@{
+    var emailClubId = ViewBag.clubId as int? ?? 0;
+}
+
+<style>
+/* CKEditor dark mode */
+[data-bs-theme="dark"] #clubEmailModal .ck.ck-editor__main > .ck-editor__editable {
+    background-color: var(--bs-body-bg);
+    color: var(--bs-body-color);
+    border-color: var(--bs-border-color);
+}
+[data-bs-theme="dark"] #clubEmailModal .ck.ck-toolbar {
+    background-color: var(--bs-tertiary-bg);
+    border-color: var(--bs-border-color);
+}
+[data-bs-theme="dark"] #clubEmailModal .ck.ck-toolbar .ck-button {
+    color: var(--bs-body-color);
+}
+[data-bs-theme="dark"] #clubEmailModal .ck.ck-toolbar .ck-button:hover {
+    background-color: var(--bs-secondary-bg);
+}
+#clubEmailModal .ck-editor__editable {
+    min-height: 150px;
+}
+#clubEmailModal .ck-editor__editable img {
+    max-width: 100%;
+    height: auto;
+}
+/* Modal and recipient list dark mode */
+[data-bs-theme="dark"] #clubEmailModal .modal-content {
+    background-color: var(--bs-body-bg);
+    color: var(--bs-body-color);
+}
+[data-bs-theme="dark"] #clubEmailModal .table {
+    color: var(--bs-body-color);
+}
+[data-bs-theme="dark"] #clubEmailModal .table-hover > tbody > tr:hover {
+    background-color: var(--bs-tertiary-bg);
+}
+</style>
+
+<div class="modal fade" id="clubEmailModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-info text-white">
+                <h5 class="modal-title"><i class="bi bi-envelope me-2"></i>Skicka mail till medlemmar</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <!-- Recipients -->
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <label class="form-label fw-semibold mb-0">Mottagare</label>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="clubEmailSelectAll" checked onchange="toggleAllClubEmailRecipients()">
+                            <label class="form-check-label small" for="clubEmailSelectAll">Välj alla</label>
+                        </div>
+                    </div>
+                    <div id="clubEmailRecipientsList" style="max-height: 250px; overflow-y: auto; border: 1px solid var(--bs-border-color); border-radius: 0.375rem;">
+                        <div class="text-center py-3 text-muted">Laddar medlemmar...</div>
+                    </div>
+                    <small class="text-muted" id="clubEmailRecipientCount"></small>
+                </div>
+
+                <!-- Subject -->
+                <div class="mb-3">
+                    <label class="form-label fw-semibold" for="clubEmailSubject">Ämne</label>
+                    <input type="text" class="form-control" id="clubEmailSubject" placeholder="Ämne för mailet">
+                </div>
+
+                <!-- Body (CKEditor) -->
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">Meddelande</label>
+                    <div id="clubEmailBodyEditor"></div>
+                </div>
+
+                <!-- Status message -->
+                <div id="clubEmailStatus" class="d-none"></div>
+
+                <!-- Action buttons -->
+                <div class="d-flex flex-wrap gap-2">
+                    <button class="btn btn-outline-secondary" onclick="clubEmailCopyEmails()">
+                        <i class="bi bi-clipboard me-1"></i>Kopiera e-postadresser
+                    </button>
+                    <button class="btn btn-outline-primary" onclick="clubEmailOpenMailto()">
+                        <i class="bi bi-box-arrow-up-right me-1"></i>Öppna i e-postklient
+                    </button>
+                    <button class="btn btn-primary" id="clubEmailBrevoBtn" onclick="clubEmailSendViaBrevo()">
+                        <i class="bi bi-send me-1"></i>Skicka med Brevo
+                    </button>
+                </div>
+                <small class="text-muted d-block mt-2">
+                    <strong>Tips:</strong> "Kopiera e-postadresser" kopierar alla valda e-postadresser till urklipp.
+                    Klistra sedan in dem i BCC-fältet i din e-postklient.
+                    "Öppna i e-postklient" stöder inte HTML-formatering — använd Brevo för formaterade utskick.
+                </small>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function() {
+    const ceClubId = @emailClubId;
+    let ceRecipients = [];
+    let ceHasBrevoKey = false;
+    let ceClubName = '';
+    let ceContactEmail = '';
+    let ceEditor = null;
+
+    function initCKEditor() {
+        if (ceEditor) return;
+        const el = document.getElementById('clubEmailBodyEditor');
+        if (!el) return;
+
+        function EmailImageUploadAdapter(editor) {
+            editor.plugins.get('FileRepository').createUploadAdapter = (loader) => {
+                return {
+                    upload() {
+                        return loader.file.then(file => {
+                            return new Promise((resolve, reject) => {
+                                const formData = new FormData();
+                                formData.append('upload', file);
+                                const token = document.querySelector('input[name="__RequestVerificationToken"]');
+                                fetch('/umbraco/surface/ImageUpload/Upload', {
+                                    method: 'POST',
+                                    headers: token ? { 'RequestVerificationToken': token.value } : {},
+                                    body: formData
+                                })
+                                .then(r => r.json())
+                                .then(data => {
+                                    if (data.error) reject(data.error.message);
+                                    else resolve({ default: data.url });
+                                })
+                                .catch(err => reject(err.message || 'Uppladdning misslyckades'));
+                            });
+                        });
+                    },
+                    abort() {}
+                };
+            };
+        }
+
+        ClassicEditor.create(el, {
+            extraPlugins: [EmailImageUploadAdapter],
+            toolbar: [
+                'heading', '|',
+                'bold', 'italic', 'underline', '|',
+                'link', 'uploadImage', 'blockQuote', '|',
+                'bulletedList', 'numberedList', '|',
+                'undo', 'redo'
+            ],
+            language: 'sv'
+        })
+        .then(editor => { ceEditor = editor; })
+        .catch(err => console.error('CKEditor init error:', err));
+    }
+
+    function getEditorHtml() {
+        return ceEditor ? ceEditor.getData() : '';
+    }
+
+    function getEditorPlainText() {
+        if (!ceEditor) return '';
+        // Strip HTML for mailto (plain text only)
+        const tmp = document.createElement('div');
+        tmp.innerHTML = ceEditor.getData();
+        return tmp.textContent || tmp.innerText || '';
+    }
+
+    window.showClubEmailModal = function() {
+        const modal = new bootstrap.Modal(document.getElementById('clubEmailModal'));
+        modal.show();
+        loadClubEmailRecipients();
+        document.getElementById('clubEmailSubject').value = '';
+        if (ceEditor) ceEditor.setData('');
+        document.getElementById('clubEmailStatus').classList.add('d-none');
+
+        // Init CKEditor on first show (needs DOM to be visible)
+        setTimeout(initCKEditor, 200);
+    };
+
+    function loadClubEmailRecipients() {
+        const container = document.getElementById('clubEmailRecipientsList');
+        container.innerHTML = '<div class="text-center py-3 text-muted"><div class="spinner-border spinner-border-sm"></div> Laddar...</div>';
+
+        fetch(`/umbraco/surface/ClubEmail/GetClubEmailRecipients?clubId=${ceClubId}`)
+            .then(r => r.json())
+            .then(data => {
+                if (!data.success) {
+                    container.innerHTML = '<div class="text-danger p-2">Kunde inte ladda medlemmar.</div>';
+                    return;
+                }
+
+                ceRecipients = data.data || [];
+                ceHasBrevoKey = data.hasBrevoKey;
+                ceClubName = data.clubName || '';
+                ceContactEmail = data.contactEmail || '';
+
+                if (ceRecipients.length === 0) {
+                    container.innerHTML = '<div class="text-muted p-2">Inga medlemmar med e-postadress.</div>';
+                    return;
+                }
+
+                let html = '<table class="table table-sm table-hover mb-0"><tbody>';
+                ceRecipients.forEach(r => {
+                    const roles = (r.boardRoles || []).map(br =>
+                        `<span class="badge ${br.isBoardMember ? 'bg-primary' : 'bg-secondary'} me-1">${esc(br.title)}</span>`
+                    ).join('');
+                    html += `<tr>
+                        <td style="width: 30px;">
+                            <input class="form-check-input club-email-cb" type="checkbox" value="${r.id}" data-email="${esc(r.email)}" data-name="${esc(r.name)}" checked onchange="updateClubEmailCount()">
+                        </td>
+                        <td>${esc(r.name)} ${roles}</td>
+                        <td class="text-muted small">${esc(r.email)}</td>
+                    </tr>`;
+                });
+                html += '</tbody></table>';
+                container.innerHTML = html;
+                updateClubEmailCount();
+            })
+            .catch(() => {
+                container.innerHTML = '<div class="text-danger p-2">Fel vid laddning.</div>';
+            });
+    }
+
+    window.toggleAllClubEmailRecipients = function() {
+        const checked = document.getElementById('clubEmailSelectAll').checked;
+        document.querySelectorAll('.club-email-cb').forEach(cb => cb.checked = checked);
+        updateClubEmailCount();
+    };
+
+    function updateClubEmailCount() {
+        const checked = document.querySelectorAll('.club-email-cb:checked').length;
+        const total = document.querySelectorAll('.club-email-cb').length;
+        document.getElementById('clubEmailRecipientCount').textContent = `${checked} av ${total} valda`;
+    }
+
+    function getSelectedRecipients() {
+        const selected = [];
+        document.querySelectorAll('.club-email-cb:checked').forEach(cb => {
+            selected.push({ id: cb.value, email: cb.dataset.email, name: cb.dataset.name });
+        });
+        return selected;
+    }
+
+    window.clubEmailCopyEmails = function() {
+        const selected = getSelectedRecipients();
+        if (selected.length === 0) { alert('Välj minst en mottagare'); return; }
+        const emails = selected.map(r => r.email).join('; ');
+        navigator.clipboard.writeText(emails).then(() => {
+            showStatus('success', `${selected.length} e-postadresser kopierade till urklipp!`);
+        }).catch(() => {
+            const ta = document.createElement('textarea');
+            ta.value = emails;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+            showStatus('success', `${selected.length} e-postadresser kopierade till urklipp!`);
+        });
+    };
+
+    window.clubEmailOpenMailto = function() {
+        const selected = getSelectedRecipients();
+        if (selected.length === 0) { alert('Välj minst en mottagare'); return; }
+
+        const subject = document.getElementById('clubEmailSubject').value.trim();
+        const body = getEditorPlainText();
+        const bcc = selected.map(r => r.email).join(',');
+
+        const mailtoUrl = `mailto:?bcc=${encodeURIComponent(bcc)}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+
+        if (mailtoUrl.length > 2000) {
+            navigator.clipboard.writeText(selected.map(r => r.email).join('; ')).catch(() => {});
+            showStatus('warning', `${selected.length} mottagare — för många för mailto-länken. E-postadresserna har kopierats till urklipp. Klistra in dem i BCC-fältet i din e-postklient.`);
+            window.location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+        } else {
+            window.location.href = mailtoUrl;
+        }
+    };
+
+    window.clubEmailSendViaBrevo = function() {
+        if (!ceHasBrevoKey) {
+            showStatus('info',
+                'Brevo är en gratis e-posttjänst som gör det möjligt att skicka formaterade mail med bilder direkt från pistol.nu. ' +
+                'För att aktivera, gå till Admin \u2192 Inställningar och ange din Brevo API-nyckel. ' +
+                'Klicka på "Hjälp med Brevo"-knappen där för en steg-för-steg-guide.');
+            return;
+        }
+
+        const selected = getSelectedRecipients();
+        if (selected.length === 0) { alert('Välj minst en mottagare'); return; }
+
+        const subject = document.getElementById('clubEmailSubject').value.trim();
+        const htmlBody = getEditorHtml();
+        if (!subject) { alert('Ange ett ämne'); return; }
+        if (!htmlBody) { alert('Skriv ett meddelande'); return; }
+
+        if (!confirm(`Skicka mail till ${selected.length} mottagare via Brevo?`)) return;
+
+        const btn = document.getElementById('clubEmailBrevoBtn');
+        const origText = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Skickar...';
+
+        const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+        const params = new URLSearchParams({
+            clubId: ceClubId,
+            subject: subject,
+            body: htmlBody,
+            recipientIds: selected.map(r => r.id).join(',')
+        });
+
+        fetch('/umbraco/surface/ClubEmail/SendClubEmailViaBrevo', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'RequestVerificationToken': token
+            },
+            body: params.toString()
+        })
+        .then(r => r.json())
+        .then(data => {
+            btn.disabled = false;
+            btn.innerHTML = origText;
+            showStatus(data.success ? 'success' : 'danger', data.message || 'Fel vid skickning');
+        })
+        .catch(() => {
+            btn.disabled = false;
+            btn.innerHTML = origText;
+            showStatus('danger', 'Nätverksfel vid skickning');
+        });
+    };
+
+    function showStatus(type, message) {
+        const el = document.getElementById('clubEmailStatus');
+        el.className = `alert alert-${type} py-2 small`;
+        el.textContent = message;
+        el.classList.remove('d-none');
+    }
+
+    function esc(str) {
+        if (!str) return '';
+        const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+        return str.toString().replace(/[&<>"']/g, m => map[m]);
+    }
+})();
+</script>

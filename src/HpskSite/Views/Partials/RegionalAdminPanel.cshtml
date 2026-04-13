@@ -95,9 +95,14 @@
 </div>
 
 <div class="regional-admin-panel">
-    <div class="alert alert-info mb-4">
-        <i class="bi bi-shield-check me-2"></i>
-        <strong>Kretsadministration</strong> - Du kan hantera dokument, texter och bilder för @regionName här.
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div class="alert alert-info mb-0 flex-grow-1 me-3">
+            <i class="bi bi-shield-check me-2"></i>
+            <strong>Kretsadministration</strong> - Du kan hantera dokument, texter och bilder för @regionName här.
+        </div>
+        <button class="btn btn-info text-white" onclick="showRegionEmailModal()">
+            <i class="bi bi-envelope me-2"></i>Skicka mail
+        </button>
     </div>
 
     <!-- Admin Sub-Tabs -->
@@ -201,6 +206,32 @@
 
                         <hr class="my-4">
 
+                        <!-- Brevo Email Integration -->
+                        <h6 class="text-muted mb-3">
+                            <i class="bi bi-envelope me-2"></i>E-postutskick (Brevo)
+                            <button type="button" class="btn btn-sm btn-outline-info ms-2" onclick="showBrevoSetupGuide()">
+                                <i class="bi bi-question-circle me-1"></i>Hjälp med Brevo
+                            </button>
+                        </h6>
+                        <div class="row">
+                            <div class="col-md-8 mb-3">
+                                <label class="form-label">Brevo API-nyckel <small class="text-muted">(valfritt)</small></label>
+                                <div class="input-group">
+                                    <input type="password" class="form-control" id="regionBrevoApiKey" name="brevoApiKey" placeholder="xkeysib-..." autocomplete="off">
+                                    <button class="btn btn-outline-secondary" type="button" onclick="toggleRegionBrevoKeyVisibility()">
+                                        <i class="bi bi-eye" id="regionBrevoKeyToggleIcon"></i>
+                                    </button>
+                                    <button class="btn btn-outline-success" type="button" onclick="testRegionBrevoApiKey()">
+                                        <i class="bi bi-check-circle me-1"></i>Testa
+                                    </button>
+                                </div>
+                                <small class="text-muted">Aktiverar "Skicka via Brevo" i e-postmodalen.</small>
+                                <div id="regionBrevoKeyTestResult" class="mt-1 d-none"></div>
+                            </div>
+                        </div>
+
+                        <hr class="my-4">
+
                         <!-- Images Section -->
                         <h6 class="text-muted mb-3">
                             <i class="bi bi-image me-2"></i>Bilder
@@ -250,6 +281,13 @@
         </div>
     </div>
 </div>
+
+<!-- Region Email Modal -->
+@{
+    ViewBag.regionContentId = regionContentId;
+}
+@await Html.PartialAsync("RegionEmailModal")
+@await Html.PartialAsync("BrevoSetupGuide")
 
 <script>
 (function() {
@@ -596,6 +634,43 @@
         }
     });
 
+    // Brevo API key toggle/test for regional settings
+    window.toggleRegionBrevoKeyVisibility = function() {
+        var input = document.getElementById('regionBrevoApiKey');
+        var icon = document.getElementById('regionBrevoKeyToggleIcon');
+        if (input.type === 'password') { input.type = 'text'; icon.className = 'bi bi-eye-slash'; }
+        else { input.type = 'password'; icon.className = 'bi bi-eye'; }
+    };
+
+    window.testRegionBrevoApiKey = function() {
+        var apiKey = document.getElementById('regionBrevoApiKey').value.trim();
+        var resultEl = document.getElementById('regionBrevoKeyTestResult');
+        if (!apiKey) {
+            resultEl.className = 'mt-1 alert alert-warning py-1 small';
+            resultEl.textContent = 'Ange en API-nyckel först';
+            resultEl.classList.remove('d-none');
+            return;
+        }
+        resultEl.className = 'mt-1 text-muted small';
+        resultEl.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Testar...';
+        resultEl.classList.remove('d-none');
+
+        fetch('/umbraco/surface/ClubEmail/TestBrevoApiKey', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'RequestVerificationToken': getAntiForgeryToken() },
+            body: 'apiKey=' + encodeURIComponent(apiKey)
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            resultEl.className = data.success ? 'mt-1 alert alert-success py-1 small' : 'mt-1 alert alert-danger py-1 small';
+            resultEl.textContent = data.message;
+        })
+        .catch(function() {
+            resultEl.className = 'mt-1 alert alert-danger py-1 small';
+            resultEl.textContent = 'Nätverksfel vid test';
+        });
+    };
+
     function loadRegionInfo() {
         fetch('/umbraco/surface/Club/GetRegionInfo?contentId=' + regionContentId)
             .then(function(r) { return r.json(); })
@@ -605,6 +680,10 @@
                     document.getElementById('regionContactPerson').value = data.data.contactPerson || '';
                     document.getElementById('regionContactEmail').value = data.data.contactEmail || '';
                     document.getElementById('regionContactPhone').value = data.data.contactPhone || '';
+
+                    // Brevo API key
+                    var brevoField = document.getElementById('regionBrevoApiKey');
+                    if (brevoField) brevoField.value = data.data.brevoApiKey || '';
 
                     // Set CKEditor content or textarea fallback
                     var welcomeTextContent = data.data.welcomeText || '';

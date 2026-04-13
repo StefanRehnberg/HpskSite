@@ -41,6 +41,10 @@ namespace HpskSite.Composers
             // Register BoardRoleService as scoped
             builder.Services.AddScoped<BoardRoleService>();
 
+            // Register BrevoEmailService and named HttpClient
+            builder.Services.AddHttpClient("Brevo");
+            builder.Services.AddScoped<BrevoEmailService>();
+
             // Configure document archive options from appsettings.json
             builder.Services.Configure<DocumentArchiveOptions>(
                 builder.Config.GetSection("DocumentArchive"));
