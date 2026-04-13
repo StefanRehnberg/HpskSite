@@ -563,6 +563,13 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
 #competitionEditModal .ck-editor__editable {
     min-height: 120px;
 }
+#competitionEditModal .ck-editor__editable img {
+    max-width: 100%;
+    height: auto;
+}
+#competitionEditModal .ck-editor__editable .image {
+    margin: 0.5em 0;
+}
 </style>
 
 <script>
@@ -608,12 +615,45 @@ editModal.addEventListener('show.bs.modal', function() {
 
         // Initialize CKEditor 5 for description field
         if (!compDescriptionEditor) {
+            // Custom upload adapter for CKEditor image uploads
+            function CompetitionImageUploadAdapterPlugin(editor) {
+                editor.plugins.get('FileRepository').createUploadAdapter = (loader) => {
+                    return {
+                        upload() {
+                            return loader.file.then(file => {
+                                return new Promise((resolve, reject) => {
+                                    const formData = new FormData();
+                                    formData.append('upload', file);
+                                    const token = document.querySelector('input[name="__RequestVerificationToken"]');
+                                    fetch('/umbraco/surface/ImageUpload/Upload', {
+                                        method: 'POST',
+                                        headers: token ? { 'RequestVerificationToken': token.value } : {},
+                                        body: formData
+                                    })
+                                    .then(response => response.json())
+                                    .then(data => {
+                                        if (data.error) {
+                                            reject(data.error.message);
+                                        } else {
+                                            resolve({ default: data.url });
+                                        }
+                                    })
+                                    .catch(err => reject(err.message || 'Uppladdning misslyckades'));
+                                });
+                            });
+                        },
+                        abort() {}
+                    };
+                };
+            }
+
             ClassicEditor
                 .create(document.getElementById('description'), {
+                    extraPlugins: [CompetitionImageUploadAdapterPlugin],
                     toolbar: [
                         'heading', '|',
                         'bold', 'italic', 'underline', '|',
-                        'link', 'blockQuote', '|',
+                        'link', 'uploadImage', 'blockQuote', '|',
                         'bulletedList', 'numberedList', '|',
                         'undo', 'redo'
                     ],

@@ -185,14 +185,47 @@ document.addEventListener('DOMContentLoaded', function() {
     loadRegionsForSeries();
     loadSeriesStrategies();
 
+    // Custom upload adapter for CKEditor image uploads
+    function SeriesImageUploadAdapterPlugin(editor) {
+        editor.plugins.get('FileRepository').createUploadAdapter = (loader) => {
+            return {
+                upload() {
+                    return loader.file.then(file => {
+                        return new Promise((resolve, reject) => {
+                            const formData = new FormData();
+                            formData.append('upload', file);
+                            const token = document.querySelector('input[name="__RequestVerificationToken"]');
+                            fetch('/umbraco/surface/ImageUpload/Upload', {
+                                method: 'POST',
+                                headers: token ? { 'RequestVerificationToken': token.value } : {},
+                                body: formData
+                            })
+                            .then(response => response.json())
+                            .then(data => {
+                                if (data.error) {
+                                    reject(data.error.message);
+                                } else {
+                                    resolve({ default: data.url });
+                                }
+                            })
+                            .catch(err => reject(err.message || 'Uppladdning misslyckades'));
+                        });
+                    });
+                },
+                abort() {}
+            };
+        };
+    }
+
     // Initialize CKEditor 5
     ClassicEditor
         .create(document.getElementById('seriesDescription'), {
+            extraPlugins: [SeriesImageUploadAdapterPlugin],
             height: '300px',
             toolbar: [
                 'heading', '|',
                 'bold', 'italic', 'underline', 'strikethrough', '|',
-                'link', 'imageUpload', 'blockQuote', 'codeBlock', '|',
+                'link', 'uploadImage', 'blockQuote', 'codeBlock', '|',
                 'bulletedList', 'numberedList', '|',
                 'undo', 'redo'
             ],

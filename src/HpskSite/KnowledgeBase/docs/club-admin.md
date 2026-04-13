@@ -63,6 +63,8 @@ Evenemang kan utökas till fullständiga landningssidor med:
 
 Använd redigera-knappen på evenemanget för att bygga ut sidan.
 
+**Tips för tävlingsinbjudningar:** Om du vill skapa en detaljerad inbjudningssida med bilder för en tävling, skapa ett evenemang och lägg till en "Anmäl dig här"-länk till tävlingen. Tävlingens beskrivningsfält stöder också bilduppladdning direkt, men evenemangssidor ger mer utrymme och flexibilitet.
+
 ## Hantera tävlingar
 
 Under **Admin** > **Tävlingar**:

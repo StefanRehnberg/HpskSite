@@ -222,6 +222,7 @@
 <script>
 let allMembers = [];
 let isAdmin = false;
+let boardRolesMap = {}; // memberId -> [{ title, isBoardMember }]
 const isClubMember = @(isClubMember.ToString().ToLower());
 const isClubAdmin = @(isClubAdmin.ToString().ToLower());
 
@@ -238,23 +239,30 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function loadMembers() {
-    fetch(`/umbraco/surface/Club/GetClubMembers?clubId=${clubId}`)
-        .then(response => response.json())
-        .then(data => {
-            if (data.success && data.data && data.data.members) {
-                allMembers = data.data.members;
-                isAdmin = data.data.isAdmin || false;
-                displayMembers(allMembers);
-                document.getElementById('memberCount').textContent = data.data.totalCount || 0;
-            } else {
-                showEmptyState();
-            }
-        })
-        .catch(error => {
-            console.error('Error loading members:', error);
-            document.getElementById('membersContainer').innerHTML =
-                '<p class="text-danger"><i class="bi bi-exclamation-triangle me-2"></i>Fel vid hämtning av medlemmar.</p>';
-        });
+    // Load members and board roles in parallel
+    Promise.all([
+        fetch(`/umbraco/surface/Club/GetClubMembers?clubId=${clubId}`).then(r => r.json()),
+        fetch(`/umbraco/surface/BoardRole/GetBoardRolesForClubMembers?clubId=${clubId}`).then(r => r.ok ? r.json() : ({ success: false })).catch(() => ({ success: false }))
+    ]).then(([membersData, rolesData]) => {
+        // Process board roles
+        if (rolesData.success && rolesData.data) {
+            boardRolesMap = rolesData.data;
+        }
+
+        // Process members
+        if (membersData.success && membersData.data && membersData.data.members) {
+            allMembers = membersData.data.members;
+            isAdmin = membersData.data.isAdmin || false;
+            displayMembers(allMembers);
+            document.getElementById('memberCount').textContent = membersData.data.totalCount || 0;
+        } else {
+            showEmptyState();
+        }
+    }).catch(error => {
+        console.error('Error loading members:', error);
+        document.getElementById('membersContainer').innerHTML =
+            '<p class="text-danger"><i class="bi bi-exclamation-triangle me-2"></i>Fel vid hämtning av medlemmar.</p>';
+    });
 }
 
 function filterMembers(searchTerm) {
@@ -365,6 +373,7 @@ function displayMembers(members) {
                     <tr>
                         <th>Namn</th>
                         <th class="d-none d-md-table-cell">E-post</th>
+                        <th class="d-none d-md-table-cell">Roll</th>
                         <th class="text-center" style="width: 50px;"></th>
                         ${isAdmin ? '<th class="text-end">Åtgärder</th>' : ''}
                     </tr>
@@ -391,6 +400,7 @@ function displayMembers(members) {
                     </div>
                 </td>
                 <td class="d-none d-md-table-cell">${escapeHtml(member.email || '-')}</td>
+                <td class="d-none d-md-table-cell">${renderBoardRoleBadges(member.id)}</td>
                 <td class="text-center">
                     ${showDashboardBtn ? `
                         <button class="btn btn-sm btn-outline-info member-action-btn" onclick="viewMemberDashboard(${member.id}, '${escapeHtml(member.name)}')" title="Visa dashboard">
@@ -445,6 +455,14 @@ function getInitials(name) {
         initials += parts[parts.length - 1].charAt(0).toUpperCase();
     }
     return initials || '?';
+}
+
+function renderBoardRoleBadges(memberId) {
+    const roles = boardRolesMap[memberId];
+    if (!roles || roles.length === 0) return '';
+    return roles.map(r =>
+        `<span class="badge ${r.isBoardMember ? 'bg-primary' : 'bg-secondary'} me-1">${escapeHtml(r.title)}</span>`
+    ).join('');
 }
 
 function renderAvatar(member) {

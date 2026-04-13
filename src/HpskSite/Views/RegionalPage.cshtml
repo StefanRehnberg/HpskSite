@@ -181,6 +181,14 @@
             }
             @await Html.PartialAsync("DocumentArchive")
         </div>
+
+        <!-- Board Tab -->
+        <div class="tab-pane fade" id="regionBoard" role="tabpanel" aria-labelledby="regionBoard-tab">
+            @{
+                ViewBag.regionContentId = Model.Id;
+            }
+            @await Html.PartialAsync("RegionalBoardPanel")
+        </div>
     }
 
     @if (isRegionalAdmin)

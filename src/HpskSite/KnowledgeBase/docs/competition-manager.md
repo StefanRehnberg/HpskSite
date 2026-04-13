@@ -16,6 +16,16 @@ En administratör eller klubbadmin tilldelar dig som tävlingsledare på en spec
 
 Öppna tävlingen och klicka **"Administrera tävling"**. Här har du tillgång till flera flikar beroende på tävlingstyp.
 
+### Redigera tävlingsinfo och lägga till bilder
+
+Klicka **"Redigera"** för att öppna redigeringsformuläret. I **beskrivningsfältet** finns en rik texteditor där du kan:
+- Formatera text (rubriker, fetstil, kursiv, listor, länkar)
+- **Ladda upp bilder** — klicka på bildikonen i verktygsfältet och välj en bildfil från din dator (JPG, PNG, GIF, WebP, max 5 MB)
+
+**Tips för inbjudningar:** Om du vill visa en inbjudningsbild (t.ex. en inskannad traditionell inbjudan), ladda upp den direkt i beskrivningsfältet. Det finns **ingen separat PDF-uppladdning** för vanliga tävlingar — den funktionen finns bara för externa tävlingar (annonser).
+
+**Alternativ för detaljerade inbjudningar:** Om du behöver en mer utförlig inbjudningssida med flera bilder, utökad information och en "Anmäl dig här"-länk, kan din klubbadmin skapa ett **evenemang** på klubbsidan. Evenemanget får en egen landningssida med plats för bilder, textblock och anmälningslänk till tävlingen.
+
 ### Anmälningar
 
 - Se alla anmälda deltagare med namn, klubb och klass

@@ -40,7 +40,13 @@ Kretsadmins har också tillgång till adminpanelen men ser bara data från sin r
 
 ### Redigera och kopiera tävlingar
 - Öppna en befintlig tävling och klicka **"Redigera"**
+- I beskrivningsfältet kan du **ladda upp bilder** via bildikonen i verktygsfältet (JPG, PNG, GIF, WebP, max 5 MB)
 - Kopiera en tävling som mall (datum justeras +1 år)
+
+### Inbjudan (PDF) — bara för externa tävlingar
+Uppladdning av inbjudnings-PDF finns **enbart för externa tävlingar** (annonser skapade med "Ny annons"). Vanliga pistol.nu-tävlingar har ingen separat PDF-uppladdning. Istället läggs bilder och information direkt i beskrivningsfältet.
+
+**Tips:** Om en arrangör behöver en mer utförlig inbjudningssida kan klubbadmin skapa ett **evenemang** på klubbsidan med bilder, textblock och en anmälningslänk.
 
 ## Seriehantering
 

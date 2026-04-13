@@ -153,6 +153,9 @@
                     <button class="btn btn-outline-success" onclick="showSkjutledareModal()">
                         <i class="bi bi-shield-check me-2"></i>Skjutledare
                     </button>
+                    <button class="btn btn-outline-primary" onclick="showBoardRolesModal()">
+                        <i class="bi bi-award me-2"></i>Roller
+                    </button>
                     <button class="btn btn-success" onclick="showAddClubMemberModal()">
                         <i class="bi bi-person-plus-fill me-2"></i>Lägg till ny klubbmedlem
                     </button>
@@ -551,6 +554,13 @@
         </div>
     </div>
 </div>
+
+<!-- Board Roles Management Modal -->
+@{
+    ViewBag.BoardOwnerType = 0;
+    ViewBag.BoardOwnerId = clubId;
+}
+@await Html.PartialAsync("BoardRolesManagement")
 
 <!-- Skjutledare Management Modal -->
 <div class="modal fade" id="skjutledareModal" tabindex="-1">

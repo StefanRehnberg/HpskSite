@@ -38,6 +38,9 @@ namespace HpskSite.Composers
             // Register CompetitionTeamService as scoped
             builder.Services.AddScoped<CompetitionTeamService>();
 
+            // Register BoardRoleService as scoped
+            builder.Services.AddScoped<BoardRoleService>();
+
             // Configure document archive options from appsettings.json
             builder.Services.Configure<DocumentArchiveOptions>(
                 builder.Config.GetSection("DocumentArchive"));

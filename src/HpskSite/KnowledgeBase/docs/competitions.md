@@ -29,8 +29,8 @@ Serier (t.ex. Hallandsserien) visas som egna kort med serienamn, logotyp, antal 
 
 Klicka på en tävling för att se detaljer:
 - **Datum och plats** (flerdagarstävlingar visar varaktighet, t.ex. "3 dagar")
-- **Beskrivning** med all information
-- **Inbjudan** — bifogad PDF som kan visas och laddas ner (om tillgänglig)
+- **Beskrivning** med all information (kan innehålla bilder som tävlingsledaren lagt till)
+- **Inbjudan (PDF)** — visas och kan laddas ner, men är **bara tillgängligt för externa tävlingar** (annonser skapade med "Ny annons"). Vanliga pistol.nu-tävlingar har inte en separat inbjudanuppladdning — istället läggs bilder och information in direkt i beskrivningsfältet
 - **Skytteklasser** som är tillgängliga
 - **Anmälningsperiod** (öppnar och stänger)
 - **Kontaktinformation** (tävlingsledare, e-post, telefon)

@@ -1,0 +1,76 @@
+@*
+ * Regional Board Panel - Read-only display of regional board members.
+ * Shows only IsBoardMember=true entries, sorted by role hierarchy.
+ * Requires ViewBag: regionContentId (int)
+ *@
+
+@{
+    var regionId = ViewBag.regionContentId as int? ?? 0;
+}
+
+<div class="card">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-award me-2"></i>Styrelsen</h5>
+    </div>
+    <div class="card-body">
+        <div id="regionalBoardContainer">
+            <div class="text-center py-4">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Laddar...</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function() {
+    const regionId = @regionId;
+
+    // Load when the tab becomes visible
+    const tabEl = document.getElementById('regionBoard-tab');
+    if (tabEl) {
+        let loaded = false;
+        tabEl.addEventListener('shown.bs.tab', function() {
+            if (!loaded) {
+                loaded = true;
+                loadRegionalBoard();
+            }
+        });
+    }
+
+    function loadRegionalBoard() {
+        const container = document.getElementById('regionalBoardContainer');
+        fetch(`/umbraco/surface/BoardRole/GetBoardMembers?ownerType=1&ownerId=${regionId}&boardOnly=true`)
+            .then(r => r.json())
+            .then(data => {
+                if (!data.success || !data.data || data.data.length === 0) {
+                    container.innerHTML = '<p class="text-muted text-center py-3">Ingen styrelse har registrerats ännu.</p>';
+                    return;
+                }
+
+                let html = '<div class="table-responsive"><table class="table table-hover">';
+                html += '<thead><tr><th>Roll</th><th>Namn</th></tr></thead><tbody>';
+
+                data.data.forEach(r => {
+                    html += `<tr>
+                        <td><span class="badge bg-primary">${esc(r.title)}</span></td>
+                        <td>${esc(r.memberName || '-')}</td>
+                    </tr>`;
+                });
+
+                html += '</tbody></table></div>';
+                container.innerHTML = html;
+            })
+            .catch(() => {
+                container.innerHTML = '<p class="text-danger">Kunde inte ladda styrelsemedlemmar.</p>';
+            });
+    }
+
+    function esc(str) {
+        if (!str) return '';
+        const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+        return str.toString().replace(/[&<>"']/g, m => map[m]);
+    }
+})();
+</script>
