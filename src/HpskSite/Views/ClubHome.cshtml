@@ -14,7 +14,7 @@
     ViewBag.Title = clubName;
 
     // Get club properties from parent node
-    var description = clubNode?.Value<string>("description") ?? "";
+    var description = HpskSite.Extensions.RteHelper.ExtractMarkup(clubNode?.Value<string>("description"));
     var logo = clubNode?.Value<IPublishedContent>("logo");
     var bannerImage = clubNode?.Value<IPublishedContent>("bannerImage");
     var contactPerson = clubNode?.Value<string>("contactPerson") ?? "";

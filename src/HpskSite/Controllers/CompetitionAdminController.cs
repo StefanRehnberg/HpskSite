@@ -681,12 +681,15 @@ namespace HpskSite.Controllers
                     return raw.Value.ToString(fmt);
                 }
 
+                // Read description from published cache (returns rendered HTML) or extract from RTE JSON
+                var descriptionValue = HpskSite.Extensions.RteHelper.ExtractMarkup(competition.GetValue<string>("description"));
+
                 var competitionData = new
                 {
                     id = competition.Id,
                     competitionName = competition.GetValue<string>("competitionName") ?? "",
                     competitionType = competition.GetValue<string>("competitionType") ?? "Precision",
-                    description = competition.GetValue<string>("description") ?? "",
+                    description = descriptionValue,
                     venue = competition.GetValue<string>("venue") ?? "",
                     competitionDate = FormatDate("competitionDate", true),
                     competitionEndDate = FormatDate("competitionEndDate", false),
@@ -2137,6 +2140,20 @@ namespace HpskSite.Controllers
         /// Get all descendants of a content item in flat list (OPTIMIZED)
         /// Uses breadth-first iteration instead of recursion for better performance
         /// </summary>
+        private static string ExtractRteMarkup(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return "";
+            if (!value.TrimStart().StartsWith("{")) return value;
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(value);
+                if (doc.RootElement.TryGetProperty("markup", out var markup))
+                    return markup.GetString() ?? "";
+            }
+            catch { }
+            return value;
+        }
+
         private int[] GetCompetitionManagerIds(Umbraco.Cms.Core.Models.IContent competition)
         {
             var json = competition.GetValue<string>("competitionManagers") ?? "[]";

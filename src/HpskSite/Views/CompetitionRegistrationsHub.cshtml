@@ -21,7 +21,7 @@
 
         <!-- Registration Summary Card -->
         @{
-            var description = Model.Value<string>("description");
+            var description = HpskSite.Extensions.RteHelper.ExtractMarkup(Model.Value<string>("description"));
             var deadline = Model.Value<DateTime>("registrationDeadline");
             var maxParticipants = Model.Value<int>("maxParticipants");
             var activeRegistrations = Model.Children.Where(r => r.Value<bool>("isActive")).ToList();

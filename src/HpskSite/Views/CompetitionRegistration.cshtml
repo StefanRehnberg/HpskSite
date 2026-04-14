@@ -126,7 +126,7 @@
                             @{
                                 var competitionDate = competition.Value<DateTime>("eventDate");
                                 var location = competition.Value<string>("location");
-                                var description = competition.Value<string>("description");
+                                var description = HpskSite.Extensions.RteHelper.ExtractMarkup(competition.Value<string>("description"));
                             }
                             @if (competitionDate != default)
                             {

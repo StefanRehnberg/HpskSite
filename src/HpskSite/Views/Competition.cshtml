@@ -28,7 +28,7 @@
 	}
 
     var competitionName = Model.Value<string>("competitionName") ?? "";
-    var description = Model.Value<string>("description") ?? "";
+    var description = HpskSite.Extensions.RteHelper.ExtractMarkup(Model.Value<string>("description"));
     var competitionDate = Model.Value<DateTime>("competitionDate");
     var competitionEndDate = Model.Value<DateTime?>("competitionEndDate");
     var venue = Model.Value<string>("venue") ?? "";

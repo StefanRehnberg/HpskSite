@@ -10,7 +10,7 @@
 
     // Event properties from Umbraco content
     var eventName = Model.Value<string>("eventName") ?? Model.Name;
-    var description = Model.Value<string>("description") ?? "";
+    var description = HpskSite.Extensions.RteHelper.ExtractMarkup(Model.Value<string>("description"));
     var eventDateRaw = Model.Value<DateTime?>("eventDate");
     var hasDate = eventDateRaw.HasValue && eventDateRaw.Value.Year > 1900;
     var eventDate = eventDateRaw ?? DateTime.MinValue;

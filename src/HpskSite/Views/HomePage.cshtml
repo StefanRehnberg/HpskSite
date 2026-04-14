@@ -8,7 +8,7 @@
 
     // Get page properties
     var welcomeTitle = Model.Value<string>("welcomeTitle") ?? "Svenska Pistolskyttekretsar";
-    var welcomeText = Model.Value<string>("welcomeText");
+    var welcomeText = HpskSite.Extensions.RteHelper.ExtractMarkup(Model.Value<string>("welcomeText"));
     var aboutText = Model.Value<string>("aboutText");
     var bannerImage = Model.Value<Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent>("bannerImage");
     var logo = Model.Value<Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent>("logo");

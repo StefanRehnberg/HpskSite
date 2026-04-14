@@ -6,7 +6,7 @@
     var competitionId = (int?)ViewData["CompetitionId"] ?? 0;
     
     var compName = competition?.Value<string>("competitionName") ?? "";
-    var compDesc = competition?.Value<string>("description") ?? "";
+    var compDesc = HpskSite.Extensions.RteHelper.ExtractMarkup(competition?.Value<string>("description"));
     var compVenue = competition?.Value<string>("venue") ?? "";
     var compDate = competition?.Value<DateTime>("competitionDate");
     var compEndDate = competition?.Value<DateTime?>("competitionEndDate");

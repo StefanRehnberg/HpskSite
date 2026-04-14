@@ -86,11 +86,13 @@ namespace HpskSite.Controllers
                 var parent = content.ParentId > 0 ? _contentService.GetById(content.ParentId) : null;
                 var isInSeries = parent != null && parent.ContentType.Alias == "competitionSeries";
 
+                var description = HpskSite.Extensions.RteHelper.ExtractMarkup(content.GetValue<string>("description"));
+
                 var competitionData = new
                 {
                     id = content.Id,
                     competitionName = content.GetValue<string>("competitionName") ?? "",
-                    description = content.GetValue<string>("description") ?? "",
+                    description = description,
                     venue = content.GetValue<string>("venue") ?? "",
                     competitionDate = GetDateTimeString(content, competitionId, "competitionDate", true),
                     competitionEndDate = GetDateTimeString(content, competitionId, "competitionEndDate", false),
@@ -385,6 +387,27 @@ namespace HpskSite.Controllers
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// Extract HTML markup from an Umbraco RTE value.
+        /// RTE stores as JSON: {"markup":"<p>text</p>","blocks":{...}}
+        /// Returns the markup string, or the original value if it's not JSON.
+        /// </summary>
+        private static string ExtractRteMarkup(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return "";
+            if (!value.TrimStart().StartsWith("{")) return value;
+
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(value);
+                if (doc.RootElement.TryGetProperty("markup", out var markup))
+                    return markup.GetString() ?? "";
+            }
+            catch { }
+
+            return value;
         }
     }
 

@@ -20,7 +20,7 @@
         </div>
 
         @{
-            var description = Model.Value<string>("description");
+            var description = HpskSite.Extensions.RteHelper.ExtractMarkup(Model.Value<string>("description"));
         }
         @if (!string.IsNullOrEmpty(description))
         {

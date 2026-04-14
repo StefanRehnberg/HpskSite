@@ -5,7 +5,7 @@
 	ViewBag.Title = Model.Value<string>("competitionTypeName") ?? "Competition Type";
 
 	var competitionTypeName = Model.Value<string>("competitionTypeName") ?? "";
-	var description = Model.Value<string>("description") ?? "";
+	var description = HpskSite.Extensions.RteHelper.ExtractMarkup(Model.Value<string>("description"));
 	var maxSeries = Model.Value<int>("maxSeries");
 	var shotsPerSeries = Model.Value<int>("shotsPerSeries");
 	var maxScorePerShot = Model.Value<string>("maxScorePerShot") ?? "10";

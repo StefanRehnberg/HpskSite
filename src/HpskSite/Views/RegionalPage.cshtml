@@ -13,8 +13,8 @@
     var regionCode = Model.Value<string>("regionCode") ?? "";
     var regionName = Model.Value<string>("regionName") ?? Model.Name;
     var welcomeTitle = Model.Value<string>("welcomeTitle") ?? $"Välkommen till {regionName}";
-    var welcomeText = Model.Value<string>("welcomeText");
-    var aboutRegion = Model.Value<string>("aboutRegion");
+    var welcomeText = HpskSite.Extensions.RteHelper.ExtractMarkup(Model.Value<string>("welcomeText"));
+    var aboutRegion = HpskSite.Extensions.RteHelper.ExtractMarkup(Model.Value<string>("aboutRegion"));
     var contactPerson = Model.Value<string>("contactPerson");
     var contactEmail = Model.Value<string>("contactEmail");
     var contactPhone = Model.Value<string>("contactPhone");

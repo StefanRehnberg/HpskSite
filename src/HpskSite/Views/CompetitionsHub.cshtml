@@ -402,7 +402,7 @@
                 var compEndDate = competition.Value<DateTime?>("competitionEndDate");
                 var regCloseDate = competition.Value<DateTime>("registrationCloseDate");
                 var regOpenDate = competition.Value<DateTime>("registrationOpenDate");
-                var description = competition.Value<string>("description");
+                var description = HpskSite.Extensions.RteHelper.ExtractMarkup(competition.Value<string>("description"));
                 var venue = competition.Value<string>("venue");
 
                 // Check if multi-day competition
@@ -835,7 +835,7 @@
                         var compEndDate = competition.Value<DateTime?>("competitionEndDate");
                         var regCloseDate = competition.Value<DateTime>("registrationCloseDate");
                         var regOpenDate = competition.Value<DateTime>("registrationOpenDate");
-                        var description = competition.Value<string>("description");
+                        var description = HpskSite.Extensions.RteHelper.ExtractMarkup(competition.Value<string>("description"));
                         var venue = competition.Value<string>("venue");
 
                         // Check if multi-day competition

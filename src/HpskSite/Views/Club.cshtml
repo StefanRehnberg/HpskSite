@@ -18,8 +18,8 @@
     ViewBag.Title = clubName;
 
     // Get club properties from this node
-    var description = Model?.Value<string>("description") ?? ""; // Short description (for SEO, meta tags, etc.)
-    var aboutClub = Model?.Value<string>("aboutClub") ?? ""; // Rich text content for welcome section
+    var description = HpskSite.Extensions.RteHelper.ExtractMarkup(Model?.Value<string>("description")); // Short description (for SEO, meta tags, etc.)
+    var aboutClub = HpskSite.Extensions.RteHelper.ExtractMarkup(Model?.Value<string>("aboutClub")); // Rich text content for welcome section
     var logo = Model?.Value<IPublishedContent>("logo");
     var bannerImage = Model?.Value<IPublishedContent>("bannerImage");
     var contactPerson = Model?.Value<string>("contactPerson") ?? "";
