@@ -461,7 +461,7 @@ window.openSeriesEditModal = function(seriesId) {
 
                 if (series.startDate) {
                     const startDateInput = document.getElementById('seriesStartDate');
-                    const formattedDate = formatDateForInput(series.startDate);
+                    const formattedDate = formatSeriesDateForInput(series.startDate);
                     startDateInput.value = formattedDate;
                     // Trigger Flatpickr update if available
                     if (startDateInput._flatpickr) {
@@ -471,7 +471,7 @@ window.openSeriesEditModal = function(seriesId) {
 
                 if (series.endDate) {
                     const endDateInput = document.getElementById('seriesEndDate');
-                    const formattedDate = formatDateForInput(series.endDate);
+                    const formattedDate = formatSeriesDateForInput(series.endDate);
                     endDateInput.value = formattedDate;
                     // Trigger Flatpickr update if available
                     if (endDateInput._flatpickr) {
@@ -644,9 +644,14 @@ window.removeSeriesFromTable = function(seriesId) {
 };
 
 // Helper to format date for input fields
-function formatDateForInput(dateStr) {
+// Use the shared formatDateForInput from CompetitionEditModal (supports time)
+// Series dates are date-only, so call with includeTime=false
+function formatSeriesDateForInput(dateStr) {
+    if (typeof window.formatDateForInput === 'function') {
+        return window.formatDateForInput(dateStr, false);
+    }
     if (!dateStr) return '';
-    const date = new Date(dateStr);
-    return date.toISOString().split('T')[0];
+    var match = dateStr.toString().match(/^(\d{4})-(\d{2})-(\d{2})/);
+    return match ? match[1] + '-' + match[2] + '-' + match[3] : '';
 }
 </script>

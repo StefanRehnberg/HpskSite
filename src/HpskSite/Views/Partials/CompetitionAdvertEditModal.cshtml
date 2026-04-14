@@ -249,13 +249,15 @@ document.getElementById('competitionAdvertEditModal')?.addEventListener('shown.b
         locale: 'sv',
         enableTime: true,
         time_24hr: true,
-        dateFormat: 'Y-m-d H:i'
+        dateFormat: 'Y-m-d H:i',
+        static: true
     });
 
     flatpickr('#advertEdit_competitionEndDate', {
         locale: 'sv',
         enableTime: false,
-        dateFormat: 'Y-m-d'
+        dateFormat: 'Y-m-d',
+        static: true
     });
 
     // Registration dates (date + time)
@@ -263,14 +265,16 @@ document.getElementById('competitionAdvertEditModal')?.addEventListener('shown.b
         locale: 'sv',
         enableTime: true,
         time_24hr: true,
-        dateFormat: 'Y-m-d H:i'
+        dateFormat: 'Y-m-d H:i',
+        static: true
     });
 
     flatpickr('#advertEdit_registrationCloseDate', {
         locale: 'sv',
         enableTime: true,
         time_24hr: true,
-        dateFormat: 'Y-m-d H:i'
+        dateFormat: 'Y-m-d H:i',
+        static: true
     });
 
     // Load series list
@@ -463,11 +467,21 @@ window.populateAdvertEditModal = function(competition) {
     document.getElementById('advertEdit_description').value = competition.description || '';
     document.getElementById('advertEdit_venue').value = competition.venue || '';
 
-    // Dates (backend should return in format suitable for Flatpickr: 'Y-m-d H:i' or 'Y-m-d')
-    document.getElementById('advertEdit_competitionDate').value = competition.competitionDate || '';
-    document.getElementById('advertEdit_competitionEndDate').value = competition.competitionEndDate || '';
-    document.getElementById('advertEdit_registrationOpenDate').value = competition.registrationOpenDate || '';
-    document.getElementById('advertEdit_registrationCloseDate').value = competition.registrationCloseDate || '';
+    // Dates - use formatDateForInput to strip timezone info, set value + sync Flatpickr
+    function setAdvertDate(id, dateStr, withTime) {
+        var el = document.getElementById(id);
+        if (!el) return;
+        var formatted = dateStr && window.formatDateForInput ? window.formatDateForInput(dateStr, withTime) : (dateStr || '');
+        el.value = formatted;
+        if (el._flatpickr) {
+            if (formatted) el._flatpickr.setDate(formatted, false);
+            else el._flatpickr.clear();
+        }
+    }
+    setAdvertDate('advertEdit_competitionDate', competition.competitionDate, true);
+    setAdvertDate('advertEdit_competitionEndDate', competition.competitionEndDate, false);
+    setAdvertDate('advertEdit_registrationOpenDate', competition.registrationOpenDate, true);
+    setAdvertDate('advertEdit_registrationCloseDate', competition.registrationCloseDate, true);
 
     // External fields
     document.getElementById('advertEdit_externalUrl').value = competition.externalUrl || '';

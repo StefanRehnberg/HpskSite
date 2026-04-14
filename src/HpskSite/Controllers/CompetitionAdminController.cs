@@ -662,10 +662,23 @@ namespace HpskSite.Controllers
                 }
 
                 // Format dates for Flatpickr (Y-m-d H:i or Y-m-d)
-                string FormatDate(DateTime? date, bool includeTime = true)
+                // Use published cache first (preserves time), fall back to IContent
+                Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent? publishedComp = null;
+                if (_umbracoContextAccessor.TryGetUmbracoContext(out var getCompCtx) && getCompCtx.Content != null)
+                    publishedComp = getCompCtx.Content.GetById(id);
+
+                string FormatDate(string alias, bool includeTime = true)
                 {
-                    if (!date.HasValue) return "";
-                    return includeTime ? date.Value.ToString("yyyy-MM-dd HH:mm") : date.Value.ToString("yyyy-MM-dd");
+                    var fmt = includeTime ? "yyyy-MM-dd HH:mm" : "yyyy-MM-dd";
+                    if (publishedComp != null)
+                    {
+                        var dt = publishedComp.Value<DateTime?>(alias);
+                        if (dt.HasValue && dt.Value != DateTime.MinValue)
+                            return dt.Value.ToString(fmt);
+                    }
+                    var raw = competition.GetValue<DateTime?>(alias);
+                    if (!raw.HasValue || raw.Value == DateTime.MinValue) return "";
+                    return raw.Value.ToString(fmt);
                 }
 
                 var competitionData = new
@@ -675,10 +688,10 @@ namespace HpskSite.Controllers
                     competitionType = competition.GetValue<string>("competitionType") ?? "Precision",
                     description = competition.GetValue<string>("description") ?? "",
                     venue = competition.GetValue<string>("venue") ?? "",
-                    competitionDate = FormatDate(competition.GetValue<DateTime?>("competitionDate"), true),
-                    competitionEndDate = FormatDate(competition.GetValue<DateTime?>("competitionEndDate"), false),
-                    registrationOpenDate = FormatDate(competition.GetValue<DateTime?>("registrationOpenDate"), true),
-                    registrationCloseDate = FormatDate(competition.GetValue<DateTime?>("registrationCloseDate"), true),
+                    competitionDate = FormatDate("competitionDate", true),
+                    competitionEndDate = FormatDate("competitionEndDate", false),
+                    registrationOpenDate = FormatDate("registrationOpenDate", true),
+                    registrationCloseDate = FormatDate("registrationCloseDate", true),
                     numberOfSeriesOrStations = competition.GetValue<int>("numberOfSeriesOrStations"),
                     numberOfFinalSeries = competition.GetValue<int>("numberOfFinalSeries"),
                     shootingClassIds = shootingClassIds,

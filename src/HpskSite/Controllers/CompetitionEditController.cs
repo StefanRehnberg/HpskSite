@@ -92,10 +92,10 @@ namespace HpskSite.Controllers
                     competitionName = content.GetValue<string>("competitionName") ?? "",
                     description = content.GetValue<string>("description") ?? "",
                     venue = content.GetValue<string>("venue") ?? "",
-                    competitionDate = content.GetValue<DateTime>("competitionDate"),
-                    competitionEndDate = content.GetValue<DateTime?>("competitionEndDate"),
-                    registrationOpenDate = content.GetValue<DateTime?>("registrationOpenDate"),
-                    registrationCloseDate = content.GetValue<DateTime?>("registrationCloseDate"),
+                    competitionDate = GetDateTimeString(content, competitionId, "competitionDate", true),
+                    competitionEndDate = GetDateTimeString(content, competitionId, "competitionEndDate", false),
+                    registrationOpenDate = GetDateTimeString(content, competitionId, "registrationOpenDate", true),
+                    registrationCloseDate = GetDateTimeString(content, competitionId, "registrationCloseDate", true),
                     maxParticipants = content.GetValue<int>("maxParticipants"),
                     registrationFee = content.GetValue<decimal>("registrationFee"),
                     competitionDirector = content.GetValue<string>("competitionDirector") ?? "",
@@ -345,6 +345,46 @@ namespace HpskSite.Controllers
                     error = ex.Message
                 };
             }
+        }
+
+        /// <summary>
+        /// Get a date/time string for edit forms. Tries the published content cache first
+        /// (which correctly preserves time via value converters), then falls back to IContent raw values.
+        /// </summary>
+        private string? GetDateTimeString(Umbraco.Cms.Core.Models.IContent content, int contentId, string propertyAlias, bool includeTime)
+        {
+            var format = includeTime ? "yyyy-MM-dd HH:mm" : "yyyy-MM-dd";
+
+            // Try published cache first — it correctly preserves date+time
+            var published = UmbracoContext.Content?.GetById(contentId);
+            if (published != null)
+            {
+                var pubDate = published.Value<DateTime?>(propertyAlias);
+                if (pubDate.HasValue && pubDate.Value != DateTime.MinValue)
+                    return pubDate.Value.ToString(format);
+            }
+
+            // Fallback: IContent raw value
+            var raw = content.GetValue(propertyAlias);
+            if (raw == null) return null;
+
+            if (raw is DateTime dt)
+            {
+                if (dt == DateTime.MinValue) return null;
+                return dt.ToString(format);
+            }
+
+            var str = raw.ToString() ?? "";
+            if (string.IsNullOrWhiteSpace(str)) return null;
+
+            if (DateTime.TryParse(str, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var parsed))
+            {
+                if (parsed == DateTime.MinValue) return null;
+                return parsed.ToString(format);
+            }
+
+            return null;
         }
     }
 

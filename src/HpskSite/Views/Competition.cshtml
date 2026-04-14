@@ -621,12 +621,12 @@
 									@dateIcon
 									@if (isMultiDay)
 									{
-										<strong>@competitionDate.ToString("dddd, d MMMM", CultureInfo.GetCultureInfo("sv-SE")) - @competitionEndDate!.Value.ToString("dddd, d MMMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))</strong>
+										<strong>@competitionDate.ToString("dddd, d MMMM", CultureInfo.GetCultureInfo("sv-SE"))@(competitionDate.TimeOfDay != TimeSpan.Zero ? ", kl " + competitionDate.ToString("HH:mm") : "") - @competitionEndDate!.Value.ToString("dddd, d MMMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))</strong>
 										<small class="text-muted">@durationInfo</small>
 									}
 									else
 									{
-										<strong>@competitionDate.ToString("dddd, d MMMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))</strong>
+										<strong>@competitionDate.ToString("dddd, d MMMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))@(competitionDate.TimeOfDay != TimeSpan.Zero ? ", kl " + competitionDate.ToString("HH:mm") : "")</strong>
 										<small class="text-muted">@durationInfo</small>
 									}
 								</li>

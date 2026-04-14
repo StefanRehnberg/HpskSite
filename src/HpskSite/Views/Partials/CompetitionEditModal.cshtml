@@ -588,26 +588,30 @@ editModal.addEventListener('show.bs.modal', function() {
                 enableTime: true,
                 dateFormat: 'Y-m-d H:i',
                 time_24hr: true,
-                locale: 'sv'
+                locale: 'sv',
+                static: true
             });
 
             flatpickr('#competitionEndDate', {
                 dateFormat: 'Y-m-d',
-                locale: 'sv'
+                locale: 'sv',
+                static: true
             });
 
             flatpickr('#registrationOpenDate', {
                 enableTime: true,
                 dateFormat: 'Y-m-d H:i',
                 time_24hr: true,
-                locale: 'sv'
+                locale: 'sv',
+                static: true
             });
 
             flatpickr('#registrationCloseDate', {
                 enableTime: true,
                 dateFormat: 'Y-m-d H:i',
                 time_24hr: true,
-                locale: 'sv'
+                locale: 'sv',
+                static: true
             });
         } catch (e) {
             console.error('Error initializing date pickers:', e);
@@ -797,18 +801,23 @@ window.setCheckboxValue = function(fieldId, checked) {
 
 window.formatDateForInput = function(dateStr, includeTime = true) {
     if (!dateStr) return '';
-    const date = new Date(dateStr);
-    if (includeTime) {
-        return date.getFullYear() + '-' +
-               String(date.getMonth() + 1).padStart(2, '0') + '-' +
-               String(date.getDate()).padStart(2, '0') + ' ' +
-               String(date.getHours()).padStart(2, '0') + ':' +
-               String(date.getMinutes()).padStart(2, '0');
-    } else {
-        return date.getFullYear() + '-' +
-               String(date.getMonth() + 1).padStart(2, '0') + '-' +
-               String(date.getDate()).padStart(2, '0');
+    // Parse ISO string directly without timezone conversion (avoid new Date() which shifts UTC to local)
+    var str = dateStr.toString();
+    // Handle "2026-01-05T14:30:00" or "2026-01-05 14:30" formats
+    var match = str.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+    if (match) {
+        if (includeTime) {
+            return match[1] + '-' + match[2] + '-' + match[3] + ' ' + match[4] + ':' + match[5];
+        } else {
+            return match[1] + '-' + match[2] + '-' + match[3];
+        }
     }
+    // Handle date-only "2026-01-05"
+    var dateOnly = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (dateOnly) {
+        return dateOnly[1] + '-' + dateOnly[2] + '-' + dateOnly[3];
+    }
+    return str;
 }
 
 // Populate edit modal with competition data
@@ -830,74 +839,27 @@ window.populateEditModal = function(competition) {
     setFieldValue('description', competition.description || '');
     setFieldValue('venue', competition.venue || '');
 
-    // Handle date fields - use Flatpickr's setDate method when available
-    if (competition.competitionDate) {
-        const compDateInput = document.getElementById('competitionDate');
-        if (compDateInput && compDateInput._flatpickr) {
-            compDateInput._flatpickr.setDate(competition.competitionDate);
-        } else {
-            setFieldValue('competitionDate', formatDateForInput(competition.competitionDate));
-        }
-    } else {
-        // Clear the date field if it's null (for copy operations)
-        const compDateInput = document.getElementById('competitionDate');
-        if (compDateInput && compDateInput._flatpickr) {
-            compDateInput._flatpickr.clear();
-        } else {
-            setFieldValue('competitionDate', '');
-        }
-    }
-
-    if (competition.competitionEndDate) {
-        const endDateInput = document.getElementById('competitionEndDate');
-        if (endDateInput && endDateInput._flatpickr) {
-            endDateInput._flatpickr.setDate(competition.competitionEndDate);
-        } else {
-            setFieldValue('competitionEndDate', formatDateForInput(competition.competitionEndDate, false));
-        }
-    } else {
-        // Clear the date field if it's null (for copy operations)
-        const endDateInput = document.getElementById('competitionEndDate');
-        if (endDateInput && endDateInput._flatpickr) {
-            endDateInput._flatpickr.clear();
-        } else {
-            setFieldValue('competitionEndDate', '');
+    // Handle date fields - set value directly, then sync Flatpickr if available
+    function setDateField(fieldId, dateStr, includeTime) {
+        var formatted = dateStr ? formatDateForInput(dateStr, includeTime !== false) : '';
+        var input = document.getElementById(fieldId);
+        if (!input) return;
+        // Always set the raw input value first
+        input.value = formatted;
+        // Then sync Flatpickr if initialized
+        if (input._flatpickr) {
+            if (formatted) {
+                input._flatpickr.setDate(formatted, false);
+            } else {
+                input._flatpickr.clear();
+            }
         }
     }
 
-    if (competition.registrationOpenDate) {
-        const openDateInput = document.getElementById('registrationOpenDate');
-        if (openDateInput && openDateInput._flatpickr) {
-            openDateInput._flatpickr.setDate(competition.registrationOpenDate);
-        } else {
-            setFieldValue('registrationOpenDate', formatDateForInput(competition.registrationOpenDate));
-        }
-    } else {
-        // Clear the date field if it's null (for copy operations)
-        const openDateInput = document.getElementById('registrationOpenDate');
-        if (openDateInput && openDateInput._flatpickr) {
-            openDateInput._flatpickr.clear();
-        } else {
-            setFieldValue('registrationOpenDate', '');
-        }
-    }
-
-    if (competition.registrationCloseDate) {
-        const closeDateInput = document.getElementById('registrationCloseDate');
-        if (closeDateInput && closeDateInput._flatpickr) {
-            closeDateInput._flatpickr.setDate(competition.registrationCloseDate);
-        } else {
-            setFieldValue('registrationCloseDate', formatDateForInput(competition.registrationCloseDate));
-        }
-    } else {
-        // Clear the date field if it's null (for copy operations)
-        const closeDateInput = document.getElementById('registrationCloseDate');
-        if (closeDateInput && closeDateInput._flatpickr) {
-            closeDateInput._flatpickr.clear();
-        } else {
-            setFieldValue('registrationCloseDate', '');
-        }
-    }
+    setDateField('competitionDate', competition.competitionDate, true);
+    setDateField('competitionEndDate', competition.competitionEndDate, false);
+    setDateField('registrationOpenDate', competition.registrationOpenDate, true);
+    setDateField('registrationCloseDate', competition.registrationCloseDate, true);
 
     // Set all form fields
     setFieldValue('maxParticipants', competition.maxParticipants || 50);

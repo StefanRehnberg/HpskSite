@@ -433,10 +433,10 @@ const springEditModalEl = document.getElementById('springEditModal');
 springEditModalEl.addEventListener('show.bs.modal', function() {
     setTimeout(function() {
         try {
-            flatpickr('#springEdit_competitionDate', { enableTime: true, dateFormat: 'Y-m-d H:i', time_24hr: true, locale: 'sv' });
-            flatpickr('#springEdit_competitionEndDate', { dateFormat: 'Y-m-d', locale: 'sv' });
-            flatpickr('#springEdit_registrationOpenDate', { enableTime: true, dateFormat: 'Y-m-d H:i', time_24hr: true, locale: 'sv' });
-            flatpickr('#springEdit_registrationCloseDate', { enableTime: true, dateFormat: 'Y-m-d H:i', time_24hr: true, locale: 'sv' });
+            flatpickr('#springEdit_competitionDate', { enableTime: true, dateFormat: 'Y-m-d H:i', time_24hr: true, locale: 'sv', static: true });
+            flatpickr('#springEdit_competitionEndDate', { dateFormat: 'Y-m-d', locale: 'sv', static: true });
+            flatpickr('#springEdit_registrationOpenDate', { enableTime: true, dateFormat: 'Y-m-d H:i', time_24hr: true, locale: 'sv', static: true });
+            flatpickr('#springEdit_registrationCloseDate', { enableTime: true, dateFormat: 'Y-m-d H:i', time_24hr: true, locale: 'sv', static: true });
         } catch (e) { console.error('Flatpickr init error:', e); }
 
         if (!springEditDescEditor) {
@@ -545,15 +545,15 @@ window.populateSpringEditModal = function(comp) {
         setVal('springEdit_description', comp.description);
     }
 
-    // Dates via Flatpickr
+    // Dates via Flatpickr — use formatDateForInput to avoid timezone conversion
     const setDate = (id, dateStr, withTime) => {
         const el = document.getElementById(id);
-        if (el && el._flatpickr && dateStr) {
-            el._flatpickr.setDate(dateStr);
-        } else if (el && dateStr) {
-            el.value = window.formatDateForInput ? formatDateForInput(dateStr, withTime) : dateStr;
-        } else if (el && el._flatpickr) {
-            el._flatpickr.clear();
+        if (!el) return;
+        var formatted = dateStr && window.formatDateForInput ? formatDateForInput(dateStr, withTime) : (dateStr || '');
+        el.value = formatted;
+        if (el._flatpickr) {
+            if (formatted) el._flatpickr.setDate(formatted, false);
+            else el._flatpickr.clear();
         }
     };
     setDate('springEdit_competitionDate', comp.competitionDate, true);
