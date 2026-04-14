@@ -839,6 +839,19 @@ namespace HpskSite.Controllers
                         await _statisticsService.RecalculateFromHistoryAsync(member.Id, weaponClass, joinDiscipline);
 
                         var stats = await _statisticsService.GetStatisticsAsync(member.Id, weaponClass, joinDiscipline);
+
+                        // Cross-class fallback: if no stats in match weapon class, use best stats from another class
+                        if (stats == null || stats.CompletedMatches == 0)
+                        {
+                            var allStats = await _statisticsService.GetAllStatisticsAsync(member.Id, joinDiscipline);
+                            var fallback = allStats
+                                .Where(s => s.WeaponClass != weaponClass && s.CompletedMatches > 0)
+                                .OrderByDescending(s => s.CompletedMatches)
+                                .FirstOrDefault();
+                            if (fallback != null)
+                                stats = fallback;
+                        }
+
                         var profile = _handicapCalculator.CalculateHandicap(stats, shooterClass);
                         frozenHandicap = profile.HandicapPerSeries;
                         frozenIsProvisional = profile.IsProvisional;
@@ -3206,16 +3219,35 @@ namespace HpskSite.Controllers
                             var shooterClass = requestedMember.HasProperty(shooterClassPropApprove) ? requestedMember.GetValue<string>(shooterClassPropApprove) : null;
                             var weaponClass = (string)match.WeaponClass;
 
-                            if (!string.IsNullOrEmpty(shooterClass))
+                            if (string.IsNullOrEmpty(shooterClass))
                             {
-                                // Recalculate statistics before getting handicap to ensure it's up-to-date
-                                await _statisticsService.RecalculateFromHistoryAsync(requestedMemberId, weaponClass, approveDiscipline);
-
-                                var stats = await _statisticsService.GetStatisticsAsync(requestedMemberId, weaponClass, approveDiscipline);
-                                var profile = _handicapCalculator.CalculateHandicap(stats, shooterClass);
-                                frozenHandicap = profile.HandicapPerSeries;
-                                frozenIsProvisional = profile.IsProvisional;
+                                return Json(new
+                                {
+                                    success = false,
+                                    message = $"Medlemmen har inte valt skytteklass för {approveDiscipline}. Be dem ställa in sin klass under Handikapp-fliken på Min Sida innan de kan gå med i en handicapmatch."
+                                });
                             }
+
+                            // Recalculate statistics before getting handicap to ensure it's up-to-date
+                            await _statisticsService.RecalculateFromHistoryAsync(requestedMemberId, weaponClass, approveDiscipline);
+
+                            var stats = await _statisticsService.GetStatisticsAsync(requestedMemberId, weaponClass, approveDiscipline);
+
+                            // Cross-class fallback: if no stats in match weapon class, use best stats from another class
+                            if (stats == null || stats.CompletedMatches == 0)
+                            {
+                                var allStats = await _statisticsService.GetAllStatisticsAsync(requestedMemberId, approveDiscipline);
+                                var fallback = allStats
+                                    .Where(s => s.WeaponClass != weaponClass && s.CompletedMatches > 0)
+                                    .OrderByDescending(s => s.CompletedMatches)
+                                    .FirstOrDefault();
+                                if (fallback != null)
+                                    stats = fallback;
+                            }
+
+                            var profile = _handicapCalculator.CalculateHandicap(stats, shooterClass);
+                            frozenHandicap = profile.HandicapPerSeries;
+                            frozenIsProvisional = profile.IsProvisional;
                         }
 
                         // Add as participant

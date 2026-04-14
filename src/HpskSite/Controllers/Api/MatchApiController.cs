@@ -264,6 +264,16 @@ namespace HpskSite.Controllers.Api
                     var weaponClass = request.WeaponClass?.ToUpper() ?? "A";
                     await _statisticsService.RecalculateFromHistoryAsync(memberId.Value, weaponClass, discipline);
                     var stats = await _statisticsService.GetStatisticsAsync(memberId.Value, weaponClass, discipline);
+
+                    // Cross-class fallback
+                    if (stats == null || stats.CompletedMatches == 0)
+                    {
+                        var allStats = await _statisticsService.GetAllStatisticsAsync(memberId.Value, discipline);
+                        var fallback = allStats.Where(s => s.WeaponClass != weaponClass && s.CompletedMatches > 0)
+                            .OrderByDescending(s => s.CompletedMatches).FirstOrDefault();
+                        if (fallback != null) stats = fallback;
+                    }
+
                     var profile = _handicapCalculator.CalculateHandicap(stats, shooterClass);
                     frozenHandicap = profile.HandicapPerSeries;
                     frozenIsProvisional = profile.IsProvisional;
@@ -461,6 +471,16 @@ namespace HpskSite.Controllers.Api
                 {
                     await _statisticsService.RecalculateFromHistoryAsync(memberId.Value, match.WeaponClass, discipline);
                     var stats = await _statisticsService.GetStatisticsAsync(memberId.Value, match.WeaponClass, discipline);
+
+                    // Cross-class fallback
+                    if (stats == null || stats.CompletedMatches == 0)
+                    {
+                        var allStats = await _statisticsService.GetAllStatisticsAsync(memberId.Value, discipline);
+                        var fallback = allStats.Where(s => s.WeaponClass != match.WeaponClass && s.CompletedMatches > 0)
+                            .OrderByDescending(s => s.CompletedMatches).FirstOrDefault();
+                        if (fallback != null) stats = fallback;
+                    }
+
                     var profile = _handicapCalculator.CalculateHandicap(stats, shooterClass);
                     frozenHandicap = profile.HandicapPerSeries;
                     frozenIsProvisional = profile.IsProvisional;
@@ -1942,6 +1962,16 @@ namespace HpskSite.Controllers.Api
                         var shooterClass = member?.HasProperty(shooterClassProp) == true ? member.GetValue<string>(shooterClassProp) : null;
                         await _statisticsService.RecalculateFromHistoryAsync(joinRequest.MemberId, match.WeaponClass, joinDiscipline);
                         var stats = await _statisticsService.GetStatisticsAsync(joinRequest.MemberId, match.WeaponClass, joinDiscipline);
+
+                        // Cross-class fallback
+                        if (stats == null || stats.CompletedMatches == 0)
+                        {
+                            var allStats = await _statisticsService.GetAllStatisticsAsync(joinRequest.MemberId, joinDiscipline);
+                            var fallback = allStats.Where(s => s.WeaponClass != match.WeaponClass && s.CompletedMatches > 0)
+                                .OrderByDescending(s => s.CompletedMatches).FirstOrDefault();
+                            if (fallback != null) stats = fallback;
+                        }
+
                         var profile = _handicapCalculator.CalculateHandicap(stats, shooterClass);
                         frozenHandicap = profile.HandicapPerSeries;
                         frozenIsProvisional = profile.IsProvisional;
