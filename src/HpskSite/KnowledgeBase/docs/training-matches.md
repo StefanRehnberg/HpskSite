@@ -90,6 +90,17 @@ Matchskaparen kan justera inställningar (t.ex. max antal serier) under matchens
 
 Om ingen aktivitet sker på 30 minuter ser skaparen en banner med förfrågan om att avsluta eller fortsätta matchen.
 
+## Avsluta en match
+
+Matchskaparen avslutar matchen via matchinställningarna. När en match avslutas:
+- **Alla resultat låses permanent** — varken skaparen eller deltagarna kan ändra matchens resultat
+- **Resultaten överförs automatiskt** till varje deltagares personliga sida under **Min Sida** > fliken **"Resultat"**
+- Matchen flyttas till fliken **"Historik"** i matchlistan
+
+**Viktigt:** En avslutad match kan inte öppnas igen. Ingen kan lägga till, ändra eller ta bort resultat i en avslutad match — inte ens matchskaparen.
+
+Om du vill justera dina egna träningsresultat efter att matchen avslutats kan du göra det under **Min Sida** > **Resultat**. Ändringar där påverkar bara din personliga statistik, inte matchresultaten.
+
 ## Handikapp-systemet
 
 Handikapp baseras på din skytteklass och tidigare resultat. Det justerar poängen så att skyttar på olika nivåer kan tävla på lika villkor. Din handicap-index beräknas automatiskt från dina registrerade träningsresultat.
