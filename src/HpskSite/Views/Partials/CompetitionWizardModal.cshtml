@@ -532,6 +532,48 @@
                             </div>
                         </div>
 
+                        <!-- Direktplacering Section -->
+                        <div class="accordion mb-3" id="wizardAccordionDirektplacering">
+                            <div class="accordion-item">
+                                <h2 class="accordion-header" id="headingDirektplacering">
+                                    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseDirektplacering">
+                                        Egenbokning
+                                    </button>
+                                </h2>
+                                <div id="collapseDirektplacering" class="accordion-collapse collapse" data-bs-parent="#wizardAccordionDirektplacering">
+                                    <div class="accordion-body">
+                                        <div class="mb-3 small text-muted">
+                                            <p class="mb-1"><strong>Utan Egenbokning:</strong> Skyttar anmäler sig till tävlingen och väljer vapengrupp. En tävlingsadministratör skapar startlistan i efterhand och tilldelar skjutlag och starttider.</p>
+                                            <p class="mb-0"><strong>Med Egenbokning:</strong> Skyttar väljer själva vilket skjutlag och vilken starttid de vill skjuta i direkt vid anmälan. Startlistan byggs upp automatiskt allt eftersom skyttar anmäler sig.</p>
+                                        </div>
+                                        <div class="form-check mb-3">
+                                            <input type="checkbox" class="form-check-input" id="wizard_enableDirektplacering" onchange="toggleDirektplaceringConfig()">
+                                            <label class="form-check-label" for="wizard_enableDirektplacering">
+                                                Aktivera Egenbokning
+                                            </label>
+                                        </div>
+
+                                        <div id="direktplaceringConfigSection" style="display:none">
+                                            <div class="form-check mb-3">
+                                                <input type="checkbox" class="form-check-input" id="wizard_allowMixedClasses" checked onchange="onWizardMixedClassesChanged()">
+                                                <label class="form-check-label" for="wizard_allowMixedClasses">
+                                                    Tillåt blandade vapengrupper i samma skjutlag
+                                                </label>
+                                            </div>
+
+                                            <div id="direktplaceringTeamList" class="mb-3">
+                                                <!-- Teams rendered here dynamically -->
+                                            </div>
+
+                                            <button type="button" class="btn btn-outline-primary btn-sm" onclick="addDirektplaceringTeam()">
+                                                <i class="bi bi-plus-circle me-1"></i>Lägg till skjutlag
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
                     </div>
 
                 </form>
@@ -883,6 +925,18 @@ function onCompetitionTypeChange() {
         if (!isSpringskytte) {
             document.getElementById('wizard_allowStafett').checked = false;
             onWizardAllowStafettChange();
+        }
+    }
+
+    // Show/hide Egenbokning (only for precision-family types)
+    const excludedTypes = ['Springskytte', 'Faltskytte', 'MagnumFalt'];
+    const dpAccordion = document.getElementById('wizardAccordionDirektplacering');
+    if (dpAccordion) {
+        const hideEgenbokning = excludedTypes.includes(typeSelect.value);
+        dpAccordion.style.display = hideEgenbokning ? 'none' : '';
+        if (hideEgenbokning) {
+            document.getElementById('wizard_enableDirektplacering').checked = false;
+            document.getElementById('direktplaceringConfigSection').style.display = 'none';
         }
     }
 }
@@ -1439,6 +1493,16 @@ function updateWizardUI() {
         applySeriesDefaults();
     }
 
+    // Show/hide Egenbokning on step 6 based on competition type
+    if (wizardCurrentStep === 6) {
+        const selectedType = document.getElementById('wizard_competitionType').value;
+        const dpExcluded = ['Springskytte', 'Faltskytte', 'MagnumFalt'];
+        const dpAccordion = document.getElementById('wizardAccordionDirektplacering');
+        if (dpAccordion) {
+            dpAccordion.style.display = dpExcluded.includes(selectedType) ? 'none' : '';
+        }
+    }
+
     // Update progress dots
     document.querySelectorAll('.wizard-dot').forEach((dot, index) => {
         if (index <= wizardCurrentStep) {
@@ -1747,6 +1811,11 @@ function submitWizard() {
         fields.rollingStart = rsEnabled ? JSON.stringify({ enabled: true, patrolSize: parseInt(document.getElementById('wizard_patrolSize').value) || 2 }) : '';
     }
 
+    // Add Direktplacering config
+    if (document.getElementById('wizard_enableDirektplacering').checked) {
+        fields.direktplaceringConfig = JSON.stringify(collectDirektplaceringConfig());
+    }
+
     const requestBody = { fields: fields };
 
     // Show loading state
@@ -1876,6 +1945,13 @@ window.resetWizard = function() {
         document.getElementById('wizard_isClubOnly').checked = true;
     }
 
+    // Reset Egenbokning section
+    document.getElementById('wizard_enableDirektplacering').checked = false;
+    document.getElementById('direktplaceringConfigSection').style.display = 'none';
+    document.getElementById('direktplaceringTeamList').innerHTML = '';
+    document.getElementById('wizard_allowMixedClasses').checked = true;
+    dpTeamCounter = 0;
+
     // Re-initialize date pickers with defaults
     initializeWizardDatePickers();
 
@@ -1884,4 +1960,157 @@ window.resetWizard = function() {
 
     console.log('Wizard reset to initial state');
 };
+
+// ============================================================================
+// Direktplacering Team Configurator
+// ============================================================================
+
+let dpTeamCounter = 0;
+
+function toggleDirektplaceringConfig() {
+    const section = document.getElementById('direktplaceringConfigSection');
+    const enabled = document.getElementById('wizard_enableDirektplacering').checked;
+    section.style.display = enabled ? 'block' : 'none';
+    if (enabled && dpTeamCounter === 0) {
+        addDirektplaceringTeam(); // Add first team automatically
+    }
+}
+
+function addDirektplaceringTeam() {
+    dpTeamCounter++;
+    const teamNum = dpTeamCounter;
+    const container = document.getElementById('direktplaceringTeamList');
+
+    // Auto-calculate start time from previous team's end time
+    let defaultStart = '09:00';
+    let defaultEnd = '11:00';
+    const existingCards = container.querySelectorAll('.dp-team-card');
+    if (existingCards.length > 0) {
+        const lastCard = existingCards[existingCards.length - 1];
+        const lastEnd = lastCard.querySelector('.dp-end-time')?.value;
+        if (lastEnd) {
+            defaultStart = lastEnd;
+            // Add 2 hours for default end time
+            const parts = lastEnd.split(':');
+            const h = parseInt(parts[0]) + 2;
+            defaultEnd = `${String(h).padStart(2, '0')}:${parts[1]}`;
+        }
+    }
+
+    const card = document.createElement('div');
+    card.className = 'card mb-2 dp-team-card';
+    card.dataset.teamNumber = teamNum;
+    card.innerHTML = `
+        <div class="card-body py-2 px-3">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <strong class="dp-team-header">Skjutlag: ${teamNum} - Tid: ${defaultStart}-${defaultEnd} (30 st)</strong>
+                <button type="button" class="btn btn-outline-danger btn-sm" onclick="removeDirektplaceringTeam(this)">
+                    <i class="bi bi-trash"></i>
+                </button>
+            </div>
+            <div class="row g-2">
+                <div class="col-md-3">
+                    <label class="form-label small mb-0">Starttid</label>
+                    <input type="text" class="form-control form-control-sm dp-start-time" value="${defaultStart}" placeholder="09:00">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small mb-0">Sluttid</label>
+                    <input type="text" class="form-control form-control-sm dp-end-time" value="${defaultEnd}" placeholder="11:00">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small mb-0">Antal platser</label>
+                    <input type="number" class="form-control form-control-sm dp-positions" value="30" min="1">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small mb-0">Plats</label>
+                    <input type="text" class="form-control form-control-sm dp-label" placeholder="T.ex. Hall 1">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small mb-0">Vapengrupper</label>
+                    <select class="form-select form-select-sm dp-weapon-classes" ${document.getElementById('wizard_allowMixedClasses').checked ? 'multiple' : ''} form="dp-no-form">
+                        <option value="A">A</option>
+                        <option value="B">B</option>
+                        <option value="C">C</option>
+                        <option value="R">R</option>
+                        <option value="L">L</option>
+                        <option value="M">M</option>
+                    </select>
+                    <small class="form-text text-muted" style="font-size:0.7rem;">Ingen markerad = alla</small>
+                </div>
+            </div>
+        </div>
+    `;
+    container.appendChild(card);
+
+    // Initialize Flatpickr time pickers
+    const startInput = card.querySelector('.dp-start-time');
+    const endInput = card.querySelector('.dp-end-time');
+    flatpickr(startInput, { locale: 'sv', enableTime: true, noCalendar: true, dateFormat: 'H:i', time_24hr: true, static: true, defaultDate: defaultStart });
+    flatpickr(endInput, { locale: 'sv', enableTime: true, noCalendar: true, dateFormat: 'H:i', time_24hr: true, static: true, defaultDate: defaultEnd });
+
+    // Add change listeners for live header update
+    [startInput, endInput, card.querySelector('.dp-positions'), card.querySelector('.dp-label')].forEach(input => {
+        input.addEventListener('change', () => updateDpTeamHeader(card));
+        input.addEventListener('input', () => updateDpTeamHeader(card));
+    });
+}
+
+function removeDirektplaceringTeam(btn) {
+    const card = btn.closest('.dp-team-card');
+    card.remove();
+    renumberDpTeams();
+}
+
+function renumberDpTeams() {
+    const cards = document.querySelectorAll('#direktplaceringTeamList .dp-team-card');
+    cards.forEach((card, idx) => {
+        card.dataset.teamNumber = idx + 1;
+        updateDpTeamHeader(card);
+    });
+    dpTeamCounter = cards.length;
+}
+
+function updateDpTeamHeader(card) {
+    const teamNum = card.dataset.teamNumber;
+    const start = card.querySelector('.dp-start-time')?.value || '??:??';
+    const end = card.querySelector('.dp-end-time')?.value || '??:??';
+    const positions = card.querySelector('.dp-positions')?.value || '?';
+    const label = card.querySelector('.dp-label')?.value || '';
+    const labelSuffix = label ? ` - ${label}` : '';
+    const header = card.querySelector('.dp-team-header');
+    if (header) {
+        header.textContent = `Skjutlag: ${teamNum} - Tid: ${start}-${end} (${positions} st)${labelSuffix}`;
+    }
+}
+
+function onWizardMixedClassesChanged() {
+    const allowMultiple = document.getElementById('wizard_allowMixedClasses').checked;
+    document.querySelectorAll('#direktplaceringTeamList .dp-weapon-classes').forEach(select => {
+        const selected = Array.from(select.selectedOptions).map(o => o.value);
+        select.multiple = allowMultiple;
+        if (!allowMultiple && selected.length > 1) {
+            Array.from(select.options).forEach(o => o.selected = (o.value === selected[0]));
+        }
+    });
+}
+
+function collectDirektplaceringConfig() {
+    const teams = [];
+    document.querySelectorAll('#direktplaceringTeamList .dp-team-card').forEach((card, idx) => {
+        const selectedClasses = Array.from(card.querySelector('.dp-weapon-classes').selectedOptions).map(o => o.value);
+        teams.push({
+            teamNumber: idx + 1,
+            startTime: card.querySelector('.dp-start-time')?.value || '',
+            endTime: card.querySelector('.dp-end-time')?.value || '',
+            positions: parseInt(card.querySelector('.dp-positions')?.value) || 30,
+            label: card.querySelector('.dp-label')?.value || '',
+            allowedWeaponClasses: selectedClasses
+        });
+    });
+    return {
+        enabled: true,
+        allowMixedClasses: document.getElementById('wizard_allowMixedClasses').checked,
+        teams: teams
+    };
+}
 </script>

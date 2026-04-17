@@ -378,6 +378,34 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                         </div>
                     </div>
 
+                    <!-- Egenbokning Section -->
+                    <div id="editDirektplaceringSection">
+                        <hr>
+                        <h6 class="text-primary mb-3"><i class="bi bi-calendar-check me-1"></i>Egenbokning</h6>
+                        <div class="mb-3 small text-muted">
+                            <p class="mb-1"><strong>Utan Egenbokning:</strong> Skyttar anmäler sig och en administratör skapar startlistan i efterhand.</p>
+                            <p class="mb-0"><strong>Med Egenbokning:</strong> Skyttar väljer själva skjutlag och starttid direkt vid anmälan. Startlistan byggs upp automatiskt.</p>
+                        </div>
+                        <div class="form-check mb-3">
+                            <input class="form-check-input" type="checkbox" id="edit_enableDirektplacering" onchange="toggleEditDirektplacering()">
+                            <label class="form-check-label" for="edit_enableDirektplacering">
+                                Aktivera Egenbokning
+                            </label>
+                        </div>
+                        <div id="editDpConfigSection" style="display:none">
+                            <div class="form-check mb-3">
+                                <input class="form-check-input" type="checkbox" id="edit_allowMixedClasses" checked onchange="onEditMixedClassesChanged()">
+                                <label class="form-check-label" for="edit_allowMixedClasses">
+                                    Tillåt blandade vapengrupper i samma skjutlag
+                                </label>
+                            </div>
+                            <div id="editDpTeamList" class="mb-3"></div>
+                            <button type="button" class="btn btn-outline-primary btn-sm mb-3" onclick="addEditDpTeam()">
+                                <i class="bi bi-plus-circle me-1"></i>Lägg till skjutlag
+                            </button>
+                        </div>
+                    </div>
+
                     <!-- Fältskytte-specific fields (hidden unless type is Faltskytte/MagnumFalt) -->
                     <div id="editFaltskytteSection" style="display:none">
                         <hr>
@@ -942,6 +970,14 @@ window.populateEditModal = function(competition) {
         }
     }
 
+    // Egenbokning section (only for precision-family types)
+    const dpExcludedTypes = ['Springskytte', 'Faltskytte', 'MagnumFalt'];
+    const dpSection = document.getElementById('editDirektplaceringSection');
+    if (dpSection) {
+        dpSection.style.display = dpExcludedTypes.includes(competition.competitionType) ? 'none' : '';
+    }
+    loadEditDirektplaceringConfig(competition.direktplaceringConfig);
+
     // Competition scope dropdown
     setFieldValue('competitionScope', competition.competitionScope || '');
     setFieldValue('edit_subCompetitionName', competition.subCompetitionName || '');
@@ -1045,10 +1081,17 @@ function saveCompetition() {
     }
 
     const form = document.getElementById('competitionEditForm');
-    if (!form.checkValidity()) {
+
+    // Disable Flatpickr-generated inputs before validation (they have name="" which breaks checkValidity)
+    const fpInputs = form.querySelectorAll('.numInput, .flatpickr-hour, .flatpickr-minute, .flatpickr-am-pm');
+    fpInputs.forEach(i => i.disabled = true);
+    const isValid = form.checkValidity();
+    if (!isValid) {
         form.reportValidity();
+        fpInputs.forEach(i => i.disabled = false);
         return;
     }
+    fpInputs.forEach(i => i.disabled = false);
 
     // Sync rolling start JSON before collecting form data
     var rsCheckbox = document.getElementById('edit_rollingStartEnabled');
@@ -1104,6 +1147,13 @@ function saveCompetition() {
     // Always include it explicitly (empty string clears it when club is selected)
     const regionSelect = document.getElementById('regionalFederation');
     fields.regionalFederation = regionSelect.disabled ? '' : (regionSelect.value || '');
+
+    // Add Direktplacering config
+    if (document.getElementById('edit_enableDirektplacering').checked) {
+        fields.direktplaceringConfig = JSON.stringify(collectEditDpConfig());
+    } else {
+        fields.direktplaceringConfig = '';
+    }
 
     // Ensure unchecked checkboxes are explicitly set to false
     const checkboxFields = ['showLiveResults', 'addToMenu', 'allowDualCClass', 'isClubOnly', 'isAwardingStandardMedals', 'isExternal', 'allowSelfReporting', 'allowTeams', 'allowStafett'];
@@ -1592,6 +1642,188 @@ function openEditFaltStationConfigurator() {
     // Open configurator on top of edit modal (no hide/show needed)
     window._faltCfgReturnToEditModal = true;
     faltCfgOpen(weaponClasses, existingConfig);
+}
+
+// ============================================================================
+// Direktplacering - Edit Modal
+// ============================================================================
+
+let editDpTeamCounter = 0;
+
+function toggleEditDirektplacering() {
+    const section = document.getElementById('editDpConfigSection');
+    const enabled = document.getElementById('edit_enableDirektplacering').checked;
+    section.style.display = enabled ? 'block' : 'none';
+    if (enabled && editDpTeamCounter === 0) {
+        addEditDpTeam();
+    }
+}
+
+function loadEditDirektplaceringConfig(configStr) {
+    const container = document.getElementById('editDpTeamList');
+    container.innerHTML = '';
+    editDpTeamCounter = 0;
+
+    if (!configStr) {
+        document.getElementById('edit_enableDirektplacering').checked = false;
+        document.getElementById('editDpConfigSection').style.display = 'none';
+        return;
+    }
+
+    let config;
+    try {
+        config = typeof configStr === 'string' ? JSON.parse(configStr) : configStr;
+    } catch(e) {
+        document.getElementById('edit_enableDirektplacering').checked = false;
+        document.getElementById('editDpConfigSection').style.display = 'none';
+        return;
+    }
+
+    if (!config || !config.enabled) {
+        document.getElementById('edit_enableDirektplacering').checked = false;
+        document.getElementById('editDpConfigSection').style.display = 'none';
+        return;
+    }
+
+    document.getElementById('edit_enableDirektplacering').checked = true;
+    document.getElementById('editDpConfigSection').style.display = 'block';
+    document.getElementById('edit_allowMixedClasses').checked = config.allowMixedClasses !== false;
+
+    if (config.teams && config.teams.length > 0) {
+        config.teams.forEach(team => {
+            addEditDpTeam(team.startTime, team.endTime, team.positions, team.allowedWeaponClasses || [], team.label || '');
+        });
+    }
+    onEditMixedClassesChanged();
+}
+
+function addEditDpTeam(startTime, endTime, positions, weaponClasses, label) {
+    editDpTeamCounter++;
+    const teamNum = editDpTeamCounter;
+    const container = document.getElementById('editDpTeamList');
+
+    const defStart = startTime || '09:00';
+    const defEnd = endTime || '11:00';
+    const defPositions = positions || 30;
+    const defLabel = label || '';
+    const labelSuffix = defLabel ? ` - ${defLabel}` : '';
+
+    const card = document.createElement('div');
+    card.className = 'card mb-2 edit-dp-team-card';
+    card.dataset.teamNumber = teamNum;
+    card.innerHTML = `
+        <div class="card-body py-2 px-3">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <strong class="edit-dp-team-header">Skjutlag: ${teamNum} - Tid: ${defStart}-${defEnd} (${defPositions} st)${labelSuffix}</strong>
+                <button type="button" class="btn btn-outline-danger btn-sm" onclick="removeEditDpTeam(this)">
+                    <i class="bi bi-trash"></i>
+                </button>
+            </div>
+            <div class="row g-2">
+                <div class="col-md-3">
+                    <label class="form-label small mb-0">Starttid</label>
+                    <input type="text" class="form-control form-control-sm edit-dp-start-time" value="${defStart}">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small mb-0">Sluttid</label>
+                    <input type="text" class="form-control form-control-sm edit-dp-end-time" value="${defEnd}">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small mb-0">Antal platser</label>
+                    <input type="number" class="form-control form-control-sm edit-dp-positions" value="${defPositions}" min="1">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small mb-0">Plats</label>
+                    <input type="text" class="form-control form-control-sm edit-dp-label" value="${defLabel}" placeholder="T.ex. Hall 1">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small mb-0">Vapengrupper</label>
+                    <select class="form-select form-select-sm edit-dp-weapon-classes" ${document.getElementById('edit_allowMixedClasses').checked ? 'multiple' : ''} form="dp-no-form">
+                        <option value="A">A</option>
+                        <option value="B">B</option>
+                        <option value="C">C</option>
+                        <option value="R">R</option>
+                        <option value="L">L</option>
+                        <option value="M">M</option>
+                    </select>
+                    <small class="form-text text-muted" style="font-size:0.7rem;">Ingen markerad = alla</small>
+                </div>
+            </div>
+        </div>
+    `;
+    container.appendChild(card);
+
+    // Pre-select weapon classes
+    if (weaponClasses && weaponClasses.length > 0) {
+        const select = card.querySelector('.edit-dp-weapon-classes');
+        weaponClasses.forEach(cls => {
+            const opt = select.querySelector(`option[value="${cls}"]`);
+            if (opt) opt.selected = true;
+        });
+    }
+
+    // Initialize Flatpickr (static: true to stay in place inside modal, defaultDate ensures value is written)
+    flatpickr(card.querySelector('.edit-dp-start-time'), { locale: 'sv', enableTime: true, noCalendar: true, dateFormat: 'H:i', time_24hr: true, static: true, defaultDate: defStart });
+    flatpickr(card.querySelector('.edit-dp-end-time'), { locale: 'sv', enableTime: true, noCalendar: true, dateFormat: 'H:i', time_24hr: true, static: true, defaultDate: defEnd });
+
+    // Live header update
+    [card.querySelector('.edit-dp-start-time'), card.querySelector('.edit-dp-end-time'), card.querySelector('.edit-dp-positions'), card.querySelector('.edit-dp-label')].forEach(input => {
+        input.addEventListener('change', () => updateEditDpTeamHeader(card));
+        input.addEventListener('input', () => updateEditDpTeamHeader(card));
+    });
+}
+
+function removeEditDpTeam(btn) {
+    btn.closest('.edit-dp-team-card').remove();
+    const cards = document.querySelectorAll('#editDpTeamList .edit-dp-team-card');
+    cards.forEach((card, idx) => {
+        card.dataset.teamNumber = idx + 1;
+        updateEditDpTeamHeader(card);
+    });
+    editDpTeamCounter = cards.length;
+}
+
+function updateEditDpTeamHeader(card) {
+    const teamNum = card.dataset.teamNumber;
+    const start = card.querySelector('.edit-dp-start-time')?.value || '??:??';
+    const end = card.querySelector('.edit-dp-end-time')?.value || '??:??';
+    const positions = card.querySelector('.edit-dp-positions')?.value || '?';
+    const label = card.querySelector('.edit-dp-label')?.value || '';
+    const labelSuffix = label ? ` - ${label}` : '';
+    const header = card.querySelector('.edit-dp-team-header');
+    if (header) header.textContent = `Skjutlag: ${teamNum} - Tid: ${start}-${end} (${positions} st)${labelSuffix}`;
+}
+
+function onEditMixedClassesChanged() {
+    const allowMultiple = document.getElementById('edit_allowMixedClasses').checked;
+    document.querySelectorAll('#editDpTeamList .edit-dp-weapon-classes').forEach(select => {
+        const selected = Array.from(select.selectedOptions).map(o => o.value);
+        select.multiple = allowMultiple;
+        // When switching to single, keep only the first selection
+        if (!allowMultiple && selected.length > 1) {
+            Array.from(select.options).forEach(o => o.selected = (o.value === selected[0]));
+        }
+    });
+}
+
+function collectEditDpConfig() {
+    const teams = [];
+    document.querySelectorAll('#editDpTeamList .edit-dp-team-card').forEach((card, idx) => {
+        const selectedClasses = Array.from(card.querySelector('.edit-dp-weapon-classes').selectedOptions).map(o => o.value);
+        teams.push({
+            teamNumber: idx + 1,
+            startTime: card.querySelector('.edit-dp-start-time')?.value || '',
+            endTime: card.querySelector('.edit-dp-end-time')?.value || '',
+            positions: parseInt(card.querySelector('.edit-dp-positions')?.value) || 30,
+            label: card.querySelector('.edit-dp-label')?.value || '',
+            allowedWeaponClasses: selectedClasses
+        });
+    });
+    return {
+        enabled: true,
+        allowMixedClasses: document.getElementById('edit_allowMixedClasses').checked,
+        teams: teams
+    };
 }
 </script>
 

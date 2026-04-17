@@ -13,11 +13,14 @@ using HpskSite.CompetitionTypes.Precision.ViewModels;
 using Microsoft.Extensions.Logging;
 using HpskSite.Services;
 using HpskSite.Models;
+using System.Collections.Concurrent;
 
 namespace HpskSite.Controllers
 {
     public class CompetitionController : SurfaceController
     {
+        private static readonly ConcurrentDictionary<int, SemaphoreSlim> _registrationLocks = new();
+
         private readonly IMemberManager _memberManager;
         private readonly IMemberService _memberService;
         private readonly IContentService _contentService;
@@ -64,7 +67,8 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> RegisterForCompetition(int competitionId,
             string selectedClasses = "", string startPreference = "Inget", int? targetMemberId = null,
-            string startPreferencesJson = "", bool isSubCompetition = false)
+            string startPreferencesJson = "", bool isSubCompetition = false,
+            string teamAssignmentsJson = "")
         {
             try
             {
@@ -288,14 +292,41 @@ namespace HpskSite.Controllers
                     }
                 }
 
-                // Build shooting classes array with per-class preferences
-                var shootingClassesArray = selectedClassesList.Select(sc => new
+                // Parse Direktplacering config and team assignments
+                var dpConfig = DirektplaceringConfig.Parse(competition.GetValue<string>("direktplaceringConfig"));
+                var teamAssignments = new Dictionary<string, int>();
+                if (dpConfig != null && !string.IsNullOrEmpty(teamAssignmentsJson))
                 {
-                    @class = sc,
-                    startPreference = startPreferencesDict.ContainsKey(sc) ? startPreferencesDict[sc] : startPreference
+                    try
+                    {
+                        teamAssignments = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, int>>(teamAssignmentsJson)
+                            ?? new Dictionary<string, int>();
+                    }
+                    catch
+                    {
+                        _logger.LogWarning("Failed to parse teamAssignmentsJson for competition {CompetitionId}", competitionId);
+                    }
+                }
+
+                // Validate: Direktplacering requires team assignments for all classes
+                if (dpConfig != null && teamAssignments.Count == 0)
+                {
+                    var errorMsg = "Du måste välja skjutlag för varje vapengrupp.";
+                    if (IsAjaxRequest())
+                        return Json(new { success = false, message = errorMsg });
+                    TempData["Error"] = errorMsg;
+                    return RedirectToCurrentUmbracoPage();
+                }
+
+                // Build shooting classes array with per-class preferences and team assignments
+                var shootingClassEntries = selectedClassesList.Select(sc => new ShootingClassEntry
+                {
+                    Class = sc,
+                    StartPreference = startPreferencesDict.ContainsKey(sc) ? startPreferencesDict[sc] : startPreference,
+                    TeamNumber = teamAssignments.TryGetValue(sc, out var tn) ? tn : null
                 }).ToList();
 
-                var shootingClassesJson = System.Text.Json.JsonSerializer.Serialize(shootingClassesArray);
+                var shootingClassesJson = CompetitionRegistrationDocument.SerializeShootingClasses(shootingClassEntries);
 
                 // Check if registration already exists — reuse the hub we already found
                 IContent existingRegistration = null;
@@ -401,6 +432,90 @@ namespace HpskSite.Controllers
                 if (registration.HasProperty("isSubCompetition"))
                     registration.SetValue("isSubCompetition", isSubCompetition);
 
+                // Direktplacering: validate team availability under lock before saving
+                if (dpConfig != null)
+                {
+                    var semaphore = _registrationLocks.GetOrAdd(competitionId, _ => new SemaphoreSlim(1, 1));
+                    if (!await semaphore.WaitAsync(TimeSpan.FromSeconds(10)))
+                    {
+                        var errorMsg = "Anmälningen kunde inte genomföras just nu, försök igen.";
+                        if (IsAjaxRequest())
+                            return Json(new { success = false, message = errorMsg });
+                        TempData["Error"] = errorMsg;
+                        return RedirectToCurrentUmbracoPage();
+                    }
+                    try
+                    {
+                        // Re-check availability inside lock
+                        var availability = BuildTeamAvailability(competitionId, competition, dpConfig);
+                        var availabilityJson = System.Text.Json.JsonSerializer.Serialize(availability);
+                        var availabilityData = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(availabilityJson);
+
+                        if (availabilityData.TryGetProperty("teams", out var teamsEl))
+                        {
+                            foreach (var entry in shootingClassEntries)
+                            {
+                                if (!entry.TeamNumber.HasValue) continue;
+                                foreach (var teamEl in teamsEl.EnumerateArray())
+                                {
+                                    if (teamEl.GetProperty("teamNumber").GetInt32() == entry.TeamNumber.Value)
+                                    {
+                                        var remaining = teamEl.GetProperty("positionsRemaining").GetInt32();
+                                        // If updating, the existing registration's spots are already counted,
+                                        // so we get an extra spot per class that was in the same team
+                                        var existingInSameTeam = 0;
+                                        if (isUpdate && existingRegistration != null)
+                                        {
+                                            var oldClasses = CompetitionRegistrationDocument.DeserializeShootingClasses(
+                                                existingRegistration.GetValue<string>("shootingClasses") ?? "");
+                                            existingInSameTeam = oldClasses.Count(c => c.TeamNumber == entry.TeamNumber.Value);
+                                        }
+
+                                        if (remaining + existingInSameTeam <= 0)
+                                        {
+                                            var errorMsg = $"Skjutlag {entry.TeamNumber.Value} är fullt. Välj ett annat skjutlag.";
+                                            if (IsAjaxRequest())
+                                                return Json(new { success = false, message = errorMsg, teamFull = true });
+                                            TempData["Error"] = errorMsg;
+                                            return RedirectToCurrentUmbracoPage();
+                                        }
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        // Save inside lock to prevent race conditions
+                        try { _contentService.Save(registration); }
+                        catch (Exception ex) when (IsDocumentUrlTimeout(ex))
+                        {
+                            _logger.LogWarning("Registration saved but URL segment rebuild timed out (non-critical) for regId={RegId}", registration.Id);
+                        }
+
+                        InvalidateDirektplaceringCache(competitionId);
+
+                        // Auto-update the start list in background
+                        var compId = competitionId;
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                await Task.Delay(5000); // Wait for registration publish
+                                AutoGenerateDirektplaceringStartList(compId, competition, dpConfig);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "Background start list update failed for competition {CompId}", compId);
+                            }
+                        });
+                    }
+                    finally
+                    {
+                        semaphore.Release();
+                    }
+                }
+                else
+                {
                 // Save content — the DB transaction commits before notifications fire,
                 // so even if DocumentUrlService times out, the data IS persisted.
                 try
@@ -411,6 +526,7 @@ namespace HpskSite.Controllers
                 {
                     // SqlBulkCopy timeout in DocumentUrlService — data was saved, URL rebuild is non-critical
                     _logger.LogWarning("Registration saved but URL segment rebuild timed out (non-critical) for regId={RegId}", registration.Id);
+                }
                 }
                 // Delayed fire-and-forget publish
                 var registrationId_forPublish = registration.Id;
@@ -497,6 +613,18 @@ namespace HpskSite.Controllers
                 if (successMessages.Any())
                 {
                     var successMessage = string.Join(" ", successMessages);
+
+                    // Append team info for Direktplacering registrations
+                    if (dpConfig != null && teamAssignments.Count > 0)
+                    {
+                        var teamInfoParts = teamAssignments.Select(ta =>
+                        {
+                            var team = dpConfig.Teams.FirstOrDefault(t => t.TeamNumber == ta.Value);
+                            return team != null ? $"{ta.Key} → Skjutlag {ta.Value} ({team.StartTime}-{team.EndTime})" : $"{ta.Key} → Skjutlag {ta.Value}";
+                        });
+                        successMessage += " Placering: " + string.Join(", ", teamInfoParts);
+                    }
+
                     if (IsAjaxRequest())
                     {
                         return Json(new
@@ -507,7 +635,8 @@ namespace HpskSite.Controllers
                             isUpdate = isUpdate,
                             feeChanged = feeChanged,
                             oldFee = oldFee,
-                            newFee = newFee
+                            newFee = newFee,
+                            teamAssignments = dpConfig != null ? teamAssignments : null
                         });
                     }
                     TempData["Success"] = successMessage;
@@ -1153,7 +1282,7 @@ namespace HpskSite.Controllers
                 }
 
                 // PERFORMANCE FIX: Direct query to competition children instead of full tree traversal
-                var competitionChildren = _contentService.GetPagedChildren(competitionId.Value, 0, 100, out _);
+                var competitionChildren = _contentService.GetPagedChildren(competitionId.Value, 0, 100, out _).ToList();
                 var registrationsHub = competitionChildren
                     .FirstOrDefault(c => c.ContentType.Alias == "competitionRegistrationsHub");
 
@@ -2201,6 +2330,238 @@ namespace HpskSite.Controllers
                 _logger.LogError(ex, "Error during cleanup of duplicate registrations");
                 return Json(new { success = false, message = "Ett fel uppstod: " + ex.Message });
             }
+        }
+
+        #endregion
+
+        #region Direktplacering
+
+        [HttpGet]
+        public IActionResult GetTeamAvailability(int competitionId)
+        {
+            try
+            {
+                var competition = _contentService.GetById(competitionId);
+                if (competition == null)
+                    return Json(new { success = false, message = "Tävlingen kunde inte hittas." });
+
+                var config = DirektplaceringConfig.Parse(competition.GetValue<string>("direktplaceringConfig"));
+                if (config == null)
+                    return Json(new { success = false, message = "Direktplacering är inte aktiverat för denna tävling." });
+
+                // Use cache to avoid repeated traversal during peak registration
+                var cacheKey = $"dp_availability_{competitionId}";
+                var result = AppCaches.RuntimeCache.GetCacheItem(cacheKey, () =>
+                {
+                    return BuildTeamAvailability(competitionId, competition, config);
+                }, TimeSpan.FromSeconds(30));
+
+                return Json(result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting team availability for competition {CompetitionId}", competitionId);
+                return Json(new { success = false, message = "Ett fel uppstod: " + ex.Message });
+            }
+        }
+
+        private object BuildTeamAvailability(int competitionId, IContent competition, DirektplaceringConfig config)
+        {
+            // Find registrations hub and count occupancy per team
+            var competitionChildren = _contentService.GetPagedChildren(competition.Id, 0, 100, out _).ToList();
+            var registrationsHub = competitionChildren.FirstOrDefault(c =>
+                c.ContentType.Alias == "competitionRegistrationsHub" ||
+                c.Name.Contains("Anmälningar") ||
+                c.Name.Contains("Registration"));
+
+            // Count team assignments from existing registrations
+            var teamCounts = new Dictionary<int, Dictionary<string, int>>(); // teamNumber -> { weaponGroup -> count }
+            foreach (var team in config.Teams)
+            {
+                teamCounts[team.TeamNumber] = new Dictionary<string, int>();
+            }
+
+            if (registrationsHub != null)
+            {
+                var registrations = _contentService.GetPagedChildren(registrationsHub.Id, 0, 1000, out _)
+                    .Where(c => c.ContentType.Alias == "competitionRegistration")
+                    .ToList();
+
+                foreach (var reg in registrations)
+                {
+                    var classesJson = reg.GetValue<string>("shootingClasses");
+                    if (string.IsNullOrWhiteSpace(classesJson)) continue;
+
+                    var classes = CompetitionRegistrationDocument.DeserializeShootingClasses(classesJson);
+                    foreach (var entry in classes)
+                    {
+                        if (!entry.TeamNumber.HasValue) continue;
+                        var teamNum = entry.TeamNumber.Value;
+                        if (!teamCounts.ContainsKey(teamNum))
+                            teamCounts[teamNum] = new Dictionary<string, int>();
+
+                        // Get weapon group letter (first character of class ID)
+                        var weaponGroup = entry.Class.Length > 0 ? entry.Class[0].ToString().ToUpper() : "?";
+                        if (!teamCounts[teamNum].ContainsKey(weaponGroup))
+                            teamCounts[teamNum][weaponGroup] = 0;
+                        teamCounts[teamNum][weaponGroup]++;
+                    }
+                }
+            }
+
+            var teams = config.Teams.Select(team =>
+            {
+                var counts = teamCounts.TryGetValue(team.TeamNumber, out var c) ? c : new Dictionary<string, int>();
+                var totalUsed = counts.Values.Sum();
+                return new
+                {
+                    teamNumber = team.TeamNumber,
+                    startTime = team.StartTime,
+                    endTime = team.EndTime,
+                    positionsTotal = team.Positions,
+                    positionsUsed = totalUsed,
+                    positionsRemaining = team.Positions - totalUsed,
+                    isFull = totalUsed >= team.Positions,
+                    label = team.Label ?? "",
+                    allowedWeaponClasses = team.AllowedWeaponClasses,
+                    weaponClassCounts = counts
+                };
+            }).ToList();
+
+            return new
+            {
+                success = true,
+                allowMixedClasses = config.AllowMixedClasses,
+                teams
+            };
+        }
+
+        private void InvalidateDirektplaceringCache(int competitionId)
+        {
+            AppCaches.RuntimeCache.ClearByKey($"dp_availability_{competitionId}");
+        }
+
+        private void AutoGenerateDirektplaceringStartList(int competitionId, IContent competition, DirektplaceringConfig dpConfig)
+        {
+            var competitionChildren = _contentService.GetPagedChildren(competition.Id, 0, 100, out _).ToList();
+            var registrationsHub = competitionChildren.FirstOrDefault(c =>
+                c.ContentType.Alias == "competitionRegistrationsHub" ||
+                c.Name.Contains("Anmälningar") || c.Name.Contains("Registration"));
+
+            var registrationDocs = registrationsHub != null
+                ? _contentService.GetPagedChildren(registrationsHub.Id, 0, 1000, out _)
+                    .Where(c => c.ContentType.Alias == "competitionRegistration").ToList()
+                : new List<IContent>();
+
+            // Build teams from registrations
+            var shootersByTeam = new Dictionary<int, List<object>>();
+            foreach (var team in dpConfig.Teams)
+                shootersByTeam[team.TeamNumber] = new List<object>();
+
+            foreach (var reg in registrationDocs)
+            {
+                var classesJson = reg.GetValue<string>("shootingClasses");
+                if (string.IsNullOrWhiteSpace(classesJson)) continue;
+                var classes = CompetitionRegistrationDocument.DeserializeShootingClasses(classesJson);
+                var memberName = reg.GetValue<string>("memberName") ?? "Okänd";
+                var memberId = reg.GetValue<int>("memberId");
+                var clubName = "Okänd förening";
+                var clubId = reg.GetValue<int>("clubId");
+                if (clubId > 0) clubName = _clubService.GetClubNameById(clubId) ?? "Okänd förening";
+
+                foreach (var entry in classes)
+                {
+                    if (!entry.TeamNumber.HasValue) continue;
+                    if (!shootersByTeam.ContainsKey(entry.TeamNumber.Value))
+                        shootersByTeam[entry.TeamNumber.Value] = new List<object>();
+                    shootersByTeam[entry.TeamNumber.Value].Add(new { Name = memberName, Club = clubName, WeaponClass = entry.Class, MemberId = memberId });
+                }
+            }
+
+            // Build StartListConfiguration JSON
+            var teams = dpConfig.Teams.Select(team =>
+            {
+                var shooters = shootersByTeam.TryGetValue(team.TeamNumber, out var s) ? s : new List<object>();
+                var pos = 0;
+                return new
+                {
+                    TeamNumber = team.TeamNumber,
+                    StartTime = team.StartTime,
+                    EndTime = team.EndTime,
+                    ShooterCount = shooters.Count,
+                    WeaponClasses = shooters.Select(sh => ((dynamic)sh).WeaponClass as string).Distinct().OrderBy(c => c).ToList(),
+                    Shooters = shooters.OrderBy(sh => ((dynamic)sh).WeaponClass).ThenBy(sh => ((dynamic)sh).Name).Select(sh =>
+                    {
+                        pos++;
+                        return new { Position = pos, Name = ((dynamic)sh).Name, Club = ((dynamic)sh).Club, WeaponClass = ((dynamic)sh).WeaponClass, MemberId = (int)((dynamic)sh).MemberId };
+                    }).ToList()
+                };
+            }).ToList();
+
+            var config = new
+            {
+                Settings = new
+                {
+                    Format = dpConfig.AllowMixedClasses ? "Mixade Skjutlag" : "En vapengrupp per Skjutlag",
+                    MaxShootersPerTeam = dpConfig.Teams.Any() ? dpConfig.Teams.Max(t => t.Positions) : 30,
+                    FirstStartTime = dpConfig.Teams.FirstOrDefault()?.StartTime ?? "09:00",
+                    Generated = DateTime.Now
+                },
+                Teams = teams
+            };
+
+            var configJson = System.Text.Json.JsonSerializer.Serialize(config);
+
+            // Create or update the start list document
+            var existingStartList = competitionChildren.FirstOrDefault(c => c.ContentType.Alias == "precisionStartList");
+            IContent startList;
+            if (existingStartList != null)
+            {
+                startList = existingStartList;
+            }
+            else
+            {
+                startList = _contentService.Create("Startlista", competition.Id, "precisionStartList");
+            }
+
+            // Generate HTML content matching StartListHtmlRenderer format
+            var html = new System.Text.StringBuilder();
+            html.AppendLine("<div class='start-list-content'>");
+            html.AppendLine($"<h3 class='competition-title'>{System.Net.WebUtility.HtmlEncode(competition.Name ?? "")}</h3>");
+            foreach (var team in teams)
+            {
+                var timeStr = !string.IsNullOrEmpty(team.EndTime) ? $"{team.StartTime}-{team.EndTime}" : team.StartTime;
+                html.AppendLine($"<h3>Skjutlag: {team.TeamNumber} Tid (ca): {timeStr} ({team.ShooterCount} st)</h3>");
+                html.AppendLine("<table class='table table-striped'>");
+                html.AppendLine("<thead><tr><th>Plats</th><th>Namn</th><th>Förening</th><th>Vapengrupp</th></tr></thead>");
+                html.AppendLine("<tbody>");
+                foreach (var shooter in team.Shooters)
+                {
+                    html.AppendLine($"<tr><td>{shooter.Position}</td><td>{System.Net.WebUtility.HtmlEncode(shooter.Name)}</td><td>{System.Net.WebUtility.HtmlEncode(shooter.Club)}</td><td>{shooter.WeaponClass}</td></tr>");
+                }
+                html.AppendLine("</tbody></table><br>");
+            }
+            html.AppendLine("</div>");
+
+            startList.SetValue("competitionId", competitionId);
+            startList.SetValue("teamFormat", dpConfig.AllowMixedClasses ? "Mixade Skjutlag" : "En vapengrupp per Skjutlag");
+            startList.SetValue("generatedDate", DateTime.Now);
+            startList.SetValue("generatedBy", "Egenbokning (auto)");
+            startList.SetValue("notes", "Autogenererad vid anmälan");
+            startList.SetValue("isOfficialStartList", true);
+            startList.SetValue("configurationData", configJson);
+            startList.SetValue("startListContent", html.ToString());
+
+            try { _contentService.Save(startList); }
+            catch (Exception ex) when (IsDocumentUrlTimeout(ex))
+            {
+                _logger.LogWarning("Start list saved but URL segment rebuild timed out (non-critical)");
+            }
+
+            try { _contentService.Publish(startList, new[] { "*" }, -1); }
+            catch { /* publish is non-critical */ }
+
+            _logger.LogInformation("Auto-updated Egenbokning start list for competition {CompId} with {Teams} teams", competitionId, teams.Count);
         }
 
         #endregion

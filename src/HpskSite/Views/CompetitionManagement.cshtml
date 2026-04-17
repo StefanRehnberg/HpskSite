@@ -482,7 +482,9 @@
                 }
                 else
                 {
-                    @await Html.PartialAsync("CompetitionStartListManagement", new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId } })
+                    var isDp = false;
+                    try { var dpJson = competition?.HasProperty("direktplaceringConfig") == true ? (competition.Value<string>("direktplaceringConfig") ?? "") : ""; isDp = dpJson.Contains("\"enabled\":true") || dpJson.Contains("\"Enabled\":true"); } catch { }
+                    @await Html.PartialAsync("CompetitionStartListManagement", new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId }, { "IsDirektplacering", isDp } })
                 }
             </div>
         </div>

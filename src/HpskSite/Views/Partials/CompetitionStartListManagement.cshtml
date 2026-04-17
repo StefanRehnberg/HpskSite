@@ -132,10 +132,121 @@
 @{
     var competitionId = ViewData["CompetitionId"]?.ToString() ?? "";
     var competitionType = ViewData["CompetitionType"]?.ToString() ?? "Precision";
+
+    var isDirektplacering = false;
+    try
+    {
+        if (ViewData["IsDirektplacering"] is true)
+        {
+            isDirektplacering = true;
+        }
+    }
+    catch { }
 }
 
-<div class="competition-startlist-management" data-competition-id="@competitionId" data-competition-type="@competitionType">
-    <!-- Header Section -->
+<div class="competition-startlist-management" data-competition-id="@competitionId" data-competition-type="@competitionType" data-is-egenbokning="@isDirektplacering.ToString().ToLower()">
+    @if (isDirektplacering)
+    {
+    <!-- Egenbokning Start List Management -->
+    <div class="mb-4">
+        <div class="alert alert-info mb-3">
+            <i class="bi bi-calendar-check me-2"></i>
+            <strong>Egenbokning aktiv</strong> — Startlistan byggs automatiskt allt eftersom skyttar anmäler sig och väljer skjutlag.
+        </div>
+
+        <h6 class="mb-2">Skjutlagsöversikt</h6>
+        <div id="dpLiveOverview" class="mb-3">
+            <div class="text-center py-3">
+                <div class="spinner-border spinner-border-sm" role="status"></div>
+                <span class="ms-2">Laddar...</span>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+    (function() {
+        const cid = '@competitionId';
+
+        // Load live team overview
+        fetch('/umbraco/surface/Competition/GetTeamAvailability?competitionId=' + cid)
+            .then(r => r.json())
+            .then(data => {
+                if (!data.success) return;
+                const container = document.getElementById('dpLiveOverview');
+                let html = '<div class="row g-2">';
+                data.teams.forEach(team => {
+                    const pct = team.positionsTotal > 0 ? Math.round((team.positionsUsed / team.positionsTotal) * 100) : 0;
+                    const barColor = team.isFull ? 'bg-danger' : (pct > 75 ? 'bg-warning' : 'bg-success');
+                    const timeStr = team.endTime ? `${team.startTime}-${team.endTime}` : team.startTime;
+                    html += `
+                        <div class="col-md-4 col-sm-6">
+                            <div class="card">
+                                <div class="card-body py-2 px-3">
+                                    <div class="d-flex justify-content-between align-items-center mb-1">
+                                        <strong>Skjutlag ${team.teamNumber}${team.label ? ' ' + team.label : ''}</strong>
+                                        <span class="badge ${team.isFull ? 'bg-danger' : 'bg-secondary'}">${team.isFull ? 'FULLT' : timeStr}</span>
+                                    </div>
+                                    <div class="progress" style="height: 8px;">
+                                        <div class="progress-bar ${barColor}" style="width: ${pct}%"></div>
+                                    </div>
+                                    <small class="text-muted">${team.positionsUsed} / ${team.positionsTotal} platser</small>
+                                </div>
+                            </div>
+                        </div>`;
+                });
+                html += '</div>';
+                container.innerHTML = html;
+            })
+            .catch(err => {
+                document.getElementById('dpLiveOverview').innerHTML = '<div class="alert alert-warning">Kunde inte ladda skjutlagsdata.</div>';
+            });
+
+        window.previewDpStartList = function() {
+            window.open('/umbraco/surface/PrecisionStartList/PreviewDirektplaceringStartList?competitionId=' + cid, '_blank');
+        };
+
+        window.publishDpStartList = function() {
+            if (!confirm('Publicera/uppdatera startlistan baserat på nuvarande anmälningar?')) return;
+            const btn = event.target.closest('button');
+            const origHtml = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Publicerar...';
+
+            const formData = new FormData();
+            formData.append('competitionId', cid);
+            fetch('/umbraco/surface/PrecisionStartList/GenerateDirektplaceringStartList', {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]')?.value || '',
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            })
+            .then(r => r.json())
+            .then(data => {
+                btn.disabled = false;
+                btn.innerHTML = origHtml;
+                if (data.success) {
+                    alert(data.message);
+                    location.reload();
+                } else {
+                    alert('Fel: ' + data.message);
+                }
+            })
+            .catch(err => {
+                btn.disabled = false;
+                btn.innerHTML = origHtml;
+                alert('Nätverksfel: ' + err.message);
+            });
+        };
+    })();
+    </script>
+    }
+
+    @if (!isDirektplacering)
+    {
+    <!-- Traditional Start List Management -->
     <div class="mb-4">
         <button id="generateStartListBtn" class="btn btn-success" onclick="openGenerateStartListModal()">
             <i class="bi bi-plus me-1"></i>Skapa ny startlista
@@ -156,8 +267,9 @@
             <strong>För att lägga till efteranmälningar:</strong> Använd "Redigera"-knappen för att manuellt lägga till skyttar utan att störa befintliga tilldelningar.
         </p>
     </div>
+    }
 
-    <!-- Existing Start Lists -->
+    <!-- Start List Display (shared by both Traditional and Egenbokning) -->
     <!-- Loading State -->
     <div id="startListsLoading" class="text-center py-4">
         <div class="spinner-border" role="status">
@@ -234,8 +346,16 @@
 
     <!-- No Start List State -->
     <div id="noStartListYet" class="alert alert-info" style="display: none;">
+        @if (isDirektplacering)
+        {
+        <h6><i class="bi bi-info-circle me-2"></i>Ingen startlista ännu</h6>
+        <p class="mb-0">Startlistan skapas automatiskt när första skytten anmäler sig.</p>
+        }
+        else
+        {
         <h6><i class="bi bi-info-circle me-2"></i>Ingen Startlista Ännu</h6>
         <p class="mb-0">Klicka "Skapa ny startlista" ovan för att skapa en startlista för denna tävling.</p>
+        }
     </div>
 
     <!-- Finals Start List Section (only shown for championships) -->
@@ -981,15 +1101,17 @@ function loadStartLists() {
 }
 
 function showStartListsError(message) {
-    document.getElementById('startListsLoading').style.display = 'none';
-    document.getElementById('officialStartListSection').style.display = 'none';
-    document.getElementById('noStartListYet').style.display = 'none';
-    document.getElementById('startListsError').classList.remove('d-none');
-    document.getElementById('startListsErrorMessage').textContent = message;
+    var el;
+    if (el = document.getElementById('startListsLoading')) el.style.display = 'none';
+    if (el = document.getElementById('officialStartListSection')) el.style.display = 'none';
+    if (el = document.getElementById('noStartListYet')) el.style.display = 'none';
+    if (el = document.getElementById('startListsError')) el.classList.remove('d-none');
+    if (el = document.getElementById('startListsErrorMessage')) el.textContent = message;
 }
 
 // Display THE ONE official/preliminary start list
 function displayOfficialStartList(startList) {
+    if (!document.getElementById('officialStartListSection')) return;
     // Access properties case-insensitively
     const isOfficial = startList.IsOfficial || startList.isOfficial || false;
     const url = startList.Url || startList.url || '';
@@ -1034,9 +1156,16 @@ function updateStartListStatus(isOfficial) {
     const badge = document.getElementById('startListStatusBadge');
     const btnPublish = document.getElementById('btnPublishStartList');
     const btnUnpublish = document.getElementById('btnUnpublishStartList');
+    const isEgenbokning = document.querySelector('.competition-startlist-management')?.dataset.isEgenbokning === 'true';
 
     if (badge && btnPublish && btnUnpublish) {
-        if (isOfficial) {
+        if (isEgenbokning) {
+            // Egenbokning: always published, no manual controls
+            badge.className = 'badge bg-success fs-6 px-3 py-2';
+            badge.innerHTML = '<i class="bi bi-check-circle me-1"></i>Aktiv';
+            btnPublish.style.display = 'none';
+            btnUnpublish.style.display = 'none';
+        } else if (isOfficial) {
             badge.className = 'badge bg-success fs-6 px-3 py-2';
             badge.innerHTML = '<i class="bi bi-check-circle me-1"></i>Publicerad';
             btnPublish.style.display = 'none';
@@ -1078,20 +1207,15 @@ function openStartListInNewTab() {
 function updatePublishedStartListUI(isPublished) {
     const generateBtn = document.getElementById('generateStartListBtn');
     const warningDiv = document.getElementById('publishedStartListWarning');
+    if (!generateBtn || !warningDiv) return;
 
     if (isPublished) {
-        // Show warning message
         warningDiv.classList.remove('d-none');
-
-        // Change button styling to indicate caution
         generateBtn.classList.remove('btn-success');
         generateBtn.classList.add('btn-warning');
         generateBtn.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>Regenerera (ej rekommenderat)';
     } else {
-        // Hide warning message
         warningDiv.classList.add('d-none');
-
-        // Reset button to normal state
         generateBtn.classList.remove('btn-warning');
         generateBtn.classList.add('btn-success');
         generateBtn.innerHTML = '<i class="bi bi-plus me-1"></i>Skapa ny startlista';

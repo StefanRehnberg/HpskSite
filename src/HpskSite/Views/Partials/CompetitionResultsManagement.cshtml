@@ -362,7 +362,12 @@ async function createResultsList(event) {
             return;
         }
 
-        if (data.suggestions && data.suggestions.length > 0) {
+        if (!data.classes || data.classes.length === 0) {
+            // No results data yet
+            if (confirm('Det finns inga resultat att bearbeta ännu. Vill du skapa en tom resultatlista?')) {
+                submitCreateResultsList(competitionId, null);
+            }
+        } else if (data.suggestions && data.suggestions.length > 0) {
             // Show merge modal
             renderMergeModal(data.classes, data.suggestions);
             new bootstrap.Modal(document.getElementById('classMergeModal')).show();

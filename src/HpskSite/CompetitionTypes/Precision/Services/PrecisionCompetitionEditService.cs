@@ -347,6 +347,8 @@ namespace HpskSite.CompetitionTypes.Precision.Services
                 "maxReshoots" => "maxReshoots",
                 "rollingStart" => "rollingStart",
                 "subCompetitionName" => "subCompetitionName",
+                // Direktplacering
+                "direktplaceringConfig" => "direktplaceringConfig",
                 _ => null
             };
         }

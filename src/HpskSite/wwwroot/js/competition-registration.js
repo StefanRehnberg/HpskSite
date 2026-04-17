@@ -804,6 +804,12 @@ async function submitAllClassesRegistration(classIds, startPreferencesMap) {
     // Set start preferences as JSON object mapping class → preference
     formData.append('startPreferencesJson', JSON.stringify(startPreferencesMap));
 
+    // Direktplacering: include team assignments
+    if (window.CompetitionConfig?.isDirektplacering) {
+        const teamAssignments = collectDpTeamAssignments();
+        formData.append('teamAssignmentsJson', JSON.stringify(teamAssignments));
+    }
+
     const response = await fetch('/umbraco/surface/Competition/RegisterForCompetition', {
         method: 'POST',
         body: formData,
@@ -2404,4 +2410,199 @@ async function quickCreateMember() {
         msgEl.innerHTML = '<span class="text-danger">Nätverksfel.</span>';
         console.error('QuickCreateMember error:', err);
     }
+}
+
+// ============================================================================
+// Direktplacering — Team Selection in Registration Modal
+// ============================================================================
+
+let dpTeamAvailability = null;
+
+function initDirektplacering() {
+    if (!window.CompetitionConfig?.isDirektplacering) return;
+
+    // Hook into class selection changes to show/update team selection
+    document.querySelectorAll('input[type="radio"]').forEach(radio => {
+        radio.addEventListener('change', onDpClassSelectionChanged);
+    });
+
+    // Load initial availability
+    fetchDpTeamAvailability();
+}
+
+async function fetchDpTeamAvailability() {
+    try {
+        const response = await fetch(`/umbraco/surface/Competition/GetTeamAvailability?competitionId=${COMPETITION_ID}`);
+        const data = await response.json();
+        if (data.success) {
+            dpTeamAvailability = data;
+            onDpClassSelectionChanged(); // Refresh UI
+        }
+    } catch (error) {
+        console.error('Failed to fetch team availability:', error);
+    }
+}
+
+function onDpClassSelectionChanged() {
+    if (!window.CompetitionConfig?.isDirektplacering || !dpTeamAvailability) return;
+
+    const radioGroups = ['selectedAClass', 'selectedBClass', 'selectedRClass', 'selectedCRegular', 'selectedCVet', 'selectedCDam', 'selectedCJun', 'selectedLRegular', 'selectedLVet', 'selectedLDam', 'selectedLJun', 'selectedMClass'];
+    const selectedClasses = [];
+
+    radioGroups.forEach(groupName => {
+        const checkedRadio = document.querySelector(`input[name="${groupName}"]:checked`);
+        if (checkedRadio) {
+            selectedClasses.push(checkedRadio.value);
+        }
+    });
+
+    const section = document.getElementById('direktplaceringTeamSection');
+    const container = document.getElementById('teamSelectionContainer');
+
+    if (selectedClasses.length === 0) {
+        section.style.display = 'none';
+        container.innerHTML = '';
+        return;
+    }
+
+    section.style.display = 'block';
+
+    // Preserve existing team selections before rebuilding
+    const previousSelections = {};
+    container.querySelectorAll('.dp-team-select').forEach(sel => {
+        if (sel.value) previousSelections[sel.dataset.classId] = sel.value;
+    });
+
+    // Remove rows for classes that are no longer selected
+    container.querySelectorAll('.dp-team-row').forEach(row => {
+        if (!selectedClasses.includes(row.dataset.classId)) row.remove();
+    });
+
+    const config = window.CompetitionConfig.direktplaceringConfig;
+
+    selectedClasses.forEach(classId => {
+        // Skip if row already exists for this class
+        if (container.querySelector(`.dp-team-row[data-class-id="${classId}"]`)) return;
+
+        const weaponGroup = classId.charAt(0).toUpperCase();
+        const row = document.createElement('div');
+        row.className = 'mb-2 dp-team-row';
+        row.dataset.classId = classId;
+
+        const rowLabel = document.createElement('label');
+        rowLabel.className = 'form-label small mb-1 fw-semibold';
+        rowLabel.textContent = `Klass ${classId}:`;
+        row.appendChild(rowLabel);
+
+        const select = document.createElement('select');
+        select.className = 'form-select form-select-sm dp-team-select';
+        select.dataset.classId = classId;
+
+        // Default option
+        const defaultOpt = document.createElement('option');
+        defaultOpt.value = '';
+        defaultOpt.textContent = '-- Välj skjutlag --';
+        select.appendChild(defaultOpt);
+
+        dpTeamAvailability.teams.forEach(team => {
+            const opt = document.createElement('option');
+            opt.value = team.teamNumber;
+
+            const remaining = team.positionsRemaining;
+            const timeStr = team.endTime ? `${team.startTime}-${team.endTime}` : team.startTime;
+
+            const labelStr = team.label ? ` ${team.label}` : '';
+            if (team.isFull) {
+                opt.textContent = `Skjutlag ${team.teamNumber}${labelStr} — ${timeStr} (FULLT)`;
+                opt.disabled = true;
+                opt.style.color = '#999';
+            } else {
+                opt.textContent = `Skjutlag ${team.teamNumber}${labelStr} — ${timeStr} (${remaining} platser kvar)`;
+            }
+
+            // Check weapon class restrictions
+            if (!config.allowMixedClasses && team.allowedWeaponClasses && team.allowedWeaponClasses.length > 0) {
+                if (!team.allowedWeaponClasses.includes(weaponGroup)) {
+                    opt.disabled = true;
+                    opt.textContent += ' [ej tillåten klass]';
+                    opt.style.color = '#999';
+                }
+            }
+
+            select.appendChild(opt);
+        });
+
+        // Restore previous selection, or pre-select from existing registration
+        if (previousSelections[classId]) {
+            select.value = previousSelections[classId];
+        } else if (existingRegistrations.length > 0) {
+            existingRegistrations.forEach(reg => {
+                if (reg.shootingClasses) {
+                    reg.shootingClasses.forEach(sc => {
+                        if (sc.class === classId && sc.teamNumber) {
+                            select.value = sc.teamNumber;
+                        }
+                    });
+                }
+            });
+        }
+
+        select.addEventListener('change', syncDpTeamSelects);
+        row.appendChild(select);
+        container.appendChild(row);
+    });
+
+    syncDpTeamSelects();
+}
+
+function syncDpTeamSelects() {
+    const selects = document.querySelectorAll('.dp-team-select');
+    // Collect which teams are taken by which class
+    const takenTeams = {};
+    selects.forEach(sel => {
+        if (sel.value) takenTeams[sel.dataset.classId] = sel.value;
+    });
+
+    selects.forEach(sel => {
+        const myClassId = sel.dataset.classId;
+        const teamsUsedByOthers = new Set();
+        Object.entries(takenTeams).forEach(([classId, teamNum]) => {
+            if (classId !== myClassId) teamsUsedByOthers.add(teamNum);
+        });
+
+        Array.from(sel.options).forEach(opt => {
+            if (!opt.value) return; // skip default "-- Välj skjutlag --"
+            const wasTakenDisabled = opt.dataset.takenDisabled === 'true';
+            const isTakenByOther = teamsUsedByOthers.has(opt.value);
+
+            if (isTakenByOther && !opt.disabled) {
+                opt.disabled = true;
+                opt.dataset.takenDisabled = 'true';
+            } else if (!isTakenByOther && wasTakenDisabled) {
+                // Only re-enable if we were the ones who disabled it
+                opt.disabled = false;
+                opt.dataset.takenDisabled = '';
+            }
+        });
+    });
+}
+
+function collectDpTeamAssignments() {
+    const assignments = {};
+    document.querySelectorAll('.dp-team-select').forEach(select => {
+        const classId = select.dataset.classId;
+        const teamNumber = parseInt(select.value);
+        if (classId && teamNumber > 0) {
+            assignments[classId] = teamNumber;
+        }
+    });
+    return assignments;
+}
+
+// Initialize Direktplacering when DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initDirektplacering);
+} else {
+    // Small delay to ensure CompetitionConfig is set
+    setTimeout(initDirektplacering, 100);
 }

@@ -11,6 +11,7 @@ namespace HpskSite.Models
     {
         public string Class { get; set; } = "";
         public string StartPreference { get; set; } = "No Preference";
+        public int? TeamNumber { get; set; }
     }
 
     public class CompetitionRegistrationDocument : BasePage

@@ -56,6 +56,20 @@
     var competitionTypeStr = Model.Value<string>("competitionType") ?? "Precision";
     var isSpringskytte = competitionTypeStr == "Springskytte";
     var isFaltskytte = competitionTypeStr == "Faltskytte" || competitionTypeStr == "MagnumFalt";
+    var dpConfigJson = "";
+    var isDirektplacering = false;
+    try
+    {
+        if (Model.HasProperty("direktplaceringConfig"))
+        {
+            dpConfigJson = Model.Value<string>("direktplaceringConfig") ?? "";
+            if (!string.IsNullOrEmpty(dpConfigJson))
+            {
+                isDirektplacering = dpConfigJson.Contains("\"enabled\":true") || dpConfigJson.Contains("\"Enabled\":true");
+            }
+        }
+    }
+    catch { }
     var rsJson = Model.HasProperty("rollingStart") ? Model.Value<string>("rollingStart") : "";
     object rsConfig = null;
     if (!string.IsNullOrEmpty(rsJson)) { try { rsConfig = Newtonsoft.Json.JsonConvert.DeserializeObject(rsJson); } catch {} }
@@ -1477,7 +1491,9 @@ window.CompetitionConfig = {
     clubs: @Html.Raw(allClubsJson),
     competitionType: '@competitionTypeStr',
     rollingStart: @(rsConfig != null ? Html.Raw(rsJson) : Html.Raw("null")),
-    subCompetitionName: '@Html.Raw(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(Model.HasProperty("subCompetitionName") ? Model.Value<string>("subCompetitionName") ?? "" : ""))'
+    subCompetitionName: '@Html.Raw(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(Model.HasProperty("subCompetitionName") ? Model.Value<string>("subCompetitionName") ?? "" : ""))',
+    isDirektplacering: @(isDirektplacering.ToString().ToLower()),
+    direktplaceringConfig: @(isDirektplacering ? Html.Raw(dpConfigJson) : Html.Raw("null"))
 };
 
 // Show success/error messages from server

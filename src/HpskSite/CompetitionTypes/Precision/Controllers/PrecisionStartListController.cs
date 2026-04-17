@@ -16,6 +16,7 @@ using Umbraco.Cms.Core.Web;
 using Umbraco.Cms.Infrastructure.Persistence;
 using Umbraco.Cms.Web.Website.Controllers;
 using HpskSite.Services;
+using HpskSite.Models;
 
 namespace HpskSite.CompetitionTypes.Precision.Controllers
 {
@@ -211,7 +212,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                             
                             htmlContent = sb.ToString();
 
-                            return Content(htmlContent, "text/html");
+                            return Content(htmlContent, "text/html; charset=utf-8");
                         }
                     }
                 }
@@ -299,7 +300,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 
                 htmlContent = fallbackSb.ToString();
 
-                return Content(htmlContent, "text/html");
+                return Content(htmlContent, "text/html; charset=utf-8");
             }
             catch (Exception ex)
             {
@@ -2377,6 +2378,215 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 ShooterCount = t.ShooterCount,
                 WeaponClasses = t.WeaponClasses
             }).ToList();
+        }
+
+        #endregion
+
+        #region Direktplacering Start List
+
+        [HttpGet]
+        public IActionResult PreviewDirektplaceringStartList(int competitionId)
+        {
+            try
+            {
+                var competition = _contentService.GetById(competitionId);
+                if (competition == null)
+                    return Content("Tävlingen kunde inte hittas.", "text/plain; charset=utf-8");
+
+                // Find existing start list with saved HTML content
+                var existingStartList = _contentService.GetPagedChildren(competition.Id, 0, 20, out _)
+                    .FirstOrDefault(c => c.ContentType.Alias == "precisionStartList");
+
+                var savedHtml = existingStartList?.GetValue<string>("startListContent") ?? "";
+
+                if (string.IsNullOrWhiteSpace(savedHtml))
+                    return Content("Ingen startlista har genererats ännu. Registrera en skytt för att skapa startlistan.", "text/plain; charset=utf-8");
+
+                // Wrap in full HTML page
+                var fullHtml = _renderer.BuildHtmlWrapper(savedHtml, competition.Name ?? "");
+                return Content(fullHtml, "text/html; charset=utf-8");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error previewing Egenbokning start list for competition {CompetitionId}", competitionId);
+                return Content($"Fel: {ex.Message}", "text/plain; charset=utf-8");
+            }
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> GenerateDirektplaceringStartList(int competitionId)
+        {
+            try
+            {
+                var currentMember = await _memberManager.GetCurrentMemberAsync();
+                if (currentMember == null)
+                    return Json(new { success = false, message = "Du måste vara inloggad." });
+
+                var competition = _contentService.GetById(competitionId);
+                if (competition == null)
+                    return Json(new { success = false, message = "Tävlingen kunde inte hittas." });
+
+                var dpConfig = DirektplaceringConfig.Parse(competition.GetValue<string>("direktplaceringConfig"));
+                if (dpConfig == null)
+                    return Json(new { success = false, message = "Direktplacering är inte aktiverat för denna tävling." });
+
+                // Build StartListConfiguration from registrations with team assignments
+                var startListData = BuildDirektplaceringStartListData(competition, dpConfig);
+                if (startListData.Teams == null || !startListData.Teams.Any())
+                    return Json(new { success = false, message = "Inga skjutlag konfigurerade." });
+
+                // Generate HTML using existing renderer
+                var htmlContent = await _renderer.GenerateStartListHtml(startListData, competition.Name ?? "");
+
+                // Create or update start list document (same pattern as traditional)
+                var existingStartList = _contentService.GetPagedChildren(competition.Id, 0, 20, out _)
+                    .FirstOrDefault(c => c.ContentType.Alias == "precisionStartList");
+
+                IContent startList;
+                if (existingStartList != null)
+                {
+                    startList = existingStartList;
+                    _logger.LogInformation("Updating Direktplacering start list {StartListId} for competition {CompetitionId}",
+                        startList.Id, competitionId);
+                }
+                else
+                {
+                    startList = _contentService.Create("Startlista", competition.Id, "precisionStartList");
+                    _logger.LogInformation("Creating new Direktplacering start list for competition {CompetitionId}", competitionId);
+                }
+
+                var memberData = _memberService.GetById(currentMember.Key);
+                var generatedBy = currentMember.Name ?? memberData?.Name ?? "System";
+
+                startList.SetValue("competitionId", competitionId);
+                startList.SetValue("teamFormat", dpConfig.AllowMixedClasses ? "Mixade Skjutlag" : "En vapengrupp per Skjutlag");
+                startList.SetValue("generatedDate", DateTime.Now);
+                startList.SetValue("generatedBy", generatedBy);
+                startList.SetValue("notes", "Genererad via Direktplacering");
+                startList.SetValue("isOfficialStartList", false);
+                startList.SetValue("configurationData", JsonConvert.SerializeObject(startListData));
+                startList.SetValue("startListContent", htmlContent);
+
+                var saveResult = _contentService.Save(startList);
+                if (!saveResult.Success)
+                {
+                    _logger.LogError("Failed to save Direktplacering start list for competition {CompetitionId}", competitionId);
+                    return Json(new { success = false, message = "Kunde inte spara startlistan." });
+                }
+
+                _contentService.Publish(startList, new[] { "*" }, -1);
+
+                var totalShooters = startListData.Teams?.Sum(t => t.Shooters?.Count ?? 0) ?? 0;
+                return Json(new
+                {
+                    success = true,
+                    message = $"Startlista publicerad med {startListData.Teams?.Count ?? 0} skjutlag och {totalShooters} starter.",
+                    startListId = startList.Id
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error generating Direktplacering start list for competition {CompetitionId}", competitionId);
+                return Json(new { success = false, message = "Ett fel uppstod: " + ex.Message });
+            }
+        }
+
+        private StartListConfiguration BuildDirektplaceringStartListData(IContent competition, DirektplaceringConfig dpConfig)
+        {
+            // Get all registrations
+            var competitionChildren = _contentService.GetPagedChildren(competition.Id, 0, 100, out _).ToList();
+            var registrationsHub = competitionChildren.FirstOrDefault(c =>
+                c.ContentType.Alias == "competitionRegistrationsHub" ||
+                c.Name.Contains("Anmälningar") ||
+                c.Name.Contains("Registration"));
+
+            var registrationDocs = registrationsHub != null
+                ? _contentService.GetPagedChildren(registrationsHub.Id, 0, 1000, out _)
+                    .Where(c => c.ContentType.Alias == "competitionRegistration")
+                    .ToList()
+                : new List<IContent>();
+
+            // Build shooters per team from registration data
+            var shootersByTeam = new Dictionary<int, List<StartListShooter>>();
+            foreach (var team in dpConfig.Teams)
+                shootersByTeam[team.TeamNumber] = new List<StartListShooter>();
+
+            foreach (var reg in registrationDocs)
+            {
+                var classesJson = reg.GetValue<string>("shootingClasses");
+                if (string.IsNullOrWhiteSpace(classesJson)) continue;
+
+                var classes = CompetitionRegistrationDocument.DeserializeShootingClasses(classesJson);
+                var memberName = reg.GetValue<string>("memberName") ?? "Okänd";
+                var memberId = reg.GetValue<int>("memberId");
+
+                // Get club name
+                var clubName = "Okänd förening";
+                var clubId = reg.GetValue<int>("clubId");
+                if (clubId > 0)
+                {
+                    clubName = _clubService.GetClubNameById(clubId) ?? "Okänd förening";
+                }
+                else
+                {
+                    var member = _memberService.GetById(memberId);
+                    if (member != null)
+                    {
+                        var primaryClubIdStr = member.GetValue<string>("primaryClubId");
+                        if (!string.IsNullOrEmpty(primaryClubIdStr) && int.TryParse(primaryClubIdStr, out int primaryClubId))
+                            clubName = _clubService.GetClubNameById(primaryClubId) ?? "Okänd förening";
+                    }
+                }
+
+                foreach (var entry in classes)
+                {
+                    if (!entry.TeamNumber.HasValue) continue;
+                    var teamNum = entry.TeamNumber.Value;
+                    if (!shootersByTeam.ContainsKey(teamNum))
+                        shootersByTeam[teamNum] = new List<StartListShooter>();
+
+                    shootersByTeam[teamNum].Add(new StartListShooter
+                    {
+                        Position = 0, // Will be assigned below
+                        Name = memberName,
+                        Club = clubName,
+                        WeaponClass = entry.Class,
+                        MemberId = memberId
+                    });
+                }
+            }
+
+            // Build teams with sequential positions
+            var teams = dpConfig.Teams.Select(team =>
+            {
+                var shooters = shootersByTeam.TryGetValue(team.TeamNumber, out var s) ? s : new List<StartListShooter>();
+                var position = 1;
+                foreach (var shooter in shooters.OrderBy(sh => sh.WeaponClass).ThenBy(sh => sh.Name))
+                    shooter.Position = position++;
+
+                return new StartListTeam
+                {
+                    TeamNumber = team.TeamNumber,
+                    StartTime = team.StartTime,
+                    EndTime = team.EndTime,
+                    ShooterCount = shooters.Count,
+                    WeaponClasses = shooters.Select(sh => sh.WeaponClass).Distinct().OrderBy(c => c).ToList(),
+                    Shooters = shooters.OrderBy(sh => sh.Position).ToList()
+                };
+            }).ToList();
+
+            return new StartListConfiguration
+            {
+                Settings = new StartListSettings
+                {
+                    Format = dpConfig.AllowMixedClasses ? "Mixade Skjutlag" : "En vapengrupp per Skjutlag",
+                    MaxShootersPerTeam = dpConfig.Teams.Max(t => t.Positions),
+                    FirstStartTime = dpConfig.Teams.FirstOrDefault()?.StartTime ?? "09:00",
+                    Generated = DateTime.Now
+                },
+                Teams = teams
+            };
         }
 
         #endregion
