@@ -428,10 +428,18 @@
                 Hanterar: <strong>@(competition?.Value<string>("competitionName") ?? "Okänd tävling")</strong>
             </p>
         </div>
-        <div>
+        <div class="d-flex gap-2">
             <a href="@(competition?.CompetitionUrl() ?? "/")" class="btn btn-outline-secondary">
                 <i class="bi bi-arrow-left"></i> Tillbaka till tävlingen
             </a>
+            @if (canManageCompetition)
+            {
+                var isExternalComp = competition?.Value<bool>("isExternal") ?? false;
+                <button type="button" class="btn btn-outline-primary"
+                        onclick="openEditCompetitionModal(@competitionId, @(isExternalComp ? "true" : "false"), '@competitionType')">
+                    <i class="bi bi-pencil"></i> Redigera tävling
+                </button>
+            }
         </div>
     </div>
 
@@ -732,6 +740,126 @@ window.CompetitionConfig = {
 
     @* Replace Confirmation Modal - required by competition-registration.js for replacing registrations *@
     @await Html.PartialAsync("CompetitionReplaceConfirmModal")
+}
+
+@* Competition Edit Modals — loaded only for users who can edit this competition *@
+@if (canManageCompetition)
+{
+    @await Html.PartialAsync("CompetitionEditModal")
+    @await Html.PartialAsync("SpringskytteEditModal")
+    @await Html.PartialAsync("CompetitionAdvertEditModal")
+    @await Html.PartialAsync("FaltskytteStationConfigModal")
+
+    <script>
+    // After the edit modal saves, it calls loadCompetitionsList(). On this page,
+    // there's no list to refresh — reload so the header/title/tabs reflect changes.
+    window.loadCompetitionsList = function() { window.location.reload(); };
+
+    // Route to the correct edit modal based on competition type / external flag.
+    window.openEditCompetitionModal = function(id, isExternal, compType) {
+        if (isExternal === true) {
+            openAdvertEditForCompetition(id);
+            return;
+        }
+        if (compType === 'Springskytte') {
+            openSpringskytteEditForCompetition(id);
+            return;
+        }
+        openInternalEditForCompetition(id);
+    };
+
+    function openInternalEditForCompetition(id) {
+        const modalLabel = document.getElementById('competitionEditModalLabel');
+        if (modalLabel) modalLabel.innerHTML = '<i class="bi bi-pencil me-2"></i>Redigera Tävling';
+
+        const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+        fetch(`/umbraco/surface/CompetitionEdit/GetCompetitionData?competitionId=${id}`, {
+            method: 'GET',
+            headers: { 'RequestVerificationToken': token },
+            credentials: 'same-origin'
+        })
+        .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+        .then(data => {
+            if (!data.success) { alert('Kunde inte ladda tävlingsdata: ' + (data.message || 'Okänt fel')); return; }
+            window.currentCompetitionData = data.data;
+            const el = document.getElementById('competitionEditModal');
+            const modal = window.competitionEditModalInstance || new bootstrap.Modal(el);
+            window.competitionEditModalInstance = modal;
+            modal.show();
+            // Defensively trigger series load — the modal's show.bs.modal handler
+            // is supposed to do this, but has been observed to not fire reliably
+            // when the modal is opened from this page. Only run if the dropdown
+            // still only has the hardcoded "Ingen serie" default option.
+            setTimeout(() => {
+                const seriesSelect = document.getElementById('competitionSeriesId');
+                const alreadyLoaded = seriesSelect && (seriesSelect.options.length > 1 || seriesSelect.dataset.seriesLoaded === 'true');
+                if (!alreadyLoaded && typeof window.loadSeries === 'function') {
+                    window.loadSeries();
+                }
+            }, 250);
+            setTimeout(() => {
+                if (typeof window.populateEditModal === 'function') {
+                    window.populateEditModal(window.currentCompetitionData);
+                    if (typeof loadEditModalShootingClasses === 'function') loadEditModalShootingClasses();
+                } else {
+                    setTimeout(() => {
+                        if (typeof window.populateEditModal === 'function') {
+                            window.populateEditModal(window.currentCompetitionData);
+                            if (typeof loadEditModalShootingClasses === 'function') loadEditModalShootingClasses();
+                        }
+                    }, 500);
+                }
+            }, 200);
+        })
+        .catch(err => { console.error(err); alert('Fel vid laddning av tävlingsdata: ' + err.message); });
+    }
+
+    function openSpringskytteEditForCompetition(id) {
+        const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+        fetch(`/umbraco/surface/CompetitionEdit/GetCompetitionData?competitionId=${id}`, {
+            method: 'GET',
+            headers: { 'RequestVerificationToken': token },
+            credentials: 'same-origin'
+        })
+        .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+        .then(data => {
+            if (!data.success) { alert('Kunde inte ladda tävlingsdata: ' + (data.message || 'Okänt fel')); return; }
+            const el = document.getElementById('springEditModal');
+            if (!el) { alert('Springskytte-redigeringsmodal inte tillgänglig.'); return; }
+            const modal = window.springEditModalInstance || new bootstrap.Modal(el);
+            window.springEditModalInstance = modal;
+            modal.show();
+            setTimeout(() => {
+                if (typeof window.populateSpringEditModal === 'function') {
+                    window.populateSpringEditModal(data.data);
+                }
+            }, 200);
+        })
+        .catch(err => { console.error(err); alert('Fel vid laddning av tävlingsdata: ' + err.message); });
+    }
+
+    function openAdvertEditForCompetition(id) {
+        const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+        fetch(`/umbraco/surface/CompetitionAdmin/GetCompetition?id=${id}`, {
+            method: 'GET',
+            headers: { 'RequestVerificationToken': token },
+            credentials: 'same-origin'
+        })
+        .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+        .then(data => {
+            if (!data.success) { alert('Kunde inte ladda tävlingsdata: ' + (data.message || 'Okänt fel')); return; }
+            if (typeof window.populateAdvertEditModal === 'function') {
+                window.populateAdvertEditModal(data.competition);
+            }
+            const el = document.getElementById('competitionAdvertEditModal');
+            if (!el) { alert('Edit modal inte tillgänglig.'); return; }
+            const modal = window.competitionAdvertEditModalInstance || new bootstrap.Modal(el);
+            window.competitionAdvertEditModalInstance = modal;
+            modal.show();
+        })
+        .catch(err => { console.error(err); alert('Fel vid laddning av tävlingsdata: ' + err.message); });
+    }
+    </script>
 }
 
 @* Swish Payment Modal *@

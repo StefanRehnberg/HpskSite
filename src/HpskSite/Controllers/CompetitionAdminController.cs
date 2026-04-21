@@ -2262,10 +2262,14 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetSeriesList(string? region = null)
         {
-            // Allow site admins, regional admins, and club admins
+            // Auth context drives filtering, not access. Series metadata (name/dates) is
+            // already public on /competitions/<series>/, and competition managers (who can
+            // open the edit modal) need this list to assign their competition to a series.
             var (isSiteAdmin, isRegionalAdmin, isClubAdmin, managedClubIds) = await GetSeriesAuthContext();
 
-            if (!isSiteAdmin && !isRegionalAdmin && !isClubAdmin)
+            // Require an authenticated member, but allow any role (competition managers too).
+            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            if (currentMember == null)
             {
                 return Ok(new { success = false, message = "Access denied" });
             }

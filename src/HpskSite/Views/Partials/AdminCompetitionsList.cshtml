@@ -709,6 +709,15 @@ function openInternalEditModal(competitionId) {
             modal.show();
             console.log('Modal shown');
 
+            // Defensively trigger series load if the modal's show.bs.modal handler didn't
+            setTimeout(() => {
+                const seriesSelect = document.getElementById('competitionSeriesId');
+                const alreadyLoaded = seriesSelect && (seriesSelect.options.length > 1 || seriesSelect.dataset.seriesLoaded === 'true');
+                if (!alreadyLoaded && typeof window.loadSeries === 'function') {
+                    window.loadSeries();
+                }
+            }, 250);
+
             // Populate data after modal is shown and Flatpickr is initialized
             setTimeout(() => {
                 console.log('Checking if populateEditModal is defined:', typeof window.populateEditModal);

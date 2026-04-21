@@ -87,6 +87,39 @@
                 </button>
             </div>
 
+            <!-- Filter Section -->
+            <div class="card mb-3">
+                <div class="card-body">
+                    <div class="row g-3 align-items-end">
+                        <div class="col-md-3">
+                            <label for="clubYearFilter" class="form-label">År</label>
+                            <select class="form-select" id="clubYearFilter" onchange="onClubYearFilterChange()">
+                                <!-- Populated by JavaScript -->
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label for="clubTypeFilter" class="form-label">Tävlingstyp</label>
+                            <select class="form-select" id="clubTypeFilter" onchange="onClubTypeFilterChange()">
+                                <option value="">Alla typer</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="clubShowCompleted" onchange="onClubShowCompletedChange()">
+                                <label class="form-check-label" for="clubShowCompleted">
+                                    Visa avslutade tävlingar
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <button class="btn btn-outline-secondary w-100" onclick="clearClubCompetitionFilters()">
+                                <i class="bi bi-x-circle me-1"></i>Rensa filter
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <div id="competitionsTableContainer">
                 <div class="text-center py-4">
                     <div class="spinner-border" role="status">
@@ -1813,12 +1846,79 @@ function showDeleteConfirmation(itemName, onConfirm) {
 // Make loadClubCompetitions available as loadCompetitionsList for CompetitionEditModal's save callback
 window.loadCompetitionsList = window.loadCompetitionsList || function() { loadClubCompetitions(); };
 
+// Filter state for club competitions (defaults: current year, hide completed)
+let clubCompetitionsFilters = {
+    year: new Date().getFullYear(),
+    includeCompleted: false,
+    type: ''
+};
+let clubCompetitionTypesCache = [];
+let clubYearFilterInitialized = false;
+
+function populateClubYearFilter() {
+    if (clubYearFilterInitialized) return;
+    const select = document.getElementById('clubYearFilter');
+    if (!select) return;
+    const currentYear = new Date().getFullYear();
+    let html = '<option value="">Alla år</option>';
+    for (let year = 2024; year <= currentYear + 1; year++) {
+        const selected = year === currentYear ? 'selected' : '';
+        html += `<option value="${year}" ${selected}>${year}</option>`;
+    }
+    select.innerHTML = html;
+    clubYearFilterInitialized = true;
+}
+
+function onClubYearFilterChange() {
+    const v = document.getElementById('clubYearFilter').value;
+    clubCompetitionsFilters.year = v ? parseInt(v) : null;
+    loadClubCompetitions();
+}
+
+function onClubTypeFilterChange() {
+    clubCompetitionsFilters.type = document.getElementById('clubTypeFilter').value;
+    loadClubCompetitions();
+}
+
+function onClubShowCompletedChange() {
+    clubCompetitionsFilters.includeCompleted = document.getElementById('clubShowCompleted').checked;
+    loadClubCompetitions();
+}
+
+function clearClubCompetitionFilters() {
+    const currentYear = new Date().getFullYear();
+    document.getElementById('clubYearFilter').value = currentYear.toString();
+    document.getElementById('clubTypeFilter').value = '';
+    document.getElementById('clubShowCompleted').checked = false;
+    clubCompetitionsFilters = { year: currentYear, includeCompleted: false, type: '' };
+    loadClubCompetitions();
+}
+
+function populateClubTypeFilter(competitions) {
+    const select = document.getElementById('clubTypeFilter');
+    if (!select) return;
+    const types = [...new Set((competitions || []).map(c => c.type).filter(t => t))].sort();
+    clubCompetitionTypesCache = types;
+    const current = clubCompetitionsFilters.type || '';
+    select.innerHTML = '<option value="">Alla typer</option>' +
+        types.map(t => `<option value="${escapeHtml(t)}" ${t === current ? 'selected' : ''}>${escapeHtml(t)}</option>`).join('');
+}
+
 // Load Club Competitions
 function loadClubCompetitions() {
     const container = document.getElementById('competitionsTableContainer');
     container.innerHTML = '<div class="text-center py-4"><div class="spinner-border" role="status"><span class="visually-hidden">Laddar tävlingar...</span></div></div>';
 
-    fetch('/umbraco/surface/CompetitionAdmin/GetCompetitionsList')
+    populateClubYearFilter();
+
+    // Build URL with server-side filters
+    const params = [];
+    if (clubCompetitionsFilters.year) params.push(`year=${clubCompetitionsFilters.year}`);
+    params.push(`includeCompleted=${clubCompetitionsFilters.includeCompleted}`);
+    if (clubCompetitionsFilters.type) params.push(`type=${encodeURIComponent(clubCompetitionsFilters.type)}`);
+    const url = '/umbraco/surface/CompetitionAdmin/GetCompetitionsList?' + params.join('&');
+
+    fetch(url)
         .then(response => response.json())
         .then(data => {
             if (data.success) {
@@ -1827,6 +1927,10 @@ function loadClubCompetitions() {
                 const clubCompetitions = (data.data || []).filter(comp =>
                     comp.clubId === clubId
                 );
+                // Populate type dropdown from full club result on first load (when no type filter active)
+                if (!clubCompetitionsFilters.type && clubCompetitionTypesCache.length === 0) {
+                    populateClubTypeFilter(clubCompetitions);
+                }
                 displayClubCompetitions(clubCompetitions);
             } else {
                 container.innerHTML = '<div class="alert alert-warning">Kunde inte ladda tävlingar.</div>';

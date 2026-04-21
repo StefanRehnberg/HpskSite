@@ -366,7 +366,7 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                                     </label>
                                 </div>
                             </div>
-                            <div class="mb-3">
+                            <div class="mb-3" id="edit_selfReportingGroup">
                                 <div class="form-check">
                                     <input class="form-check-input" type="checkbox" id="allowSelfReporting" name="allowSelfReporting" @(allowSelfReporting == true ? "checked" : "")>
                                     <label class="form-check-label" for="allowSelfReporting">
@@ -733,8 +733,17 @@ function loadShootingClasses() {
         .catch(error => console.error('Error loading shooting classes:', error));
 }
 
+window.loadSeries = loadSeries;
+let _seriesLoadInFlight = false;
 function loadSeries() {
+    if (_seriesLoadInFlight) return; // avoid duplicate parallel loads
+    _seriesLoadInFlight = true;
     const cacheBuster = new Date().getTime();
+    const initialSelect = document.getElementById('competitionSeriesId');
+    if (initialSelect) {
+        // Mark as loading so applyPendingSeriesSelection() waits until we're done
+        delete initialSelect.dataset.seriesLoaded;
+    }
     fetch(`/umbraco/surface/CompetitionAdmin/GetSeriesList?_=${cacheBuster}`)
         .then(response => response.json())
         .then(data => {
@@ -755,17 +764,18 @@ function loadSeries() {
                 select.innerHTML = '<option value="">Ingen serie</option>';
             }
 
-            // After populating options, check if there's a pending value to set
-            const pendingValue = select.dataset.pendingValue;
-            if (pendingValue) {
-                select.value = pendingValue;
-                delete select.dataset.pendingValue; // Clear it after using
-            }
+            // Mark loading as done and apply any pending selection set by populateEditModal
+            select.dataset.seriesLoaded = 'true';
+            _seriesLoadInFlight = false;
+            applyPendingSeriesSelection();
         })
         .catch(error => {
             console.error('Error loading series:', error);
             const select = document.getElementById('competitionSeriesId');
             select.innerHTML = '<option value="">Ingen serie</option>';
+            select.dataset.seriesLoaded = 'true';
+            _seriesLoadInFlight = false;
+            applyPendingSeriesSelection();
         });
 }
 
@@ -976,6 +986,12 @@ window.populateEditModal = function(competition) {
     if (dpSection) {
         dpSection.style.display = dpExcludedTypes.includes(competition.competitionType) ? 'none' : '';
     }
+
+    // Self-reporting checkbox is only meaningful for precision-family types
+    const selfReportingGroup = document.getElementById('edit_selfReportingGroup');
+    if (selfReportingGroup) {
+        selfReportingGroup.style.display = dpExcludedTypes.includes(competition.competitionType) ? 'none' : '';
+    }
     loadEditDirektplaceringConfig(competition.direktplaceringConfig);
 
     // Competition scope dropdown
@@ -984,13 +1000,47 @@ window.populateEditModal = function(competition) {
 
     // Series dropdown - store value in dataset for loadSeries() to apply
     const seriesId = competition.seriesId || '';
+    const seriesName = competition.seriesName || '';
     const seriesDropdown = document.getElementById('competitionSeriesId');
     if (seriesDropdown) {
         seriesDropdown.dataset.pendingValue = seriesId;
         // Store original series ID for detecting changes on save
         seriesDropdown.dataset.originalSeriesId = seriesId;
+        // Store name so loadSeries can inject the option if it gets filtered out
+        seriesDropdown.dataset.pendingName = seriesName;
+        // If options are already populated (loadSeries finished first), apply now
+        applyPendingSeriesSelection();
     }
 
+}
+
+// Ensures the competition's series is present in the dropdown and selected.
+// Called both after loadSeries finishes and after populateEditModal sets the pending value,
+// so it handles either ordering robustly.
+function applyPendingSeriesSelection() {
+    const select = document.getElementById('competitionSeriesId');
+    if (!select) return;
+    const pendingId = select.dataset.pendingValue;
+    // Only act when loadSeries has finished populating options
+    if (select.dataset.seriesLoaded !== 'true') return;
+    if (pendingId === undefined) return;
+
+    if (pendingId) {
+        // Inject the option if it's missing (e.g. filtered out on a club page)
+        let exists = false;
+        for (let i = 0; i < select.options.length; i++) {
+            if (select.options[i].value === String(pendingId)) { exists = true; break; }
+        }
+        if (!exists) {
+            const opt = document.createElement('option');
+            opt.value = String(pendingId);
+            opt.textContent = select.dataset.pendingName || ('Serie #' + pendingId);
+            select.appendChild(opt);
+        }
+    }
+    select.value = pendingId || '';
+    delete select.dataset.pendingValue;
+    delete select.dataset.pendingName;
 }
 
 // Load shooting classes for edit modal
