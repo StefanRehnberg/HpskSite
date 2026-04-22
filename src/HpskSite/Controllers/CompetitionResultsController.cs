@@ -932,10 +932,9 @@ namespace HpskSite.Controllers
                 // Get actual shooting class from results (not from input parameter)
                 var actualShootingClass = results.First().ShootingClass;
 
-                // Derive weapon class from shooting class (e.g., "A1" -> "A", "C2" -> "C")
-                var weaponClass = !string.IsNullOrEmpty(actualShootingClass) && actualShootingClass.Length > 0
-                    ? actualShootingClass.Substring(0, 1)
-                    : "?";
+                // Derive weapon class via the registry (so A_opt_X correctly maps to "A_Opt").
+                var weaponClass = ShootingClasses.GetWeaponClassCode(actualShootingClass);
+                if (string.IsNullOrEmpty(weaponClass)) weaponClass = "?";
 
                 // Build series data
                 var series = results.Select(r => {
@@ -2174,7 +2173,7 @@ namespace HpskSite.Controllers
                             var classInfos = cached.ClassGroups.Select(g => new ClassInfo
                             {
                                 ClassName = g.ClassName,
-                                WeaponGroup = g.ClassName.Length > 0 ? g.ClassName.Substring(0, 1) : "",
+                                WeaponGroup = ShootingClasses.GetWeaponClassCode(g.ClassName),
                                 ParticipantCount = g.Shooters.Count,
                                 BelowThreshold = g.Shooters.Count < 5,
                                 MedalImpact = g.Shooters.Count < 5

@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using HpskSite.CompetitionTypes.Precision.Models;
+using HpskSite.Models;
 
 namespace HpskSite.CompetitionTypes.Precision.Services
 {
@@ -206,21 +207,24 @@ namespace HpskSite.CompetitionTypes.Precision.Services
         /// </summary>
         private (int Bronze, int Silver) GetFixedScoreRequirements(string weaponGroup, int seriesCount)
         {
-            // Table from BR-PS.2.4.2
+            // Table from BR-PS.2.4.2. A_Opt follows the same thresholds as A.
             return (weaponGroup, seriesCount) switch
             {
                 // 6 series
                 ("A", 6) => (267, 277),
+                ("A_Opt", 6) => (267, 277),
                 ("B", 6) => (273, 282),
                 ("C", 6) => (276, 283),
 
                 // 7 series
                 ("A", 7) => (312, 323),
+                ("A_Opt", 7) => (312, 323),
                 ("B", 7) => (319, 329),
                 ("C", 7) => (322, 330),
 
                 // 10 series
                 ("A", 10) => (445, 461),
+                ("A_Opt", 10) => (445, 461),
                 ("B", 10) => (455, 470),
                 ("C", 10) => (460, 471),
 
@@ -230,18 +234,15 @@ namespace HpskSite.CompetitionTypes.Precision.Services
         }
 
         /// <summary>
-        /// Extract weapon group (A, B, or C) from shooting class like "B3", "A2", "C Dam"
+        /// Extract weapon group (A, A_Opt, B, or C) from a shooting class using the authoritative
+        /// <see cref="ShootingClasses"/> registry. Falls back to C when the class is unknown.
         /// </summary>
         private string ExtractWeaponGroup(string shootingClass)
         {
-            if (string.IsNullOrEmpty(shootingClass))
-                return "C"; // Default to C if unknown
-
-            var firstChar = shootingClass.Trim().ToUpper()[0];
-            if (firstChar == 'A' || firstChar == 'B' || firstChar == 'C')
-                return firstChar.ToString();
-
-            return "C"; // Default to C
+            var code = ShootingClasses.GetWeaponClassCode(shootingClass);
+            if (code == "A" || code == "A_Opt" || code == "B" || code == "C")
+                return code;
+            return "C"; // Unknown class → default to C (preserves previous behaviour)
         }
 
         /// <summary>

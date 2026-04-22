@@ -32,7 +32,8 @@ namespace HpskSite.Models
         // Standard competition team class mappings
         private static readonly Dictionary<string, string[]> StandardTeamClassMap = new()
         {
-            ["A"] = new[] { "A1", "A2", "A3", "A_opt" },
+            ["A"] = new[] { "A1", "A2", "A3" },
+            ["A Opt"] = new[] { "A_opt_1", "A_opt_2", "A_opt_3" },
             ["B"] = new[] { "B1", "B2", "B3" },
             ["C Öppen"] = new[] { "C1", "C2", "C3" },
             ["C Vet"] = new[] { "C_Vet_Y", "C_Vet_A" },

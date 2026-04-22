@@ -1650,8 +1650,10 @@ async function queryExistingRegistrations() {
                 // Each registration now has shootingClasses array
                 if (reg.shootingClasses && Array.isArray(reg.shootingClasses)) {
                     reg.shootingClasses.forEach(classEntry => {
-                        // Extract weapon class from class ID (e.g., "A1" → "A")
-                        const weaponClass = classEntry.class.charAt(0).toUpperCase();
+                        // Resolve weapon class via the registry helper so A_opt_X resolves
+                        // to "A_Opt" (its own group), not "A".
+                        const weaponClass = window.getWeaponClassCode(classEntry.class);
+                        if (!weaponClass) return;
 
                         if (!weaponClassConflicts[weaponClass]) {
                             weaponClassConflicts[weaponClass] = [];
@@ -1995,8 +1997,9 @@ function getLClassSubcategory(classId) {
 
 // Validate weapon class conflicts
 function validateWeaponClassConflicts(newClassId) {
-    // Extract weapon class from new class (first character)
-    const newWeaponClass = newClassId.charAt(0);
+    // Resolve weapon class via the registry so A_opt_X belongs to its own bucket ("A_Opt"),
+    // not to plain "A".
+    const newWeaponClass = window.getWeaponClassCode(newClassId);
 
     // Check if this weapon class has existing registrations
     const conflicts = weaponClassConflicts[newWeaponClass];
@@ -2484,7 +2487,8 @@ function onDpClassSelectionChanged() {
         // Skip if row already exists for this class
         if (container.querySelector(`.dp-team-row[data-class-id="${classId}"]`)) return;
 
-        const weaponGroup = classId.charAt(0).toUpperCase();
+        // Resolve weapon group via the registry so A_opt_X belongs to "A_Opt", not "A".
+        const weaponGroup = window.getWeaponClassCode(classId);
         const row = document.createElement('div');
         row.className = 'mb-2 dp-team-row';
         row.dataset.classId = classId;

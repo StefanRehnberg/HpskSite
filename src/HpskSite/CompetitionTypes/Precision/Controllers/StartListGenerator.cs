@@ -1,6 +1,7 @@
 ﻿using HpskSite.CompetitionTypes.Milsnabb.Services;
 using HpskSite.CompetitionTypes.Precision.Models;
 using HpskSite.CompetitionTypes.Precision.ViewModels;
+using HpskSite.Models;
 using HpskSite.Models.ViewModels.Competition;
 
 namespace HpskSite.CompetitionTypes.Precision.Controllers
@@ -332,13 +333,10 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
 
         private string GetWeaponClassLevel(string weaponClass)
         {
-            if (weaponClass.StartsWith("A")) return "A";
-            if (weaponClass.StartsWith("B")) return "B";
-            if (weaponClass.StartsWith("C")) return "C";
-            if (weaponClass.StartsWith("R")) return "R";
-            if (weaponClass.StartsWith("M")) return "M";
-            if (weaponClass.StartsWith("L")) return "L";
-            return "Z";
+            // Authoritative lookup via registry so A_opt_X correctly maps to "A_Opt" (its own group),
+            // not "A". Returns "Z" as the sort-to-end bucket for unknown inputs.
+            var code = ShootingClasses.GetWeaponClassCode(weaponClass);
+            return string.IsNullOrEmpty(code) ? "Z" : code;
         }
 
         private string FormatTime(TimeSpan time)

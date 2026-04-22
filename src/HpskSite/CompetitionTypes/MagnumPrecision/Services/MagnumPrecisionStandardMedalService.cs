@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using HpskSite.CompetitionTypes.Precision.Models;
 using HpskSite.CompetitionTypes.Precision.Services;
+using HpskSite.Models;
 
 namespace HpskSite.CompetitionTypes.MagnumPrecision.Services
 {
@@ -200,19 +201,14 @@ namespace HpskSite.CompetitionTypes.MagnumPrecision.Services
 
         /// <summary>
         /// Extract weapon group from shooting class (e.g., "M1", "M5", "M9").
-        /// For Magnum Precision, returns the full M-class identifier.
+        /// For Magnum Precision this returns the full M-class identifier.
+        /// Uses the ShootingClasses registry to validate the input is an M-class.
         /// </summary>
         private string ExtractWeaponGroup(string shootingClass)
         {
-            if (string.IsNullOrEmpty(shootingClass))
-                return "M1"; // Default
-
-            var trimmed = shootingClass.Trim().ToUpper();
-
-            // Extract M + digit pattern (M1 through M9)
-            if (trimmed.Length >= 2 && trimmed[0] == 'M' && char.IsDigit(trimmed[1]))
-                return trimmed.Substring(0, 2);
-
+            var sc = ShootingClasses.GetById(shootingClass) ?? ShootingClasses.GetByName(shootingClass);
+            if (sc != null && sc.Weapon == WeaponClass.M)
+                return sc.Id.ToUpper(); // "M1" .. "M9"
             return "M1"; // Default
         }
     }

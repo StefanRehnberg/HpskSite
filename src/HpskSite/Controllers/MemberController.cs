@@ -807,12 +807,9 @@ namespace HpskSite.Controllers
 
                         var competitionName = competition.Name ?? "Okänd tävling";
 
-                        // Map ShootingClass to WeaponClass
-                        var shootingClassObj = ShootingClasses.GetById(group.Key.ShootingClass);
-                        var weaponClassStr = shootingClassObj?.Weapon.ToString()
-                            ?? (!string.IsNullOrEmpty(group.Key.ShootingClass) && group.Key.ShootingClass.Length > 0
-                                ? group.Key.ShootingClass.Substring(0, 1).ToUpper()
-                                : "?");
+                        // Map ShootingClass to WeaponClass via the registry (so A_opt_X resolves to "A_Opt").
+                        var weaponClassStr = ShootingClasses.GetWeaponClassCode(group.Key.ShootingClass);
+                        if (string.IsNullOrEmpty(weaponClassStr)) weaponClassStr = "?";
 
                         // Filter by weapon class
                         if (weaponClass != "Alla" && weaponClassStr != weaponClass) continue;
@@ -2911,8 +2908,8 @@ namespace HpskSite.Controllers
                     foreach (var entry in group)
                     {
                         string shootingClass = entry.ShootingClass?.ToString() ?? "";
-                        if (string.IsNullOrEmpty(weaponClass) && shootingClass.Length > 0)
-                            weaponClass = shootingClass.Substring(0, 1);
+                        if (string.IsNullOrEmpty(weaponClass))
+                            weaponClass = ShootingClasses.GetWeaponClassCode(shootingClass);
 
                         if (entry.EnteredAt != null && (DateTime)entry.EnteredAt > enteredAt)
                             enteredAt = (DateTime)entry.EnteredAt;

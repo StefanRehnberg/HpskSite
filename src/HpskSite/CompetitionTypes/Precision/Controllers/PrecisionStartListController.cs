@@ -1,4 +1,5 @@
-﻿using HpskSite.Models.ViewModels.Competition;
+﻿using HpskSite.Models;
+using HpskSite.Models.ViewModels.Competition;
 using HpskSite.CompetitionTypes.Precision.Models;
 using HpskSite.CompetitionTypes.Precision.ViewModels;
 using HpskSite.CompetitionTypes.Precision.Services;
@@ -625,9 +626,10 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
 
                 var registrations = await _repository.GetCompetitionRegistrations(competitionId);
 
-                // Extract unique weapon class prefixes (A, B, C, R, M, L)
+                // Extract unique weapon group codes (A, A_Opt, B, C, R, M, L) via the registry
                 var classes = registrations
-                    .Select(r => r.MemberClass.Substring(0, 1).ToUpper())
+                    .Select(r => ShootingClasses.GetWeaponClassCode(r.MemberClass))
+                    .Where(c => !string.IsNullOrEmpty(c))
                     .Distinct()
                     .OrderBy(c => c)
                     .ToList();
@@ -1728,12 +1730,13 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     return false;
                 }
 
-                // Find and update the specific class entry
-                // Match by class prefix (e.g., "A" matches "A1", "A2", etc.)
-                var oldClassPrefix = oldWeaponClass.Length > 0 ? oldWeaponClass.Substring(0, 1).ToUpper() : "";
+                // Find and update the specific class entry.
+                // Match by exact class first, then by weapon group code (so "A" matches "A1"/"A2"/"A3"
+                // and "A_Opt" matches "A_opt_1"/"A_opt_2"/"A_opt_3" — without crossing groups).
+                var oldGroup = ShootingClasses.GetWeaponClassCode(oldWeaponClass);
                 var classEntry = shootingClasses.FirstOrDefault(c =>
                     c.Class.Equals(oldWeaponClass, StringComparison.OrdinalIgnoreCase) ||
-                    (c.Class.Length > 0 && c.Class.Substring(0, 1).ToUpper() == oldClassPrefix));
+                    (!string.IsNullOrEmpty(oldGroup) && ShootingClasses.GetWeaponClassCode(c.Class) == oldGroup));
 
                 if (classEntry == null)
                 {

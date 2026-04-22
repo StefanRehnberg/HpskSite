@@ -7,6 +7,7 @@ using Umbraco.Cms.Core.Services;
 using Umbraco.Cms.Core.Web;
 using Umbraco.Cms.Infrastructure.Persistence;
 using Umbraco.Cms.Web.Website.Controllers;
+using HpskSite.Models;
 using HpskSite.Shared.Models;
 using HpskSite.Services;
 using NPoco;
@@ -1126,8 +1127,8 @@ namespace HpskSite.Controllers
                     foreach (var entry in group)
                     {
                         string shootingClass = entry.ShootingClass?.ToString() ?? "";
-                        if (string.IsNullOrEmpty(weaponClass) && shootingClass.Length > 0)
-                            weaponClass = shootingClass.Substring(0, 1);
+                        if (string.IsNullOrEmpty(weaponClass))
+                            weaponClass = ShootingClasses.GetWeaponClassCode(shootingClass);
 
                         try
                         {

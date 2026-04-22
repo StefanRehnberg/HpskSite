@@ -615,7 +615,21 @@
                 <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-A" type="checkbox" value="A1" id="class_A1"><label class="form-check-label" for="class_A1">A1</label></div></div>
                 <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-A" type="checkbox" value="A2" id="class_A2"><label class="form-check-label" for="class_A2">A2</label></div></div>
                 <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-A" type="checkbox" value="A3" id="class_A3"><label class="form-check-label" for="class_A3">A3</label></div></div>
-                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-A" type="checkbox" value="A_opt" id="class_A_opt"><label class="form-check-label" for="class_A_opt">A Opt</label></div></div>
+            </div>
+        </div>
+
+        <!-- A Opt-klasser (own weapon class) -->
+        <div class="class-section mb-3" id="classSection_A_Opt">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0">A Opt-klasser</h6>
+                <button type="button" class="btn btn-sm btn-outline-primary" onclick="toggleClassSection('A_Opt')">
+                    <span class="select-all-a_opt-text">Välj alla</span>
+                </button>
+            </div>
+            <div class="row">
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-A_Opt" type="checkbox" value="A_opt_1" id="class_A_opt_1"><label class="form-check-label" for="class_A_opt_1">A Opt 1</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-A_Opt" type="checkbox" value="A_opt_2" id="class_A_opt_2"><label class="form-check-label" for="class_A_opt_2">A Opt 2</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-A_Opt" type="checkbox" value="A_opt_3" id="class_A_opt_3"><label class="form-check-label" for="class_A_opt_3">A Opt 3</label></div></div>
             </div>
         </div>
 
@@ -1047,9 +1061,11 @@ function springSeriesChanged() {
 }
 
 function openFaltStationConfigurator() {
-    // Determine weapon classes from selected shooting classes
+    // Determine weapon classes from selected shooting classes via the registry helper,
+    // so A_opt_X classes group as their own weapon class instead of being lumped into A.
     const checkedClasses = Array.from(document.querySelectorAll('.class-checkbox:checked')).map(cb => cb.value);
-    let weaponClasses = [...new Set(checkedClasses.map(c => c.charAt(0)))].filter(w => ['A','B','C','R','M'].includes(w));
+    const allowedGroups = ['A', 'A_Opt', 'B', 'C', 'R', 'M'];
+    let weaponClasses = [...new Set(checkedClasses.map(c => window.getWeaponClassCode(c)))].filter(w => allowedGroups.includes(w));
     if (weaponClasses.length === 0) weaponClasses = ['C'];
 
     // Load existing config if any

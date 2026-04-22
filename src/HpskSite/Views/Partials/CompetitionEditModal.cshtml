@@ -1671,7 +1671,10 @@ function openEditFaltStationConfigurator() {
             checkedIds = typeof raw === 'string' && raw.startsWith('[') ? JSON.parse(raw) : raw.split(',');
         } catch(e) { checkedIds = raw.split(','); }
     }
-    var wcs = [...new Set(checkedIds.map(function(c) { return c.charAt(0); }))].filter(function(w) { return ['A','B','C','R','M'].indexOf(w) >= 0; });
+    // Use the registry helper so A_opt_X classes resolve to "A_Opt" (their own group), not "A".
+    var allowedGroups = ['A','A_Opt','B','C','R','M'];
+    var wcs = [...new Set(checkedIds.map(function(c) { return window.getWeaponClassCode(c); }))]
+        .filter(function(w) { return allowedGroups.indexOf(w) >= 0; });
     if (wcs.length > 0) weaponClasses = wcs;
 
     var existingJson = document.getElementById('edit_faltStationConfigJson').value;

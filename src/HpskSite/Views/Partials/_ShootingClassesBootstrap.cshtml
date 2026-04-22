@@ -1,0 +1,23 @@
+@using HpskSite.Models
+@{
+    // Emits a site-wide JS mapping of shooting class ID → weapon class code so that
+    // front-end code can replace .charAt(0) / .substring(0,1) with window.getWeaponClassCode(id).
+    // Critical for A_opt_1 / A_opt_2 / A_opt_3 which would otherwise be misclassified as plain "A".
+    var classesJson = System.Text.Json.JsonSerializer.Serialize(
+        ShootingClasses.All.Select(sc => new { id = sc.Id, name = sc.Name, weapon = sc.Weapon.ToString() }));
+}
+<script>
+    window.HpskShootingClasses = @Html.Raw(classesJson);
+    window.getWeaponClassCode = function (shootingClassIdOrName) {
+        if (!shootingClassIdOrName) return '';
+        var key = String(shootingClassIdOrName).trim();
+        if (!key) return '';
+        var lower = key.toLowerCase();
+        var list = window.HpskShootingClasses || [];
+        for (var i = 0; i < list.length; i++) {
+            var sc = list[i];
+            if (sc.id.toLowerCase() === lower || sc.name.toLowerCase() === lower) return sc.weapon;
+        }
+        return '';
+    };
+</script>

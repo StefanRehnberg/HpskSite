@@ -1,3 +1,4 @@
+using HpskSite.Models;
 using HpskSite.Shared.Models;
 using Xunit;
 
@@ -74,34 +75,32 @@ namespace HpskSite.Tests
 
         [Theory]
         [InlineData("A3", "A")]
+        [InlineData("A_opt_1", "A_Opt")]
+        [InlineData("A_opt_2", "A_Opt")]
+        [InlineData("A_opt_3", "A_Opt")]
         [InlineData("B2", "B")]
         [InlineData("C Vet Y", "C")]
         [InlineData("R1", "R")]
-        [InlineData("P2", "P")]
         public void WeaponClassExtraction_FromShootingClass_ExtractsCorrectly(string shootingClass, string expectedWeaponClass)
         {
-            // This tests the logic from UnifiedResultsService.cs line 152-154
-            // Extract weapon class from shooting class (e.g., "A3" -> "A")
-            string weaponClass = !string.IsNullOrEmpty(shootingClass) && shootingClass.Length > 0
-                ? shootingClass.Substring(0, 1).ToUpper()
-                : "A";
-
+            // Now uses the authoritative registry helper rather than substring parsing,
+            // so A_opt_X classes correctly resolve to "A_Opt" (not "A").
+            var weaponClass = ShootingClasses.GetWeaponClassCode(shootingClass);
             Assert.Equal(expectedWeaponClass, weaponClass);
         }
 
         [Fact]
-        public void WeaponClassExtraction_WithEmptyShootingClass_DefaultsToA()
+        public void WeaponClassExtraction_WithEmptyShootingClass_ReturnsEmpty()
         {
-            // Arrange
-            string shootingClass = "";
+            var weaponClass = ShootingClasses.GetWeaponClassCode("");
+            Assert.Equal("", weaponClass);
+        }
 
-            // Act
-            string weaponClass = !string.IsNullOrEmpty(shootingClass) && shootingClass.Length > 0
-                ? shootingClass.Substring(0, 1).ToUpper()
-                : "A";
-
-            // Assert
-            Assert.Equal("A", weaponClass);
+        [Fact]
+        public void WeaponClassExtraction_WithUnknownShootingClass_ReturnsEmpty()
+        {
+            var weaponClass = ShootingClasses.GetWeaponClassCode("ZZ_unknown");
+            Assert.Equal("", weaponClass);
         }
 
         [Fact]

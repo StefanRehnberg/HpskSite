@@ -2663,8 +2663,9 @@ function openChangeClassModal(memberId, name, currentClass) {
     const select = document.getElementById('changeClassNewSelect');
     select.value = '';
 
-    // Determine weapon type from current class (first character, e.g. "C2" -> "C")
-    const weaponType = currentClass.length > 0 ? currentClass.charAt(0).toUpperCase() : '';
+    // Determine weapon group from current class via the registry helper so A_opt_X resolves
+    // to "A_Opt" instead of being lumped with plain A.
+    const weaponType = window.getWeaponClassCode(currentClass);
     select.dataset.currentWeapon = weaponType;
 
     filterChangeClassOptions();
@@ -2681,14 +2682,14 @@ function filterChangeClassOptions() {
 
     const options = select.querySelectorAll('option[data-weapon]');
     options.forEach(opt => {
-        const optWeapon = opt.getAttribute('data-weapon');
-        // Map enum names to letter prefixes: A, B, C, R, M, L
-        const weaponLetter = optWeapon ? optWeapon.charAt(0).toUpperCase() : '';
+        // data-weapon already holds the WeaponClass enum value ("A", "A_Opt", "B", ...);
+        // compare against weaponType directly so A and A_Opt are not treated as the same group.
+        const optWeapon = opt.getAttribute('data-weapon') || '';
 
         if (showAll) {
             opt.style.display = '';
         } else {
-            opt.style.display = (weaponLetter === weaponType) ? '' : 'none';
+            opt.style.display = (optWeapon === weaponType) ? '' : 'none';
         }
 
         // Disable the current class option

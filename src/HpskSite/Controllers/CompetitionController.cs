@@ -1848,21 +1848,15 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
-        /// Extracts the weapon class (A, B, C, R) from a shooting class ID
+        /// Extracts the weapon class code (e.g., "A", "A_Opt", "B", "C", "R") from a shooting class ID
+        /// via the authoritative ShootingClasses registry. Returns null if the id is unknown
+        /// (we deliberately do NOT fall back to the first character — that would misclassify A_opt_X).
         /// </summary>
         private string GetWeaponClassFromShootingClass(string shootingClassId)
         {
             if (string.IsNullOrEmpty(shootingClassId)) return null;
-
-            // Use ShootingClasses model to get weapon type
-            var shootingClass = ShootingClasses.GetById(shootingClassId);
-            if (shootingClass != null)
-            {
-                return shootingClass.Weapon.ToString(); // Returns "A", "B", "C", or "R"
-            }
-
-            // Fallback: simple string parsing (first character)
-            return shootingClassId.Substring(0, 1);
+            var code = ShootingClasses.GetWeaponClassCode(shootingClassId);
+            return string.IsNullOrEmpty(code) ? null : code;
         }
 
         /// <summary>

@@ -142,18 +142,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
 
         private static string ExtractWeaponGroup(string shootingClass)
         {
-            if (string.IsNullOrEmpty(shootingClass)) return "?";
-
-            // "A Opt" / "A Optisk" is its own weapon group
-            if (shootingClass.StartsWith("A Opt", StringComparison.OrdinalIgnoreCase))
-                return "A Opt";
-
-            // Use ShootingClasses lookup first
-            var sc = ShootingClasses.GetByName(shootingClass) ?? ShootingClasses.GetById(shootingClass);
-            if (sc != null) return sc.Weapon.ToString();
-
-            // Fallback: first letter
-            return shootingClass.Substring(0, 1);
+            // Authoritative lookup — returns "A", "A_Opt", "B", "C", etc. from the registry.
+            var code = ShootingClasses.GetWeaponClassCode(shootingClass);
+            return string.IsNullOrEmpty(code) ? "?" : code;
         }
 
         private static string? ExtractClassification(string shootingClass)

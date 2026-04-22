@@ -1,5 +1,6 @@
 using HpskSite.CompetitionTypes.Precision.Models;
 using HpskSite.CompetitionTypes.Precision.Services;
+using HpskSite.Models;
 
 namespace HpskSite.CompetitionTypes.Milsnabb.Services
 {
@@ -60,10 +61,11 @@ namespace HpskSite.CompetitionTypes.Milsnabb.Services
         /// </summary>
         private static (int Bronze, int Silver) GetMilsnabbFixedScoreRequirements(string weaponGroup, int seriesCount)
         {
-            // Milsnabb fixed score thresholds (12 series only)
+            // Milsnabb fixed score thresholds (12 series only). A_Opt follows A's thresholds.
             return (weaponGroup, seriesCount) switch
             {
                 ("A", 12) => (516, 540),
+                ("A_Opt", 12) => (516, 540),
                 ("R", 12) => (528, 552),
                 ("B", 12) => (537, 561),
                 ("C", 12) => (540, 564),
@@ -75,13 +77,9 @@ namespace HpskSite.CompetitionTypes.Milsnabb.Services
 
         private static string ExtractWeaponGroup(string shootingClass)
         {
-            if (string.IsNullOrEmpty(shootingClass))
-                return "C";
-
-            var firstChar = shootingClass.Trim().ToUpper()[0];
-            if (firstChar == 'A' || firstChar == 'B' || firstChar == 'C' || firstChar == 'R')
-                return firstChar.ToString();
-
+            var code = ShootingClasses.GetWeaponClassCode(shootingClass);
+            if (code == "A" || code == "A_Opt" || code == "B" || code == "C" || code == "R")
+                return code;
             return "C";
         }
     }

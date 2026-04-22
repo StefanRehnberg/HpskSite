@@ -1,5 +1,6 @@
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using HpskSite.Models;
 
 namespace HpskSite.CompetitionTypes.Faltskytte.Models
 {
@@ -9,7 +10,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
     /// </summary>
     public class FaltskytteCompetitionConfig
     {
-        /// <summary>Keyed by weapon class: "A", "B", "C", "R", "M1"-"M9".</summary>
+        /// <summary>Keyed by weapon class: "A", "A_Opt", "B", "C", "R", "M1"-"M9".</summary>
         public Dictionary<string, FaltskytteWeaponClassConfig> WeaponConfigs { get; set; } = new();
 
         /// <summary>Gets station config for a specific weapon class. Falls back to first available.</summary>
@@ -17,7 +18,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         {
             if (WeaponConfigs.TryGetValue(weaponClass, out var config))
                 return config;
-            if (weaponClass.Length > 0 && WeaponConfigs.TryGetValue(weaponClass.Substring(0, 1), out config))
+            // Fallback: if weaponClass is a shooting class ID (e.g. "A_opt_2"), look up by weapon group code.
+            var groupCode = ShootingClasses.GetWeaponClassCode(weaponClass);
+            if (!string.IsNullOrEmpty(groupCode) && WeaponConfigs.TryGetValue(groupCode, out config))
                 return config;
             return WeaponConfigs.Values.FirstOrDefault();
         }

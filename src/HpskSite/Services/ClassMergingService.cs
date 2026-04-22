@@ -160,16 +160,12 @@ namespace HpskSite.Services
             if (IsClass1(className))
                 return null;
 
-            // A Opt never merges
-            if (className == "A Opt")
-                return null;
-
             // M-classes excluded
             if (weaponGroup == "M")
                 return null;
 
-            // ── Weapon groups A, B: class 2 ↔ 3 ──
-            if (weaponGroup == "A" || weaponGroup == "B")
+            // ── Weapon groups A, A_Opt, B: class 2 ↔ 3 ──
+            if (weaponGroup == "A" || weaponGroup == "A_Opt" || weaponGroup == "B")
                 return BuildLevel23Suggestion(className, count, classCounts, weaponGroup);
 
             // ── Weapon group R: class 2 ↔ 3 (Milsnabb, Fältskytte, MagnumFält) ──
@@ -184,7 +180,7 @@ namespace HpskSite.Services
         }
 
         /// <summary>
-        /// For A/B/R weapon groups: class 2 and 3 can merge with each other.
+        /// For A/A_Opt/B/R weapon groups: class 2 and 3 can merge with each other.
         /// </summary>
         private MergeSuggestion? BuildLevel23Suggestion(string className, int count,
             Dictionary<string, int> classCounts, string weaponGroup)
@@ -193,10 +189,11 @@ namespace HpskSite.Services
             if (level != 2 && level != 3) return null;
 
             var partnerLevel = level == 2 ? 3 : 2;
-            var partnerName = $"{weaponGroup}{partnerLevel}";
+            var partnerName = FormatLevelName(weaponGroup, partnerLevel);
 
             if (!classCounts.ContainsKey(partnerName)) return null;
 
+            var weaponGroupLabel = weaponGroup == "A_Opt" ? "A Opt" : weaponGroup;
             return new MergeSuggestion
             {
                 SourceClass = className,
@@ -204,7 +201,7 @@ namespace HpskSite.Services
                 DefaultTarget = partnerName,
                 PossibleTargets = new List<string> { partnerName },
                 RequiresAdminChoice = false,
-                Reason = $"Klass {level} och {partnerLevel} i vapengrupp {weaponGroup} får slås samman"
+                Reason = $"Klass {level} och {partnerLevel} i vapengrupp {weaponGroupLabel} får slås samman"
             };
         }
 
@@ -306,28 +303,45 @@ namespace HpskSite.Services
 
         private static string GetWeaponGroup(string k)
         {
-            // Use ShootingClasses model when possible
-            var sc = ShootingClasses.GetByName(k);
-            if (sc != null) return sc.Weapon.ToString();
+            // Authoritative lookup — handles names ("A Opt 2") and IDs ("A_opt_2") alike.
+            // Returns "" for unknown inputs; callers must not fall back to first-character parsing
+            // because that would mis-categorize A_opt classes as plain A.
+            return ShootingClasses.GetWeaponClassCode(k);
+        }
 
-            // Fallback: extract first letter
-            if (string.IsNullOrEmpty(k)) return "";
-            return k.Substring(0, 1);
+        /// <summary>
+        /// Builds the display name for a given weapon group at a given competence level.
+        /// Most groups use a compact form ("A2", "B3", "R2"); A_Opt uses a spaced form ("A Opt 2").
+        /// </summary>
+        private static string FormatLevelName(string weaponGroup, int level)
+        {
+            if (weaponGroup == "A_Opt") return $"A Opt {level}";
+            return $"{weaponGroup}{level}";
         }
 
         private static int? GetCompetenceLevel(string className)
         {
-            // "C2 Dam" → 2, "A3" → 3, "C Vet Y" → null, "L1 Dam" → 1
-            // Look for a digit right after the weapon group letter
-            if (className.Length < 2) return null;
-            if (char.IsDigit(className[1]))
+            // "C2 Dam" → 2, "A3" → 3, "C Vet Y" → null, "L1 Dam" → 1, "A Opt 2" → 2
+            if (string.IsNullOrEmpty(className)) return null;
+
+            // Compact form: digit right after the weapon group letter ("A3", "R2", "C1 Dam")
+            if (className.Length >= 2 && char.IsDigit(className[1]))
                 return className[1] - '0';
+
+            // Spaced form: "A Opt 2" — trailing digit represents the level
+            var last = className[className.Length - 1];
+            if (char.IsDigit(last)) return last - '0';
+
             return null;
         }
 
         private static bool IsClass1(string className)
         {
-            return className.Length >= 2 && className[1] == '1' && !className.Contains("Vet") && !className.Contains("Jun");
+            // Mirrors the original intent (class 1 never merges) but now uses
+            // GetCompetenceLevel so it also catches "A Opt 1".
+            return GetCompetenceLevel(className) == 1
+                && !className.Contains("Vet")
+                && !className.Contains("Jun");
         }
 
         private static bool IsDamClass(string className) => className.Contains("Dam");
@@ -374,7 +388,8 @@ namespace HpskSite.Services
                 { "C3", 7 }, { "C3 Dam", 8 }, { "C3 Jun", 9 },
                 { "C Vet Y", 10 }, { "C Vet Ä", 11 }, { "C Jun", 12 },
                 { "B1", 16 }, { "B2", 19 }, { "B3", 22 },
-                { "A1", 31 }, { "A2", 34 }, { "A3", 37 }, { "A Opt", 40 },
+                { "A1", 31 }, { "A2", 34 }, { "A3", 37 },
+                { "A Opt 1", 38 }, { "A Opt 2", 39 }, { "A Opt 3", 40 },
                 { "R1", 41 }, { "R2", 42 }, { "R3", 43 },
                 { "L1", 50 }, { "L1 Dam", 51 }, { "L2", 52 }, { "L2 Dam", 53 },
                 { "L3", 54 }, { "L3 Dam", 55 },

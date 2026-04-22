@@ -1,3 +1,4 @@
+using HpskSite.Models;
 using HpskSite.Shared.Models;
 using HpskSite.CompetitionTypes.Precision.Models;
 using NPoco;
@@ -241,10 +242,9 @@ namespace HpskSite.Services
                     int competitionId = compRecord.CompetitionId ?? 0;
                     string shootingClass = compRecord.ShootingClass ?? "";
 
-                    // Extract weapon class from shooting class (e.g., "A3" -> "A")
-                    string weaponClass = !string.IsNullOrEmpty(shootingClass) && shootingClass.Length > 0
-                        ? shootingClass.Substring(0, 1).ToUpper()
-                        : "A";
+                    // Extract weapon class via the registry so A_opt_X correctly maps to "A_Opt".
+                    string weaponClass = ShootingClasses.GetWeaponClassCode(shootingClass);
+                    if (string.IsNullOrEmpty(weaponClass)) weaponClass = "A";
 
                     // Get competition name from batch-loaded map
                     competitionNameMap.TryGetValue(competitionId, out string? competitionName);

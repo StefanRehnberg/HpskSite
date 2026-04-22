@@ -1,6 +1,7 @@
 using Xunit;
 using FluentAssertions;
 using HpskSite.CompetitionTypes.Precision.Services;
+using HpskSite.Models;
 using HpskSite.Tests.TestDataBuilders;
 using HpskSite.Tests.TestData;
 using System.Linq;
@@ -56,10 +57,10 @@ namespace HpskSite.Tests.Services
             var medalsAwarded = shooters.Count(s => !string.IsNullOrEmpty(s.StandardMedal));
             medalsAwarded.Should().BeGreaterThan(6, "with 30 shooters, multiple medals should be awarded");
 
-            // Verify each weapon group has some medals
-            var groupA = shooters.Where(s => s.ShootingClass.StartsWith("A"));
-            var groupB = shooters.Where(s => s.ShootingClass.StartsWith("B"));
-            var groupC = shooters.Where(s => s.ShootingClass.StartsWith("C"));
+            // Verify each weapon group has some medals (use the registry so A_opt is treated separately from A)
+            var groupA = shooters.Where(s => ShootingClasses.GetWeaponClassCode(s.ShootingClass) == "A");
+            var groupB = shooters.Where(s => ShootingClasses.GetWeaponClassCode(s.ShootingClass) == "B");
+            var groupC = shooters.Where(s => ShootingClasses.GetWeaponClassCode(s.ShootingClass) == "C");
 
             groupA.Should().Contain(s => !string.IsNullOrEmpty(s.StandardMedal), "Group A should have medals");
             groupB.Should().Contain(s => !string.IsNullOrEmpty(s.StandardMedal), "Group B should have medals");
@@ -119,7 +120,7 @@ namespace HpskSite.Tests.Services
             var highScorers = shooters.Where(s => s.TotalScore >= 461).ToList();  // A group silver threshold for 10 series
             if (highScorers.Any())
             {
-                highScorers.Where(s => s.ShootingClass.StartsWith("A"))
+                highScorers.Where(s => ShootingClasses.GetWeaponClassCode(s.ShootingClass) == "A")
                     .Should().AllSatisfy(s => s.StandardMedal.Should().Be("S", "Group A shooters with 461+ should get silver in 10 series"));
             }
         }

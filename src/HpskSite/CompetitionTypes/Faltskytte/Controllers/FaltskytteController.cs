@@ -10,6 +10,7 @@ using Umbraco.Cms.Web.Website.Controllers;
 using Umbraco.Extensions;
 using Umbraco.Cms.Core.Security;
 using HpskSite.CompetitionTypes.Faltskytte.Models;
+using HpskSite.Models;
 using HpskSite.Services;
 using HpskSite.CompetitionTypes.Precision.Controllers;
 using HpskSite.Services;
@@ -272,11 +273,19 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             List<FaltskytteResultEntry> entries;
             if (!string.IsNullOrEmpty(shootingClass))
             {
-                // Filter by weapon group prefix (A, B, C, R) — reshoots are per weapon class
-                var prefix = shootingClass.Substring(0, 1);
+                // Filter by weapon group — reshoots are per weapon class.
+                // Resolve the requested class to its weapon group via the registry, then
+                // expand that group to the list of shooting class IDs in the SAME group.
+                // (Cannot use LEFT(ShootingClass, 1) here because A_opt_X would falsely match A.)
+                var requestedGroup = ShootingClasses.GetWeaponClassCode(shootingClass);
+                var sameGroupIds = ShootingClasses.All
+                    .Where(sc => sc.Weapon.ToString() == requestedGroup)
+                    .Select(sc => sc.Id)
+                    .ToList();
+                if (sameGroupIds.Count == 0) sameGroupIds.Add(shootingClass); // safety
                 entries = await db.FetchAsync<FaltskytteResultEntry>(
-                    "WHERE CompetitionId = @0 AND MemberId = @1 AND Reshoots > 0 AND LEFT(ShootingClass, 1) = @2",
-                    competitionId, memberId, prefix);
+                    "WHERE CompetitionId = @0 AND MemberId = @1 AND Reshoots > 0 AND ShootingClass IN (@2)",
+                    competitionId, memberId, sameGroupIds);
             }
             else
             {
@@ -1064,7 +1073,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 return Json(new { success = false, message = "Du har inte behörighet." });
 
             var weaponGroup = !string.IsNullOrEmpty(request.ShootingClass)
-                ? request.ShootingClass.Substring(0, 1) : "C";
+                ? (ShootingClasses.GetWeaponClassCode(request.ShootingClass) is { Length: > 0 } code ? code : "C")
+                : "C";
             var patrolSize = request.PatrolSize > 0 ? request.PatrolSize : 2;
 
             using var db = _umbracoDatabaseFactory.CreateDatabase();
@@ -1183,8 +1193,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                                 ?? HpskSite.Models.ShootingClasses.GetByName(r.MemberClass);
                             return sc?.Id ?? r.MemberClass;
                         }
-                        // Standard: use weapon group letter (A, B, C, R)
-                        return !string.IsNullOrEmpty(r.MemberClass) ? r.MemberClass.Substring(0, 1) : "";
+                        // Standard: use weapon group code (A, A_Opt, B, C, R) via the registry
+                        return ShootingClasses.GetWeaponClassCode(r.MemberClass);
                     })
                     .Where(w => !string.IsNullOrEmpty(w))
                     .Distinct()
@@ -1230,7 +1240,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                     registrations = allRegistrations
                         .Where(r =>
                         {
-                            var wg = !string.IsNullOrEmpty(r.MemberClass) ? r.MemberClass.Substring(0, 1) : "";
+                            var wg = ShootingClasses.GetWeaponClassCode(r.MemberClass);
                             return selectedWcs.Contains(wg);
                         })
                         .ToList();
@@ -1475,16 +1485,22 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
 
             using var db = _umbracoDatabaseFactory.CreateDatabase();
 
-            // Remove from any existing patrol with the same weapon group prefix (allows "move" via add)
-            // A shooter in a C patrol should not be removed when adding to an A patrol
-            var classPrefix = request.ShootingClass.Length > 0 ? request.ShootingClass.Substring(0, 1) : "";
-            if (!string.IsNullOrEmpty(classPrefix))
+            // Remove from any existing patrol within the same weapon group (allows "move" via add).
+            // A shooter in a C patrol should not be removed when adding to an A patrol — and
+            // A_opt is its own group, so an A_opt assignment should not affect plain A patrols.
+            var weaponGroup = ShootingClasses.GetWeaponClassCode(request.ShootingClass);
+            if (!string.IsNullOrEmpty(weaponGroup))
             {
+                var sameGroupIds = ShootingClasses.All
+                    .Where(sc => sc.Weapon.ToString() == weaponGroup)
+                    .Select(sc => sc.Id)
+                    .ToList();
+                if (sameGroupIds.Count == 0) sameGroupIds.Add(request.ShootingClass);
                 await db.ExecuteAsync(
                     @"DELETE FROM FaltskyttePatrolMember WHERE MemberId = @0
-                      AND LEFT(ShootingClass, 1) = @2
+                      AND ShootingClass IN (@2)
                       AND PatrolId IN (SELECT Id FROM FaltskyttePatrol WHERE CompetitionId = @1)",
-                    request.MemberId, request.CompetitionId, classPrefix);
+                    request.MemberId, request.CompetitionId, sameGroupIds);
             }
 
             var maxPos = await db.ExecuteScalarAsync<int>(
@@ -1586,25 +1602,29 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             var assignedMembers = await db.FetchAsync<FaltskyttePatrolMember>(
                 "SELECT pm.* FROM FaltskyttePatrolMember pm INNER JOIN FaltskyttePatrol p ON pm.PatrolId = p.Id WHERE p.CompetitionId = @0",
                 competitionId);
-            var assignedPairs = new HashSet<string>(
-                assignedMembers.Select(m => m.MemberId + "_" + (m.ShootingClass.Length > 0 ? m.ShootingClass.Substring(0, 1) : "")));
+            // Use the registry's weapon-class code so A_opt classes form their own bucket
+            // and don't collide with plain A in patrol assignment lookups.
+            string MemberKey(int memberId, string? memberClass) =>
+                memberId + "_" + ShootingClasses.GetWeaponClassCode(memberClass ?? "");
 
-            // Build patrol lookup for display: (memberId, classPrefix) → patrolNumber
+            var assignedPairs = new HashSet<string>(
+                assignedMembers.Select(m => MemberKey(m.MemberId, m.ShootingClass)));
+
+            // Build patrol lookup for display: (memberId, weaponGroup) → patrolNumber
             var patrols = await db.FetchAsync<FaltskyttePatrol>("WHERE CompetitionId = @0", competitionId);
             var patrolDict = patrols.ToDictionary(p => p.Id, p => p.PatrolNumber);
-            var patrolLookup = new Dictionary<string, int>(); // "memberId_prefix" → patrolNumber
+            var patrolLookup = new Dictionary<string, int>();
             foreach (var am in assignedMembers)
             {
-                var key = am.MemberId + "_" + (am.ShootingClass.Length > 0 ? am.ShootingClass.Substring(0, 1) : "");
                 if (patrolDict.TryGetValue(am.PatrolId, out var pn))
-                    patrolLookup[key] = pn;
+                    patrolLookup[MemberKey(am.MemberId, am.ShootingClass)] = pn;
             }
 
-            // Parse weapon group into allowed first-letter prefixes (e.g. "A+R" → ["A","R"])
-            HashSet<string>? allowedPrefixes = null;
+            // Parse weapon group into allowed weapon-group codes (e.g. "A+R" → ["A","R"])
+            HashSet<string>? allowedGroups = null;
             if (!string.IsNullOrWhiteSpace(weaponGroup))
             {
-                allowedPrefixes = new HashSet<string>(
+                allowedGroups = new HashSet<string>(
                     weaponGroup.Split('+').Select(w => w.Trim()).Where(w => w.Length > 0),
                     StringComparer.OrdinalIgnoreCase);
             }
@@ -1613,14 +1633,13 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 .Where(r =>
                 {
                     if (showAll) return true;
-                    var prefix = (r.MemberClass ?? "").Length > 0 ? r.MemberClass!.Substring(0, 1) : "";
-                    return !assignedPairs.Contains(r.MemberId + "_" + prefix);
+                    return !assignedPairs.Contains(MemberKey(r.MemberId, r.MemberClass));
                 })
                 .Where(r =>
                 {
-                    if (allowedPrefixes == null) return true;
-                    var cls = r.MemberClass ?? "";
-                    return cls.Length > 0 && allowedPrefixes.Contains(cls.Substring(0, 1));
+                    if (allowedGroups == null) return true;
+                    var wg = ShootingClasses.GetWeaponClassCode(r.MemberClass ?? "");
+                    return !string.IsNullOrEmpty(wg) && allowedGroups.Contains(wg);
                 })
                 .Select(r => new
                 {
@@ -1628,9 +1647,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                     name = r.MemberName ?? "",
                     club = r.MemberClub ?? "",
                     shootingClass = r.MemberClass ?? "",
-                    assignedToPatrol = patrolLookup.TryGetValue(
-                        r.MemberId + "_" + ((r.MemberClass ?? "").Length > 0 ? r.MemberClass!.Substring(0, 1) : ""),
-                        out var pn) ? (int?)pn : null
+                    assignedToPatrol = patrolLookup.TryGetValue(MemberKey(r.MemberId, r.MemberClass), out var pn)
+                        ? (int?)pn : null
                 })
                 .ToList();
 

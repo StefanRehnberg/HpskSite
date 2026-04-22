@@ -169,17 +169,14 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
 
         private static string GetWeaponGroup(string shootingClass)
         {
-            var sc = ShootingClasses.GetByName(shootingClass)
-                ?? ShootingClasses.GetById(shootingClass);
-            if (sc != null) return sc.Weapon.ToString();
-            if (!string.IsNullOrEmpty(shootingClass))
-                return shootingClass.Substring(0, 1);
-            return "?";
+            // No substring fallback — that would mis-categorize A_opt_X as plain A.
+            var code = ShootingClasses.GetWeaponClassCode(shootingClass);
+            return string.IsNullOrEmpty(code) ? "?" : code;
         }
 
         private static int GetGroupSortOrder(string weaponGroup) => weaponGroup switch
         {
-            "C" => 1, "B" => 2, "A" => 3, "R" => 4, "M" => 5, _ => 99
+            "C" => 1, "B" => 2, "A" => 3, "A_Opt" => 4, "R" => 5, "M" => 6, _ => 99
         };
     }
 

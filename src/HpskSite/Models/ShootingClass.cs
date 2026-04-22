@@ -1,4 +1,4 @@
-﻿namespace HpskSite.Models
+namespace HpskSite.Models
 {
     public class ShootingClass
     {
@@ -23,7 +23,9 @@
             new ShootingClass("A1", "A1", "Vapenklass A för nybörjare", WeaponClass.A),
             new ShootingClass("A2", "A2", "Vapenklass A för Guldmärkesskyttar", WeaponClass.A),
             new ShootingClass("A3", "A3", "Vapenklass A för Riksmästare", WeaponClass.A),
-            new ShootingClass("A_opt", "A Opt", "Vapenklass A med optiskt riktmedel", WeaponClass.A),
+            new ShootingClass("A_opt_1", "A Opt 1", "Vapenklass A optisk för nybörjare", WeaponClass.A_Opt),
+            new ShootingClass("A_opt_2", "A Opt 2", "Vapenklass A optisk för Guldmärkesskyttar", WeaponClass.A_Opt),
+            new ShootingClass("A_opt_3", "A Opt 3", "Vapenklass A optisk för Riksmästare", WeaponClass.A_Opt),
             new ShootingClass("B1", "B1", "Vapenklass B för nybörjare", WeaponClass.B),
             new ShootingClass("B2", "B2", "Vapenklass B för Guldmärkesskyttar", WeaponClass.B),
             new ShootingClass("B3", "B3", "Vapenklass B för Riksmästare", WeaponClass.B),
@@ -67,6 +69,7 @@
 
         public static ShootingClass? GetByName(string name)
         {
+            if (string.IsNullOrEmpty(name)) return null;
             return All.FirstOrDefault(sc => sc.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
         }
 
@@ -74,6 +77,29 @@
         {
             // For now, all classes are active. Could add IsActive property later if needed.
             return All.ToList();
+        }
+
+        /// <summary>
+        /// Authoritative lookup of a shooting class's weapon group.
+        /// Accepts either the Id ("A_opt_1") or the display Name ("A Opt 1").
+        /// Returns null when the input is unknown — callers must not fall back to string parsing.
+        /// </summary>
+        public static WeaponClass? GetWeaponClass(string? shootingClassIdOrName)
+        {
+            if (string.IsNullOrWhiteSpace(shootingClassIdOrName)) return null;
+            return (GetById(shootingClassIdOrName) ?? GetByName(shootingClassIdOrName))?.Weapon;
+        }
+
+        /// <summary>
+        /// Returns the weapon-class code as a string (e.g., "A", "B", "C", "A_Opt").
+        /// Use this instead of <c>id.Substring(0, 1)</c> / <c>id[0]</c> / <c>id.StartsWith("A")</c>
+        /// so A_opt classes are correctly categorized as their own weapon group.
+        /// Returns the empty string when the input is unknown.
+        /// </summary>
+        public static string GetWeaponClassCode(string? shootingClassIdOrName)
+        {
+            var weapon = GetWeaponClass(shootingClassIdOrName);
+            return weapon?.ToString() ?? string.Empty;
         }
     }
 
@@ -83,6 +109,10 @@
         /// Tjänstevapen
         /// </summary>
         A,
+        /// <summary>
+        /// Tjänstevapen med optiskt riktmedel
+        /// </summary>
+        A_Opt,
         /// <summary>
         /// Kal. 32-45
         /// </summary>

@@ -1,5 +1,6 @@
 using HpskSite.CompetitionTypes.Precision.Models;
 using HpskSite.CompetitionTypes.Precision.Services;
+using HpskSite.Models;
 
 namespace HpskSite.CompetitionTypes.Duell.Services
 {
@@ -122,11 +123,9 @@ namespace HpskSite.CompetitionTypes.Duell.Services
 
         private static string ExtractWeaponGroup(string shootingClass)
         {
-            if (string.IsNullOrEmpty(shootingClass))
-                return "C";
-            var firstChar = shootingClass.Trim().ToUpper()[0];
-            if (firstChar == 'A' || firstChar == 'B' || firstChar == 'C')
-                return firstChar.ToString();
+            var code = ShootingClasses.GetWeaponClassCode(shootingClass);
+            if (code == "A" || code == "A_Opt" || code == "B" || code == "C")
+                return code;
             return "C";
         }
 
