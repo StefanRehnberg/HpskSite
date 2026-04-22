@@ -72,7 +72,7 @@ function initializeRegistrationModal() {
     });
 
     // Handle radio button changes for each class group
-    const nonCClassGroups = ['selectedAClass', 'selectedBClass', 'selectedRClass', 'selectedMClass'];
+    const nonCClassGroups = ['selectedAClass', 'selectedAOptClass', 'selectedBClass', 'selectedRClass', 'selectedMClass'];
     const cClassGroups = ['selectedCRegular', 'selectedCVet', 'selectedCDam', 'selectedCJun'];
     const lClassGroups = ['selectedLRegular', 'selectedLVet', 'selectedLDam', 'selectedLJun'];
 
@@ -401,7 +401,7 @@ function updateSubmitButton() {
     if (!submitBtn) return;
 
     // Check if any radio button is selected from any group
-    const radioGroups = ['selectedAClass', 'selectedBClass', 'selectedRClass', 'selectedCRegular', 'selectedCVet', 'selectedCDam', 'selectedCJun', 'selectedLRegular', 'selectedLVet', 'selectedLDam', 'selectedLJun', 'selectedMClass'];
+    const radioGroups = ['selectedAClass', 'selectedAOptClass', 'selectedBClass', 'selectedRClass', 'selectedCRegular', 'selectedCVet', 'selectedCDam', 'selectedCJun', 'selectedLRegular', 'selectedLVet', 'selectedLDam', 'selectedLJun', 'selectedMClass'];
     let hasSelection = false;
 
     for (let groupName of radioGroups) {
@@ -424,7 +424,7 @@ function updateRegistrationButton() {
 }
 
 function validateLevelConsistency(newClassId) {
-    const radioGroups = ['selectedAClass', 'selectedBClass', 'selectedRClass', 'selectedCRegular', 'selectedCVet', 'selectedCDam', 'selectedCJun', 'selectedLRegular', 'selectedLVet', 'selectedLDam', 'selectedLJun', 'selectedMClass'];
+    const radioGroups = ['selectedAClass', 'selectedAOptClass', 'selectedBClass', 'selectedRClass', 'selectedCRegular', 'selectedCVet', 'selectedCDam', 'selectedCJun', 'selectedLRegular', 'selectedLVet', 'selectedLDam', 'selectedLJun', 'selectedMClass'];
     const selectedRadios = [];
 
     // Get all currently selected radio buttons
@@ -550,7 +550,7 @@ function getClassDisplayName(classId) {
 }
 
 function updateClassAvailability() {
-    const radioGroups = ['selectedAClass', 'selectedBClass', 'selectedRClass', 'selectedCRegular', 'selectedCVet', 'selectedCDam', 'selectedCJun', 'selectedLRegular', 'selectedLVet', 'selectedLDam', 'selectedLJun', 'selectedMClass'];
+    const radioGroups = ['selectedAClass', 'selectedAOptClass', 'selectedBClass', 'selectedRClass', 'selectedCRegular', 'selectedCVet', 'selectedCDam', 'selectedCJun', 'selectedLRegular', 'selectedLVet', 'selectedLDam', 'selectedLJun', 'selectedMClass'];
     const selectedRadios = [];
 
     // Get all currently selected radio buttons
@@ -646,7 +646,7 @@ async function submitRegistrationForm() {
     };
 
     try {
-        const radioGroups = ['selectedAClass', 'selectedBClass', 'selectedRClass', 'selectedCRegular', 'selectedCVet', 'selectedCDam', 'selectedCJun', 'selectedLRegular', 'selectedLVet', 'selectedLDam', 'selectedLJun', 'selectedMClass'];
+        const radioGroups = ['selectedAClass', 'selectedAOptClass', 'selectedBClass', 'selectedRClass', 'selectedCRegular', 'selectedCVet', 'selectedCDam', 'selectedCJun', 'selectedLRegular', 'selectedLVet', 'selectedLDam', 'selectedLJun', 'selectedMClass'];
         const selectedClasses = [];
         const startPreferencesMap = {};
 
@@ -692,9 +692,32 @@ async function submitRegistrationForm() {
                     keyboard: false
                 });
 
-                const existingClassNameEl = document.getElementById('existingClassName');
-                if (existingClassNameEl) {
-                    existingClassNameEl.textContent = 'alla valda klasser';
+                // Build an accurate message based on what's actually changing.
+                // Existing class IDs from the user's current registration(s):
+                const existingClassIds = [];
+                existingRegistrations.forEach(reg => {
+                    if (reg.shootingClasses && Array.isArray(reg.shootingClasses)) {
+                        reg.shootingClasses.forEach(sc => existingClassIds.push(sc.class));
+                    }
+                });
+                const existingSet = new Set(existingClassIds);
+                const newSet = new Set(selectedClasses);
+                const added   = selectedClasses.filter(c => !existingSet.has(c));
+                const removed = existingClassIds.filter(c => !newSet.has(c));
+                const kept    = selectedClasses.filter(c => existingSet.has(c));
+
+                const formatList = ids => ids.map(id => getClassDisplayName(id) || id).join(', ');
+                const messageEl = document.getElementById('updateRegistrationMessage');
+                if (messageEl) {
+                    let parts = [];
+                    if (added.length > 0)   parts.push(`<strong>Lägg till:</strong> ${formatList(added)}`);
+                    if (removed.length > 0) parts.push(`<strong>Ta bort:</strong> ${formatList(removed)}`);
+                    if (parts.length === 0 && kept.length > 0) {
+                        // No add/remove → only preferences changed.
+                        messageEl.innerHTML = 'Du har redan en anmälan i de valda klasserna. Vill du uppdatera dina preferenser?';
+                    } else {
+                        messageEl.innerHTML = 'Du har redan en anmälan till denna tävling. Vill du uppdatera den?<br><br>' + parts.join('<br>');
+                    }
                 }
 
                 const confirmBtn = document.getElementById('confirmUpdateBtn');
@@ -1147,6 +1170,7 @@ function initializeCClassValidation() {
     if (registrationForm) {
         registrationForm.addEventListener('submit', function(e) {
             const selectedA = document.querySelector('input[name="selectedAClass"]:checked');
+            const selectedAOpt = document.querySelector('input[name="selectedAOptClass"]:checked');
             const selectedB = document.querySelector('input[name="selectedBClass"]:checked');
             const selectedR = document.querySelector('input[name="selectedRClass"]:checked');
             const selectedCRegular = document.querySelector('input[name="selectedCRegular"]:checked');
@@ -1159,7 +1183,7 @@ function initializeCClassValidation() {
             const selectedLDam = document.querySelector('input[name="selectedLDam"]:checked');
             const selectedM = document.querySelector('input[name="selectedMClass"]:checked');
 
-            const hasAnySelection = selectedA || selectedB || selectedR || selectedCRegular || selectedCVet || selectedCJun || selectedCDam || selectedLRegular || selectedLVet || selectedLJun || selectedLDam || selectedM;
+            const hasAnySelection = selectedA || selectedAOpt || selectedB || selectedR || selectedCRegular || selectedCVet || selectedCJun || selectedCDam || selectedLRegular || selectedLVet || selectedLJun || selectedLDam || selectedM;
 
             if (!hasAnySelection) {
                 e.preventDefault();
@@ -1173,10 +1197,26 @@ function initializeCClassValidation() {
 
             // Check A classes for level
             if (selectedA) {
-                const match = selectedA.value.match(/A([123])/);
+                const match = selectedA.value.match(/^A([123])$/);
                 if (match) {
                     selectedLevel = match[1];
                     levelSource = `A${selectedLevel}`;
+                }
+            }
+
+            // Check A Opt classes for level (own weapon group, but level must still match across groups)
+            if (selectedAOpt) {
+                const match = selectedAOpt.value.match(/^A_opt_([123])$/);
+                if (match) {
+                    if (selectedLevel && selectedLevel !== match[1]) {
+                        e.preventDefault();
+                        alert(`Du har valt ${levelSource} och A Opt ${match[1]}. Du måste välja samma nivå (1-3) i alla klasser.`);
+                        return false;
+                    }
+                    if (!selectedLevel) {
+                        selectedLevel = match[1];
+                        levelSource = `A Opt ${selectedLevel}`;
+                    }
                 }
             }
 
@@ -1709,8 +1749,12 @@ function addExistingRegistrationBadges() {
             const headingText = h6.textContent.trim();
             let shouldAddBadge = false;
 
-            // Match heading to weapon class and subcategory
-            if (weaponClass === 'A' && headingText.includes('A-klasser')) {
+            // Match heading to weapon class and subcategory.
+            // Note: A-klasser and A Opt-klasser are separate weapon groups now —
+            // exact-match on 'A-klasser' (without 'Opt') so A doesn't badge the A Opt section.
+            if (weaponClass === 'A' && /\bA-klasser\b/.test(headingText)) {
+                shouldAddBadge = true;
+            } else if (weaponClass === 'A_Opt' && headingText.includes('A Opt-klasser')) {
                 shouldAddBadge = true;
             } else if (weaponClass === 'B' && headingText.includes('B-klasser')) {
                 shouldAddBadge = true;
@@ -1811,7 +1855,7 @@ function captureOriginalSelection() {
 // Check if selection has changed from original
 function hasSelectionChanged(originalClasses) {
     const currentClasses = [];
-    const radioGroups = ['selectedAClass', 'selectedBClass', 'selectedRClass',
+    const radioGroups = ['selectedAClass', 'selectedAOptClass', 'selectedBClass', 'selectedRClass',
                        'selectedCRegular', 'selectedCVet', 'selectedCDam', 'selectedCJun',
                        'selectedLRegular', 'selectedLVet', 'selectedLDam', 'selectedLJun',
                        'selectedMClass'];
@@ -1889,9 +1933,11 @@ function showUpdateConfirmationDialog(classId, callback) {
 
     const modal = new bootstrap.Modal(modalElement);
 
-    const existingClassNameEl = document.getElementById('existingClassName');
-    if (existingClassNameEl) {
-        existingClassNameEl.textContent = classId;
+    // Write a class-specific message into the (now generic) modal body.
+    const messageEl = document.getElementById('updateRegistrationMessage');
+    if (messageEl) {
+        const displayName = (typeof getClassDisplayName === 'function') ? (getClassDisplayName(classId) || classId) : classId;
+        messageEl.innerHTML = `Du är redan anmäld i <strong>${displayName}</strong>. Vill du uppdatera din anmälan?`;
     }
 
     const confirmBtn = document.getElementById('confirmUpdateBtn');
@@ -2228,7 +2274,7 @@ async function registerAndJoinPatrol() {
 
     try {
         // Collect selected classes (same logic as submitRegistrationForm)
-        var radioGroups = ['selectedAClass', 'selectedBClass', 'selectedRClass', 'selectedCRegular', 'selectedCVet', 'selectedCDam', 'selectedCJun', 'selectedLRegular', 'selectedLVet', 'selectedLDam', 'selectedLJun', 'selectedMClass'];
+        var radioGroups = ['selectedAClass', 'selectedAOptClass', 'selectedBClass', 'selectedRClass', 'selectedCRegular', 'selectedCVet', 'selectedCDam', 'selectedCJun', 'selectedLRegular', 'selectedLVet', 'selectedLDam', 'selectedLJun', 'selectedMClass'];
         var selectedClasses = [];
         radioGroups.forEach(function(groupName) {
             var checked = document.querySelector('input[name="' + groupName + '"]:checked');
@@ -2449,7 +2495,7 @@ async function fetchDpTeamAvailability() {
 function onDpClassSelectionChanged() {
     if (!window.CompetitionConfig?.isDirektplacering || !dpTeamAvailability) return;
 
-    const radioGroups = ['selectedAClass', 'selectedBClass', 'selectedRClass', 'selectedCRegular', 'selectedCVet', 'selectedCDam', 'selectedCJun', 'selectedLRegular', 'selectedLVet', 'selectedLDam', 'selectedLJun', 'selectedMClass'];
+    const radioGroups = ['selectedAClass', 'selectedAOptClass', 'selectedBClass', 'selectedRClass', 'selectedCRegular', 'selectedCVet', 'selectedCDam', 'selectedCJun', 'selectedLRegular', 'selectedLVet', 'selectedLDam', 'selectedLJun', 'selectedMClass'];
     const selectedClasses = [];
 
     radioGroups.forEach(groupName => {

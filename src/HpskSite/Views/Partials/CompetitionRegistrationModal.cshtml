@@ -3,6 +3,7 @@
     var competitionId = ViewData["CompetitionId"]?.ToString() ?? "";
     var competitionName = ViewData["CompetitionName"]?.ToString() ?? "";
     var aClasses = ViewData["AClasses"] as List<ShootingClass> ?? new List<ShootingClass>();
+    var aOptClasses = ViewData["AOptClasses"] as List<ShootingClass> ?? new List<ShootingClass>();
     var bClasses = ViewData["BClasses"] as List<ShootingClass> ?? new List<ShootingClass>();
     var cRegularClasses = ViewData["CRegularClasses"] as List<ShootingClass> ?? new List<ShootingClass>();
     var cVetClasses = ViewData["CVetClasses"] as List<ShootingClass> ?? new List<ShootingClass>();
@@ -106,6 +107,36 @@
 											<button type="button" class="btn p-1 border-0 text-secondary"
 													onclick="openPreferenceModal('@shootingClass.Id', '@shootingClass.Name', 'A')"
 													disabled data-class="A_@shootingClass.Id">
+												<i class="bi bi-pencil" style="font-size: 0.8rem;"></i>
+											</button>
+										</div>
+									</div>
+								}
+							</div>
+						}
+
+						@* A Opt Classes Group (own weapon group — separate radio name so users can pick A AND A Opt) *@
+						@if (aOptClasses.Any())
+						{
+							<div class="mb-2">
+								<h6 class="text-primary border-bottom border-primary pb-1 mb-1">
+									<i class="bi bi-trophy"></i> A Opt-klasser
+								</h6>
+								@foreach (var shootingClass in aOptClasses)
+								{
+									<div class="row align-items-center gx-1 py-0">
+										<div class="col-1">
+											<input class="form-check-input" type="radio" name="selectedAOptClass" value="@shootingClass.Id" id="class_AOpt_@shootingClass.Id">
+										</div>
+										<div class="col-9">
+											<label class="form-check-label" for="class_AOpt_@shootingClass.Id">
+												<strong>@shootingClass.Name</strong> - <small class="text-muted">@shootingClass.Description</small>
+											</label>
+										</div>
+										<div class="col-2 text-end">
+											<button type="button" class="btn p-1 border-0 text-secondary"
+													onclick="openPreferenceModal('@shootingClass.Id', '@shootingClass.Name', 'A_Opt')"
+													disabled data-class="AOpt_@shootingClass.Id">
 												<i class="bi bi-pencil" style="font-size: 0.8rem;"></i>
 											</button>
 										</div>

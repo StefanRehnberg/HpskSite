@@ -134,6 +134,7 @@
     var allowDualCClassRegistration = false;
     var competitionShootingClasses = new List<HpskSite.Models.ShootingClass>();
     var aClasses = new List<HpskSite.Models.ShootingClass>();
+    var aOptClasses = new List<HpskSite.Models.ShootingClass>();
     var bClasses = new List<HpskSite.Models.ShootingClass>();
     var cClasses = new List<HpskSite.Models.ShootingClass>();
     var cRegularClasses = new List<HpskSite.Models.ShootingClass>();
@@ -231,13 +232,14 @@
             }
         }
 
-        // Group available shooting classes by category for smart registration
-        aClasses = competitionShootingClasses.Where(sc => sc.Id.StartsWith("A")).ToList();
-        bClasses = competitionShootingClasses.Where(sc => sc.Id.StartsWith("B")).ToList();
-        cClasses = competitionShootingClasses.Where(sc => sc.Id.StartsWith("C")).ToList();
-        rClasses = competitionShootingClasses.Where(sc => sc.Id.StartsWith("R")).ToList();
-        lClasses = competitionShootingClasses.Where(sc => sc.Id.StartsWith("L")).ToList();
-        mClasses = competitionShootingClasses.Where(sc => sc.Id.StartsWith("M")).ToList();
+        // Group available shooting classes by weapon (so A_opt_X is its own group, not lumped into A).
+        aClasses    = competitionShootingClasses.Where(sc => sc.Weapon == HpskSite.Models.WeaponClass.A).ToList();
+        aOptClasses = competitionShootingClasses.Where(sc => sc.Weapon == HpskSite.Models.WeaponClass.A_Opt).ToList();
+        bClasses    = competitionShootingClasses.Where(sc => sc.Weapon == HpskSite.Models.WeaponClass.B).ToList();
+        cClasses    = competitionShootingClasses.Where(sc => sc.Weapon == HpskSite.Models.WeaponClass.C).ToList();
+        rClasses    = competitionShootingClasses.Where(sc => sc.Weapon == HpskSite.Models.WeaponClass.R).ToList();
+        lClasses    = competitionShootingClasses.Where(sc => sc.Weapon == HpskSite.Models.WeaponClass.L).ToList();
+        mClasses    = competitionShootingClasses.Where(sc => sc.Weapon == HpskSite.Models.WeaponClass.M).ToList();
 
         // Subdivide C classes into subcategories for proper validation
         cRegularClasses = cClasses.Where(sc => sc.Id == "C1" || sc.Id == "C2" || sc.Id == "C3").ToList();
@@ -718,6 +720,7 @@ window.CompetitionConfig = {
             { "CompetitionId", competitionId },
             { "CompetitionName", competition.Value<string>("competitionName") },
             { "AClasses", aClasses },
+            { "AOptClasses", aOptClasses },
             { "BClasses", bClasses },
             { "CClasses", cClasses },
             { "CRegularClasses", cRegularClasses },

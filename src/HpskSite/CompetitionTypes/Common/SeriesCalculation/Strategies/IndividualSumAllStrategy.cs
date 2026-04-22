@@ -1,4 +1,5 @@
 using HpskSite.CompetitionTypes.Common.SeriesCalculation.Models;
+using HpskSite.Models;
 
 namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.Strategies
 {
@@ -182,10 +183,20 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.Strategies
             var classOrder = GetClassOrder();
 
             return standingsByClass
-                .OrderBy(kvp => classOrder.GetValueOrDefault(kvp.Key, 999))
                 .Select(kvp =>
                 {
-                    var rows = kvp.Value
+                    // Convert the raw shooting-class ID (e.g. "C_Vet_Y", "A_opt_2") to its display
+                    // name ("C Vet Y", "A Opt 2") so the UI shows user-friendly labels and the
+                    // class-order lookup keys match.
+                    var sc = ShootingClasses.GetById(kvp.Key);
+                    var displayName = sc?.Name ?? kvp.Key;
+                    return (DisplayName: displayName, Rows: kvp.Value);
+                })
+                .OrderBy(item => classOrder.GetValueOrDefault(item.DisplayName, 999))
+                .ThenBy(item => item.DisplayName, StringComparer.Ordinal)
+                .Select(item =>
+                {
+                    var rows = item.Rows
                         .OrderByDescending(r => r.TotalSeriesScore)
                         .ThenByDescending(r => r.TotalXCount)
                         .ThenByDescending(r => r.BestIndividualScore ?? 0)
@@ -209,7 +220,7 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.Strategies
 
                     return new SeriesClassStandings
                     {
-                        ClassName = kvp.Key,
+                        ClassName = item.DisplayName,
                         Rows = rows
                     };
                 })
@@ -218,26 +229,48 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.Strategies
 
         private static Dictionary<string, int> GetClassOrder()
         {
+            // Weapon groups ordered A → A Opt → B → C → R → M → L.
+            // Within each weapon group, highest skill level first (3 → 2 → 1).
             return new Dictionary<string, int>
             {
-                { "C1", 1 }, { "C1 Dam", 2 }, { "C1 Jun", 3 },
-                { "C2", 4 }, { "C2 Dam", 5 }, { "C2 Jun", 6 },
-                { "C3", 7 }, { "C3 Dam", 8 }, { "C3 Jun", 9 },
-                { "C Vet Y", 10 }, { "C Vet Y Dam", 11 }, { "C Vet Y Jun", 12 },
-                { "C Vet Ä", 13 }, { "C Vet Ä Dam", 14 }, { "C Vet Ä Jun", 15 },
-                { "B1", 16 }, { "B1 Dam", 17 }, { "B1 Jun", 18 },
-                { "B2", 19 }, { "B2 Dam", 20 }, { "B2 Jun", 21 },
-                { "B3", 22 }, { "B3 Dam", 23 }, { "B3 Jun", 24 },
-                { "B Vet Y", 25 }, { "B Vet Y Dam", 26 }, { "B Vet Y Jun", 27 },
-                { "B Vet Ä", 28 }, { "B Vet Ä Dam", 29 }, { "B Vet Ä Jun", 30 },
-                { "A1", 31 }, { "A1 Dam", 32 }, { "A1 Jun", 33 },
-                { "A2", 34 }, { "A2 Dam", 35 }, { "A2 Jun", 36 },
-                { "A3", 37 }, { "A3 Dam", 38 }, { "A3 Jun", 39 },
-                { "R1", 40 }, { "R2", 41 }, { "R3", 42 },
-                { "M1", 50 }, { "M2", 51 }, { "M3", 52 },
-                { "M4", 53 }, { "M5", 54 }, { "M6", 55 },
-                { "M7", 56 }, { "M8", 57 }, { "M9", 58 },
-                { "L1", 60 }, { "L2", 61 }, { "L3", 62 }
+                // A group
+                { "A3", 1 }, { "A3 Dam", 2 }, { "A3 Jun", 3 },
+                { "A2", 4 }, { "A2 Dam", 5 }, { "A2 Jun", 6 },
+                { "A1", 7 }, { "A1 Dam", 8 }, { "A1 Jun", 9 },
+
+                // A Opt group (own weapon class)
+                { "A Opt 3", 10 },
+                { "A Opt 2", 11 },
+                { "A Opt 1", 12 },
+
+                // B group
+                { "B3", 20 }, { "B3 Dam", 21 }, { "B3 Jun", 22 },
+                { "B2", 23 }, { "B2 Dam", 24 }, { "B2 Jun", 25 },
+                { "B1", 26 }, { "B1 Dam", 27 }, { "B1 Jun", 28 },
+                { "B Vet Y", 29 }, { "B Vet Y Dam", 30 }, { "B Vet Y Jun", 31 },
+                { "B Vet Ä", 32 }, { "B Vet Ä Dam", 33 }, { "B Vet Ä Jun", 34 },
+
+                // C group
+                { "C3", 40 }, { "C3 Dam", 41 }, { "C3 Jun", 42 },
+                { "C2", 43 }, { "C2 Dam", 44 }, { "C2 Jun", 45 },
+                { "C1", 46 }, { "C1 Dam", 47 }, { "C1 Jun", 48 },
+                { "C Vet Y", 49 }, { "C Vet Y Dam", 50 }, { "C Vet Y Jun", 51 },
+                { "C Vet Ä", 52 }, { "C Vet Ä Dam", 53 }, { "C Vet Ä Jun", 54 },
+                { "C Jun", 55 }, { "C Dam", 56 },
+
+                // R group
+                { "R3", 60 }, { "R2", 61 }, { "R1", 62 },
+
+                // M group
+                { "M1", 70 }, { "M2", 71 }, { "M3", 72 },
+                { "M4", 73 }, { "M5", 74 }, { "M6", 75 },
+                { "M7", 76 }, { "M8", 77 }, { "M9", 78 },
+
+                // L group
+                { "L3", 80 }, { "L3 Dam", 81 },
+                { "L2", 82 }, { "L2 Dam", 83 },
+                { "L1", 84 }, { "L1 Dam", 85 },
+                { "L Vet Y", 86 }, { "L Vet Ä", 87 }, { "L Jun", 88 }
             };
         }
     }
