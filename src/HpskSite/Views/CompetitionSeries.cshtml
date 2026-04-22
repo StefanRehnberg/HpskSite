@@ -386,6 +386,13 @@
 #toggleIcon.rotated {
     transform: rotate(180deg);
 }
+
+/* Truncate long name/club values in series standings tables so fixed-width columns stay aligned */
+.series-cell-truncate {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 </style>
 
 <script>
@@ -551,22 +558,34 @@ function toggleSeriesDescription() {
                 });
             });
 
+            // Column widths as percentages so tables fit the container and align across classes.
+            // Numeric columns get a consistent share; name/club share the remaining space.
+            const numCompCols = competitions.length;
+            const omgPct = 7;
+            const totalPct = 9;
+            const xPct = 4;
+            const rankPct = 3;
+            const numericShare = numCompCols * omgPct + totalPct + xPct + rankPct;
+            const textShare = 100 - numericShare;
+            const namePct = textShare / 2;
+            const clubPct = textShare / 2;
+
             section.classStandings.forEach(function(classGroup) {
                 if (classGroup.rows.length === 0) return;
 
                 html += '<div class="mb-4">';
                 html += '<h5 class="p-2 rounded" style="background-color: var(--bs-tertiary-bg);">' + escapeHtmlSeries(classGroup.className) + '</h5>';
                 html += '<div class="table-responsive">';
-                html += '<table class="table table-sm table-striped table-hover mb-0">';
+                html += '<table class="table table-sm table-striped table-hover mb-0 series-standings-individual" style="table-layout:fixed;width:100%;">';
                 html += '<thead><tr>';
-                html += '<th style="width:50px">#</th>';
-                html += '<th>Namn</th>';
-                html += '<th>Klubb</th>';
+                html += '<th style="width:' + rankPct + '%">#</th>';
+                html += '<th style="width:' + namePct + '%">Namn</th>';
+                html += '<th style="width:' + clubPct + '%">Klubb</th>';
                 competitions.forEach(function(comp, idx) {
-                    html += '<th class="text-center" title="' + escapeHtmlSeries(comp.name) + '">Omg.&nbsp;' + (idx + 1) + '</th>';
+                    html += '<th class="text-center" style="width:' + omgPct + '%" title="' + escapeHtmlSeries(comp.name) + '">Omg.&nbsp;' + (idx + 1) + '</th>';
                 });
-                html += '<th class="text-center"><strong>' + (usesPoints ? 'Poäng' : 'Totalt') + '</strong></th>';
-                html += '<th class="text-center">X</th>';
+                html += '<th class="text-center" style="width:' + totalPct + '%"><strong>' + (usesPoints ? 'Poäng' : 'Totalt') + '</strong></th>';
+                html += '<th class="text-center" style="width:' + xPct + '%">X</th>';
                 html += '</tr></thead>';
                 html += '<tbody>';
 
@@ -576,8 +595,8 @@ function toggleSeriesDescription() {
 
                     html += '<tr' + rowClass + '>';
                     html += '<td><strong>' + row.rank + '</strong></td>';
-                    html += '<td>' + escapeHtmlSeries(row.name) + '</td>';
-                    html += '<td><small>' + escapeHtmlSeries(row.club) + '</small></td>';
+                    html += '<td class="series-cell-truncate" title="' + escapeHtmlSeries(row.name) + '">' + escapeHtmlSeries(row.name) + '</td>';
+                    html += '<td class="series-cell-truncate" title="' + escapeHtmlSeries(row.club) + '"><small>' + escapeHtmlSeries(row.club) + '</small></td>';
 
                     row.competitionScores.forEach(function(cell) {
                         if (cell.score === null || cell.score === undefined) {
@@ -625,27 +644,33 @@ function toggleSeriesDescription() {
                 });
             });
 
+            const numCompColsC = competitions.length;
+            const omgPctC = 7;
+            const totalPctC = 9;
+            const rankPctC = 3;
+            const clubPctC = 100 - (numCompColsC * omgPctC + totalPctC + rankPctC);
+
             section.classStandings.forEach(function(classGroup) {
                 if (classGroup.rows.length === 0) return;
 
                 html += '<div class="mb-4">';
                 html += '<h5 class="p-2 rounded" style="background-color: var(--bs-tertiary-bg);">' + escapeHtmlSeries(classGroup.className) + '</h5>';
                 html += '<div class="table-responsive">';
-                html += '<table class="table table-sm table-striped table-hover mb-0">';
+                html += '<table class="table table-sm table-striped table-hover mb-0 series-standings-club" style="table-layout:fixed;width:100%;">';
                 html += '<thead><tr>';
-                html += '<th style="width:50px">#</th>';
-                html += '<th>Klubb</th>';
+                html += '<th style="width:' + rankPctC + '%">#</th>';
+                html += '<th style="width:' + clubPctC + '%">Klubb</th>';
                 competitions.forEach(function(comp, idx) {
-                    html += '<th class="text-center" title="' + escapeHtmlSeries(comp.name) + '">Omg.&nbsp;' + (idx + 1) + '</th>';
+                    html += '<th class="text-center" style="width:' + omgPctC + '%" title="' + escapeHtmlSeries(comp.name) + '">Omg.&nbsp;' + (idx + 1) + '</th>';
                 });
-                html += '<th class="text-center"><strong>' + (usesPoints ? 'Poäng' : 'Totalt') + '</strong></th>';
+                html += '<th class="text-center" style="width:' + totalPctC + '%"><strong>' + (usesPoints ? 'Poäng' : 'Totalt') + '</strong></th>';
                 html += '</tr></thead>';
                 html += '<tbody>';
 
                 classGroup.rows.forEach(function(row) {
                     html += '<tr>';
                     html += '<td><strong>' + row.rank + '</strong></td>';
-                    html += '<td>' + escapeHtmlSeries(row.name) + '</td>';
+                    html += '<td class="series-cell-truncate" title="' + escapeHtmlSeries(row.name) + '">' + escapeHtmlSeries(row.name) + '</td>';
 
                     row.competitionScores.forEach(function(cell) {
                         if (cell.score === null || cell.score === undefined) {

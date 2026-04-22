@@ -83,6 +83,17 @@
             line-height: 1.2;
             white-space: nowrap;
         }
+
+        /* Fixed layout so score columns align across class tables and the table fits the viewport */
+        .results-table-fixed {
+            table-layout: fixed;
+        }
+
+        .results-cell-truncate {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
         
         .results-table th {
             background-color: #f5f5f5;
@@ -148,6 +159,16 @@
             .results-table { font-size: 9px; }
             .results-table th, .results-table td { padding: 2px 4px; }
             .class-header { font-size: 12px; }
+            .print-footer {
+                position: fixed;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                text-align: right;
+                font-size: 9px;
+                color: #555;
+                padding: 4px 8px;
+            }
         }
     </style>
 </head>
@@ -171,12 +192,29 @@
 
         <!-- Print Header -->
         <div class="print-only mb-4">
-            <h1>@Model.Name</h1>
-            <h2>@competition.Name</h2>
-            <p><strong>Datum:</strong> @lastUpdated.ToString("yyyy-MM-dd HH:mm")</p>
-            <p><strong>Status:</strong> @(isOfficial ? "Officiellt" : "Preliminärt")</p>
+            <h1>@Model.Name @competition.Name</h1>
             <hr>
-                    </div>
+        </div>
+
+        <!-- Print Footer -->
+        <div class="print-footer print-only">
+            Utskriven: <span id="printTimestamp"></span>
+        </div>
+
+        <script>
+            (function () {
+                function setPrintTimestamp() {
+                    var now = new Date();
+                    var pad = function (n) { return n < 10 ? '0' + n : n; };
+                    var stamp = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate())
+                        + ' ' + pad(now.getHours()) + ':' + pad(now.getMinutes());
+                    var el = document.getElementById('printTimestamp');
+                    if (el) el.textContent = stamp;
+                }
+                setPrintTimestamp();
+                window.addEventListener('beforeprint', setPrintTimestamp);
+            })();
+        </script>
 
         @if (allowTeams)
         {
@@ -298,19 +336,49 @@
 
                 if (results.classGroups && results.classGroups.length > 0) {
                     results.classGroups.forEach(classGroup => {
+                        // Determine numeric column count so we can allocate percentage widths
+                        // that keep every class-table column-aligned and make the table fit the viewport.
+                        let numericColCount = 0;
+                        let seriesCountForRow = 0;
+                        let showFinals = false;
+                        if (isGrouped12) {
+                            numericColCount = 12 + 3; // 12 series + 3 subtotals
+                        } else if (classGroup.shooters.length > 0 && classGroup.shooters[0].results) {
+                            seriesCountForRow = classGroup.shooters[0].results.length;
+                            if (hasFinalsRound && seriesCountForRow >= totalSeriesCount) {
+                                numericColCount = qualificationSeriesCount + 1 + numberOfFinalSeries; // qual + mid Tot + finals
+                                showFinals = true;
+                            } else {
+                                numericColCount = seriesCountForRow;
+                            }
+                        }
+                        numericColCount += 2; // final Tot + X
+                        if (isAwardingStandardMedals) numericColCount += 1; // optional S
+
+                        const platsPct = 4;
+                        const klassPct = 5;
+                        const fixedTextPct = platsPct + klassPct;
+                        const targetNumericPct = 7;
+                        // Reserve at least 8% each for Namn and Förening; shrink numeric width if needed.
+                        const maxNumericPct = (100 - fixedTextPct - 16) / Math.max(1, numericColCount);
+                        const numericPct = Math.min(targetNumericPct, maxNumericPct);
+                        const textSharePct = 100 - fixedTextPct - numericColCount * numericPct;
+                        const namnPct = textSharePct / 2;
+                        const foreningPct = textSharePct / 2;
+
                         // Class header
                         html += `
                             <div class="class-results-section">
                                 <div class="class-header">
                                     ${classGroup.className} (${classGroup.shooters.length} deltagare)
                                 </div>
-                                <table class="results-table">
+                                <table class="results-table results-table-fixed">
                                     <thead>
                                         <tr>
-                                            <th>Plats</th>
-                                            <th>Namn</th>
-                                            <th>Förening</th>
-                                            <th>Klass</th>
+                                            <th style="width:${platsPct}%">Plats</th>
+                                            <th style="width:${namnPct}%">Namn</th>
+                                            <th style="width:${foreningPct}%">Förening</th>
+                                            <th style="width:${klassPct}%">Klass</th>
                         `;
 
                         // Add series columns based on competition type
@@ -320,34 +388,34 @@
                                 ? ['Prec', 'Duell', 'Fält']
                                 : ['10s', '8s', '6s'];
                             for (let g = 0; g < 3; g++) {
-                                for (let i = g*4+1; i <= g*4+4; i++) html += `<th class="milsnabb-series">${i}</th>`;
-                                html += `<th class="subtotal-col">${groupHeaders[g]}</th>`;
+                                for (let i = g*4+1; i <= g*4+4; i++) html += `<th class="milsnabb-series" style="width:${numericPct}%">${i}</th>`;
+                                html += `<th class="subtotal-col" style="width:${numericPct}%">${groupHeaders[g]}</th>`;
                             }
                         } else if (classGroup.shooters.length > 0 && classGroup.shooters[0].results) {
                             const seriesCount = classGroup.shooters[0].results.length;
 
                             if (hasFinalsRound && seriesCount >= totalSeriesCount) {
                                 for (let i = 1; i <= qualificationSeriesCount; i++) {
-                                    html += `<th>${i}</th>`;
+                                    html += `<th style="width:${numericPct}%">${i}</th>`;
                                 }
-                                html += `<th>Tot</th>`;
+                                html += `<th style="width:${numericPct}%">Tot</th>`;
                                 for (let i = 1; i <= numberOfFinalSeries; i++) {
-                                    html += `<th>F${i}</th>`;
+                                    html += `<th style="width:${numericPct}%">F${i}</th>`;
                                 }
                             } else {
                                 for (let i = 1; i <= seriesCount; i++) {
-                                    html += `<th>${i}</th>`;
+                                    html += `<th style="width:${numericPct}%">${i}</th>`;
                                 }
                             }
                         }
 
                         html += `
-                                            <th>Tot</th>
-                                            <th>X</th>
+                                            <th style="width:${numericPct}%">Tot</th>
+                                            <th style="width:${numericPct}%">X</th>
                         `;
 
                         if (isAwardingStandardMedals) {
-                            html += `<th>S</th>`;
+                            html += `<th style="width:${numericPct}%">S</th>`;
                         }
 
                         html += `
@@ -389,8 +457,8 @@
                             html += `
                                 <tr class="${rowClass}">
                                     <td class="text-center">${position}</td>
-                                    <td>${shooter.name}</td>
-                                    <td>${shooter.club}</td>
+                                    <td class="results-cell-truncate" title="${shooter.name}">${shooter.name}</td>
+                                    <td class="results-cell-truncate" title="${shooter.club}">${shooter.club}</td>
                                     <td class="text-center">${shooter.shootingClass || classGroup.className}</td>
                             `;
 
