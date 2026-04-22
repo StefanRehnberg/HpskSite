@@ -10,7 +10,7 @@ Fältskytte är en utomhusdisciplin där skyttar rör sig mellan stationer och s
 
 ## Vapengrupper
 
-Fältskytte har upp till 5 vapengrupper: **C, B, A, R, M**. Vilka som är tillgängliga beror på tävlingen.
+Fältskytte har upp till 6 vapengrupper: **C, B, A, A Opt, R, M**. Vilka som är tillgängliga beror på tävlingen. **A Opt** (pistol med optiskt riktmedel) är en egen vapenklass — A Opt-skyttar grupperas separat från A-skyttar i patruller, resultatlistor och medaljberäkning.
 
 ## Anmälan
 

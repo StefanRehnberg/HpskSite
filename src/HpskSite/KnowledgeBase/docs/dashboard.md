@@ -39,7 +39,7 @@ Alla dina registrerade träningsresultat.
 **Filter:**
 - **Disciplin** — Precision, Milsnabb, Duell, Nationell Helmatch, Magnum Precision
 - **År**
-- **Vapenklass** — Alla, A, B, C, R, M, L
+- **Vapenklass** — Alla, A, A Opt, B, C, R, M, L
 
 **Tabellen visar:** Datum, Typ (träning/tävling/officiell), Klass (vapenklass), Poäng (total + snitt per serie), X-antal, Tävling (namn eller streck).
 

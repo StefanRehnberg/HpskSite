@@ -24,12 +24,13 @@ Så beräknas resultat, hur lika resultat avgörs, och hur standardmedaljer dela
 | Vapengrupp | 6 serier | 7 serier | 10 serier |
 |---|---|---|---|
 | A | Brons 267 / Silver 277 | Brons 312 / Silver 323 | Brons 445 / Silver 461 |
+| A Opt | Brons 267 / Silver 277 | Brons 312 / Silver 323 | Brons 445 / Silver 461 |
 | B | Brons 273 / Silver 282 | Brons 319 / Silver 329 | Brons 455 / Silver 470 |
 | C | Brons 276 / Silver 283 | Brons 322 / Silver 330 | Brons 460 / Silver 471 |
 
 Varje skytt får den **bästa medaljen** från Metod A eller B. Silver övertrumfar alltid Brons.
 
-**Gruppering:** Per vapengrupp (A, B, C). Vid SM/Landsdelsmästerskap delas grupp C ytterligare i Dam, Junior, Veteran och Öppen.
+**Gruppering:** Per vapengrupp (A, A Opt, B, C). A Opt är en egen vapengrupp och beräknas separat från A. Vid SM/Landsdelsmästerskap delas grupp C ytterligare i Dam, Junior, Veteran och Öppen.
 
 **Krav:** Minst 6 serier. Delas inte ut vid Klubbmästerskap.
 
@@ -50,13 +51,14 @@ Varje skytt får den **bästa medaljen** från Metod A eller B. Silver övertrum
 | Vapengrupp | Brons | Silver |
 |---|---|---|
 | A | 516 | 540 |
+| A Opt | 516 | 540 |
 | R | 528 | 552 |
 | B | 537 | 561 |
 | C | 540 | 564 |
 
 Bästa medaljen från Metod A eller B gäller.
 
-**Gruppering:** Per vapengrupp (A, B, C, R). Grupp C delas vid SM/LM.
+**Gruppering:** Per vapengrupp (A, A Opt, B, C, R). A Opt är en egen vapengrupp. Grupp C delas vid SM/LM.
 
 **Krav:** Minst 6 serier.
 
@@ -72,7 +74,7 @@ Bästa medaljen från Metod A eller B gäller.
 
 **Standardmedaljer:** Enbart procent — Silver topp 1/9, Brons topp 1/3. Inga fasta poängkrav.
 
-**Gruppering:** Per vapengrupp (A, B, C). Grupp C delas vid SM/LM.
+**Gruppering:** Per vapengrupp (A, A Opt, B, C). A Opt är en egen vapengrupp. Grupp C delas vid SM/LM.
 
 **Krav:** Minst 6 serier.
 
@@ -88,7 +90,7 @@ Bästa medaljen från Metod A eller B gäller.
 
 **Standardmedaljer:** Enbart procent — Silver topp 1/9, Brons topp 1/3. Inga fasta poängkrav.
 
-**Gruppering:** Per vapengrupp (A, B, C). Grupp C delas vid SM/LM.
+**Gruppering:** Per vapengrupp (A, A Opt, B, C). A Opt är en egen vapengrupp. Grupp C delas vid SM/LM.
 
 **Krav:** Minst 12 serier.
 

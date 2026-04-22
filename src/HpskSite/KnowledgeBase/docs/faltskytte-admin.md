@@ -28,7 +28,7 @@ Varje station har en eller flera målgrupper (A, B, C...). Per målgrupp:
 - Gruppfoto
 
 ### Vapenklasser
-- Flikar per vapenklass (C, B, A, R, M)
+- Flikar per vapenklass (C, B, A, A Opt, R, M)
 - **"Kopiera från:"** — kopiera konfiguration från en annan vapenklass med proportionell tidsskalning
 - **"Länka..."** — länka två vapenklasser för identisk konfiguration
 - **"Avlänka"** — bryt länken och behåll en kopia

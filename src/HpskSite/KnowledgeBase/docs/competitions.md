@@ -16,7 +16,7 @@ Tävlingslistan har avancerade filter:
 - **Region** — filtrera på krets
 - **Status** — Öppna, Kommande, Pågående, Avslutade
 - **Tävlingstyp** — Precision, Milsnabb, Duell, Nationell Helmatch, Springskytte, Fältskytte, Magnum Precision, Magnum Fältskytte
-- **Vapenklass** — A, B, C, R, M, L
+- **Vapenklass** — A, A Opt, B, C, R, M, L
 - **Säsong** och **Plats**
 - **Sök** — fritext
 - **Vy** — växla mellan kort- och listvy
@@ -45,7 +45,7 @@ Vissa tävlingar är markerade som **"Extern"**. Dessa arrangeras utanför pisto
 
 1. Öppna tävlingssidan
 2. Klicka på **"Anmäl mig till tävling"**
-3. Välj **skytteklass** — klasserna visas grupperade per vapenklass (A-klasser, B-klasser osv.), välj en klass per vapengrupp via radioknappar
+3. Välj **skytteklass** — klasserna visas grupperade per vapenklass (A-klasser, A Opt-klasser, B-klasser osv.), välj en klass per vapengrupp via radioknappar. **A Opt** är en egen vapenklass (för pistol med optiskt riktmedel) med tre nivåer (A Opt 1/2/3) och hanteras separat från A-klasserna.
 4. Valfritt: ställ in **startpreferens** per klass (Tidig Start, Sen Start, eller Ingen preferens)
 5. Om tävlingen har en **deltävling** visas en kryssruta: "Jag anmäler mig även till [deltävlingsnamn]"
 6. Bekräfta din anmälan

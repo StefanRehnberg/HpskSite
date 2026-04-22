@@ -23,7 +23,7 @@ Om du är med i en pågående match visas den i sidopanelen med knappen **"Gå t
 2. Fyll i:
    - **Matchnamn** (t.ex. "Fredagsmatchen")
    - **Matchtyp** — enskild eller lagmatch
-   - **Vapenklass** (A, B, C, R, M eller L)
+   - **Vapenklass** (A, A Opt, B, C, R, M eller L)
    - **Disciplin** (Precision, Milsnabb, Duell, Nationell Helmatch eller Magnum Precision)
    - **Handikapp** — på eller av
    - **Öppen match** — ikryssad = alla kan hitta och gå med. Avmarkerad = matchen är bara tillgänglig via länk, matchkod eller QR-kod, och deltagare måste godkännas
