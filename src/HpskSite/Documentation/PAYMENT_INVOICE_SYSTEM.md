@@ -1,6 +1,6 @@
 # Payment & Invoice System Documentation
 
-**Version:** 2025-11-26
+**Version:** 2026-04-24
 **Status:** ✅ Production Ready
 
 ## Overview
@@ -520,12 +520,47 @@ Task<IPublishedContent?> GetExistingInvoiceForMember(
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `swishNumber` | Textstring | Yes | 10-digit phone number (0701234567) |
-| `registrationFee` | Decimal | Yes | Fee per class (e.g., 150.00) |
+| `registrationFee` | Textstring (numeric) | Yes | Base fee per class (e.g., "150") |
+| `juniorRegistrationFee` | Textstring (numeric) | No | Fee per junior class. 0 = fall back to `registrationFee` |
+| `subCompetitionFee` | Textstring (numeric) | No | Extra fee when shooter opts into deltävling. 0 = no extra |
+| `subCompetitionFeeMode` | Textstring | No | `"perClass"` (default) or `"perRegistration"` |
+| `teamRegistrationFee` | Textstring (numeric) | No | Flat fee per team registration |
+| `stafettRegistrationFee` | Textstring (numeric) | No | Flat fee per stafett/relay team |
 
 **Validation:**
 - Swish number must be 10 digits starting with 0
-- Registration fee must be > 0
-- Both required for payment button to show
+- At least one of `registrationFee`, `juniorRegistrationFee`, or `subCompetitionFee` must be > 0 for the payment button to appear
+- All fee fields stored as Textstring (numeric string). The admin save path in `CompetitionAdminController` and `PrecisionCompetitionEditService` normalises incoming JSON numbers to `decimal` before writing; reads use `decimal.TryParse` with `CultureInfo.InvariantCulture`
+
+### Fee Calculation
+
+All fee math flows through a single helper — **`Services/RegistrationFeeCalculator.cs`**. Do not duplicate the logic elsewhere.
+
+**Per-class vs per-registration rules:**
+
+```
+For each selected class:
+  fee_for_class = juniorFee if (class is junior AND juniorFee > 0) else baseFee
+  if (isSubCompetition AND subCompFee > 0 AND mode == perClass):
+      fee_for_class += subCompFee
+  total += fee_for_class
+
+if (isSubCompetition AND subCompFee > 0 AND mode == perRegistration):
+    total += subCompFee
+```
+
+**Junior class detection** (`RegistrationFeeCalculator.IsJuniorClass`):
+- Standard disciplines: class ID contains `_Jun` (e.g. `C_Jun`, `L_Jun`)
+- Springskytte composite class (e.g. `A-D jun`, `A-D 15`, `C-H 18`): age part after the `-` contains `jun`, `15`, or `18`
+
+**Call sites that MUST use the calculator:**
+- `CompetitionController.RegisterForCompetition` — new fee + old fee recomputation (invoice cancellation path at line ~349)
+- `SwishController.GeneratePaymentQR` — Swish QR amount (line ~340)
+- `SwishController.SendQRCodeEmail` — email QR amount (line ~1322)
+
+**QR response breakdown** — `SwishController.GeneratePaymentQR` returns `includesSubCompetition`, `subCompetitionName`, `subCompetitionFeeTotal` so the frontend dialogs can render a "Inkluderar X kr i deltävlingsavgift" line under the total.
+
+**Do NOT** branch junior/deltävling logic into `teamRegistrationFee` / `stafettRegistrationFee` paths — team/stafett fees are flat per team and not subject to junior or sub-competition modifiers.
 
 ### Email Configuration
 

@@ -245,6 +245,37 @@
 // Event Page Admin JavaScript
 // ==========================================
 
+// Inject CKEditor styling (dark mode + balloon z-index + editor sizing).
+// Done from JS rather than a top-level <style> block to keep the partial Razor-safe.
+(function injectBlockEditorStyles() {
+    if (document.getElementById('event-block-editor-styles')) return;
+    var css = [
+        '#contentBlockModal .ck-editor__editable { min-height: 180px; }',
+        '#contentBlockModal .ck-editor__editable img { max-width: 100%; height: auto; }',
+        '[data-bs-theme="dark"] #contentBlockModal .ck.ck-editor__main > .ck-editor__editable { background-color: var(--bs-body-bg); color: var(--bs-body-color); border-color: var(--bs-border-color); }',
+        '[data-bs-theme="dark"] #contentBlockModal .ck.ck-toolbar { background-color: var(--bs-tertiary-bg); border-color: var(--bs-border-color); }',
+        '[data-bs-theme="dark"] #contentBlockModal .ck.ck-toolbar .ck-button { color: var(--bs-body-color); }',
+        '[data-bs-theme="dark"] #contentBlockModal .ck.ck-toolbar .ck-button:hover { background-color: var(--bs-secondary-bg); }',
+        '.ck-body-wrapper { z-index: 10000; }',
+        '.ck.ck-balloon-panel { z-index: 10001 !important; }',
+        '[data-bs-theme="dark"] .ck.ck-balloon-panel { background-color: var(--bs-body-bg); border-color: var(--bs-border-color); color: var(--bs-body-color); }',
+        '[data-bs-theme="dark"] .ck.ck-input { background-color: var(--bs-body-bg); color: var(--bs-body-color); border-color: var(--bs-border-color); }'
+    ].join('\n');
+    var styleEl = document.createElement('style');
+    styleEl.id = 'event-block-editor-styles';
+    styleEl.textContent = css;
+    document.head.appendChild(styleEl);
+})();
+
+// Bootstrap 5 modals trap focus inside the modal, which steals focus back from
+// CKEditor balloons (link URL input) since the balloon is appended at the
+// document root. Let focus flow into any .ck-body-wrapper (CKEditor popup).
+document.addEventListener('focusin', function(ev) {
+    if (ev.target.closest('.ck-body-wrapper, .ck-balloon-panel') !== null) {
+        ev.stopImmediatePropagation();
+    }
+}, true);
+
 let contentBlocks = [];
 let quickLinks = [];
 let blockEditorInstance = null;
@@ -536,9 +567,46 @@ function openContentBlockModal(blockId) {
     // Initialize CKEditor after modal is shown
     document.getElementById('contentBlockModal').addEventListener('shown.bs.modal', function handler() {
         document.getElementById('contentBlockModal').removeEventListener('shown.bs.modal', handler);
+
+        // Custom upload adapter so images pasted/inserted into the text body get stored
+        function EventBlockImageUploadAdapterPlugin(editor) {
+            editor.plugins.get('FileRepository').createUploadAdapter = function(loader) {
+                return {
+                    upload: function() {
+                        return loader.file.then(function(file) {
+                            return new Promise(function(resolve, reject) {
+                                var formData = new FormData();
+                                formData.append('upload', file);
+                                var token = document.querySelector('input[name="__RequestVerificationToken"]');
+                                fetch('/umbraco/surface/ImageUpload/Upload', {
+                                    method: 'POST',
+                                    headers: token ? { 'RequestVerificationToken': token.value } : {},
+                                    body: formData
+                                })
+                                .then(function(r) { return r.json(); })
+                                .then(function(data) {
+                                    if (data.error) { reject(data.error.message); }
+                                    else { resolve({ default: data.url }); }
+                                })
+                                .catch(function(err) { reject(err.message || 'Uppladdning misslyckades'); });
+                            });
+                        });
+                    },
+                    abort: function() {}
+                };
+            };
+        }
+
         ClassicEditor
             .create(document.getElementById('blockText'), {
-                toolbar: ['heading', '|', 'bold', 'italic', 'link', '|', 'bulletedList', 'numberedList', '|', 'undo', 'redo'],
+                extraPlugins: [EventBlockImageUploadAdapterPlugin],
+                toolbar: [
+                    'heading', '|',
+                    'bold', 'italic', 'underline', '|',
+                    'link', 'uploadImage', 'blockQuote', '|',
+                    'bulletedList', 'numberedList', '|',
+                    'undo', 'redo'
+                ],
                 language: 'sv'
             })
             .then(function(editor) {

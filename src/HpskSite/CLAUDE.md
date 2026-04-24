@@ -589,12 +589,25 @@ if (stringValue.TrimStart().StartsWith("[")) {
 
 **Configuration:**
 - Competition must have `swishNumber` property configured (10 digits starting with 0)
-- Competition must have `registrationFee` property > 0
-- Payment button only shows when both conditions are met
+- At least one of `registrationFee`, `juniorRegistrationFee`, `subCompetitionFee` must be > 0
+- Payment button only shows when these conditions are met
+
+**Fee Types (all Textstring on `competition` doctype):**
+- `registrationFee` — base fee, charged per selected class
+- `juniorRegistrationFee` — optional. Replaces base fee per class for junior classes (IDs containing `_Jun`, or Springskytte age-class `jun`/`15`/`18`). 0 = fall back to base fee
+- `subCompetitionFee` — optional extra for shooters who opt into the deltävling at registration
+- `subCompetitionFeeMode` — `"perClass"` (default) or `"perRegistration"` — controls whether the deltävling fee multiplies by class count or is a flat one-off
+- `teamRegistrationFee` / `stafettRegistrationFee` — flat per-team fees (unchanged; not affected by junior/deltävling modifiers)
+
+**Fee Calculation — single source of truth:**
+All fee math flows through `Services/RegistrationFeeCalculator.cs`. Never duplicate the branching inline in controllers. Call sites: `CompetitionController.RegisterForCompetition` (new + old fee for invoice cancellation), `SwishController.GeneratePaymentQR`, `SwishController.SendQRCodeEmail`. The Swish endpoint also returns `includesSubCompetition`, `subCompetitionName`, and `subCompetitionFeeTotal` so payment dialogs render a "Inkluderar X kr i deltävlingsavgift" breakdown.
+
+**Frontend flag flow:** `competition-registration.js` submits `isSubCompetition=true|false` on every standard registration (the flag was previously only sent by the direktplacering path — easy to miss when adding registration surfaces).
 
 **See Also:**
 - [SWISH_PAYMENT_SETUP.md](Documentation/SWISH_PAYMENT_SETUP.md) - Complete setup guide
 - [SWISH_PAYMENT_IMPLEMENTATION.md](Documentation/SWISH_PAYMENT_IMPLEMENTATION.md) - Implementation details
+- [PAYMENT_INVOICE_SYSTEM.md](Documentation/PAYMENT_INVOICE_SYSTEM.md) - Fee calculation details
 
 ### Late Registration & Identity-Based Results ✅ (2025-11-23)
 

@@ -62,11 +62,22 @@ Om tävlingen har stafett visas knappen **"Anmäl stafettlag"** med ett separat 
 
 Klicka på **"Visa anmälda skyttar"** i sidopanelen för att se en lista över alla anmälda med namn, klubbar och klasser. Din egen rad markeras.
 
+### Anmälningsavgifter
+
+På tävlingssidan under **Anmälningsdetaljer** listas alla avgifter som gäller tävlingen:
+
+- **Avgift** — grundavgift per anmäld klass
+- **Junioravgift** (om tävlingen har en) — används för juniorklasser (t.ex. C Jun, L Jun, eller Springskytte-klasser D/H jun, 15, 18) i stället för grundavgiften
+- **Deltävlingsavgift** (om tävlingen har en deltävling) — tillägg för skyttar som kryssar i deltävlingen vid anmälan. Kan tas ut antingen **per anmäld klass** eller **en gång per anmälan** beroende på hur arrangören konfigurerat tävlingen
+- **Lagavgift / Stafettavgift** (om tävlingen tillåter lag/stafett) — separat avgift per lag
+
+Ditt totalbelopp räknas automatiskt fram utifrån dina valda klasser och om du kryssat i deltävlingen.
+
 ### Betala med Swish
 
 Om tävlingen har en anmälningsavgift:
 1. Efter anmälan visas knappen **"Betala med Swish"**
-2. En QR-kod visas på skärmen med belopp och referensnummer
+2. En QR-kod visas på skärmen med belopp och referensnummer. Om beloppet inkluderar deltävlingsavgift visas det som en separat rad ("Inkluderar X kr i deltävlingsavgift")
 3. Öppna Swish-appen på din mobil och skanna QR-koden
 4. Bekräfta betalningen i appen
 5. **Obs:** Betalningen verifieras manuellt av en administratör som markerar den som betald

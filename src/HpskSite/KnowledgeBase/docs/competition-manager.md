@@ -32,6 +32,19 @@ Klicka **"Redigera"** för att öppna redigeringsformuläret. I **beskrivningsf�
 - Se betalningsstatus och **markera betalningar som betalda**
 - Hantera anmälningslistan
 
+### Anmälningsavgifter
+
+Vid redigering av tävlingen finns flera avgiftsfält:
+
+- **Anmälningsavgift (individuell)** — grundavgift per anmäld klass
+- **Junioravgift** — valfri. Om satt (> 0) används den för juniorklasser (IDn som innehåller `_Jun`, samt Springskytte-åldersklasser `jun`, `15`, `18`) i stället för grundavgiften. 0 kr = samma som grundavgiften
+- **Lagavgift** / **Stafettavgift** — flat avgift per lag, används bara för lag-/stafettanmälningar
+- **Anmälningsavgift för Deltävling** — tillägg för skyttar som kryssar i deltävlingen. Välj mellan:
+  - **Per anmäld klass** — tillägget läggs till varje anmäld klass (t.ex. 2 klasser × 30 kr = 60 kr extra)
+  - **En gång per anmälan** — tillägget tas ut en gång oavsett antal klasser (t.ex. engångsavgift till arrangören)
+
+Avgifterna listas automatiskt under **Anmälningsdetaljer** på tävlingssidan så skyttar ser exakt vad som gäller. Betalningsdialogen visar också en separat rad om deltävlingsavgift är inkluderad.
+
 ### Startlistor
 
 Generera och publicera startlistor:
