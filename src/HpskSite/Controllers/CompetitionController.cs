@@ -345,9 +345,8 @@ namespace HpskSite.Controllers
                 decimal oldFee = 0;
                 decimal newFee = 0;
 
-                // Get registration fee from competition
-                var registrationFee = competition.GetValue<decimal>("registrationFee");
-                newFee = registrationFee * selectedClassesList.Count;
+                // Calculate new fee (per-class base/junior + optional deltävling surcharge)
+                newFee = RegistrationFeeCalculator.Calculate(competition, selectedClassesList, isSubCompetition);
 
                 if (existingRegistration != null)
                 {
@@ -355,14 +354,19 @@ namespace HpskSite.Controllers
                     _logger.LogInformation("Found existing registration (ID: {RegId}) for member {MemberId}. Updating with classes: {Classes}",
                         existingRegistration.Id, targetMember.Id, string.Join(", ", selectedClassesList));
 
-                    // Calculate old fee from existing classes
+                    // Calculate old fee from existing classes + stored isSubCompetition flag
                     var oldClassesJson = existingRegistration.GetValue<string>("shootingClasses");
                     if (!string.IsNullOrEmpty(oldClassesJson))
                     {
                         try
                         {
-                            var oldClasses = System.Text.Json.JsonSerializer.Deserialize<List<Dictionary<string, string>>>(oldClassesJson);
-                            oldFee = registrationFee * (oldClasses?.Count ?? 0);
+                            var oldClassEntries = CompetitionRegistrationDocument.DeserializeShootingClasses(oldClassesJson);
+                            var oldClassNames = oldClassEntries
+                                .Select(e => e.Class)
+                                .Where(c => !string.IsNullOrEmpty(c))
+                                .ToList();
+                            var oldIsSubCompetition = existingRegistration.GetValue<bool>("isSubCompetition");
+                            oldFee = RegistrationFeeCalculator.Calculate(competition, oldClassNames, oldIsSubCompetition);
                         }
                         catch
                         {

@@ -45,6 +45,17 @@
         "(1 dag)";
     var maxParticipants = Model.Value<int>("maxParticipants");
     var registrationFee = Model.Value<string>("registrationFee") ?? "";
+    var juniorRegistrationFeeStr = Model.Value<string>("juniorRegistrationFee") ?? "";
+    var subCompetitionFeeStr = Model.Value<string>("subCompetitionFee") ?? "";
+    var subCompetitionFeeModeRaw = Model.HasProperty("subCompetitionFeeMode") ? Model.Value<string>("subCompetitionFeeMode") ?? "" : "";
+    var subCompetitionNameRaw = Model.HasProperty("subCompetitionName") ? Model.Value<string>("subCompetitionName") ?? "" : "";
+    var teamRegistrationFeeStr = Model.Value<string>("teamRegistrationFee") ?? "";
+    var stafettRegistrationFeeStr = Model.Value<string>("stafettRegistrationFee") ?? "";
+    decimal.TryParse(juniorRegistrationFeeStr, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var juniorRegistrationFeeVal);
+    decimal.TryParse(subCompetitionFeeStr, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var subCompetitionFeeVal);
+    decimal.TryParse(teamRegistrationFeeStr, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var teamRegistrationFeeVal);
+    decimal.TryParse(stafettRegistrationFeeStr, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var stafettRegistrationFeeVal);
+    var subCompetitionFeeIsPerRegistration = string.Equals(subCompetitionFeeModeRaw, "perRegistration", StringComparison.OrdinalIgnoreCase);
     var registrationOpenDate = Model.Value<DateTime>("registrationOpenDate");
     var registrationCloseDate = Model.Value<DateTime>("registrationCloseDate");
     var competitionDirector = Model.Value<string>("competitionDirector") ?? "";
@@ -706,7 +717,25 @@
 											<li><i class="bi bi-pencil-square"></i> Föranmälan krävs</li>
 										}
 									}
-									<li><i class="bi bi-currency-dollar"></i> Avgift: <strong>@registrationFee</strong></li>
+									<li><i class="bi bi-currency-dollar"></i> Avgift: <strong>@registrationFee kr</strong> <small class="text-muted">per anmäld klass</small></li>
+										@if (juniorRegistrationFeeVal > 0)
+										{
+											<li class="ms-4"><i class="bi bi-person-arms-up"></i> Junioravgift: <strong>@juniorRegistrationFeeStr kr</strong> <small class="text-muted">per anmäld juniorklass</small></li>
+										}
+										@if (subCompetitionFeeVal > 0)
+										{
+											var subCompModeLabel = subCompetitionFeeIsPerRegistration ? "en gång per anmälan" : "per anmäld klass";
+											var subCompLabelSuffix = string.IsNullOrEmpty(subCompetitionNameRaw) ? "Deltävling" : subCompetitionNameRaw;
+											<li class="ms-4"><i class="bi bi-plus-circle"></i> Deltävlingsavgift (@subCompLabelSuffix): <strong>@subCompetitionFeeStr kr</strong> <small class="text-muted">@subCompModeLabel</small></li>
+										}
+										@if (allowTeams && teamRegistrationFeeVal > 0)
+										{
+											<li class="ms-4"><i class="bi bi-people"></i> Lagavgift: <strong>@teamRegistrationFeeStr kr</strong> <small class="text-muted">per lag</small></li>
+										}
+										@if (allowStafett && stafettRegistrationFeeVal > 0)
+										{
+											<li class="ms-4"><i class="bi bi-flag"></i> Stafettavgift: <strong>@stafettRegistrationFeeStr kr</strong> <small class="text-muted">per lag</small></li>
+										}
 								}
 								<li><i class="bi bi-calendar-check"></i> Öppnar: @registrationOpenDate.ToString("d MMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))</li>
 								<li><i class="bi bi-calendar-x"></i> Stänger: @registrationCloseDate.ToString("d MMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))</li>
@@ -1481,6 +1510,8 @@ window.CompetitionConfig = {
     competitionId: @Model.Id,
     allowDualCClassRegistration: @(allowDualCClassRegistration.ToString().ToLower()),
     registrationFee: @(decimal.TryParse(registrationFee, out var _configFee) ? _configFee : 0m),
+    juniorRegistrationFee: @(decimal.TryParse(juniorRegistrationFeeStr, out var _configJuniorFee) ? _configJuniorFee : 0m),
+    subCompetitionFee: @(decimal.TryParse(subCompetitionFeeStr, out var _configSubCompFee) ? _configSubCompFee : 0m),
     hasSwishNumber: @(hasSwishNumberValue.ToString().ToLower()),
     registrationInfo: {
         role: '@regRole',
@@ -1703,6 +1734,7 @@ window.CompetitionConfig = {
                             </div>
                             <div class="alert alert-info text-start mb-0">
                                 <p class="mb-1"><strong>Belopp:</strong> ${amount} kr</p>
+                                ${data.includesSubCompetition ? `<p class="mb-1 small text-muted">Inkluderar ${data.subCompetitionFeeTotal} kr i deltävlingsavgift${data.subCompetitionName ? ` (${data.subCompetitionName})` : ''}.</p>` : ''}
                                 ${data.shootingClasses ? `<p class="mb-1"><strong>Klasser:</strong> ${data.shootingClasses}</p>` : ''}
                                 ${data.teamName ? `<p class="mb-1"><strong>Lag:</strong> ${data.teamName}</p>` : ''}
                                 <p class="mb-0"><strong>Fakturanummer:</strong> ${invNum}</p>

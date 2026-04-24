@@ -3014,6 +3014,7 @@ function loadSwishQrCode(competitionId, invoiceId) {
                     <img src="${data.qrCode}" alt="Swish QR Code" class="img-fluid" style="max-width: 300px;">
                     <p class="text-muted mt-2">
                         <strong>Belopp:</strong> ${data.amount} kr<br>
+                        ${data.includesSubCompetition ? `<small>Inkluderar ${data.subCompetitionFeeTotal} kr i deltävlingsavgift${data.subCompetitionName ? ` (${data.subCompetitionName})` : ''}.</small><br>` : ''}
                         <strong>Fakturanr:</strong> ${data.invoiceNumber || invoiceId}
                     </p>
                 `;

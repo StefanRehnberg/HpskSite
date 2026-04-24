@@ -710,6 +710,9 @@ namespace HpskSite.Controllers
                     isClubOnly = competition.GetValue<bool>("isClubOnly"),
                     maxParticipants = competition.GetValue<int>("maxParticipants"),
                     registrationFee = competition.GetValue<decimal>("registrationFee"),
+                    juniorRegistrationFee = competition.GetValue<string>("juniorRegistrationFee") ?? "0",
+                    subCompetitionFee = competition.GetValue<string>("subCompetitionFee") ?? "0",
+                    subCompetitionFeeMode = competition.GetValue<string>("subCompetitionFeeMode") ?? "perClass",
                     competitionDirector = competition.GetValue<string>("competitionDirector") ?? "",
                     contactEmail = competition.GetValue<string>("contactEmail") ?? "",
                     contactPhone = competition.GetValue<string>("contactPhone") ?? "",
@@ -943,7 +946,8 @@ namespace HpskSite.Controllers
                                 value = dateValue;
                             }
                         }
-                        else if ((field.Key == "registrationFee" || field.Key == "teamRegistrationFee" || field.Key == "stafettRegistrationFee") && value != null)
+                        else if ((field.Key == "registrationFee" || field.Key == "teamRegistrationFee" || field.Key == "stafettRegistrationFee"
+                                   || field.Key == "juniorRegistrationFee" || field.Key == "subCompetitionFee") && value != null)
                         {
                             // registrationFee must be stored as decimal (not int) for Model.Value<decimal?> to work
                             if (value is System.Text.Json.JsonElement jsonElementDec)

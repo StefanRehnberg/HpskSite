@@ -10,6 +10,8 @@
  * Hides: allowDualCClass, allowSelfReporting, numberOfFinalSeries
  *@
 
+<script src="https://cdn.ckeditor.com/ckeditor5/41.0.0/classic/ckeditor.js"></script>
+
 <style>
     #springEditModal input[type="text"].date-input { font-family: monospace; }
 </style>
@@ -51,6 +53,29 @@
                         <input type="text" class="form-control" id="springEdit_subCompetitionName" name="subCompetitionName"
                                placeholder="T.ex. Svenska Polismästerskapet 2026" autocomplete="off" data-1p-ignore="true">
                         <small class="form-text text-muted">Om ifyllt visas en kryssruta vid anmälan.</small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="springEdit_subCompetitionFee" class="form-label">Anmälningsavgift för Deltävling</label>
+                        <div class="input-group mb-2" style="max-width: 220px;">
+                            <input type="number" class="form-control" id="springEdit_subCompetitionFee" name="subCompetitionFee" min="0" value="0" step="0.01">
+                            <span class="input-group-text">kr</span>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="subCompetitionFeeMode" id="springEdit_subCompFeeMode_perClass" value="perClass" checked>
+                            <label class="form-check-label" for="springEdit_subCompFeeMode_perClass">
+                                <strong>Per anmäld klass</strong>
+                                <small class="d-block text-muted">Avgiften läggs till varje anmäld klass (t.ex. 2 klasser × 30 kr = 60 kr tillägg).</small>
+                            </label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="subCompetitionFeeMode" id="springEdit_subCompFeeMode_perRegistration" value="perRegistration">
+                            <label class="form-check-label" for="springEdit_subCompFeeMode_perRegistration">
+                                <strong>En gång per anmälan</strong>
+                                <small class="d-block text-muted">Avgiften tas ut en gång oavsett antal anmälda klasser (t.ex. en engångsavgift till arrangören).</small>
+                            </label>
+                        </div>
+                        <small class="form-text text-muted mt-2">Avgiften gäller bara skyttar som kryssar i deltävlingen vid anmälan. 0 kr = ingen extra avgift.</small>
                     </div>
 
                     <div class="mb-3">
@@ -131,8 +156,18 @@
                         </div>
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label for="springEdit_registrationFee" class="form-label">Anmalningsavgift (kr)</label>
-                                <input type="number" class="form-control" id="springEdit_registrationFee" name="registrationFee" min="0" step="0.01">
+                                <label class="form-label">Anmälningsavgifter (kr)</label>
+                                <div class="d-flex align-items-center flex-wrap gap-2">
+                                    <div class="input-group" style="max-width: 220px;">
+                                        <span class="input-group-text" style="min-width: 90px;">Individuell</span>
+                                        <input type="number" class="form-control" id="springEdit_registrationFee" name="registrationFee" min="0" step="0.01">
+                                    </div>
+                                    <div class="input-group" style="max-width: 220px;">
+                                        <span class="input-group-text" style="min-width: 90px;">Junior</span>
+                                        <input type="number" class="form-control" id="springEdit_juniorRegistrationFee" name="juniorRegistrationFee" min="0" step="0.01">
+                                    </div>
+                                </div>
+                                <small class="form-text text-muted">Junioravgift används för juniorklasser (t.ex. H/D jun, 15, 18). 0 = samma som individuell.</small>
                             </div>
                         </div>
                     </div>
@@ -526,6 +561,7 @@ window.populateSpringEditModal = function(comp) {
     setVal('springEdit_venue', comp.venue);
     setVal('springEdit_maxParticipants', comp.maxParticipants || 50);
     setVal('springEdit_registrationFee', comp.registrationFee || 0);
+    setVal('springEdit_juniorRegistrationFee', comp.juniorRegistrationFee || 0);
     setVal('springEdit_teamRegistrationFee', comp.teamRegistrationFee || 0);
     setCheck('springEdit_allowTeams', comp.allowTeams);
     springEditAllowTeamsChange();
@@ -567,6 +603,12 @@ window.populateSpringEditModal = function(comp) {
     setCheck('springEdit_addToMenu', comp.addToMenu);
     setCheck('springEdit_isClubOnly', comp.isClubOnly);
     setVal('springEdit_subCompetitionName', comp.subCompetitionName || '');
+    setVal('springEdit_subCompetitionFee', comp.subCompetitionFee || 0);
+    const springSubCompMode = comp.subCompetitionFeeMode || 'perClass';
+    const springModePerClass = document.getElementById('springEdit_subCompFeeMode_perClass');
+    const springModePerReg = document.getElementById('springEdit_subCompFeeMode_perRegistration');
+    if (springModePerClass) springModePerClass.checked = (springSubCompMode === 'perClass');
+    if (springModePerReg) springModePerReg.checked = (springSubCompMode === 'perRegistration');
 
     // Managers
     const managerIds = Array.isArray(comp.competitionManagers) ? comp.competitionManagers : [];
@@ -710,7 +752,17 @@ function springEditSave() {
     }
 
     const form = document.getElementById('springEditForm');
-    if (!form.checkValidity()) { form.reportValidity(); return; }
+
+    // Disable Flatpickr-generated inputs before validation (they have name="" which breaks checkValidity)
+    const fpInputs = form.querySelectorAll('.numInput, .flatpickr-hour, .flatpickr-minute, .flatpickr-am-pm');
+    fpInputs.forEach(i => i.disabled = true);
+    const isValid = form.checkValidity();
+    if (!isValid) {
+        form.reportValidity();
+        fpInputs.forEach(i => i.disabled = false);
+        return;
+    }
+    fpInputs.forEach(i => i.disabled = false);
 
     // Validate classes
     const classIds = document.getElementById('springEdit_shootingClassIds').value;

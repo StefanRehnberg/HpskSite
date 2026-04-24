@@ -375,12 +375,20 @@
                         <h6 class="mb-3 text-primary"><i class="bi bi-credit-card me-1"></i>Betalningar</h6>
 
                         <div class="mb-3">
-                            <label for="wizard_registrationFee" class="form-label">Anmälningsavgift (individuell)</label>
-                            <div class="input-group">
-                                <input type="number" class="form-control" id="wizard_registrationFee" name="registrationFee" min="0" value="0">
-                                <span class="input-group-text">kr</span>
+                            <label class="form-label">Anmälningsavgifter</label>
+                            <div class="d-flex align-items-center flex-wrap gap-3">
+                                <div class="input-group" style="max-width: 220px;">
+                                    <span class="input-group-text" style="min-width: 90px;">Individuell</span>
+                                    <input type="number" class="form-control" id="wizard_registrationFee" name="registrationFee" min="0" value="0">
+                                    <span class="input-group-text">kr</span>
+                                </div>
+                                <div class="input-group" style="max-width: 220px;">
+                                    <span class="input-group-text" style="min-width: 90px;">Junior</span>
+                                    <input type="number" class="form-control" id="wizard_juniorRegistrationFee" name="juniorRegistrationFee" min="0" value="0">
+                                    <span class="input-group-text">kr</span>
+                                </div>
                             </div>
-                            <small class="form-text text-muted">0 för ingen avgift</small>
+                            <small class="form-text text-muted">Junioravgift används för juniorklasser (t.ex. C Jun, L Jun, Springskytte Jun/15/18). 0 = samma som individuell.</small>
                         </div>
 
                         <hr class="my-3">
@@ -457,6 +465,29 @@
                                             <input type="text" class="form-control" id="wizard_subCompetitionName" name="subCompetitionName"
                                                    placeholder="T.ex. Svenska Polismästerskapet 2026" autocomplete="off" data-1p-ignore="true">
                                             <small class="form-text text-muted">Om ifyllt visas en kryssruta vid anmälan. Skyttar som kryssar i den får en egen resultatlista.</small>
+                                        </div>
+
+                                        <div class="mb-3">
+                                            <label for="wizard_subCompetitionFee" class="form-label">Anmälningsavgift för Deltävling</label>
+                                            <div class="input-group mb-2" style="max-width: 220px;">
+                                                <input type="number" class="form-control" id="wizard_subCompetitionFee" name="subCompetitionFee" min="0" value="0">
+                                                <span class="input-group-text">kr</span>
+                                            </div>
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="radio" name="subCompetitionFeeMode" id="wizard_subCompFeeMode_perClass" value="perClass" checked>
+                                                <label class="form-check-label" for="wizard_subCompFeeMode_perClass">
+                                                    <strong>Per anmäld klass</strong>
+                                                    <small class="d-block text-muted">Avgiften läggs till varje anmäld klass (t.ex. 2 klasser × 30 kr = 60 kr tillägg).</small>
+                                                </label>
+                                            </div>
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="radio" name="subCompetitionFeeMode" id="wizard_subCompFeeMode_perRegistration" value="perRegistration">
+                                                <label class="form-check-label" for="wizard_subCompFeeMode_perRegistration">
+                                                    <strong>En gång per anmälan</strong>
+                                                    <small class="d-block text-muted">Avgiften tas ut en gång oavsett antal anmälda klasser (t.ex. en engångsavgift till arrangören).</small>
+                                                </label>
+                                            </div>
+                                            <small class="form-text text-muted mt-2">Avgiften gäller bara skyttar som kryssar i deltävlingen vid anmälan. 0 kr = ingen extra avgift.</small>
                                         </div>
 
                                         <div class="mb-3">

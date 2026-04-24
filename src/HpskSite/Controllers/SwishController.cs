@@ -190,16 +190,20 @@ namespace HpskSite.Controllers
                 var swishNumber = competition.Value<string>("swishNumber");
                 var _feeStr = competition.Value<string>("registrationFee") ?? "0";
                 decimal.TryParse(_feeStr, out var registrationFee);
+                var _juniorFeeStr = competition.Value<string>("juniorRegistrationFee") ?? "0";
+                decimal.TryParse(_juniorFeeStr, out var juniorFeeConfigured);
+                var _subCompFeeStr = competition.Value<string>("subCompetitionFee") ?? "0";
+                decimal.TryParse(_subCompFeeStr, out var subCompFeeConfigured);
 
-                _logger.LogInformation("Swish payment request - CompetitionId: {CompetitionId}, SwishNumber: {SwishNumber}, RegistrationFee: {RegistrationFee}", 
-                    competitionId, swishNumber, registrationFee);
+                _logger.LogInformation("Swish payment request - CompetitionId: {CompetitionId}, SwishNumber: {SwishNumber}, RegistrationFee: {RegistrationFee}, JuniorFee: {JuniorFee}, SubCompFee: {SubCompFee}",
+                    competitionId, swishNumber, registrationFee, juniorFeeConfigured, subCompFeeConfigured);
 
                 if (string.IsNullOrEmpty(swishNumber))
                 {
                     return Json(new { success = false, message = "Ingen Swish-nummer är konfigurerad för denna tävling." });
                 }
 
-                if (registrationFee <= 0)
+                if (registrationFee <= 0 && juniorFeeConfigured <= 0 && subCompFeeConfigured <= 0)
                 {
                     return Json(new { success = false, message = "Ingen anmälningsavgift är konfigurerad." });
                 }
@@ -216,6 +220,7 @@ namespace HpskSite.Controllers
                 var userShootingClasses = new List<string>();
                 string registeredMemberId = null; // The member who is registered (may differ from logged-in user if admin)
                 string registeredMemberName = null;
+                bool registeredIsSubCompetition = false;
 
                 _logger.LogInformation("Looking for registration for member {MemberId} in competition {CompetitionId}", memberData.Id, competitionId);
 
@@ -244,6 +249,8 @@ namespace HpskSite.Controllers
                                 userRegistrationId = registration.Id;
                                 registeredMemberId = registrationMemberId;
                                 registeredMemberName = registration.Value<string>("memberName");
+                                registeredIsSubCompetition = registration.Value<bool>("isSubCompetition",
+                                    fallback: Umbraco.Cms.Core.Models.PublishedContent.Fallback.ToDefaultValue, defaultValue: false);
 
                                 try
                                 {
@@ -303,6 +310,7 @@ namespace HpskSite.Controllers
                                     userRegistrationId = reg.Id;
                                     registeredMemberId = regMemberId;
                                     registeredMemberName = reg.GetValue<string>("memberName");
+                                    registeredIsSubCompetition = reg.GetValue<bool>("isSubCompetition");
 
                                     try
                                     {
@@ -335,14 +343,21 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Du har inga aktiva anmälningar för denna tävling." });
                 }
 
-                // Calculate total amount (fee × number of classes)
-                var classCount = userShootingClasses.Count > 0 ? userShootingClasses.Count : 1;
-                var totalAmount = registrationFee * classCount;
+                // Calculate total amount (per-class base/junior fee + optional deltävling surcharge)
+                var classesForCalc = userShootingClasses.Count > 0
+                    ? (IReadOnlyCollection<string>)userShootingClasses
+                    : new[] { string.Empty }; // single non-junior bucket so baseFee applies once when class list is empty
+                var totalAmount = RegistrationFeeCalculator.Calculate(competition, classesForCalc, registeredIsSubCompetition);
                 var amountString = totalAmount.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
 
-                _logger.LogInformation("Payment calculation - RegistrationId: {RegistrationId}, ClassCount: {ClassCount}, RegistrationFee: {Fee}, TotalAmount: {Total}",
-                    userRegistrationId.Value, classCount, registrationFee, totalAmount);
+                _logger.LogInformation("Payment calculation - RegistrationId: {RegistrationId}, ClassCount: {ClassCount}, RegistrationFee: {Fee}, IsSubCompetition: {SubComp}, TotalAmount: {Total}",
+                    userRegistrationId.Value, userShootingClasses.Count, registrationFee, registeredIsSubCompetition, totalAmount);
                 _logger.LogInformation("User shooting classes found: {ShootingClasses}", string.Join(", ", userShootingClasses));
+
+                if (totalAmount <= 0)
+                {
+                    return Json(new { success = false, message = "Ingen anmälningsavgift är konfigurerad." });
+                }
 
                 // Get or create invoice for this registration (SIMPLIFIED FLOW)
                 var memberId = registeredMemberId ?? currentMember.Id.ToString();
@@ -466,6 +481,10 @@ namespace HpskSite.Controllers
 
                 var qrCodeBase64 = Convert.ToBase64String(qrCodeBytes);
 
+                var subCompPortion = RegistrationFeeCalculator.CalculateSubCompetitionPortion(
+                    competition, classesForCalc, registeredIsSubCompetition);
+                var subCompetitionName = competition.Value<string>("subCompetitionName") ?? "";
+
                 return Json(new {
                     success = true,
                     qrCode = $"data:image/png;base64,{qrCodeBase64}",
@@ -474,7 +493,10 @@ namespace HpskSite.Controllers
                     shootingClasses = string.Join(", ", userShootingClasses),
                     invoiceId = invoice.Id,
                     invoiceNumber = invoiceNumber,
-                    message = message
+                    message = message,
+                    includesSubCompetition = subCompPortion > 0,
+                    subCompetitionName = subCompetitionName,
+                    subCompetitionFeeTotal = subCompPortion
                 });
             }
             catch (Exception ex)
@@ -1183,13 +1205,17 @@ namespace HpskSite.Controllers
                 var swishNumber = competition.Value<string>("swishNumber");
                 var _feeStr = competition.Value<string>("registrationFee") ?? "0";
                 decimal.TryParse(_feeStr, out var registrationFee);
+                var _juniorFeeStr = competition.Value<string>("juniorRegistrationFee") ?? "0";
+                decimal.TryParse(_juniorFeeStr, out var juniorFeeConfigured);
+                var _subCompFeeStr = competition.Value<string>("subCompetitionFee") ?? "0";
+                decimal.TryParse(_subCompFeeStr, out var subCompFeeConfigured);
 
                 if (string.IsNullOrEmpty(swishNumber))
                 {
                     return Json(new { success = false, message = "Ingen Swish-nummer är konfigurerad för denna tävling." });
                 }
 
-                if (registrationFee <= 0)
+                if (registrationFee <= 0 && juniorFeeConfigured <= 0 && subCompFeeConfigured <= 0)
                 {
                     return Json(new { success = false, message = "Ingen anmälningsavgift är konfigurerad." });
                 }
@@ -1200,6 +1226,7 @@ namespace HpskSite.Controllers
                 string targetMemberIdFromReg = null;
                 string targetMemberNameFromReg = null;
                 string searchMemberId = null; // Declare outside the if block so it's accessible later
+                bool registeredIsSubCompetition = false;
 
                 // First: try published content (fast, cached)
                 searchMemberId = !string.IsNullOrEmpty(targetMemberId) ? targetMemberId : currentMember.Id.ToString();
@@ -1223,6 +1250,8 @@ namespace HpskSite.Controllers
                                 userRegistrationId = registration.Id;
                                 targetMemberIdFromReg = registrationMemberId;
                                 targetMemberNameFromReg = registration.Value<string>("memberName");
+                                registeredIsSubCompetition = registration.Value<bool>("isSubCompetition",
+                                    fallback: Umbraco.Cms.Core.Models.PublishedContent.Fallback.ToDefaultValue, defaultValue: false);
 
                                 var shootingClassesJson = registration.Value<string>("shootingClasses");
                                 var shootingClasses = CompetitionRegistrationDocument.DeserializeShootingClasses(shootingClassesJson);
@@ -1270,6 +1299,7 @@ namespace HpskSite.Controllers
                                     userRegistrationId = reg.Id;
                                     targetMemberIdFromReg = regMemberId;
                                     targetMemberNameFromReg = reg.GetValue<string>("memberName");
+                                    registeredIsSubCompetition = reg.GetValue<bool>("isSubCompetition");
 
                                     try
                                     {
@@ -1302,10 +1332,17 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Du har inga aktiva anmälningar för denna tävling." });
                 }
 
-                // Calculate total amount: fee × number of classes
-                var classCount = userShootingClasses.Count > 0 ? userShootingClasses.Count : 1;
-                var totalAmount = registrationFee * classCount;
+                // Calculate total amount (per-class base/junior fee + optional deltävling surcharge)
+                var classesForCalc = userShootingClasses.Count > 0
+                    ? (IReadOnlyCollection<string>)userShootingClasses
+                    : new[] { string.Empty };
+                var totalAmount = RegistrationFeeCalculator.Calculate(competition, classesForCalc, registeredIsSubCompetition);
                 var amountString = totalAmount.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
+
+                if (totalAmount <= 0)
+                {
+                    return Json(new { success = false, message = "Ingen anmälningsavgift är konfigurerad." });
+                }
 
                 // Check for existing invoice for the TARGET MEMBER (not the logged-in user)
                 var memberId = searchMemberId;

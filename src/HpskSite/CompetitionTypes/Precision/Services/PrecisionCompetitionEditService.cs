@@ -290,6 +290,8 @@ namespace HpskSite.CompetitionTypes.Precision.Services
                 "contactPhone" => ValidatePhone(value),
                 "maxParticipants" => ValidatePositiveInt(value, "Max antal deltagare"),
                 "registrationFee" => ValidateDecimal(value, "Anmälningsavgift"),
+                "juniorRegistrationFee" => ValidateDecimal(value, "Junioranmälningsavgift"),
+                "subCompetitionFee" => ValidateDecimal(value, "Anmälningsavgift för Deltävling"),
                 "numberOfSeriesOrStations" => ValidatePositiveInt(value, "Antal serier"),
                 "competitionDate" => ValidateDateTime(value, "Tävlingsdatum"),
                 "competitionEndDate" => ValidateOptionalDateTime(value, "Slutdatum"),
@@ -317,6 +319,9 @@ namespace HpskSite.CompetitionTypes.Precision.Services
                 "registrationCloseDate" => "registrationCloseDate",
                 "maxParticipants" => "maxParticipants",
                 "registrationFee" => "registrationFee",
+                "juniorRegistrationFee" => "juniorRegistrationFee",
+                "subCompetitionFee" => "subCompetitionFee",
+                "subCompetitionFeeMode" => "subCompetitionFeeMode",
                 "competitionDirector" => "competitionDirector",
                 "contactEmail" => "contactEmail",
                 "contactPhone" => "contactPhone",
@@ -366,7 +371,8 @@ namespace HpskSite.CompetitionTypes.Precision.Services
                 "maxParticipants" or "numberOfSeriesOrStations" or "numberOfFinalSeries" or "clubId" =>
                     int.TryParse(value.ToString(), out var intVal) && intVal >= 0 ? intVal : (object)null,
 
-                "registrationFee" or "teamRegistrationFee" or "stafettRegistrationFee" =>
+                "registrationFee" or "teamRegistrationFee" or "stafettRegistrationFee"
+                    or "juniorRegistrationFee" or "subCompetitionFee" =>
                     decimal.TryParse(value.ToString(), out var decVal) && decVal >= 0 ? decVal : (object)null,
 
                 "showLiveResults" or "isActive" or "isClubOnly" or "allowDualCClass" or "addToMenu" or "isAwardingStandardMedals" or "allowSelfReporting" or "allowTeams" or "allowStafett" =>

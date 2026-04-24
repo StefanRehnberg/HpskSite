@@ -93,6 +93,12 @@
     var allowStafett = competition?.Value<bool>("allowStafett") ?? false;
     var stafettRegFeeStr = competition?.Value<string>("stafettRegistrationFee") ?? "0";
     decimal.TryParse(stafettRegFeeStr, out var stafettRegFee);
+    var juniorRegFeeStr = competition?.Value<string>("juniorRegistrationFee") ?? "0";
+    decimal.TryParse(juniorRegFeeStr, out var juniorRegFee);
+    var subCompFeeStr = competition?.Value<string>("subCompetitionFee") ?? "0";
+    decimal.TryParse(subCompFeeStr, out var subCompFee);
+    var subCompFeeMode = competition?.Value<string>("subCompetitionFeeMode");
+    if (string.IsNullOrEmpty(subCompFeeMode)) subCompFeeMode = "perClass";
 
     var isClubOnly = competition?.Value<bool>("isClubOnly") ?? false;
     var clubId = competition?.Value<int>("clubId") ?? 0;
@@ -201,6 +207,29 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                     </div>
 
                     <div class="mb-3">
+                        <label for="edit_subCompetitionFee" class="form-label">Anmälningsavgift för Deltävling</label>
+                        <div class="input-group mb-2" style="max-width: 220px;">
+                            <input type="number" class="form-control" id="edit_subCompetitionFee" name="subCompetitionFee" value="@subCompFee" min="0" step="0.01">
+                            <span class="input-group-text">kr</span>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="subCompetitionFeeMode" id="edit_subCompFeeMode_perClass" value="perClass" @(subCompFeeMode == "perClass" ? "checked" : "")>
+                            <label class="form-check-label" for="edit_subCompFeeMode_perClass">
+                                <strong>Per anmäld klass</strong>
+                                <small class="d-block text-muted">Avgiften läggs till varje anmäld klass (t.ex. 2 klasser × 30 kr = 60 kr tillägg).</small>
+                            </label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="subCompetitionFeeMode" id="edit_subCompFeeMode_perRegistration" value="perRegistration" @(subCompFeeMode == "perRegistration" ? "checked" : "")>
+                            <label class="form-check-label" for="edit_subCompFeeMode_perRegistration">
+                                <strong>En gång per anmälan</strong>
+                                <small class="d-block text-muted">Avgiften tas ut en gång oavsett antal anmälda klasser (t.ex. en engångsavgift till arrangören).</small>
+                            </label>
+                        </div>
+                        <small class="form-text text-muted mt-2">Avgiften gäller bara skyttar som kryssar i deltävlingen vid anmälan. 0 kr = ingen extra avgift.</small>
+                    </div>
+
+                    <div class="mb-3">
                         <label for="competitionSeriesId" class="form-label">Tävlingsserie (valfritt)</label>
                         <select class="form-select" id="competitionSeriesId" name="seriesId">
                             <option value="">Ingen serie</option>
@@ -278,8 +307,18 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                         </div>
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label for="registrationFee" class="form-label">Anmälningsavgift (kr)</label>
-                                <input type="number" class="form-control" id="registrationFee" name="registrationFee" value="@regFee" min="0" step="0.01">
+                                <label class="form-label">Anmälningsavgifter (kr)</label>
+                                <div class="d-flex align-items-center flex-wrap gap-2">
+                                    <div class="input-group" style="max-width: 220px;">
+                                        <span class="input-group-text" style="min-width: 90px;">Individuell</span>
+                                        <input type="number" class="form-control" id="registrationFee" name="registrationFee" value="@regFee" min="0" step="0.01">
+                                    </div>
+                                    <div class="input-group" style="max-width: 220px;">
+                                        <span class="input-group-text" style="min-width: 90px;">Junior</span>
+                                        <input type="number" class="form-control" id="juniorRegistrationFee" name="juniorRegistrationFee" value="@juniorRegFee" min="0" step="0.01">
+                                    </div>
+                                </div>
+                                <small class="form-text text-muted">Junioravgift används för juniorklasser. 0 = samma som individuell.</small>
                             </div>
                         </div>
                     </div>
@@ -911,6 +950,13 @@ window.populateEditModal = function(competition) {
     setFieldValue('numberOfFinalSeries', competition.numberOfFinalSeries || 0);
     setFieldValue('swishNumber', competition.swishNumber || '');
     setFieldValue('teamRegistrationFee', competition.teamRegistrationFee || 0);
+    setFieldValue('juniorRegistrationFee', competition.juniorRegistrationFee || 0);
+    setFieldValue('edit_subCompetitionFee', competition.subCompetitionFee || 0);
+    const subCompMode = competition.subCompetitionFeeMode || 'perClass';
+    const modePerClassRadio = document.getElementById('edit_subCompFeeMode_perClass');
+    const modePerRegRadio = document.getElementById('edit_subCompFeeMode_perRegistration');
+    if (modePerClassRadio) modePerClassRadio.checked = (subCompMode === 'perClass');
+    if (modePerRegRadio) modePerRegRadio.checked = (subCompMode === 'perRegistration');
 
     // Handle competitionManagers - array of member IDs
     var managerIds = Array.isArray(competition.competitionManagers) ? competition.competitionManagers : [];

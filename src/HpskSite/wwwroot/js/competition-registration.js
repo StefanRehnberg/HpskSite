@@ -9,20 +9,11 @@ const ALLOW_DUAL_C_CLASS_REGISTRATION = window.CompetitionConfig ? window.Compet
 // Helper function to check if payment should be shown
 function shouldShowPayment() {
     const config = window.CompetitionConfig;
-
-    // Debug logging
-    console.log('=== shouldShowPayment() Debug ===');
-    console.log('CompetitionConfig:', config);
-    console.log('registrationFee:', config?.registrationFee, 'Type:', typeof config?.registrationFee);
-    console.log('hasSwishNumber:', config?.hasSwishNumber, 'Type:', typeof config?.hasSwishNumber);
-    console.log('Check results:');
-    console.log('  - config exists:', !!config);
-    console.log('  - registrationFee > 0:', config?.registrationFee > 0);
-    console.log('  - hasSwishNumber:', config?.hasSwishNumber);
-    console.log('Final result:', config && config.registrationFee > 0 && config.hasSwishNumber);
-    console.log('================================');
-
-    return config && config.registrationFee > 0 && config.hasSwishNumber;
+    if (!config || !config.hasSwishNumber) return false;
+    const baseFee = config.registrationFee || 0;
+    const juniorFee = config.juniorRegistrationFee || 0;
+    const subCompFee = config.subCompetitionFee || 0;
+    return baseFee > 0 || juniorFee > 0 || subCompFee > 0;
 }
 
 // Enhanced Registration Target - Global Variables
@@ -833,6 +824,10 @@ async function submitAllClassesRegistration(classIds, startPreferencesMap) {
         formData.append('teamAssignmentsJson', JSON.stringify(teamAssignments));
     }
 
+    // Deltävling (sub-competition) opt-in flag
+    const subCompCheckbox = document.getElementById('subCompetitionCheckbox');
+    formData.append('isSubCompetition', (subCompCheckbox && subCompCheckbox.checked) ? 'true' : 'false');
+
     const response = await fetch('/umbraco/surface/Competition/RegisterForCompetition', {
         method: 'POST',
         body: formData,
@@ -1018,6 +1013,7 @@ function showSwishPaymentModal(competitionId, targetMemberId = '') {
                     <div class="alert alert-info text-start mb-0">
                         <h6 class="mb-2"><strong><i class="bi bi-info-circle"></i> Betalningsinformation</strong></h6>
                         <p class="mb-1"><strong>Belopp:</strong> ${data.amount} kr</p>
+                        ${data.includesSubCompetition ? `<p class="mb-1 small text-muted">Inkluderar ${data.subCompetitionFeeTotal} kr i deltävlingsavgift${data.subCompetitionName ? ` (${data.subCompetitionName})` : ''}.</p>` : ''}
                         <p class="mb-1"><strong>Klass${data.registrationCount > 1 ? 'er' : ''}:</strong> ${data.shootingClasses}</p>
                         <p class="mb-0"><strong>Fakturanummer:</strong> ${data.invoiceNumber}</p>
                     </div>
