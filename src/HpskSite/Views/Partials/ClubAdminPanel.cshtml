@@ -2860,16 +2860,6 @@ async function recalculateEditMemberHandicap() {
 
 // Save member
 async function saveEditClubMember() {
-    // Validate personnummer before saving
-    const personNumberField = document.getElementById('editMemberPersonNumber');
-    if (!validateSwedishPersonnummer(personNumberField.value)) {
-        personNumberField.classList.add('is-invalid');
-        personNumberField.focus();
-        alert('Ogiltigt personnummer. Vänligen ange ett giltigt svenskt personnummer i formatet ÅÅÅÅMMDD-XXXX.');
-        return;
-    }
-    personNumberField.classList.remove('is-invalid');
-
     const memberId = document.getElementById('editMemberId').value;
 
     const formData = new FormData();

@@ -617,6 +617,8 @@
             <small class="text-muted">{email}</small>
         </td>
         <td><span class="badge bg-secondary">{clubName}</span></td>
+        <td>{region}</td>
+        <td>{notifiedAdmins}</td>
         <td>{regDate}</td>
         <td class="text-end text-nowrap">
             <button class="btn btn-success btn-sm me-1" onclick="approvePendingMember({id})" title="Godkänn">
@@ -1715,6 +1717,25 @@ function loadPendingApprovals() {
         });
 }
 
+function renderNotifiedAdmins(clubCount, regionCount) {
+    // No admins at all → only site admin can act. Highlight in red.
+    if (clubCount === 0 && regionCount === 0) {
+        return '<span class="badge bg-danger" title="Inga klubb- eller kretsadmins finns för medlemmens klubb/krets — endast webbadmin kan godkänna">'
+             + '<i class="bi bi-exclamation-triangle me-1"></i>Kräver webbadmin'
+             + '</span>';
+    }
+
+    const clubBadge = clubCount > 0
+        ? `<span class="badge bg-success" title="${clubCount} klubbadmin${clubCount > 1 ? 'er' : ''} har notifierats vid registreringen"><i class="bi bi-house-door me-1"></i>${clubCount}</span>`
+        : '<span class="badge bg-secondary" title="Ingen klubbadmin för medlemmens klubb"><i class="bi bi-house-door me-1"></i>0</span>';
+
+    const regionBadge = regionCount > 0
+        ? `<span class="badge bg-success ms-1" title="${regionCount} kretsadmin${regionCount > 1 ? 'er' : ''} har notifierats vid registreringen"><i class="bi bi-globe2 me-1"></i>${regionCount}</span>`
+        : '<span class="badge bg-secondary ms-1" title="Ingen kretsadmin för medlemmens krets"><i class="bi bi-globe2 me-1"></i>0</span>';
+
+    return clubBadge + regionBadge;
+}
+
 function displayPendingApprovals(pendingMembers) {
     const container = document.getElementById('pendingApprovals');
     const template = document.getElementById('pending-row-template').innerHTML;
@@ -1726,6 +1747,8 @@ function displayPendingApprovals(pendingMembers) {
                     <tr>
                         <th>Namn</th>
                         <th>Klubb</th>
+                        <th>Krets</th>
+                        <th title="Klubb- och kretsadmins som notifierats för denna medlem">Notifierade admins</th>
                         <th>Registreringsdatum</th>
                         <th class="text-end">Åtgärder</th>
                     </tr>
@@ -1736,12 +1759,21 @@ function displayPendingApprovals(pendingMembers) {
     pendingMembers.forEach(member => {
         const regDate = new Date(member.registrationDate).toLocaleDateString('sv-SE');
         const clubName = shortenClubName(member.clubName || 'Ingen klubb');
+        const region = member.region
+            ? `<span class="badge bg-light text-dark border">${escapeHtml(member.region)}</span>`
+            : '<span class="text-muted">&mdash;</span>';
+        const notifiedAdmins = renderNotifiedAdmins(
+            member.clubAdminCount || 0,
+            member.regionalAdminCount || 0
+        );
 
         html += template
             .replace(/{id}/g, member.id)
             .replace(/{name}/g, escapeHtml(member.name))
             .replace(/{email}/g, escapeHtml(member.email))
             .replace(/{clubName}/g, escapeHtml(clubName))
+            .replace(/{region}/g, region)
+            .replace(/{notifiedAdmins}/g, notifiedAdmins)
             .replace(/{regDate}/g, regDate);
     });
 

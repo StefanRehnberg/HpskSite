@@ -7,6 +7,7 @@
 @inject IMemberManager MemberManager
 @inject IMemberService MemberService
 @inject HpskSite.Services.ClubService ClubService
+@inject HpskSite.Services.AdminAuthorizationService AuthService
 @{
     Layout = null;
     var competition = Model.Parent; // Competition -> Result (direct child)
@@ -39,7 +40,10 @@
     var currentMember = await MemberManager.GetCurrentMemberAsync();
     var currentMemberName = currentMember?.Name ?? "";
     var currentMemberClub = "";
-    
+
+    // Authorization: who may delete a shooter's results from this competition?
+    var canDeleteResults = false;
+
     if (currentMember != null)
     {
         var memberData = MemberService.GetByEmail(currentMember.Email ?? "");
@@ -50,6 +54,20 @@
             {
                 currentMemberClub = ClubService.GetClubNameById(primaryClubId) ?? "";
             }
+
+            var isSiteAdmin = await AuthService.IsCurrentUserAdminAsync();
+            var isCompetitionManager = await AuthService.IsCompetitionManager(competition.Id);
+
+            var isClubAdmin = false;
+            var isSkjutledare = false;
+            var competitionClubId = competition.Value<int>("clubId");
+            if (competitionClubId > 0)
+            {
+                isClubAdmin = await AuthService.IsClubAdminForClub(competitionClubId);
+                isSkjutledare = await AuthService.IsSkjutledareForClub(competitionClubId);
+            }
+
+            canDeleteResults = isSiteAdmin || isCompetitionManager || isClubAdmin || isSkjutledare;
         }
     }
 }
@@ -173,6 +191,7 @@
     </style>
 </head>
 <body>
+    @Html.AntiForgeryToken()
     <div class="container">
         <!-- Header -->
         <div class="d-flex justify-content-between align-items-center mb-4 no-print">
@@ -292,6 +311,9 @@
     // Current user info for highlighting
     const currentUserName = '@Html.Raw(currentMemberName.Replace("'", "\\'"))';
     const currentUserClub = '@Html.Raw(currentMemberClub.Replace("'", "\\'"))';
+
+    // Admin-only delete capability for individual shooter results
+    const canDeleteResults = @(canDeleteResults.ToString().ToLower());
         
         // Fetch and display results
         async function loadResults() {
@@ -354,6 +376,7 @@
                         }
                         numericColCount += 2; // final Tot + X
                         if (isAwardingStandardMedals) numericColCount += 1; // optional S
+                        if (canDeleteResults) numericColCount += 1; // optional admin delete column
 
                         const platsPct = 4;
                         const klassPct = 5;
@@ -416,6 +439,10 @@
 
                         if (isAwardingStandardMedals) {
                             html += `<th style="width:${numericPct}%">S</th>`;
+                        }
+
+                        if (canDeleteResults) {
+                            html += `<th class="no-print" style="width:${numericPct}%"></th>`;
                         }
 
                         html += `
@@ -500,6 +527,20 @@
                                 html += `<td class="text-center"><strong>${medal}</strong></td>`;
                             }
 
+                            if (canDeleteResults) {
+                                const rowClass = shooter.shootingClass || classGroup.className || '';
+                                const safeClassAttr = rowClass.replace(/"/g, '&quot;');
+                                const safeNameAttr = (shooter.name || '').replace(/"/g, '&quot;');
+                                html += `<td class="no-print text-center">`
+                                     + `<button type="button" class="btn btn-sm btn-outline-danger py-0 px-1 delete-shooter-btn" `
+                                     + `data-member-id="${shooter.memberId}" `
+                                     + `data-shooting-class="${safeClassAttr}" `
+                                     + `data-shooter-name="${safeNameAttr}" `
+                                     + `title="Ta bort alla resultat för denna skytt i klassen">`
+                                     + `<i class="bi bi-trash"></i>`
+                                     + `</button></td>`;
+                            }
+
                             html += `
                                 </tr>
                             `;
@@ -540,6 +581,60 @@
         
         // Load results when page loads
         document.addEventListener('DOMContentLoaded', loadResults);
+
+        // Admin: delete all results for one shooter in one shooting class.
+        // Uses event delegation so re-rendered tables stay wired up.
+        async function deleteShooterFromClass(memberId, shootingClass, shooterName) {
+            if (!memberId || !shootingClass) {
+                alert('Saknar nödvändig data för att ta bort resultat.');
+                return;
+            }
+
+            const confirmed = confirm(`Ta bort alla resultat för ${shooterName || 'denna skytt'} i klass ${shootingClass}?\n\nDetta kan inte ångras.`);
+            if (!confirmed) return;
+
+            const tokenInput = document.querySelector('input[name="__RequestVerificationToken"]');
+            const token = tokenInput ? tokenInput.value : '';
+            if (!token) {
+                alert('Säkerhetstoken saknas. Ladda om sidan och försök igen.');
+                return;
+            }
+
+            try {
+                const response = await fetch('/umbraco/surface/CompetitionResults/DeleteShooterFromClass', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'RequestVerificationToken': token
+                    },
+                    body: JSON.stringify({
+                        competitionId: competitionId,
+                        memberId: memberId,
+                        shootingClass: shootingClass
+                    })
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    await loadResults();
+                } else {
+                    alert('Kunde inte ta bort resultat: ' + (data.message || 'Okänt fel'));
+                }
+            } catch (err) {
+                console.error('Delete error', err);
+                alert('Ett fel uppstod vid borttagning.');
+            }
+        }
+
+        document.addEventListener('click', function (ev) {
+            const btn = ev.target.closest('.delete-shooter-btn');
+            if (!btn) return;
+            ev.preventDefault();
+            const memberId = parseInt(btn.getAttribute('data-member-id'), 10);
+            const shootingClass = btn.getAttribute('data-shooting-class') || '';
+            const shooterName = btn.getAttribute('data-shooter-name') || '';
+            deleteShooterFromClass(memberId, shootingClass, shooterName);
+        });
         
         // Springskytte results rendering
         async function loadSpringskytteResults(container) {

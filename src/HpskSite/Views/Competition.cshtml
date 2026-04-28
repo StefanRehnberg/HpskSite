@@ -417,7 +417,7 @@
             // Distributed result reporting — uses same auth values (no duplicate service calls)
             if (allowSelfReporting && !isExternal)
             {
-                canReportDistributedResults = isSiteAdmin || isCompetitionManager || isClubAdmin || isSkjutledare;
+                canReportDistributedResults = isSiteAdmin || isCompetitionManager || isClubAdmin || isSkjutledare || isRegionalAdmin;
             }
         }
     }
@@ -617,15 +617,7 @@
 			@* ======================================== INTERNAL COMPETITION BUTTONS ======================================== *@
 			else
 			{
-				@* Registration button moved to "Anmälan" card in right column *@
-
-				@* Distributed result reporting button *@
-				@if (canReportDistributedResults)
-				{
-				<button type="button" class="btn btn-outline-success" data-bs-toggle="modal" data-bs-target="#distributedResultModal" title="Rapportera resultat">
-				<i class="bi bi-pencil-square"></i> <span class="d-none d-md-inline">Rapportera resultat</span>
-				</button>
-				}
+				@* Registration and Rapportera resultat buttons live in the "Anmälan" card in the right column *@
 
 				@* Management button (admin/competition manager only) - Bulls eye icon only *@
 				@if (canManageCompetition)
@@ -921,6 +913,14 @@
 								</button>
 							}
 						}
+						@* Distributed result reporting button (always full-width so it stays readable on mobile) *@
+						@if (canReportDistributedResults)
+						{
+							<button type="button" class="btn btn-outline-success w-100 mt-2" data-bs-toggle="modal" data-bs-target="#distributedResultModal">
+								<i class="bi bi-pencil-square me-1"></i>Rapportera resultat
+							</button>
+						}
+
 						@* Unpaid invoices button — shown/hidden by JS *@
 						<div id="unpaidInvoicesButtonContainer" style="display:none;" class="mt-2">
 							<button type="button" class="btn btn-warning w-100" data-bs-toggle="modal" data-bs-target="#unpaidInvoicesModal">

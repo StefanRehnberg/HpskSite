@@ -701,15 +701,14 @@
     <!-- All Competitions List View -->
     <div class="mt-4 d-none" id="competitionsList">
         <div class="table-responsive">
-            <table class="table table-hover">
+            <table class="table table-sm table-hover">
                 <thead>
                     <tr>
-                        <th scope="col" style="width: 22%">Tävling</th>
+                        <th scope="col" style="width: 26%">Tävling</th>
                         <th scope="col" style="width: 12%">Status</th>
-                        <th scope="col" style="width: 12%">Registrerad</th>
                         <th scope="col" style="width: 12%">Datum</th>
-                        <th scope="col" style="width: 12%">Plats</th>
-                        <th scope="col" style="width: 12%">Typ</th>
+                        <th scope="col" style="width: 15%">Plats</th>
+                        <th scope="col" style="width: 17%">Typ</th>
                         <th scope="col" style="width: 10%">Klass</th>
                         <th scope="col" style="width: 8%">Åtgärd</th>
                     </tr>
@@ -775,7 +774,7 @@
                                 <div class="fw-bold"><i class="bi bi-trophy"></i> @seriesName</div>
                                 @if (!string.IsNullOrEmpty(seriesShortDescription))
                                 {
-                                    <small class="text-muted">@Html.Raw(System.Net.WebUtility.HtmlDecode(seriesShortDescription))</small>
+                                    <div class="small text-muted series-description">@Html.Raw(System.Net.WebUtility.HtmlDecode(seriesShortDescription))</div>
                                 }
                             </td>
 
@@ -799,10 +798,6 @@
 
                             <td>
                                 <span class="text-muted">Flera platser</span>
-                            </td>
-
-                            <td>
-                                <span class="text-muted">-</span>
                             </td>
 
                             <td>
@@ -1011,21 +1006,11 @@
                             </td>
 
                             <td>
-                                @if (userRegisteredCompetitionIds.Contains(competition.Id))
-                                {
-                                    <span class="badge bg-success" title="Du är anmäld till denna tävling">
-                                        <i class="bi bi-check-circle-fill"></i> Ja
-                                    </span>
-                                }
-                                else
-                                {
-                                    <span class="text-muted">-</span>
-                                }
-                            </td>
-
-                            <td>
                                 <div class="fw-bold">@dateIcon @dateDisplay</div>
-                                <small class="text-muted">@durationInfo</small>
+                                @if (isMultiDay)
+                                {
+                                    <small class="text-muted">@durationInfo</small>
+                                }
                             </td>
 
                             <td>
@@ -1163,8 +1148,9 @@
 
 /* List view specific styles */
 #competitionsList .table {
-    border-collapse: separate;
-    border-spacing: 0 0.25rem;
+    border-collapse: collapse;
+    table-layout: fixed;
+    width: 100%;
 }
 
 #competitionsList .table th {
@@ -1174,30 +1160,29 @@
     text-transform: uppercase;
     letter-spacing: 0.03em;
     border: none;
-    padding: 0.5rem 0.75rem;
+    padding: 0.4rem 0.6rem;
 }
 
 #competitionsList .table td {
     vertical-align: middle;
     background-color: var(--bs-body-bg);
     border-top: 1px solid var(--bs-border-color);
-    border-bottom: 1px solid var(--bs-border-color);
-    padding: 0.75rem;
+    padding: 0.4rem 0.6rem;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
-#competitionsList .table td:first-child {
-    border-left: 1px solid var(--bs-border-color);
-    border-radius: 0.375rem 0 0 0.375rem;
-}
-
-#competitionsList .table td:last-child {
-    border-right: 1px solid var(--bs-border-color);
-    border-radius: 0 0.375rem 0.375rem 0;
+/* Inner block elements need their own ellipsis to truncate inside the fixed cell */
+#competitionsList .table td > div {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 #competitionsList .table-hover tbody tr:hover td {
     background-color: rgba(var(--bs-primary-rgb), 0.05);
-    border-color: var(--bs-primary);
 }
 
 /* View toggle button styles */

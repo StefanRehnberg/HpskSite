@@ -387,6 +387,98 @@
     transform: rotate(180deg);
 }
 
+/* Mobile card layout for series standings (visible under md breakpoint) */
+.series-mobile-rounds-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.25rem 0.75rem;
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--bs-border-color);
+    font-size: 0.875rem;
+}
+.series-mobile-rounds-grid .label {
+    color: var(--bs-secondary-color);
+    margin-right: 0.35rem;
+}
+.series-mobile-rounds-grid .non-counting {
+    opacity: 0.4;
+    text-decoration: line-through;
+}
+
+/* Klubb section: per-round breakdown with contributing shooters (mobile collapse + desktop expander) */
+.series-klubb-rounds {
+    /* container; rounds stacked vertically */
+}
+.series-klubb-round {
+    padding: 0.45rem 0;
+    border-top: 1px solid var(--bs-border-color);
+}
+.series-klubb-round:first-child {
+    border-top: 0;
+    padding-top: 0.1rem;
+}
+.series-klubb-round-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-weight: 600;
+    gap: 0.5rem;
+}
+.series-klubb-round-head .label {
+    color: var(--bs-secondary-color);
+    font-weight: 500;
+}
+.series-klubb-round-head .value {
+    text-align: right;
+}
+.series-klubb-contributors {
+    margin-top: 0.25rem;
+    margin-left: 0.6rem;
+    font-size: 0.875rem;
+}
+.series-klubb-contributor {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.5rem;
+    padding: 0.05rem 0;
+}
+.series-klubb-contributor .name {
+    flex: 1 1 auto;
+    min-width: 0;
+    color: var(--bs-body-color);
+    word-break: break-word;
+}
+.series-klubb-contributor .score {
+    flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
+    color: var(--bs-secondary-color);
+}
+.series-klubb-contributor .cls-badge {
+    display: inline-block;
+    margin-right: 0.4rem;
+    padding: 0.05rem 0.4rem;
+    border-radius: 0.2rem;
+    background-color: var(--bs-tertiary-bg);
+    color: var(--bs-secondary-color);
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+.series-klubb-expand-btn {
+    border: 0;
+    background: transparent;
+    padding: 0 0.25rem;
+    color: var(--bs-secondary-color);
+    cursor: pointer;
+}
+.series-klubb-expand-btn[aria-expanded="true"] .bi-chevron-down {
+    transform: rotate(180deg);
+}
+.series-klubb-expand-btn .bi-chevron-down {
+    transition: transform 0.15s ease;
+}
+
 /* Truncate long name/club values in series standings tables so fixed-width columns stay aligned */
 .series-cell-truncate {
     overflow: hidden;
@@ -507,6 +599,10 @@ function toggleSeriesDescription() {
                     html += '</div>';
                     html += '<div class="card-body p-0">';
 
+                    // Pre-build lookup of contributing shooters (per club, per class) so the Klubb section
+                    // can show "best of N" contributors without recomputing per row.
+                    const contributorsByClub = buildContributorsByClub(result.sections);
+
                     result.sections.forEach(function(section) {
                         html += '<div class="p-3">';
                         if (result.sections.length > 1) {
@@ -516,7 +612,7 @@ function toggleSeriesDescription() {
                         if (section.sectionType === 'Individual') {
                             html += renderIndividualSection(section, result.competitions);
                         } else if (section.sectionType === 'Club') {
-                            html += renderClubSection(section, result.competitions);
+                            html += renderClubSection(section, result.competitions, contributorsByClub);
                         }
                         html += '</div>';
                     });
@@ -575,6 +671,7 @@ function toggleSeriesDescription() {
 
                 html += '<div class="mb-4">';
                 html += '<h5 class="p-2 rounded" style="background-color: var(--bs-tertiary-bg);">' + escapeHtmlSeries(classGroup.className) + '</h5>';
+                html += '<div class="d-none d-md-block">';
                 html += '<div class="table-responsive">';
                 html += '<table class="table table-sm table-striped table-hover mb-0 series-standings-individual" style="table-layout:fixed;width:100%;">';
                 html += '<thead><tr>';
@@ -624,12 +721,49 @@ function toggleSeriesDescription() {
                 });
 
                 html += '</tbody></table></div></div>';
+
+                // Mobile card list (visible below md breakpoint)
+                html += '<div class="d-md-none">';
+                classGroup.rows.forEach(function(row) {
+                    const isCurrentUser = row.entityId === currentMemberId;
+                    const cardStyle = isCurrentUser ? ' style="background-color: rgba(13,110,253,0.1);"' : '';
+                    const collapseId = 'mr-Indiv-' + sanitizeIdSeries(classGroup.className) + '-' + row.entityId;
+
+                    html += '<div class="series-mobile-card border rounded p-2 mb-2"' + cardStyle + '>';
+                    html += '<div class="d-flex justify-content-between align-items-start">';
+                    html += '<div class="flex-grow-1 me-2" style="min-width:0;">';
+                    html += '<div><span class="fw-bold me-1">' + row.rank + '.</span>' + escapeHtmlSeries(row.name) + '</div>';
+                    html += '<small class="text-muted">' + escapeHtmlSeries(row.club) + '</small>';
+                    html += '</div>';
+                    html += '<div class="text-end">';
+                    html += '<div class="fw-bold">' + row.totalSeriesScore + '</div>';
+                    html += '<small class="text-muted">' + row.totalXCount + ' &times;</small>';
+                    html += '</div>';
+                    html += '</div>';
+
+                    html += '<button class="btn btn-link btn-sm p-0 mt-1" type="button" data-bs-toggle="collapse" data-bs-target="#' + collapseId + '" aria-expanded="false" aria-controls="' + collapseId + '">';
+                    html += '<i class="bi bi-chevron-down me-1"></i>Visa omgångar';
+                    html += '</button>';
+
+                    html += '<div class="collapse" id="' + collapseId + '">';
+                    html += '<div class="series-mobile-rounds-grid">';
+                    row.competitionScores.forEach(function(cell, idx) {
+                        html += '<span><span class="label">Omg.' + (idx + 1) + '</span>' + buildMobileRoundCell(cell, usesPoints) + '</span>';
+                    });
+                    html += '</div>';
+                    html += '</div>';
+
+                    html += '</div>';
+                });
+                html += '</div>';
+
+                html += '</div>';
             });
 
             return html;
         }
 
-        function renderClubSection(section, competitions) {
+        function renderClubSection(section, competitions, contributorsByClub) {
             let html = '';
 
             // Detect if any cell uses points different from score (placement scoring)
@@ -655,6 +789,7 @@ function toggleSeriesDescription() {
 
                 html += '<div class="mb-4">';
                 html += '<h5 class="p-2 rounded" style="background-color: var(--bs-tertiary-bg);">' + escapeHtmlSeries(classGroup.className) + '</h5>';
+                html += '<div class="d-none d-md-block">';
                 html += '<div class="table-responsive">';
                 html += '<table class="table table-sm table-striped table-hover mb-0 series-standings-club" style="table-layout:fixed;width:100%;">';
                 html += '<thead><tr>';
@@ -667,9 +802,18 @@ function toggleSeriesDescription() {
                 html += '</tr></thead>';
                 html += '<tbody>';
 
+                const desktopColspan = 2 + competitions.length + 1; // rank + club + per-comp + total
+
                 classGroup.rows.forEach(function(row) {
+                    const collapseDeskId = 'kc-desk-' + sanitizeIdSeries(classGroup.className) + '-' + row.entityId;
+                    const showExpander = !!contributorsByClub;
+
                     html += '<tr>';
-                    html += '<td><strong>' + row.rank + '</strong></td>';
+                    html += '<td><strong>' + row.rank + '</strong>';
+                    if (showExpander) {
+                        html += ' <button type="button" class="series-klubb-expand-btn" data-bs-toggle="collapse" data-bs-target="#' + collapseDeskId + '" aria-expanded="false" aria-controls="' + collapseDeskId + '" title="Visa bidragande skyttar"><i class="bi bi-chevron-down"></i></button>';
+                    }
+                    html += '</td>';
                     html += '<td class="series-cell-truncate" title="' + escapeHtmlSeries(row.name) + '">' + escapeHtmlSeries(row.name) + '</td>';
 
                     row.competitionScores.forEach(function(cell) {
@@ -694,11 +838,237 @@ function toggleSeriesDescription() {
 
                     html += '<td class="text-center"><strong>' + row.totalSeriesScore + '</strong></td>';
                     html += '</tr>';
+
+                    // Sibling collapse row with per-round contributor breakdown (desktop only)
+                    if (showExpander) {
+                        html += '<tr>';
+                        html += '<td colspan="' + desktopColspan + '" class="p-0 border-0">';
+                        html += '<div class="collapse" id="' + collapseDeskId + '">';
+                        html += '<div class="p-3" style="background-color: var(--bs-tertiary-bg);">';
+                        html += buildKlubbRoundsBlock(row, classGroup.className, competitions, contributorsByClub, usesPoints);
+                        html += '</div>';
+                        html += '</div>';
+                        html += '</td>';
+                        html += '</tr>';
+                    }
                 });
 
                 html += '</tbody></table></div></div>';
+
+                // Mobile card list (visible below md breakpoint)
+                html += '<div class="d-md-none">';
+                classGroup.rows.forEach(function(row) {
+                    const collapseId = 'mr-Klubb-' + sanitizeIdSeries(classGroup.className) + '-' + row.entityId;
+
+                    html += '<div class="series-mobile-card border rounded p-2 mb-2">';
+                    html += '<div class="d-flex justify-content-between align-items-start">';
+                    html += '<div class="flex-grow-1 me-2" style="min-width:0;">';
+                    html += '<div><span class="fw-bold me-1">' + row.rank + '.</span>' + escapeHtmlSeries(row.name) + '</div>';
+                    html += '</div>';
+                    html += '<div class="text-end">';
+                    html += '<div class="fw-bold">' + row.totalSeriesScore + (usesPoints ? ' p' : '') + '</div>';
+                    html += '</div>';
+                    html += '</div>';
+
+                    html += '<button class="btn btn-link btn-sm p-0 mt-1" type="button" data-bs-toggle="collapse" data-bs-target="#' + collapseId + '" aria-expanded="false" aria-controls="' + collapseId + '">';
+                    html += '<i class="bi bi-chevron-down me-1"></i>Visa omgångar';
+                    html += '</button>';
+
+                    html += '<div class="collapse" id="' + collapseId + '">';
+                    html += buildKlubbRoundsBlock(row, classGroup.className, competitions, contributorsByClub, usesPoints);
+                    html += '</div>';
+
+                    html += '</div>';
+                });
+                html += '</div>';
+
+                html += '</div>';
             });
 
+            return html;
+        }
+
+        function sanitizeIdSeries(s) {
+            return String(s == null ? '' : s).replace(/[^a-zA-Z0-9_-]/g, '-');
+        }
+
+        function buildMobileRoundCell(cell, usesPoints) {
+            if (cell.score === null || cell.score === undefined) {
+                return '<span class="text-muted">-</span>';
+            }
+            let inner = String(cell.score);
+            if (usesPoints && cell.points !== null && cell.points !== undefined) {
+                inner += ' <small class="text-success fw-bold">(' + cell.points + 'p)</small>';
+            }
+            if (!cell.counting) {
+                return '<span class="non-counting">' + inner + '</span>';
+            }
+            return inner;
+        }
+
+        // Builds a lookup of Individual-section rows by class and by club for fast contributor lookup.
+        // Each entry is { row, className } so we can show which class a contributing score came from
+        // (a shooter may appear in multiple classes for the same competition).
+        // Returns null when the response has no Individual section.
+        function buildContributorsByClub(sections) {
+            if (!sections) return null;
+            const indSection = sections.find(function(s) { return s.sectionType === 'Individual'; });
+            if (!indSection || !indSection.classStandings) return null;
+
+            const byClass = {}; // className -> clubName -> entries[]
+            const all = {};      // clubName -> entries[]
+
+            indSection.classStandings.forEach(function(cg) {
+                const cn = cg.className || '';
+                if (!byClass[cn]) byClass[cn] = {};
+                cg.rows.forEach(function(row) {
+                    const entry = { row: row, className: cn };
+                    const club = row.club || '';
+                    if (!byClass[cn][club]) byClass[cn][club] = [];
+                    byClass[cn][club].push(entry);
+                    if (!all[club]) all[club] = [];
+                    all[club].push(entry);
+                });
+            });
+
+            return { byClass: byClass, all: all };
+        }
+
+        // Mirror of HpskSite.Helpers.ClubNameHelper.Shorten — the backend's BuildIndividualSection
+        // shortens the club name on every Individual row (e.g. "Varbergs Pistolklubb" → "Varbergs PK"),
+        // while the Klubb section keeps the raw long name. Apply the same transform on the lookup
+        // key so they line up. Order matters: longer matches first.
+        function shortenClubNameJs(name) {
+            if (!name) return name;
+            return name
+                .replace(/Pistolskytteförening/gi, 'PSF')
+                .replace(/Pistolskytteklubb/gi, 'PSK')
+                .replace(/Pistolklubb/gi, 'PK')
+                .replace(/Sportskytteklubb/gi, 'SSK')
+                .replace(/Skytteklubb/gi, 'SK')
+                .replace(/Skytteförening/gi, 'SF');
+        }
+
+        // Identify contributing shooters for a Klubb cell by replicating the strategy's selection rule:
+        // take top-N from the club for that competition (by score desc, xCount desc) and accumulate
+        // until the sum equals the Klubb cell's score. Whatever fell into the prefix is the contributor set.
+        // For "Kombinerat" (groupByClass=false) Klubb sections, a shooter who shot multiple classes
+        // counts only once with their best score across classes — match the backend in BuildClubSectionCombined.
+        // Returns { contributors: entry[], matched: bool } so callers can distinguish a verified match from
+        // an inconsistency (e.g. team total doesn't equal any prefix sum, indicating data drift).
+        function findContributors(contributorsByClub, klubbClassName, clubName, competitionIdx, teamTotalScore) {
+            const empty = { contributors: [], matched: false };
+            if (!contributorsByClub) return empty;
+
+            const shortName = shortenClubNameJs(clubName);
+
+            let pool = null;
+            let isCombined = false;
+            if (klubbClassName && contributorsByClub.byClass[klubbClassName] && contributorsByClub.byClass[klubbClassName][shortName]) {
+                pool = contributorsByClub.byClass[klubbClassName][shortName];
+            } else if (contributorsByClub.all[shortName]) {
+                pool = contributorsByClub.all[shortName];
+                isCombined = true;
+            } else {
+                return empty;
+            }
+
+            // Keep only entries with a score in this competition
+            let candidates = pool.filter(function(e) {
+                const cell = e.row.competitionScores && e.row.competitionScores[competitionIdx];
+                return cell && cell.score !== null && cell.score !== undefined;
+            });
+            if (candidates.length === 0) return empty;
+
+            // Combined mode: dedupe per member, keep their best (score, xCount) for this comp.
+            // The wrapper retains className, so the surviving entry shows the class of the winning score.
+            if (isCombined) {
+                const bestByMember = new Map();
+                candidates.forEach(function(e) {
+                    const id = e.row.entityId;
+                    const cur = e.row.competitionScores[competitionIdx];
+                    const ex = bestByMember.get(id);
+                    if (!ex) { bestByMember.set(id, e); return; }
+                    const exCell = ex.row.competitionScores[competitionIdx];
+                    const curBetter = cur.score > exCell.score
+                        || (cur.score === exCell.score && (cur.xCount || 0) > (exCell.xCount || 0));
+                    if (curBetter) bestByMember.set(id, e);
+                });
+                candidates = Array.from(bestByMember.values());
+            }
+
+            // Sort top-down: score desc, xCount desc — matches strategy's selection order.
+            candidates.sort(function(a, b) {
+                const ca = a.row.competitionScores[competitionIdx];
+                const cb = b.row.competitionScores[competitionIdx];
+                if (cb.score !== ca.score) return cb.score - ca.score;
+                return (cb.xCount || 0) - (ca.xCount || 0);
+            });
+
+            if (teamTotalScore === null || teamTotalScore === undefined) {
+                return { contributors: candidates, matched: false };
+            }
+
+            // Accumulate from top until running sum equals the team total.
+            // (Use for-of, not a numeric for-loop — Razor's text-block parser misreads
+            //  the less-than operator before an identifier as the start of an HTML tag.)
+            const result = [];
+            let runningSum = 0;
+            for (const entry of candidates) {
+                result.push(entry);
+                runningSum += entry.row.competitionScores[competitionIdx].score;
+                if (runningSum === teamTotalScore) {
+                    return { contributors: result, matched: true };
+                }
+            }
+
+            // No prefix sum matched — data drift or unknown rule. Surface the inconsistency.
+            return { contributors: [], matched: false };
+        }
+
+        // Render the rounds-with-contributors block for one Klubb row. Used in both mobile collapse and desktop expander.
+        function buildKlubbRoundsBlock(row, klubbClassName, competitions, contributorsByClub, usesPoints) {
+            let html = '<div class="series-klubb-rounds">';
+            row.competitionScores.forEach(function(cell, idx) {
+                html += '<div class="series-klubb-round">';
+                html += '<div class="series-klubb-round-head">';
+                html += '<span class="label">Omg.&nbsp;' + (idx + 1) + '</span>';
+                html += '<span class="value">' + buildMobileRoundCell(cell, usesPoints) + '</span>';
+                html += '</div>';
+
+                if (cell.score !== null && cell.score !== undefined) {
+                    const result = findContributors(contributorsByClub, klubbClassName, row.name, idx, cell.score);
+                    if (result.contributors.length > 0) {
+                        html += '<div class="series-klubb-contributors">';
+                        result.contributors.forEach(function(c) {
+                            const cellRef = c.row.competitionScores[idx];
+                            let scoreText = String(cellRef.score);
+                            if (cellRef.xCount !== null && cellRef.xCount !== undefined) {
+                                scoreText += ' (' + cellRef.xCount + '×)';
+                            }
+                            // Show class only when it differs from the Klubb class (avoids redundant labels
+                            // for single-class team series where every contributor is from the same class).
+                            const showClass = c.className && c.className !== klubbClassName;
+                            html += '<div class="series-klubb-contributor">';
+                            html += '<span class="name">' + escapeHtmlSeries(c.row.name) + '</span>';
+                            html += '<span class="score">';
+                            if (showClass) {
+                                html += '<span class="cls-badge">' + escapeHtmlSeries(c.className) + '</span>';
+                            }
+                            html += scoreText;
+                            html += '</span>';
+                            html += '</div>';
+                        });
+                        html += '</div>';
+                    } else if (contributorsByClub) {
+                        // Either no individual rows for this club/class/comp, or no prefix sum matches
+                        // the team total. Either way, surface the inconsistency rather than hide it.
+                        html += '<div class="series-klubb-contributors text-muted small fst-italic">(kunde inte härleda bidragande skyttar)</div>';
+                    }
+                }
+                html += '</div>';
+            });
+            html += '</div>';
             return html;
         }
 

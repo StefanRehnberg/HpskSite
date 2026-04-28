@@ -115,6 +115,9 @@
                         <div class="d-flex justify-content-between align-items-center mb-2">
                             <label class="form-label mb-0 fw-bold">
                                 <i class="bi bi-crosshair me-1"></i>Serie <span id="dr-current-series-label">1</span>
+                                <span id="dr-entered-by-display" class="ms-2 small text-muted" style="display:none;">
+                                    (inmatat av <span id="dr-entered-by-name"></span>)
+                                </span>
                             </label>
                             <button type="button" class="btn btn-outline-danger btn-sm" onclick="drClearCurrentSeries()">
                                 <i class="bi bi-x-circle"></i> Rensa
@@ -481,6 +484,9 @@
 
             if (series) {
                 badge.innerHTML = `<i class="bi bi-check-circle-fill"></i> S${i}: ${series.total}p`;
+                if (series.enteredByName) {
+                    badge.title = `Inmatat av ${series.enteredByName}`;
+                }
                 grandTotal += series.total;
                 grandX += series.xCount;
             } else {
@@ -524,6 +530,13 @@
         document.getElementById('dr-current-series-label').textContent = seriesNum;
         document.getElementById('dr-shot-entry').style.display = '';
 
+        const enteredByDisplay = document.getElementById('dr-entered-by-display');
+        const enteredByName = document.getElementById('dr-entered-by-name');
+        if (enteredByDisplay && enteredByName) {
+            enteredByDisplay.style.display = 'none';
+            enteredByName.textContent = '';
+        }
+
         // If this series already has data, pre-fill
         const member = drMembers.find(m => m.memberId === drSelectedMemberId && m.shootingClass === drSelectedClass);
         if (member) {
@@ -531,6 +544,11 @@
             if (existing && existing.shots && existing.shots.length === 5) {
                 drShots = [...existing.shots];
                 updateShotDisplay();
+
+                if (enteredByDisplay && enteredByName && existing.enteredByName) {
+                    enteredByName.textContent = existing.enteredByName;
+                    enteredByDisplay.style.display = '';
+                }
             }
         }
     }
@@ -545,20 +563,28 @@
         });
     }
 
+    function drHideEnteredBy() {
+        const el = document.getElementById('dr-entered-by-display');
+        if (el) el.style.display = 'none';
+    }
+
     window.drAddShot = function(value) {
         if (drShots.length >= 5 || drSaving) return;
         drShots.push(value);
+        drHideEnteredBy();
         updateShotDisplay();
     };
 
     window.drUndoLastShot = function() {
         if (drShots.length === 0) return;
         drShots.pop();
+        drHideEnteredBy();
         updateShotDisplay();
     };
 
     window.drClearCurrentSeries = function() {
         drShots = [];
+        drHideEnteredBy();
         updateShotDisplay();
     };
 

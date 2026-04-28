@@ -1662,6 +1662,36 @@ namespace HpskSite.Controllers
                         .ToHashSet();
                 }
 
+                // Pre-compute admin counts per club and per region (one pass over member groups)
+                // Used to show webadmins whether a club admin or kretsadmin was notified for each prospect.
+                var clubAdminCounts = new Dictionary<int, int>();
+                var regionalAdminCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                foreach (var group in _memberGroupService.GetAll())
+                {
+                    var groupName = group?.Name;
+                    if (string.IsNullOrEmpty(groupName)) continue;
+
+                    if (groupName.StartsWith("ClubAdmin_") &&
+                        int.TryParse(groupName.Substring("ClubAdmin_".Length), out var cid))
+                    {
+                        var count = _memberService.GetMembersByGroup(groupName)?.Count() ?? 0;
+                        if (count > 0) clubAdminCounts[cid] = count;
+                    }
+                    else if (groupName.StartsWith("RegionalAdmin_"))
+                    {
+                        var rcode = groupName.Substring("RegionalAdmin_".Length);
+                        if (string.IsNullOrEmpty(rcode)) continue;
+                        var count = _memberService.GetMembersByGroup(groupName)?.Count() ?? 0;
+                        if (count > 0) regionalAdminCounts[rcode] = count;
+                    }
+                }
+
+                // Build clubId → region lookup for quick region resolution per prospect
+                var clubRegionLookup = clubs
+                    .Where(c => c.Id.HasValue)
+                    .GroupBy(c => c.Id!.Value)
+                    .ToDictionary(g => g.Key, g => g.First().RegionalFederation ?? "");
+
                 var pendingMembers = allMembers
                     .Where(m => m.ContentType.Alias != ClubMemberTypeAlias) // Exclude clubs
                     .Where(m => !m.IsApproved) // Only non-approved members
@@ -1669,13 +1699,22 @@ namespace HpskSite.Controllers
                         var primaryClubIdStr = m.GetValue("primaryClubId")?.ToString();
                         var clubName = "No Club";
                         int? parsedClubId = null;
+                        var region = "";
 
                         if (!string.IsNullOrEmpty(primaryClubIdStr) && int.TryParse(primaryClubIdStr, out var clubId))
                         {
                             parsedClubId = clubId;
                             var club = clubs.FirstOrDefault(c => c.Id == clubId);
                             clubName = club?.Name ?? $"Unknown Club (ID: {clubId})";
+                            clubRegionLookup.TryGetValue(clubId, out region!);
                         }
+
+                        var clubAdminCount = parsedClubId.HasValue
+                            ? clubAdminCounts.GetValueOrDefault(parsedClubId.Value)
+                            : 0;
+                        var regionalAdminCount = !string.IsNullOrEmpty(region)
+                            ? regionalAdminCounts.GetValueOrDefault(region)
+                            : 0;
 
                         return new {
                             Id = m.Id,
@@ -1683,6 +1722,9 @@ namespace HpskSite.Controllers
                             Email = m.Email,
                             ClubName = clubName,
                             ClubId = parsedClubId,
+                            Region = region ?? "",
+                            ClubAdminCount = clubAdminCount,
+                            RegionalAdminCount = regionalAdminCount,
                             RegistrationDate = m.CreateDate
                         };
                     })

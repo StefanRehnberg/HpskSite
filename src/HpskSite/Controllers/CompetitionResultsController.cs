@@ -571,6 +571,8 @@ namespace HpskSite.Controllers
                     }
                 }
 
+                var entererNameMap = BuildEntererNameMap(existingResults.Select(e => e.EnteredBy));
+
                 var members = authorizedRegistrations
                     .Select(r =>
                     {
@@ -591,7 +593,8 @@ namespace HpskSite.Controllers
                                     SeriesNumber = e.SeriesNumber,
                                     Total = total,
                                     XCount = xCount,
-                                    Shots = shots
+                                    Shots = shots,
+                                    EnteredByName = entererNameMap.TryGetValue(e.EnteredBy, out var n) ? n : ""
                                 };
                             })
                             .ToList();
@@ -884,13 +887,67 @@ namespace HpskSite.Controllers
             try
             {
                 var results = await GetCompetitionResultsInternal(competitionId);
-                return Json(new { Success = true, Results = results });
+                var nameMap = BuildEntererNameMap(results.Select(r => r.EnteredBy));
+
+                var projected = results.Select(r => new
+                {
+                    r.Id,
+                    r.CompetitionId,
+                    r.SeriesNumber,
+                    r.MemberId,
+                    r.TeamNumber,
+                    r.Position,
+                    r.ShootingClass,
+                    r.Shots,
+                    r.EnteredBy,
+                    EnteredByName = nameMap.TryGetValue(r.EnteredBy, out var n) ? n : "",
+                    r.EnteredAt,
+                    r.LastModified
+                });
+
+                return Json(new { Success = true, Results = projected });
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error getting competition results for competition {CompetitionId}", competitionId);
                 return Json(new { Success = false, Message = "Error loading results" });
             }
+        }
+
+        /// <summary>
+        /// Resolve a set of MemberIds to compact display names ("Stefan R.").
+        /// Single in-memory pass over IMemberService — avoids N+1 lookups in callers.
+        /// </summary>
+        private Dictionary<int, string> BuildEntererNameMap(IEnumerable<int> memberIds)
+        {
+            var map = new Dictionary<int, string>();
+            foreach (var id in memberIds.Where(i => i > 0).Distinct())
+            {
+                try
+                {
+                    var m = _memberService.GetById(id);
+                    if (m != null)
+                    {
+                        map[id] = FormatCompactName(m.Name ?? "");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to resolve enterer name for MemberId {MemberId}", id);
+                }
+            }
+            return map;
+        }
+
+        /// <summary>
+        /// "Stefan Rehnberg" -> "Stefan R."  (single name -> as-is, empty -> empty)
+        /// </summary>
+        private static string FormatCompactName(string fullName)
+        {
+            if (string.IsNullOrWhiteSpace(fullName)) return "";
+            var parts = fullName.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 1) return parts[0];
+            return parts[0] + " " + parts[^1][0] + ".";
         }
 
         /// <summary>
@@ -1068,6 +1125,124 @@ namespace HpskSite.Controllers
                     Success = false,
                     Message = $"Ett fel uppstod vid borttagning av resultatet: {ex.Message}"
                 });
+            }
+        }
+
+        /// <summary>
+        /// Remove ALL series results for one shooter in one shooting class for a competition.
+        /// Works regardless of whether a start list exists (covers self-reporting / hemmabana
+        /// competitions where the per-series CLEAR flow is not available). Identity-based:
+        /// keyed on (CompetitionId, MemberId, ShootingClass).
+        /// Springskytte and Fältskytte have their own controllers and storage and are not handled here.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeleteShooterFromClass([FromBody] DeleteShooterFromClassRequest request)
+        {
+            try
+            {
+                if (request == null || request.CompetitionId <= 0 || request.MemberId <= 0 ||
+                    string.IsNullOrEmpty(request.ShootingClass))
+                {
+                    return Json(new { success = false, message = "Ogiltig begäran." });
+                }
+
+                var competition = _contentService.GetById(request.CompetitionId);
+                if (competition == null)
+                {
+                    return Json(new { success = false, message = "Tävlingen hittades inte." });
+                }
+
+                bool isSiteAdmin = await _adminAuthorizationService.IsCurrentUserAdminAsync();
+                bool isCompetitionManager = await _adminAuthorizationService.IsCompetitionManager(request.CompetitionId);
+
+                bool isClubAdmin = false;
+                bool isSkjutledare = false;
+                var competitionClubId = competition.GetValue<int>("clubId");
+                if (competitionClubId > 0)
+                {
+                    isClubAdmin = await _adminAuthorizationService.IsClubAdminForClub(competitionClubId);
+                    isSkjutledare = await _adminAuthorizationService.IsSkjutledareForClub(competitionClubId);
+                }
+
+                if (!isSiteAdmin && !isCompetitionManager && !isClubAdmin && !isSkjutledare)
+                {
+                    return Json(new { success = false, message = "Du har inte behörighet att ta bort resultat." });
+                }
+
+                var compTypeId = GetCompetitionTypeId(request.CompetitionId);
+                if (compTypeId is "Springskytte" or "Faltskytte" or "MagnumFalt")
+                {
+                    return Json(new { success = false, message = $"Borttagning av resultat för {compTypeId} hanteras i dess egen vy." });
+                }
+
+                var tableName = GetResultTableName(compTypeId);
+
+                // The result list JSON stores the display Name ("C 1"); the DB stores the Id ("C1").
+                // Accept either by normalizing through the registry. Fall back to the raw input
+                // for unknown values (e.g. legacy/custom rows) so the existing behaviour is preserved.
+                var resolvedClass = ShootingClasses.GetById(request.ShootingClass)?.Id
+                                 ?? ShootingClasses.GetByName(request.ShootingClass)?.Id
+                                 ?? request.ShootingClass;
+
+                using var db = _umbracoDatabaseFactory.CreateDatabase();
+                var rowsDeleted = await db.ExecuteAsync(
+                    $"DELETE FROM [{tableName}] WHERE CompetitionId = @0 AND MemberId = @1 AND ShootingClass = @2",
+                    request.CompetitionId, request.MemberId, resolvedClass);
+
+                _logger.LogInformation(
+                    "DeleteShooterFromClass: removed {Rows} rows from {Table} for competition {CompetitionId}, member {MemberId}, class '{RequestedClass}' (resolved to '{ResolvedClass}')",
+                    rowsDeleted, tableName, request.CompetitionId, request.MemberId, request.ShootingClass, resolvedClass);
+
+                if (rowsDeleted == 0)
+                {
+                    return Json(new { success = false, message = "Inga resultat hittades att ta bort." });
+                }
+
+                try { _seriesCalculationService.InvalidateCacheForCompetition(request.CompetitionId); }
+                catch (Exception ex) { _logger.LogWarning(ex, "Failed to invalidate series cache after DeleteShooterFromClass"); }
+
+                try { await UpdateLiveLeaderboard(request.CompetitionId); }
+                catch (Exception ex) { _logger.LogWarning(ex, "Failed to update live leaderboard after DeleteShooterFromClass"); }
+
+                // Refresh the persisted Slutresultat snapshot so officially-marked pages also reflect the deletion.
+                try
+                {
+                    var dbResults = await GetCompetitionResultsInternal(request.CompetitionId);
+                    var resultPage = _contentService.GetPagedChildren(competition.Id, 0, int.MaxValue, out long _)
+                        .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
+                    if (resultPage != null)
+                    {
+                        var mergeConfigJson = resultPage.GetValue<string>("mergeConfig");
+                        List<ClassMergeAction>? storedMerges = null;
+                        if (!string.IsNullOrEmpty(mergeConfigJson))
+                        {
+                            storedMerges = JsonConvert.DeserializeObject<List<ClassMergeAction>>(mergeConfigJson);
+                        }
+
+                        var finalResults = await CalculateFinalResults(dbResults, request.CompetitionId, storedMerges);
+                        var existingIsOfficial = resultPage.GetValue<bool>("isOfficial");
+
+                        resultPage.SetValue("resultData", JsonConvert.SerializeObject(finalResults));
+                        resultPage.SetValue("lastUpdated", DateTime.Now);
+                        resultPage.SetValue("isOfficial", existingIsOfficial);
+
+                        _contentService.Save(resultPage);
+                        _contentService.Publish(resultPage, new[] { "*" }, -1);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to refresh final results page after DeleteShooterFromClass");
+                }
+
+                return Json(new { success = true, message = $"{rowsDeleted} resultatrad(er) borttagna.", rowsDeleted });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in DeleteShooterFromClass for competition {CompetitionId}, member {MemberId}, class {Class}",
+                    request?.CompetitionId, request?.MemberId, request?.ShootingClass);
+                return Json(new { success = false, message = "Ett fel uppstod: " + ex.Message });
             }
         }
 
@@ -3101,6 +3276,13 @@ namespace HpskSite.Controllers
         public int MemberId { get; set; }
         public string OldShootingClass { get; set; } = "";
         public string NewShootingClass { get; set; } = "";
+    }
+
+    public class DeleteShooterFromClassRequest
+    {
+        public int CompetitionId { get; set; }
+        public int MemberId { get; set; }
+        public string ShootingClass { get; set; } = "";
     }
 
     public class CreateResultsListRequest

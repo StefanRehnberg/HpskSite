@@ -260,6 +260,7 @@ namespace HpskSite.CompetitionTypes.Precision.Models
         public int Total { get; set; }
         public int XCount { get; set; }
         public string[] Shots { get; set; } = Array.Empty<string>();
+        public string EnteredByName { get; set; } = "";
     }
 
     /// <summary>

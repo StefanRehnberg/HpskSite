@@ -1398,6 +1398,9 @@ function generateShooterResultsEntryHtml(shooterData, seriesId, competitionId) {
                                         <span class="fw-bold me-2 d-flex align-items-center">=</span><span class="series-total fs-5 fw-bold">0</span>
                                         <span class="ms-4 fw-bold d-flex align-items-center">X: </span><span class="series-xcount fs-5 fw-bold">0</span>
                                     </div>
+                                    <span class="entered-by-display ms-3 small text-muted" style="display:none;">
+                                        Inmatat av <span class="entered-by-name"></span>
+                                    </span>
                                 </div>
                             </div>
 
@@ -1649,7 +1652,8 @@ function initializeShooterResultsEntry(shooterData, existingResult = null) {
         total: total,
         xCount: xCount,
         isComplete: isComplete,
-        hasExistingResults: !!existingResult
+        hasExistingResults: !!existingResult,
+        enteredByName: existingResult ? (existingResult.enteredByName || '') : ''
     };
     
     // Set up event listeners
@@ -1853,7 +1857,20 @@ function updateShooterDisplay() {
     
     if (seriesTotalElement) seriesTotalElement.textContent = currentShooterData.total;
     if (seriesXCountElement) seriesXCountElement.textContent = currentShooterData.xCount;
-    
+
+    // "Inmatat av X" — visible only while the existing saved data is on screen
+    const enteredByDisplay = document.querySelector('.entered-by-display');
+    const enteredByNameEl = document.querySelector('.entered-by-name');
+    if (enteredByDisplay && enteredByNameEl) {
+        const showEnteredBy = currentShooterData.hasExistingResults && !!currentShooterData.enteredByName;
+        if (showEnteredBy) {
+            enteredByNameEl.textContent = currentShooterData.enteredByName;
+            enteredByDisplay.style.display = '';
+        } else {
+            enteredByDisplay.style.display = 'none';
+        }
+    }
+
     // Update overall totals (all series for this shooter)
     updateOverallTotals();
 }
