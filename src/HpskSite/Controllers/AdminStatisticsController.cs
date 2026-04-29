@@ -87,6 +87,120 @@ namespace HpskSite.Controllers
             }
         }
 
+        /// <summary>
+        /// Visitor stats for the Statistik tab — daily over the last 30 days and
+        /// weekly (Monday-start) over the last 53 weeks. Source: VisitorLogs table.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetVisitorStats(bool force = false)
+        {
+            if (!await _authService.IsCurrentUserAdminAsync())
+            {
+                return Json(new { success = false, message = "Access denied" });
+            }
+
+            const string cacheKey = "admin_visitor_stats";
+            if (!force && _memoryCache.TryGetValue(cacheKey, out object? cached) && cached != null)
+            {
+                return Json(cached);
+            }
+
+            try
+            {
+                var today = DateTime.Today;
+                var dailyStart = today.AddDays(-29); // include today => 30 entries
+                var weeklyEnd = StartOfIsoWeek(today);
+                var weeklyStart = weeklyEnd.AddDays(-7 * 52); // include current week => 53 entries
+
+                using var db = _databaseFactory.CreateDatabase();
+
+                // Daily aggregation (last 30 days, including today)
+                var dailyRows = await db.FetchAsync<DailyVisitorRow>(
+                    @"SELECT
+                          CAST(VisitedAt AS DATE) AS [Day],
+                          COUNT(DISTINCT SessionHash) AS Visitors,
+                          COUNT(*) AS PageViews
+                      FROM [VisitorLogs]
+                      WHERE VisitedAt >= @0
+                      GROUP BY CAST(VisitedAt AS DATE)
+                      ORDER BY [Day]",
+                    dailyStart);
+
+                var dailyMap = dailyRows.ToDictionary(r => r.Day.Date, r => r);
+                var daily = new List<object>(30);
+                for (int i = 0; i < 30; i++)
+                {
+                    var d = dailyStart.AddDays(i);
+                    if (dailyMap.TryGetValue(d, out var row))
+                    {
+                        daily.Add(new { date = d.ToString("yyyy-MM-dd"), visitors = row.Visitors, pageViews = row.PageViews });
+                    }
+                    else
+                    {
+                        daily.Add(new { date = d.ToString("yyyy-MM-dd"), visitors = 0, pageViews = 0 });
+                    }
+                }
+
+                // Weekly aggregation (last 53 weeks, Monday-start, regardless of DATEFIRST).
+                // 1900-01-01 was a Monday, so (DATEDIFF(day, '19000101', VisitedAt) % 7) gives 0 for Monday.
+                var weeklyRows = await db.FetchAsync<WeeklyVisitorRow>(
+                    @"SELECT
+                          DATEADD(day, -((DATEDIFF(day, '19000101', VisitedAt)) % 7), CAST(VisitedAt AS DATE)) AS WeekStart,
+                          COUNT(DISTINCT SessionHash) AS Visitors,
+                          COUNT(*) AS PageViews
+                      FROM [VisitorLogs]
+                      WHERE VisitedAt >= @0
+                      GROUP BY DATEADD(day, -((DATEDIFF(day, '19000101', VisitedAt)) % 7), CAST(VisitedAt AS DATE))
+                      ORDER BY WeekStart",
+                    weeklyStart);
+
+                var weeklyMap = weeklyRows.ToDictionary(r => r.WeekStart.Date, r => r);
+                var weekly = new List<object>(53);
+                for (int i = 0; i < 53; i++)
+                {
+                    var w = weeklyStart.AddDays(7 * i);
+                    if (weeklyMap.TryGetValue(w, out var row))
+                    {
+                        weekly.Add(new { weekStart = w.ToString("yyyy-MM-dd"), visitors = row.Visitors, pageViews = row.PageViews });
+                    }
+                    else
+                    {
+                        weekly.Add(new { weekStart = w.ToString("yyyy-MM-dd"), visitors = 0, pageViews = 0 });
+                    }
+                }
+
+                var result = new { success = true, daily, weekly };
+                _memoryCache.Set(cacheKey, result, TimeSpan.FromMinutes(5));
+                return Json(result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error building visitor stats");
+                return Json(new { success = false, message = "Error loading visitor stats: " + ex.Message });
+            }
+        }
+
+        private static DateTime StartOfIsoWeek(DateTime d)
+        {
+            // Monday = 1, Sunday = 0 in C# DayOfWeek (where Sunday=0). Translate to Monday=0.
+            int offset = ((int)d.DayOfWeek + 6) % 7;
+            return d.Date.AddDays(-offset);
+        }
+
+        private class DailyVisitorRow
+        {
+            public DateTime Day { get; set; }
+            public int Visitors { get; set; }
+            public int PageViews { get; set; }
+        }
+
+        private class WeeklyVisitorRow
+        {
+            public DateTime WeekStart { get; set; }
+            public int Visitors { get; set; }
+            public int PageViews { get; set; }
+        }
+
         private object BuildStatistics()
         {
             var now = DateTime.Now;

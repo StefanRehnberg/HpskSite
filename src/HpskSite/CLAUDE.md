@@ -126,6 +126,10 @@ Home
 - `ClubAdmin_{ClubId}` (e.g., ClubAdmin_1098) — Club administrator
 - `Skjutledare_{ClubId}` (e.g., Skjutledare_1098) — Range Master (Skjutledare)
 - `RegionalAdmin_{RegionCode}` (e.g., RegionalAdmin_Stockholm) — Regional administrator
+- `Foreningsinstruktor_{ClubId}` — Appointed Föreningsinstruktör for the club (cert-backed; see [CERTIFICATIONS_SYSTEM.md](Documentation/CERTIFICATIONS_SYSTEM.md))
+- `Kretsinstruktor_{RegionCode}` — Appointed Kretsinstruktör for the region (cert-backed)
+- `Riksinstruktor_{AreaCode}` — Appointed Riksinstruktör for an area (`Syd`/`Vast`/`Ost`/`Nord`)
+- `Vapenkontrollant`, `Banlaggare` — Global groups, auto-managed by `CertificationService` when the personal cert is granted/revoked
 
 **Permission Hierarchy:**
 1. Site Administrators - Full access to all clubs
@@ -134,6 +138,8 @@ Home
 4. Skjutledare (Range Master) - Approve training steps + manage competitions for their club
 5. Trainer (Training Group) - Approve training steps for their training group members only
 6. Regular Users - No admin access
+
+**Certified roles (separate from appointed roles)**: Föreningsinstruktör, Kretsinstruktör, Riksinstruktör, Vapenkontrollant, Banläggare are SPSF-registered certifications. The cert is a personal credential stored in the `MemberCertifications` table; the appointment to a specific scope is held in the member groups above. See [CERTIFICATIONS_SYSTEM.md](Documentation/CERTIFICATIONS_SYSTEM.md) for the full architecture, authority hierarchy, and operator setup steps.
 
 **Key API Methods** (AdminAuthorizationService.cs):
 ```csharp
@@ -841,6 +847,11 @@ Navigate to **Members → Member Groups**:
 - ClubAdmin_XXXX groups (created automatically by system for each club)
 - Skjutledare_XXXX groups (created automatically when assigning Skjutledare via club admin panel)
 - RegionalAdmin_XXXX groups (created automatically for regional admins)
+- Foreningsinstruktor_XXXX, Kretsinstruktor_XXXX, Riksinstruktor_XXXX (created automatically by `CertificationService` on first appointment per scope)
+- Vapenkontrollant, Banlaggare (single global groups, created automatically on first cert grant)
+
+### Document Type Properties — Required Additions
+- **regionalPage**: add `area` Textstring property (dropdown values: `Syd`, `Vast`, `Ost`, `Nord`). Required by the Certifications system to scope Riksinstruktör authority. Backfill on every existing region node.
 
 ## Common Patterns
 
@@ -906,6 +917,7 @@ The `/Migrations` folder contains disabled database schemas for direct competiti
 - **Training System (Skyttetrappan)** - Backend, UI, admin interface, training groups, step approval workflow
 - **Training Groups System (2026-02)** - Database tables, service, controller, UI in both TrainingStairs and ClubAdminPanel. Includes group lifecycle (create/edit/deactivate), member/trainer management, step-by-step approval, group email messaging
 - **Skjutledare (Range Master) Role (2026-02)** - New club-level trust role. Can approve training steps and manage competitions for their club. Member group pattern `Skjutledare_{ClubId}`. Managed via club admin panel Members tab
+- **Certifications System (2026-04-29)** - SPSF-registered roles (Föreningsinstruktör, Kretsinstruktör, Riksinstruktör, Vapenkontrollant, Banläggare). Personal cert stored in `MemberCertifications` table; appointment via member groups. Hierarchy-aware grant authority. Statistik integration on club + regional + admin tabs. Members-tier panels on Club and RegionalPage. See [Documentation](Documentation/CERTIFICATIONS_SYSTEM.md). **Manual operator steps required:** run `Migrations/create-member-certifications-table.sql` and add `area` Textstring property to `regionalPage` doctype.
 - **Training Scoring System (2025-10-31)** - Complete with dashboard, Chart.js visualizations, unified results (see [Documentation](Documentation/TRAINING_SCORING_SYSTEM.md))
 - **Competition Series System** - Full CRUD with CKEditor 5
 - **Competition Admin System** - Full CRUD operations with role-based access

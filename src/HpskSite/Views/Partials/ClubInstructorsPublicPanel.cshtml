@@ -1,0 +1,73 @@
+@*
+    Read-only "Klubbens instruktörer" panel for the members-tier on Club.cshtml.
+    Lists active appointed Föreningsinstruktörer plus club-resident Vapenkontrollanter
+    and Banläggare. Visible only to logged-in members (the parent view gates this).
+*@
+@{
+    var publicPanelClubId = ViewBag.clubId as int? ?? 0;
+}
+
+@if (publicPanelClubId > 0)
+{
+    <div class="card mb-3 club-instructors-card" data-club-id="@publicPanelClubId">
+        <div class="card-body">
+            <h6 class="card-title mb-3"><i class="bi bi-mortarboard me-2"></i>Klubbens instruktörer</h6>
+            <div class="club-instructors-loading small text-muted">
+                <div class="spinner-border spinner-border-sm me-2" role="status"></div>Laddar...
+            </div>
+            <div class="club-instructors-content row g-3" style="display:none;">
+                <div class="col-md-6">
+                    <h6 class="small text-muted text-uppercase mb-2">Föreningsinstruktörer</h6>
+                    <ul class="list-unstyled mb-0 small" data-list="foreningsinstruktorer">
+                        <li class="text-muted">— Inga registrerade —</li>
+                    </ul>
+                </div>
+                <div class="col-md-3">
+                    <h6 class="small text-muted text-uppercase mb-2">Vapenkontrollanter</h6>
+                    <ul class="list-unstyled mb-0 small" data-list="vapenkontrollanter">
+                        <li class="text-muted">— Inga —</li>
+                    </ul>
+                </div>
+                <div class="col-md-3">
+                    <h6 class="small text-muted text-uppercase mb-2">Banläggare</h6>
+                    <ul class="list-unstyled mb-0 small" data-list="banlaggare">
+                        <li class="text-muted">— Inga —</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    (function () {
+        var card = document.querySelector('.club-instructors-card[data-club-id="@publicPanelClubId"]');
+        if (!card) return;
+
+        function escapeHtml(str) { var d = document.createElement('div'); d.textContent = str || ''; return d.innerHTML; }
+
+        function fillList(key, items) {
+            var ul = card.querySelector('[data-list="' + key + '"]');
+            if (!ul) return;
+            if (!items || items.length === 0) {
+                ul.innerHTML = '<li class="text-muted">— Inga registrerade —</li>';
+                return;
+            }
+            ul.innerHTML = items.map(function (p) { return '<li>' + escapeHtml(p.name) + '</li>'; }).join('');
+        }
+
+        fetch('/umbraco/surface/Certification/PublicListForClub?clubId=@publicPanelClubId')
+            .then(function (r) { return r.json(); })
+            .then(function (resp) {
+                card.querySelector('.club-instructors-loading').style.display = 'none';
+                card.querySelector('.club-instructors-content').style.display = '';
+                if (!resp.success) return;
+                fillList('foreningsinstruktorer', resp.foreningsinstruktorer);
+                fillList('vapenkontrollanter', resp.vapenkontrollanter);
+                fillList('banlaggare', resp.banlaggare);
+            })
+            .catch(function () {
+                card.querySelector('.club-instructors-loading').textContent = 'Kunde inte ladda instruktörer.';
+            });
+    })();
+    </script>
+}

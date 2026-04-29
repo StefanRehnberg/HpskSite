@@ -1,0 +1,552 @@
+@*
+    Certification management panel — shared between the Club admin "Instruktörer &
+    certifieringar" surface and the Regional admin Certifieringar tab. Read scope from
+    ViewData["CertScopeType"] (Club | Region) and ViewData["CertScopeId"]
+    (clubId as int or regionCode string). The partial renders a self-contained DOM block
+    + JS that fetches its own data from CertificationController.
+*@
+@{
+    var certScopeType = ViewData["CertScopeType"] as string ?? "Club";
+    var certScopeIdRaw = ViewData["CertScopeId"]?.ToString() ?? "";
+    var certInstanceKey = (certScopeType + "-" + certScopeIdRaw).Replace(" ", "-");
+}
+
+<div class="certification-management-panel" data-cert-scope-type="@certScopeType" data-cert-scope-id="@certScopeIdRaw" data-cert-instance="@certInstanceKey">
+
+    <div class="d-flex align-items-center mb-3">
+        <h6 class="mb-0">
+            <i class="bi bi-mortarboard me-2"></i>
+            @if (certScopeType == "Region") { <text>Certifieringar i kretsen</text> } else { <text>Klubbens certifieringar</text> }
+        </h6>
+        <button type="button" class="btn btn-sm btn-outline-secondary ms-auto cert-refresh-btn">
+            <i class="bi bi-arrow-clockwise"></i>
+        </button>
+    </div>
+
+    <div class="cert-loading text-center py-3">
+        <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+        <span class="ms-2 small text-muted">Laddar certifieringar...</span>
+    </div>
+
+    <div class="cert-error alert alert-danger d-none"></div>
+
+    <div class="cert-content" style="display:none;">
+
+        @if (certScopeType == "Region")
+        {
+            <!-- Kretsinstruktörer for this region -->
+            <div class="card mb-3">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h6 class="mb-0"><i class="bi bi-mortarboard-fill me-1"></i>Kretsinstruktörer</h6>
+                        <button type="button" class="btn btn-sm btn-success cert-add-btn"
+                                data-cert-type="Kretsinstruktor">
+                            <i class="bi bi-plus-circle"></i> Tilldela
+                        </button>
+                    </div>
+                    <ul class="list-group list-group-flush cert-list" data-cert-type="Kretsinstruktor"></ul>
+                </div>
+            </div>
+
+            <!-- Vapen / Ban directories (read-only at region scope) -->
+            <div class="row g-2 mb-3">
+                <div class="col-md-6">
+                    <div class="card h-100">
+                        <div class="card-body">
+                            <h6 class="mb-2"><i class="bi bi-shield-check me-1"></i>Vapenkontrollanter i kretsen</h6>
+                            <ul class="list-group list-group-flush cert-list" data-cert-type="Vapenkontrollant"></ul>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="card h-100">
+                        <div class="card-body">
+                            <h6 class="mb-2"><i class="bi bi-bullseye me-1"></i>Banläggare i kretsen</h6>
+                            <ul class="list-group list-group-flush cert-list" data-cert-type="Banlaggare"></ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Föreningsinstruktörer per club rollup (last) -->
+            <div class="card mb-3">
+                <div class="card-body">
+                    <h6 class="mb-2"><i class="bi bi-people me-1"></i>Föreningsinstruktörer per klubb</h6>
+                    <small class="text-muted d-block mb-2">Klubbar utan Föreningsinstruktör listas i rött. Tilldela ny medlem direkt från klubbens admin.</small>
+                    <div class="cert-foreningsinstruktor-rollup"></div>
+                </div>
+            </div>
+        }
+        else
+        {
+            <!-- Föreningsinstruktörer (appointed for THIS club) -->
+            <div class="card mb-3">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h6 class="mb-0"><i class="bi bi-mortarboard-fill me-1"></i>Föreningsinstruktörer</h6>
+                        <button type="button" class="btn btn-sm btn-success cert-add-btn"
+                                data-cert-type="Foreningsinstruktor">
+                            <i class="bi bi-plus-circle"></i> Tilldela
+                        </button>
+                    </div>
+                    <small class="text-muted d-block mb-2">SPSF kräver minst en Föreningsinstruktör per klubb. Hör med kretsens kretsinstruktör om utbildning.</small>
+                    <ul class="list-group list-group-flush cert-list" data-cert-type="Foreningsinstruktor"></ul>
+                </div>
+            </div>
+
+            <div class="row g-2">
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <h6 class="mb-0"><i class="bi bi-shield-check me-1"></i>Vapenkontrollanter</h6>
+                                <button type="button" class="btn btn-sm btn-success cert-add-btn"
+                                        data-cert-type="Vapenkontrollant">
+                                    <i class="bi bi-plus-circle"></i>
+                                </button>
+                            </div>
+                            <ul class="list-group list-group-flush cert-list" data-cert-type="Vapenkontrollant"></ul>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <h6 class="mb-0"><i class="bi bi-bullseye me-1"></i>Banläggare</h6>
+                                <button type="button" class="btn btn-sm btn-success cert-add-btn"
+                                        data-cert-type="Banlaggare">
+                                    <i class="bi bi-plus-circle"></i>
+                                </button>
+                            </div>
+                            <ul class="list-group list-group-flush cert-list" data-cert-type="Banlaggare"></ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+<!-- Add/Grant modal (one per panel instance) -->
+<div class="modal fade" id="certGrantModal-@certInstanceKey" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Tilldela certifiering</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label">Certifieringstyp</label>
+                    <input type="text" class="form-control" id="certGrantType-@certInstanceKey" readonly>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Medlem *</label>
+                    <select class="form-select cert-member-select" id="certGrantMember-@certInstanceKey"></select>
+                    <small class="form-text text-muted">Sökbar via dropdown. Du måste välja en medlem som ännu inte har en aktiv certifiering av samma typ.</small>
+                </div>
+                <div class="mb-3" id="certGrantGrantorWrapper-@certInstanceKey">
+                    <label class="form-label">Certifierad av</label>
+                    <select class="form-select" id="certGrantGrantor-@certInstanceKey">
+                        <option value="">— Välj utbildare / utfärdare —</option>
+                    </select>
+                    <small class="form-text text-muted">Endast medlemmar med behörighet att utfärda denna certifieringstyp visas.</small>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Certifierad datum *</label>
+                    <input type="text" class="form-control cert-date-picker" id="certGrantCertifiedAt-@certInstanceKey" placeholder="ÅÅÅÅ-MM-DD">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Förfaller (frivilligt)</label>
+                    <input type="text" class="form-control cert-date-picker" id="certGrantExpiresAt-@certInstanceKey" placeholder="ÅÅÅÅ-MM-DD">
+                    <small class="form-text text-muted">Lämna tomt om certifieringen aldrig förfaller.</small>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Certifikatnummer (frivilligt)</label>
+                    <input type="text" class="form-control" id="certGrantNumber-@certInstanceKey" maxlength="100">
+                </div>
+                <div class="mb-2">
+                    <label class="form-label">Anteckningar (frivilligt)</label>
+                    <textarea class="form-control" id="certGrantNotes-@certInstanceKey" rows="2"></textarea>
+                </div>
+                <div class="alert alert-danger d-none" id="certGrantError-@certInstanceKey"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary cert-grant-submit-btn">
+                    <i class="bi bi-save me-1"></i>Spara
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    var instanceKey = '@certInstanceKey';
+    var rootSelector = '.certification-management-panel[data-cert-instance="' + instanceKey + '"]';
+    var root = document.querySelector(rootSelector);
+    if (!root) return;
+
+    var scopeType = root.getAttribute('data-cert-scope-type');
+    var scopeId = root.getAttribute('data-cert-scope-id');
+
+    // Flatpickr (sv-SE) for the two date fields in this instance's grant modal.
+    var fpCertifiedAt = null;
+    var fpExpiresAt = null;
+    function initFlatpickrs() {
+        if (typeof flatpickr === 'undefined') return;
+        if (!fpCertifiedAt) {
+            fpCertifiedAt = flatpickr('#certGrantCertifiedAt-' + instanceKey, {
+                locale: 'sv', dateFormat: 'Y-m-d', allowInput: true
+            });
+        }
+        if (!fpExpiresAt) {
+            fpExpiresAt = flatpickr('#certGrantExpiresAt-' + instanceKey, {
+                locale: 'sv', dateFormat: 'Y-m-d', allowInput: true
+            });
+        }
+    }
+
+    function escapeHtml(str) {
+        var d = document.createElement('div'); d.textContent = str || ''; return d.innerHTML;
+    }
+
+    function getToken() {
+        var el = document.querySelector('input[name="__RequestVerificationToken"]');
+        return el ? el.value : '';
+    }
+
+    function loadCerts() {
+        var loading = root.querySelector('.cert-loading');
+        var content = root.querySelector('.cert-content');
+        var errBox = root.querySelector('.cert-error');
+        loading.style.display = '';
+        content.style.display = 'none';
+        errBox.classList.add('d-none');
+
+        var url = scopeType === 'Region'
+            ? '/umbraco/surface/Certification/ListForRegion?regionCode=' + encodeURIComponent(scopeId)
+            : '/umbraco/surface/Certification/ListForClub?clubId=' + encodeURIComponent(scopeId);
+
+        fetch(url).then(function (r) { return r.json(); }).then(function (resp) {
+            loading.style.display = 'none';
+            if (!resp.success) {
+                errBox.classList.remove('d-none');
+                errBox.textContent = resp.message || 'Okänt fel';
+                return;
+            }
+            content.style.display = '';
+            renderLists(resp);
+        }).catch(function (err) {
+            loading.style.display = 'none';
+            errBox.classList.remove('d-none');
+            errBox.textContent = err.message || 'Nätverksfel';
+        });
+    }
+
+    function renderPersonItem(person, certType) {
+        var cert = person.cert;
+        var details = '';
+        if (cert) {
+            var pieces = [];
+            if (cert.certifiedAt) pieces.push('Cert ' + escapeHtml(cert.certifiedAt));
+            if (cert.expiresAt) pieces.push('förfaller ' + escapeHtml(cert.expiresAt));
+            if (cert.certificateNumber) pieces.push('nr ' + escapeHtml(cert.certificateNumber));
+            details = pieces.join(' · ');
+        } else {
+            details = '<span class="text-muted small">Ingen aktiv certifiering</span>';
+        }
+
+        var actionBtns = '';
+        if (cert) {
+            actionBtns = '<button type="button" class="btn btn-sm btn-outline-danger cert-revoke-btn"'
+                       + ' data-cert-id="' + cert.id + '"'
+                       + ' data-cert-type="' + escapeHtml(certType) + '"'
+                       + ' data-member-name="' + escapeHtml(person.name) + '"'
+                       + ' title="Återkalla certifiering">'
+                       + '<i class="bi bi-x-circle"></i>'
+                       + '</button>';
+        }
+
+        // For Föreningsinstruktör + Kretsinstruktör (have appointments), allow unappoint.
+        if ((certType === 'Foreningsinstruktor' && scopeType === 'Club')
+            || (certType === 'Kretsinstruktor' && scopeType === 'Region'))
+        {
+            actionBtns += ' <button type="button" class="btn btn-sm btn-outline-warning cert-unappoint-btn"'
+                       + ' data-member-id="' + person.memberId + '"'
+                       + ' data-cert-type="' + escapeHtml(certType) + '"'
+                       + ' data-member-name="' + escapeHtml(person.name) + '"'
+                       + ' title="Ta bort utnämning">'
+                       + '<i class="bi bi-person-dash"></i>'
+                       + '</button>';
+        }
+
+        return '<li class="list-group-item d-flex justify-content-between align-items-center">'
+             + '  <div>'
+             + '    <strong>' + escapeHtml(person.name) + '</strong>'
+             + '    <div class="small text-muted">' + details + '</div>'
+             + '  </div>'
+             + '  <div class="cert-actions">' + actionBtns + '</div>'
+             + '</li>';
+    }
+
+    function renderLists(resp) {
+        if (scopeType === 'Region') {
+            renderInto('Kretsinstruktor', resp.kretsinstruktorer || []);
+            renderInto('Vapenkontrollant', resp.vapenkontrollanter || []);
+            renderInto('Banlaggare', resp.banlaggare || []);
+
+            // Föreningsinstruktör roll-up — show ALL clubs in the region; zero-count
+            // clubs render in red so the regional admin can see who needs an instructor.
+            var rollupEl = root.querySelector('.cert-foreningsinstruktor-rollup');
+            var byClub = resp.foreningsinstruktorerByClub || [];
+            if (byClub.length === 0) {
+                rollupEl.innerHTML = '<div class="text-muted small">Inga klubbar i kretsen.</div>';
+            } else {
+                rollupEl.innerHTML = byClub.map(function (c) {
+                    var persons = c.persons || [];
+                    if (persons.length === 0) {
+                        return '<div class="mb-2 text-danger">'
+                             + '<i class="bi bi-exclamation-triangle me-1"></i>'
+                             + '<strong>' + escapeHtml(c.clubName) + '</strong>'
+                             + ' <span class="small">— saknar Föreningsinstruktör</span>'
+                             + '</div>';
+                    }
+                    var lines = persons.map(function (p) {
+                        var line = escapeHtml(p.name);
+                        if (p.cert && p.cert.expiresAt) line += ' <span class="small text-muted">(förfaller ' + escapeHtml(p.cert.expiresAt) + ')</span>';
+                        return '<li>' + line + '</li>';
+                    }).join('');
+                    return '<div class="mb-2"><strong>' + escapeHtml(c.clubName) + '</strong><ul class="mb-1 small">' + lines + '</ul></div>';
+                }).join('');
+            }
+        } else {
+            renderInto('Foreningsinstruktor', resp.foreningsinstruktorer || []);
+            renderInto('Vapenkontrollant', resp.vapenkontrollanter || []);
+            renderInto('Banlaggare', resp.banlaggare || []);
+        }
+    }
+
+    function renderInto(certType, persons) {
+        var listEl = root.querySelector('.cert-list[data-cert-type="' + certType + '"]');
+        if (!listEl) return;
+        if (persons.length === 0) {
+            listEl.innerHTML = '<li class="list-group-item text-muted small">Inga registrerade</li>';
+            return;
+        }
+        listEl.innerHTML = persons.map(function (p) { return renderPersonItem(p, certType); }).join('');
+    }
+
+    // ── Add (grant) flow ─────────────────────────────────────────────
+    var modal = document.getElementById('certGrantModal-' + instanceKey);
+    var bsModal = null;
+
+    function openGrantModal(certType) {
+        initFlatpickrs();
+        document.getElementById('certGrantType-' + instanceKey).value = labelFor(certType);
+        document.getElementById('certGrantMember-' + instanceKey).innerHTML = '<option value="">— Laddar medlemmar —</option>';
+        document.getElementById('certGrantGrantor-' + instanceKey).innerHTML = '<option value="">— Välj utbildare / utfärdare —</option>';
+        if (fpCertifiedAt) { fpCertifiedAt.setDate(new Date(), true); }
+        else { document.getElementById('certGrantCertifiedAt-' + instanceKey).value = new Date().toISOString().slice(0, 10); }
+        if (fpExpiresAt) { fpExpiresAt.clear(); }
+        else { document.getElementById('certGrantExpiresAt-' + instanceKey).value = ''; }
+        document.getElementById('certGrantNumber-' + instanceKey).value = '';
+        document.getElementById('certGrantNotes-' + instanceKey).value = '';
+        document.getElementById('certGrantError-' + instanceKey).classList.add('d-none');
+
+        modal.dataset.certType = certType;
+
+        // Hide "Certifierad av" for cert types issued by SPSF (Kretsinstruktör, Riksinstruktör).
+        // For those, the grantor is implicitly SPSF and we record the cert without naming
+        // an individual person; the acting admin's authority is checked server-side.
+        var grantorWrapper = document.getElementById('certGrantGrantorWrapper-' + instanceKey);
+        if (grantorWrapper) {
+            var hideGrantor = (certType === 'Kretsinstruktor' || certType === 'Riksinstruktor');
+            grantorWrapper.style.display = hideGrantor ? 'none' : '';
+        }
+
+        // Load member list — scoped: for Club, only club members; for Region, all approved members.
+        var memberUrl = scopeType === 'Club'
+            ? '/umbraco/surface/ClubAdmin/GetClubMembers?clubId=' + encodeURIComponent(scopeId)
+            : '/umbraco/surface/MemberAdmin/GetMembers?pageSize=10000';
+
+        fetch(memberUrl).then(function (r) { return r.json(); }).then(function (resp) {
+            var sel = document.getElementById('certGrantMember-' + instanceKey);
+            sel.innerHTML = '<option value="">— Välj medlem —</option>';
+            if (!resp.success) return;
+            // ClubAdmin/GetClubMembers returns data: [...]; MemberAdmin/GetMembers returns
+            // data: { items: [...], page, ... }. Handle both.
+            var items;
+            if (Array.isArray(resp.data)) {
+                items = resp.data;
+            } else if (resp.data && Array.isArray(resp.data.items)) {
+                items = resp.data.items;
+            } else {
+                items = [];
+            }
+            items
+                .map(function (m) { return { id: m.id, name: ((m.firstName || '') + ' ' + (m.lastName || '')).trim() || m.email || ('Medlem #' + m.id) }; })
+                .sort(function (a, b) { return a.name.localeCompare(b.name, 'sv'); })
+                .forEach(function (m) {
+                    var opt = document.createElement('option');
+                    opt.value = m.id;
+                    opt.textContent = m.name;
+                    sel.appendChild(opt);
+                });
+        });
+
+        bsModal = bsModal || new bootstrap.Modal(modal);
+        bsModal.show();
+    }
+
+    function loadGrantorsForCandidate(certType, candidateMemberId) {
+        var sel = document.getElementById('certGrantGrantor-' + instanceKey);
+        sel.innerHTML = '<option value="">— Välj utbildare / utfärdare —</option>';
+        if (!candidateMemberId) return;
+        var url = '/umbraco/surface/Certification/GetGrantorsFor?certType=' + encodeURIComponent(certType)
+                + '&candidateMemberId=' + encodeURIComponent(candidateMemberId);
+        fetch(url).then(function (r) { return r.json(); }).then(function (resp) {
+            if (!resp.success) return;
+            (resp.data || []).forEach(function (g) {
+                var opt = document.createElement('option');
+                opt.value = g.memberId;
+                opt.textContent = g.name;
+                sel.appendChild(opt);
+            });
+        });
+    }
+
+    function labelFor(t) {
+        return ({
+            'Foreningsinstruktor': 'Föreningsinstruktör',
+            'Kretsinstruktor': 'Kretsinstruktör',
+            'Riksinstruktor': 'Riksinstruktör',
+            'Vapenkontrollant': 'Vapenkontrollant',
+            'Banlaggare': 'Banläggare'
+        })[t] || t;
+    }
+
+    function submitGrant() {
+        var errEl = document.getElementById('certGrantError-' + instanceKey);
+        errEl.classList.add('d-none');
+
+        var certType = modal.dataset.certType;
+        var memberId = parseInt(document.getElementById('certGrantMember-' + instanceKey).value, 10);
+        var grantorRaw = document.getElementById('certGrantGrantor-' + instanceKey).value;
+        var grantorId = grantorRaw ? parseInt(grantorRaw, 10) : null;
+        var certifiedAt = document.getElementById('certGrantCertifiedAt-' + instanceKey).value || null;
+        var expiresAt = document.getElementById('certGrantExpiresAt-' + instanceKey).value || null;
+        var certNumber = document.getElementById('certGrantNumber-' + instanceKey).value.trim() || null;
+        var notes = document.getElementById('certGrantNotes-' + instanceKey).value.trim() || null;
+
+        if (!memberId) { errEl.textContent = 'Välj en medlem.'; errEl.classList.remove('d-none'); return; }
+        if (!certifiedAt) { errEl.textContent = 'Ange certifieringsdatum.'; errEl.classList.remove('d-none'); return; }
+
+        var body = {
+            memberId: memberId,
+            certificationType: certType,
+            certifiedByMemberId: grantorId,
+            certifiedAt: certifiedAt,
+            expiresAt: expiresAt,
+            certificateNumber: certNumber,
+            notes: notes
+        };
+
+        fetch('/umbraco/surface/Certification/Grant', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getToken() },
+            body: JSON.stringify(body)
+        }).then(function (r) { return r.json(); }).then(function (resp) {
+            if (!resp.success) {
+                errEl.textContent = resp.message || 'Kunde inte spara';
+                errEl.classList.remove('d-none');
+                return;
+            }
+
+            // For Föreningsinstruktör in club scope, also append the appointment so the
+            // member shows up in the list immediately.
+            if (certType === 'Foreningsinstruktor' && scopeType === 'Club') {
+                fetch('/umbraco/surface/Certification/Appoint', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getToken() },
+                    body: JSON.stringify({ memberId: memberId, certificationType: 'Foreningsinstruktor', scopeId: scopeId })
+                }).finally(function () {
+                    bsModal.hide();
+                    loadCerts();
+                });
+            } else if (certType === 'Kretsinstruktor' && scopeType === 'Region') {
+                fetch('/umbraco/surface/Certification/Appoint', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getToken() },
+                    body: JSON.stringify({ memberId: memberId, certificationType: 'Kretsinstruktor', scopeId: scopeId })
+                }).finally(function () {
+                    bsModal.hide();
+                    loadCerts();
+                });
+            } else {
+                bsModal.hide();
+                loadCerts();
+            }
+        });
+    }
+
+    // ── Wire up event delegation ──────────────────────────────────────
+    root.addEventListener('click', function (ev) {
+        var addBtn = ev.target.closest('.cert-add-btn');
+        if (addBtn) { ev.preventDefault(); openGrantModal(addBtn.dataset.certType); return; }
+
+        var revokeBtn = ev.target.closest('.cert-revoke-btn');
+        if (revokeBtn) {
+            ev.preventDefault();
+            var name = revokeBtn.dataset.memberName || 'denna medlem';
+            if (!confirm('Återkalla ' + labelFor(revokeBtn.dataset.certType) + '-certifieringen för ' + name + '?')) return;
+            var reason = prompt('Anledning (frivilligt):') || null;
+            fetch('/umbraco/surface/Certification/Revoke', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getToken() },
+                body: JSON.stringify({ certId: parseInt(revokeBtn.dataset.certId, 10), reason: reason })
+            }).then(function (r) { return r.json(); }).then(function (resp) {
+                if (!resp.success) alert(resp.message || 'Kunde inte återkalla');
+                loadCerts();
+            });
+            return;
+        }
+
+        var unappointBtn = ev.target.closest('.cert-unappoint-btn');
+        if (unappointBtn) {
+            ev.preventDefault();
+            var n = unappointBtn.dataset.memberName || 'denna medlem';
+            if (!confirm('Ta bort utnämningen som ' + labelFor(unappointBtn.dataset.certType) + ' för ' + n + '? Certifieringen behålls.')) return;
+            fetch('/umbraco/surface/Certification/Unappoint', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getToken() },
+                body: JSON.stringify({
+                    memberId: parseInt(unappointBtn.dataset.memberId, 10),
+                    certificationType: unappointBtn.dataset.certType,
+                    scopeId: scopeId
+                })
+            }).then(function (r) { return r.json(); }).then(function (resp) {
+                if (!resp.success) alert(resp.message || 'Kunde inte ta bort utnämningen');
+                loadCerts();
+            });
+            return;
+        }
+
+        var refreshBtn = ev.target.closest('.cert-refresh-btn');
+        if (refreshBtn) { ev.preventDefault(); loadCerts(); return; }
+    });
+
+    document.getElementById('certGrantMember-' + instanceKey).addEventListener('change', function (ev) {
+        loadGrantorsForCandidate(modal.dataset.certType, parseInt(ev.target.value, 10));
+    });
+
+    modal.querySelector('.cert-grant-submit-btn').addEventListener('click', function (ev) {
+        ev.preventDefault();
+        submitGrant();
+    });
+
+    loadCerts();
+})();
+</script>

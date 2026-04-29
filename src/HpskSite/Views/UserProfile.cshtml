@@ -655,6 +655,9 @@
                                 </button>
                                 <div id="resetTutorialsMessage" class="alert mt-3" style="display: none;"></div>
                             </div>
+
+                            @{ ViewBag.memberId = memberData?.Id ?? 0; }
+                            @await Html.PartialAsync("MemberCertificationsCard")
                         </div>
                         @* End Profile Tab *@
 

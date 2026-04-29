@@ -1,0 +1,477 @@
+@*
+    Regional admin Statistik tab.
+    Lazy-loaded when the tab is activated. Fetches /umbraco/surface/RegionalStatistics/GetRegionalStatistics
+    scoped by regionCode from ViewBag.
+*@
+@{
+    var regionCode = ViewBag.regionCode as string ?? "";
+    var regionName = ViewBag.regionName as string ?? "Krets";
+}
+
+<div id="regionalStatisticsContainer" data-region-code="@regionCode">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5 class="mb-0"><i class="bi bi-graph-up me-2"></i>Statistik &mdash; @regionName</h5>
+        <button class="btn btn-outline-primary btn-sm" id="refreshRegionalStatsBtn" type="button" onclick="loadRegionalStatistics(true)">
+            <i class="bi bi-arrow-clockwise me-1"></i>Uppdatera
+        </button>
+    </div>
+
+    <div id="regionalStatsLoading" class="text-center py-5">
+        <div class="spinner-border text-primary" role="status"><span class="visually-hidden">Laddar...</span></div>
+        <p class="text-muted mt-2">Laddar kretsstatistik...</p>
+    </div>
+
+    <div id="regionalStatsError" class="alert alert-danger d-none">
+        <strong>Fel:</strong> <span id="regionalStatsErrorMessage"></span>
+    </div>
+
+    <div id="regionalStatsContent" style="display: none;">
+
+        <!-- Section A: Summary cards -->
+        <div class="row g-3 mb-4">
+            <div class="col-md-3 col-sm-6">
+                <div class="card h-100 border-primary">
+                    <div class="card-body text-center">
+                        <h6 class="card-subtitle mb-2 text-muted">Klubbar i kretsen</h6>
+                        <h2 class="card-title mb-1" id="regStatTotalClubs">—</h2>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-sm-6">
+                <div class="card h-100 border-success">
+                    <div class="card-body text-center">
+                        <h6 class="card-subtitle mb-2 text-muted">Medlemmar</h6>
+                        <h2 class="card-title mb-1" id="regStatTotalMembers">—</h2>
+                        <small class="text-success" id="regStatNewMembers30d"></small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-sm-6">
+                <div class="card h-100 border-info">
+                    <div class="card-body text-center">
+                        <h6 class="card-subtitle mb-2 text-muted">
+                            Aktiva 30d
+                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip"
+                               title="Medlemmar i kretsen som loggat in på webben eller i appen senaste 30 dagarna."></i>
+                        </h6>
+                        <h2 class="card-title mb-1" id="regStatActive30d">—</h2>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-sm-6">
+                <div class="card h-100 border-warning">
+                    <div class="card-body text-center">
+                        <h6 class="card-subtitle mb-2 text-muted">Tävlingar i år</h6>
+                        <h2 class="card-title mb-1" id="regStatCompetitionsYear">—</h2>
+                        <small class="text-muted">Arrangerade av kretsens klubbar</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section B: Members per club + nudges -->
+        <div class="row g-3 mb-4">
+            <div class="col-md-7">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">Medlemmar per klubb</h6>
+                        <div style="position:relative;height:360px"><canvas id="chartMembersPerClub"></canvas></div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-5">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">
+                            Klubbar som behöver hjälp
+                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip"
+                               title="Listor över klubbar som saknar något viktigt och kan behöva en knuff från kretsen."></i>
+                        </h6>
+                        <div id="regNudges"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section C: Member growth + Competitions per club -->
+        <div class="row g-3 mb-4">
+            <div class="col-md-7">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">Nya medlemmar per månad (12 mån)</h6>
+                        <div style="position:relative;height:240px"><canvas id="chartRegNewMembers"></canvas></div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-5">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">Tävlingar per klubb (i år)</h6>
+                        <div id="regCompetitionsList" class="table-responsive">
+                            <table class="table table-sm table-hover mb-0">
+                                <thead class="table-light">
+                                    <tr><th>Klubb</th><th class="text-end">Antal</th></tr>
+                                </thead>
+                                <tbody id="regCompetitionsBody"><tr><td colspan="2" class="text-muted">—</td></tr></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section C2: Föreningsinstruktörer per klubb -->
+        <div class="row g-3 mb-4">
+            <div class="col-12">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">
+                            <i class="bi bi-mortarboard me-1"></i>Föreningsinstruktörer per klubb
+                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip"
+                               title="Antal aktiva Föreningsinstruktörer per klubb. Klubbar utan listas som 0 — SPSF kräver minst en per klubb."></i>
+                        </h6>
+                        <div style="position:relative;height:280px"><canvas id="chartRegForeningsinstruktor"></canvas></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section D: Training matches per club + Recognition lists -->
+        <div class="row g-3 mb-4">
+            <div class="col-md-7">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">Träningsmatcher per klubb (30d)</h6>
+                        <div style="position:relative;height:280px"><canvas id="chartRegMatches"></canvas></div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-5">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">
+                            <i class="bi bi-trophy me-1"></i>Topp 5 tillväxt (12 mån)
+                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip"
+                               title="Klubbar med högst procentuell medlemsökning senaste 12 månader. Klubbar med fler än 2 medlemmar."></i>
+                        </h6>
+                        <ul class="list-group list-group-flush mb-3" id="regTopGrowthList"></ul>
+
+                        <h6 class="card-title mt-3">
+                            <i class="bi bi-fire me-1"></i>Mest aktiva klubbar (matcher 30d)
+                        </h6>
+                        <ul class="list-group list-group-flush" id="regTopActiveList"></ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <small class="text-muted">
+            All statistik är begränsad till klubbar inom denna krets. Medlemmar räknas via primärklubb.
+        </small>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+(function () {
+    var chartInstances = {};
+    var loadedOnce = false;
+
+    function destroyChart(id) {
+        if (chartInstances[id]) { chartInstances[id].destroy(); chartInstances[id] = null; }
+    }
+
+    function getColors() {
+        var s = getComputedStyle(document.documentElement);
+        return {
+            primary: s.getPropertyValue('--chart-primary').trim() || '#0d6efd',
+            success: s.getPropertyValue('--chart-success').trim() || '#198754',
+            warning: s.getPropertyValue('--chart-warning').trim() || '#ffc107',
+            danger:  s.getPropertyValue('--chart-danger').trim()  || '#dc3545',
+            info:    s.getPropertyValue('--chart-info').trim()    || '#0dcaf0',
+            text:    s.getPropertyValue('--chart-text').trim()    || '#212529',
+            grid:    s.getPropertyValue('--chart-grid').trim()    || 'rgba(0,0,0,0.1)'
+        };
+    }
+
+    function escapeHtml(str) {
+        var d = document.createElement('div'); d.textContent = str || ''; return d.innerHTML;
+    }
+
+    function formatMonth(yyyymm) {
+        if (!yyyymm) return '';
+        var p = yyyymm.split('-'); var months = ['Jan','Feb','Mar','Apr','Maj','Jun','Jul','Aug','Sep','Okt','Nov','Dec'];
+        return months[parseInt(p[1], 10) - 1] + ' ' + p[0].slice(-2);
+    }
+
+    window.loadRegionalStatistics = function (force) {
+        var container = document.getElementById('regionalStatisticsContainer');
+        if (!container) return;
+        var regionCode = container.getAttribute('data-region-code');
+        if (!regionCode) return;
+
+        var loading = document.getElementById('regionalStatsLoading');
+        var content = document.getElementById('regionalStatsContent');
+        var errBox  = document.getElementById('regionalStatsError');
+        var btn     = document.getElementById('refreshRegionalStatsBtn');
+
+        loading.style.display = '';
+        content.style.display = 'none';
+        errBox.classList.add('d-none');
+        if (btn) btn.disabled = true;
+
+        var url = '/umbraco/surface/RegionalStatistics/GetRegionalStatistics?regionCode=' + encodeURIComponent(regionCode)
+                + '&force=' + (force ? 'true' : 'false');
+
+        fetch(url)
+            .then(function (r) { return r.json(); })
+            .then(function (resp) {
+                loading.style.display = 'none';
+                if (btn) btn.disabled = false;
+                if (!resp.success) {
+                    errBox.classList.remove('d-none');
+                    document.getElementById('regionalStatsErrorMessage').textContent = resp.message || 'Okänt fel';
+                    return;
+                }
+                content.style.display = '';
+                renderRegionalStatistics(resp.data);
+            })
+            .catch(function (err) {
+                loading.style.display = 'none';
+                if (btn) btn.disabled = false;
+                errBox.classList.remove('d-none');
+                document.getElementById('regionalStatsErrorMessage').textContent = err.message || 'Nätverksfel';
+            });
+    };
+
+    function renderRegionalStatistics(d) {
+        var colors = getColors();
+
+        // Section A — summary
+        document.getElementById('regStatTotalClubs').textContent = d.summary.totalClubs;
+        document.getElementById('regStatTotalMembers').textContent = d.summary.totalMembers;
+        document.getElementById('regStatNewMembers30d').textContent = d.summary.newMembers30d > 0
+            ? '+' + d.summary.newMembers30d + ' senaste 30d' : '';
+        document.getElementById('regStatActive30d').textContent = d.summary.active30d;
+        document.getElementById('regStatCompetitionsYear').textContent = d.summary.competitionsThisYear;
+
+        // Members per club (horizontal bar)
+        destroyChart('chartMembersPerClub');
+        var mpc = d.membersPerClub || [];
+        chartInstances['chartMembersPerClub'] = new Chart(document.getElementById('chartMembersPerClub'), {
+            type: 'bar',
+            data: {
+                labels: mpc.map(function (x) { return x.clubName; }),
+                datasets: [{
+                    label: 'Medlemmar',
+                    data: mpc.map(function (x) { return x.count; }),
+                    backgroundColor: colors.primary + 'cc',
+                    borderColor: colors.primary,
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { beginAtZero: true, ticks: { precision: 0, color: colors.text }, grid: { color: colors.grid } },
+                    y: { ticks: { color: colors.text, autoSkip: false }, grid: { display: false } }
+                }
+            }
+        });
+
+        // Nudges
+        var nudgesEl = document.getElementById('regNudges');
+        var html = '';
+        function nudgeBlock(items, type, icon, title, emptyText) {
+            if (!items || items.length === 0) {
+                html += '<div class="d-flex align-items-center mb-2 small text-muted">'
+                     + '<i class="bi bi-check-circle-fill text-success me-2"></i>' + escapeHtml(emptyText)
+                     + '</div>';
+                return;
+            }
+            html += '<div class="mb-3">';
+            html += '<div class="fw-bold small mb-1"><i class="bi ' + icon + ' me-1 text-' + type + '"></i>'
+                 + escapeHtml(title) + ' (' + items.length + ')</div>';
+            html += '<ul class="list-unstyled mb-0 ps-2">';
+            items.slice(0, 6).forEach(function (c) {
+                html += '<li><a href="' + (c.url || '#') + '" class="small">' + escapeHtml(c.clubName) + '</a></li>';
+            });
+            if (items.length > 6) html += '<li class="text-muted small">+ ' + (items.length - 6) + ' till</li>';
+            html += '</ul></div>';
+        }
+        nudgeBlock(d.clubsWithoutForeningsinstruktor, 'danger', 'bi-mortarboard',
+                   'Saknar Föreningsinstruktör (SPSF-krav)', 'Alla klubbar har Föreningsinstruktör');
+        nudgeBlock(d.clubsWithoutEvent90d, 'warning', 'bi-calendar-x',
+                   'Inget event senaste 90 dagar', 'Alla klubbar har haft event senaste 90d');
+        nudgeBlock(d.clubsWithoutAdmin, 'danger', 'bi-shield-exclamation',
+                   'Saknar klubbadmin', 'Alla klubbar har klubbadmin');
+        nudgeBlock(d.clubsWithoutSkjutledare, 'info', 'bi-person-badge',
+                   'Saknar Skjutledare', 'Alla klubbar har Skjutledare');
+        nudgesEl.innerHTML = html;
+
+        // Instructor summary line + Kretsinstruktör minimum warning
+        if (d.instructors) {
+            var instr = d.instructors;
+            var summaryLine = (instr.kretsinstruktor || 0) + ' Krets · '
+                            + (instr.foreningsinstruktorTotal || 0) + ' Förenings · '
+                            + (instr.vapenkontrollant || 0) + ' Vapen · '
+                            + (instr.banlaggare || 0) + ' Bana';
+            var existing = document.getElementById('regInstructorSummary');
+            if (!existing) {
+                var holder = document.createElement('div');
+                holder.id = 'regInstructorSummary';
+                holder.className = 'mb-3 small text-muted';
+                holder.innerHTML = '<i class="bi bi-mortarboard me-1"></i>Kretsens instruktörer: <strong>' + summaryLine + '</strong>';
+                nudgesEl.parentNode.insertBefore(holder, nudgesEl);
+            } else {
+                existing.querySelector('strong').textContent = summaryLine;
+            }
+        }
+        if (d.kretsinstruktorBelowMinimum) {
+            nudgesEl.insertAdjacentHTML('afterbegin',
+                '<div class="alert alert-warning d-flex align-items-center mb-2 py-2">'
+                + '<i class="bi bi-exclamation-triangle me-2"></i>'
+                + 'Kretsen har färre än 2 utsedda Kretsinstruktörer — kontakta riksinstruktör för utbildning.'
+                + '</div>');
+        }
+
+        // New members per month
+        destroyChart('chartRegNewMembers');
+        var nm = d.newMembersPerMonth || [];
+        chartInstances['chartRegNewMembers'] = new Chart(document.getElementById('chartRegNewMembers'), {
+            type: 'line',
+            data: {
+                labels: nm.map(function (x) { return formatMonth(x.month); }),
+                datasets: [{
+                    label: 'Nya medlemmar',
+                    data: nm.map(function (x) { return x.count; }),
+                    backgroundColor: colors.success + '33',
+                    borderColor: colors.success,
+                    borderWidth: 2,
+                    tension: 0.3,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: { beginAtZero: true, ticks: { precision: 0, color: colors.text }, grid: { color: colors.grid } },
+                    x: { ticks: { color: colors.text }, grid: { display: false } }
+                }
+            }
+        });
+
+        // Competitions per club table
+        var compsBody = document.getElementById('regCompetitionsBody');
+        var comps = d.competitionsPerClub || [];
+        if (comps.length === 0) {
+            compsBody.innerHTML = '<tr><td colspan="2" class="text-muted">Inga tävlingar i år</td></tr>';
+        } else {
+            compsBody.innerHTML = comps.map(function (c) {
+                return '<tr><td>' + escapeHtml(c.clubName) + '</td>'
+                     + '<td class="text-end">' + c.count + '</td></tr>';
+            }).join('');
+        }
+
+        // Föreningsinstruktörer per klubb (horizontal bar)
+        destroyChart('chartRegForeningsinstruktor');
+        var fpc = d.foreningsinstruktorPerClub || [];
+        chartInstances['chartRegForeningsinstruktor'] = new Chart(document.getElementById('chartRegForeningsinstruktor'), {
+            type: 'bar',
+            data: {
+                labels: fpc.map(function (x) { return x.clubName; }),
+                datasets: [{
+                    label: 'Föreningsinstruktörer',
+                    data: fpc.map(function (x) { return x.count; }),
+                    backgroundColor: fpc.map(function (x) {
+                        return x.count === 0 ? colors.danger + 'cc' : colors.success + 'cc';
+                    }),
+                    borderColor: fpc.map(function (x) {
+                        return x.count === 0 ? colors.danger : colors.success;
+                    }),
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { beginAtZero: true, ticks: { precision: 0, color: colors.text, stepSize: 1 }, grid: { color: colors.grid } },
+                    y: { ticks: { color: colors.text, autoSkip: false, font: { size: 11 } }, grid: { display: false } }
+                }
+            }
+        });
+
+        // Training matches per club
+        destroyChart('chartRegMatches');
+        var tm = d.trainingMatchesPerClub || [];
+        chartInstances['chartRegMatches'] = new Chart(document.getElementById('chartRegMatches'), {
+            type: 'bar',
+            data: {
+                labels: tm.map(function (x) { return x.clubName; }),
+                datasets: [{
+                    label: 'Matcher (30d)',
+                    data: tm.map(function (x) { return x.count; }),
+                    backgroundColor: colors.info + 'cc',
+                    borderColor: colors.info,
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { beginAtZero: true, ticks: { precision: 0, color: colors.text }, grid: { color: colors.grid } },
+                    y: { ticks: { color: colors.text, autoSkip: false }, grid: { display: false } }
+                }
+            }
+        });
+
+        // Top growth list
+        var growthList = document.getElementById('regTopGrowthList');
+        var growth = d.topGrowthClubs || [];
+        if (growth.length === 0) {
+            growthList.innerHTML = '<li class="list-group-item text-muted small">Inga tillräckligt stora klubbar att jämföra</li>';
+        } else {
+            growthList.innerHTML = growth.map(function (c, i) {
+                var pct = (c.growthPct >= 0 ? '+' : '') + c.growthPct + '%';
+                return '<li class="list-group-item d-flex justify-content-between align-items-center">'
+                     + '<span><span class="badge bg-secondary me-2">#' + (i + 1) + '</span>' + escapeHtml(c.clubName) + '</span>'
+                     + '<span class="badge bg-success rounded-pill">' + pct + '</span>'
+                     + '</li>';
+            }).join('');
+        }
+
+        // Top active list
+        var activeList = document.getElementById('regTopActiveList');
+        var topActive = d.topActiveClubs || [];
+        if (topActive.length === 0) {
+            activeList.innerHTML = '<li class="list-group-item text-muted small">Inga matcher senaste 30 dagar</li>';
+        } else {
+            activeList.innerHTML = topActive.map(function (c, i) {
+                return '<li class="list-group-item d-flex justify-content-between align-items-center">'
+                     + '<span><span class="badge bg-secondary me-2">#' + (i + 1) + '</span>' + escapeHtml(c.clubName) + '</span>'
+                     + '<span class="badge bg-info rounded-pill">' + c.matches30d + '</span>'
+                     + '</li>';
+            }).join('');
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+        var statsTab = document.getElementById('regionStats-tab');
+        if (statsTab) {
+            statsTab.addEventListener('shown.bs.tab', function () {
+                if (!loadedOnce) {
+                    loadedOnce = true;
+                    loadRegionalStatistics(false);
+                }
+            });
+        }
+    });
+})();
+</script>

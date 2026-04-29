@@ -789,16 +789,25 @@ namespace HpskSite.Controllers
                         (m.GetValue("memberClubIds")?.ToString()?.Split(',')
                             .Select(s => s.Trim())
                             .Contains(clubIdStr) ?? false))
-                    .Select(m => new
+                    .Select(m =>
                     {
-                        id = m.Id,
-                        memberName = $"{m.GetValue("firstName")?.ToString() ?? ""} {m.GetValue("lastName")?.ToString() ?? ""}".Trim(),
-                        firstName = m.GetValue("firstName")?.ToString() ?? "",
-                        lastName = m.GetValue("lastName")?.ToString() ?? "",
-                        email = m.Email ?? "",
-                        phoneNumber = m.GetValue("phoneNumber")?.ToString() ?? "",
-                        profilePictureUrl = m.GetValue<string>("profilePictureUrl") ?? "",
-                        isApproved = m.IsApproved
+                        var lastActive = m.GetValue<DateTime?>("lastActiveDate");
+                        var lastMobile = m.GetValue<DateTime?>("lastMobileActiveDate");
+                        return new
+                        {
+                            id = m.Id,
+                            memberName = $"{m.GetValue("firstName")?.ToString() ?? ""} {m.GetValue("lastName")?.ToString() ?? ""}".Trim(),
+                            firstName = m.GetValue("firstName")?.ToString() ?? "",
+                            lastName = m.GetValue("lastName")?.ToString() ?? "",
+                            email = m.Email ?? "",
+                            phoneNumber = m.GetValue("phoneNumber")?.ToString() ?? "",
+                            profilePictureUrl = m.GetValue<string>("profilePictureUrl") ?? "",
+                            isApproved = m.IsApproved,
+                            lastActiveDisplay = FormatLastActive(lastActive),
+                            lastActiveSortValue = lastActive.HasValue ? new DateTimeOffset(lastActive.Value).ToUnixTimeSeconds() : 0L,
+                            lastMobileActiveDisplay = FormatLastActive(lastMobile),
+                            lastMobileActiveSortValue = lastMobile.HasValue ? new DateTimeOffset(lastMobile.Value).ToUnixTimeSeconds() : 0L
+                        };
                     }).ToList();
 
                 return Json(new { success = true, data = members });
@@ -2711,5 +2720,21 @@ namespace HpskSite.Controllers
         }
 
         #endregion
+
+        /// <summary>
+        /// Format a last-active timestamp the same way as MemberAdminController.FormatLastActive
+        /// — kept in sync so the club Members tab matches the admin Users tab visually.
+        /// </summary>
+        private static string FormatLastActive(DateTime? lastActive)
+        {
+            if (!lastActive.HasValue) return "Aldrig";
+
+            var elapsed = DateTime.UtcNow - lastActive.Value;
+            if (elapsed.TotalMinutes < 5) return "Just nu";
+            if (elapsed.TotalMinutes < 60) return $"{(int)elapsed.TotalMinutes} min sedan";
+            if (elapsed.TotalHours < 24) return $"{(int)elapsed.TotalHours}h sedan";
+            if (elapsed.TotalDays < 7) return $"{(int)elapsed.TotalDays}d sedan";
+            return lastActive.Value.ToLocalTime().ToString("yyyy-MM-dd");
+        }
     }
 }

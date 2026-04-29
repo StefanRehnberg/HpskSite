@@ -1,7 +1,7 @@
 ---
 title: Klubbadministratör - Hantera din klubb
 roles: [club-admin]
-features: [member-management, events, competitions, series, club-settings, training-groups, skjutledare-assignment, invoices]
+features: [member-management, events, competitions, series, club-settings, training-groups, skjutledare-assignment, invoices, certifieringar, klubbstatistik]
 ---
 
 # Klubbadministration
@@ -114,3 +114,28 @@ Du kan även:
 ## Hantera dokument
 
 Ladda upp och hantera dokument i klubbens dokumentarkiv. Medlemmarna ser dessa under fliken **"Dokument"** på klubbsidan.
+
+## Certifieringar — instruktörer och kontrollanter
+
+Under **Admin** > **Certifieringar** hanteras klubbens SPSF-registrerade roller:
+
+- **Föreningsinstruktörer** — utnämn medlemmar till klubbens Föreningsinstruktörer (kräver att de redan har eller får en certifiering). SPSF kräver att klubben har minst en.
+- **Vapenkontrollanter** — medlemmar med aktiv Vapenkontrollantcertifiering.
+- **Banläggare** — medlemmar med aktiv Banläggarcertifiering (för fältskytte).
+
+Om du själv är Krets- eller Riksinstruktör kan du utfärda nya certifieringar direkt. Annars väljer du i dropdownen **"Certifierad av"** vem som har utbildat personen — endast medlemmar med behörighet visas. Se separat dokumentation: [Instruktörer och certifieringar](instructors.md).
+
+Datumväljarna i tilldelningsdialogen använder svenskt format (ÅÅÅÅ-MM-DD). Lämna förfallodatum tomt för certifieringar som inte förfaller.
+
+## Statistik
+
+Under **Admin** > **Statistik** ser du klubbens hälsotillstånd:
+
+- **Sammanfattningskort** — antal medlemmar, aktiva senaste 30 dagar (med jämförelse mot snittklubb i samma storlek), kommande events, tävlingar i år.
+- **Notiser ("nudges")** — pekar ut konkreta åtgärder: väntande godkännanden, inaktiva medlemmar (90 d), saknade events i år, saknad Skjutledare, saknad Föreningsinstruktör (SPSF-krav).
+- **Diagram** — nya medlemmar per månad, medlemmar per Skyttetrappan-nivå, träningsmatcher per månad, träningsresultat per disciplin.
+- **Tävlingar** — tävlingar per disciplin (donut) och de fem största tävlingarna (sorterat på antal anmälda).
+- **Klubbaktiviteter** — events i år vs. föregående år, events per typ, events per månad.
+- **Mest aktiva skyttar (30d)** — topp 5 medlemmar baserat på registrerade träningsresultat senaste 30 dagar. Bra anledning att skicka uppmuntran.
+
+Klicka **"Uppdatera"** för att hämta färska siffror om något ändrats nyligen.

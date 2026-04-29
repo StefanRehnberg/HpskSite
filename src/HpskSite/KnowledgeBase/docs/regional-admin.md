@@ -1,7 +1,7 @@
 ---
 title: Kretsadministratör - Regional administration
 roles: [regional-admin]
-features: [regional-overview, cross-club-management, member-approval, club-admin-assignment]
+features: [regional-overview, cross-club-management, member-approval, club-admin-assignment, certifieringar, kretsstatistik]
 ---
 
 # Kretsadministration
@@ -51,3 +51,32 @@ Du kan välja vilka tävlingar och serier som ska lyftas fram på din regionssid
 - När en klubb behöver en ny klubbadmin tilldelad
 - När tävlingar involverar flera klubbar i samma region
 - Som backup när en klubbadmin inte är tillgänglig
+
+## Certifieringar — instruktörer i kretsen
+
+På din regions sida > Admin > **Certifieringar**-fliken hanteras kretsens SPSF-registrerade roller:
+
+- **Kretsinstruktörer** högst upp — utnämn och avutnämn de som är certifierade och ska representera kretsen. Du kan även **utfärda** Kretsinstruktörscertifieringar — sajten registrerar att SPSF utbildat personen och att kretsen utnämner dem. Inget separat "Certifierad av" behövs.
+- **Vapenkontrollanter / Banläggare i kretsen** — översikt över aktiva certifieringar bland kretsens medlemmar (read-only).
+- **Föreningsinstruktörer per klubb** längst ned — visar **alla** klubbar i kretsen. Klubbar utan utnämnd Föreningsinstruktör listas i **rött** så du ser var det behövs en utbildning.
+
+Se separat dokumentation: [Instruktörer och certifieringar](instructors.md).
+
+## Statistik
+
+På din regions sida > Admin > **Statistik**-fliken får du översikten över hela kretsen:
+
+- **Sammanfattningskort** — antal klubbar, medlemmar, nya medlemmar senaste 30 dagar, tävlingar i år.
+- **Medlemmar per klubb** (horisontellt stapeldiagram) — vilka klubbar är störst och minst.
+- **Klubbar som behöver hjälp** — listor över:
+  - Klubbar utan Föreningsinstruktör (SPSF-krav, röd)
+  - Klubbar utan publicerat event senaste 90 dagar
+  - Klubbar utan klubbadmin
+  - Klubbar utan Skjutledare
+- **Föreningsinstruktörer per klubb** (horisontellt stapeldiagram) — klubbar utan instruktörer markeras med röd stapel.
+- **Nya medlemmar per månad** (12 månader) och **tävlingar per klubb (i år)**.
+- **Träningsmatcher per klubb (30 d)** — vilka klubbar är aktiva.
+- **Topp 5 tillväxt (12 mån, %)** och **Mest aktiva klubbar** — för att lyfta fram positiva exempel snarare än rankning.
+- **Notiser** — bl.a. varning om kretsen har färre än 2 utnämnda Kretsinstruktörer.
+
+Klicka **"Uppdatera"** för att hämta färska siffror.

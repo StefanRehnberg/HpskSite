@@ -82,6 +82,35 @@
             </div>
         </div>
 
+        <!-- Section A2: Besökarstatistik -->
+        <h5 class="mt-4 mb-3"><i class="bi bi-people-fill me-2"></i>Besökarstatistik</h5>
+        <div class="row g-3 mb-4">
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">
+                            Unika besökare per dag (30d)
+                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
+                               title="Antal unika sessioner som besökte en sida på sajten. En session är 30 minuters inaktivitet. Bottar är filtrerade."></i>
+                        </h6>
+                        <div style="position:relative;height:240px"><canvas id="chartVisitorsDaily"></canvas></div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">
+                            Unika besökare per vecka (53w)
+                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
+                               title="Antal unika sessioner per kalendervecka (måndag–söndag). En session räknas i den vecka den startade."></i>
+                        </h6>
+                        <div style="position:relative;height:240px"><canvas id="chartVisitorsWeekly"></canvas></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Section B: Medlemsstatistik -->
         <h5 class="mt-4 mb-3"><i class="bi bi-people me-2"></i>Medlemsstatistik</h5>
         <div class="row g-3 mb-4">
@@ -623,6 +652,7 @@
                 lastStatsData = resp.data;
                 content.style.display = '';
                 renderStatistics(resp.data);
+                loadVisitorStats(force);
             })
             .catch(err => {
                 loading.style.display = 'none';
@@ -1154,6 +1184,128 @@
         var div = document.createElement('div');
         div.textContent = str;
         return div.innerHTML;
+    }
+
+    function loadVisitorStats(force) {
+        const url = '/umbraco/surface/AdminStatistics/GetVisitorStats?force=' + (force ? 'true' : 'false');
+        fetch(url)
+            .then(r => r.json())
+            .then(resp => {
+                if (!resp.success) {
+                    console.warn('Visitor stats unavailable:', resp.message);
+                    return;
+                }
+                renderVisitorStats(resp.daily || [], resp.weekly || []);
+            })
+            .catch(err => {
+                console.warn('Visitor stats fetch failed:', err);
+            });
+    }
+
+    function renderVisitorStats(daily, weekly) {
+        const colors = getColors();
+
+        // Daily — last 30 days, label every 5th day (so the axis stays readable on narrow screens)
+        const dailyLabels = daily.map(function (x, i) {
+            return (i % 5 === 0 || i === daily.length - 1) ? formatShortDate(x.date) : '';
+        });
+
+        destroyChart('chartVisitorsDaily');
+        const dailyCtx = document.getElementById('chartVisitorsDaily').getContext('2d');
+        chartInstances['chartVisitorsDaily'] = new Chart(dailyCtx, {
+            type: 'bar',
+            data: {
+                labels: dailyLabels,
+                datasets: [{
+                    label: 'Unika besökare',
+                    data: daily.map(x => x.visitors),
+                    backgroundColor: colors.primary + 'cc',
+                    borderColor: colors.primary,
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            title: function (items) {
+                                const idx = items[0].dataIndex;
+                                return formatLongDate(daily[idx].date);
+                            },
+                            afterBody: function (items) {
+                                const idx = items[0].dataIndex;
+                                return 'Sidvisningar: ' + daily[idx].pageViews;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: { beginAtZero: true, ticks: { precision: 0, color: colors.text }, grid: { color: colors.grid } },
+                    x: { ticks: { color: colors.text, autoSkip: false, maxRotation: 0 }, grid: { display: false } }
+                }
+            }
+        });
+
+        // Weekly — last 53 weeks, label every 4th week
+        const weeklyLabels = weekly.map(function (x, i) {
+            return (i % 4 === 0 || i === weekly.length - 1) ? formatShortDate(x.weekStart) : '';
+        });
+
+        destroyChart('chartVisitorsWeekly');
+        const weeklyCtx = document.getElementById('chartVisitorsWeekly').getContext('2d');
+        chartInstances['chartVisitorsWeekly'] = new Chart(weeklyCtx, {
+            type: 'bar',
+            data: {
+                labels: weeklyLabels,
+                datasets: [{
+                    label: 'Unika besökare',
+                    data: weekly.map(x => x.visitors),
+                    backgroundColor: colors.success + 'cc',
+                    borderColor: colors.success,
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            title: function (items) {
+                                const idx = items[0].dataIndex;
+                                return 'Vecka som börjar ' + formatLongDate(weekly[idx].weekStart);
+                            },
+                            afterBody: function (items) {
+                                const idx = items[0].dataIndex;
+                                return 'Sidvisningar: ' + weekly[idx].pageViews;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: { beginAtZero: true, ticks: { precision: 0, color: colors.text }, grid: { color: colors.grid } },
+                    x: { ticks: { color: colors.text, autoSkip: false, maxRotation: 0 }, grid: { display: false } }
+                }
+            }
+        });
+    }
+
+    function formatShortDate(iso) {
+        // "2026-04-29" -> "29/4"
+        if (!iso) return '';
+        const parts = iso.split('-');
+        if (parts.length !== 3) return iso;
+        return parseInt(parts[2], 10) + '/' + parseInt(parts[1], 10);
+    }
+
+    function formatLongDate(iso) {
+        if (!iso) return '';
+        const d = new Date(iso + 'T00:00:00');
+        return d.toLocaleDateString('sv-SE', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
     }
 
     // Lazy-load: trigger when statistics tab is shown

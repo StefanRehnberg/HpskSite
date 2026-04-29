@@ -1,0 +1,636 @@
+@*
+    Club admin Statistik tab.
+    Loaded lazily when the user activates the tab via the data-bs-toggle handler in
+    ClubAdminPanel.cshtml.  Fetches /umbraco/surface/ClubStatistics/GetClubStatistics
+    scoped by clubId from ViewBag.
+*@
+@{
+    var clubId = ViewBag.clubId as int? ?? 0;
+}
+
+<div id="clubStatisticsContainer" data-club-id="@clubId">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5 class="mb-0"><i class="bi bi-graph-up me-2"></i>Statistik</h5>
+        <button class="btn btn-outline-primary btn-sm" id="refreshClubStatsBtn" type="button" onclick="loadClubStatistics(true)">
+            <i class="bi bi-arrow-clockwise me-1"></i>Uppdatera
+        </button>
+    </div>
+
+    <div id="clubStatsLoading" class="text-center py-5">
+        <div class="spinner-border text-primary" role="status"><span class="visually-hidden">Laddar...</span></div>
+        <p class="text-muted mt-2">Laddar klubbstatistik...</p>
+    </div>
+
+    <div id="clubStatsError" class="alert alert-danger d-none">
+        <strong>Fel:</strong> <span id="clubStatsErrorMessage"></span>
+    </div>
+
+    <div id="clubStatsContent" style="display: none;">
+
+        <!-- Section A: Summary cards -->
+        <div class="row g-3 mb-4">
+            <div class="col-md-3 col-sm-6">
+                <div class="card h-100 border-primary">
+                    <div class="card-body text-center">
+                        <h6 class="card-subtitle mb-2 text-muted">Medlemmar</h6>
+                        <h2 class="card-title mb-1" id="clubStatTotalMembers">—</h2>
+                        <small class="text-success" id="clubStatNewMembers30d"></small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-sm-6">
+                <div class="card h-100 border-success">
+                    <div class="card-body text-center">
+                        <h6 class="card-subtitle mb-2 text-muted">
+                            Aktiva senaste 30 dagar
+                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip"
+                               title="Antal medlemmar som loggat in på webben eller i appen senaste 30 dagarna."></i>
+                        </h6>
+                        <h2 class="card-title mb-1" id="clubStatActive30d">—</h2>
+                        <small class="text-muted" id="clubStatActive30dMedian"></small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-sm-6">
+                <div class="card h-100 border-info">
+                    <div class="card-body text-center">
+                        <h6 class="card-subtitle mb-2 text-muted">Kommande events</h6>
+                        <h2 class="card-title mb-1" id="clubStatUpcomingEvents">—</h2>
+                        <small class="text-muted">Klubbhändelser från idag</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-sm-6">
+                <div class="card h-100 border-warning">
+                    <div class="card-body text-center">
+                        <h6 class="card-subtitle mb-2 text-muted">Tävlingar i år</h6>
+                        <h2 class="card-title mb-1" id="clubStatCompetitionsYear">—</h2>
+                        <small class="text-muted">Tävlingar arrangerade av klubben</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section B: Nudges (only visible items render) -->
+        <div id="clubNudges" class="mb-4"></div>
+
+        <!-- Section C: Member growth + Skyttetrappan levels -->
+        <div class="row g-3 mb-4">
+            <div class="col-md-7">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">Nya medlemmar per månad (12 mån)</h6>
+                        <div style="position:relative;height:220px"><canvas id="chartClubNewMembers"></canvas></div>
+                        <small class="text-muted" id="clubGrowthLine"></small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-5">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">Medlemmar per Skyttetrappan-nivå</h6>
+                        <div style="position:relative;height:220px"><canvas id="chartClubLevels"></canvas></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section D: Activity & training -->
+        <div class="row g-3 mb-4">
+            <div class="col-md-7">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">
+                            Träningsmatcher per månad (12 mån)
+                        </h6>
+                        <div style="position:relative;height:220px"><canvas id="chartClubMatches"></canvas></div>
+                        <small class="text-muted" id="clubMatches30dLine"></small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-5">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">Träningsresultat per disciplin (12 mån)</h6>
+                        <div style="position:relative;height:220px"><canvas id="chartClubScores"></canvas></div>
+                        <small class="text-muted" id="clubScores30dLine"></small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section E: Tävlingsstatistik -->
+        <h6 class="mt-4 mb-3 text-muted text-uppercase small"><i class="bi bi-trophy me-2"></i>Tävlingsstatistik</h6>
+        <div class="row g-3 mb-4" id="clubCompetitionsRow">
+            <div class="col-md-5">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">Tävlingar per disciplin</h6>
+                        <div style="position:relative;height:220px"><canvas id="chartClubCompetitionsByDiscipline"></canvas></div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-7">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">Största tävlingar (i år)</h6>
+                        <div class="table-responsive">
+                            <table class="table table-sm table-hover mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Tävling</th>
+                                        <th>Disciplin</th>
+                                        <th class="text-end">Anmälda</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="clubTopCompetitionsBody">
+                                    <tr><td colspan="3" class="text-center text-muted">Laddar...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section F: Klubbaktiviteter -->
+        <h6 class="mt-4 mb-3 text-muted text-uppercase small"><i class="bi bi-calendar-event me-2"></i>Klubbaktiviteter</h6>
+        <div class="row g-3 mb-4">
+            <div class="col-md-4 col-sm-6">
+                <div class="card h-100">
+                    <div class="card-body text-center">
+                        <small class="text-muted">
+                            Events i år
+                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip"
+                               title="Totalt antal klubbevent med eventdatum under respektive kalenderår."></i>
+                        </small>
+                        <h3 class="mb-1" id="clubEventsYear">—</h3>
+                        <small class="text-success d-block" id="clubEvents30d"></small>
+                        <hr class="my-2">
+                        <div class="d-flex justify-content-around text-muted small">
+                            <div><span id="clubEventsLastYear">—</span><br><span id="clubLabelLastYear"></span></div>
+                            <div><span id="clubEventsYearBefore">—</span><br><span id="clubLabelYearBefore"></span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-8">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">Events per typ (i år)</h6>
+                        <div style="position:relative;height:220px"><canvas id="chartClubEventsByType"></canvas></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="row g-3 mb-4">
+            <div class="col-12">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">Events per månad (i år)</h6>
+                        <div style="position:relative;height:220px"><canvas id="chartClubEventsPerMonth"></canvas></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section G: Recognition -->
+        <div class="row g-3 mb-4">
+            <div class="col-md-12">
+                <div class="card h-100" id="clubTopMembersCard">
+                    <div class="card-body">
+                        <h6 class="card-title">
+                            Mest aktiva skyttar (30d)
+                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip"
+                               title="Topp 5 medlemmar efter antal registrerade träningsresultat senaste 30 dagar. En anledning att skicka uppmuntran!"></i>
+                        </h6>
+                        <ul class="list-group list-group-flush" id="clubTopMembersList"></ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <small class="text-muted">
+            Statistik beräknas på medlemmar med denna klubb som primärklubb.
+            Jämförelser visar median bland klubbar med liknande medlemsantal.
+            <span id="clubComparableCountLine"></span>
+        </small>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+(function () {
+    var chartInstances = {};
+    var loadedOnce = false;
+
+    function destroyChart(id) {
+        if (chartInstances[id]) { chartInstances[id].destroy(); chartInstances[id] = null; }
+    }
+
+    function getColors() {
+        var style = getComputedStyle(document.documentElement);
+        return {
+            primary: style.getPropertyValue('--chart-primary').trim() || '#0d6efd',
+            success: style.getPropertyValue('--chart-success').trim() || '#198754',
+            warning: style.getPropertyValue('--chart-warning').trim() || '#ffc107',
+            danger:  style.getPropertyValue('--chart-danger').trim()  || '#dc3545',
+            info:    style.getPropertyValue('--chart-info').trim()    || '#0dcaf0',
+            text:    style.getPropertyValue('--chart-text').trim()    || '#212529',
+            grid:    style.getPropertyValue('--chart-grid').trim()    || 'rgba(0,0,0,0.1)'
+        };
+    }
+
+    function escapeHtml(str) {
+        var d = document.createElement('div'); d.textContent = str || ''; return d.innerHTML;
+    }
+
+    function formatMonth(yyyymm) {
+        if (!yyyymm) return '';
+        var parts = yyyymm.split('-');
+        var months = ['Jan','Feb','Mar','Apr','Maj','Jun','Jul','Aug','Sep','Okt','Nov','Dec'];
+        var m = parseInt(parts[1], 10);
+        return months[m - 1] + ' ' + parts[0].slice(-2);
+    }
+
+    window.loadClubStatistics = function (force) {
+        var container = document.getElementById('clubStatisticsContainer');
+        if (!container) return;
+        var clubId = container.getAttribute('data-club-id');
+        if (!clubId) return;
+
+        var loading = document.getElementById('clubStatsLoading');
+        var content = document.getElementById('clubStatsContent');
+        var errBox  = document.getElementById('clubStatsError');
+        var btn     = document.getElementById('refreshClubStatsBtn');
+
+        loading.style.display = '';
+        content.style.display = 'none';
+        errBox.classList.add('d-none');
+        if (btn) btn.disabled = true;
+
+        var url = '/umbraco/surface/ClubStatistics/GetClubStatistics?clubId=' + encodeURIComponent(clubId)
+                + '&force=' + (force ? 'true' : 'false');
+
+        fetch(url)
+            .then(function (r) { return r.json(); })
+            .then(function (resp) {
+                loading.style.display = 'none';
+                if (btn) btn.disabled = false;
+                if (!resp.success) {
+                    errBox.classList.remove('d-none');
+                    document.getElementById('clubStatsErrorMessage').textContent = resp.message || 'Okänt fel';
+                    return;
+                }
+                content.style.display = '';
+                renderClubStatistics(resp.data);
+            })
+            .catch(function (err) {
+                loading.style.display = 'none';
+                if (btn) btn.disabled = false;
+                errBox.classList.remove('d-none');
+                document.getElementById('clubStatsErrorMessage').textContent = err.message || 'Nätverksfel';
+            });
+    };
+
+    function renderClubStatistics(d) {
+        var colors = getColors();
+
+        // Section A — summary
+        document.getElementById('clubStatTotalMembers').textContent = d.summary.totalMembers;
+        document.getElementById('clubStatNewMembers30d').textContent = d.summary.newMembers30d > 0
+            ? '+' + d.summary.newMembers30d + ' senaste 30d' : '';
+        document.getElementById('clubStatActive30d').textContent = d.summary.active30d;
+        document.getElementById('clubStatActive30dMedian').textContent = d.summary.comparableClubCount > 0
+            ? 'snitt jämförbar klubb: ' + d.summary.active30dMedian : '';
+        document.getElementById('clubStatUpcomingEvents').textContent = d.summary.upcomingEvents;
+        document.getElementById('clubStatCompetitionsYear').textContent = d.summary.competitionsThisYear;
+
+        var growthLine = document.getElementById('clubGrowthLine');
+        if (d.summary.growthPct12m !== undefined) {
+            var s = (d.summary.growthPct12m >= 0 ? '+' : '') + d.summary.growthPct12m + '% tillväxt 12 mån';
+            if (d.summary.comparableClubCount > 0) {
+                s += ' (jämförbar klubb: ' + (d.summary.growthPct12mMedian >= 0 ? '+' : '') + d.summary.growthPct12mMedian + '%)';
+            }
+            growthLine.textContent = s;
+        }
+
+        // Section B — nudges
+        var nudgesEl = document.getElementById('clubNudges');
+        var nudges = [];
+        if (d.nudges.pendingApprovals > 0) {
+            nudges.push({
+                type: 'warning',
+                icon: 'bi-person-plus',
+                text: d.nudges.pendingApprovals + ' medlemmar väntar på godkännande',
+                cta: { tab: 'members-tab', label: 'Hantera' }
+            });
+        }
+        if (d.nudges.inactive90d > 0) {
+            nudges.push({
+                type: 'info',
+                icon: 'bi-person-dash',
+                text: d.nudges.inactive90d + ' medlemmar har inte loggat in på 90 dagar — kanske dags att höra av sig?',
+                cta: { tab: 'members-tab', label: 'Visa medlemmar' }
+            });
+        }
+        if (d.nudges.noEventsThisYear) {
+            nudges.push({
+                type: 'warning',
+                icon: 'bi-calendar-x',
+                text: 'Klubben har inga publicerade händelser i år — lägg till en träning, städning eller socialt event.',
+                cta: { tab: 'events-tab', label: 'Skapa händelse' }
+            });
+        }
+        if (d.nudges.noSkjutledare) {
+            nudges.push({
+                type: 'warning',
+                icon: 'bi-shield-exclamation',
+                text: 'Klubben saknar utsedd Skjutledare. Tilldela en betrodd medlem rollen via Medlemmar-fliken.',
+                cta: { tab: 'members-tab', label: 'Tilldela roll' }
+            });
+        }
+        if (d.nudges.noForeningsinstruktor) {
+            nudges.push({
+                type: 'danger',
+                icon: 'bi-mortarboard',
+                text: 'Klubben saknar Föreningsinstruktör — krav från SPSF. Kontakta kretsens kretsinstruktör för utbildning.',
+                cta: { tab: 'certifications-tab', label: 'Hantera certifieringar' }
+            });
+        }
+        if (d.instructors) {
+            var instr = d.instructors;
+            var summary = (instr.foreningsinstruktor || 0) + ' F · '
+                        + (instr.vapenkontrollant || 0) + ' V · '
+                        + (instr.banlaggare || 0) + ' B';
+            // Render below the summary cards as small text
+            var existing = document.getElementById('clubInstructorSummary');
+            if (!existing) {
+                var holder = document.createElement('div');
+                holder.id = 'clubInstructorSummary';
+                holder.className = 'mb-3 small text-muted';
+                holder.innerHTML = '<i class="bi bi-mortarboard me-1"></i>Instruktörer i klubben: <strong>' + summary
+                                 + '</strong> <span class="ms-2 text-muted">(F = Föreningsinstruktör, V = Vapenkontrollant, B = Banläggare)</span>';
+                document.getElementById('clubNudges').parentNode.insertBefore(holder, document.getElementById('clubNudges'));
+            } else {
+                existing.querySelector('strong').textContent = summary;
+            }
+        }
+
+        if (nudges.length === 0) {
+            nudgesEl.innerHTML = '';
+        } else {
+            nudgesEl.innerHTML = nudges.map(function (n) {
+                return '<div class="alert alert-' + n.type + ' d-flex align-items-center mb-2 py-2">'
+                     + '  <i class="bi ' + n.icon + ' me-2 fs-5"></i>'
+                     + '  <div class="flex-grow-1">' + escapeHtml(n.text) + '</div>'
+                     + '  <button type="button" class="btn btn-sm btn-outline-' + n.type + '"'
+                     + '          onclick="document.getElementById(\'' + n.cta.tab + '\').click()">'
+                     + escapeHtml(n.cta.label) + '</button>'
+                     + '</div>';
+            }).join('');
+        }
+
+        // Section C — new members per month
+        destroyChart('chartClubNewMembers');
+        var nm = d.newMembersPerMonth || [];
+        chartInstances['chartClubNewMembers'] = new Chart(document.getElementById('chartClubNewMembers'), {
+            type: 'bar',
+            data: {
+                labels: nm.map(function (x) { return formatMonth(x.month); }),
+                datasets: [{
+                    label: 'Nya medlemmar',
+                    data: nm.map(function (x) { return x.count; }),
+                    backgroundColor: colors.primary + 'cc',
+                    borderColor: colors.primary,
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: { beginAtZero: true, ticks: { precision: 0, color: colors.text }, grid: { color: colors.grid } },
+                    x: { ticks: { color: colors.text }, grid: { display: false } }
+                }
+            }
+        });
+
+        // Section C — members by Skyttetrappan level
+        destroyChart('chartClubLevels');
+        var lv = d.membersByLevel || [];
+        chartInstances['chartClubLevels'] = new Chart(document.getElementById('chartClubLevels'), {
+            type: 'bar',
+            data: {
+                labels: lv.map(function (x) { return 'Nivå ' + x.level; }),
+                datasets: [{
+                    label: 'Medlemmar',
+                    data: lv.map(function (x) { return x.count; }),
+                    backgroundColor: colors.success + 'cc',
+                    borderColor: colors.success,
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { beginAtZero: true, ticks: { precision: 0, color: colors.text }, grid: { color: colors.grid } },
+                    y: { ticks: { color: colors.text }, grid: { display: false } }
+                }
+            }
+        });
+
+        // Section D — training matches
+        destroyChart('chartClubMatches');
+        var tm = d.trainingMatchesPerMonth || [];
+        chartInstances['chartClubMatches'] = new Chart(document.getElementById('chartClubMatches'), {
+            type: 'bar',
+            data: {
+                labels: tm.map(function (x) { return formatMonth(x.month); }),
+                datasets: [{
+                    label: 'Matcher',
+                    data: tm.map(function (x) { return x.count; }),
+                    backgroundColor: colors.info + 'cc',
+                    borderColor: colors.info,
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: { beginAtZero: true, ticks: { precision: 0, color: colors.text }, grid: { color: colors.grid } },
+                    x: { ticks: { color: colors.text }, grid: { display: false } }
+                }
+            }
+        });
+        var matchLine = d.trainingMatches30d + ' matcher senaste 30d';
+        if (d.summary.comparableClubCount > 0) matchLine += ' (jämförbar klubb: ' + d.trainingMatches30dMedian + ')';
+        document.getElementById('clubMatches30dLine').textContent = matchLine;
+
+        // Section D — training scores by discipline
+        destroyChart('chartClubScores');
+        var ts = d.trainingScoresByDiscipline || [];
+        var disciplinePalette = ['#0d6efd', '#198754', '#ffc107', '#dc3545', '#6f42c1', '#fd7e14'];
+        chartInstances['chartClubScores'] = new Chart(document.getElementById('chartClubScores'), {
+            type: 'doughnut',
+            data: {
+                labels: ts.map(function (x) { return x.discipline; }),
+                datasets: [{
+                    data: ts.map(function (x) { return x.count; }),
+                    backgroundColor: ts.map(function (_, i) { return disciplinePalette[i % disciplinePalette.length]; }),
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { position: 'bottom' } }
+            }
+        });
+        var scoresLine = d.trainingScores30d + ' resultat senaste 30d';
+        if (d.summary.comparableClubCount > 0) scoresLine += ' (jämförbar klubb: ' + d.trainingScores30dMedian + ')';
+        document.getElementById('clubScores30dLine').textContent = scoresLine;
+
+        // Section E — competitions by discipline (doughnut) + biggest competitions table
+        var disciplinePalette = ['#0d6efd', '#198754', '#ffc107', '#dc3545', '#6f42c1', '#fd7e14', '#20c997', '#e83e8c', '#0dcaf0', '#6c757d'];
+        function disciplineColor(disc, i) { return disciplinePalette[i % disciplinePalette.length]; }
+
+        var compRow = document.getElementById('clubCompetitionsRow');
+        var byDisc = d.competitionsByDiscipline || [];
+        var topComps = d.topCompetitions || [];
+        if (byDisc.length === 0 && topComps.length === 0) {
+            compRow.style.display = 'none';
+        } else {
+            compRow.style.display = '';
+
+            destroyChart('chartClubCompetitionsByDiscipline');
+            chartInstances['chartClubCompetitionsByDiscipline'] = new Chart(document.getElementById('chartClubCompetitionsByDiscipline'), {
+                type: 'doughnut',
+                data: {
+                    labels: byDisc.map(function (x) { return x.discipline + ' (' + x.count + ')'; }),
+                    datasets: [{
+                        data: byDisc.map(function (x) { return x.count; }),
+                        backgroundColor: byDisc.map(function (x, i) { return disciplineColor(x.discipline, i); }),
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: { color: colors.text, usePointStyle: true, pointStyle: 'circle', padding: 12 }
+                        }
+                    }
+                }
+            });
+
+            var topBody = document.getElementById('clubTopCompetitionsBody');
+            if (topComps.length === 0) {
+                topBody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">Inga tävlingar att visa</td></tr>';
+            } else {
+                topBody.innerHTML = topComps.map(function (c, i) {
+                    return '<tr>'
+                         + '<td>' + escapeHtml(c.name) + '</td>'
+                         + '<td><span class="badge" style="background-color:' + disciplineColor(c.discipline, i) + '">' + escapeHtml(c.discipline) + '</span></td>'
+                         + '<td class="text-end">' + c.registrations + '</td>'
+                         + '</tr>';
+                }).join('');
+            }
+        }
+
+        // Section F — Klubbaktiviteter (events stats)
+        if (d.clubActivities) {
+            var thisYear = new Date().getFullYear();
+            document.getElementById('clubEventsYear').textContent = d.clubActivities.eventsThisYear;
+            document.getElementById('clubEvents30d').textContent = d.clubActivities.events30d > 0
+                ? '+' + d.clubActivities.events30d + ' senaste 30d' : '';
+            document.getElementById('clubEventsLastYear').textContent = d.clubActivities.eventsLastYear;
+            document.getElementById('clubLabelLastYear').textContent = String(thisYear - 1);
+            document.getElementById('clubEventsYearBefore').textContent = d.clubActivities.eventsYearBefore;
+            document.getElementById('clubLabelYearBefore').textContent = String(thisYear - 2);
+
+            var eventTypePalette = { 'Tävling': '#dc3545', 'Träning': '#198754', 'Städning': '#ffc107', 'Möte': '#0d6efd', 'Socialt': '#6f42c1', 'Annat': '#6c757d' };
+            destroyChart('chartClubEventsByType');
+            var byType = d.clubActivities.byType || [];
+            chartInstances['chartClubEventsByType'] = new Chart(document.getElementById('chartClubEventsByType'), {
+                type: 'doughnut',
+                data: {
+                    labels: byType.map(function (x) { return x.type + ' (' + x.count + ')'; }),
+                    datasets: [{
+                        data: byType.map(function (x) { return x.count; }),
+                        backgroundColor: byType.map(function (x, i) { return eventTypePalette[x.type] || disciplinePalette[i % disciplinePalette.length]; }),
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { position: 'right', labels: { color: colors.text, usePointStyle: true, pointStyle: 'circle', padding: 8, font: { size: 11 } } } }
+                }
+            });
+
+            destroyChart('chartClubEventsPerMonth');
+            var perMonth = d.clubActivities.perMonth || [];
+            chartInstances['chartClubEventsPerMonth'] = new Chart(document.getElementById('chartClubEventsPerMonth'), {
+                type: 'bar',
+                data: {
+                    labels: perMonth.map(function (x) { return formatMonth(x.month); }),
+                    datasets: [{
+                        label: 'Events',
+                        data: perMonth.map(function (x) { return x.count; }),
+                        backgroundColor: colors.success + 'cc',
+                        borderColor: colors.success,
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { beginAtZero: true, ticks: { precision: 0, color: colors.text }, grid: { color: colors.grid } },
+                        x: { ticks: { color: colors.text }, grid: { display: false } }
+                    }
+                }
+            });
+        }
+
+        // Section G — top active members
+        var topList = document.getElementById('clubTopMembersList');
+        var top = d.topActiveMembers || [];
+        if (top.length === 0) {
+            document.getElementById('clubTopMembersCard').style.display = 'none';
+        } else {
+            document.getElementById('clubTopMembersCard').style.display = '';
+            topList.innerHTML = top.map(function (m, i) {
+                return '<li class="list-group-item d-flex justify-content-between align-items-center">'
+                     + '<span><span class="badge bg-secondary me-2">#' + (i + 1) + '</span>' + escapeHtml(m.name) + '</span>'
+                     + '<span class="badge bg-primary rounded-pill">' + m.scoreCount + '</span>'
+                     + '</li>';
+            }).join('');
+        }
+
+        // Footer
+        var compEl = document.getElementById('clubComparableCountLine');
+        if (d.summary.comparableClubCount > 0) {
+            compEl.textContent = '(' + d.summary.comparableClubCount + ' jämförbara klubbar)';
+        } else {
+            compEl.textContent = '';
+        }
+    }
+
+    // Lazy-load when the Statistik tab is first activated
+    document.addEventListener('DOMContentLoaded', function () {
+        var statsTab = document.getElementById('clubstats-tab');
+        if (statsTab) {
+            statsTab.addEventListener('shown.bs.tab', function () {
+                if (!loadedOnce) {
+                    loadedOnce = true;
+                    loadClubStatistics(false);
+                }
+            });
+        }
+    });
+})();
+</script>

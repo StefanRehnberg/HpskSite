@@ -41,6 +41,13 @@ namespace HpskSite.Composers
             // Register BoardRoleService as scoped
             builder.Services.AddScoped<BoardRoleService>();
 
+            // Register ClubComparisonService as scoped (snapshot is cached via IMemoryCache)
+            builder.Services.AddScoped<ClubComparisonService>();
+
+            // Certification authority + writer for instructor / control roles
+            builder.Services.AddScoped<CertificationAuthorizationService>();
+            builder.Services.AddScoped<CertificationService>();
+
             // Register BrevoEmailService and named HttpClient
             builder.Services.AddHttpClient("Brevo");
             builder.Services.AddScoped<BrevoEmailService>();

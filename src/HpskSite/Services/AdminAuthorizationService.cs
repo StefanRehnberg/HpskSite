@@ -32,6 +32,53 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// Look up the area code (Syd/Vast/Ost/Nord) for a given region. Returns null when
+        /// the regionalPage doesn't exist or has no area set yet.
+        /// </summary>
+        public string? GetAreaForRegion(string regionCode)
+        {
+            if (string.IsNullOrWhiteSpace(regionCode)) return null;
+
+            try
+            {
+                if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null)
+                    return null;
+
+                var root = ctx.Content.GetAtRoot().FirstOrDefault();
+                if (root == null) return null;
+
+                var rp = root.Children.FirstOrDefault(c =>
+                    c.ContentType.Alias == "regionalPage" &&
+                    string.Equals(c.Value<string>("regionCode") ?? "", regionCode, StringComparison.OrdinalIgnoreCase));
+                return rp?.Value<string>("area");
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// True if the current user is an appointed Riksinstruktör for the given area.
+        /// Site admins also pass.
+        /// </summary>
+        public async Task<bool> IsRiksinstruktorForArea(string areaCode)
+        {
+            if (string.IsNullOrWhiteSpace(areaCode)) return false;
+
+            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            if (currentMember == null) return false;
+
+            if (await IsCurrentUserAdminAsync()) return true;
+
+            var memberData = _memberService.GetByEmail(currentMember.Email ?? string.Empty);
+            if (memberData == null) return false;
+
+            var roles = _memberService.GetAllRoles(memberData.Id);
+            return roles?.Contains($"Riksinstruktor_{areaCode}") == true;
+        }
+
+        /// <summary>
         /// Checks if the current user is a site administrator
         /// </summary>
         public async Task<bool> IsCurrentUserAdminAsync()
@@ -276,7 +323,7 @@ namespace HpskSite.Services
         /// <summary>
         /// Gets list of club IDs in the specified regions
         /// </summary>
-        private List<int> GetClubsInRegions(List<string> regionCodes)
+        public List<int> GetClubsInRegions(List<string> regionCodes)
         {
             var clubIds = new List<int>();
 

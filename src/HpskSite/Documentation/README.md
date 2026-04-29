@@ -40,6 +40,7 @@ This folder contains all technical documentation for the HPSK Site project.
 - **CLUB_SYSTEM_MIGRATIONS.md** - Club system migration details (2025-10-30/31)
 - **LOGIN_REGISTRATION_SYSTEM.md** - Complete login/registration documentation
 - **AUTHORIZATION_SECURITY_AUDIT.md** - Security audit & fixes (2025-11-02, updated 2026-02 with Skjutledare/Trainer roles)
+- **CERTIFICATIONS_SYSTEM.md** - SPSF-registered instructor & control roles (Föreningsinstruktör, Kretsinstruktör, Riksinstruktör, Vapenkontrollant, Banläggare). Personal certifications + appointments, with Statistik integration (2026-04-29)
 
 ### Technical Reference
 - **CONTROLLER_ROUTING_POST_MIGRATION.md** - Controller routing notes

@@ -1,0 +1,52 @@
+@*
+    Read-only "Kretsinstruktörer" panel for the members-tier on RegionalPage.cshtml.
+    Lists active appointed Kretsinstruktörer in the region. Visible only to logged-in
+    members (the parent view gates this).
+*@
+@{
+    var publicPanelRegionCode = ViewBag.regionCode as string ?? "";
+}
+
+@if (!string.IsNullOrEmpty(publicPanelRegionCode))
+{
+    <div class="card mb-3 region-instructors-card" data-region-code="@publicPanelRegionCode">
+        <div class="card-body">
+            <h6 class="card-title mb-3"><i class="bi bi-mortarboard me-2"></i>Kretsinstruktörer</h6>
+            <div class="region-instructors-loading small text-muted">
+                <div class="spinner-border spinner-border-sm me-2" role="status"></div>Laddar...
+            </div>
+            <div class="region-instructors-content" style="display:none;">
+                <ul class="list-unstyled mb-0 small" data-list="kretsinstruktorer">
+                    <li class="text-muted">— Inga registrerade —</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    (function () {
+        var card = document.querySelector('.region-instructors-card[data-region-code="@publicPanelRegionCode"]');
+        if (!card) return;
+
+        function escapeHtml(str) { var d = document.createElement('div'); d.textContent = str || ''; return d.innerHTML; }
+
+        fetch('/umbraco/surface/Certification/PublicListForRegion?regionCode=' + encodeURIComponent('@publicPanelRegionCode'))
+            .then(function (r) { return r.json(); })
+            .then(function (resp) {
+                card.querySelector('.region-instructors-loading').style.display = 'none';
+                card.querySelector('.region-instructors-content').style.display = '';
+                if (!resp.success) return;
+                var ul = card.querySelector('[data-list="kretsinstruktorer"]');
+                var items = resp.kretsinstruktorer || [];
+                if (items.length === 0) {
+                    ul.innerHTML = '<li class="text-muted">— Inga registrerade —</li>';
+                    return;
+                }
+                ul.innerHTML = items.map(function (p) { return '<li>' + escapeHtml(p.name) + '</li>'; }).join('');
+            })
+            .catch(function () {
+                card.querySelector('.region-instructors-loading').textContent = 'Kunde inte ladda instruktörer.';
+            });
+    })();
+    </script>
+}

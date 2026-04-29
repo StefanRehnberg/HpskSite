@@ -1,0 +1,307 @@
+@*
+    Site-admin Riksinstruktör panel: per-area list with target counts (Syd/Vast/Ost = 2,
+    Nord = 3) and a grant + appoint flow. Uses the CertificationController endpoints.
+    Site-admin only — already gated by AdminPage.
+*@
+
+<!-- Flatpickr Date Picker (sv-SE) — AdminPage doesn't load it globally, so include here -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
+
+<div class="riksinstruktor-admin">
+    <div class="d-flex align-items-center mb-3">
+        <h5 class="mb-0"><i class="bi bi-mortarboard-fill me-2"></i>Riksinstruktörer</h5>
+        <button type="button" class="btn btn-sm btn-outline-secondary ms-auto me-2" id="riksRefreshBtn">
+            <i class="bi bi-arrow-clockwise"></i>
+        </button>
+        <button type="button" class="btn btn-sm btn-success" id="riksAddBtn">
+            <i class="bi bi-plus-circle me-1"></i>Tilldela ny
+        </button>
+    </div>
+
+    <div class="alert alert-info small">
+        Riksinstruktörer utbildar kretsinstruktörer och är källan till sanning för regelverk.
+        Mål: 2 per område (Syd, Väst, Öst) och 3 i Nord. Granter:s sker enbart av siteadmin.
+    </div>
+
+    <div id="riksLoading" class="text-center py-3">
+        <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+        <span class="ms-2 small text-muted">Laddar...</span>
+    </div>
+
+    <div id="riksContent" style="display:none;" class="row g-3"></div>
+</div>
+
+<!-- Grant modal -->
+<div class="modal fade" id="riksGrantModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Tilldela Riksinstruktör</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label">Område *</label>
+                    <select class="form-select" id="riksGrantArea">
+                        <option value="Syd">Syd</option>
+                        <option value="Vast">Väst</option>
+                        <option value="Ost">Öst</option>
+                        <option value="Nord">Nord</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Medlem *</label>
+                    <select class="form-select" id="riksGrantMember"></select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Certifierad datum *</label>
+                    <input type="text" class="form-control" id="riksGrantCertifiedAt" placeholder="ÅÅÅÅ-MM-DD">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Förfaller (frivilligt)</label>
+                    <input type="text" class="form-control" id="riksGrantExpiresAt" placeholder="ÅÅÅÅ-MM-DD">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Certifikatnummer (frivilligt)</label>
+                    <input type="text" class="form-control" id="riksGrantNumber" maxlength="100">
+                </div>
+                <div class="mb-2">
+                    <label class="form-label">Anteckningar (frivilligt)</label>
+                    <textarea class="form-control" id="riksGrantNotes" rows="2"></textarea>
+                </div>
+                <div class="alert alert-danger d-none" id="riksGrantError"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="riksGrantSubmit">
+                    <i class="bi bi-save me-1"></i>Spara
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    var areas = [
+        { code: 'Syd',  label: 'Syd',  target: 2 },
+        { code: 'Vast', label: 'Väst', target: 2 },
+        { code: 'Ost',  label: 'Öst',  target: 2 },
+        { code: 'Nord', label: 'Nord', target: 3 }
+    ];
+
+    var fpRiksCertifiedAt = null;
+    var fpRiksExpiresAt = null;
+    function initRiksFlatpickrs() {
+        if (typeof flatpickr === 'undefined') return;
+        if (!fpRiksCertifiedAt) {
+            fpRiksCertifiedAt = flatpickr('#riksGrantCertifiedAt', {
+                locale: 'sv', dateFormat: 'Y-m-d', allowInput: true
+            });
+        }
+        if (!fpRiksExpiresAt) {
+            fpRiksExpiresAt = flatpickr('#riksGrantExpiresAt', {
+                locale: 'sv', dateFormat: 'Y-m-d', allowInput: true
+            });
+        }
+    }
+
+    function getToken() {
+        var el = document.querySelector('input[name="__RequestVerificationToken"]');
+        return el ? el.value : '';
+    }
+
+    function escapeHtml(str) { var d = document.createElement('div'); d.textContent = str || ''; return d.innerHTML; }
+
+    function loadAll() {
+        document.getElementById('riksLoading').style.display = '';
+        document.getElementById('riksContent').style.display = 'none';
+
+        // Fetch all members + filter to those with Riksinstruktor_<area> roles client-side.
+        // For a v1 this is fine; the data set is small (handful of Riksinstruktörer total).
+        Promise.all(areas.map(function (a) {
+            return fetch('/umbraco/surface/Certification/ListForArea?areaCode=' + encodeURIComponent(a.code))
+                .then(function (r) { return r.json(); })
+                .then(function (resp) { return { area: a, resp: resp }; });
+        })).then(function (results) {
+            var content = document.getElementById('riksContent');
+            content.innerHTML = '';
+            results.forEach(function (entry) {
+                var a = entry.area;
+                var resp = entry.resp;
+                var persons = (resp && resp.success) ? (resp.data || []) : [];
+
+                var listItems;
+                if (persons.length === 0) {
+                    listItems = '<li class="list-group-item text-muted small">Ingen utsedd</li>';
+                } else {
+                    listItems = persons.map(function (p) {
+                        var meta = '';
+                        if (p.cert) {
+                            var pieces = [];
+                            if (p.cert.certifiedAt) pieces.push('Cert ' + escapeHtml(p.cert.certifiedAt));
+                            if (p.cert.expiresAt) pieces.push('förfaller ' + escapeHtml(p.cert.expiresAt));
+                            if (p.cert.certificateNumber) pieces.push('nr ' + escapeHtml(p.cert.certificateNumber));
+                            meta = pieces.join(' · ');
+                        }
+                        return '<li class="list-group-item d-flex justify-content-between align-items-center">'
+                             + '<div><strong>' + escapeHtml(p.name) + '</strong>'
+                             + (meta ? '<div class="small text-muted">' + meta + '</div>' : '')
+                             + '</div>'
+                             + (p.cert
+                                  ? '<div>'
+                                    + '<button type="button" class="btn btn-sm btn-outline-warning riks-unappoint-btn me-1"'
+                                    + ' data-member-id="' + p.memberId + '" data-area="' + escapeHtml(a.code) + '" data-name="' + escapeHtml(p.name) + '" title="Ta bort utnämning">'
+                                    + '<i class="bi bi-person-dash"></i></button>'
+                                    + '<button type="button" class="btn btn-sm btn-outline-danger riks-revoke-btn"'
+                                    + ' data-cert-id="' + p.cert.id + '" data-name="' + escapeHtml(p.name) + '" title="Återkalla cert">'
+                                    + '<i class="bi bi-x-circle"></i></button>'
+                                    + '</div>'
+                                  : '')
+                             + '</li>';
+                    }).join('');
+                }
+
+                var statusBadge = (persons.length >= a.target)
+                    ? '<span class="badge bg-success">Mål nått</span>'
+                    : '<span class="badge bg-warning text-dark">Under mål</span>';
+
+                content.insertAdjacentHTML('beforeend',
+                    '<div class="col-md-6">'
+                  + '<div class="card h-100">'
+                  + '<div class="card-body">'
+                  + '<div class="d-flex justify-content-between align-items-center mb-2">'
+                  + '<h6 class="mb-0">' + escapeHtml(a.label) + '</h6>'
+                  + '<span class="small text-muted">' + persons.length + ' / ' + a.target + ' ' + statusBadge + '</span>'
+                  + '</div>'
+                  + '<ul class="list-group list-group-flush">' + listItems + '</ul>'
+                  + '</div></div></div>');
+            });
+            document.getElementById('riksLoading').style.display = 'none';
+            document.getElementById('riksContent').style.display = '';
+        });
+    }
+
+    function loadMembers() {
+        var sel = document.getElementById('riksGrantMember');
+        sel.innerHTML = '<option value="">— Laddar medlemmar —</option>';
+        fetch('/umbraco/surface/MemberAdmin/GetMembers?pageSize=10000')
+            .then(function (r) { return r.json(); })
+            .then(function (resp) {
+                sel.innerHTML = '<option value="">— Välj medlem —</option>';
+                if (!resp.success) return;
+                // MemberAdmin/GetMembers returns data: { items: [...], page, ... }
+                var items = (resp.data && Array.isArray(resp.data.items)) ? resp.data.items
+                          : (Array.isArray(resp.data) ? resp.data : []);
+                items
+                    .map(function (m) { return { id: m.id, name: ((m.firstName || '') + ' ' + (m.lastName || '')).trim() || m.email || ('Medlem #' + m.id) }; })
+                    .sort(function (a, b) { return a.name.localeCompare(b.name, 'sv'); })
+                    .forEach(function (m) {
+                        var opt = document.createElement('option');
+                        opt.value = m.id; opt.textContent = m.name;
+                        sel.appendChild(opt);
+                    });
+            });
+    }
+
+    document.getElementById('riksRefreshBtn').addEventListener('click', loadAll);
+
+    document.getElementById('riksAddBtn').addEventListener('click', function () {
+        initRiksFlatpickrs();
+        document.getElementById('riksGrantArea').value = 'Syd';
+        if (fpRiksCertifiedAt) { fpRiksCertifiedAt.setDate(new Date(), true); }
+        else { document.getElementById('riksGrantCertifiedAt').value = new Date().toISOString().slice(0, 10); }
+        if (fpRiksExpiresAt) { fpRiksExpiresAt.clear(); }
+        else { document.getElementById('riksGrantExpiresAt').value = ''; }
+        document.getElementById('riksGrantNumber').value = '';
+        document.getElementById('riksGrantNotes').value = '';
+        document.getElementById('riksGrantError').classList.add('d-none');
+        loadMembers();
+        new bootstrap.Modal(document.getElementById('riksGrantModal')).show();
+    });
+
+    document.getElementById('riksGrantSubmit').addEventListener('click', function () {
+        var area = document.getElementById('riksGrantArea').value;
+        var memberId = parseInt(document.getElementById('riksGrantMember').value, 10);
+        var certifiedAt = document.getElementById('riksGrantCertifiedAt').value || null;
+        var expiresAt = document.getElementById('riksGrantExpiresAt').value || null;
+        var num = document.getElementById('riksGrantNumber').value.trim() || null;
+        var notes = document.getElementById('riksGrantNotes').value.trim() || null;
+        var err = document.getElementById('riksGrantError');
+        err.classList.add('d-none');
+
+        if (!area || !memberId || !certifiedAt) {
+            err.textContent = 'Fyll i område, medlem och datum.';
+            err.classList.remove('d-none');
+            return;
+        }
+
+        // Two-step: grant cert, then appoint to area.
+        fetch('/umbraco/surface/Certification/Grant', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getToken() },
+            body: JSON.stringify({
+                memberId: memberId,
+                certificationType: 'Riksinstruktor',
+                certifiedAt: certifiedAt,
+                expiresAt: expiresAt,
+                certificateNumber: num,
+                notes: notes
+            })
+        }).then(function (r) { return r.json(); }).then(function (resp) {
+            if (!resp.success) {
+                err.textContent = resp.message || 'Kunde inte spara';
+                err.classList.remove('d-none');
+                return;
+            }
+            return fetch('/umbraco/surface/Certification/Appoint', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getToken() },
+                body: JSON.stringify({ memberId: memberId, certificationType: 'Riksinstruktor', scopeId: area })
+            }).then(function (r) { return r.json(); }).then(function () {
+                bootstrap.Modal.getInstance(document.getElementById('riksGrantModal')).hide();
+                loadAll();
+            });
+        });
+    });
+
+    document.body.addEventListener('click', function (ev) {
+        var revoke = ev.target.closest('.riks-revoke-btn');
+        if (revoke) {
+            ev.preventDefault();
+            if (!confirm('Återkalla Riksinstruktör-certifieringen för ' + revoke.dataset.name + '?')) return;
+            var reason = prompt('Anledning (frivilligt):') || null;
+            fetch('/umbraco/surface/Certification/Revoke', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getToken() },
+                body: JSON.stringify({ certId: parseInt(revoke.dataset.certId, 10), reason: reason })
+            }).then(function (r) { return r.json(); }).then(function (resp) {
+                if (!resp.success) alert(resp.message || 'Kunde inte återkalla');
+                loadAll();
+            });
+            return;
+        }
+        var unappoint = ev.target.closest('.riks-unappoint-btn');
+        if (unappoint) {
+            ev.preventDefault();
+            if (!confirm('Ta bort utnämningen som Riksinstruktör för ' + unappoint.dataset.name + ' i område ' + unappoint.dataset.area + '? Certifieringen behålls.')) return;
+            fetch('/umbraco/surface/Certification/Unappoint', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getToken() },
+                body: JSON.stringify({
+                    memberId: parseInt(unappoint.dataset.memberId, 10),
+                    certificationType: 'Riksinstruktor',
+                    scopeId: unappoint.dataset.area
+                })
+            }).then(function (r) { return r.json(); }).then(function (resp) {
+                if (!resp.success) alert(resp.message || 'Kunde inte ta bort utnämningen');
+                loadAll();
+            });
+        }
+    });
+
+    loadAll();
+})();
+</script>

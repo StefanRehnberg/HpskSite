@@ -2839,8 +2839,9 @@ namespace HpskSite.Controllers
                 { "A1", 31 }, { "A1 Dam", 32 }, { "A1 Jun", 33 },
                 { "A2", 34 }, { "A2 Dam", 35 }, { "A2 Jun", 36 },
                 { "A3", 37 }, { "A3 Dam", 38 }, { "A3 Jun", 39 },
-                { "A Opt", 40 },
-                { "R1", 41 }, { "R2", 42 }, { "R3", 43 }
+                { "A Opt 1", 40 }, { "A Opt 2", 41 }, { "A Opt 3", 42 },
+                { "A Opt", 43 }, // legacy / unspecific
+                { "R1", 44 }, { "R2", 45 }, { "R3", 46 }
             };
 
             // Determine competition type for type-specific logic
@@ -2857,10 +2858,14 @@ namespace HpskSite.Controllers
                 ? new MilsnabbTieBreaker()
                 : new SeriesCountBackComparer(hasFinalsRound, qualificationSeriesCount, numberOfFinalSeries);
 
-            // Group by shooting class (using merge lookup if merges were applied)
+            // Group by shooting class (using merge lookup if merges were applied).
+            // Sort key is the MIN classOrder among the group's constituent shooters' classes,
+            // so merged groups (e.g. "C2+Dam", "A2+3", "C Vet") land next to their lowest member
+            // instead of falling through to the unknown-class bucket.
             var classGroups = shooterResults
                 .GroupBy(s => GetGroupName(s.ShootingClass))
-                .OrderBy(g => classOrder.GetValueOrDefault(g.Key, 999)) // Unknown classes go last
+                .OrderBy(g => g.Min(s => classOrder.GetValueOrDefault(s.ShootingClass, 999)))
+                .ThenBy(g => g.Key) // stable secondary sort for any unknown classes
                 .Select(classGroup => new ClassGroup
                 {
                     ClassName = classGroup.Key,

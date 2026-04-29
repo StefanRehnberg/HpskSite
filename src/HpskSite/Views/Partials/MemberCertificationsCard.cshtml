@@ -1,0 +1,84 @@
+@*
+    Read-only "Mina certifieringar" card on the user profile page. Loads the current
+    member's active certifications via /umbraco/surface/Certification/ListForMember.
+    Member ID is taken from ViewBag.memberId (already set in UserProfile.cshtml).
+*@
+@{
+    var memberId = ViewBag.memberId as int? ?? 0;
+}
+
+@if (memberId > 0)
+{
+    <hr class="my-4">
+
+    <div class="mb-4">
+        <h5 class="mb-3">
+            <i class="bi bi-mortarboard me-2"></i>Mina certifieringar
+        </h5>
+
+        <div id="memberCertsLoading" class="small text-muted">
+            <div class="spinner-border spinner-border-sm me-2" role="status"></div>Laddar...
+        </div>
+
+        <div id="memberCertsContent" style="display:none;">
+            <div id="memberCertsEmpty" class="text-muted small d-none">
+                Du har inga registrerade certifieringar ännu.
+            </div>
+            <table class="table table-sm" id="memberCertsTable" style="display:none;">
+                <thead class="table-light">
+                    <tr>
+                        <th>Certifiering</th>
+                        <th>Utfärdad</th>
+                        <th>Förfaller</th>
+                        <th>Cert.nr</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody id="memberCertsBody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+    (function () {
+        var memberId = @memberId;
+
+        function escapeHtml(str) { var d = document.createElement('div'); d.textContent = str || ''; return d.innerHTML; }
+
+        fetch('/umbraco/surface/Certification/ListForMember?memberId=' + memberId)
+            .then(function (r) { return r.json(); })
+            .then(function (resp) {
+                document.getElementById('memberCertsLoading').style.display = 'none';
+                var content = document.getElementById('memberCertsContent');
+                content.style.display = '';
+
+                if (!resp.success) {
+                    document.getElementById('memberCertsEmpty').textContent = resp.message || 'Kunde inte ladda certifieringar.';
+                    document.getElementById('memberCertsEmpty').classList.remove('d-none');
+                    return;
+                }
+
+                var rows = (resp.data || []).filter(function (c) { return c.isActive; });
+                if (rows.length === 0) {
+                    document.getElementById('memberCertsEmpty').classList.remove('d-none');
+                    return;
+                }
+
+                document.getElementById('memberCertsTable').style.display = '';
+                var tbody = document.getElementById('memberCertsBody');
+                tbody.innerHTML = rows.map(function (c) {
+                    var status = c.isExpired
+                        ? '<span class="badge bg-warning text-dark">Förfallen</span>'
+                        : '<span class="badge bg-success">Aktiv</span>';
+                    return '<tr>'
+                         + '<td>' + escapeHtml(c.certificationTypeLabel) + '</td>'
+                         + '<td class="text-nowrap small">' + escapeHtml(c.certifiedAt || '') + '</td>'
+                         + '<td class="text-nowrap small">' + (c.expiresAt ? escapeHtml(c.expiresAt) : '<span class="text-muted">Aldrig</span>') + '</td>'
+                         + '<td class="small">' + escapeHtml(c.certificateNumber || '') + '</td>'
+                         + '<td>' + status + '</td>'
+                         + '</tr>';
+                }).join('');
+            });
+    })();
+    </script>
+}

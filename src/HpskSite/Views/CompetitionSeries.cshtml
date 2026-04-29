@@ -603,7 +603,13 @@ function toggleSeriesDescription() {
                     // can show "best of N" contributors without recomputing per row.
                     const contributorsByClub = buildContributorsByClub(result.sections);
 
-                    result.sections.forEach(function(section) {
+                    // Render Club sections before Individual sections.
+                    const orderedSections = result.sections.slice().sort(function(a, b) {
+                        const rank = function(s) { return s.sectionType === 'Club' ? 0 : 1; };
+                        return rank(a) - rank(b);
+                    });
+
+                    orderedSections.forEach(function(section) {
                         html += '<div class="p-3">';
                         if (result.sections.length > 1) {
                             html += '<h4 class="mb-3">' + escapeHtmlSeries(section.title) + '</h4>';

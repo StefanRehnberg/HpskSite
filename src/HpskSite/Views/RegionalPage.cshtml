@@ -119,6 +119,7 @@
     ViewBag.isLoggedIn = isLoggedIn;
     ViewBag.regionContentId = Model.Id;
     ViewBag.regionName = regionName;
+    ViewBag.regionCode = regionCode;
 }
 
 <script>
@@ -168,6 +169,10 @@
             <div class="alert alert-info">
                 <i class="bi bi-info-circle me-2"></i>Ingen information om kretsen har lagts till ännu.
             </div>
+        }
+        @if (isLoggedIn)
+        {
+            @await Html.PartialAsync("RegionInstructorsPublicPanel")
         }
     </div>
 

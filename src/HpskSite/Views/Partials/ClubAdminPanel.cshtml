@@ -56,6 +56,16 @@
                 <i class="bi bi-file-earmark-text me-2"></i>Dokument
             </button>
         </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="certifications-tab" data-bs-toggle="tab" data-bs-target="#certificationsTab" type="button">
+                <i class="bi bi-mortarboard me-2"></i>Certifieringar
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="clubstats-tab" data-bs-toggle="tab" data-bs-target="#clubStatsTab" type="button">
+                <i class="bi bi-graph-up me-2"></i>Statistik
+            </button>
+        </li>
     </ul>
 
     <!-- Tab Content -->
@@ -374,6 +384,21 @@
                     </form>
                 </div>
             </div>
+        </div>
+
+        <!-- Certifieringar Tab -->
+        <div class="tab-pane fade" id="certificationsTab">
+            @{
+                var clubCertVD = new ViewDataDictionary(ViewData);
+                clubCertVD["CertScopeType"] = "Club";
+                clubCertVD["CertScopeId"] = clubId;
+            }
+            @await Html.PartialAsync("CertificationManagementPanel", null, clubCertVD)
+        </div>
+
+        <!-- Statistik Tab -->
+        <div class="tab-pane fade" id="clubStatsTab">
+            @await Html.PartialAsync("ClubStatistics")
         </div>
     </div>
 </div>
@@ -2186,13 +2211,20 @@ function displayClubMembers(members) {
     }
 
     let html = '<div class="table-responsive"><table class="table table-striped">';
-    html += '<thead><tr><th>Namn</th><th>E-post</th><th>Telefon</th><th>Status</th><th>Åtgärder</th></tr></thead><tbody>';
+    html += '<thead><tr><th>Namn</th><th>E-post</th><th>Telefon</th>'
+         + '<th class="text-nowrap">Webb</th><th class="text-nowrap">App</th>'
+         + '<th>Status</th><th>Åtgärder</th></tr></thead><tbody>';
 
     members.forEach(member => {
         const fullName = `${member.firstName || ''} ${member.lastName || ''}`.trim() || 'Okänt namn';
         const statusBadge = member.isApproved
             ? '<span class="badge bg-success">Godkänd</span>'
             : '<span class="badge bg-warning text-dark">Väntande</span>';
+
+        const webDisplay = member.lastActiveDisplay || 'Aldrig';
+        const webClass = webDisplay === 'Aldrig' ? 'text-muted' : '';
+        const mobileDisplay = member.lastMobileActiveDisplay || 'Aldrig';
+        const mobileClass = mobileDisplay === 'Aldrig' ? 'text-muted' : '';
 
         html += `
             <tr>
@@ -2204,6 +2236,8 @@ function displayClubMembers(members) {
                 </td>
                 <td>${escapeHtml(member.email || '-')}</td>
                 <td>${escapeHtml(member.phoneNumber || '-')}</td>
+                <td class="${webClass} text-nowrap small">${escapeHtml(webDisplay)}</td>
+                <td class="${mobileClass} text-nowrap small">${escapeHtml(mobileDisplay)}</td>
                 <td>${statusBadge}</td>
                 <td>
                     <button class="btn btn-sm btn-outline-primary me-1" onclick="editClubMember(${member.id})" title="Redigera">
