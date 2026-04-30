@@ -48,6 +48,13 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<CertificationAuthorizationService>();
             builder.Services.AddScoped<CertificationService>();
 
+            // Klubb- och kretsrekord (manual record entry, IsCurrent + history chain)
+            builder.Services.AddScoped<CompetitionRecordsService>();
+
+            // Manual klubb-/kretsmästare entries (auto-compute approach abandoned —
+            // many clubs don't run results through pistol.nu)
+            builder.Services.AddScoped<CompetitionChampionsService>();
+
             // Register BrevoEmailService and named HttpClient
             builder.Services.AddHttpClient("Brevo");
             builder.Services.AddScoped<BrevoEmailService>();

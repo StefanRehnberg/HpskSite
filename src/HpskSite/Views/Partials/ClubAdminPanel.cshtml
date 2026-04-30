@@ -62,6 +62,11 @@
             </button>
         </li>
         <li class="nav-item" role="presentation">
+            <button class="nav-link" id="clubChampions-tab" data-bs-toggle="tab" data-bs-target="#clubChampionsTab" type="button">
+                <i class="bi bi-trophy-fill me-2"></i>Mästare
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
             <button class="nav-link" id="clubstats-tab" data-bs-toggle="tab" data-bs-target="#clubStatsTab" type="button">
                 <i class="bi bi-graph-up me-2"></i>Statistik
             </button>
@@ -396,6 +401,19 @@
             @await Html.PartialAsync("CertificationManagementPanel", null, clubCertVD)
         </div>
 
+        <!-- Mästare Tab -->
+        <div class="tab-pane fade" id="clubChampionsTab">
+            @{
+                var clubChampAdminVD = new ViewDataDictionary(ViewData);
+                clubChampAdminVD["ChampionsScopeType"] = "Club";
+                clubChampAdminVD["ChampionsScopeId"] = clubId.ToString();
+                clubChampAdminVD["ChampionsScopeName"] = clubName;
+                clubChampAdminVD["ChampionsCanEdit"] = true;
+                clubChampAdminVD["ChampionsShowAllYears"] = true;
+            }
+            @await Html.PartialAsync("ReigningChampionsPanel", null, clubChampAdminVD)
+        </div>
+
         <!-- Statistik Tab -->
         <div class="tab-pane fade" id="clubStatsTab">
             @await Html.PartialAsync("ClubStatistics")
@@ -590,7 +608,7 @@
                         </div>
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label for="newMemberShooterIdNumber" class="form-label">Skytte-ID</label>
+                                <label for="newMemberShooterIdNumber" class="form-label">Pistolkortnr</label>
                                 <input type="text" class="form-control" id="newMemberShooterIdNumber" name="shooterIdNumber">
                             </div>
                         </div>
@@ -756,7 +774,7 @@
                         </div>
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label for="editMemberShooterIdNumber" class="form-label">Skytte-ID</label>
+                                <label for="editMemberShooterIdNumber" class="form-label">Pistolkortnr</label>
                                 <input type="text" class="form-control" id="editMemberShooterIdNumber" name="shooterIdNumber">
                             </div>
                         </div>

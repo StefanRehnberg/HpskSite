@@ -268,6 +268,35 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// Public-facing (login-only) cert list for a single member. Used by the member
+        /// details modal on the club members directory — visible to any logged-in member.
+        /// Strips admin-only fields (cert number, notes, grantor) and only returns active
+        /// certifications.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> PublicListForMember(int memberId)
+        {
+            if (memberId <= 0) return Json(new { success = false, message = "Ogiltigt medlems-ID." });
+            var current = await _memberManager.GetCurrentMemberAsync();
+            if (current == null) return Json(new { success = false, message = "Login required." });
+
+            var rows = await _certService.GetForMemberAsync(memberId);
+            var data = rows
+                .Where(c => c.IsActive)
+                .Select(c => new
+                {
+                    certificationType = c.CertificationType,
+                    certificationTypeLabel = CertificationTypes.DisplayName(c.CertificationType),
+                    certifiedAt = c.CertifiedAt.ToString("yyyy-MM-dd"),
+                    expiresAt = c.ExpiresAt?.ToString("yyyy-MM-dd"),
+                    isExpired = c.IsExpired
+                })
+                .ToList();
+
+            return Json(new { success = true, data });
+        }
+
+        /// <summary>
         /// Public-facing (login-only) instructor list for a club. Used by the members-tier
         /// panel on Club.cshtml. No admin info — just names + cert type.
         /// </summary>

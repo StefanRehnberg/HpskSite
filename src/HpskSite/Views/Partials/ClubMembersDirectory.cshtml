@@ -1,10 +1,25 @@
 @{
     var clubId = ViewBag.clubId as int? ?? 0;
+    var clubName = ViewBag.clubName as string ?? "";
     var isClubMember = ViewBag.isClubMember as bool? ?? false;
     var isClubAdmin = ViewBag.isClubAdmin as bool? ?? false;
 }
 
 <div class="club-members-directory">
+    @{
+        var champVD = new ViewDataDictionary(ViewData);
+        champVD["ChampionsScopeType"] = "Club";
+        champVD["ChampionsScopeId"] = clubId.ToString();
+        champVD["ChampionsScopeName"] = clubName;
+        // Read-only here in the Members directory — entry/management happens from
+        // ClubAdminPanel > Mästare tab.
+        champVD["ChampionsCanEdit"] = false;
+    }
+    @if (clubId > 0)
+    {
+        @await Html.PartialAsync("ReigningChampionsPanel", null, champVD)
+    }
+
     <div class="card">
         <div class="card-header border-bottom">
             <div class="d-flex justify-content-between align-items-center">
@@ -66,8 +81,8 @@
                         <p id="detailPhone" class="mb-0"></p>
                     </div>
                     <div class="col-md-6">
-                        <label class="fw-bold text-muted small">Personnummer</label>
-                        <p id="detailPersonNumber" class="mb-0"></p>
+                        <label class="fw-bold text-muted small">Pistolkortnr</label>
+                        <p id="detailShooterIdNumber" class="mb-0"></p>
                     </div>
                 </div>
                 <div class="row mb-3">
@@ -88,18 +103,36 @@
                 </div>
                 <div class="row mb-3">
                     <div class="col-md-6">
-                        <label class="fw-bold text-muted small">Skyttekortnummer</label>
-                        <p id="detailShooterIdNumber" class="mb-0"></p>
-                    </div>
-                    <div class="col-md-6">
                         <label class="fw-bold text-muted small">Medlem sedan</label>
                         <p id="detailMemberSince" class="mb-0"></p>
                     </div>
-                </div>
-                <div class="row">
-                    <div class="col-md-12">
+                    <div class="col-md-6">
                         <label class="fw-bold text-muted small">Klubbstatus</label>
                         <p id="detailClubStatus" class="mb-0"></p>
+                    </div>
+                </div>
+                <div class="row mb-3" id="detailBoardRolesRow" style="display:none;">
+                    <div class="col-md-12">
+                        <label class="fw-bold text-muted small">Styrelseroller</label>
+                        <div id="detailBoardRoles" class="mb-0"></div>
+                    </div>
+                </div>
+                <div class="row mb-3" id="detailCertificationsRow" style="display:none;">
+                    <div class="col-md-12">
+                        <label class="fw-bold text-muted small">Certifieringar</label>
+                        <div id="detailCertifications" class="mb-0"></div>
+                    </div>
+                </div>
+                <div class="row mb-3" id="detailRecordsRow" style="display:none;">
+                    <div class="col-md-12">
+                        <label class="fw-bold text-muted small">Rekord</label>
+                        <div id="detailRecords" class="mb-0"></div>
+                    </div>
+                </div>
+                <div class="row mb-0" id="detailChampionsRow" style="display:none;">
+                    <div class="col-md-12">
+                        <label class="fw-bold text-muted small">Mästartitlar</label>
+                        <div id="detailChampions" class="mb-0"></div>
                     </div>
                 </div>
             </div>
@@ -482,11 +515,11 @@ function showMemberDetails(memberId) {
         return;
     }
 
-    // Populate modal fields
+    // Populate modal fields. Personnummer is intentionally NOT shown here —
+    // this modal is visible to any club member, not just admins.
     document.getElementById('detailName').textContent = member.name || '-';
     document.getElementById('detailEmail').textContent = member.email || '-';
     document.getElementById('detailPhone').textContent = member.phoneNumber || '-';
-    document.getElementById('detailPersonNumber').textContent = member.personNumber || '-';
     document.getElementById('detailAddress').textContent = member.address || '-';
     document.getElementById('detailPostalCode').textContent = member.postalCode || '-';
     document.getElementById('detailCity').textContent = member.city || '-';
@@ -505,6 +538,118 @@ function showMemberDetails(memberId) {
         '<span class="badge bg-primary">Primär klubb</span>' :
         '<span class="badge bg-secondary">Sekundär klubb</span>';
     document.getElementById('detailClubStatus').innerHTML = clubStatus;
+
+    // Board roles — pre-loaded into boardRolesMap on page load
+    const rolesRow = document.getElementById('detailBoardRolesRow');
+    const rolesEl = document.getElementById('detailBoardRoles');
+    const roles = boardRolesMap[memberId];
+    if (roles && roles.length > 0) {
+        rolesEl.innerHTML = roles.map(r =>
+            `<span class="badge ${r.isBoardMember ? 'bg-primary' : 'bg-secondary'} me-1 mb-1">${escapeHtml(r.title)}</span>`
+        ).join('');
+        rolesRow.style.display = '';
+    } else {
+        rolesRow.style.display = 'none';
+    }
+
+    // Certifications — fetched on demand from public endpoint (login required, no
+    // admin metadata exposed: just type, dates, expiry status).
+    const certsRow = document.getElementById('detailCertificationsRow');
+    const certsEl = document.getElementById('detailCertifications');
+    certsEl.innerHTML = '<span class="text-muted small">Laddar...</span>';
+    certsRow.style.display = '';
+
+    fetch(`/umbraco/surface/Certification/PublicListForMember?memberId=${memberId}`)
+        .then(r => r.json())
+        .then(resp => {
+            if (!resp.success || !resp.data || resp.data.length === 0) {
+                certsRow.style.display = 'none';
+                return;
+            }
+            certsEl.innerHTML = resp.data.map(c => {
+                const meta = c.expiresAt
+                    ? ` <span class="small text-muted">(förfaller ${escapeHtml(c.expiresAt)})</span>`
+                    : '';
+                return `<span class="badge bg-info text-dark me-1 mb-1">${escapeHtml(c.certificationTypeLabel)}</span>${meta}`;
+            }).join(' ');
+        })
+        .catch(() => {
+            certsRow.style.display = 'none';
+        });
+
+    // Records held by this member — short summary line
+    const recsRow = document.getElementById('detailRecordsRow');
+    const recsEl = document.getElementById('detailRecords');
+    recsEl.innerHTML = '<span class="text-muted small">Laddar...</span>';
+    recsRow.style.display = '';
+
+    fetch(`/umbraco/surface/CompetitionRecords/ListForMember?memberId=${memberId}`)
+        .then(r => r.json())
+        .then(resp => {
+            if (!resp.success || !resp.data || resp.data.length === 0) {
+                recsRow.style.display = 'none';
+                return;
+            }
+            const club = resp.data.filter(x => x.level === 'Club').length;
+            const region = resp.data.filter(x => x.level === 'Region').length;
+            const parts = [];
+            if (club > 0) parts.push(club + ' klubbrekord');
+            if (region > 0) parts.push(region + ' kretsrekord');
+            const summary = parts.join(' och ');
+
+            const badges = resp.data.map(r => {
+                const cls = r.level === 'Region' ? 'bg-info' : 'bg-primary';
+                return `<span class="badge ${cls} me-1 mb-1">${escapeHtml(r.disciplineLabel)} ${escapeHtml(r.classLabel)} — ${r.totalScore}</span>`;
+            }).join(' ');
+
+            recsEl.innerHTML = `<div class="small mb-1"><i class="bi bi-trophy-fill text-warning me-1"></i>Innehar ${escapeHtml(summary)}</div>${badges}`;
+        })
+        .catch(() => {
+            recsRow.style.display = 'none';
+        });
+
+    // Championship titles held by this member
+    const champRow = document.getElementById('detailChampionsRow');
+    const champEl = document.getElementById('detailChampions');
+    champEl.innerHTML = '<span class="text-muted small">Laddar...</span>';
+    champRow.style.display = '';
+
+    fetch(`/umbraco/surface/CompetitionRecords/ChampionsForMember?memberId=${memberId}`)
+        .then(r => r.json())
+        .then(resp => {
+            if (!resp.success || !resp.data || resp.data.length === 0) {
+                champRow.style.display = 'none';
+                return;
+            }
+            const club = resp.data.filter(x => x.level === 'Club').length;
+            const region = resp.data.filter(x => x.level === 'Region').length;
+            const parts = [];
+            if (club > 0) parts.push(club + ' klubbmästartitel' + (club !== 1 ? 'titlar' : ''));
+            if (region > 0) parts.push(region + ' kretsmästartitel' + (region !== 1 ? 'titlar' : ''));
+            // Swedish plural: "1 titel" / "2 titlar"
+            const summary = [
+                club > 0 ? (club + (club === 1 ? ' klubbmästartitel' : ' klubbmästartitlar')) : null,
+                region > 0 ? (region + (region === 1 ? ' kretsmästartitel' : ' kretsmästartitlar')) : null
+            ].filter(Boolean).join(' och ');
+
+            // Sort: Year desc, then level (Club before Region), then class
+            const sorted = (resp.data || []).slice().sort((a, b) => {
+                if (b.year !== a.year) return b.year - a.year;
+                if (a.level !== b.level) return a.level === 'Region' ? 1 : -1;
+                return (a.classLabel || '').localeCompare(b.classLabel || '', 'sv');
+            });
+
+            const badges = sorted.map(c => {
+                const cls = c.level === 'Region' ? 'bg-info' : 'bg-primary';
+                const prefix = c.level === 'Region' ? 'KrM' : 'KM';
+                return `<span class="badge ${cls} me-1 mb-1">${prefix} ${c.year} · ${escapeHtml(c.disciplineLabel)} ${escapeHtml(c.classLabel)}</span>`;
+            }).join(' ');
+
+            champEl.innerHTML = `<div class="small mb-1"><i class="bi bi-award-fill text-warning me-1"></i>Innehar ${escapeHtml(summary)}</div>${badges}`;
+        })
+        .catch(() => {
+            champRow.style.display = 'none';
+        });
 
     // Show modal
     const modal = new bootstrap.Modal(document.getElementById('memberDetailsModal'));

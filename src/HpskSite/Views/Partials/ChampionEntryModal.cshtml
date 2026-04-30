@@ -1,0 +1,340 @@
+@*
+    ChampionEntryModal — admin-only modal for adding a klubb-/kretsmästare entry.
+    Manual entry per (Year, Discipline, ChampionType, ClassCode). Reuses the
+    member-autocomplete pattern from RecordEntryModal.
+*@
+@{
+    var ceScopeType = ViewData["ChampScopeType"] as string ?? "Club";
+    var ceScopeId = ViewData["ChampScopeId"]?.ToString() ?? "";
+    var ceInstance = ViewData["ChampInstance"] as string ?? (ceScopeType + "-" + ceScopeId).Replace(" ", "-");
+}
+
+<!-- Flatpickr (sv-SE) — many host pages already include it; double-loading is harmless. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
+
+<div class="modal fade" id="championEntryModal-@ceInstance" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Ny @(ceScopeType == "Region" ? "kretsmästare" : "klubbmästare")</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row mb-3">
+                    <div class="col-md-4">
+                        <label class="form-label">År *</label>
+                        <input type="number" class="form-control" id="ceYear-@ceInstance" min="1900" max="2200" step="1">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Disciplin *</label>
+                        <select class="form-select" id="ceDiscipline-@ceInstance">
+                            <option value="Precision">Precisionsskjutning</option>
+                            <option value="MagnumPrecision">Magnumprecision</option>
+                            <option value="Milsnabb">Militär snabbmatch</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Typ *</label>
+                        <div class="btn-group d-flex" role="group">
+                            <input type="radio" class="btn-check" name="ceType-@ceInstance" id="ceType-Individual-@ceInstance" value="Individual" checked>
+                            <label class="btn btn-outline-primary" for="ceType-Individual-@ceInstance"><i class="bi bi-person me-1"></i>Individuell</label>
+                            <input type="radio" class="btn-check" name="ceType-@ceInstance" id="ceType-Team-@ceInstance" value="Team">
+                            <label class="btn btn-outline-primary" for="ceType-Team-@ceInstance"><i class="bi bi-people me-1"></i>Lag</label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <label class="form-label">Klass *</label>
+                        <select class="form-select" id="ceClass-@ceInstance"></select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Total poäng *</label>
+                        <input type="number" class="form-control" id="ceScore-@ceInstance" min="0" step="1">
+                        <small class="form-text text-muted" id="ceScoreHelp-@ceInstance"></small>
+                    </div>
+                </div>
+
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <label class="form-label">Tävling</label>
+                        <input type="text" class="form-control" id="ceCompetition-@ceInstance" maxlength="200" placeholder="Namn på mästerskapstävlingen">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Tävlingsdatum</label>
+                        <input type="text" class="form-control" id="ceDate-@ceInstance" placeholder="ÅÅÅÅ-MM-DD">
+                    </div>
+                </div>
+
+                <!-- Individual-only -->
+                <div class="row mb-3 ce-individual-fields" id="ceIndividual-@ceInstance">
+                    <div class="col-md-12">
+                        <label class="form-label">Skytt *</label>
+                        <div class="position-relative">
+                            <input type="text" class="form-control" id="ceHolderName-@ceInstance" placeholder="För- och efternamn" autocomplete="off">
+                            <input type="hidden" id="ceHolderMemberId-@ceInstance" value="">
+                            <div class="list-group position-absolute w-100" id="ceHolderSuggestions-@ceInstance" style="display:none; z-index:10; max-height:240px; overflow:auto;"></div>
+                        </div>
+                        <small class="form-text text-muted">Skriv namnet och välj från listan. Frittextnamn fungerar också.</small>
+                    </div>
+                </div>
+
+                <!-- Team-only -->
+                <div class="ce-team-fields" id="ceTeam-@ceInstance" style="display:none;">
+                    <div class="row mb-3">
+                        <div class="col-md-12">
+                            <label class="form-label">Lagnamn *</label>
+                            <input type="text" class="form-control" id="ceTeamName-@ceInstance">
+                        </div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-12">
+                            <label class="form-label">Lagmedlemmar (en per rad)</label>
+                            <textarea class="form-control" id="ceTeamMembers-@ceInstance" rows="3" placeholder="Anders Andersson&#10;Britta Bengtsson&#10;..."></textarea>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">Anteckningar</label>
+                    <textarea class="form-control" id="ceNotes-@ceInstance" rows="2"></textarea>
+                </div>
+
+                <div class="alert alert-danger d-none" id="ceError-@ceInstance"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="ceSubmit-@ceInstance">
+                    <i class="bi bi-save me-1"></i>Spara
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    var instance = '@ceInstance';
+    var scopeType = '@ceScopeType';
+    var scopeId = '@ceScopeId';
+
+    var el = function (suffix) { return document.getElementById(suffix + '-' + instance); };
+    var modal = document.getElementById('championEntryModal-' + instance);
+    if (!modal) return;
+    var bsModal = null;
+    var fpDate = null;
+
+    var combos = {
+        'Precision-Individual': { classes: ['A','B','C','C_Dam','C_Jun','C_VetY','C_VetA'], series: 10, max: 500 },
+        'Precision-Team':       { classes: ['A','B','C','C_Dam','C_Jun','C_Vet'],          series: 7,  max: 350 },
+        'MagnumPrecision-Individual': { classes: ['M1','M2','M3','M4','M5','M6','M7'],     series: 6,  max: 300 },
+        'MagnumPrecision-Team':       { classes: ['M1','M2','M3','M4','M5','M6','M7'],     series: 6,  max: 300 },
+        'Milsnabb-Individual':  { classes: ['A','B','C','C_Dam','C_Jun','C_VetY','C_VetA','R'], series: 12, max: 600 },
+        'Milsnabb-Team':        { classes: ['A','B','C','C_Dam','C_Jun','C_Vet','R'],         series: 12, max: 600 }
+    };
+    var classLabels = { 'C_Dam':'C Dam', 'C_Jun':'C Jun', 'C_VetY':'C Vet Y', 'C_VetA':'C Vet Ä', 'C_Vet':'C Vet' };
+    function classLabel(c) { return classLabels[c] || c; }
+
+    function getToken() { var e = document.querySelector('input[name="__RequestVerificationToken"]'); return e ? e.value : ''; }
+    function escapeHtml(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+
+    function selectedDiscipline() { return el('ceDiscipline').value; }
+    function selectedType() {
+        var radios = document.getElementsByName('ceType-' + instance);
+        for (var i = 0; i < radios.length; i++) if (radios[i].checked) return radios[i].value;
+        return 'Individual';
+    }
+
+    function refreshClassesAndHelp() {
+        var d = selectedDiscipline();
+        var t = selectedType();
+        var combo = combos[d + '-' + t];
+        if (!combo) return;
+        var sel = el('ceClass');
+        sel.innerHTML = combo.classes.map(function (c) {
+            return '<option value="' + c + '">' + escapeHtml(classLabel(c)) + '</option>';
+        }).join('');
+        el('ceScore').setAttribute('max', String(combo.max));
+        el('ceScoreHelp').textContent = 'Max möjligt: ' + combo.max + ' (' + combo.series + ' serier × 50p).';
+        document.getElementById('ceIndividual-' + instance).style.display = (t === 'Individual') ? '' : 'none';
+        document.getElementById('ceTeam-' + instance).style.display = (t === 'Team') ? '' : 'none';
+    }
+
+    function init() {
+        if (typeof flatpickr !== 'undefined' && !fpDate) {
+            fpDate = flatpickr('#ceDate-' + instance, { locale: 'sv', dateFormat: 'Y-m-d', allowInput: true });
+        }
+        refreshClassesAndHelp();
+        loadMemberPool();
+    }
+
+    el('ceDiscipline').addEventListener('change', refreshClassesAndHelp);
+    Array.from(document.getElementsByName('ceType-' + instance)).forEach(function (r) {
+        r.addEventListener('change', refreshClassesAndHelp);
+    });
+
+    // ── Member autocomplete ─────────────────────────────────────────
+    var memberPool = null;
+    var memberPoolLoading = false;
+    function loadMemberPool() {
+        if (memberPool || memberPoolLoading) return;
+        memberPoolLoading = true;
+        var url = scopeType === 'Region'
+            ? '/umbraco/surface/CompetitionRecords/GetRegionMembers?regionCode=' + encodeURIComponent(scopeId)
+            : '/umbraco/surface/ClubAdmin/GetClubMembers?clubId=' + encodeURIComponent(scopeId);
+        fetch(url).then(function (r) { return r.json(); }).then(function (resp) {
+            memberPoolLoading = false;
+            if (!resp.success) { memberPool = []; return; }
+            var items;
+            if (Array.isArray(resp.data)) items = resp.data;
+            else if (resp.data && Array.isArray(resp.data.items)) items = resp.data.items;
+            else items = [];
+            memberPool = items.map(function (m) {
+                var name = m.name || ((m.firstName || '') + ' ' + (m.lastName || '')).trim();
+                if (!name) name = m.email || ('Medlem #' + m.id);
+                return {
+                    id: m.id, name: name,
+                    clubName: m.clubName || '',
+                    shooterIdNumber: m.shooterIdNumber || ''
+                };
+            }).sort(function (a, b) { return a.name.localeCompare(b.name, 'sv'); });
+        }).catch(function () { memberPoolLoading = false; memberPool = []; });
+    }
+
+    function renderSuggestions(query) {
+        var box = document.getElementById('ceHolderSuggestions-' + instance);
+        if (!box) return;
+        if (!memberPool || query.length < 2) { box.style.display = 'none'; return; }
+        var q = query.toLowerCase();
+        var matches = memberPool.filter(function (m) {
+            return m.name.toLowerCase().indexOf(q) >= 0
+                || (m.clubName && m.clubName.toLowerCase().indexOf(q) >= 0)
+                || (m.shooterIdNumber && m.shooterIdNumber.toLowerCase().indexOf(q) >= 0);
+        }).slice(0, 8);
+        if (matches.length === 0) { box.style.display = 'none'; return; }
+        box.innerHTML = matches.map(function (m) {
+            var meta = [];
+            if (m.clubName) meta.push(escapeHtml(m.clubName));
+            if (m.shooterIdNumber) meta.push('Pistolkortnr ' + escapeHtml(m.shooterIdNumber));
+            var metaLine = meta.length ? '<div class="text-muted small">' + meta.join(' · ') + '</div>' : '';
+            return '<button type="button" class="list-group-item list-group-item-action small ce-suggestion"'
+                 + ' data-member-id="' + m.id + '" data-member-name="' + escapeHtml(m.name) + '">'
+                 + '<div>' + escapeHtml(m.name) + '</div>' + metaLine
+                 + '</button>';
+        }).join('');
+        box.style.display = '';
+    }
+
+    var holderInput = el('ceHolderName');
+    holderInput.addEventListener('input', function () {
+        el('ceHolderMemberId').value = '';
+        renderSuggestions(holderInput.value || '');
+    });
+    holderInput.addEventListener('blur', function () {
+        setTimeout(function () {
+            var b = document.getElementById('ceHolderSuggestions-' + instance);
+            if (b) b.style.display = 'none';
+        }, 150);
+    });
+    document.getElementById('ceHolderSuggestions-' + instance).addEventListener('mousedown', function (ev) {
+        var btn = ev.target.closest('.ce-suggestion');
+        if (!btn) return;
+        ev.preventDefault();
+        holderInput.value = btn.getAttribute('data-member-name');
+        el('ceHolderMemberId').value = btn.getAttribute('data-member-id');
+        document.getElementById('ceHolderSuggestions-' + instance).style.display = 'none';
+    });
+
+    function reset() {
+        init();
+        el('ceYear').value = new Date().getFullYear();
+        el('ceScore').value = '';
+        el('ceCompetition').value = '';
+        if (fpDate) fpDate.clear(); else el('ceDate').value = '';
+        el('ceHolderName').value = '';
+        el('ceHolderMemberId').value = '';
+        var sb = document.getElementById('ceHolderSuggestions-' + instance);
+        if (sb) sb.style.display = 'none';
+        el('ceTeamName').value = '';
+        el('ceTeamMembers').value = '';
+        el('ceNotes').value = '';
+        el('ceError').classList.add('d-none');
+    }
+
+    window['champEntryOpen_' + instance] = function () {
+        reset();
+        bsModal = bsModal || new bootstrap.Modal(modal);
+        bsModal.show();
+    };
+
+    function parseTeamMembers(raw) {
+        if (!raw) return [];
+        return raw.split(/\r?\n/).map(function (s) { return s.trim(); })
+            .filter(function (s) { return s.length > 0; })
+            .map(function (n) { return { memberId: null, name: n }; });
+    }
+
+    function showErr(msg) {
+        var e = el('ceError');
+        e.textContent = msg;
+        e.classList.remove('d-none');
+    }
+
+    el('ceSubmit').addEventListener('click', function () {
+        el('ceError').classList.add('d-none');
+
+        var year = parseInt(el('ceYear').value, 10);
+        var d = selectedDiscipline();
+        var t = selectedType();
+        var classCode = el('ceClass').value;
+        var score = parseInt(el('ceScore').value, 10);
+        var competition = el('ceCompetition').value.trim() || null;
+        var date = el('ceDate').value || null;
+        var notes = el('ceNotes').value.trim() || null;
+
+        if (isNaN(year) || year < 1900 || year > 2200) { showErr('Ange ett giltigt år.'); return; }
+        if (isNaN(score)) { showErr('Ange total poäng.'); return; }
+
+        var body = {
+            level: scopeType, scopeId: scopeId, year: year,
+            discipline: d, championType: t, classCode: classCode,
+            totalScore: score, competitionName: competition, competitionDate: date, notes: notes
+        };
+
+        if (t === 'Individual') {
+            var holder = el('ceHolderName').value.trim();
+            if (!holder) { showErr('Ange skyttens namn.'); return; }
+            body.holderName = holder;
+            var pickedId = el('ceHolderMemberId').value;
+            if (pickedId) {
+                var n = parseInt(pickedId, 10);
+                if (!isNaN(n)) body.holderMemberId = n;
+            }
+        } else {
+            var teamName = el('ceTeamName').value.trim();
+            if (!teamName) { showErr('Ange lagnamn.'); return; }
+            body.holderName = teamName;
+            body.teamName = teamName;
+            var members = parseTeamMembers(el('ceTeamMembers').value);
+            body.teamMembersJson = members.length ? JSON.stringify(members) : null;
+        }
+
+        fetch('/umbraco/surface/CompetitionRecords/ChampionCreate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getToken() },
+            body: JSON.stringify(body)
+        }).then(function (r) { return r.json(); }).then(function (resp) {
+            if (!resp.success) { showErr(resp.message || 'Kunde inte spara.'); return; }
+            bsModal.hide();
+            if (window['championsReload_' + instance]) window['championsReload_' + instance]();
+        }).catch(function (err) {
+            showErr(err.message || 'Nätverksfel.');
+        });
+    });
+
+    init();
+})();
+</script>

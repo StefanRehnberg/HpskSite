@@ -64,7 +64,7 @@ Gå till **Min Sida** och klicka på fliken **"Profil"** (den femte fliken).
 Här kan du ändra:
 - Förnamn, efternamn, e-post
 - Telefonnummer, adress, postnummer, stad
-- Personnummer och Skytte-ID
+- Personnummer och Pistolkortnr
 - Profilbild (klicka på kameraikonen nere till höger på din avatar, eller **"Ta bort bild"** för att ta bort den)
 
 Skrivskyddade fält som visas:

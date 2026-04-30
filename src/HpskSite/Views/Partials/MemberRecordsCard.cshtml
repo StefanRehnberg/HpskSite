@@ -1,0 +1,80 @@
+@*
+    "Rekord jag innehar" — read-only card on the user profile page.
+    Lists current klubb- och kretsrekord held by the member. Hidden when none.
+    Reads ViewBag.memberId, set in UserProfile.cshtml before this partial is rendered.
+*@
+@{
+    var recCardMemberId = ViewBag.memberId as int? ?? 0;
+}
+
+@if (recCardMemberId > 0)
+{
+    <hr class="my-4">
+
+    <div class="mb-4">
+        <h5 class="mb-3">
+            <i class="bi bi-trophy-fill text-warning me-2"></i>Rekord jag innehar
+        </h5>
+
+        <div id="memberRecordsLoading" class="small text-muted">
+            <div class="spinner-border spinner-border-sm me-2" role="status"></div>Laddar...
+        </div>
+
+        <div id="memberRecordsContent" style="display:none;">
+            <div id="memberRecordsEmpty" class="text-muted small d-none">
+                Du innehar inga rekord just nu.
+            </div>
+            <div id="memberRecordsList" class="row g-2"></div>
+        </div>
+    </div>
+
+    <script>
+    (function () {
+        var memberId = @recCardMemberId;
+
+        function escapeHtml(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+
+        function levelLabel(level) { return level === 'Region' ? 'Kretsrekord' : 'Klubbrekord'; }
+        function levelBadgeClass(level) { return level === 'Region' ? 'bg-info' : 'bg-primary'; }
+
+        fetch('/umbraco/surface/CompetitionRecords/ListForMember?memberId=' + memberId)
+            .then(function (r) { return r.json(); })
+            .then(function (resp) {
+                document.getElementById('memberRecordsLoading').style.display = 'none';
+                var content = document.getElementById('memberRecordsContent');
+                content.style.display = '';
+
+                var rows = (resp && resp.success && resp.data) ? resp.data : [];
+                if (rows.length === 0) {
+                    document.getElementById('memberRecordsEmpty').classList.remove('d-none');
+                    return;
+                }
+
+                document.getElementById('memberRecordsList').innerHTML = rows.map(function (r) {
+                    return '<div class="col-md-6">'
+                         + '<div class="card h-100">'
+                         + '<div class="card-body py-2 px-3">'
+                         + '<div class="d-flex justify-content-between align-items-start">'
+                         + '<div>'
+                         +   '<span class="badge ' + levelBadgeClass(r.level) + ' me-1">' + levelLabel(r.level) + '</span>'
+                         +   '<strong class="ms-1">' + escapeHtml(r.disciplineLabel) + '</strong>'
+                         +   ' <small class="text-muted">— ' + escapeHtml(r.recordTypeLabel) + '</small>'
+                         +   '<div class="mt-1">'
+                         +     '<span class="badge bg-secondary me-1">' + escapeHtml(r.classLabel) + '</span>'
+                         +     '<span class="text-muted small">' + escapeHtml(r.recordDate) + (r.competitionName ? ' · ' + escapeHtml(r.competitionName) : '') + '</span>'
+                         +   '</div>'
+                         + '</div>'
+                         + '<div class="text-end">'
+                         +   '<div style="font-size:1.4rem;font-weight:700;">' + r.totalScore + '</div>'
+                         +   '<small class="text-muted">/ ' + r.maxScore + '</small>'
+                         + '</div>'
+                         + '</div>'
+                         + '</div></div></div>';
+                }).join('');
+            })
+            .catch(function () {
+                document.getElementById('memberRecordsLoading').style.display = 'none';
+            });
+    })();
+    </script>
+}

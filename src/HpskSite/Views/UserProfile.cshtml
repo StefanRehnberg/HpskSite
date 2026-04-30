@@ -525,8 +525,8 @@
                                     </div>
                                     <div class="col-md-6">
                                         <div class="mb-3">
-                                            <label for="shooterIdNumber" class="form-label">Skytte-ID</label>
-                                            <input type="text" class="form-control" id="shooterIdNumber" name="shooterIdNumber" value="@(memberData?.GetValue("shooterIdNumber")?.ToString() ?? "")" placeholder="Ditt skytte-ID nummer">
+                                            <label for="shooterIdNumber" class="form-label">Pistolkortnr</label>
+                                            <input type="text" class="form-control" id="shooterIdNumber" name="shooterIdNumber" value="@(memberData?.GetValue("shooterIdNumber")?.ToString() ?? "")" placeholder="Ditt pistolkortnr">
                                         </div>
                                     </div>
                                 </div>
@@ -658,6 +658,7 @@
 
                             @{ ViewBag.memberId = memberData?.Id ?? 0; }
                             @await Html.PartialAsync("MemberCertificationsCard")
+                            @await Html.PartialAsync("MemberRecordsCard")
                         </div>
                         @* End Profile Tab *@
 

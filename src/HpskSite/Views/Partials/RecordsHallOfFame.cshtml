@@ -1,0 +1,443 @@
+@*
+    Klubb- och kretsrekord — Hall of Fame display partial.
+    Used on both Club.cshtml and RegionalPage.cshtml. Reads its scope from ViewData:
+      ViewData["RecordsScopeType"]  = "Club" | "Region"
+      ViewData["RecordsScopeId"]    = clubId (string) or regionCode
+      ViewData["RecordsCanEdit"]    = bool — controls visibility of admin actions
+      ViewData["RecordsScopeName"]  = display name (clubName or regionName) — optional
+*@
+@{
+    var rScopeType = ViewData["RecordsScopeType"] as string ?? "Club";
+    var rScopeId = ViewData["RecordsScopeId"]?.ToString() ?? "";
+    var rCanEdit = ViewData["RecordsCanEdit"] as bool? ?? false;
+    var rScopeName = ViewData["RecordsScopeName"] as string ?? "";
+    var rInstance = (rScopeType + "-" + rScopeId).Replace(" ", "-");
+    var rTitle = rScopeType == "Region" ? "Kretsrekord" : "Klubbrekord";
+}
+
+<div class="records-hall-of-fame" data-scope-type="@rScopeType" data-scope-id="@rScopeId" data-can-edit="@(rCanEdit.ToString().ToLower())">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h4 class="mb-0"><i class="bi bi-award-fill text-warning me-2"></i>@rTitle</h4>
+        <div>
+            <button type="button" class="btn btn-sm btn-outline-secondary records-refresh-btn me-2" title="Uppdatera">
+                <i class="bi bi-arrow-clockwise"></i>
+            </button>
+            @if (rCanEdit)
+            {
+                <button type="button" class="btn btn-sm btn-success records-add-btn">
+                    <i class="bi bi-plus-circle me-1"></i>Lägg till rekord
+                </button>
+            }
+        </div>
+    </div>
+
+    <div class="records-loading text-center py-4">
+        <div class="spinner-border text-primary" role="status"></div>
+        <p class="text-muted mt-2 mb-0">Laddar rekord...</p>
+    </div>
+    <div class="records-error alert alert-danger d-none"></div>
+
+    <div class="records-content" style="display:none;">
+
+        <!-- Hero strip — best individual record per discipline -->
+        <div class="row g-3 mb-4 records-hero-row"></div>
+
+        <!-- Type pill switch -->
+        <div class="d-flex justify-content-center mb-3">
+            <div class="btn-group" role="group">
+                <button type="button" class="btn btn-outline-primary records-type-btn active" data-record-type="Individual">
+                    <i class="bi bi-person me-1"></i>Individuella
+                </button>
+                <button type="button" class="btn btn-outline-primary records-type-btn" data-record-type="Team">
+                    <i class="bi bi-people me-1"></i>Lag
+                </button>
+            </div>
+        </div>
+
+        <!-- Discipline grids -->
+        <div class="records-grids"></div>
+
+    </div>
+</div>
+
+<style>
+.records-hero-card {
+    border: 2px solid var(--bs-border-color);
+    border-radius: 12px;
+    padding: 16px;
+    background: linear-gradient(135deg, var(--bs-tertiary-bg), var(--bs-body-bg));
+    height: 100%;
+    position: relative;
+    overflow: hidden;
+}
+.records-hero-card.has-record { border-color: #ffc107; }
+.records-hero-card .records-hero-discipline {
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--bs-secondary-color);
+    margin-bottom: 8px;
+}
+.records-hero-card .records-hero-score {
+    font-size: 2.4rem;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--bs-emphasis-color);
+}
+.records-hero-card .records-hero-max {
+    font-size: 0.9rem;
+    color: var(--bs-secondary-color);
+}
+.records-hero-card .records-hero-holder {
+    font-weight: 600;
+    margin-top: 12px;
+}
+.records-hero-card .records-hero-meta {
+    font-size: 0.85rem;
+    color: var(--bs-secondary-color);
+}
+.records-hero-card.has-record::before {
+    content: "🏆";
+    position: absolute;
+    right: 12px;
+    top: 12px;
+    font-size: 1.6rem;
+    opacity: 0.6;
+}
+
+.records-discipline-card { margin-bottom: 1rem; }
+.records-discipline-card .card-header {
+    background-color: var(--bs-tertiary-bg);
+    font-weight: 600;
+}
+.records-table { font-size: 0.92rem; }
+.records-table td.score-cell { font-weight: 700; font-family: 'Courier New', monospace; }
+.records-table tr.empty-row td { color: var(--bs-secondary-color); }
+.records-new-badge {
+    background: #dc3545;
+    color: white;
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 4px;
+    margin-left: 6px;
+    letter-spacing: 0.5px;
+}
+.records-row-clickable { cursor: pointer; }
+.records-row-clickable:hover { background-color: var(--bs-tertiary-bg); }
+</style>
+
+<!-- History modal (lazy) -->
+<div class="modal fade" id="recordsHistoryModal-@rInstance" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Rekordhistorik</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="records-history-loading text-muted small">
+                    <div class="spinner-border spinner-border-sm me-2" role="status"></div>Laddar...
+                </div>
+                <div class="records-history-content" style="display:none;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@{
+    var entryModalVD = new ViewDataDictionary(ViewData);
+    entryModalVD["RecordsScopeType"] = rScopeType;
+    entryModalVD["RecordsScopeId"] = rScopeId;
+    entryModalVD["RecordsInstance"] = rInstance;
+}
+@if (rCanEdit)
+{
+    @await Html.PartialAsync("RecordEntryModal", null, entryModalVD)
+}
+
+<script>
+(function () {
+    var instance = '@rInstance';
+    var root = document.querySelector('.records-hall-of-fame[data-scope-type="@rScopeType"][data-scope-id="@rScopeId"]');
+    if (!root) return;
+    var scopeType = root.getAttribute('data-scope-type');
+    var scopeId = root.getAttribute('data-scope-id');
+    var canEdit = root.getAttribute('data-can-edit') === 'true';
+
+    var allRecords = [];
+    var currentRecordType = 'Individual';
+
+    // Hardcoded to mirror the server-side RecordClassRegistry.AllCombos
+    var combos = [
+        { discipline: 'Precision',         disciplineLabel: 'Precisionsskjutning',  recordType: 'Individual',
+          classes: ['A','B','C','C_Dam','C_Jun','C_VetY','C_VetA'], series: 10, max: 500, icon: 'bi-bullseye' },
+        { discipline: 'Precision',         disciplineLabel: 'Precisionsskjutning',  recordType: 'Team',
+          classes: ['A','B','C','C_Dam','C_Jun','C_Vet'],          series: 7,  max: 350, icon: 'bi-bullseye' },
+        { discipline: 'MagnumPrecision',   disciplineLabel: 'Magnumprecision',      recordType: 'Individual',
+          classes: ['M1','M2','M3','M4','M5','M6','M7'],           series: 6,  max: 300, icon: 'bi-bullseye' },
+        { discipline: 'MagnumPrecision',   disciplineLabel: 'Magnumprecision',      recordType: 'Team',
+          classes: ['M1','M2','M3','M4','M5','M6','M7'],           series: 6,  max: 300, icon: 'bi-bullseye' },
+        { discipline: 'Milsnabb',          disciplineLabel: 'Militär snabbmatch',   recordType: 'Individual',
+          classes: ['A','B','C','C_Dam','C_Jun','C_VetY','C_VetA','R'], series: 12, max: 600, icon: 'bi-stopwatch' },
+        { discipline: 'Milsnabb',          disciplineLabel: 'Militär snabbmatch',   recordType: 'Team',
+          classes: ['A','B','C','C_Dam','C_Jun','C_Vet','R'],      series: 12, max: 600, icon: 'bi-stopwatch' }
+    ];
+
+    var classLabels = {
+        'C_Dam': 'C Dam', 'C_Jun': 'C Jun', 'C_VetY': 'C Vet Y',
+        'C_VetA': 'C Vet Ä', 'C_Vet': 'C Vet'
+    };
+    function classLabel(c) { return classLabels[c] || c; }
+
+    function escapeHtml(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+
+    function getToken() {
+        var el = document.querySelector('input[name="__RequestVerificationToken"]');
+        return el ? el.value : '';
+    }
+
+    function load() {
+        root.querySelector('.records-loading').style.display = '';
+        root.querySelector('.records-content').style.display = 'none';
+        root.querySelector('.records-error').classList.add('d-none');
+
+        var url = scopeType === 'Region'
+            ? '/umbraco/surface/CompetitionRecords/ListForRegion?regionCode=' + encodeURIComponent(scopeId)
+            : '/umbraco/surface/CompetitionRecords/ListForClub?clubId=' + encodeURIComponent(scopeId);
+
+        fetch(url).then(function (r) { return r.json(); }).then(function (resp) {
+            root.querySelector('.records-loading').style.display = 'none';
+            if (!resp.success) {
+                root.querySelector('.records-error').classList.remove('d-none');
+                root.querySelector('.records-error').textContent = resp.message || 'Okänt fel';
+                return;
+            }
+            allRecords = resp.data || [];
+            root.querySelector('.records-content').style.display = '';
+            renderHero();
+            renderGrids();
+        }).catch(function (err) {
+            root.querySelector('.records-loading').style.display = 'none';
+            root.querySelector('.records-error').classList.remove('d-none');
+            root.querySelector('.records-error').textContent = err.message || 'Nätverksfel';
+        });
+    }
+
+    function findRecord(disc, type, classCode) {
+        return allRecords.find(function (r) {
+            return r.discipline === disc && r.recordType === type && r.classCode === classCode;
+        });
+    }
+
+    function bestIndividualForDiscipline(disc) {
+        var rs = allRecords.filter(function (r) { return r.discipline === disc && r.recordType === 'Individual'; });
+        if (rs.length === 0) return null;
+        return rs.reduce(function (best, r) {
+            if (!best) return r;
+            if (r.totalScore > best.totalScore) return r;
+            if (r.totalScore === best.totalScore && new Date(r.recordDate) < new Date(best.recordDate)) return r;
+            return best;
+        }, null);
+    }
+
+    function timeSince(dateStr) {
+        if (!dateStr) return '';
+        var d = new Date(dateStr + 'T00:00:00');
+        var now = new Date();
+        var months = (now.getFullYear() - d.getFullYear()) * 12 + (now.getMonth() - d.getMonth());
+        if (months < 1) return 'i mindre än en månad';
+        if (months < 12) return months + ' mån';
+        var years = Math.floor(months / 12);
+        var rem = months % 12;
+        return years + ' år' + (rem > 0 ? ' ' + rem + ' mån' : '');
+    }
+
+    function renderHero() {
+        var disciplines = ['Precision', 'MagnumPrecision', 'Milsnabb'];
+        var labels = { 'Precision': 'Precisionsskjutning', 'MagnumPrecision': 'Magnumprecision', 'Milsnabb': 'Militär snabbmatch' };
+        var icons  = { 'Precision': 'bi-bullseye',         'MagnumPrecision': 'bi-bullseye',     'Milsnabb': 'bi-stopwatch' };
+
+        var html = disciplines.map(function (d) {
+            var r = bestIndividualForDiscipline(d);
+            if (!r) {
+                return '<div class="col-md-4">'
+                     + '<div class="records-hero-card">'
+                     + '<div class="records-hero-discipline"><i class="bi ' + icons[d] + ' me-1"></i>' + escapeHtml(labels[d]) + '</div>'
+                     + '<div class="records-hero-score text-muted">—</div>'
+                     + '<div class="records-hero-meta">Inget rekord ännu</div>'
+                     + '</div></div>';
+            }
+            return '<div class="col-md-4">'
+                 + '<div class="records-hero-card has-record">'
+                 + '<div class="records-hero-discipline"><i class="bi ' + icons[d] + ' me-1"></i>' + escapeHtml(labels[d]) + '</div>'
+                 + '<div><span class="records-hero-score">' + r.totalScore + '</span><span class="records-hero-max"> / ' + r.maxScore + '</span></div>'
+                 + '<div class="records-hero-holder">' + escapeHtml(r.holderName) + '</div>'
+                 + '<div class="records-hero-meta">'
+                 +   '<span class="badge bg-secondary me-1">' + escapeHtml(classLabel(r.classCode)) + '</span>'
+                 +   '<span>stående i ' + timeSince(r.recordDate) + '</span>'
+                 + '</div>'
+                 + (r.competitionName ? '<div class="records-hero-meta mt-1"><i class="bi bi-trophy me-1"></i>' + escapeHtml(r.competitionName) + ', ' + escapeHtml(r.recordDate) + '</div>'
+                                      : '<div class="records-hero-meta mt-1">' + escapeHtml(r.recordDate) + '</div>')
+                 + '</div></div>';
+        }).join('');
+
+        root.querySelector('.records-hero-row').innerHTML = html;
+    }
+
+    function renderGrids() {
+        var html = '';
+        combos.filter(function (c) { return c.recordType === currentRecordType; }).forEach(function (c) {
+            var rows = c.classes.map(function (classCode) {
+                var r = findRecord(c.discipline, c.recordType, classCode);
+                if (!r) {
+                    return '<tr class="empty-row">'
+                         + '<td>' + escapeHtml(classLabel(classCode)) + '</td>'
+                         + '<td class="score-cell">—</td>'
+                         + '<td>—</td><td>—</td><td>—</td>'
+                         + (canEdit ? '<td></td>' : '')
+                         + '</tr>';
+                }
+                var holder = r.recordType === 'Team'
+                    ? (escapeHtml(r.teamName || r.holderName) + (r.teamMembers && r.teamMembers.length
+                            ? ' <small class="text-muted">(' + r.teamMembers.map(function (tm) { return escapeHtml(tm.name); }).join(', ') + ')</small>'
+                            : ''))
+                    : escapeHtml(r.holderName);
+
+                var newBadge = r.isNew ? '<span class="records-new-badge">NY</span>' : '';
+                var actions = canEdit
+                    ? '<td class="text-nowrap">'
+                      + '<button type="button" class="btn btn-sm btn-outline-danger records-delete-btn" data-record-id="' + r.id + '" data-class="' + escapeHtml(classLabel(classCode)) + '" title="Ta bort"><i class="bi bi-x-circle"></i></button>'
+                      + '</td>'
+                    : '';
+                return '<tr class="records-row-clickable" data-discipline="' + r.discipline + '" data-record-type="' + r.recordType + '" data-class-code="' + r.classCode + '">'
+                     + '<td>' + escapeHtml(classLabel(classCode)) + newBadge + '</td>'
+                     + '<td class="score-cell">' + r.totalScore + '<small class="text-muted"> / ' + r.maxScore + '</small></td>'
+                     + '<td>' + holder + '</td>'
+                     + '<td class="text-nowrap">' + escapeHtml(r.recordDate) + '</td>'
+                     + '<td>' + escapeHtml(r.competitionName || '') + '</td>'
+                     + actions
+                     + '</tr>';
+            }).join('');
+
+            var actionsHeader = canEdit ? '<th></th>' : '';
+            html += '<div class="card records-discipline-card">'
+                  + '<div class="card-header"><i class="bi ' + c.icon + ' me-2"></i>' + escapeHtml(c.disciplineLabel) + ' — ' + (c.recordType === 'Individual' ? 'Individuella' : 'Lag') + ' (' + c.series + ' serier, max ' + c.max + ')</div>'
+                  + '<div class="table-responsive">'
+                  +   '<table class="table table-striped records-table mb-0">'
+                  +     '<thead><tr>'
+                  +       '<th style="width:18%">Klass</th>'
+                  +       '<th style="width:14%">Resultat</th>'
+                  +       '<th>Skytt(ar)</th>'
+                  +       '<th style="width:12%">Datum</th>'
+                  +       '<th style="width:22%">Tävling</th>'
+                  +       actionsHeader
+                  +     '</tr></thead>'
+                  +     '<tbody>' + rows + '</tbody>'
+                  +   '</table>'
+                  + '</div>'
+                  + '</div>';
+        });
+        root.querySelector('.records-grids').innerHTML = html;
+    }
+
+    function showHistory(disc, type, classCode) {
+        var modalEl = document.getElementById('recordsHistoryModal-' + instance);
+        if (!modalEl) return;
+        var loading = modalEl.querySelector('.records-history-loading');
+        var content = modalEl.querySelector('.records-history-content');
+        loading.style.display = '';
+        content.style.display = 'none';
+        new bootstrap.Modal(modalEl).show();
+
+        var url = '/umbraco/surface/CompetitionRecords/History'
+                + '?level=' + encodeURIComponent(scopeType)
+                + '&scopeId=' + encodeURIComponent(scopeId)
+                + '&discipline=' + encodeURIComponent(disc)
+                + '&recordType=' + encodeURIComponent(type)
+                + '&classCode=' + encodeURIComponent(classCode);
+
+        fetch(url).then(function (r) { return r.json(); }).then(function (resp) {
+            loading.style.display = 'none';
+            content.style.display = '';
+            if (!resp.success || !resp.data || resp.data.length === 0) {
+                content.innerHTML = '<div class="text-muted small">Ingen historik.</div>';
+                return;
+            }
+            content.innerHTML = '<h6>' + escapeHtml(resp.data[0].disciplineLabel) + ' — ' + escapeHtml(resp.data[0].recordTypeLabel) + ' — ' + escapeHtml(classLabel(resp.data[0].classCode)) + '</h6>'
+                + '<table class="table table-sm mt-2"><thead><tr><th>Resultat</th><th>Skytt(ar)</th><th>Datum</th><th>Tävling</th><th></th></tr></thead><tbody>'
+                + resp.data.map(function (r) {
+                    var label = r.isCurrent
+                        ? '<span class="badge bg-success">Nuvarande</span>'
+                        : '<span class="badge bg-secondary">Tidigare</span>';
+                    var holder = r.recordType === 'Team' ? escapeHtml(r.teamName || r.holderName) : escapeHtml(r.holderName);
+                    return '<tr>'
+                         + '<td><strong>' + r.totalScore + '</strong> <small class="text-muted">/ ' + r.maxScore + '</small></td>'
+                         + '<td>' + holder + '</td>'
+                         + '<td>' + escapeHtml(r.recordDate) + '</td>'
+                         + '<td>' + escapeHtml(r.competitionName || '') + '</td>'
+                         + '<td>' + label + '</td>'
+                         + '</tr>';
+                }).join('') + '</tbody></table>';
+        }).catch(function (err) {
+            loading.style.display = 'none';
+            content.style.display = '';
+            content.innerHTML = '<div class="text-danger small">Kunde inte ladda historik: ' + escapeHtml(err.message) + '</div>';
+        });
+    }
+
+    // ── Wire-up ──────────────────────────────────────────────────────
+    root.addEventListener('click', function (ev) {
+        var addBtn = ev.target.closest('.records-add-btn');
+        if (addBtn && canEdit) {
+            ev.preventDefault();
+            if (window['recordEntryOpen_' + instance]) window['recordEntryOpen_' + instance]();
+            return;
+        }
+
+        var refreshBtn = ev.target.closest('.records-refresh-btn');
+        if (refreshBtn) { ev.preventDefault(); load(); return; }
+
+        var typeBtn = ev.target.closest('.records-type-btn');
+        if (typeBtn) {
+            ev.preventDefault();
+            currentRecordType = typeBtn.getAttribute('data-record-type');
+            root.querySelectorAll('.records-type-btn').forEach(function (b) { b.classList.remove('active'); });
+            typeBtn.classList.add('active');
+            renderGrids();
+            return;
+        }
+
+        var deleteBtn = ev.target.closest('.records-delete-btn');
+        if (deleteBtn && canEdit) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            var name = deleteBtn.getAttribute('data-class') || 'detta rekord';
+            if (!confirm('Ta bort rekordet i ' + name + '? Eventuellt tidigare rekord blir åter aktivt.')) return;
+            fetch('/umbraco/surface/CompetitionRecords/Delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getToken() },
+                body: JSON.stringify({ recordId: parseInt(deleteBtn.getAttribute('data-record-id'), 10) })
+            }).then(function (r) { return r.json(); }).then(function (resp) {
+                if (!resp.success) alert(resp.message || 'Kunde inte ta bort.');
+                load();
+            });
+            return;
+        }
+
+        var row = ev.target.closest('.records-row-clickable');
+        if (row) {
+            showHistory(
+                row.getAttribute('data-discipline'),
+                row.getAttribute('data-record-type'),
+                row.getAttribute('data-class-code')
+            );
+        }
+    });
+
+    // Expose load() so the entry modal can refresh us after a successful Create.
+    window['recordsReload_' + instance] = load;
+
+    load();
+})();
+</script>

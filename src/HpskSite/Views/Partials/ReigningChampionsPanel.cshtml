@@ -1,0 +1,357 @@
+@*
+    Reigning champions panel — manual entries from CompetitionChampions table.
+    Displays the latest-year champion per (discipline, championType, classCode) for
+    the given scope. Logged-in only (parent surfaces gate this).
+
+    ViewData:
+      ChampionsScopeType  = "Club" | "Region"
+      ChampionsScopeId    = clubId (string) or regionCode
+      ChampionsScopeName  = club/region display name (header)
+      ChampionsCanEdit    = bool — show admin add/delete buttons
+*@
+@{
+    var champScopeType = ViewData["ChampionsScopeType"] as string ?? "Club";
+    var champScopeId = ViewData["ChampionsScopeId"]?.ToString() ?? "";
+    var champScopeName = ViewData["ChampionsScopeName"] as string ?? "";
+    var champCanEdit = ViewData["ChampionsCanEdit"] as bool? ?? false;
+    var champShowAllYears = ViewData["ChampionsShowAllYears"] as bool? ?? false;
+    var champInstance = (champScopeType + "-" + champScopeId + (champShowAllYears ? "-all" : "")).Replace(" ", "-");
+    var champTitle = champShowAllYears
+        ? (champScopeType == "Region"
+            ? (string.IsNullOrEmpty(champScopeName) ? "Kretsmästare — alla år" : $"Kretsmästare i {champScopeName} — alla år")
+            : (string.IsNullOrEmpty(champScopeName) ? "Klubbmästare — alla år" : $"Klubbmästare i {champScopeName} — alla år"))
+        : (champScopeType == "Region"
+            ? (string.IsNullOrEmpty(champScopeName) ? "Regerande kretsmästare" : $"Regerande kretsmästare i {champScopeName}")
+            : (string.IsNullOrEmpty(champScopeName) ? "Regerande klubbmästare" : $"Regerande klubbmästare i {champScopeName}"));
+}
+
+<div class="reigning-champions-card card mb-3" data-champ-instance="@champInstance" data-scope-type="@champScopeType" data-scope-id="@champScopeId" data-can-edit="@(champCanEdit.ToString().ToLower())" data-show-all-years="@(champShowAllYears.ToString().ToLower())">
+    <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start mb-3">
+            <h6 class="card-title mb-0">
+                <i class="bi bi-trophy-fill text-warning me-2"></i>@champTitle
+            </h6>
+            @if (champCanEdit)
+            {
+                <button type="button" class="btn btn-sm btn-success champ-add-btn">
+                    <i class="bi bi-plus-circle me-1"></i>Lägg till mästare
+                </button>
+            }
+        </div>
+        <div class="champ-loading small text-muted">
+            <div class="spinner-border spinner-border-sm me-2" role="status"></div>Laddar...
+        </div>
+        <div class="champ-error alert alert-danger d-none small mb-0"></div>
+        <div class="champ-content" style="display:none;"></div>
+    </div>
+</div>
+
+<style>
+.reigning-champions-card .champ-section { margin-bottom: 1.25rem; }
+.reigning-champions-card .champ-section-header {
+    font-weight: 600;
+    font-size: 0.9rem;
+    border-bottom: 1px solid var(--bs-border-color);
+    padding-bottom: 4px;
+    margin-bottom: 8px;
+    color: var(--bs-body-color);
+}
+.reigning-champions-card table.champ-table {
+    width: 100%;
+    margin-bottom: 0;
+    font-size: 0.92rem;
+    table-layout: fixed;
+}
+.reigning-champions-card table.champ-table > tbody > tr { cursor: pointer; }
+.reigning-champions-card table.champ-table > tbody > tr:hover { background-color: var(--bs-tertiary-bg); }
+.reigning-champions-card table.champ-table th {
+    font-weight: 500;
+    color: var(--bs-secondary-color);
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--bs-border-color);
+    white-space: nowrap;
+}
+.reigning-champions-card table.champ-table td {
+    padding: 4px 8px;
+    border-top: 1px solid var(--bs-border-color);
+    vertical-align: middle;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.reigning-champions-card table.champ-table .col-year { width: 60px; font-weight: 600; }
+.reigning-champions-card table.champ-table .col-class { width: 90px; color: var(--bs-secondary-color); }
+.reigning-champions-card table.champ-table .col-score { width: 70px; text-align: right; font-weight: 600; }
+.reigning-champions-card table.champ-table .col-club { color: var(--bs-secondary-color); }
+.reigning-champions-card table.champ-table .col-actions { width: 36px; text-align: right; overflow: visible; }
+.reigning-champions-card .champ-empty { color: var(--bs-secondary-color); font-style: italic; }
+</style>
+
+<!-- History modal -->
+<div class="modal fade" id="champHistoryModal-@champInstance" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="champHistoryTitle-@champInstance">Mästarhistorik</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="champ-history-loading text-muted small"><div class="spinner-border spinner-border-sm me-2"></div>Laddar...</div>
+                <div class="champ-history-content" style="display:none;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@if (champCanEdit)
+{
+    var entryVD = new ViewDataDictionary(ViewData);
+    entryVD["ChampScopeType"] = champScopeType;
+    entryVD["ChampScopeId"] = champScopeId;
+    entryVD["ChampInstance"] = champInstance;
+    @await Html.PartialAsync("ChampionEntryModal", null, entryVD)
+}
+
+<script>
+(function () {
+    var instance = '@champInstance';
+    var card = document.querySelector('.reigning-champions-card[data-champ-instance="' + instance + '"]');
+    if (!card) return;
+    var scopeType = card.getAttribute('data-scope-type');
+    var scopeId = card.getAttribute('data-scope-id');
+    var canEdit = card.getAttribute('data-can-edit') === 'true';
+    var showAllYears = card.getAttribute('data-show-all-years') === 'true';
+
+    var allRows = [];
+
+    function escapeHtml(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+    function getToken() { var e = document.querySelector('input[name="__RequestVerificationToken"]'); return e ? e.value : ''; }
+    var classOrder = { 'A':1, 'B':2, 'C':3, 'C_Dam':4, 'C_Jun':5, 'C_VetY':6, 'C_VetA':7, 'C_Vet':8, 'R':9, 'M1':10, 'M2':11, 'M3':12, 'M4':13, 'M5':14, 'M6':15, 'M7':16 };
+
+    function load() {
+        var loading = card.querySelector('.champ-loading');
+        var content = card.querySelector('.champ-content');
+        var err = card.querySelector('.champ-error');
+        loading.style.display = '';
+        content.style.display = 'none';
+        err.classList.add('d-none');
+
+        var historyParam = showAllYears ? '&includeHistory=true' : '';
+        var url = scopeType === 'Region'
+            ? '/umbraco/surface/CompetitionRecords/ChampionsForRegion?regionCode=' + encodeURIComponent(scopeId) + historyParam
+            : '/umbraco/surface/CompetitionRecords/ChampionsForClub?clubId=' + encodeURIComponent(scopeId) + historyParam;
+
+        fetch(url).then(function (r) { return r.json(); }).then(function (resp) {
+            loading.style.display = 'none';
+            if (!resp.success) {
+                err.textContent = resp.message || 'Okänt fel';
+                err.classList.remove('d-none');
+                return;
+            }
+            allRows = resp.data || [];
+            content.style.display = '';
+            render();
+        }).catch(function (ex) {
+            loading.style.display = 'none';
+            err.textContent = ex.message || 'Nätverksfel';
+            err.classList.remove('d-none');
+        });
+    }
+
+    function render() {
+        if (allRows.length === 0) {
+            card.querySelector('.champ-content').innerHTML = '<div class="champ-empty small">Inga mästare registrerade ännu.'
+                + (canEdit ? ' Klicka på "Lägg till mästare" för att börja.' : '')
+                + '</div>';
+            return;
+        }
+
+        if (showAllYears) {
+            renderAllYears();
+        } else {
+            renderReigning();
+        }
+    }
+
+    function buildSections() {
+        // Common helper — group by discipline + championType, ordered for display.
+        var sections = {};
+        allRows.forEach(function (r) {
+            var key = r.discipline + '|' + r.championType;
+            if (!sections[key]) sections[key] = { discipline: r.discipline, championType: r.championType, label: r.disciplineLabel + ' · ' + r.championTypeLabel, rows: [] };
+            sections[key].rows.push(r);
+        });
+        var orderedKeys = [];
+        ['Precision', 'MagnumPrecision', 'Milsnabb'].forEach(function (d) {
+            ['Individual', 'Team'].forEach(function (t) {
+                var k = d + '|' + t;
+                if (sections[k]) orderedKeys.push(k);
+            });
+        });
+        return orderedKeys.map(function (k) { return sections[k]; });
+    }
+
+    function renderRow(r, includeYear) {
+        var displayName = (r.championType === 'Team' && r.teamName) ? r.teamName : r.holderName;
+        var clubName = r.championType === 'Team' ? '' : (r.holderClubName || '');
+        var actionsCell = canEdit
+            ? '<button type="button" class="btn btn-sm btn-link text-danger p-0 champ-delete-btn"'
+              + ' data-id="' + r.id + '" data-class="' + escapeHtml(r.classLabel) + '"'
+              + ' data-year="' + r.year + '" title="Ta bort"><i class="bi bi-x-circle"></i></button>'
+            : '';
+        return '<tr data-discipline="' + escapeHtml(r.discipline) + '" data-type="' + escapeHtml(r.championType) + '" data-class="' + escapeHtml(r.classCode) + '" data-class-label="' + escapeHtml(r.classLabel) + '">'
+             + (includeYear ? '<td class="col-year">' + r.year + '</td>' : '')
+             + '<td class="col-class" title="' + escapeHtml(r.classLabel) + '">' + escapeHtml(r.classLabel) + '</td>'
+             + '<td title="' + escapeHtml(displayName) + '">' + escapeHtml(displayName) + '</td>'
+             + '<td class="col-club" title="' + escapeHtml(clubName) + '">' + escapeHtml(clubName) + '</td>'
+             + '<td class="col-score">' + r.totalScore + '</td>'
+             + (canEdit ? '<td class="col-actions">' + actionsCell + '</td>' : '')
+             + '</tr>';
+    }
+
+    function tableHeader(includeYear) {
+        return '<thead><tr>'
+             + (includeYear ? '<th class="col-year">År</th>' : '')
+             + '<th class="col-class">Klass</th>'
+             + '<th>Skytt / lag</th>'
+             + '<th class="col-club">Klubb</th>'
+             + '<th class="col-score">Resultat</th>'
+             + (canEdit ? '<th class="col-actions"></th>' : '')
+             + '</tr></thead>';
+    }
+
+    function renderReigning() {
+        var sections = buildSections();
+        var html = sections.map(function (s) {
+            s.rows.sort(function (a, b) {
+                var ao = classOrder[a.classCode] || 999;
+                var bo = classOrder[b.classCode] || 999;
+                return ao - bo;
+            });
+            var bodyRows = s.rows.map(function (r) { return renderRow(r, false); }).join('');
+            return '<div class="champ-section">'
+                 + '<div class="champ-section-header">' + escapeHtml(s.label) + '</div>'
+                 + '<table class="champ-table">' + tableHeader(false) + '<tbody>' + bodyRows + '</tbody></table>'
+                 + '</div>';
+        }).join('');
+        card.querySelector('.champ-content').innerHTML = html
+            + '<div class="text-muted small mt-2 text-center"><i class="bi bi-info-circle me-1"></i>Klicka på en rad för att se historiken</div>';
+    }
+
+    function renderAllYears() {
+        // Admin view: one table per discipline+type, sorted by class then year-desc.
+        // Flat layout matches the entry pattern admins are typing in.
+        var sections = buildSections();
+        var html = sections.map(function (s) {
+            s.rows.sort(function (a, b) {
+                var ao = classOrder[a.classCode] || 999;
+                var bo = classOrder[b.classCode] || 999;
+                if (ao !== bo) return ao - bo;
+                return b.year - a.year;
+            });
+            var bodyRows = s.rows.map(function (r) { return renderRow(r, true); }).join('');
+            return '<div class="champ-section">'
+                 + '<div class="champ-section-header">' + escapeHtml(s.label)
+                 +   ' <span class="text-muted fw-normal small">(' + s.rows.length + ' poster)</span>'
+                 + '</div>'
+                 + '<table class="champ-table">' + tableHeader(true) + '<tbody>' + bodyRows + '</tbody></table>'
+                 + '</div>';
+        }).join('');
+        card.querySelector('.champ-content').innerHTML = html
+            + '<div class="text-muted small mt-2 text-center"><i class="bi bi-info-circle me-1"></i>Klicka på en rad för att se historik per klass · Använd "Lägg till mästare" för att fylla på</div>';
+    }
+
+    function showHistory(discipline, championType, classCode, classLabel) {
+        var modalEl = document.getElementById('champHistoryModal-' + instance);
+        if (!modalEl) return;
+        modalEl.querySelector('#champHistoryTitle-' + instance).textContent = 'Historik — ' + classLabel;
+        var loading = modalEl.querySelector('.champ-history-loading');
+        var content = modalEl.querySelector('.champ-history-content');
+        loading.style.display = '';
+        content.style.display = 'none';
+        new bootstrap.Modal(modalEl).show();
+
+        var url = '/umbraco/surface/CompetitionRecords/ChampionHistory'
+                + '?level=' + encodeURIComponent(scopeType)
+                + '&scopeId=' + encodeURIComponent(scopeId)
+                + '&discipline=' + encodeURIComponent(discipline)
+                + '&championType=' + encodeURIComponent(championType)
+                + '&classCode=' + encodeURIComponent(classCode);
+
+        fetch(url).then(function (r) { return r.json(); }).then(function (resp) {
+            loading.style.display = 'none';
+            content.style.display = '';
+            if (!resp.success) { content.innerHTML = '<div class="text-danger small">' + escapeHtml(resp.message || 'Fel') + '</div>'; return; }
+            var data = resp.data || [];
+            if (data.length === 0) {
+                content.innerHTML = '<div class="text-muted">Ingen historik registrerad ännu. Klubbadmin kan fylla på från äldre årtal.</div>';
+                return;
+            }
+            content.innerHTML = '<table class="table table-sm table-striped">'
+                + '<thead><tr><th>År</th><th>Resultat</th><th>Mästare</th><th>Tävling</th></tr></thead>'
+                + '<tbody>'
+                + data.map(function (r) {
+                    var holder = (r.championType === 'Team' && r.teamName) ? escapeHtml(r.teamName) : escapeHtml(r.holderName);
+                    var compMeta = [r.competitionName, r.competitionDate].filter(function (x) { return x; }).map(escapeHtml).join(' · ');
+                    return '<tr>'
+                         + '<td><strong>' + r.year + '</strong></td>'
+                         + '<td>' + r.totalScore + ' <small class="text-muted">/ ' + r.maxScore + '</small></td>'
+                         + '<td>' + holder + '</td>'
+                         + '<td>' + compMeta + '</td>'
+                         + '</tr>';
+                }).join('')
+                + '</tbody></table>';
+        }).catch(function (ex) {
+            loading.style.display = 'none';
+            content.style.display = '';
+            content.innerHTML = '<div class="text-danger small">' + escapeHtml(ex.message || 'Nätverksfel') + '</div>';
+        });
+    }
+
+    // Wire-up
+    card.addEventListener('click', function (ev) {
+        var addBtn = ev.target.closest('.champ-add-btn');
+        if (addBtn && canEdit) {
+            ev.preventDefault();
+            if (window['champEntryOpen_' + instance]) window['champEntryOpen_' + instance]();
+            return;
+        }
+
+        var deleteBtn = ev.target.closest('.champ-delete-btn');
+        if (deleteBtn && canEdit) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            var cls = deleteBtn.getAttribute('data-class');
+            var yr = deleteBtn.getAttribute('data-year');
+            if (!confirm('Ta bort mästaren i ' + cls + ' (' + yr + ')?')) return;
+            fetch('/umbraco/surface/CompetitionRecords/ChampionDelete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getToken() },
+                body: JSON.stringify({ championId: parseInt(deleteBtn.getAttribute('data-id'), 10) })
+            }).then(function (r) { return r.json(); }).then(function (resp) {
+                if (!resp.success) alert(resp.message || 'Kunde inte ta bort.');
+                load();
+            });
+            return;
+        }
+
+        var row = ev.target.closest('.champ-table tbody tr');
+        if (row) {
+            showHistory(
+                row.getAttribute('data-discipline'),
+                row.getAttribute('data-type'),
+                row.getAttribute('data-class'),
+                row.getAttribute('data-class-label')
+            );
+        }
+    });
+
+    // Expose for the entry modal to call after a successful create
+    window['championsReload_' + instance] = load;
+
+    load();
+})();
+</script>

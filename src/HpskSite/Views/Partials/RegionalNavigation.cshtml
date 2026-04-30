@@ -17,13 +17,18 @@
     @if (isLoggedIn)
     {
         <li class="nav-item" role="presentation">
+            <button class="nav-link" id="regionRecords-tab" data-bs-toggle="tab" data-bs-target="#regionRecords" type="button" role="tab" aria-controls="regionRecords" aria-selected="false">
+                <i class="bi bi-award me-2"></i>Rekord
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
             <button class="nav-link" id="regionDocuments-tab" data-bs-toggle="tab" data-bs-target="#regionDocuments" type="button" role="tab" aria-controls="regionDocuments" aria-selected="false">
                 <i class="bi bi-archive me-2"></i>Dokument
             </button>
         </li>
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="regionBoard-tab" data-bs-toggle="tab" data-bs-target="#regionBoard" type="button" role="tab" aria-controls="regionBoard" aria-selected="false">
-                <i class="bi bi-award me-2"></i>Styrelsen
+                <i class="bi bi-people me-2"></i>Styrelsen
             </button>
         </li>
     }

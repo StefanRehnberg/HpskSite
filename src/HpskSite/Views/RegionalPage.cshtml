@@ -178,6 +178,18 @@
 
     @if (isLoggedIn)
     {
+        <!-- Records (Hall of Fame) Tab -->
+        <div class="tab-pane fade" id="regionRecords" role="tabpanel" aria-labelledby="regionRecords-tab">
+            @{
+                var regionRecVD = new ViewDataDictionary(ViewData);
+                regionRecVD["RecordsScopeType"] = "Region";
+                regionRecVD["RecordsScopeId"] = regionCode;
+                regionRecVD["RecordsCanEdit"] = isRegionalAdmin;
+                regionRecVD["RecordsScopeName"] = regionName;
+            }
+            @await Html.PartialAsync("RecordsHallOfFame", null, regionRecVD)
+        </div>
+
         <!-- Documents Tab -->
         <div class="tab-pane fade" id="regionDocuments" role="tabpanel" aria-labelledby="regionDocuments-tab">
             @{

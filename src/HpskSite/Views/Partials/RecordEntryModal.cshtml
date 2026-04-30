@@ -1,0 +1,363 @@
+@*
+    RecordEntryModal — admin-only modal for creating a new record.
+    Included from RecordsHallOfFame.cshtml only when RecordsCanEdit=true. Reads the
+    same scope from ViewData. Exposes window['recordEntryOpen_' + instance]() which
+    the parent panel calls when its "Lägg till rekord" button is clicked.
+*@
+@{
+    var reScopeType = ViewData["RecordsScopeType"] as string ?? "Club";
+    var reScopeId = ViewData["RecordsScopeId"]?.ToString() ?? "";
+    var reInstance = ViewData["RecordsInstance"] as string ?? (reScopeType + "-" + reScopeId).Replace(" ", "-");
+}
+
+<!-- Flatpickr (sv-SE) — many host pages already include it; double-loading is harmless. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
+
+<div class="modal fade" id="recordEntryModal-@reInstance" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Nytt rekord</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <label class="form-label">Disciplin *</label>
+                        <select class="form-select" id="reDiscipline-@reInstance">
+                            <option value="Precision">Precisionsskjutning</option>
+                            <option value="MagnumPrecision">Magnumprecision</option>
+                            <option value="Milsnabb">Militär snabbmatch</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Rekordtyp *</label>
+                        <div class="btn-group d-flex" role="group">
+                            <input type="radio" class="btn-check" name="reType-@reInstance" id="reType-Individual-@reInstance" value="Individual" checked>
+                            <label class="btn btn-outline-primary" for="reType-Individual-@reInstance">
+                                <i class="bi bi-person me-1"></i>Individuell
+                            </label>
+                            <input type="radio" class="btn-check" name="reType-@reInstance" id="reType-Team-@reInstance" value="Team">
+                            <label class="btn btn-outline-primary" for="reType-Team-@reInstance">
+                                <i class="bi bi-people me-1"></i>Lag
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <label class="form-label">Klass *</label>
+                        <select class="form-select" id="reClass-@reInstance"></select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Total poäng *</label>
+                        <input type="number" class="form-control" id="reScore-@reInstance" min="0" step="1">
+                        <small class="form-text text-muted" id="reScoreHelp-@reInstance"></small>
+                    </div>
+                </div>
+
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <label class="form-label">Datum *</label>
+                        <input type="text" class="form-control" id="reDate-@reInstance" placeholder="ÅÅÅÅ-MM-DD">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Tävling</label>
+                        <input type="text" class="form-control" id="reCompetition-@reInstance" maxlength="200" placeholder="Namn på tävlingen där rekordet sattes">
+                    </div>
+                </div>
+
+                <!-- Individual-only -->
+                <div class="row mb-3 re-individual-fields" id="reIndividual-@reInstance">
+                    <div class="col-md-12">
+                        <label class="form-label">Skytt *</label>
+                        <div class="position-relative">
+                            <input type="text" class="form-control" id="reHolderName-@reInstance" placeholder="För- och efternamn" autocomplete="off">
+                            <input type="hidden" id="reHolderMemberId-@reInstance" value="">
+                            <div class="list-group position-absolute w-100" id="reHolderSuggestions-@reInstance" style="display:none; z-index:10; max-height:240px; overflow:auto;"></div>
+                        </div>
+                        <small class="form-text text-muted">Skriv namnet och välj från listan om skytten är medlem. Frittextnamn fungerar också — då sparas inget medlems-ID.</small>
+                    </div>
+                </div>
+
+                <!-- Team-only -->
+                <div class="re-team-fields" id="reTeam-@reInstance" style="display:none;">
+                    <div class="row mb-3">
+                        <div class="col-md-12">
+                            <label class="form-label">Lagnamn *</label>
+                            <input type="text" class="form-control" id="reTeamName-@reInstance" placeholder='T.ex. "Hallandsklubben Lag 1"'>
+                        </div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-12">
+                            <label class="form-label">Lagmedlemmar (namn, en per rad)</label>
+                            <textarea class="form-control" id="reTeamMembers-@reInstance" rows="3" placeholder="Anders Andersson&#10;Britta Bengtsson&#10;..."></textarea>
+                            <small class="form-text text-muted">Frivilligt men rekommenderat. Behöver inte matcha medlemmar i registret.</small>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">Anteckningar</label>
+                    <textarea class="form-control" id="reNotes-@reInstance" rows="2"></textarea>
+                </div>
+
+                <div class="alert alert-info" id="rePreview-@reInstance" style="display:none;"></div>
+                <div class="alert alert-danger d-none" id="reError-@reInstance"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="reSubmit-@reInstance">
+                    <i class="bi bi-save me-1"></i>Spara rekord
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    var instance = '@reInstance';
+    var scopeType = '@reScopeType';
+    var scopeId = '@reScopeId';
+
+    var el = function (suffix) { return document.getElementById(suffix + '-' + instance); };
+    var modal = el('recordEntryModal') || document.getElementById('recordEntryModal-' + instance);
+    if (!modal) return;
+    var bsModal = null;
+    var fpDate = null;
+
+    var combos = {
+        'Precision-Individual': { classes: ['A','B','C','C_Dam','C_Jun','C_VetY','C_VetA'], series: 10, max: 500 },
+        'Precision-Team':       { classes: ['A','B','C','C_Dam','C_Jun','C_Vet'],          series: 7,  max: 350 },
+        'MagnumPrecision-Individual': { classes: ['M1','M2','M3','M4','M5','M6','M7'],     series: 6,  max: 300 },
+        'MagnumPrecision-Team':       { classes: ['M1','M2','M3','M4','M5','M6','M7'],     series: 6,  max: 300 },
+        'Milsnabb-Individual':  { classes: ['A','B','C','C_Dam','C_Jun','C_VetY','C_VetA','R'], series: 12, max: 600 },
+        'Milsnabb-Team':        { classes: ['A','B','C','C_Dam','C_Jun','C_Vet','R'],         series: 12, max: 600 }
+    };
+
+    var classLabels = { 'C_Dam':'C Dam', 'C_Jun':'C Jun', 'C_VetY':'C Vet Y', 'C_VetA':'C Vet Ä', 'C_Vet':'C Vet' };
+    function classLabel(c) { return classLabels[c] || c; }
+
+    function getToken() {
+        var e = document.querySelector('input[name="__RequestVerificationToken"]');
+        return e ? e.value : '';
+    }
+
+    function selectedDiscipline() { return el('reDiscipline').value; }
+    function selectedType() {
+        var radios = document.getElementsByName('reType-' + instance);
+        for (var i = 0; i < radios.length; i++) if (radios[i].checked) return radios[i].value;
+        return 'Individual';
+    }
+
+    function refreshClassesAndHelp() {
+        var d = selectedDiscipline();
+        var t = selectedType();
+        var combo = combos[d + '-' + t];
+        if (!combo) return;
+        var sel = el('reClass');
+        sel.innerHTML = combo.classes.map(function (c) {
+            return '<option value="' + c + '">' + classLabel(c) + '</option>';
+        }).join('');
+        el('reScore').setAttribute('max', String(combo.max));
+        el('reScoreHelp').textContent = 'Max möjligt: ' + combo.max + ' (' + combo.series + ' serier × 50p).';
+
+        // Individual vs Team field visibility
+        document.getElementById('reIndividual-' + instance).style.display = (t === 'Individual') ? '' : 'none';
+        document.getElementById('reTeam-' + instance).style.display = (t === 'Team') ? '' : 'none';
+    }
+
+    function init() {
+        if (typeof flatpickr !== 'undefined' && !fpDate) {
+            fpDate = flatpickr('#reDate-' + instance, {
+                locale: 'sv', dateFormat: 'Y-m-d', allowInput: true
+            });
+        }
+        refreshClassesAndHelp();
+        loadMemberPool();
+    }
+
+    // ── Member autocomplete pool ────────────────────────────────────
+    var memberPool = null; // [{ id, name }]
+    var memberPoolLoading = false;
+    function loadMemberPool() {
+        if (memberPool || memberPoolLoading) return;
+        memberPoolLoading = true;
+        var url = scopeType === 'Region'
+            ? '/umbraco/surface/CompetitionRecords/GetRegionMembers?regionCode=' + encodeURIComponent(scopeId)
+            : '/umbraco/surface/ClubAdmin/GetClubMembers?clubId=' + encodeURIComponent(scopeId);
+        fetch(url).then(function (r) { return r.json(); }).then(function (resp) {
+            memberPoolLoading = false;
+            if (!resp.success) { memberPool = []; return; }
+            // ClubAdmin/GetClubMembers returns objects with firstName/lastName; CompetitionRecords/GetRegionMembers returns {id, name}.
+            var items;
+            if (Array.isArray(resp.data)) items = resp.data;
+            else if (resp.data && Array.isArray(resp.data.items)) items = resp.data.items;
+            else items = [];
+            memberPool = items.map(function (m) {
+                var name = m.name || ((m.firstName || '') + ' ' + (m.lastName || '')).trim();
+                if (!name) name = m.email || ('Medlem #' + m.id);
+                return {
+                    id: m.id,
+                    name: name,
+                    clubName: m.clubName || '',
+                    shooterIdNumber: m.shooterIdNumber || ''
+                };
+            }).sort(function (a, b) { return a.name.localeCompare(b.name, 'sv'); });
+        }).catch(function () {
+            memberPoolLoading = false;
+            memberPool = [];
+        });
+    }
+
+    function escapeHtml(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+
+    function renderSuggestions(query) {
+        var box = document.getElementById('reHolderSuggestions-' + instance);
+        if (!box) return;
+        if (!memberPool || query.length < 2) { box.style.display = 'none'; return; }
+        var q = query.toLowerCase();
+        // Match on name, club name, or shooter id (so "1234" or "Halland" works).
+        var matches = memberPool.filter(function (m) {
+            return m.name.toLowerCase().indexOf(q) >= 0
+                || (m.clubName && m.clubName.toLowerCase().indexOf(q) >= 0)
+                || (m.shooterIdNumber && m.shooterIdNumber.toLowerCase().indexOf(q) >= 0);
+        }).slice(0, 8);
+        if (matches.length === 0) { box.style.display = 'none'; return; }
+        box.innerHTML = matches.map(function (m) {
+            var meta = [];
+            if (m.clubName) meta.push(escapeHtml(m.clubName));
+            if (m.shooterIdNumber) meta.push('Pistolkortnr ' + escapeHtml(m.shooterIdNumber));
+            var metaLine = meta.length ? '<div class="text-muted small">' + meta.join(' · ') + '</div>' : '';
+            return '<button type="button" class="list-group-item list-group-item-action small re-suggestion"'
+                 + ' data-member-id="' + m.id + '"'
+                 + ' data-member-name="' + escapeHtml(m.name) + '">'
+                 + '<div>' + escapeHtml(m.name) + '</div>'
+                 + metaLine
+                 + '</button>';
+        }).join('');
+        box.style.display = '';
+    }
+
+    var holderInput = document.getElementById('reHolderName-' + instance);
+    holderInput.addEventListener('input', function () {
+        // Free typing wipes any previously-picked memberId
+        document.getElementById('reHolderMemberId-' + instance).value = '';
+        renderSuggestions(holderInput.value || '');
+    });
+    holderInput.addEventListener('blur', function () {
+        // Hide suggestions on blur, but allow click to register first.
+        setTimeout(function () {
+            var box = document.getElementById('reHolderSuggestions-' + instance);
+            if (box) box.style.display = 'none';
+        }, 150);
+    });
+    document.getElementById('reHolderSuggestions-' + instance).addEventListener('mousedown', function (ev) {
+        var btn = ev.target.closest('.re-suggestion');
+        if (!btn) return;
+        ev.preventDefault();
+        holderInput.value = btn.getAttribute('data-member-name');
+        document.getElementById('reHolderMemberId-' + instance).value = btn.getAttribute('data-member-id');
+        document.getElementById('reHolderSuggestions-' + instance).style.display = 'none';
+    });
+
+    el('reDiscipline').addEventListener('change', refreshClassesAndHelp);
+    document.getElementsByName('reType-' + instance).forEach
+        ? document.getElementsByName('reType-' + instance).forEach(function (r) { r.addEventListener('change', refreshClassesAndHelp); })
+        : Array.from(document.getElementsByName('reType-' + instance)).forEach(function (r) { r.addEventListener('change', refreshClassesAndHelp); });
+
+    function reset() {
+        init();
+        if (fpDate) fpDate.setDate(new Date(), true); else el('reDate').value = new Date().toISOString().slice(0, 10);
+        el('reScore').value = '';
+        el('reCompetition').value = '';
+        el('reHolderName').value = '';
+        el('reHolderMemberId').value = '';
+        var sugBox = document.getElementById('reHolderSuggestions-' + instance);
+        if (sugBox) sugBox.style.display = 'none';
+        el('reTeamName').value = '';
+        el('reTeamMembers').value = '';
+        el('reNotes').value = '';
+        el('reError').classList.add('d-none');
+        el('rePreview').style.display = 'none';
+    }
+
+    window['recordEntryOpen_' + instance] = function () {
+        reset();
+        bsModal = bsModal || new bootstrap.Modal(modal);
+        bsModal.show();
+    };
+
+    function parseTeamMembers(raw) {
+        if (!raw) return [];
+        return raw.split(/\r?\n/).map(function (s) { return s.trim(); }).filter(function (s) { return s.length > 0; })
+            .map(function (name) { return { memberId: null, name: name }; });
+    }
+
+    el('reSubmit').addEventListener('click', function () {
+        el('reError').classList.add('d-none');
+
+        var d = selectedDiscipline();
+        var t = selectedType();
+        var classCode = el('reClass').value;
+        var score = parseInt(el('reScore').value, 10);
+        var date = el('reDate').value;
+        var competition = el('reCompetition').value.trim() || null;
+        var notes = el('reNotes').value.trim() || null;
+
+        if (isNaN(score)) { showErr('Ange total poäng.'); return; }
+        if (!date) { showErr('Ange datum.'); return; }
+
+        var body = {
+            level: scopeType, scopeId: scopeId,
+            discipline: d, recordType: t, classCode: classCode,
+            totalScore: score, recordDate: date,
+            competitionName: competition, notes: notes
+        };
+
+        if (t === 'Individual') {
+            var holder = el('reHolderName').value.trim();
+            if (!holder) { showErr('Ange skyttens namn.'); return; }
+            body.holderName = holder;
+            var pickedId = el('reHolderMemberId').value;
+            if (pickedId) {
+                var n = parseInt(pickedId, 10);
+                if (!isNaN(n)) body.holderMemberId = n;
+            }
+        } else {
+            var teamName = el('reTeamName').value.trim();
+            if (!teamName) { showErr('Ange lagnamn.'); return; }
+            body.holderName = teamName;
+            body.teamName = teamName;
+            var members = parseTeamMembers(el('reTeamMembers').value);
+            body.teamMembersJson = members.length ? JSON.stringify(members) : null;
+        }
+
+        fetch('/umbraco/surface/CompetitionRecords/Create', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getToken() },
+            body: JSON.stringify(body)
+        }).then(function (r) { return r.json(); }).then(function (resp) {
+            if (!resp.success) { showErr(resp.message || 'Kunde inte spara.'); return; }
+            bsModal.hide();
+            // Reload the parent Hall of Fame panel
+            if (window['recordsReload_' + instance]) window['recordsReload_' + instance]();
+        }).catch(function (err) {
+            showErr(err.message || 'Nätverksfel.');
+        });
+    });
+
+    function showErr(msg) {
+        var e = el('reError');
+        e.textContent = msg;
+        e.classList.remove('d-none');
+    }
+
+    // Eager init so the date picker and class list are ready as soon as the page loads.
+    init();
+})();
+</script>

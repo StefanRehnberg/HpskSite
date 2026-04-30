@@ -801,6 +801,7 @@ namespace HpskSite.Controllers
                             lastName = m.GetValue("lastName")?.ToString() ?? "",
                             email = m.Email ?? "",
                             phoneNumber = m.GetValue("phoneNumber")?.ToString() ?? "",
+                            shooterIdNumber = m.GetValue("shooterIdNumber")?.ToString() ?? "",
                             profilePictureUrl = m.GetValue<string>("profilePictureUrl") ?? "",
                             isApproved = m.IsApproved,
                             lastActiveDisplay = FormatLastActive(lastActive),

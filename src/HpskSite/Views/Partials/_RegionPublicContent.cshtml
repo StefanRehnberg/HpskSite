@@ -6,6 +6,7 @@
     var clubCount = ViewData["clubCount"] as int? ?? 0;
     var featuredItems = ViewData["featuredItems"] as List<Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent> ?? new List<Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent>();
     var isRegionalAdmin = ViewData["isRegionalAdmin"] as bool? ?? false;
+    var isLoggedIn = ViewData["isLoggedIn"] as bool? ?? false;
     var regionName = ViewData["regionName"] as string ?? "";
     var aboutRegion = ViewData["aboutRegion"] as string ?? "";
     var contactPerson = ViewData["contactPerson"] as string ?? "";
@@ -323,20 +324,32 @@
                         </div>
                     </a>
                 }
-                @{
-                    var recordsPage = Model.Children.FirstOrDefault(c => c.ContentType.Alias == "recordsPage");
-                    var recordsUrl = recordsPage?.Url() ?? $"{Model.Url()}kretsrekord";
+                @if (isLoggedIn)
+                {
+                    <a href="#" onclick="document.getElementById('regionRecords-tab').click(); return false;" class="list-group-item list-group-item-action d-flex align-items-center">
+                        <i class="bi bi-award me-3 text-primary"></i>
+                        <div>
+                            <strong>Kretsrekord</strong>
+                            <small class="d-block text-muted">Rekord i @regionName</small>
+                        </div>
+                    </a>
                 }
-                <a href="@recordsUrl" class="list-group-item list-group-item-action d-flex align-items-center">
-                    <i class="bi bi-award me-3 text-primary"></i>
-                    <div>
-                        <strong>Kretsrekord</strong>
-                        <small class="d-block text-muted">Rekord i @regionName</small>
-                    </div>
-                </a>
                 <div id="regionQuickLinkDocuments"></div>
             </div>
         </div>
+
+        @if (isLoggedIn)
+        {
+            var regionCodeForChamps = Model.Value<string>("regionCode") ?? "";
+            var regChampVD = new ViewDataDictionary(ViewData);
+            regChampVD["ChampionsScopeType"] = "Region";
+            regChampVD["ChampionsScopeId"] = regionCodeForChamps;
+            regChampVD["ChampionsScopeName"] = regionName;
+            // Read-only here on the home tab — entry/management happens from
+            // RegionalAdminPanel > Mästare tab.
+            regChampVD["ChampionsCanEdit"] = false;
+            @await Html.PartialAsync("ReigningChampionsPanel", null, regChampVD)
+        }
     </div>
 </div>
 
