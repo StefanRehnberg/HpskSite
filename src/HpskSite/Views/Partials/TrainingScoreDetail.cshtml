@@ -21,8 +21,11 @@
                 </div>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-outline-danger" id="deleteScoreBtn" onclick="deleteTrainingScore()">
+                <button type="button" class="btn btn-outline-danger d-none" id="deleteScoreBtn" onclick="deleteTrainingScore()">
                     <i class="bi bi-trash"></i> Ta bort
+                </button>
+                <button type="button" class="btn btn-outline-primary d-none" id="editScoreBtn" onclick="openEditScoreModal()">
+                    <i class="bi bi-pencil"></i> Ändra
                 </button>
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
             </div>
@@ -64,12 +67,19 @@ function loadScoreDetails(scoreId) {
                 const score = data.scores.find(s => s.id === scoreId);
                 if (score) {
                     content.innerHTML = renderScoreDetails(score);
+                    window.__currentEditScore = score;
+                    // Edit + Delete are only available for entries that aren't flagged as competition
+                    const isLocked = score.isCompetition === true;
+                    document.getElementById('editScoreBtn').classList.toggle('d-none', isLocked);
+                    document.getElementById('deleteScoreBtn').classList.toggle('d-none', isLocked);
                 } else {
                     content.innerHTML = `
                         <div class="alert alert-warning">
                             <i class="bi bi-exclamation-triangle"></i> Kunde inte hitta träningsresultatet
                         </div>
                     `;
+                    document.getElementById('editScoreBtn').classList.add('d-none');
+                    document.getElementById('deleteScoreBtn').classList.add('d-none');
                 }
             } else {
                 content.innerHTML = `
@@ -171,16 +181,18 @@ function renderScoreDetails(score) {
                 return `
                 <div class="accordion-item">
                     <h2 class="accordion-header" id="heading${index}">
-                        <button class="accordion-button ${index === 0 ? '' : 'collapsed'}" type="button" data-bs-toggle="collapse" data-bs-target="#collapse${index}">
+                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse${index}" aria-expanded="false">
                             <strong>${entryMethod === 'TotalOnly' ? 'Totalt' : `Serie ${s.seriesNumber}`}</strong>
-                            <span class="ms-auto me-3">
-                                ${s.total}p
-                                ${s.xCount > 0 ? `<span class="badge bg-warning text-dark ms-2">${s.xCount} X</span>` : ''}
-                                ${entryMethod === 'TotalOnly' && s.seriesCount ? `<span class="badge bg-info text-dark ms-2">${s.seriesCount} serier</span>` : ''}
+                            <span class="ms-auto me-3 d-flex align-items-center gap-2">
+                                <span class="series-score-cell">${s.total}p</span>
+                                <span class="series-badges-cell">
+                                    ${s.xCount > 0 ? `<span class="badge bg-warning text-dark">${s.xCount} X</span>` : ''}
+                                    ${entryMethod === 'TotalOnly' && s.seriesCount ? `<span class="badge bg-info text-dark">${s.seriesCount} serier</span>` : ''}
+                                </span>
                             </span>
                         </button>
                     </h2>
-                    <div id="collapse${index}" class="accordion-collapse collapse ${index === 0 ? 'show' : ''}" data-bs-parent="#seriesAccordion">
+                    <div id="collapse${index}" class="accordion-collapse collapse" data-bs-parent="#seriesAccordion">
                         <div class="accordion-body">
                             ${hasShots ? `
                                 <div class="row g-2">
@@ -285,4 +297,731 @@ function deleteTrainingScore() {
     background-color: #e7f1ff;
     color: #0d6efd;
 }
+
+.series-score-cell {
+    min-width: 3.5rem;
+    text-align: right;
+    font-weight: 600;
+}
+
+.series-badges-cell {
+    min-width: 5rem;
+    display: inline-flex;
+    justify-content: flex-start;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+#editTrainingScoreModal .edit-shot-circle {
+    width: 50px;
+    height: 50px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 3px solid var(--bs-border-color);
+    border-radius: 50%;
+    background-color: var(--bs-body-bg);
+    color: var(--bs-secondary-color);
+    font-size: 1.5rem;
+    font-weight: bold;
+}
+
+#editTrainingScoreModal .edit-shot-circle.filled {
+    border-color: var(--bs-primary);
+    color: var(--bs-body-color);
+}
+
+#editTrainingScoreModal .edit-shot-circle.shot-x {
+    background-color: #ffc107;
+    border-color: #ffc107;
+    color: #000;
+}
+
+#editTrainingScoreModal .edit-shot-circle.shot-10 {
+    background-color: #198754;
+    border-color: #198754;
+    color: white;
+}
+
+#editTrainingScoreModal .edit-button-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    max-width: 400px;
+    margin: 0 auto;
+}
+
+#editTrainingScoreModal .edit-button-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.5rem;
+}
+
+#editTrainingScoreModal .edit-button-row.action-row {
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-top: 0.5rem;
+}
+
+#editTrainingScoreModal .edit-shot-btn {
+    height: 60px;
+    font-size: 1.5rem;
+    font-weight: bold;
+}
+
+#editTrainingScoreModal .edit-shot-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+#editTrainingScoreModal .edit-shot-display {
+    background-color: var(--bs-tertiary-bg);
+    padding: 1.5rem;
+    border-radius: 0.5rem;
+    border: 2px solid var(--bs-border-color);
+}
+
+#editTrainingScoreModal .edit-shot-circles {
+    display: flex;
+    justify-content: center;
+    gap: 1rem;
+}
 </style>
+
+<!-- Edit Training Score Modal -->
+<div class="modal fade" id="editTrainingScoreModal" tabindex="-1" aria-labelledby="editTrainingScoreModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-fullscreen-sm-down">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="editTrainingScoreModalLabel">
+                    <i class="bi bi-pencil"></i> Ändra resultat
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="editTrainingScoreForm">
+                    @Html.AntiForgeryToken()
+
+                    <div class="row mb-3">
+                        <div class="col-md-4">
+                            <label for="editTrainingDate" class="form-label">Träningsdatum <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="editTrainingDate" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="editShootingClass" class="form-label">Vapenklass <span class="text-danger">*</span></label>
+                            <select class="form-select" id="editShootingClass" required>
+                                <option value="">Välj klass...</option>
+                                <option value="A">A - Tjänstevapen</option>
+                                <option value="A_Opt">A Opt - Optisk</option>
+                                <option value="B">B - Kal. 32-45</option>
+                                <option value="C">C - Kal. 22</option>
+                                <option value="R">R - Revolver</option>
+                                <option value="L">L - Luftpistol</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="editDiscipline" class="form-label">Disciplin <span class="text-danger">*</span></label>
+                            <select class="form-select" id="editDiscipline" required>
+                                <option value="Precision">Precision</option>
+                                <option value="Milsnabb">Milsnabb</option>
+                                <option value="Duell">Duell</option>
+                                <option value="NationellHelmatch">Nationell Helmatch</option>
+                                <option value="MagnumPrecision">Magnum Precision</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="editTrainingDescription" class="form-label">Beskrivning <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="editTrainingDescription" required placeholder="T.ex. 'Morgonträning' eller 'Kvällspass'">
+                        <div class="form-text">Detta visas som namn i resultat-listan</div>
+                    </div>
+
+                    @* Competition Flag *@
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="editIsCompetitionCheckbox">
+                            <label class="form-check-label" for="editIsCompetitionCheckbox">
+                                <i class="bi bi-trophy"></i> Detta är ett resultat från en tävling
+                            </label>
+                            <div class="form-text">
+                                Markera om detta är från en tävling utanför systemet. Räknas som tävlingsresultat i statistiken.
+                            </div>
+                        </div>
+                    </div>
+
+                    @* Competition Details (shown only when checkbox is checked) *@
+                    <div id="editCompetitionDetailsSection" style="display: none; background-color: var(--bs-tertiary-bg);" class="mb-3 p-3 border rounded">
+                        <h6 class="mb-3"><i class="bi bi-info-circle"></i> Tävlingsdetaljer (frivilligt)</h6>
+
+                        <div class="row mb-3">
+                            <div class="col-md-4">
+                                <label for="editCompetitionPlace" class="form-label">Placering</label>
+                                <input type="number" class="form-control" id="editCompetitionPlace" min="1" max="999" placeholder="T.ex. 1, 2, 3...">
+                                <div class="form-text">Din placering i tävlingen</div>
+                            </div>
+                            <div class="col-md-4">
+                                <label for="editCompetitionShootingClass" class="form-label">Klass</label>
+                                <select class="form-select" id="editCompetitionShootingClass">
+                                    <option value="">Välj klass...</option>
+                                    @foreach (var shootingClass in HpskSite.Models.ShootingClasses.All)
+                                    {
+                                        <option value="@shootingClass.Id">@shootingClass.Name - @shootingClass.Description</option>
+                                    }
+                                </select>
+                                <div class="form-text">Vilken klass du tävlade i</div>
+                            </div>
+                            <div class="col-md-4">
+                                <label for="editCompetitionStdMedal" class="form-label">Standard Medalj</label>
+                                <select class="form-select" id="editCompetitionStdMedal">
+                                    <option value="">Ingen medalj</option>
+                                    <option value="B">Brons</option>
+                                    <option value="S">Silver</option>
+                                </select>
+                                <div class="form-text">Standard medalj om uppnådd</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    @* Entry Method Selector *@
+                    <div class="mb-3">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <strong>Inmatningsmetod:</strong>
+                            </div>
+                            <div class="btn-group btn-group-sm" role="group">
+                                <input type="radio" class="btn-check" name="editEntryMethod" id="editMethodDetailed" value="ShotByShot" checked autocomplete="off">
+                                <label class="btn btn-outline-primary" for="editMethodDetailed">
+                                    <i class="bi bi-grid-3x3"></i> Detaljerad
+                                </label>
+
+                                <input type="radio" class="btn-check" name="editEntryMethod" id="editMethodSeries" value="SeriesTotal" autocomplete="off">
+                                <label class="btn btn-outline-primary" for="editMethodSeries">
+                                    <i class="bi bi-list-ol"></i> Serie-totaler
+                                </label>
+
+                                <input type="radio" class="btn-check" name="editEntryMethod" id="editMethodTotal" value="TotalOnly" autocomplete="off">
+                                <label class="btn btn-outline-primary" for="editMethodTotal">
+                                    <i class="bi bi-hash"></i> Bara totalt
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    @* Shot-by-Shot Entry *@
+                    <div id="editShotByShotEntry" style="display:block;">
+                        <div class="mb-3">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <label class="form-label mb-0">Serie <span id="editCurrentSeriesLabel">1</span></label>
+                                <div class="btn-group btn-group-sm" role="group">
+                                    <button type="button" class="btn btn-outline-secondary" id="editPrevSeriesBtn" onclick="editNavigateSeries(-1)" disabled>
+                                        <i class="bi bi-arrow-left"></i> Föregående
+                                    </button>
+                                    <button type="button" class="btn btn-outline-primary" onclick="editAddNewSeries()">
+                                        <i class="bi bi-plus-circle"></i> Ny serie
+                                    </button>
+                                    <button type="button" class="btn btn-outline-secondary" id="editNextSeriesBtn" onclick="editNavigateSeries(1)" disabled>
+                                        Nästa <i class="bi bi-arrow-right"></i>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="edit-shot-display mb-3 text-center">
+                                <div class="edit-shot-circles">
+                                    <span class="edit-shot-circle" id="editShotCircle0">_</span>
+                                    <span class="edit-shot-circle" id="editShotCircle1">_</span>
+                                    <span class="edit-shot-circle" id="editShotCircle2">_</span>
+                                    <span class="edit-shot-circle" id="editShotCircle3">_</span>
+                                    <span class="edit-shot-circle" id="editShotCircle4">_</span>
+                                </div>
+                                <div class="mt-2">
+                                    <strong>Totalt: <span id="editCurrentSeriesTotal">0</span>p</strong> |
+                                    <strong>X: <span id="editCurrentSeriesX">0</span></strong>
+                                </div>
+                            </div>
+
+                            <div class="edit-button-grid">
+                                <div class="edit-button-row">
+                                    <button type="button" class="btn btn-primary edit-shot-btn" onclick="editAddShot('X')">X</button>
+                                    <button type="button" class="btn btn-primary edit-shot-btn" onclick="editAddShot('10')">10</button>
+                                    <button type="button" class="btn btn-primary edit-shot-btn" onclick="editAddShot('9')">9</button>
+                                    <button type="button" class="btn btn-primary edit-shot-btn" onclick="editAddShot('8')">8</button>
+                                </div>
+                                <div class="edit-button-row">
+                                    <button type="button" class="btn btn-primary edit-shot-btn" onclick="editAddShot('7')">7</button>
+                                    <button type="button" class="btn btn-primary edit-shot-btn" onclick="editAddShot('6')">6</button>
+                                    <button type="button" class="btn btn-primary edit-shot-btn" onclick="editAddShot('5')">5</button>
+                                    <button type="button" class="btn btn-primary edit-shot-btn" onclick="editAddShot('4')">4</button>
+                                </div>
+                                <div class="edit-button-row">
+                                    <button type="button" class="btn btn-primary edit-shot-btn" onclick="editAddShot('3')">3</button>
+                                    <button type="button" class="btn btn-primary edit-shot-btn" onclick="editAddShot('2')">2</button>
+                                    <button type="button" class="btn btn-primary edit-shot-btn" onclick="editAddShot('1')">1</button>
+                                    <button type="button" class="btn btn-primary edit-shot-btn" onclick="editAddShot('0')">0</button>
+                                </div>
+                                <div class="edit-button-row action-row">
+                                    <button type="button" class="btn btn-warning" onclick="editClearCurrentSeries()">
+                                        <i class="bi bi-x-circle"></i> RENSA
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    @* Series-Total Entry *@
+                    <div id="editSeriesTotalEntry" style="display:none;">
+                        <div class="card mb-3">
+                            <div class="card-body">
+                                <h6 class="card-title">Serie-totaler</h6>
+                                <p class="card-text text-muted small">Ange totalt poäng för varje serie. X-antal är valfritt.</p>
+
+                                <div id="editSeriesInputsContainer"></div>
+
+                                <button type="button" class="btn btn-sm btn-outline-primary mt-2" onclick="editAddSeriesInput()">
+                                    <i class="bi bi-plus-circle"></i> Lägg till serie
+                                </button>
+
+                                <div class="mt-3">
+                                    <strong>Totalt: <span id="editSeriesTotalSum">0</span>p</strong> |
+                                    <strong>X-antal: <span id="editSeriesTotalXSum">0</span></strong> |
+                                    <span class="text-muted">(<span id="editSeriesTotalCount">0</span> serier)</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    @* Total-Only Entry *@
+                    <div id="editTotalOnlyEntry" style="display:none;">
+                        <div class="card mb-3">
+                            <div class="card-body">
+                                <h6 class="card-title">Totalt resultat</h6>
+                                <p class="card-text text-muted small">Ange antal serier och totalt poäng. X-antal är valfritt.</p>
+
+                                <div class="row">
+                                    <div class="col-md-4">
+                                        <label for="editTotalSeriesCount" class="form-label">Antal serier <span class="text-danger">*</span></label>
+                                        <input type="number" class="form-control" id="editTotalSeriesCount" min="1" max="100" oninput="editUpdateTotalOnlyAverage()">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label for="editTotalScore" class="form-label">Totalt poäng <span class="text-danger">*</span></label>
+                                        <input type="number" class="form-control" id="editTotalScore" min="0" oninput="editUpdateTotalOnlyAverage()">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label for="editTotalXCount" class="form-label">Totalt X-antal</label>
+                                        <input type="number" class="form-control" id="editTotalXCount" min="0">
+                                        <div class="form-text">(valfritt)</div>
+                                    </div>
+                                </div>
+
+                                <div class="alert alert-info mt-3 mb-0">
+                                    <i class="bi bi-calculator"></i> Genomsnitt: <strong id="editAverageScore">-</strong> poäng per serie
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="editTrainingNotes" class="form-label">Anteckningar (valfritt)</label>
+                        <textarea class="form-control" id="editTrainingNotes" rows="2"></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="editSubmitBtn" onclick="submitEditScore()">
+                    <i class="bi bi-check-circle"></i> Spara ändringar
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let editEntryState = {
+    currentSeriesIndex: 0,
+    allSeries: [{ seriesNumber: 1, shots: [] }]
+};
+let editSeriesInputsCount = 0;
+let editFlatpickr = null;
+
+function editSwitchEntryMethod(method) {
+    document.getElementById('editShotByShotEntry').style.display = 'none';
+    document.getElementById('editSeriesTotalEntry').style.display = 'none';
+    document.getElementById('editTotalOnlyEntry').style.display = 'none';
+
+    switch (method) {
+        case 'ShotByShot':
+            document.getElementById('editShotByShotEntry').style.display = 'block';
+            break;
+        case 'SeriesTotal':
+            document.getElementById('editSeriesTotalEntry').style.display = 'block';
+            editUpdateSeriesTotalSummary();
+            break;
+        case 'TotalOnly':
+            document.getElementById('editTotalOnlyEntry').style.display = 'block';
+            editUpdateTotalOnlyAverage();
+            break;
+    }
+}
+
+function editAddShot(value) {
+    const cur = editEntryState.allSeries[editEntryState.currentSeriesIndex];
+    if (cur.shots.length >= 5) return;
+    cur.shots.push(value);
+    editUpdateSeriesDisplay();
+}
+
+function editClearCurrentSeries() {
+    editEntryState.allSeries[editEntryState.currentSeriesIndex].shots = [];
+    editUpdateSeriesDisplay();
+}
+
+function editAddNewSeries() {
+    editEntryState.allSeries.push({
+        seriesNumber: editEntryState.allSeries.length + 1,
+        shots: []
+    });
+    editEntryState.currentSeriesIndex = editEntryState.allSeries.length - 1;
+    editUpdateSeriesDisplay();
+    editUpdateNavigationButtons();
+}
+
+function editNavigateSeries(direction) {
+    const newIndex = editEntryState.currentSeriesIndex + direction;
+    if (newIndex >= 0 && newIndex < editEntryState.allSeries.length) {
+        editEntryState.currentSeriesIndex = newIndex;
+        editUpdateSeriesDisplay();
+        editUpdateNavigationButtons();
+    }
+}
+
+function editUpdateSeriesDisplay() {
+    const cur = editEntryState.allSeries[editEntryState.currentSeriesIndex];
+    document.getElementById('editCurrentSeriesLabel').textContent = cur.seriesNumber;
+
+    for (let i = 0; i < 5; i++) {
+        const circle = document.getElementById(`editShotCircle${i}`);
+        if (i < cur.shots.length) {
+            circle.textContent = cur.shots[i];
+            circle.classList.add('filled');
+            circle.classList.remove('shot-x', 'shot-10');
+            if (cur.shots[i] === 'X') circle.classList.add('shot-x');
+            else if (cur.shots[i] === '10') circle.classList.add('shot-10');
+        } else {
+            circle.textContent = '_';
+            circle.classList.remove('filled', 'shot-x', 'shot-10');
+        }
+    }
+
+    let total = 0, xCount = 0;
+    cur.shots.forEach(s => {
+        if (s === 'X') { total += 10; xCount++; }
+        else { total += parseInt(s); }
+    });
+    document.getElementById('editCurrentSeriesTotal').textContent = total;
+    document.getElementById('editCurrentSeriesX').textContent = xCount;
+
+    document.querySelectorAll('#editTrainingScoreModal .edit-shot-btn').forEach(btn => {
+        btn.disabled = cur.shots.length >= 5;
+    });
+}
+
+function editUpdateNavigationButtons() {
+    document.getElementById('editPrevSeriesBtn').disabled = editEntryState.currentSeriesIndex === 0;
+    document.getElementById('editNextSeriesBtn').disabled = editEntryState.currentSeriesIndex === editEntryState.allSeries.length - 1;
+}
+
+function editAddSeriesInput(prefillScore, prefillX) {
+    const container = document.getElementById('editSeriesInputsContainer');
+    editSeriesInputsCount++;
+    const n = editSeriesInputsCount;
+    const html = `
+        <div class="row mb-2 edit-series-input-row" data-series="${n}">
+            <div class="col-1 text-center pt-2"><strong>${n}.</strong></div>
+            <div class="col-5">
+                <input type="number" class="form-control form-control-sm edit-series-score-input"
+                       min="0" max="50" placeholder="Poäng" value="${prefillScore != null ? prefillScore : ''}"
+                       data-series="${n}" oninput="editUpdateSeriesTotalSummary()">
+            </div>
+            <div class="col-4">
+                <input type="number" class="form-control form-control-sm edit-series-x-input"
+                       min="0" max="5" placeholder="X-antal" value="${prefillX != null ? prefillX : ''}"
+                       data-series="${n}" oninput="editUpdateSeriesTotalSummary()">
+            </div>
+            <div class="col-2">
+                <button type="button" class="btn btn-sm btn-outline-danger" onclick="editRemoveSeriesInput(this)">
+                    <i class="bi bi-trash"></i>
+                </button>
+            </div>
+        </div>`;
+    container.insertAdjacentHTML('beforeend', html);
+    editUpdateSeriesTotalSummary();
+}
+
+function editRemoveSeriesInput(btn) {
+    btn.closest('.edit-series-input-row').remove();
+    // Renumber
+    const rows = document.querySelectorAll('#editSeriesInputsContainer .edit-series-input-row');
+    editSeriesInputsCount = 0;
+    rows.forEach(row => {
+        editSeriesInputsCount++;
+        const n = editSeriesInputsCount;
+        row.setAttribute('data-series', n);
+        row.querySelector('strong').textContent = n + '.';
+        row.querySelector('.edit-series-score-input').setAttribute('data-series', n);
+        row.querySelector('.edit-series-x-input').setAttribute('data-series', n);
+    });
+    editUpdateSeriesTotalSummary();
+}
+
+function editUpdateSeriesTotalSummary() {
+    let total = 0, x = 0, count = 0;
+    document.querySelectorAll('#editSeriesInputsContainer .edit-series-score-input').forEach(input => {
+        const s = parseInt(input.value) || 0;
+        total += s;
+        if (input.value) count++;
+    });
+    document.querySelectorAll('#editSeriesInputsContainer .edit-series-x-input').forEach(input => {
+        x += parseInt(input.value) || 0;
+    });
+    document.getElementById('editSeriesTotalSum').textContent = total;
+    document.getElementById('editSeriesTotalXSum').textContent = x;
+    document.getElementById('editSeriesTotalCount').textContent = count;
+}
+
+function editUpdateTotalOnlyAverage() {
+    const c = parseInt(document.getElementById('editTotalSeriesCount').value) || 0;
+    const t = parseInt(document.getElementById('editTotalScore').value) || 0;
+    document.getElementById('editAverageScore').textContent = (c > 0 && t > 0) ? (t / c).toFixed(1) : '-';
+}
+
+function openEditScoreModal() {
+    const score = window.__currentEditScore;
+    if (!score) {
+        alert('Inget resultat valt');
+        return;
+    }
+
+    // Hide the view modal first
+    const viewModal = bootstrap.Modal.getInstance(document.getElementById('viewTrainingScoreModal'));
+    if (viewModal) viewModal.hide();
+
+    // Reset edit state
+    editEntryState = { currentSeriesIndex: 0, allSeries: [{ seriesNumber: 1, shots: [] }] };
+    editSeriesInputsCount = 0;
+    document.getElementById('editSeriesInputsContainer').innerHTML = '';
+
+    // Init Flatpickr once
+    if (!editFlatpickr && typeof flatpickr === 'function') {
+        editFlatpickr = flatpickr('#editTrainingDate', {
+            locale: 'sv',
+            dateFormat: 'Y-m-d',
+            maxDate: 'today'
+        });
+    }
+
+    // Populate fields
+    const trainingDate = score.trainingDate ? score.trainingDate.split('T')[0] : '';
+    if (editFlatpickr) editFlatpickr.setDate(trainingDate, false);
+    else document.getElementById('editTrainingDate').value = trainingDate;
+
+    document.getElementById('editShootingClass').value = score.weaponClass || '';
+    document.getElementById('editDiscipline').value = score.discipline || 'Precision';
+
+    // Competition flag + details
+    const isComp = score.isCompetition === true;
+    document.getElementById('editIsCompetitionCheckbox').checked = isComp;
+    document.getElementById('editCompetitionDetailsSection').style.display = isComp ? 'block' : 'none';
+    document.getElementById('editCompetitionPlace').value = score.competitionPlace != null ? score.competitionPlace : '';
+    document.getElementById('editCompetitionShootingClass').value = score.competitionShootingClass || '';
+    document.getElementById('editCompetitionStdMedal').value = score.competitionStdMedal || '';
+
+    // Split notes into description + optional notes (mirrors create-form serialization "desc - notes")
+    const fullNotes = score.notes || '';
+    const sepIdx = fullNotes.indexOf(' - ');
+    const description = sepIdx >= 0 ? fullNotes.substring(0, sepIdx) : fullNotes;
+    const extraNotes = sepIdx >= 0 ? fullNotes.substring(sepIdx + 3) : '';
+    document.getElementById('editTrainingDescription').value = description;
+    document.getElementById('editTrainingNotes').value = extraNotes;
+
+    // Determine entry method from first series
+    const series = score.series || [];
+    const firstMethod = (series[0] && series[0].entryMethod) || 'ShotByShot';
+
+    // Pre-populate series data per method
+    if (firstMethod === 'ShotByShot') {
+        editEntryState.allSeries = series.map((s, i) => ({
+            seriesNumber: i + 1,
+            shots: Array.isArray(s.shots) ? s.shots.slice(0, 5) : []
+        }));
+        if (editEntryState.allSeries.length === 0) {
+            editEntryState.allSeries = [{ seriesNumber: 1, shots: [] }];
+        }
+        editEntryState.currentSeriesIndex = editEntryState.allSeries.length - 1;
+    } else if (firstMethod === 'SeriesTotal') {
+        series.forEach(s => editAddSeriesInput(s.total, s.xCount));
+    } else if (firstMethod === 'TotalOnly') {
+        const s = series[0] || {};
+        document.getElementById('editTotalSeriesCount').value = s.seriesCount || series.length || 1;
+        document.getElementById('editTotalScore').value = s.total != null ? s.total : score.totalScore;
+        document.getElementById('editTotalXCount').value = s.xCount != null ? s.xCount : (score.xCount || 0);
+    }
+
+    // Set radio + display correct section
+    const radioId = firstMethod === 'SeriesTotal' ? 'editMethodSeries'
+                  : firstMethod === 'TotalOnly' ? 'editMethodTotal'
+                  : 'editMethodDetailed';
+    document.getElementById(radioId).checked = true;
+    editSwitchEntryMethod(firstMethod);
+
+    if (firstMethod === 'ShotByShot') {
+        editUpdateSeriesDisplay();
+        editUpdateNavigationButtons();
+    }
+
+    const editModal = new bootstrap.Modal(document.getElementById('editTrainingScoreModal'));
+    editModal.show();
+}
+
+function submitEditScore() {
+    const score = window.__currentEditScore;
+    if (!score) return;
+
+    const form = document.getElementById('editTrainingScoreForm');
+    if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+    }
+
+    const method = document.querySelector('input[name="editEntryMethod"]:checked').value;
+    let seriesData = [];
+
+    if (method === 'ShotByShot') {
+        const completed = editEntryState.allSeries.filter(s => s.shots.length === 5);
+        if (completed.length === 0) {
+            alert('Du måste ha minst en komplett serie (5 skott).');
+            return;
+        }
+        seriesData = completed.map((s, i) => ({
+            seriesNumber: i + 1,
+            shots: s.shots,
+            entryMethod: 'ShotByShot'
+        }));
+    } else if (method === 'SeriesTotal') {
+        const inputs = document.querySelectorAll('#editSeriesInputsContainer .edit-series-score-input');
+        if (inputs.length === 0) {
+            alert('Du måste ange minst en serie.');
+            return;
+        }
+        let n = 0;
+        inputs.forEach((inp, i) => {
+            const s = parseInt(inp.value);
+            if (!isNaN(s)) {
+                n++;
+                const xInp = document.querySelectorAll('#editSeriesInputsContainer .edit-series-x-input')[i];
+                seriesData.push({
+                    seriesNumber: n,
+                    shots: null,
+                    total: s,
+                    xCount: parseInt(xInp.value) || 0,
+                    entryMethod: 'SeriesTotal'
+                });
+            }
+        });
+        if (seriesData.length === 0) {
+            alert('Du måste ange minst en serie med poäng.');
+            return;
+        }
+    } else if (method === 'TotalOnly') {
+        const c = parseInt(document.getElementById('editTotalSeriesCount').value);
+        const t = parseInt(document.getElementById('editTotalScore').value);
+        const x = parseInt(document.getElementById('editTotalXCount').value) || 0;
+        if (!c || isNaN(t)) {
+            alert('Du måste ange antal serier och totalt poäng.');
+            return;
+        }
+        seriesData = [{
+            seriesNumber: 1,
+            shots: null,
+            total: t,
+            xCount: x,
+            entryMethod: 'TotalOnly',
+            seriesCount: c
+        }];
+    }
+
+    const description = document.getElementById('editTrainingDescription').value.trim();
+    const extra = document.getElementById('editTrainingNotes').value.trim();
+    const combinedNotes = description + (extra ? ' - ' + extra : '');
+
+    const isComp = document.getElementById('editIsCompetitionCheckbox').checked;
+    const wasComp = score.isCompetition === true;
+    if (isComp && !wasComp) {
+        if (!confirm('Är du säker? Tävlingsresultat kan inte ändras igen efter att ha sparats.')) {
+            return;
+        }
+    }
+    const placeRaw = document.getElementById('editCompetitionPlace').value;
+    const competitionPlace = isComp && placeRaw !== '' ? parseInt(placeRaw) : null;
+    const competitionShootingClass = isComp ? (document.getElementById('editCompetitionShootingClass').value || null) : null;
+    const competitionStdMedal = isComp ? (document.getElementById('editCompetitionStdMedal').value || null) : null;
+
+    const payload = {
+        id: score.id,
+        memberId: score.memberId,
+        trainingDate: document.getElementById('editTrainingDate').value,
+        weaponClass: document.getElementById('editShootingClass').value,
+        discipline: document.getElementById('editDiscipline').value,
+        isCompetition: isComp,
+        competitionPlace: competitionPlace,
+        competitionShootingClass: competitionShootingClass,
+        competitionStdMedal: competitionStdMedal,
+        series: seriesData,
+        notes: combinedNotes
+    };
+
+    const token = document.querySelector('#editTrainingScoreForm input[name="__RequestVerificationToken"]').value;
+
+    document.getElementById('editSubmitBtn').disabled = true;
+
+    fetch('/umbraco/surface/TrainingScoring/UpdateTrainingScore', {
+        method: 'PUT',
+        headers: {
+            'Content-Type': 'application/json',
+            'RequestVerificationToken': token
+        },
+        body: JSON.stringify(payload)
+    })
+    .then(r => r.json())
+    .then(result => {
+        document.getElementById('editSubmitBtn').disabled = false;
+        if (result.success) {
+            const editModal = bootstrap.Modal.getInstance(document.getElementById('editTrainingScoreModal'));
+            if (editModal) editModal.hide();
+            if (typeof loadResults === 'function') loadResults();
+            if (typeof loadTrainingScoresDashboard === 'function') loadTrainingScoresDashboard();
+        } else {
+            alert('Fel: ' + (result.message || 'okänt fel'));
+        }
+    })
+    .catch(err => {
+        console.error('Error updating score:', err);
+        document.getElementById('editSubmitBtn').disabled = false;
+        alert('Kunde inte spara ändringar.');
+    });
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('input[name="editEntryMethod"]').forEach(r => {
+        r.addEventListener('change', function () { editSwitchEntryMethod(this.value); });
+    });
+
+    const editCompCheckbox = document.getElementById('editIsCompetitionCheckbox');
+    const editCompSection = document.getElementById('editCompetitionDetailsSection');
+    if (editCompCheckbox && editCompSection) {
+        editCompCheckbox.addEventListener('change', function () {
+            editCompSection.style.display = this.checked ? 'block' : 'none';
+        });
+    }
+});
+</script>

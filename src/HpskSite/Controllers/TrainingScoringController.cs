@@ -191,6 +191,7 @@ namespace HpskSite.Controllers
                         MemberName = currentMember.Name,
                         TrainingDate = r.TrainingDate,
                         WeaponClass = r.WeaponClass,
+                        Discipline = (string?)r.Discipline ?? "Precision",
                         IsCompetition = r.IsCompetition,
                         CompetitionPlace = r.CompetitionPlace,
                         CompetitionShootingClass = r.CompetitionShootingClass,
@@ -696,12 +697,13 @@ namespace HpskSite.Controllers
                     // Update the record
                     db.Execute(
                         @"UPDATE TrainingScores
-                          SET TrainingDate = @0, WeaponClass = @1, IsCompetition = @2,
-                              CompetitionPlace = @3, CompetitionShootingClass = @4, CompetitionStdMedal = @5,
-                              SeriesScores = @6, TotalScore = @7, XCount = @8, Notes = @9, UpdatedAt = @10
-                          WHERE Id = @11",
+                          SET TrainingDate = @0, WeaponClass = @1, Discipline = @2, IsCompetition = @3,
+                              CompetitionPlace = @4, CompetitionShootingClass = @5, CompetitionStdMedal = @6,
+                              SeriesScores = @7, TotalScore = @8, XCount = @9, Notes = @10, UpdatedAt = @11
+                          WHERE Id = @12",
                         entry.TrainingDate,
                         entry.WeaponClass,
+                        entry.Discipline ?? "Precision",
                         entry.IsCompetition,
                         entry.CompetitionPlace,
                         entry.CompetitionShootingClass,
