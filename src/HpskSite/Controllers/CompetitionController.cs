@@ -265,7 +265,7 @@ namespace HpskSite.Controllers
                             {
                                 await Task.Delay(10000);
                                 var hub = _contentService.GetById(hubId);
-                                if (hub != null) _contentService.Publish(hub, Array.Empty<string>());
+                                if (hub != null) _contentService.Publish(hub, new[] { "*" }, -1);
                             }
                             catch { /* hub publish is non-critical */ }
                         });
@@ -542,7 +542,7 @@ namespace HpskSite.Controllers
                         var content = _contentService.GetById(registrationId_forPublish);
                         if (content != null)
                         {
-                            _contentService.Publish(content, Array.Empty<string>());
+                            _contentService.Publish(content, new[] { "*" }, -1);
                             _logger.LogInformation("Background publish completed for registration {RegId}", registrationId_forPublish);
                         }
                     }
@@ -570,7 +570,7 @@ namespace HpskSite.Controllers
                                 notes += $"\n[{DateTime.Now:yyyy-MM-dd HH:mm}] Cancelled - Fee change from {feeInfo} SEK";
                                 oldInvoice.SetValue("notes", notes);
                                 _contentService.Save(oldInvoice);
-                                _contentService.Publish(oldInvoice, Array.Empty<string>());
+                                _contentService.Publish(oldInvoice, new[] { "*" }, -1);
                             }
                         }
                         catch (Exception ex)
@@ -689,7 +689,7 @@ namespace HpskSite.Controllers
                 {
                     _logger.LogInformation("Publishing existing unpublished registrations folder {FolderId} for competition {CompetitionId}",
                         existingFolder.Id, competition.Id);
-                    var publishResult = _contentService.Publish(existingFolder, Array.Empty<string>());
+                    var publishResult = _contentService.Publish(existingFolder, new[] { "*" }, -1);
                     if (!publishResult.Success)
                     {
                         _logger.LogWarning("Failed to publish existing registrations folder {FolderId} for competition {CompetitionId}",
@@ -704,7 +704,7 @@ namespace HpskSite.Controllers
             var saveResult = _contentService.Save(folder);
             if (saveResult.Success)
             {
-                var publishResult = _contentService.Publish(folder, Array.Empty<string>());
+                var publishResult = _contentService.Publish(folder, new[] { "*" }, -1);
                 if (!publishResult.Success)
                 {
                     _logger.LogWarning("Failed to publish new registrations folder for competition {CompetitionId}", competition.Id);
@@ -1750,7 +1750,7 @@ namespace HpskSite.Controllers
                 if (saveResult.Success)
                 {
                     _logger.LogInformation("Hub saved successfully, publishing...");
-                    var publishResult = _contentService.Publish(hub, Array.Empty<string>());
+                    var publishResult = _contentService.Publish(hub, new[] { "*" }, -1);
                     if (publishResult.Success)
                     {
                         _logger.LogInformation("Created registrations hub '{HubName}' (ID: {HubId}) for competition {CompetitionId}", hubName, hub.Id, competition.Id);
@@ -2193,7 +2193,7 @@ namespace HpskSite.Controllers
 
                 // Save and publish
                 _contentService.Save(newRegistration);
-                _contentService.Publish(newRegistration, Array.Empty<string>());
+                _contentService.Publish(newRegistration, new[] { "*" }, -1);
 
                 return Json(new
                 {

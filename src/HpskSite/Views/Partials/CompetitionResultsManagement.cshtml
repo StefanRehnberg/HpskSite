@@ -146,17 +146,17 @@
                 {
                     <div>
                         <label class="form-label mb-1 small">Fas</label>
-                        <div class="btn-group phase-selector" role="group" aria-label="Competition Phase">
+                        <div class="btn-group phase-selector" role="group" aria-label="Tävlingsfas">
                             <input type="radio" class="btn-check" name="competitionPhase" id="phaseQualification" value="qualification" checked autocomplete="off">
                             <label class="btn btn-sm btn-outline-primary" for="phaseQualification" id="phaseQualificationLabel">
                                 <i class="bi bi-list-ol me-1"></i>
-                                <span>Qualification (1-@qualificationSeriesCount)</span>
+                                <span>Grundomgång (1-@qualificationSeriesCount)</span>
                             </label>
 
                             <input type="radio" class="btn-check" name="competitionPhase" id="phaseFinals" value="finals" autocomplete="off">
                             <label class="btn btn-sm btn-outline-success" for="phaseFinals" id="phaseFinalsLabel">
                                 <i class="bi bi-trophy me-1"></i>
-                                <span>Finals (F1-F@numberOfFinalSeries)</span>
+                                <span>Final (F1-F@numberOfFinalSeries)</span>
                             </label>
                         </div>
                     </div>
@@ -831,13 +831,13 @@ if (competitionData.hasFinalsRound) {
         console.error('   numberOfFinalSeries:', competitionData.numberOfFinalSeries);
         console.error('   Expected: numberOfSeries should be (qualification + finals)');
         console.error('   Example: For 7 qual + 3 finals, set numberOfSeriesOrStations = 10');
-        alert('⚠️ Competition Configuration Error!\n\n' +
-              'Number of series is incorrectly configured.\n\n' +
-              'Current: ' + competitionData.numberOfSeries + ' total series, ' + competitionData.numberOfFinalSeries + ' finals\n' +
-              'This gives only ' + competitionData.qualificationSeriesCount + ' qualification series!\n\n' +
-              'Please update the competition:\n' +
-              '• numberOfSeriesOrStations should be TOTAL (qual + finals)\n' +
-              '• Example: 7 qualification + 3 finals = 10 total');
+        alert('⚠️ Felaktig tävlingskonfiguration!\n\n' +
+              'Antalet serier är felaktigt inställt.\n\n' +
+              'Just nu: ' + competitionData.numberOfSeries + ' totalt antal serier, ' + competitionData.numberOfFinalSeries + ' finalserier\n' +
+              'Det ger bara ' + competitionData.qualificationSeriesCount + ' grundomgångsserier!\n\n' +
+              'Uppdatera tävlingen:\n' +
+              '• "Antal serier" ska vara TOTALT antal (grundomgång + final)\n' +
+              '• Exempel: 7 grundomgång + 3 final = 10 totalt');
     }
 }
 // NEW SHOOTER-BASED NAVIGATION SYSTEM
@@ -1047,16 +1047,16 @@ function showNoShootersError(message) {
 function showStartListError(message) {
     document.getElementById('resultsEntryContainer').innerHTML = `
         <div class="alert alert-warning">
-            <h6><i class="bi bi-exclamation-triangle me-2"></i>Start List Required</h6>
+            <h6><i class="bi bi-exclamation-triangle me-2"></i>Startlista krävs</h6>
             <p>${message}</p>
-            <p>Please generate an official start list first before entering results.</p>
+            <p>Skapa en officiell startlista först innan du registrerar resultat.</p>
         </div>
     `;
 }
 
 function populateSeriesDropdown() {
     const seriesSelect = document.getElementById('seriesSelect');
-    seriesSelect.innerHTML = '<option value="">Choose a series...</option>';
+    seriesSelect.innerHTML = '<option value="">Välj serie...</option>';
     
     if (competitionData.hasFinalsRound) {
         // Populate based on current phase
@@ -1092,7 +1092,7 @@ function populateSeriesDropdown() {
 
 function populateTeamsDropdown() {
     const teamSelect = document.getElementById('teamSelect');
-    teamSelect.innerHTML = '<option value="">Choose a team...</option>';
+    teamSelect.innerHTML = '<option value="">Välj lag...</option>';
     
     if (!startListData || !startListData.teams) {
         console.error('No start list data available');
@@ -1173,7 +1173,7 @@ function loadTeamShooters() {
     const seriesSelect = document.getElementById('seriesSelect');
     
     // Reset dependent dropdowns
-    positionSelect.innerHTML = '<option value="">Choose position...</option>';
+    positionSelect.innerHTML = '<option value="">Välj position...</option>';
     positionSelect.disabled = true;
     seriesSelect.disabled = true;
     
@@ -1181,7 +1181,7 @@ function loadTeamShooters() {
         document.getElementById('resultsEntryContainer').innerHTML = `
             <div class="text-center py-4">
                 <i class="bi bi-arrow-up-circle display-1 text-muted"></i>
-                <p class="text-muted mt-2">Select a team above to start entering results</p>
+                <p class="text-muted mt-2">Välj ett lag ovan för att börja registrera resultat</p>
             </div>
         `;
         return;
@@ -1221,7 +1221,7 @@ function loadShooterResults() {
         document.getElementById('resultsEntryContainer').innerHTML = `
             <div class="text-center py-4">
                 <i class="bi bi-arrow-up-circle display-1 text-muted"></i>
-                <p class="text-muted mt-2">Select a team and position above to start entering results</p>
+                <p class="text-muted mt-2">Välj lag och position ovan för att börja registrera resultat</p>
                 </div>
         `;
         document.getElementById('seriesSelect').disabled = true;
@@ -1235,7 +1235,7 @@ function loadShooterResults() {
         document.getElementById('resultsEntryContainer').innerHTML = `
             <div class="text-center py-4">
                 <i class="bi bi-list-ol display-1 text-muted"></i>
-                <p class="text-muted mt-2">Select a series to enter results for this shooter</p>
+                <p class="text-muted mt-2">Välj en serie för att registrera resultat för denna skytt</p>
             </div>
         `;
         return;
@@ -1245,9 +1245,9 @@ function loadShooterResults() {
     document.getElementById('resultsEntryContainer').innerHTML = `
         <div class="text-center py-4">
             <div class="spinner-border" role="status">
-                <span class="visually-hidden">Loading...</span>
+                <span class="visually-hidden">Laddar...</span>
             </div>
-            <p class="mt-2">Loading results entry form...</p>
+            <p class="mt-2">Laddar formulär för resultatregistrering...</p>
         </div>
     `;
     
@@ -1454,11 +1454,11 @@ function generateShooterResultsEntryHtml(shooterData, seriesId, competitionId) {
 
                         <div class="col-md-4">
                             <div class="alert alert-info info-section" style="display: none;">
-                                <h6><i class="bi bi-info-circle"></i> Quick Entry Mode</h6>
-                                <p class="mb-1">• Click buttons or use keyboard (0-9, X)</p>
-                                <p class="mb-1">• Press ENTER when done</p>
-                                <p class="mb-1">• Press ESC or CLEAR to reset</p>
-                                <p class="mb-0">• 5 shots per series</p>
+                                <h6><i class="bi bi-info-circle"></i> Snabbregistrering</h6>
+                                <p class="mb-1">• Klicka på knapparna eller använd tangentbordet (0-9, X)</p>
+                                <p class="mb-1">• Tryck ENTER när du är klar</p>
+                                <p class="mb-1">• Tryck ESC eller RENSA för att börja om</p>
+                                <p class="mb-0">• 5 skott per serie</p>
                             </div>
                         </div>
         </div>
@@ -2285,7 +2285,7 @@ function resetForm() {
     document.getElementById('resultsEntryContainer').innerHTML = `
         <div class="text-center py-4">
             <i class="bi bi-arrow-up-circle display-1 text-muted"></i>
-            <p class="text-muted mt-2">Select a shooter above to start entering results</p>
+            <p class="text-muted mt-2">Välj en skytt ovan för att börja registrera resultat</p>
         </div>
     `;
     
@@ -2318,9 +2318,9 @@ function showExistingResultsWarning(existingResult) {
     notification.className = 'alert alert-warning alert-dismissible fade show position-fixed';
     notification.style.cssText = 'top: 20px; right: 20px; z-index: 1050; max-width: 400px;';
     notification.innerHTML = `
-        <strong>Existing Results Found</strong><br>
-        Current scores: ${shotDisplay} (Total: ${existingResult.total}, X: ${existingResult.xCount})<br>
-        <small class="text-muted">Click CLEAR to start over, or continue editing.</small>
+        <strong>Befintliga resultat hittades</strong><br>
+        Nuvarande poäng: ${shotDisplay} (Totalt: ${existingResult.total}, X: ${existingResult.xCount})<br>
+        <small class="text-muted">Klicka RENSA för att börja om, eller fortsätt redigera.</small>
         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
     `;
     
@@ -2343,18 +2343,18 @@ async function confirmClearExistingResults() {
             <div class="modal-dialog">
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h5 class="modal-title">Clear Existing Results</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        <h5 class="modal-title">Rensa befintliga resultat</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
                     </div>
                     <div class="modal-body">
-                        <p>This shooter already has results entered. Are you sure you want to clear them and start over?</p>
+                        <p>Denna skytt har redan registrerade resultat. Är du säker på att du vill rensa dem och börja om?</p>
                         <div class="alert alert-warning">
-                            <strong>Warning:</strong> This action cannot be undone.
+                            <strong>Varning:</strong> Åtgärden kan inte ångras.
                         </div>
                     </div>
                     <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                        <button type="button" class="btn btn-danger" id="confirmClearBtn">Yes, Clear Results</button>
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                        <button type="button" class="btn btn-danger" id="confirmClearBtn">Ja, rensa resultat</button>
                     </div>
                 </div>
             </div>
@@ -2516,11 +2516,11 @@ function initializePhaseSelector() {
     const finalsLabel = document.getElementById('phaseFinalsLabel');
     
     if (qualLabel && qualLabel.querySelector('span')) {
-        qualLabel.querySelector('span').textContent = `Qualification (Series 1-${competitionData.qualificationSeriesCount})`;
+        qualLabel.querySelector('span').textContent = `Grundomgång (serie 1-${competitionData.qualificationSeriesCount})`;
     }
-    
+
     if (finalsLabel && finalsLabel.querySelector('span')) {
-        finalsLabel.querySelector('span').textContent = `Finals (Series F1-F${competitionData.numberOfFinalSeries})`;
+        finalsLabel.querySelector('span').textContent = `Final (serie F1-F${competitionData.numberOfFinalSeries})`;
     }
 
     // Add event listeners to phase selector radio buttons
@@ -2614,7 +2614,7 @@ function populateTeamsDropdown() {
     const teamSelect = document.getElementById('teamSelect');
     if (!teamSelect) return;
 
-    teamSelect.innerHTML = '<option value="">Choose a team...</option>';
+    teamSelect.innerHTML = '<option value="">Välj lag...</option>';
 
     const currentList = getCurrentStartList();
     if (!currentList || !currentList.teams) {
@@ -2639,7 +2639,7 @@ function populatePositionsDropdown() {
     const positionSelect = document.getElementById('positionSelect');
     if (!positionSelect) return;
 
-    positionSelect.innerHTML = '<option value="">Choose a position...</option>';
+    positionSelect.innerHTML = '<option value="">Välj position...</option>';
 
     const currentList = getCurrentStartList();
     if (!currentList || !currentList.teams) {

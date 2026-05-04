@@ -41,6 +41,7 @@ This folder contains all technical documentation for the HPSK Site project.
 - **LOGIN_REGISTRATION_SYSTEM.md** - Complete login/registration documentation
 - **AUTHORIZATION_SECURITY_AUDIT.md** - Security audit & fixes (2025-11-02, updated 2026-02 with Skjutledare/Trainer roles)
 - **CERTIFICATIONS_SYSTEM.md** - SPSF-registered instructor & control roles (Föreningsinstruktör, Kretsinstruktör, Riksinstruktör, Vapenkontrollant, Banläggare). Personal certifications + appointments, with Statistik integration (2026-04-29)
+- **RECORDS_AND_CHAMPIONS_SYSTEM.md** - Klubb-/kretsrekord (records, with IsCurrent + history chain) and klubb-/kretsmästartitlar (champions, per-year, manual entry). Visible to logged-in members, edited by club/regional admins, integrated into Snabblänkar, member detail modal and profile (2026-04-30)
 
 ### Technical Reference
 - **CONTROLLER_ROUTING_POST_MIGRATION.md** - Controller routing notes

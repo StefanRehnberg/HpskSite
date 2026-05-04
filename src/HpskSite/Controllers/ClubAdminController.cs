@@ -367,7 +367,7 @@ namespace HpskSite.Controllers
                         // Publish if active, unpublish if inactive
                         if (isActive)
                         {
-                            _contentService.Publish(clubContent, Array.Empty<string>());
+                            _contentService.Publish(clubContent, new[] { "*" }, -1);
                         }
                         else
                         {
@@ -422,7 +422,7 @@ namespace HpskSite.Controllers
 
                                 if (isActive)
                                 {
-                                    _contentService.Publish(newClubContent, Array.Empty<string>());
+                                    _contentService.Publish(newClubContent, new[] { "*" }, -1);
                                 }
 
                                 // Create corresponding club admin group
@@ -1226,7 +1226,7 @@ namespace HpskSite.Controllers
                     {
                         // Re-save and publish each club to trigger cache refresh
                         _contentService.Save(club);
-                        var publishResult = _contentService.Publish(club, Array.Empty<string>());
+                        var publishResult = _contentService.Publish(club, new[] { "*" }, -1);
 
                         if (publishResult.Success)
                         {
@@ -1960,7 +1960,7 @@ namespace HpskSite.Controllers
                 regionalPage.SetValue("contactPhone", contactPhone ?? "");
 
                 _contentService.Save(regionalPage);
-                _contentService.Publish(regionalPage, Array.Empty<string>());
+                _contentService.Publish(regionalPage, new[] { "*" }, -1);
 
                 _logger.LogInformation("Updated regional page {RegionCode}", regionCode);
 
@@ -2332,7 +2332,7 @@ namespace HpskSite.Controllers
                             regionalPage.SetValue("welcomeText", $"<p>Vi hälsar dig välkommen till {regionDescription}. Här hittar du information om våra klubbar och aktiviteter.</p>");
 
                             _contentService.Save(regionalPage);
-                            _contentService.Publish(regionalPage, Array.Empty<string>());
+                            _contentService.Publish(regionalPage, new[] { "*" }, -1);
 
                             // 2. Create clubsPage under regional page
                             var clubsPage = _contentService.Create(
@@ -2343,7 +2343,7 @@ namespace HpskSite.Controllers
 
                             clubsPage.SetValue("regionCode", regionCode);
                             _contentService.Save(clubsPage);
-                            _contentService.Publish(clubsPage, Array.Empty<string>());
+                            _contentService.Publish(clubsPage, new[] { "*" }, -1);
 
                             // 3. Create RegionalAdmin group
                             await _authService.EnsureRegionalAdminGroup(regionCode);
@@ -2511,7 +2511,7 @@ namespace HpskSite.Controllers
                     // Rename the page
                     page.Name = correctName;
                     _contentService.Save(page);
-                    _contentService.Publish(page, Array.Empty<string>());
+                    _contentService.Publish(page, new[] { "*" }, -1);
 
                     results.Add($"FIXED: '{currentName}' -> '{correctName}'");
                     fixedCount++;
@@ -2695,7 +2695,7 @@ namespace HpskSite.Controllers
                             club.SetValue("aboutClub", clubUrl);
                             club.SetValue("clubUrl", ""); // Clear the old field
                             _contentService.Save(club);
-                            _contentService.Publish(club, Array.Empty<string>());
+                            _contentService.Publish(club, new[] { "*" }, -1);
                         }
 
                         results.Add($"{(dryRun ? "[DryRun] Would migrate" : "Migrated")} {clubName}: '{clubUrl}'");

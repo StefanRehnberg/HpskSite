@@ -800,7 +800,7 @@
 //                        // Publish if active, unpublish if inactive
 //                        if (isActive)
 //                        {
-//                            _contentService.Publish(clubContent, Array.Empty<string>());
+//                            _contentService.Publish(clubContent, new[] { "*" }, -1);
 //                        }
 //                        else
 //                        {
@@ -852,7 +852,7 @@
 
 //                                if (isActive)
 //                                {
-//                                    _contentService.Publish(newClubContent, Array.Empty<string>());
+//                                    _contentService.Publish(newClubContent, new[] { "*" }, -1);
 //                                }
 
 //                                // Create corresponding club admin group
@@ -2443,7 +2443,7 @@
 //                var saveResult = _contentService.Save(registration);
 //                if (saveResult.Success)
 //                {
-//                    _contentService.Publish(registration, Array.Empty<string>());
+//                    _contentService.Publish(registration, new[] { "*" }, -1);
 //                    return Json(new { success = true, message = "Registration updated successfully" });
 //                }
 //                else

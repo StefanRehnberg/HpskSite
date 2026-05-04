@@ -337,7 +337,7 @@ namespace HpskSite.Services
                             return Task.FromResult<IContent?>(null);
                         }
 
-                        var hubPublishResult = _contentService.Publish(hub, Array.Empty<string>());
+                        var hubPublishResult = _contentService.Publish(hub, new[] { "*" }, -1);
                         if (!hubPublishResult.Success)
                         {
                             _logger.LogError("Failed to publish registrationInvoicesHub for competition {CompetitionId}", competitionId);
@@ -402,7 +402,7 @@ namespace HpskSite.Services
                 var saveResult = _contentService.Save(invoice);
                 if (saveResult.Success)
                 {
-                    var publishResult = _contentService.Publish(invoice, Array.Empty<string>());
+                    var publishResult = _contentService.Publish(invoice, new[] { "*" }, -1);
                     if (publishResult.Success)
                     {
                         _logger.LogInformation("Invoice {InvoiceId} saved and published successfully.", invoice.Id);
@@ -458,7 +458,7 @@ namespace HpskSite.Services
                 var saveResult = _contentService.Save(invoice);
                 if (saveResult.Success)
                 {
-                    _contentService.Publish(invoice, Array.Empty<string>());
+                    _contentService.Publish(invoice, new[] { "*" }, -1);
                     return Task.FromResult(true);
                 }
 
@@ -589,7 +589,7 @@ namespace HpskSite.Services
                     var saveResult = _contentService.Save(registration);
                     if (saveResult.Success)
                     {
-                        _contentService.Publish(registration, Array.Empty<string>());
+                        _contentService.Publish(registration, new[] { "*" }, -1);
                         _logger.LogInformation("Successfully linked registration {RegistrationId} to invoice {InvoiceId}", registrationId, invoiceId);
                     }
                     else
@@ -659,7 +659,7 @@ namespace HpskSite.Services
                     if (!hubSaveResult.Success)
                         return Task.FromResult<IContent?>(null);
 
-                    var hubPublishResult = _contentService.Publish(hub, Array.Empty<string>());
+                    var hubPublishResult = _contentService.Publish(hub, new[] { "*" }, -1);
                     if (!hubPublishResult.Success)
                     {
                         _contentService.Delete(hub);
@@ -705,7 +705,7 @@ namespace HpskSite.Services
                 var saveResult = _contentService.Save(invoice);
                 if (saveResult.Success)
                 {
-                    var publishResult = _contentService.Publish(invoice, Array.Empty<string>());
+                    var publishResult = _contentService.Publish(invoice, new[] { "*" }, -1);
                     if (publishResult.Success)
                     {
                         _logger.LogInformation("Team invoice {InvoiceId} created successfully for team {TeamId}", invoice.Id, teamId);

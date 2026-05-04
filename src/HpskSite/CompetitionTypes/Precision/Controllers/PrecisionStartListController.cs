@@ -859,7 +859,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                         return Json(new { success = false, message = "Kunde inte spara uppdateringarna." });
                     }
 
-                    _contentService.Publish(startList, Array.Empty<string>());
+                    _contentService.Publish(startList, new[] { "*" }, -1);
                 }
 
                 return Json(new {
@@ -1023,7 +1023,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 if (result.Success)
                 {
                     // Publish to make changes visible on frontend
-                    _contentService.Publish(startList, Array.Empty<string>());
+                    _contentService.Publish(startList, new[] { "*" }, -1);
                     return Json(new
                     {
                         success = true,
@@ -1138,7 +1138,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 if (result.Success)
                 {
                     // Publish to make changes visible on frontend
-                    _contentService.Publish(startList, Array.Empty<string>());
+                    _contentService.Publish(startList, new[] { "*" }, -1);
                     return Json(new { success = true, message = "Skyttan har tagits bort." });
                 }
                 else
@@ -1219,7 +1219,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 if (result.Success)
                 {
                     // Publish to make changes visible on frontend
-                    _contentService.Publish(startList, Array.Empty<string>());
+                    _contentService.Publish(startList, new[] { "*" }, -1);
                     return Json(new
                     {
                         success = true,
@@ -1307,7 +1307,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 if (result.Success)
                 {
                     // Publish to make changes visible on frontend
-                    _contentService.Publish(startList, Array.Empty<string>());
+                    _contentService.Publish(startList, new[] { "*" }, -1);
                     return Json(new { success = true, message = "Lagets tider har uppdaterats och lagen har sorterats om." });
                 }
                 else
@@ -1427,7 +1427,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 if (result.Success)
                 {
                     // Publish to make changes visible on frontend
-                    _contentService.Publish(startList, Array.Empty<string>());
+                    _contentService.Publish(startList, new[] { "*" }, -1);
                     return Json(new { success = true, message = $"Skyttan har flyttats till Lag {request.TargetTeamNumber}." });
                 }
                 return Json(new { success = false, message = "Kunde inte spara startlistan." });
@@ -1541,7 +1541,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 if (result.Success)
                 {
                     // Publish to make changes visible on frontend
-                    _contentService.Publish(startList, Array.Empty<string>());
+                    _contentService.Publish(startList, new[] { "*" }, -1);
                     return Json(new { success = true, message = $"{movedCount} skytt(ar) har flyttats till Lag {request.TargetTeamNumber}." });
                 }
                 return Json(new { success = false, message = "Kunde inte spara startlistan." });
@@ -1638,7 +1638,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 if (result.Success)
                 {
                     // Publish to make changes visible on frontend
-                    _contentService.Publish(startList, Array.Empty<string>());
+                    _contentService.Publish(startList, new[] { "*" }, -1);
 
                     // Also update the underlying registration so the change persists when regenerating start lists
                     var registrationUpdated = await UpdateRegistrationWeaponClass(competitionId, request.MemberId, oldWeaponClass, request.NewWeaponClass);
@@ -1720,7 +1720,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                             var legacyResult = _contentService.Save(memberRegistration);
                             if (legacyResult.Success)
                             {
-                                _contentService.Publish(memberRegistration, Array.Empty<string>());
+                                _contentService.Publish(memberRegistration, new[] { "*" }, -1);
                                 _logger.LogInformation("Updated legacy registration weapon class for member {MemberId}: {OldClass} -> {NewClass}",
                                     memberId, oldWeaponClass, newWeaponClass);
                                 return true;
@@ -1754,7 +1754,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 var saveResult = _contentService.Save(memberRegistration);
                 if (saveResult.Success)
                 {
-                    _contentService.Publish(memberRegistration, Array.Empty<string>());
+                    _contentService.Publish(memberRegistration, new[] { "*" }, -1);
                     _logger.LogInformation("Updated registration weapon class for member {MemberId}: {OldClass} -> {NewClass}",
                         memberId, oldWeaponClass, newWeaponClass);
                     return true;
@@ -1835,7 +1835,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 if (result.Success)
                 {
                     // Publish to make changes visible on frontend
-                    _contentService.Publish(startList, Array.Empty<string>());
+                    _contentService.Publish(startList, new[] { "*" }, -1);
                     return Json(new { success = true, message = "Laget har tagits bort." });
                 }
                 return Json(new { success = false, message = "Kunde inte spara startlistan." });

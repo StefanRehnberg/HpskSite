@@ -1,7 +1,7 @@
 ---
 title: Klubbadministratör - Hantera din klubb
 roles: [club-admin]
-features: [member-management, events, competitions, series, club-settings, training-groups, skjutledare-assignment, invoices, certifieringar, klubbstatistik]
+features: [member-management, events, competitions, series, club-settings, training-groups, skjutledare-assignment, invoices, certifieringar, klubbstatistik, klubbrekord, klubbmästare]
 ---
 
 # Klubbadministration
@@ -126,6 +126,28 @@ Under **Admin** > **Certifieringar** hanteras klubbens SPSF-registrerade roller:
 Om du själv är Krets- eller Riksinstruktör kan du utfärda nya certifieringar direkt. Annars väljer du i dropdownen **"Certifierad av"** vem som har utbildat personen — endast medlemmar med behörighet visas. Se separat dokumentation: [Instruktörer och certifieringar](instructors.md).
 
 Datumväljarna i tilldelningsdialogen använder svenskt format (ÅÅÅÅ-MM-DD). Lämna förfallodatum tomt för certifieringar som inte förfaller.
+
+## Klubbrekord
+
+På klubbsidan finns fliken **"Rekord"** (synlig för alla inloggade medlemmar). Som klubbadmin ser du även knappen **"Lägg till rekord"** och kan ta bort enskilda rekord.
+
+- Rekord finns för Precisionsskjutning, Magnumprecision och Militär snabbmatch — både individuellt och lag.
+- Klasser kommer från klassregistret (A/B/C/C Dam/C Jun/C Vet Y/C Vet Ä, M1–M7, plus R för Milsnabb).
+- När du registrerar ett nytt rekord som slår det förra, flippas det förra till historik automatiskt.
+- Tar du bort det aktuella rekordet befordras det förra i historiken till nuvarande.
+- Skytt väljs via autocomplete (namn, klubb, Pistolkortnr) — du kan också skriva ett fritt namn för icke-medlemmar; namnet sparas oavsett om medlemmen senare tas bort.
+
+Se separat dokumentation: [Rekord och mästartitlar](records-and-champions.md).
+
+## Klubbmästare (mästartitlar)
+
+Under **Admin** > **Mästare** registrerar du årets klubbmästare per disciplin och klass:
+
+- En post per (år, disciplin, klass, individuellt/lag). Sajten räknar inte ut vinnare automatiskt — du anger dem manuellt eftersom många klubbar fortfarande kör KM med papper och penna.
+- Senaste året visas som "regerande klubbmästare" på klubbens medlems-flik och hemsida (höger kolumn). Hela historiken syns på admin-fliken.
+- Du kan **backfilla** äldre årtal — registrera flera år i samma klass, en post per år.
+- Samma autocomplete-pattern som rekord. Tävlingsnamn och datum är frivilliga men rekommenderas.
+- Klubbmästartitlar listas också i medlemsdetaljmodalen ("Innehar N klubbmästartitlar"), tillsammans med klubb- och kretsrekord.
 
 ## Statistik
 

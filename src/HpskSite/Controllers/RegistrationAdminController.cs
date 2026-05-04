@@ -128,22 +128,51 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
-        /// Get list of all active competitions for dropdown/filtering
+        /// Get list of all active competitions for dropdown/filtering.
+        /// Site admins see every competition; regional admins see only competitions
+        /// whose club belongs to one of their managed regions.
         /// </summary>
         [HttpGet]
         public async Task<IActionResult> GetActiveCompetitions()
         {
-            if (!await _authService.IsCurrentUserAdminAsync())
+            bool isSiteAdmin = await _authService.IsCurrentUserAdminAsync();
+            var managedRegions = isSiteAdmin ? new List<string>() : await _authService.GetManagedRegions();
+            bool isRegionalAdmin = !isSiteAdmin && managedRegions.Any();
+
+            if (!isSiteAdmin && !isRegionalAdmin)
             {
                 return Json(new { success = false, message = "Access denied" });
             }
 
             try
             {
-                // Get all competition documents
-                var allContent = _contentService.GetRootContent().SelectMany(GetAllDescendants);
-                var competitions = allContent
-                    .Where(c => c.ContentType.Alias == "competition")
+                var allContent = _contentService.GetRootContent().SelectMany(GetAllDescendants).ToList();
+
+                // For regional admins, build clubId -> region lookup so we can filter
+                Dictionary<int, string>? clubRegions = null;
+                if (isRegionalAdmin)
+                {
+                    clubRegions = allContent
+                        .Where(c => c.ContentType.Alias == "club")
+                        .GroupBy(c => c.Id)
+                        .ToDictionary(g => g.Key, g => g.First().GetValue<string>("regionalFederation") ?? "");
+                }
+
+                var competitionsQuery = allContent.Where(c => c.ContentType.Alias == "competition");
+
+                if (isRegionalAdmin && clubRegions != null)
+                {
+                    var managedRegionSet = new HashSet<string>(managedRegions, StringComparer.OrdinalIgnoreCase);
+                    competitionsQuery = competitionsQuery.Where(comp =>
+                    {
+                        var clubId = comp.GetValue<int?>("clubId") ?? 0;
+                        return clubId > 0
+                            && clubRegions.TryGetValue(clubId, out var clubRegion)
+                            && managedRegionSet.Contains(clubRegion);
+                    });
+                }
+
+                var competitions = competitionsQuery
                     .Select(comp => new
                     {
                         id = comp.Id,
@@ -186,7 +215,7 @@ namespace HpskSite.Controllers
                 var saveResult = _contentService.Save(registration);
                 if (saveResult.Success)
                 {
-                    _contentService.Publish(registration, Array.Empty<string>());
+                    _contentService.Publish(registration, new[] { "*" }, -1);
                     return Json(new { success = true, message = "Registration updated successfully" });
                 }
                 else
@@ -315,7 +344,7 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Failed to save registration" });
                 }
 
-                _contentService.Publish(registration, Array.Empty<string>());
+                _contentService.Publish(registration, new[] { "*" }, -1);
 
                 return Json(new
                 {
@@ -370,7 +399,7 @@ namespace HpskSite.Controllers
                 hub = _contentService.Create("Anmälningar", competition.Id, "competitionRegistrationsHub");
                 _contentService.Save(hub);
                 // Publish the hub
-                _contentService.Publish(hub, Array.Empty<string>());
+                _contentService.Publish(hub, new[] { "*" }, -1);
             }
 
             return hub;

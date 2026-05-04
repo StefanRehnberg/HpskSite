@@ -32,7 +32,7 @@ Varje skytt får den **bästa medaljen** från Metod A eller B. Silver övertrum
 
 **Gruppering:** Per vapengrupp (A, A Opt, B, C). A Opt är en egen vapengrupp och beräknas separat från A. Vid SM/Landsdelsmästerskap delas grupp C ytterligare i Dam, Junior, Veteran och Öppen.
 
-**Krav:** Minst 6 serier. Delas inte ut vid Klubbmästerskap.
+**Krav:** Minst 6 serier. Delas inte ut vid klubbtävlingar (när tävlingen är markerad som "Endast för specifik klubb").
 
 ---
 
@@ -172,5 +172,5 @@ Bästa medaljen från Metod A eller B gäller.
 Placeringar tilldelas löpande (1, 2, 3...) efter sorteringen. Om tiebreakern inte kan skilja två skyttar åt får de olika placeringsnummer men är i praktiken lika.
 
 ### Undantag
-- Standardmedaljer delas **inte** ut vid Klubbmästerskap (gäller Precision)
+- Standardmedaljer delas **inte** ut vid klubbtävlingar (Föreningstävlingar). I tävlingseditorn betyder det: när "Endast för specifik klubb" är ikryssat är "Standardmedaljsgrundande" automatiskt avstängt.
 - Magnum Fältskytte följer samma regler som Fältskytte

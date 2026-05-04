@@ -51,6 +51,7 @@
     var currentMember = await MemberManager.GetCurrentMemberAsync();
     bool canManageCompetition = false;
     bool isSiteAdmin = false;
+    bool isRegionalAdmin = false;
 
     // Registration modal variables (computed inside auth block)
     var regRole = "member";
@@ -68,6 +69,7 @@
         {
             var roles = MemberService.GetAllRoles(memberData.Id)?.ToList() ?? new List<string>();
             isSiteAdmin = roles.Contains("Administrators");
+            isRegionalAdmin = !isSiteAdmin && roles.Any(r => r.StartsWith("RegionalAdmin_"));
 
             // Compute registration target info
             regMemberId = memberData.Id;
@@ -124,8 +126,9 @@
             }
             else if (competitionId == 0)
             {
-                // Allow access to competition selection if user is admin (they can manage any competition)
-                canManageCompetition = isSiteAdmin;
+                // Allow access to competition selection if user is site admin or regional admin.
+                // Regional admins only see competitions in their managed regions (filtered server-side).
+                canManageCompetition = isSiteAdmin || isRegionalAdmin;
             }
         }
     }
@@ -282,7 +285,7 @@
                 </div>
             </div>
 
-            @if (isSiteAdmin)
+            @if (isSiteAdmin || isRegionalAdmin)
             {
                 <div class="card">
                     <div class="card-header">
@@ -329,7 +332,7 @@
         <script>
         // Load competitions for selection
         $(document).ready(function() {
-            if (@(isSiteAdmin ? "true" : "false")) {
+            if (@((isSiteAdmin || isRegionalAdmin) ? "true" : "false")) {
                 loadCompetitionList();
             }
         });

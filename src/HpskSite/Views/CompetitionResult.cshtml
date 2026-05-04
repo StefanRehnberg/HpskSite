@@ -358,34 +358,59 @@
 
                 if (results.classGroups && results.classGroups.length > 0) {
                     results.classGroups.forEach(classGroup => {
-                        // Determine numeric column count so we can allocate percentage widths
-                        // that keep every class-table column-aligned and make the table fit the viewport.
-                        let numericColCount = 0;
+                        // Allocate column widths so the table fits the viewport while leaving as
+                        // much room as possible for Namn and Förening. Single-series columns
+                        // (1..N, F1..FN, milsnabb 1..12) hold at most 2 chars ("50"), so they
+                        // get a narrow width. Tot/X/S/subtotal columns hold up to 3 chars ("500")
+                        // and need slightly more room.
+                        let seriesColCount = 0;
+                        let totalColCount = 0;
                         let seriesCountForRow = 0;
                         let showFinals = false;
+
                         if (isGrouped12) {
-                            numericColCount = 12 + 3; // 12 series + 3 subtotals
+                            seriesColCount = 12;
+                            totalColCount = 3; // 3 group subtotals (10s/8s/6s or Prec/Duell/Fält)
                         } else if (classGroup.shooters.length > 0 && classGroup.shooters[0].results) {
                             seriesCountForRow = classGroup.shooters[0].results.length;
                             if (hasFinalsRound && seriesCountForRow >= totalSeriesCount) {
-                                numericColCount = qualificationSeriesCount + 1 + numberOfFinalSeries; // qual + mid Tot + finals
+                                seriesColCount = qualificationSeriesCount + numberOfFinalSeries;
+                                totalColCount = 1; // mid Tot between qualification and finals
                                 showFinals = true;
                             } else {
-                                numericColCount = seriesCountForRow;
+                                seriesColCount = seriesCountForRow;
                             }
                         }
-                        numericColCount += 2; // final Tot + X
-                        if (isAwardingStandardMedals) numericColCount += 1; // optional S
-                        if (canDeleteResults) numericColCount += 1; // optional admin delete column
+                        totalColCount += 2; // final Tot + X
+                        if (isAwardingStandardMedals) totalColCount += 1; // S
+                        const deleteColCount = canDeleteResults ? 1 : 0;
 
                         const platsPct = 4;
                         const klassPct = 5;
                         const fixedTextPct = platsPct + klassPct;
-                        const targetNumericPct = 7;
-                        // Reserve at least 8% each for Namn and Förening; shrink numeric width if needed.
-                        const maxNumericPct = (100 - fixedTextPct - 16) / Math.max(1, numericColCount);
-                        const numericPct = Math.min(targetNumericPct, maxNumericPct);
-                        const textSharePct = 100 - fixedTextPct - numericColCount * numericPct;
+                        const targetSeriesPct = 3;  // 2-char single-series cells
+                        const targetTotalPct  = 4;  // 3-char total/subtotal cells
+                        const targetDeletePct = 3;  // tiny trash-icon col
+                        const minTextSharePct = 20; // floor for Namn + Förening combined
+
+                        const targetNumericPct =
+                            seriesColCount * targetSeriesPct +
+                            totalColCount  * targetTotalPct  +
+                            deleteColCount * targetDeletePct;
+                        const availableNumericPct = 100 - fixedTextPct - minTextSharePct;
+                        const scale = targetNumericPct > availableNumericPct
+                            ? availableNumericPct / targetNumericPct
+                            : 1;
+
+                        const seriesPct = targetSeriesPct * scale;
+                        const totalPct  = targetTotalPct  * scale;
+                        const deletePct = targetDeletePct * scale;
+
+                        const usedNumericPct =
+                            seriesColCount * seriesPct +
+                            totalColCount  * totalPct  +
+                            deleteColCount * deletePct;
+                        const textSharePct = 100 - fixedTextPct - usedNumericPct;
                         const namnPct = textSharePct / 2;
                         const foreningPct = textSharePct / 2;
 
@@ -411,38 +436,38 @@
                                 ? ['Prec', 'Duell', 'Fält']
                                 : ['10s', '8s', '6s'];
                             for (let g = 0; g < 3; g++) {
-                                for (let i = g*4+1; i <= g*4+4; i++) html += `<th class="milsnabb-series" style="width:${numericPct}%">${i}</th>`;
-                                html += `<th class="subtotal-col" style="width:${numericPct}%">${groupHeaders[g]}</th>`;
+                                for (let i = g*4+1; i <= g*4+4; i++) html += `<th class="milsnabb-series" style="width:${seriesPct}%">${i}</th>`;
+                                html += `<th class="subtotal-col" style="width:${totalPct}%">${groupHeaders[g]}</th>`;
                             }
                         } else if (classGroup.shooters.length > 0 && classGroup.shooters[0].results) {
                             const seriesCount = classGroup.shooters[0].results.length;
 
                             if (hasFinalsRound && seriesCount >= totalSeriesCount) {
                                 for (let i = 1; i <= qualificationSeriesCount; i++) {
-                                    html += `<th style="width:${numericPct}%">${i}</th>`;
+                                    html += `<th style="width:${seriesPct}%">${i}</th>`;
                                 }
-                                html += `<th style="width:${numericPct}%">Tot</th>`;
+                                html += `<th style="width:${totalPct}%">Tot</th>`;
                                 for (let i = 1; i <= numberOfFinalSeries; i++) {
-                                    html += `<th style="width:${numericPct}%">F${i}</th>`;
+                                    html += `<th style="width:${seriesPct}%">F${i}</th>`;
                                 }
                             } else {
                                 for (let i = 1; i <= seriesCount; i++) {
-                                    html += `<th style="width:${numericPct}%">${i}</th>`;
+                                    html += `<th style="width:${seriesPct}%">${i}</th>`;
                                 }
                             }
                         }
 
                         html += `
-                                            <th style="width:${numericPct}%">Tot</th>
-                                            <th style="width:${numericPct}%">X</th>
+                                            <th style="width:${totalPct}%">Tot</th>
+                                            <th style="width:${totalPct}%">X</th>
                         `;
 
                         if (isAwardingStandardMedals) {
-                            html += `<th style="width:${numericPct}%">S</th>`;
+                            html += `<th style="width:${totalPct}%">S</th>`;
                         }
 
                         if (canDeleteResults) {
-                            html += `<th class="no-print" style="width:${numericPct}%"></th>`;
+                            html += `<th class="no-print" style="width:${deletePct}%"></th>`;
                         }
 
                         html += `

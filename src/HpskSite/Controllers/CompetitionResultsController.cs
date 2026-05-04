@@ -769,7 +769,7 @@ namespace HpskSite.Controllers
                         newHub.SetValue("bodyText", "<p>Alla anmälningar för denna tävling.</p>");
                     }
                     _contentService.Save(newHub);
-                    _contentService.Publish(newHub, Array.Empty<string>());
+                    _contentService.Publish(newHub, new[] { "*" }, -1);
                     registrationsHub = newHub;
                 }
 
@@ -2880,12 +2880,32 @@ namespace HpskSite.Controllers
             // Calculate Standard Medal Awards if enabled
             var isAwardingStandardMedals = competition?.GetValue<bool>("isAwardingStandardMedals") ?? false;
             var competitionScope = competition?.GetValue<string>("competitionScope") ?? "";
+            var isClubOnly = competition?.GetValue<bool>("isClubOnly") ?? false;
 
-            // Don't award medals for club championships (Klubbmästerskap)
-            if (isAwardingStandardMedals && competitionScope != "Klubbmästerskap")
+            // Per BR-PS.1.3: Standard medals may not be awarded at Föreningstävlingar (club competitions).
+            // The `isClubOnly` flag is the authoritative marker for "this is a club competition" —
+            // it covers Klubbmästerskap, regular club competitions, and any other club-internal event.
+            if (isAwardingStandardMedals && !isClubOnly)
             {
                 var allShooters = classGroups.SelectMany(g => g.Shooters).ToList();
                 var shouldSplitGroupC = new StandardMedalCalculationService().ShouldSplitGroupC(competitionScope);
+
+                // Per BR-PS.2.3: Standard medals are determined from the qualification round only,
+                // not the finals. PrecisionShooterResult.TotalScore sums *all* Results, so when finals
+                // exist we must run the calculation on shooters whose Results are filtered to
+                // qualification series (SeriesNumber <= qualificationSeriesCount). Without this,
+                // 10-series totals get compared against 7-series fixed-score thresholds and false
+                // Silver medals are awarded.
+                var medalShooters = hasFinalsRound
+                    ? allShooters.Select(s => new ShooterResult
+                    {
+                        MemberId = s.MemberId,
+                        Name = s.Name,
+                        Club = s.Club,
+                        ShootingClass = s.ShootingClass,
+                        Results = s.Results.Where(r => r.SeriesNumber <= qualificationSeriesCount).ToList()
+                    }).ToList()
+                    : allShooters;
 
                 if (isMilsnabb)
                 {
@@ -2896,7 +2916,7 @@ namespace HpskSite.Controllers
                         SeriesCount = qualificationSeriesCount,
                         ShouldSplitGroupC = shouldSplitGroupC
                     };
-                    milsnabbMedalService.CalculateStandardMedals(allShooters, config);
+                    milsnabbMedalService.CalculateStandardMedals(medalShooters, config);
                 }
                 else if (isDuell)
                 {
@@ -2907,7 +2927,7 @@ namespace HpskSite.Controllers
                         SeriesCount = qualificationSeriesCount,
                         ShouldSplitGroupC = shouldSplitGroupC
                     };
-                    duellMedalService.CalculateStandardMedals(allShooters, config);
+                    duellMedalService.CalculateStandardMedals(medalShooters, config);
                 }
                 else if (isNationellHelmatch)
                 {
@@ -2918,7 +2938,7 @@ namespace HpskSite.Controllers
                         SeriesCount = qualificationSeriesCount,
                         ShouldSplitGroupC = shouldSplitGroupC
                     };
-                    nhMedalService.CalculateStandardMedals(allShooters, config);
+                    nhMedalService.CalculateStandardMedals(medalShooters, config);
                 }
                 else if (isMagnumPrecision)
                 {
@@ -2929,7 +2949,7 @@ namespace HpskSite.Controllers
                         SeriesCount = qualificationSeriesCount,
                         ShouldSplitGroupC = shouldSplitGroupC
                     };
-                    mpMedalService.CalculateStandardMedals(allShooters, config);
+                    mpMedalService.CalculateStandardMedals(medalShooters, config);
                 }
                 else
                 {
@@ -2940,7 +2960,22 @@ namespace HpskSite.Controllers
                         SeriesCount = qualificationSeriesCount,
                         ShouldSplitGroupC = shouldSplitGroupC
                     };
-                    medalService.CalculateStandardMedals(allShooters, config);
+                    medalService.CalculateStandardMedals(medalShooters, config);
+                }
+
+                // When we used a filtered copy, copy the medals back to the originals.
+                if (hasFinalsRound)
+                {
+                    var medalLookup = medalShooters.ToDictionary(
+                        s => (s.MemberId, s.ShootingClass),
+                        s => s.StandardMedal);
+                    foreach (var shooter in allShooters)
+                    {
+                        if (medalLookup.TryGetValue((shooter.MemberId, shooter.ShootingClass), out var medal))
+                        {
+                            shooter.StandardMedal = medal;
+                        }
+                    }
                 }
 
                 _logger.LogInformation("Calculated standard medals for {Count} shooters in competition {CompetitionId} (Type: {Type}, Scope: {Scope}, Series: {SeriesCount})",
@@ -3188,7 +3223,7 @@ namespace HpskSite.Controllers
             var result = _contentService.Save(startListContent);
             if (result.Success)
             {
-                _contentService.Publish(startListContent, Array.Empty<string>());
+                _contentService.Publish(startListContent, new[] { "*" }, -1);
                 _logger.LogInformation("Updated start list weapon class for member {MemberId}: {OldClass} -> {NewClass}", memberId, oldClass, newClass);
                 return true;
             }
@@ -3239,7 +3274,7 @@ namespace HpskSite.Controllers
                     var legacyResult = _contentService.Save(memberRegistration);
                     if (legacyResult.Success)
                     {
-                        _contentService.Publish(memberRegistration, Array.Empty<string>());
+                        _contentService.Publish(memberRegistration, new[] { "*" }, -1);
                         return true;
                     }
                 }
@@ -3264,7 +3299,7 @@ namespace HpskSite.Controllers
             var saveResult = _contentService.Save(memberRegistration);
             if (saveResult.Success)
             {
-                _contentService.Publish(memberRegistration, Array.Empty<string>());
+                _contentService.Publish(memberRegistration, new[] { "*" }, -1);
                 _logger.LogInformation("Updated registration weapon class for member {MemberId}: {OldClass} -> {NewClass}",
                     memberId, oldClass, newClass);
                 return true;

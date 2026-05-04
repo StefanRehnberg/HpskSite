@@ -72,7 +72,7 @@ namespace HpskSite.CompetitionTypes.Precision.Services
 
                 // Save first, then publish as system user (-1) to ensure publish succeeds
                 _contentService.Save(content);
-                var publishResult = _contentService.Publish(content, Array.Empty<string>(), -1);
+                var publishResult = _contentService.Publish(content, new[] { "*" }, -1);
 
                 if (!publishResult.Success)
                 {

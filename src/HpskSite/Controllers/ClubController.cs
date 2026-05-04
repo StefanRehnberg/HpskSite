@@ -438,7 +438,7 @@ namespace HpskSite.Controllers
 
                 // Save and publish
                 _contentService.Save(newEvent);
-                _contentService.Publish(newEvent, Array.Empty<string>());
+                _contentService.Publish(newEvent, new[] { "*" }, -1);
 
                 return Ok(new
                 {
@@ -672,7 +672,7 @@ namespace HpskSite.Controllers
 
                 // Save and publish
                 _contentService.Save(eventContent);
-                _contentService.Publish(eventContent, Array.Empty<string>());
+                _contentService.Publish(eventContent, new[] { "*" }, -1);
 
                 return Ok(new { success = true, message = "Event updated successfully" });
             }
@@ -769,7 +769,7 @@ namespace HpskSite.Controllers
 
                 // Save and publish
                 _contentService.Save(newNews);
-                _contentService.Publish(newNews, Array.Empty<string>());
+                _contentService.Publish(newNews, new[] { "*" }, -1);
 
                 return Ok(new
                 {
@@ -824,7 +824,7 @@ namespace HpskSite.Controllers
 
                 // Save and publish
                 _contentService.Save(newsContent_item);
-                _contentService.Publish(newsContent_item, Array.Empty<string>());
+                _contentService.Publish(newsContent_item, new[] { "*" }, -1);
 
                 return Ok(new { success = true, message = "News updated successfully" });
             }
@@ -976,7 +976,7 @@ namespace HpskSite.Controllers
 
                 // Save and publish
                 _contentService.Save(clubContent);
-                _contentService.Publish(clubContent, Array.Empty<string>());
+                _contentService.Publish(clubContent, new[] { "*" }, -1);
 
                 return Ok(new { success = true, message = "Club information updated successfully" });
             }
@@ -1318,7 +1318,7 @@ namespace HpskSite.Controllers
 
                 content.SetValue("featuredItems", string.Join(",", udiStrings));
                 _contentService.Save(content);
-                _contentService.Publish(content, Array.Empty<string>());
+                _contentService.Publish(content, new[] { "*" }, -1);
 
                 return Ok(new { success = true, message = "Featured items updated", count = udiStrings.Count });
             }
@@ -1437,7 +1437,7 @@ namespace HpskSite.Controllers
                     regionContent.SetValue("brevoApiKey", brevoApiKey ?? "");
 
                 _contentService.Save(regionContent);
-                _contentService.Publish(regionContent, Array.Empty<string>());
+                _contentService.Publish(regionContent, new[] { "*" }, -1);
 
                 return Ok(new { success = true, message = "Region information updated successfully" });
             }
@@ -1557,7 +1557,7 @@ namespace HpskSite.Controllers
 
                 regionContent.SetValue(imageType, mediaItem.GetUdi().ToString());
                 _contentService.Save(regionContent);
-                _contentService.Publish(regionContent, Array.Empty<string>());
+                _contentService.Publish(regionContent, new[] { "*" }, -1);
 
                 return Ok(new
                 {
@@ -1617,7 +1617,7 @@ namespace HpskSite.Controllers
 
                 regionContent.SetValue(imageType, null);
                 _contentService.Save(regionContent);
-                _contentService.Publish(regionContent, Array.Empty<string>());
+                _contentService.Publish(regionContent, new[] { "*" }, -1);
 
                 return Ok(new { success = true, message = "Image removed successfully" });
             }
@@ -1736,7 +1736,7 @@ namespace HpskSite.Controllers
 
                 clubContent.SetValue(imageType, mediaItem.GetUdi().ToString());
                 _contentService.Save(clubContent);
-                _contentService.Publish(clubContent, Array.Empty<string>());
+                _contentService.Publish(clubContent, new[] { "*" }, -1);
 
                 return Ok(new
                 {
@@ -1784,7 +1784,7 @@ namespace HpskSite.Controllers
 
                 clubContent.SetValue(imageType, null);
                 _contentService.Save(clubContent);
-                _contentService.Publish(clubContent, Array.Empty<string>());
+                _contentService.Publish(clubContent, new[] { "*" }, -1);
 
                 return Ok(new { success = true, message = "Image removed successfully" });
             }
@@ -1909,7 +1909,7 @@ namespace HpskSite.Controllers
                 newEvent.SetValue("isActive", true);
 
                 _contentService.Save(newEvent);
-                _contentService.Publish(newEvent, Array.Empty<string>());
+                _contentService.Publish(newEvent, new[] { "*" }, -1);
 
                 return Ok(new
                 {
@@ -1993,7 +1993,7 @@ namespace HpskSite.Controllers
                 }
 
                 _contentService.Save(eventContent);
-                _contentService.Publish(eventContent, Array.Empty<string>());
+                _contentService.Publish(eventContent, new[] { "*" }, -1);
 
                 return Ok(new { success = true, message = "Event updated successfully" });
             }
@@ -2223,7 +2223,7 @@ namespace HpskSite.Controllers
                 }
 
                 _contentService.Save(eventContent);
-                _contentService.Publish(eventContent, Array.Empty<string>());
+                _contentService.Publish(eventContent, new[] { "*" }, -1);
 
                 return Ok(new { success = true, message = "Event details updated successfully" });
             }
@@ -2321,7 +2321,7 @@ namespace HpskSite.Controllers
                 // Link media to event content property via UDI
                 eventContent.SetValue("eventImage", mediaItem.GetUdi().ToString());
                 _contentService.Save(eventContent);
-                _contentService.Publish(eventContent, Array.Empty<string>());
+                _contentService.Publish(eventContent, new[] { "*" }, -1);
 
                 return Ok(new
                 {
@@ -2363,7 +2363,7 @@ namespace HpskSite.Controllers
 
                 eventContent.SetValue("contentBlocks", contentBlocksJson ?? "[]");
                 _contentService.Save(eventContent);
-                _contentService.Publish(eventContent, Array.Empty<string>());
+                _contentService.Publish(eventContent, new[] { "*" }, -1);
 
                 return Ok(new { success = true, message = "Content blocks saved successfully" });
             }
@@ -2400,7 +2400,7 @@ namespace HpskSite.Controllers
 
                 eventContent.SetValue("quickLinks", quickLinksJson ?? "[]");
                 _contentService.Save(eventContent);
-                _contentService.Publish(eventContent, Array.Empty<string>());
+                _contentService.Publish(eventContent, new[] { "*" }, -1);
 
                 return Ok(new { success = true, message = "Quick links saved successfully" });
             }

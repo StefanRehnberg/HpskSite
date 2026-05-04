@@ -1,7 +1,7 @@
 ---
 title: Kretsadministratör - Regional administration
 roles: [regional-admin]
-features: [regional-overview, cross-club-management, member-approval, club-admin-assignment, certifieringar, kretsstatistik]
+features: [regional-overview, cross-club-management, member-approval, club-admin-assignment, certifieringar, kretsstatistik, kretsrekord, kretsmästare]
 ---
 
 # Kretsadministration
@@ -61,6 +61,26 @@ På din regions sida > Admin > **Certifieringar**-fliken hanteras kretsens SPSF-
 - **Föreningsinstruktörer per klubb** längst ned — visar **alla** klubbar i kretsen. Klubbar utan utnämnd Föreningsinstruktör listas i **rött** så du ser var det behövs en utbildning.
 
 Se separat dokumentation: [Instruktörer och certifieringar](instructors.md).
+
+## Kretsrekord
+
+På regionssidan finns fliken **"Rekord"** (synlig för inloggade medlemmar). Som kretsadmin ser du knappen **"Lägg till rekord"** och kan ta bort enskilda rekord.
+
+- Samma datamodell som klubbrekord: Precisionsskjutning, Magnumprecision, Militär snabbmatch — individuellt och lag.
+- Skytt väljs från en autocomplete som omfattar **alla medlemmar i kretsens klubbar** (namn, klubb och Pistolkortnr filtrerar listan). Fritextsnamn fungerar också för icke-medlemmar.
+- Slår ett nytt rekord det förra flippas det förra automatiskt till historik. Tas det aktuella rekordet bort befordras föregående post.
+
+Se separat dokumentation: [Rekord och mästartitlar](records-and-champions.md).
+
+## Kretsmästare (mästartitlar)
+
+På regionssidan > Admin > **Mästare**-fliken registrerar du årets kretsmästare:
+
+- En post per (år, disciplin, klass, individuellt/lag). Manuell inmatning — sajten räknar inte ut vinnare.
+- Senaste året visas som "regerande kretsmästare" i höger kolumn på regionens hem-flik. Admin-fliken visar hela historiken (alla år grupperade per klass).
+- Du kan **backfilla** äldre årtal en post i taget. Skytten kan väljas från medlemspoolen i kretsen eller anges som fritext.
+- Tävlingsnamn och datum är frivilliga.
+- Kretsmästartitlar listas i medlemsdetaljmodalen på respektive klubbs medlemslista (KrM-badge), tillsammans med rekord och klubbmästartitlar.
 
 ## Statistik
 

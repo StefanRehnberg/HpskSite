@@ -907,7 +907,7 @@ namespace HpskSite.Controllers
                         {
                             return Ok(new { success = false, message = "Failed to create year folder: " + yearFolderName });
                         }
-                        _contentService.Publish(yearFolder, Array.Empty<string>());
+                        _contentService.Publish(yearFolder, new[] { "*" }, -1);
                     }
 
                     parentId = yearFolder.Id;
@@ -1220,7 +1220,7 @@ namespace HpskSite.Controllers
                         {
                             return Ok(new { success = false, message = "Failed to create year folder: " + yearFolderName });
                         }
-                        _contentService.Publish(yearFolder, Array.Empty<string>());
+                        _contentService.Publish(yearFolder, new[] { "*" }, -1);
                     }
 
                     parentId = yearFolder.Id;
@@ -1364,7 +1364,7 @@ namespace HpskSite.Controllers
                     });
                 }
 
-                var publishResult = _contentService.Publish(newCompetition, Array.Empty<string>());
+                var publishResult = _contentService.Publish(newCompetition, new[] { "*" }, -1);
                 if (!publishResult.Success)
                 {
                     return Ok(new
@@ -1635,7 +1635,7 @@ namespace HpskSite.Controllers
                     });
                 }
 
-                var publishResult = _contentService.Publish(competition, Array.Empty<string>());
+                var publishResult = _contentService.Publish(competition, new[] { "*" }, -1);
                 if (!publishResult.Success)
                 {
                     return Ok(new
@@ -1996,7 +1996,7 @@ namespace HpskSite.Controllers
                         {
                             return Ok(new { success = false, message = "Failed to create year folder: " + yearFolderName });
                         }
-                        _contentService.Publish(yearFolder, Array.Empty<string>());
+                        _contentService.Publish(yearFolder, new[] { "*" }, -1);
                     }
 
                     newParentId = yearFolder.Id;
@@ -2090,7 +2090,7 @@ namespace HpskSite.Controllers
 
                         if (result.Success)
                         {
-                            _contentService.Publish(competition, Array.Empty<string>());
+                            _contentService.Publish(competition, new[] { "*" }, -1);
                             fixedCount++;
                         }
                         else
@@ -2533,7 +2533,7 @@ namespace HpskSite.Controllers
                     {
                         return Ok(new { success = false, message = "Failed to create year folder" });
                     }
-                    _contentService.Publish(yearFolder, Array.Empty<string>());
+                    _contentService.Publish(yearFolder, new[] { "*" }, -1);
                 }
 
                 // Create new series
@@ -2573,7 +2573,7 @@ namespace HpskSite.Controllers
                 }
 
                 // Publish the series
-                var publishResult = _contentService.Publish(newSeries, Array.Empty<string>());
+                var publishResult = _contentService.Publish(newSeries, new[] { "*" }, -1);
                 if (!publishResult.Success)
                 {
                     return Ok(new
@@ -2673,7 +2673,7 @@ namespace HpskSite.Controllers
                 }
 
                 // Publish the series changes
-                var publishResult = _contentService.Publish(series, Array.Empty<string>());
+                var publishResult = _contentService.Publish(series, new[] { "*" }, -1);
                 if (!publishResult.Success)
                 {
                     return Ok(new
@@ -2819,7 +2819,7 @@ namespace HpskSite.Controllers
                     {
                         return Ok(new { success = false, message = "Failed to create year folder" });
                     }
-                    _contentService.Publish(yearFolder, Array.Empty<string>());
+                    _contentService.Publish(yearFolder, new[] { "*" }, -1);
                 }
 
                 var parentId = yearFolder.Id;
@@ -2868,7 +2868,7 @@ namespace HpskSite.Controllers
                 }
 
                 // Publish the copied series
-                var publishSeriesResult = _contentService.Publish(newSeries, Array.Empty<string>());
+                var publishSeriesResult = _contentService.Publish(newSeries, new[] { "*" }, -1);
                 if (!publishSeriesResult.Success)
                 {
                     return Ok(new
@@ -2915,7 +2915,7 @@ namespace HpskSite.Controllers
                             if (saveCompResult.Success)
                             {
                                 // Publish the copied competition
-                                var publishCompResult = _contentService.Publish(newComp, Array.Empty<string>());
+                                var publishCompResult = _contentService.Publish(newComp, new[] { "*" }, -1);
                                 if (publishCompResult.Success)
                                 {
                                     copiedCompetitionCount++;
@@ -3195,7 +3195,7 @@ namespace HpskSite.Controllers
                             // Invalid value - clear it
                             competition.SetValue("invitationFile", null);
                             _contentService.Save(competition);
-                            _contentService.Publish(competition, Array.Empty<string>());
+                            _contentService.Publish(competition, new[] { "*" }, -1);
                             clearedCount++;
                         }
                     }
@@ -3359,7 +3359,7 @@ namespace HpskSite.Controllers
                 }
 
                 // Publish competition
-                _contentService.Publish(competition, Array.Empty<string>());
+                _contentService.Publish(competition, new[] { "*" }, -1);
 
                 return Ok(new
                 {

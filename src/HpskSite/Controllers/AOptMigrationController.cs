@@ -101,7 +101,7 @@ namespace HpskSite.Controllers
 
                 // Save + Publish per CLAUDE.md memory: Publish() alone does not reliably persist property changes.
                 _contentService.Save(node);
-                _contentService.Publish(node, Array.Empty<string>());
+                _contentService.Publish(node, new[] { "*" }, -1);
 
                 report.CompetitionsUpdated++;
             }
@@ -156,7 +156,7 @@ namespace HpskSite.Controllers
 
                 node.SetValue("mergeConfig", rewritten);
                 _contentService.Save(node);
-                _contentService.Publish(node, Array.Empty<string>());
+                _contentService.Publish(node, new[] { "*" }, -1);
                 report.MergeConfigsUpdated++;
             }
         }

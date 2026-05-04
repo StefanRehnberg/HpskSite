@@ -119,7 +119,7 @@
                         </div>
 
                         <div class="mb-3 form-check mt-3">
-                            <input type="checkbox" class="form-check-input" id="wizard_isClubOnly" name="isClubOnly">
+                            <input type="checkbox" class="form-check-input" id="wizard_isClubOnly" name="isClubOnly" onchange="onWizardIsClubOnlyChange()">
                             <label class="form-check-label" for="wizard_isClubOnly">
                                 Endast för vald klubb
                             </label>
@@ -502,6 +502,9 @@
                                             <label class="form-check-label" for="wizard_isAwardingStandardMedals">
                                                 Standardmedaljsgrundande
                                             </label>
+                                            <small class="form-text text-muted d-block mt-1" id="wizard_standardMedalsClubOnlyHint" style="display:none">
+                                                Standardmedaljer får inte delas ut vid klubbtävlingar (BR-PS.1.3).
+                                            </small>
                                         </div>
 
                                         <div class="mb-3">
@@ -1296,6 +1299,7 @@ function populateWizardClubs(clubs) {
 
         document.getElementById('wizard_organizerHelpText').classList.add('d-none');
         document.getElementById('wizard_isClubOnly').checked = true;
+        onWizardIsClubOnlyChange();
     }
 }
 
@@ -1421,6 +1425,24 @@ function onWizardAllowTeamsChange() {
     const feeInput = document.getElementById('wizard_teamRegistrationFee');
     feeInput.disabled = !checked;
     if (!checked) feeInput.value = '0';
+}
+
+function onWizardIsClubOnlyChange() {
+    // Standard medals may not be awarded at club competitions (BR-PS.1.3).
+    const clubOnly = document.getElementById('wizard_isClubOnly')?.checked || false;
+    const medalCb = document.getElementById('wizard_isAwardingStandardMedals');
+    const hint = document.getElementById('wizard_standardMedalsClubOnlyHint');
+    if (medalCb) {
+        if (clubOnly) {
+            medalCb.checked = false;
+            medalCb.disabled = true;
+        } else {
+            medalCb.disabled = false;
+        }
+    }
+    if (hint) {
+        hint.style.display = clubOnly ? '' : 'none';
+    }
 }
 
 function onWizardAllowStafettChange() {
@@ -1991,6 +2013,7 @@ window.resetWizard = function() {
     if (wizardContext.isClubPage) {
         document.getElementById('wizard_isClubOnly').checked = true;
     }
+    onWizardIsClubOnlyChange();
 
     // Reset Egenbokning section
     document.getElementById('wizard_enableDirektplacering').checked = false;

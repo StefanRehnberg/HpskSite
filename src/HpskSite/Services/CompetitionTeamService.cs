@@ -914,7 +914,7 @@ namespace HpskSite.Services
                     _logger.LogError("Failed to save registrations hub");
                     return;
                 }
-                _contentService.Publish(registrationsHub, Array.Empty<string>());
+                _contentService.Publish(registrationsHub, new[] { "*" }, -1);
             }
 
             _logger.LogInformation("Using registrations hub {HubId} ({HubName})", registrationsHub.Id, registrationsHub.Name);
@@ -941,18 +941,18 @@ namespace HpskSite.Services
 
             if (saveResult.Success)
             {
-                var publishResult = _contentService.Publish(doc, Array.Empty<string>());
+                var publishResult = _contentService.Publish(doc, new[] { "*" }, -1);
                 _logger.LogInformation("Publish result: {Success}", publishResult.Success);
                 if (!publishResult.Success)
                 {
                     _logger.LogWarning("Publish failed for team registration doc {DocId}. Reasons: {Reasons}",
-                        doc.Id, string.Join(", ", publishResult.EventMessages?.GetAll()?.Select(m => m.Message) ?? Array.Empty<string>()));
+                        doc.Id, string.Join(", ", publishResult.EventMessages?.GetAll()?.Select(m => m.Message) ?? new[] { "*" }, -1));
                 }
             }
             else
             {
                 _logger.LogError("Save failed for team registration doc. Reasons: {Reasons}",
-                    string.Join(", ", saveResult.EventMessages?.GetAll()?.Select(m => m.Message) ?? Array.Empty<string>()));
+                    string.Join(", ", saveResult.EventMessages?.GetAll()?.Select(m => m.Message) ?? new[] { "*" }, -1));
             }
         }
 
@@ -971,7 +971,7 @@ namespace HpskSite.Services
 
             var saveResult = _contentService.Save(doc);
             if (saveResult.Success)
-                _contentService.Publish(doc, Array.Empty<string>());
+                _contentService.Publish(doc, new[] { "*" }, -1);
         }
 
         /// <summary>

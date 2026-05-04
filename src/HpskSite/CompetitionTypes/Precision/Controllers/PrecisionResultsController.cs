@@ -138,7 +138,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 var saveResult = _contentService.Save(registration);
                 if (saveResult.Success)
                 {
-                    var publishResult = _contentService.Publish(registration, Array.Empty<string>());
+                    var publishResult = _contentService.Publish(registration, new[] { "*" }, -1);
                     if (publishResult.Success)
                     {
                         _logger.LogInformation("Results saved successfully for registration {RegistrationId} by user {UserId}", 

@@ -383,7 +383,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 var saveResult = _contentService.Save(hub);
                 if (saveResult.Success)
                 {
-                    var publishResult = _contentService.Publish(hub, Array.Empty<string>());
+                    var publishResult = _contentService.Publish(hub, new[] { "*" }, -1);
                     if (publishResult.Success)
                     {
                         _logger.LogInformation("Created registrations hub '{HubName}' for competition {CompetitionId}", hubName, competition.Id);

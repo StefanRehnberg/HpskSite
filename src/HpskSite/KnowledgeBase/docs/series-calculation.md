@@ -93,3 +93,11 @@ Serieställningen visar en tabell per klass med:
 Resultat som inte räknas (strukna av "bästa N") visas med genomstrykning och dämpad text. Tävlingar man inte deltog i visar "-".
 
 Administratörer kan klicka **"Beräkna om"** för att tvinga en omräkning (resultat cachelagras i 5 minuter).
+
+## Om en skytt byter klass mitt i serien
+
+Varje deltävling använder den klass skytten var anmäld i för just den tävlingen. Serieberäkningen läser dessa klasser som de är — den försöker inte slå ihop resultat från olika klasser för samma skytt.
+
+**Det innebär:** om en skytt skjuter omg. 1–2 i C2 och omg. 3 och framåt i C3, så syns hen som **två rader** i serieställningen — en rad i C2-tabellen med poäng i omg. 1–2 (och "-" på resten), och en rad i C3-tabellen med "-" på omg. 1–2 och poäng från omg. 3 och framåt.
+
+Det finns idag ingen automatisk eller manuell funktion för att flytta tidigare resultat till den nya klassen. Det här är ett känt specialfall som bevakas — kontakta administratör om det blir aktuellt i en pågående serie.

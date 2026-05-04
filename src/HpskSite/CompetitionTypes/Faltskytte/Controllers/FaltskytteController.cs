@@ -157,7 +157,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
 
                 competition.SetValue("stationConfig", request.StationConfigJson ?? "");
                 _contentService.Save(competition);
-                _contentService.Publish(competition, Array.Empty<string>(), -1);
+                _contentService.Publish(competition, new[] { "*" }, -1);
 
                 _logger.LogInformation("Saved Fältskytte station config for competition {CompId}", request.CompetitionId);
                 return Json(new { success = true, message = "Stationskonfiguration sparad." });
@@ -646,7 +646,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             {
                 competition.SetValue("mergeConfig", request.MergeConfig ?? "");
                 _contentService.Save(competition);
-                _contentService.Publish(competition, Array.Empty<string>());
+                _contentService.Publish(competition, new[] { "*" }, -1);
             }
             else
             {
@@ -673,7 +673,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
 
             competition.SetValue("faltskytteResultsOfficial", request.IsOfficial);
             _contentService.Save(competition);
-            _contentService.Publish(competition, Array.Empty<string>());
+            _contentService.Publish(competition, new[] { "*" }, -1);
 
             return Json(new { success = true });
         }
@@ -1674,7 +1674,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
 
             competition.SetValue("faltskyttePatrolsPublished", request.Publish);
             _contentService.Save(competition);
-            _contentService.Publish(competition, Array.Empty<string>());
+            _contentService.Publish(competition, new[] { "*" }, -1);
 
             return Json(new { success = true, published = request.Publish });
         }
