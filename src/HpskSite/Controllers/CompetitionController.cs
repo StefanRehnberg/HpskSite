@@ -1302,10 +1302,12 @@ namespace HpskSite.Controllers
                     .FirstOrDefault(c => c.ContentType.Alias == "registrationInvoicesHub");
 
                 var paymentStatusMap = new Dictionary<int, string>();
-                var paymentInvoiceMap = new Dictionary<int, int>();        // registrationId -> invoiceId
-                var paymentAmountMap = new Dictionary<int, decimal>();     // registrationId -> totalAmount
+                var paymentInvoiceMap = new Dictionary<int, int>();        // registrationId -> invoiceId (newest actionable)
+                var paymentAmountMap = new Dictionary<int, decimal>();     // registrationId -> actionable invoice amount
                 var invoiceNumberMap = new Dictionary<int, string>();      // registrationId -> invoiceNumber (Swish reference)
                 var transactionIdMap = new Dictionary<int, string>();      // registrationId -> existing transactionId (if any)
+                var paidAmountMap = new Dictionary<int, decimal>();        // registrationId -> sum of all Paid invoices
+                var pendingAmountMap = new Dictionary<int, decimal>();     // registrationId -> sum of all Pending invoices
                 if (invoicesHub != null)
                 {
                     var allInvoices = _contentService.GetPagedChildren(invoicesHub.Id, 0, 1000, out _)
@@ -1323,13 +1325,23 @@ namespace HpskSite.Controllers
 
                         // Check new property first (registrationId - single integer)
                         var invoiceRegistrationId = invoice.GetValue<int>("registrationId");
-                        if (invoiceRegistrationId > 0 && !paymentStatusMap.ContainsKey(invoiceRegistrationId))
+                        if (invoiceRegistrationId > 0)
                         {
-                            paymentStatusMap[invoiceRegistrationId] = invoiceStatus;
-                            paymentInvoiceMap[invoiceRegistrationId] = invoice.Id;
-                            paymentAmountMap[invoiceRegistrationId] = invoiceAmount;
-                            invoiceNumberMap[invoiceRegistrationId] = invoiceNumber;
-                            transactionIdMap[invoiceRegistrationId] = transactionId;
+                            // Aggregate totals across ALL invoices for this registration
+                            if (invoiceStatus == "Paid")
+                                paidAmountMap[invoiceRegistrationId] = paidAmountMap.GetValueOrDefault(invoiceRegistrationId) + invoiceAmount;
+                            else if (invoiceStatus == "Pending")
+                                pendingAmountMap[invoiceRegistrationId] = pendingAmountMap.GetValueOrDefault(invoiceRegistrationId) + invoiceAmount;
+
+                            // Actionable invoice = newest (first encountered due to OrderByDescending)
+                            if (!paymentStatusMap.ContainsKey(invoiceRegistrationId))
+                            {
+                                paymentStatusMap[invoiceRegistrationId] = invoiceStatus;
+                                paymentInvoiceMap[invoiceRegistrationId] = invoice.Id;
+                                paymentAmountMap[invoiceRegistrationId] = invoiceAmount;
+                                invoiceNumberMap[invoiceRegistrationId] = invoiceNumber;
+                                transactionIdMap[invoiceRegistrationId] = transactionId;
+                            }
                         }
 
                         // Also check relatedRegistrationIds for backward compatibility
@@ -1344,6 +1356,11 @@ namespace HpskSite.Controllers
                                 : invoiceAmount;
                             foreach (var regId in registrationIds)
                             {
+                                if (invoiceStatus == "Paid")
+                                    paidAmountMap[regId] = paidAmountMap.GetValueOrDefault(regId) + perRegAmount;
+                                else if (invoiceStatus == "Pending")
+                                    pendingAmountMap[regId] = pendingAmountMap.GetValueOrDefault(regId) + perRegAmount;
+
                                 if (!paymentStatusMap.ContainsKey(regId))
                                 {
                                     paymentStatusMap[regId] = invoiceStatus;
@@ -1445,6 +1462,8 @@ namespace HpskSite.Controllers
                         var paymentAmount = paymentAmountMap.TryGetValue(content.Id, out var amt) ? amt : 0m;
                         var invoiceNumber = invoiceNumberMap.TryGetValue(content.Id, out var invNum) ? invNum : "";
                         var existingTxnId = transactionIdMap.TryGetValue(content.Id, out var txnId) ? txnId : "";
+                        var paidAmount = paidAmountMap.TryGetValue(content.Id, out var pa) ? pa : 0m;
+                        var pendingAmount = pendingAmountMap.TryGetValue(content.Id, out var pe) ? pe : 0m;
 
                         // Get shooting classes (new JSON array format)
                         var shootingClassesJson = content.GetValue<string>("shootingClasses");
@@ -1471,7 +1490,9 @@ namespace HpskSite.Controllers
                             invoiceId = invoiceId,
                             paymentAmount = paymentAmount,
                             invoiceNumber = invoiceNumber,
-                            transactionId = existingTxnId
+                            transactionId = existingTxnId,
+                            paidAmount = paidAmount,
+                            pendingAmount = pendingAmount
                         };
                     })
                     .OrderBy(r => r.memberName)

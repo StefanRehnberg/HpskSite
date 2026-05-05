@@ -675,16 +675,13 @@ function updatePaymentSummary() {
 
     regs.forEach(r => {
         const status = r.paymentStatus || 'No Invoice';
-        const amount = Number(r.paymentAmount) || 0;
-        if (status === 'Paid') {
-            paidCount++;
-            paidAmount += amount;
-        } else if (status === 'Pending') {
-            pendingCount++;
-            pendingAmount += amount;
-        } else if (status === 'No Invoice') {
-            noInvoiceCount++;
-        }
+        // Amounts come from aggregates so multi-invoice regs (paid + top-up pending) sum correctly.
+        paidAmount += Number(r.paidAmount) || 0;
+        pendingAmount += Number(r.pendingAmount) || 0;
+        // Counts still bucket by the actionable status so buckets sum to total registrations.
+        if (status === 'Paid') paidCount++;
+        else if (status === 'Pending') pendingCount++;
+        else if (status === 'No Invoice') noInvoiceCount++;
     });
 
     document.getElementById('summaryRegCount').textContent = regs.length;
@@ -1497,7 +1494,10 @@ function showQrInManageModal() {
                     live.invoiceId = data.invoiceId;
                     live.invoiceNumber = data.invoiceNumber || live.invoiceNumber;
                     live.paymentAmount = data.amount || live.paymentAmount;
-                    if (live.paymentStatus === 'No Invoice') live.paymentStatus = 'Pending';
+                    if (live.paymentStatus === 'No Invoice') {
+                        live.paymentStatus = 'Pending';
+                        live.pendingAmount = (Number(live.pendingAmount) || 0) + (Number(data.amount) || 0);
+                    }
                 }
             }
         } else {
@@ -1535,7 +1535,10 @@ async function markPaidFromManageModal() {
                 live.invoiceId = data.invoiceId;
                 live.invoiceNumber = data.invoiceNumber || live.invoiceNumber;
                 live.paymentAmount = data.amount || live.paymentAmount;
-                if (live.paymentStatus === 'No Invoice') live.paymentStatus = 'Pending';
+                if (live.paymentStatus === 'No Invoice') {
+                    live.paymentStatus = 'Pending';
+                    live.pendingAmount = (Number(live.pendingAmount) || 0) + (Number(data.amount) || 0);
+                }
             }
         } catch (err) {
             alert('Kunde inte starta betalning: ' + err.message);
@@ -1798,7 +1801,10 @@ async function submitWalkInRegistration() {
                     if (invoiceInfo.invoiceId) reg.invoiceId = invoiceInfo.invoiceId;
                     if (invoiceInfo.invoiceNumber) reg.invoiceNumber = invoiceInfo.invoiceNumber;
                     if (invoiceInfo.paymentAmount) reg.paymentAmount = invoiceInfo.paymentAmount;
-                    if (reg.paymentStatus === 'No Invoice') reg.paymentStatus = 'Pending';
+                    if (reg.paymentStatus === 'No Invoice') {
+                        reg.paymentStatus = 'Pending';
+                        reg.pendingAmount = (Number(reg.pendingAmount) || 0) + (Number(invoiceInfo.paymentAmount) || 0);
+                    }
                 }
                 showPaymentOptionsForRegistration(newRegistrationId);
             }
