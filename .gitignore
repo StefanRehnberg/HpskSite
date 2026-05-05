@@ -41,3 +41,13 @@ appsettings.Development.json
 /src/HpskSite/hallandsserien-invitation-email.html
 /src/HpskSite/series-announcement-email.html
 /Marketing
+
+# Curated content — see CONTENT.md
+# (Code stays open-source under AGPL-3.0; the curated data/images/docs do not.)
+/src/HpskSite/Clubs.json
+/src/HpskSite/Associations.json
+/src/HpskSite/access.txt
+/src/HpskSite/wwwroot/images/field-targets/
+/src/HpskSite/wwwroot/images/competition-types/
+/src/HpskSite/KnowledgeBase/docs/
+/src/HpskSite/Documentation/
