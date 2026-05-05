@@ -667,6 +667,47 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// Checks whether the current user is allowed to manage (mark paid, cancel, resend, etc.)
+        /// a specific competition invoice. The four-tier rule is: site admin OR competition manager
+        /// for the invoice's competition OR club admin for the competition's club OR skjutledare
+        /// for the competition's club. Returns false if the invoice or its competition cannot be
+        /// resolved.
+        /// </summary>
+        public async Task<bool> CanManageCompetitionInvoice(int invoiceId)
+        {
+            try
+            {
+                if (await IsCurrentUserAdminAsync()) return true;
+
+                if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null)
+                    return false;
+
+                var invoice = ctx.Content.GetById(invoiceId);
+                if (invoice == null || invoice.ContentType.Alias != "registrationInvoice")
+                    return false;
+
+                var competitionId = invoice.Value<int>("competitionId");
+                if (competitionId <= 0) return false;
+
+                if (await IsCompetitionManager(competitionId)) return true;
+
+                var competition = ctx.Content.GetById(competitionId);
+                var clubId = competition?.Value<int>("clubId") ?? 0;
+                if (clubId > 0)
+                {
+                    if (await IsClubAdminForClub(clubId)) return true;   // includes regional admin
+                    if (await IsSkjutledareForClub(clubId)) return true;
+                }
+
+                return false;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
         /// Checks if the current user can approve a specific member
         /// Returns true if user is site admin OR club admin for the member's applied club
         /// </summary>

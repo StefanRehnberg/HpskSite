@@ -19,6 +19,7 @@ namespace HpskSite.Controllers
         private readonly IMemberService _memberService;
         private readonly IContentService _contentService;
         private readonly PaymentService _paymentService;
+        private readonly AdminAuthorizationService _authService;
         private readonly ILogger<PaymentController> _logger;
 
         public PaymentController(
@@ -32,6 +33,7 @@ namespace HpskSite.Controllers
             IMemberService memberService,
             IContentService contentService,
             PaymentService paymentService,
+            AdminAuthorizationService authService,
             ILogger<PaymentController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
@@ -39,6 +41,7 @@ namespace HpskSite.Controllers
             _memberService = memberService;
             _contentService = contentService;
             _paymentService = paymentService;
+            _authService = authService;
             _logger = logger;
         }
 
@@ -121,7 +124,8 @@ namespace HpskSite.Controllers
             string paymentStatus,
             DateTime? paymentDate = null,
             string? transactionId = null,
-            string? notes = null)
+            string? notes = null,
+            string? paymentMethod = null)
         {
             try
             {
@@ -131,25 +135,22 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Du måste vara inloggad." });
                 }
 
-                // Check if user has permission to update this invoice
-                var memberData = _memberService.GetById(currentMember.Key);
-                var roles = _memberService.GetAllRoles(memberData.Id);
-                var rolesList = roles?.ToList() ?? new List<string>();
-                bool isSiteAdmin = rolesList.Any(r => r.Equals("Administrators", StringComparison.OrdinalIgnoreCase));
-
-                if (!isSiteAdmin)
+                // Authorization: site admin OR competition manager OR club admin OR skjutledare
+                // for the invoice's competition's club OR the invoice's owner.
+                bool canManage = await _authService.CanManageCompetitionInvoice(invoiceId);
+                if (!canManage)
                 {
-                    // Check if this invoice belongs to the current user
                     var umbracoContext = UmbracoContext;
                     var invoice = umbracoContext.Content.GetById(invoiceId);
-                    if (invoice?.Value<string>("memberId") != currentMember.Id.ToString())
+                    bool isOwner = invoice?.Value<string>("memberId") == currentMember.Id.ToString();
+                    if (!isOwner)
                     {
                         return Json(new { success = false, message = "Du har inte behörighet att uppdatera denna faktura." });
                     }
                 }
 
                 var success = await _paymentService.UpdatePaymentStatusAsync(
-                    invoiceId, paymentStatus, paymentDate, transactionId, notes);
+                    invoiceId, paymentStatus, paymentDate, transactionId, notes, paymentMethod);
 
                 if (success)
                 {

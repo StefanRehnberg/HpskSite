@@ -5,38 +5,128 @@
 
 @{
     var competitionId = ViewData["CompetitionId"]?.ToString() ?? "";
+    var availableShootingClasses = ViewData["AvailableShootingClasses"] ?? new List<object>();
+    var availableShootingClassesJson = System.Text.Json.JsonSerializer.Serialize(availableShootingClasses);
 }
+
+<!-- Flatpickr (used by the mark-as-paid date picker). Loaded again here so the
+     registration tab works standalone even when the start list tab isn't rendered. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
 
 <div class="competition-registration-management" data-competition-id="@competitionId">
     <!-- Header Section -->
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <h4><i class="bi bi-people me-2"></i>Anmälningar</h4>
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h4 class="mb-0"><i class="bi bi-people me-2"></i>Anmälningar</h4>
+        <div class="d-flex gap-2">
+            <button type="button" class="btn btn-primary btn-sm" onclick="openWalkInRegistrationModal()" title="Anmäl en skytt vid registreringsbordet">
+                <i class="bi bi-person-plus me-1"></i>Anmäl och betala
+            </button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="exportCompetitionRegistrations()" title="Exportera anmälningar och betalningar som CSV">
+                <i class="bi bi-download me-1"></i>Exportera CSV
+            </button>
+        </div>
+    </div>
+
+    <!-- Quick Search — primary at-the-desk lookup. Matches against name, club, and the
+         Swish reference (invoice number) so a treasurer can paste the reference straight
+         from a Swish notification and jump to the right row. -->
+    <div class="card mb-3 border-primary">
+        <div class="card-body py-2">
+            <label for="competitionRegistrationSearch" class="form-label mb-1 small fw-bold">
+                <i class="bi bi-search me-1"></i>Sök på namn, klubb eller fakturanummer
+            </label>
+            <input type="text" class="form-control" id="competitionRegistrationSearch"
+                   placeholder="t.ex. ”Andy Haard”, ”Haaplinge” eller ”5312-2043-1”"
+                   oninput="filterCompetitionRegistrations()" autocomplete="off">
+        </div>
+    </div>
+
+    <!-- Payment Summary Cards -->
+    <div class="row g-2 mb-3" id="paymentSummaryCards" style="display:none">
+        <div class="col-6 col-md-3">
+            <div class="card h-100">
+                <div class="card-body py-2">
+                    <h6 class="card-subtitle mb-1 text-muted small">Anmälda</h6>
+                    <div class="d-flex justify-content-between align-items-baseline">
+                        <h4 class="card-title mb-0" id="summaryRegCount">0</h4>
+                        <small class="text-muted"><span id="summaryUniqueMembers">0</span> unika</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="card h-100 border-success">
+                <div class="card-body py-2">
+                    <h6 class="card-subtitle mb-1 text-success small">Betalt</h6>
+                    <div class="d-flex justify-content-between align-items-baseline">
+                        <h4 class="card-title mb-0 text-success" id="summaryPaidAmount">0 kr</h4>
+                        <small class="text-muted"><span id="summaryPaidCount">0</span> st</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="card h-100 border-warning">
+                <div class="card-body py-2">
+                    <h6 class="card-subtitle mb-1 text-warning small">Väntande</h6>
+                    <div class="d-flex justify-content-between align-items-baseline">
+                        <h4 class="card-title mb-0 text-warning" id="summaryPendingAmount">0 kr</h4>
+                        <small class="text-muted"><span id="summaryPendingCount">0</span> st</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="card h-100 border-secondary">
+                <div class="card-body py-2">
+                    <h6 class="card-subtitle mb-1 text-secondary small">Saknar faktura</h6>
+                    <div class="d-flex justify-content-between align-items-baseline">
+                        <h4 class="card-title mb-0" id="summaryNoInvoiceCount">0</h4>
+                        <small class="text-muted">st</small>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Filter Section -->
     <div class="card mb-3">
         <div class="card-body">
             <div class="row g-3">
-                <div class="col-md-4">
+                <div class="col-md-3">
                     <label for="competitionClassFilter" class="form-label">Filtrera på klass:</label>
                     <select class="form-select" id="competitionClassFilter" onchange="filterCompetitionRegistrations()">
                         <option value="">Alla klasser</option>
                         <!-- Options populated dynamically by populateShootingClassFilter() -->
                     </select>
                 </div>
-                <div class="col-md-4">
+                <div class="col-md-3">
                     <label for="competitionClubFilter" class="form-label">Filtrera på klubb:</label>
                     <select class="form-select" id="competitionClubFilter" onchange="filterCompetitionRegistrations()">
-                        <option value="">All Clubs</option>
+                        <option value="">Alla klubbar</option>
                     </select>
                 </div>
-                <div class="col-md-4">
+                <div class="col-md-3">
                     <label for="competitionPreferenceFilter" class="form-label">Filtrera på startpreferens:</label>
                     <select class="form-select" id="competitionPreferenceFilter" onchange="filterCompetitionRegistrations()">
                         <option value="">Alla preferenser</option>
                         <option value="Inget">Inget (ingen preferens)</option>
                         <option value="Tidig Start">Tidig start</option>
                         <option value="Sen Start">Sen start</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label for="competitionPaymentFilter" class="form-label">Filtrera på betalstatus:</label>
+                    <select class="form-select" id="competitionPaymentFilter" onchange="filterCompetitionRegistrations()">
+                        <option value="">Alla betalstatus</option>
+                        <option value="Paid">Betald</option>
+                        <option value="Pending">Väntande</option>
+                        <option value="Failed">Misslyckad</option>
+                        <option value="Cancelled">Makulerad</option>
+                        <option value="Refunded">Återbetald</option>
+                        <option value="No Invoice">Ingen faktura</option>
                     </select>
                 </div>
             </div>
@@ -99,52 +189,178 @@
     </div>
 </div>
 
-<!-- Payment Options Modal -->
-<div class="modal fade" id="paymentOptionsModal" tabindex="-1" aria-labelledby="paymentOptionsModalLabel" aria-hidden="true">
+<!-- Manage Invoice Modal — desk workflow hub for a single registration's payment.
+     Replaces the older Betalningsalternativ + Swish-QR modals. Has two visual states
+     (action picker / QR display) toggled by JS. Lazily creates the invoice on first
+     action when the row is in "No Invoice" state. -->
+<div class="modal fade" id="manageInvoiceModal" tabindex="-1" aria-labelledby="manageInvoiceModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
             <div class="modal-header bg-primary text-white">
-                <h5 class="modal-title" id="paymentOptionsModalLabel">
-                    <i class="bi bi-wallet2"></i> Betalningsalternativ
+                <h5 class="modal-title" id="manageInvoiceModalLabel">
+                    <i class="bi bi-wallet2 me-2"></i>Hantera betalning
                 </h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Stäng"></button>
             </div>
-            <div class="modal-body text-center py-4">
-                <h6 class="mb-4">Välj hur du vill betala tävlingsavgiften:</h6>
-                <div class="d-flex flex-column gap-3 align-items-center">
-                    <button type="button" class="btn btn-primary w-75" onclick="showSwishPaymentModalForRegistration()">
-                        <i class="bi bi-qr-code"></i> Betala nu med Swish
-                    </button>
-                    <button type="button" class="btn btn-outline-primary w-75" onclick="sendSwishQRCodeEmailForRegistration()">
-                        <i class="bi bi-envelope"></i> Skicka QR-kod via e-post
-                    </button>
-                    <button type="button" class="btn btn-outline-secondary w-75" data-bs-dismiss="modal">
-                        <i class="bi bi-clock"></i> Stäng
-                    </button>
+            <div class="modal-body">
+                <!-- Header strip: shooter, amount, status -->
+                <div class="alert alert-light mb-3">
+                    <div class="row small">
+                        <div class="col-6">
+                            <strong>Skytt:</strong> <span id="manageInvoiceShooterName"></span><br>
+                            <small class="text-muted" id="manageInvoiceClub"></small>
+                        </div>
+                        <div class="col-6 text-end">
+                            <strong>Belopp:</strong> <span id="manageInvoiceAmount"></span> kr<br>
+                            <span id="manageInvoiceStatusBadge"></span>
+                        </div>
+                    </div>
+                    <div class="small text-muted mt-1" id="manageInvoiceRefRow" style="display:none">
+                        <i class="bi bi-hash"></i><span id="manageInvoiceRef"></span>
+                    </div>
                 </div>
+
+                <!-- State A: Action chooser (default) -->
+                <div id="manageInvoiceActions">
+                    <div class="d-grid gap-2">
+                        <button type="button" class="btn btn-primary btn-lg" onclick="showQrInManageModal()">
+                            <i class="bi bi-qr-code me-1"></i>Visa QR-kod
+                            <div class="small fw-normal">Skytten skannar koden från din skärm</div>
+                        </button>
+                        <button type="button" class="btn btn-success btn-lg" onclick="markPaidFromManageModal()">
+                            <i class="bi bi-check-circle me-1"></i>Registrera betalning
+                            <div class="small fw-normal">Kontant, Swish via app, bankgiro eller annat</div>
+                        </button>
+                    </div>
+                    <div class="text-center mt-3">
+                        <button type="button" class="btn btn-link btn-sm text-muted" onclick="emailQrFromManageModal(this)">
+                            <i class="bi bi-envelope me-1"></i>Skicka QR-kod via e-post till skytten
+                        </button>
+                    </div>
+                </div>
+
+                <!-- State B: QR display (toggled when "Visa QR-kod" clicked) -->
+                <div id="manageInvoiceQr" style="display:none">
+                    <div class="text-center" id="manageInvoiceQrBody">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Laddar QR-kod...</span>
+                        </div>
+                    </div>
+                    <div class="text-center mt-3">
+                        <button type="button" class="btn btn-link btn-sm" onclick="backToManageInvoiceActions()">
+                            <i class="bi bi-arrow-left me-1"></i>Tillbaka
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
             </div>
         </div>
     </div>
 </div>
 
-<!-- Swish Payment Modal (for QR code display) -->
-<div class="modal fade" id="swishPaymentModalAdmin" tabindex="-1" aria-labelledby="swishPaymentModalAdminLabel" aria-hidden="true">
+<!-- Walk-in Registration Modal — for a shooter who turns up at the desk without
+     pre-registering. Searches members, picks a class, calls AddLateRegistration,
+     then drops the result into the manage-invoice flow so the cashier can take
+     payment in the same session. -->
+<div class="modal fade" id="walkInRegistrationModal" tabindex="-1" aria-labelledby="walkInRegistrationModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
             <div class="modal-header bg-primary text-white">
-                <h5 class="modal-title" id="swishPaymentModalAdminLabel">
-                    <i class="bi bi-qr-code"></i> Betala med Swish
+                <h5 class="modal-title" id="walkInRegistrationModalLabel">
+                    <i class="bi bi-person-plus me-2"></i>Anmäl och betala
                 </h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Stäng"></button>
             </div>
-            <div class="modal-body text-center" id="swishPaymentModalAdminBody">
-                <div class="spinner-border text-primary" role="status">
-                    <span class="visually-hidden">Laddar QR-kod...</span>
+            <div class="modal-body">
+                <p class="text-muted small mb-3">
+                    Anmäl en skytt som kommer till tävlingsbordet utan att vara föranmäld.
+                    Efter anmälan öppnas betalningshanteringen direkt.
+                </p>
+
+                <div class="mb-3">
+                    <label for="walkInMemberSearch" class="form-label fw-bold">Sök medlem</label>
+                    <input type="text" class="form-control" id="walkInMemberSearch"
+                           placeholder="Skriv namn eller e-post (minst 2 tecken)" autocomplete="off">
+                    <div id="walkInMemberResults" class="list-group mt-2" style="max-height: 220px; overflow-y: auto;"></div>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Vald skytt</label>
+                    <div id="walkInSelectedMember" class="form-control-plaintext text-muted">Ingen vald än</div>
+                    <input type="hidden" id="walkInSelectedMemberId" value="">
+                </div>
+
+                <div class="mb-0">
+                    <label for="walkInShootingClass" class="form-label fw-bold">Vapenklass</label>
+                    <select class="form-select" id="walkInShootingClass">
+                        <option value="">-- Välj klass --</option>
+                        <!-- Populated from the competition's actual allowed classes -->
+                    </select>
+                </div>
+
+                <div id="walkInError" class="alert alert-danger mt-3 d-none"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="walkInSubmitBtn" onclick="submitWalkInRegistration()" disabled>
+                    <i class="bi bi-arrow-right me-1"></i>Skapa anmälan och fortsätt
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Mark as Paid Modal -->
+<div class="modal fade" id="markAsPaidModal" tabindex="-1" aria-labelledby="markAsPaidModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title" id="markAsPaidModalLabel">
+                    <i class="bi bi-check-circle me-2"></i>Markera som betald
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-light mb-3">
+                    <div class="row small">
+                        <div class="col-6"><strong>Skytt:</strong> <span id="markPaidShooterName"></span></div>
+                        <div class="col-6 text-end"><strong>Belopp:</strong> <span id="markPaidAmount"></span> kr</div>
+                    </div>
+                </div>
+                <input type="hidden" id="markPaidInvoiceId" />
+                <input type="hidden" id="markPaidRegistrationId" />
+
+                <div class="mb-3">
+                    <label for="markPaidMethod" class="form-label">Betalningsmetod</label>
+                    <select class="form-select" id="markPaidMethod">
+                        <option value="Swish">Swish</option>
+                        <option value="Kontant">Kontant</option>
+                        <option value="Bankgiro">Bankgiro / banköverföring</option>
+                        <option value="Annat">Annat</option>
+                    </select>
+                </div>
+
+                <div class="mb-3">
+                    <label for="markPaidDate" class="form-label">Betaldatum</label>
+                    <input type="text" class="form-control" id="markPaidDate" placeholder="Välj datum">
+                </div>
+
+                <div class="mb-3">
+                    <label for="markPaidTransactionId" class="form-label">Referens / transaktions-ID <small class="text-muted">(valfritt)</small></label>
+                    <input type="text" class="form-control" id="markPaidTransactionId" placeholder="t.ex. Swish-referens, kvittonummer">
+                </div>
+
+                <div class="mb-0">
+                    <label for="markPaidNotes" class="form-label">Anteckning <small class="text-muted">(valfritt)</small></label>
+                    <textarea class="form-control" id="markPaidNotes" rows="2" placeholder="t.ex. 'Betalt vid registreringsbordet'"></textarea>
                 </div>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
-                    <i class="bi bi-x-circle"></i> Stäng
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-success" id="markPaidConfirmBtn" onclick="confirmMarkAsPaid()">
+                    <i class="bi bi-check-circle me-1"></i>Bekräfta betalning
                 </button>
             </div>
         </div>
@@ -279,7 +495,7 @@ function loadCompetitionRegistrations() {
         if (data.success) {
             competitionRegistrations = data.registrations || [];
             populateCompetitionClubFilter();
-            // updateCompetitionStatistics(data.statistics || {}); // Removed - statistics cards no longer exist
+            updatePaymentSummary();
             filterCompetitionRegistrations();
         } else {
             showCompetitionError(data.message || 'Failed to load registrations');
@@ -295,6 +511,8 @@ function filterCompetitionRegistrations() {
     const classFilter = document.getElementById('competitionClassFilter').value;
     const clubFilter = document.getElementById('competitionClubFilter').value;
     const preferenceFilter = document.getElementById('competitionPreferenceFilter').value;
+    const paymentFilter = document.getElementById('competitionPaymentFilter')?.value || '';
+    const searchTerm = (document.getElementById('competitionRegistrationSearch')?.value || '').trim().toLowerCase();
 
     filteredCompetitionRegistrations = competitionRegistrations.filter(reg => {
         // Check if any class in the shootingClasses array matches
@@ -302,12 +520,66 @@ function filterCompetitionRegistrations() {
         const matchesClub = !clubFilter || reg.memberClub === clubFilter;
         // Check if any class has the matching start preference
         const matchesPreference = !preferenceFilter || (reg.shootingClasses && reg.shootingClasses.some(sc => sc.startPreference === preferenceFilter));
+        const matchesPayment = !paymentFilter || (reg.paymentStatus || 'No Invoice') === paymentFilter;
 
-        return matchesClass && matchesClub && matchesPreference;
+        // Free-text search against name, club, and Swish reference (invoice number).
+        // Substring match so partial pastes from a Swish notification still hit.
+        let matchesSearch = true;
+        if (searchTerm) {
+            const haystack = [
+                reg.memberName || '',
+                reg.memberClub || '',
+                reg.invoiceNumber || ''
+            ].join(' ').toLowerCase();
+            matchesSearch = haystack.includes(searchTerm);
+        }
+
+        return matchesClass && matchesClub && matchesPreference && matchesPayment && matchesSearch;
     });
 
     currentCompetitionPage = 1;
     displayCompetitionRegistrations();
+}
+
+// Recompute and render the totals across the FULL registration list (not the filtered view).
+// Filtering changes the table below, the summary above represents the whole competition.
+function updatePaymentSummary() {
+    const cards = document.getElementById('paymentSummaryCards');
+    if (!cards) return;
+
+    const regs = competitionRegistrations || [];
+    if (regs.length === 0) {
+        cards.style.display = 'none';
+        return;
+    }
+
+    const uniqueMembers = new Set(regs.map(r => r.memberId)).size;
+    let paidCount = 0, paidAmount = 0;
+    let pendingCount = 0, pendingAmount = 0;
+    let noInvoiceCount = 0;
+
+    regs.forEach(r => {
+        const status = r.paymentStatus || 'No Invoice';
+        const amount = Number(r.paymentAmount) || 0;
+        if (status === 'Paid') {
+            paidCount++;
+            paidAmount += amount;
+        } else if (status === 'Pending') {
+            pendingCount++;
+            pendingAmount += amount;
+        } else if (status === 'No Invoice') {
+            noInvoiceCount++;
+        }
+    });
+
+    document.getElementById('summaryRegCount').textContent = regs.length;
+    document.getElementById('summaryUniqueMembers').textContent = uniqueMembers;
+    document.getElementById('summaryPaidCount').textContent = paidCount;
+    document.getElementById('summaryPaidAmount').textContent = `${Math.round(paidAmount)} kr`;
+    document.getElementById('summaryPendingCount').textContent = pendingCount;
+    document.getElementById('summaryPendingAmount').textContent = `${Math.round(pendingAmount)} kr`;
+    document.getElementById('summaryNoInvoiceCount').textContent = noInvoiceCount;
+    cards.style.display = '';
 }
 
 function populateCompetitionClubFilter() {
@@ -422,6 +694,13 @@ function displayCompetitionRegistrations() {
         }
 
         const row = document.createElement('tr');
+        // Show the invoice number under the status badge so the cashier can match against
+        // a Swish notification at a glance. Empty for rows that don't have an invoice yet.
+        const invoiceRef = reg.invoiceNumber
+            ? `<div class="small text-muted mt-1" title="Fakturanummer / Swish-referens">
+                   <i class="bi bi-hash"></i>${reg.invoiceNumber}
+               </div>`
+            : '';
         row.innerHTML = `
             <td>
                 <strong>${reg.memberName}</strong>
@@ -437,6 +716,7 @@ function displayCompetitionRegistrations() {
                 <span class="badge ${getPaymentStatusBadgeClass(reg.paymentStatus)}">
                     ${getPaymentStatusText(reg.paymentStatus)}
                 </span>
+                ${invoiceRef}
             </td>
             <td>
                 <button class="btn btn-sm btn-outline-primary me-1"
@@ -728,46 +1008,110 @@ function deleteRegistrationById(registrationId) {
     });
 }
 
+// Bootstrap modal instance, lazily created on first open
+let markPaidModalInstance = null;
+let markPaidDatePicker = null;
+
 function markAsPaid(registrationId) {
-    if (!confirm('Markera denna anmälan som betald?')) return;
+    const reg = competitionRegistrations.find(r => r.id === registrationId);
+    if (!reg) {
+        alert('Kunde inte hitta anmälan i listan.');
+        return;
+    }
+    if (!reg.invoiceId) {
+        alert('Det finns ingen faktura för denna anmälan. Använd plånboksknappen för att skapa en faktura först.');
+        return;
+    }
+
+    // Pre-fill the modal with this registration's data.
+    // Reference field: prefer an existing transactionId (e.g. a real Swish transaction
+    // ID from a callback) if one was already recorded; otherwise drop in the invoice
+    // number, which is exactly what the payer sees as the Swish reference. Saves the
+    // cashier from typing/pasting it from the Swish notification.
+    document.getElementById('markPaidInvoiceId').value = reg.invoiceId;
+    document.getElementById('markPaidRegistrationId').value = reg.id;
+    document.getElementById('markPaidShooterName').textContent = reg.memberName || '';
+    document.getElementById('markPaidAmount').textContent = Math.round(Number(reg.paymentAmount) || 0);
+    document.getElementById('markPaidMethod').value = 'Swish';
+    document.getElementById('markPaidTransactionId').value = reg.transactionId || reg.invoiceNumber || '';
+    document.getElementById('markPaidNotes').value = '';
+
+    const modalEl = document.getElementById('markAsPaidModal');
+    if (!markPaidModalInstance) {
+        markPaidModalInstance = new bootstrap.Modal(modalEl);
+    }
+
+    // Initialise (or reset) the date picker; defaults to today.
+    if (!markPaidDatePicker) {
+        markPaidDatePicker = flatpickr('#markPaidDate', {
+            locale: 'sv',
+            dateFormat: 'Y-m-d',
+            defaultDate: 'today',
+            maxDate: 'today'
+        });
+    } else {
+        markPaidDatePicker.setDate(new Date(), true);
+    }
+
+    markPaidModalInstance.show();
+}
+
+function confirmMarkAsPaid() {
+    const invoiceId = document.getElementById('markPaidInvoiceId').value;
+    if (!invoiceId) return;
+
+    const method = document.getElementById('markPaidMethod').value;
+    const dateStr = document.getElementById('markPaidDate').value;
+    const transactionId = document.getElementById('markPaidTransactionId').value.trim();
+    const notesField = document.getElementById('markPaidNotes').value.trim();
+
+    // Build a default note that captures method + reference if the user didn't write one.
+    // Surfaces enough context in the invoice's notes field that a future reader can tell
+    // who marked it paid and how.
+    const noteParts = [];
+    if (notesField) noteParts.push(notesField);
+    noteParts.push(`Markerad som betald — ${method}`);
+    if (transactionId) noteParts.push(`Ref: ${transactionId}`);
+    const finalNotes = noteParts.join(' | ');
+
+    const btn = document.getElementById('markPaidConfirmBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Sparar…';
 
     const token = $('input[name="__RequestVerificationToken"]').val();
+    const params = new URLSearchParams();
+    params.append('invoiceId', invoiceId);
+    params.append('paymentStatus', 'Paid');
+    params.append('paymentDate', dateStr ? new Date(dateStr).toISOString() : new Date().toISOString());
+    if (transactionId) params.append('transactionId', transactionId);
+    params.append('notes', finalNotes);
+    params.append('paymentMethod', method);
 
-    // Get invoice ID from registration
-    fetch(`/umbraco/surface/Payment/GetRegistrationPaymentStatus?registrationId=${registrationId}`)
-        .then(response => response.json())
-        .then(data => {
-            if (data.success && data.data && data.data.invoiceId) {
-                // Update payment status
-                return fetch('/umbraco/surface/Payment/UpdatePaymentStatus', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'RequestVerificationToken': token
-                    },
-                    body: JSON.stringify({
-                        invoiceId: data.data.invoiceId,
-                        newStatus: 'Paid',
-                        notes: 'Manually marked as paid by admin'
-                    })
-                });
-            } else {
-                throw new Error('No invoice found for this registration');
-            }
-        })
-        .then(response => response.json())
-        .then(result => {
-            if (result.success) {
-                alert('Betalning markerad som betald!');
-                loadCompetitionRegistrations(); // Refresh list
-            } else {
-                alert('Kunde inte uppdatera: ' + result.message);
-            }
-        })
-        .catch(error => {
-            console.error('Error:', error);
-            alert('Ett fel uppstod: ' + error.message);
-        });
+    fetch('/umbraco/surface/Payment/UpdatePaymentStatus', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'RequestVerificationToken': token
+        },
+        body: params.toString()
+    })
+    .then(r => r.json())
+    .then(result => {
+        if (result.success) {
+            markPaidModalInstance?.hide();
+            loadCompetitionRegistrations();
+        } else {
+            alert('Kunde inte uppdatera: ' + (result.message || 'okänt fel'));
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Ett fel uppstod: ' + error.message);
+    })
+    .finally(() => {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Bekräfta betalning';
+    });
 }
 
 function getPreferenceBadgeClass(preference) {
@@ -838,8 +1182,12 @@ $(document).ready(function() {
 // Make loadCompetitionRegistrations available globally for refresh
 window.loadCompetitionRegistrations = loadCompetitionRegistrations;
 
-// Payment functionality for registration management
-let currentPaymentRegistrationId = null;
+// Payment management — desk workflow.
+// The wallet button on each row opens the manageInvoiceModal which has two states:
+// (A) action chooser: Visa QR / Registrera betalning / Skicka QR via e-post
+// (B) QR display.
+let currentManageInvoiceReg = null;
+let manageInvoiceModalInstance = null;
 
 function showPaymentOptionsForRegistration(registrationId) {
     const registration = competitionRegistrations.find(r => r.id === registrationId);
@@ -847,105 +1195,151 @@ function showPaymentOptionsForRegistration(registrationId) {
         alert('Anmälan hittades inte');
         return;
     }
+    currentManageInvoiceReg = registration;
 
-    // Store registration ID for payment functions
-    currentPaymentRegistrationId = registrationId;
+    // Populate header strip
+    document.getElementById('manageInvoiceShooterName').textContent = registration.memberName || '';
+    document.getElementById('manageInvoiceClub').textContent = registration.memberClub || '';
+    document.getElementById('manageInvoiceAmount').textContent = Math.round(Number(registration.paymentAmount) || 0);
 
-    // Show payment options modal
-    new bootstrap.Modal(document.getElementById('paymentOptionsModal')).show();
+    const statusEl = document.getElementById('manageInvoiceStatusBadge');
+    statusEl.className = `badge ${getPaymentStatusBadgeClass(registration.paymentStatus)}`;
+    statusEl.textContent = getPaymentStatusText(registration.paymentStatus);
+
+    const refRow = document.getElementById('manageInvoiceRefRow');
+    if (registration.invoiceNumber) {
+        document.getElementById('manageInvoiceRef').textContent = registration.invoiceNumber;
+        refRow.style.display = '';
+    } else {
+        refRow.style.display = 'none';
+    }
+
+    // Reset to action-picker state
+    backToManageInvoiceActions();
+
+    if (!manageInvoiceModalInstance) {
+        manageInvoiceModalInstance = new bootstrap.Modal(document.getElementById('manageInvoiceModal'));
+    }
+    manageInvoiceModalInstance.show();
 }
 
-function showSwishPaymentModalForRegistration() {
+function backToManageInvoiceActions() {
+    document.getElementById('manageInvoiceActions').style.display = '';
+    document.getElementById('manageInvoiceQr').style.display = 'none';
+    document.getElementById('manageInvoiceQrBody').innerHTML = `
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Laddar QR-kod...</span>
+        </div>`;
+}
+
+function showQrInManageModal() {
+    if (!currentManageInvoiceReg) return;
     const competitionId = $('.competition-registration-management').data('competition-id');
+    const registration = currentManageInvoiceReg;
 
-    if (!competitionId) {
-        alert('Tävlings-ID saknas');
-        return;
-    }
+    // Toggle to QR state immediately so the operator sees feedback
+    document.getElementById('manageInvoiceActions').style.display = 'none';
+    const qrPanel = document.getElementById('manageInvoiceQr');
+    qrPanel.style.display = '';
 
-    if (!currentPaymentRegistrationId) {
-        alert('Ingen anmälan vald för betalning');
-        return;
-    }
+    const body = document.getElementById('manageInvoiceQrBody');
+    body.innerHTML = `
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Laddar QR-kod...</span>
+        </div>
+        <p class="mt-2 small text-muted">Genererar QR-kod...</p>`;
 
-    // Get the registration to find member ID
-    const registration = competitionRegistrations.find(r => r.id === currentPaymentRegistrationId);
-    if (!registration) {
-        alert('Anmälan hittades inte');
-        return;
-    }
-
-    // Close payment options modal
-    bootstrap.Modal.getInstance(document.getElementById('paymentOptionsModal')).hide();
-
-    // Show Swish QR modal
-    const swishModal = new bootstrap.Modal(document.getElementById('swishPaymentModalAdmin'));
-    swishModal.show();
-
-    // Load QR code using GeneratePaymentQR endpoint
-    const modalBody = document.getElementById('swishPaymentModalAdminBody');
-    modalBody.innerHTML = '<div class="spinner-border text-primary" role="status"><span class="visually-hidden">Laddar QR-kod...</span></div>';
-
-    // Call GeneratePaymentQR with targetMemberId parameter
     fetch(`/umbraco/surface/Swish/GeneratePaymentQR?competitionId=${competitionId}&targetMemberId=${registration.memberId}`, {
         method: 'GET',
-        headers: {
-            'Content-Type': 'application/json'
-        }
+        headers: { 'Content-Type': 'application/json' }
     })
-    .then(response => response.json())
+    .then(r => r.json())
     .then(data => {
         if (data.success) {
-            // Display QR code
-            let html = '<div class="text-center">';
-            html += `<h5 class="mb-3">Swish QR-kod</h5>`;
-            html += `<img src="${data.qrCode}" alt="Swish QR Code" class="img-fluid mb-3" style="max-width: 300px;" />`;
-            html += `<p><strong>Belopp:</strong> ${data.amount} SEK</p>`;
-            html += `<p><strong>Klasser:</strong> ${data.shootingClasses}</p>`;
-            html += `<p><strong>Fakturanummer:</strong> ${data.invoiceNumber}</p>`;
-            html += `<p class="text-muted small">Skanna QR-koden med Swish-appen för att betala.</p>`;
-            html += '</div>';
-            modalBody.innerHTML = html;
+            body.innerHTML = `
+                <img src="${data.qrCode}" alt="Swish QR Code" class="img-fluid mb-3" style="max-width: 280px;" />
+                <p class="mb-1"><strong>Belopp:</strong> ${data.amount} kr</p>
+                ${data.shootingClasses ? `<p class="mb-1 small text-muted"><strong>Klasser:</strong> ${data.shootingClasses}</p>` : ''}
+                <p class="mb-1 small text-muted"><strong>Referens:</strong> ${data.invoiceNumber || ''}</p>
+                <p class="small text-muted mt-2 mb-0">Be skytten skanna koden med Swish-appen.</p>`;
+
+            // The endpoint creates an invoice if one didn't exist — refresh local state so
+            // the operator can immediately register payment without re-loading the page.
+            if (data.invoiceId) {
+                currentManageInvoiceReg.invoiceId = data.invoiceId;
+                currentManageInvoiceReg.invoiceNumber = data.invoiceNumber || currentManageInvoiceReg.invoiceNumber;
+                currentManageInvoiceReg.paymentAmount = data.amount || currentManageInvoiceReg.paymentAmount;
+                // Patch the in-memory registration list so a subsequent action picks it up.
+                const live = competitionRegistrations.find(r => r.id === currentManageInvoiceReg.id);
+                if (live) {
+                    live.invoiceId = data.invoiceId;
+                    live.invoiceNumber = data.invoiceNumber || live.invoiceNumber;
+                    live.paymentAmount = data.amount || live.paymentAmount;
+                    if (live.paymentStatus === 'No Invoice') live.paymentStatus = 'Pending';
+                }
+            }
         } else {
-            modalBody.innerHTML = `<div class="alert alert-danger">${data.message || 'Kunde inte ladda QR-kod'}</div>`;
+            body.innerHTML = `<div class="alert alert-danger">${data.message || 'Kunde inte ladda QR-kod'}</div>`;
         }
     })
-    .catch(error => {
-        console.error('Error loading Swish QR code:', error);
-        modalBody.innerHTML = '<div class="alert alert-danger">Ett fel uppstod när QR-koden skulle laddas.</div>';
+    .catch(err => {
+        console.error('Error loading Swish QR code:', err);
+        body.innerHTML = '<div class="alert alert-danger">Ett fel uppstod när QR-koden skulle laddas.</div>';
     });
 }
 
-async function sendSwishQRCodeEmailForRegistration() {
+async function markPaidFromManageModal() {
+    if (!currentManageInvoiceReg) return;
+    const reg = currentManageInvoiceReg;
     const competitionId = $('.competition-registration-management').data('competition-id');
 
-    if (!competitionId) {
-        alert('Tävlings-ID saknas');
-        return;
+    // No-invoice path: silently create an invoice via GeneratePaymentQR, then open the
+    // mark-as-paid modal with the new invoiceId. The QR itself is discarded — the operator
+    // doesn't need it, they're recording a payment that already happened (or is happening
+    // in cash right now).
+    if (!reg.invoiceId) {
+        try {
+            const response = await fetch(`/umbraco/surface/Swish/GeneratePaymentQR?competitionId=${competitionId}&targetMemberId=${reg.memberId}`);
+            const data = await response.json();
+            if (!data.success || !data.invoiceId) {
+                alert('Kunde inte skapa faktura: ' + (data.message || 'okänt fel'));
+                return;
+            }
+            reg.invoiceId = data.invoiceId;
+            reg.invoiceNumber = data.invoiceNumber || reg.invoiceNumber;
+            reg.paymentAmount = data.amount || reg.paymentAmount;
+            const live = competitionRegistrations.find(r => r.id === reg.id);
+            if (live) {
+                live.invoiceId = data.invoiceId;
+                live.invoiceNumber = data.invoiceNumber || live.invoiceNumber;
+                live.paymentAmount = data.amount || live.paymentAmount;
+                if (live.paymentStatus === 'No Invoice') live.paymentStatus = 'Pending';
+            }
+        } catch (err) {
+            alert('Kunde inte skapa faktura: ' + err.message);
+            return;
+        }
     }
 
-    if (!currentPaymentRegistrationId) {
-        alert('Ingen anmälan vald för betalning');
-        return;
-    }
+    // Hide manage modal, then open mark-as-paid modal which is already designed for
+    // method/date/reference/notes input.
+    manageInvoiceModalInstance?.hide();
+    setTimeout(() => markAsPaid(reg.id), 250);  // small delay so Bootstrap finishes the hide animation
+}
 
-    // Get the registration to find member ID
-    const registration = competitionRegistrations.find(r => r.id === currentPaymentRegistrationId);
-    if (!registration) {
-        alert('Anmälan hittades inte');
-        return;
-    }
+async function emailQrFromManageModal(button) {
+    if (!currentManageInvoiceReg) return;
+    const competitionId = $('.competition-registration-management').data('competition-id');
+    const reg = currentManageInvoiceReg;
+
+    const original = button.innerHTML;
+    button.disabled = true;
+    button.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Skickar...';
 
     try {
-        // Show loading state on button
-        const button = event.target;
-        const originalContent = button.innerHTML;
-        button.disabled = true;
-        button.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Skickar...';
-
         const formData = new FormData();
         formData.append('competitionId', competitionId);
-        formData.append('targetMemberId', registration.memberId);
+        formData.append('targetMemberId', reg.memberId);
 
         const response = await fetch('/umbraco/surface/Swish/SendQRCodeEmail', {
             method: 'POST',
@@ -956,30 +1350,244 @@ async function sendSwishQRCodeEmailForRegistration() {
                 'X-Requested-With': 'XMLHttpRequest'
             }
         });
-
         const result = await response.json();
 
         if (result.success) {
-            // Close payment options modal
-            bootstrap.Modal.getInstance(document.getElementById('paymentOptionsModal')).hide();
-
-            // Show success message
+            manageInvoiceModalInstance?.hide();
             alert(`QR-koden har skickats till ${result.email}`);
-
-            // Reset button
-            button.innerHTML = originalContent;
-            button.disabled = false;
         } else {
-            // Show error
-            button.innerHTML = originalContent;
-            button.disabled = false;
-            alert('Fel: ' + result.message);
+            alert('Fel: ' + (result.message || 'okänt fel'));
         }
     } catch (error) {
         console.error('Error sending Swish QR code email:', error);
         alert('Ett fel uppstod när e-posten skulle skickas. Försök igen.');
-        event.target.innerHTML = '<i class="bi bi-envelope"></i> Skicka QR-kod via e-post';
-        event.target.disabled = false;
+    } finally {
+        button.disabled = false;
+        button.innerHTML = original;
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Walk-in registration: shooter turns up at the desk without pre-registering.
+// Search a member, pick a class, create the registration, then drop into the
+// manage-invoice modal so the cashier can take payment in the same flow.
+// ──────────────────────────────────────────────────────────────────────
+let walkInModalInstance = null;
+let walkInSearchTimer = null;
+
+// Server-rendered list of {id, name} for the classes this competition actually allows
+// (sourced from competition.shootingClassIds). Used to populate the walk-in class dropdown.
+const walkInAvailableClasses = @Html.Raw(availableShootingClassesJson);
+
+function openWalkInRegistrationModal() {
+    // Reset state
+    document.getElementById('walkInMemberSearch').value = '';
+    document.getElementById('walkInMemberResults').innerHTML = '';
+    document.getElementById('walkInSelectedMember').textContent = 'Ingen vald än';
+    document.getElementById('walkInSelectedMember').classList.add('text-muted');
+    document.getElementById('walkInSelectedMemberId').value = '';
+    document.getElementById('walkInError').classList.add('d-none');
+    document.getElementById('walkInSubmitBtn').disabled = true;
+
+    // Populate the class dropdown from the competition's actual allowed classes only.
+    const classSelect = document.getElementById('walkInShootingClass');
+    classSelect.innerHTML = '<option value="">-- Välj klass --</option>';
+    if (Array.isArray(walkInAvailableClasses) && walkInAvailableClasses.length > 0) {
+        walkInAvailableClasses.forEach(c => classSelect.add(new Option(c.name, c.id)));
+    } else {
+        // Fallback: if no class list was passed (older parent view), keep the dropdown
+        // permissive by copying from the filter — better than blocking the operator.
+        const filterClasses = document.getElementById('competitionClassFilter');
+        if (filterClasses) {
+            for (let i = 1; i < filterClasses.options.length; i++) {
+                const opt = filterClasses.options[i];
+                classSelect.add(new Option(opt.textContent, opt.value));
+            }
+        }
+    }
+
+    if (!walkInModalInstance) {
+        walkInModalInstance = new bootstrap.Modal(document.getElementById('walkInRegistrationModal'));
+    }
+    walkInModalInstance.show();
+    setTimeout(() => document.getElementById('walkInMemberSearch').focus(), 250);
+}
+
+// Debounced member search via the existing TrainingGroup/SearchMembers endpoint
+// (which already handles four-tier auth and returns name + email + club).
+document.addEventListener('DOMContentLoaded', () => {
+    const search = document.getElementById('walkInMemberSearch');
+    if (search) {
+        search.addEventListener('input', () => {
+            clearTimeout(walkInSearchTimer);
+            const query = search.value.trim();
+            const resultsBox = document.getElementById('walkInMemberResults');
+            if (query.length < 2) {
+                resultsBox.innerHTML = '';
+                return;
+            }
+            walkInSearchTimer = setTimeout(() => doWalkInMemberSearch(query), 250);
+        });
+    }
+
+    // Delegated click handler for the dynamically-built result list.
+    const resultsBox = document.getElementById('walkInMemberResults');
+    if (resultsBox) {
+        resultsBox.addEventListener('click', (e) => {
+            const btn = e.target.closest('.walk-in-result');
+            if (!btn) return;
+            e.preventDefault();
+            const memberId = parseInt(btn.dataset.memberId, 10);
+            const memberName = btn.dataset.memberName || '';
+            const clubName = btn.dataset.clubName || '';
+            selectWalkInMember(memberId, memberName, clubName);
+        });
+    }
+});
+
+function doWalkInMemberSearch(query) {
+    const resultsBox = document.getElementById('walkInMemberResults');
+    resultsBox.innerHTML = '<div class="list-group-item text-muted small"><span class="spinner-border spinner-border-sm me-1"></span>Söker...</div>';
+
+    fetch(`/umbraco/surface/TrainingGroup/SearchMembers?query=${encodeURIComponent(query)}`)
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) {
+                resultsBox.innerHTML = `<div class="list-group-item text-danger small">${data.message || 'Kunde inte söka'}</div>`;
+                return;
+            }
+            const results = data.data || [];
+            if (results.length === 0) {
+                resultsBox.innerHTML = '<div class="list-group-item text-muted small">Inga träffar</div>';
+                return;
+            }
+            // Use data-* attributes (HTML-escaped) and let a delegated click listener handle
+            // selection. Avoids quote-escaping headaches with inline onclick.
+            resultsBox.innerHTML = results.map(m => `
+                <button type="button" class="list-group-item list-group-item-action walk-in-result"
+                        data-member-id="${m.memberId}"
+                        data-member-name="${escapeWalkIn(m.memberName || '')}"
+                        data-club-name="${escapeWalkIn(m.clubName || '')}">
+                    <strong>${escapeWalkIn(m.memberName)}</strong>
+                    <small class="text-muted ms-2">${escapeWalkIn(m.clubName || '')}</small>
+                    <small class="text-muted d-block">${escapeWalkIn(m.email || '')}</small>
+                </button>`).join('');
+        })
+        .catch(err => {
+            console.error('Walk-in member search failed:', err);
+            resultsBox.innerHTML = '<div class="list-group-item text-danger small">Sökningen misslyckades</div>';
+        });
+}
+
+function escapeWalkIn(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c =>
+        ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function selectWalkInMember(memberId, memberName, clubName) {
+    document.getElementById('walkInSelectedMemberId').value = memberId;
+    const sel = document.getElementById('walkInSelectedMember');
+    sel.textContent = clubName ? `${memberName} (${clubName})` : memberName;
+    sel.classList.remove('text-muted');
+    document.getElementById('walkInMemberResults').innerHTML = '';
+    document.getElementById('walkInMemberSearch').value = memberName;
+    refreshWalkInSubmitState();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const classSel = document.getElementById('walkInShootingClass');
+    if (classSel) classSel.addEventListener('change', refreshWalkInSubmitState);
+});
+
+function refreshWalkInSubmitState() {
+    const memberId = document.getElementById('walkInSelectedMemberId').value;
+    const cls = document.getElementById('walkInShootingClass').value;
+    document.getElementById('walkInSubmitBtn').disabled = !(memberId && cls);
+}
+
+async function submitWalkInRegistration() {
+    const competitionId = parseInt($('.competition-registration-management').data('competition-id'), 10);
+    const memberId = parseInt(document.getElementById('walkInSelectedMemberId').value, 10);
+    const shootingClass = document.getElementById('walkInShootingClass').value;
+    // Walk-ins don't pick a start preference — start lists are typically already built by
+    // the time someone walks up. Hardcoded to 'Inget' (matches the field's default).
+    const startPreference = 'Inget';
+
+    const errBox = document.getElementById('walkInError');
+    errBox.classList.add('d-none');
+
+    const btn = document.getElementById('walkInSubmitBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Skapar...';
+
+    try {
+        const token = $('input[name="__RequestVerificationToken"]').val();
+        const response = await fetch('/umbraco/surface/RegistrationAdmin/AddLateRegistration', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': token
+            },
+            body: JSON.stringify({ competitionId, memberId, shootingClass, startPreference })
+        });
+        const data = await response.json();
+
+        if (!data.success) {
+            errBox.textContent = data.message || 'Kunde inte skapa anmälan';
+            errBox.classList.remove('d-none');
+            return;
+        }
+
+        const newRegistrationId = data.registrationId;
+
+        // Eagerly create the invoice + compute the fee so the manage-invoice modal opens
+        // with the real amount instead of "0 kr / Ingen faktura". The endpoint side-effect
+        // creates the invoice using RegistrationFeeCalculator (the single source of truth
+        // for fee math), so we get the same number as a normal Swish-pay flow would.
+        let invoiceInfo = null;
+        try {
+            const qrResponse = await fetch(
+                `/umbraco/surface/Swish/GeneratePaymentQR?competitionId=${competitionId}&targetMemberId=${memberId}`);
+            const qrData = await qrResponse.json();
+            if (qrData.success) {
+                invoiceInfo = {
+                    invoiceId: qrData.invoiceId,
+                    invoiceNumber: qrData.invoiceNumber,
+                    paymentAmount: qrData.amount
+                };
+            }
+        } catch (qrErr) {
+            // Non-fatal — the registration was created. The manage modal's lazy path will
+            // create the invoice on demand if this preflight failed.
+            console.warn('Walk-in invoice pre-creation failed, will fall back to lazy creation:', qrErr);
+        }
+
+        walkInModalInstance?.hide();
+
+        // Refresh the list and open the manage modal for the new row. We patch the row's
+        // invoice fields from invoiceInfo as soon as the row appears, so the modal sees
+        // the correct amount even on the first paint.
+        loadCompetitionRegistrations();
+        const wait = setInterval(() => {
+            const reg = competitionRegistrations.find(r => r.id === newRegistrationId);
+            if (reg) {
+                clearInterval(wait);
+                if (invoiceInfo) {
+                    if (invoiceInfo.invoiceId) reg.invoiceId = invoiceInfo.invoiceId;
+                    if (invoiceInfo.invoiceNumber) reg.invoiceNumber = invoiceInfo.invoiceNumber;
+                    if (invoiceInfo.paymentAmount) reg.paymentAmount = invoiceInfo.paymentAmount;
+                    if (reg.paymentStatus === 'No Invoice') reg.paymentStatus = 'Pending';
+                }
+                showPaymentOptionsForRegistration(newRegistrationId);
+            }
+        }, 200);
+        setTimeout(() => clearInterval(wait), 5000);
+    } catch (err) {
+        errBox.textContent = 'Ett fel uppstod: ' + err.message;
+        errBox.classList.remove('d-none');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-arrow-right me-1"></i>Skapa anmälan och fortsätt';
     }
 }
 </script>

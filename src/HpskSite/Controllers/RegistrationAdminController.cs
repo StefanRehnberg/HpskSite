@@ -272,12 +272,6 @@ namespace HpskSite.Controllers
         [HttpPost]
         public async Task<IActionResult> AddLateRegistration([FromBody] LateRegistrationRequest request)
         {
-            // Check authorization
-            if (!await _authService.IsCurrentUserAdminAsync())
-            {
-                return Json(new { success = false, message = "Access denied" });
-            }
-
             try
             {
                 // Validate competition exists
@@ -285,6 +279,26 @@ namespace HpskSite.Controllers
                 if (competition == null)
                 {
                     return Json(new { success = false, message = "Competition not found" });
+                }
+
+                // Authorization: site admin / competition manager / club admin / skjutledare
+                // for the competition's club. Same four-tier rule as the rest of the per-competition
+                // surface — late/walk-in registrations are part of running the competition, not a
+                // privileged operation that only site admins can do.
+                bool authorized = await _authService.IsCurrentUserAdminAsync()
+                    || await _authService.IsCompetitionManager(request.CompetitionId);
+                if (!authorized)
+                {
+                    var competitionClubId = competition.GetValue<int>("clubId");
+                    if (competitionClubId > 0)
+                    {
+                        authorized = await _authService.IsClubAdminForClub(competitionClubId)
+                                  || await _authService.IsSkjutledareForClub(competitionClubId);
+                    }
+                }
+                if (!authorized)
+                {
+                    return Json(new { success = false, message = "Access denied" });
                 }
 
                 // Validate member exists
@@ -403,6 +417,163 @@ namespace HpskSite.Controllers
             }
 
             return hub;
+        }
+
+        /// <summary>
+        /// Export all registrations for a single competition as a CSV (semicolon-separated,
+        /// UTF-8 with BOM so Excel opens it correctly with Swedish characters). Includes
+        /// payment columns so the treasurer can reconcile against bank/Swish statements.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> ExportCompetitionRegistrations(int competitionId)
+        {
+            // Same four-tier auth as the per-competition registration view:
+            // site admin OR competition manager OR club admin (incl. regional) OR skjutledare.
+            if (competitionId <= 0)
+                return BadRequest("competitionId is required");
+
+            var competition = _contentService.GetById(competitionId);
+            if (competition == null)
+                return NotFound("Competition not found");
+
+            bool authorized = await _authService.IsCurrentUserAdminAsync()
+                || await _authService.IsCompetitionManager(competitionId);
+            if (!authorized)
+            {
+                var competitionClubId = competition.GetValue<int>("clubId");
+                if (competitionClubId > 0)
+                {
+                    authorized = await _authService.IsClubAdminForClub(competitionClubId)
+                              || await _authService.IsSkjutledareForClub(competitionClubId);
+                }
+            }
+            if (!authorized) return Forbid();
+
+            try
+            {
+                // Load registrations + invoices in one pass
+                var competitionChildren = _contentService.GetPagedChildren(competitionId, 0, 100, out _).ToList();
+                var registrationsHub = competitionChildren
+                    .FirstOrDefault(c => c.ContentType.Alias == "competitionRegistrationsHub");
+
+                var registrations = registrationsHub != null
+                    ? _contentService.GetPagedChildren(registrationsHub.Id, 0, 1000, out _)
+                        .Where(c => c.ContentType.Alias == "competitionRegistration")
+                        .ToList()
+                    : new List<IContent>();
+
+                // Build invoice lookup keyed by registrationId. A registration may match either
+                // via the new invoice.registrationId int field or via the legacy
+                // relatedRegistrationIds JSON array.
+                var invoicesHub = competitionChildren
+                    .FirstOrDefault(c => c.ContentType.Alias == "registrationInvoicesHub");
+                var invoiceByRegId = new Dictionary<int, IContent>();
+                if (invoicesHub != null)
+                {
+                    var invoices = _contentService.GetPagedChildren(invoicesHub.Id, 0, 1000, out _)
+                        .Where(x => x.ContentType.Alias == "registrationInvoice")
+                        .OrderByDescending(x => x.Id) // most recent invoice wins on collisions
+                        .ToList();
+
+                    foreach (var inv in invoices)
+                    {
+                        var single = inv.GetValue<int>("registrationId");
+                        if (single > 0 && !invoiceByRegId.ContainsKey(single))
+                            invoiceByRegId[single] = inv;
+
+                        var relatedJson = inv.GetValue<string>("relatedRegistrationIds") ?? "";
+                        foreach (var regId in ParseRegistrationIds(relatedJson))
+                        {
+                            if (!invoiceByRegId.ContainsKey(regId))
+                                invoiceByRegId[regId] = inv;
+                        }
+                    }
+                }
+
+                var competitionName = competition.GetValue<string>("competitionName") ?? competition.Name ?? "";
+
+                // Build CSV using ; separator (Swedish Excel default) and quote every field
+                // so commas and embedded line breaks in notes don't break parsing.
+                var csv = new System.Text.StringBuilder();
+                csv.Append('﻿'); // BOM so Excel detects UTF-8
+                csv.AppendLine(string.Join(";", new[]
+                {
+                    "Tävling", "Skytt", "Klubb", "Klasser", "Startpreferenser",
+                    "Anmälningsdatum", "Anmäld av", "Aktiv", "Skytt-anteckning",
+                    "Fakturanummer", "Belopp", "Betalstatus", "Betalningsmetod",
+                    "Betaldatum", "Transaktions-ID", "Faktura-anteckning"
+                }.Select(QuoteCsv)));
+
+                foreach (var reg in registrations.OrderBy(r => r.GetValue<string>("memberName") ?? ""))
+                {
+                    var clubId = reg.GetValue<int>("clubId");
+                    var clubName = clubId > 0 ? (_clubService.GetClubNameById(clubId) ?? "") : "";
+                    if (string.IsNullOrEmpty(clubName))
+                    {
+                        var legacy = reg.GetValue<string>("memberClub") ?? "";
+                        clubName = int.TryParse(legacy, out var legacyId) ? (_clubService.GetClubNameById(legacyId) ?? "") : legacy;
+                    }
+
+                    // Decode shootingClasses JSON array. For each entry write the class id and
+                    // its preference. Multi-class registrations get pipe-separated lists in one cell.
+                    var shootingClassesJson = reg.GetValue<string>("shootingClasses") ?? "";
+                    var classEntries = HpskSite.Models.CompetitionRegistrationDocument.DeserializeShootingClasses(shootingClassesJson);
+                    var classes = classEntries.Count > 0
+                        ? string.Join(" | ", classEntries.Select(c => c.Class))
+                        : (reg.GetValue<string>("shootingClass") ?? "");
+                    var preferences = classEntries.Count > 0
+                        ? string.Join(" | ", classEntries.Select(c => c.StartPreference ?? "Inget"))
+                        : (reg.GetValue<string>("startPreference") ?? "Inget");
+
+                    invoiceByRegId.TryGetValue(reg.Id, out var invoice);
+                    var invoiceNumber = invoice?.GetValue<string>("invoiceNumber") ?? "";
+                    var amount = invoice?.GetValue<decimal>("totalAmount") ?? 0m;
+                    var paymentStatus = CleanPaymentStatus(invoice?.GetValue<string>("paymentStatus") ?? "No Invoice");
+                    var paymentMethod = invoice?.GetValue<string>("paymentMethod") ?? "";
+                    var paymentDate = invoice?.GetValue<DateTime?>("paymentDate");
+                    var transactionId = invoice?.GetValue<string>("transactionId") ?? "";
+                    var invoiceNotes = invoice?.GetValue<string>("notes") ?? "";
+
+                    csv.AppendLine(string.Join(";", new[]
+                    {
+                        QuoteCsv(competitionName),
+                        QuoteCsv(reg.GetValue<string>("memberName") ?? ""),
+                        QuoteCsv(clubName),
+                        QuoteCsv(classes),
+                        QuoteCsv(preferences),
+                        QuoteCsv(reg.GetValue<DateTime>("registrationDate").ToString("yyyy-MM-dd HH:mm")),
+                        QuoteCsv(reg.GetValue<string>("registeredBy") ?? ""),
+                        QuoteCsv(reg.GetValue<bool>("isActive") ? "Ja" : "Nej"),
+                        QuoteCsv(reg.GetValue<string>("shooterNotes") ?? ""),
+                        QuoteCsv(invoiceNumber),
+                        QuoteCsv(amount > 0 ? amount.ToString("0", System.Globalization.CultureInfo.InvariantCulture) : ""),
+                        QuoteCsv(paymentStatus),
+                        QuoteCsv(paymentMethod),
+                        QuoteCsv(paymentDate?.ToString("yyyy-MM-dd") ?? ""),
+                        QuoteCsv(transactionId),
+                        QuoteCsv(invoiceNotes)
+                    }));
+                }
+
+                var safeName = System.Text.RegularExpressions.Regex.Replace(competitionName, @"[^\w\-]", "_");
+                if (string.IsNullOrEmpty(safeName)) safeName = $"comp_{competitionId}";
+                var fileName = $"Anmalningar_{safeName}_{DateTime.Now:yyyy-MM-dd}.csv";
+
+                return File(System.Text.Encoding.UTF8.GetBytes(csv.ToString()), "text/csv; charset=utf-8", fileName);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest("Error exporting registrations: " + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Wrap a CSV cell in double quotes and escape embedded quotes by doubling them.
+        /// </summary>
+        private static string QuoteCsv(string value)
+        {
+            if (value == null) return "\"\"";
+            return "\"" + value.Replace("\"", "\"\"") + "\"";
         }
 
         #endregion

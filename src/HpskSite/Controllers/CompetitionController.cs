@@ -1302,6 +1302,10 @@ namespace HpskSite.Controllers
                     .FirstOrDefault(c => c.ContentType.Alias == "registrationInvoicesHub");
 
                 var paymentStatusMap = new Dictionary<int, string>();
+                var paymentInvoiceMap = new Dictionary<int, int>();        // registrationId -> invoiceId
+                var paymentAmountMap = new Dictionary<int, decimal>();     // registrationId -> totalAmount
+                var invoiceNumberMap = new Dictionary<int, string>();      // registrationId -> invoiceNumber (Swish reference)
+                var transactionIdMap = new Dictionary<int, string>();      // registrationId -> existing transactionId (if any)
                 if (invoicesHub != null)
                 {
                     var allInvoices = _contentService.GetPagedChildren(invoicesHub.Id, 0, 1000, out _)
@@ -1312,11 +1316,20 @@ namespace HpskSite.Controllers
 
                     foreach (var invoice in allInvoices)
                     {
+                        var invoiceStatus = CleanPaymentStatus(invoice.GetValue<string>("paymentStatus") ?? "Unknown");
+                        var invoiceAmount = invoice.GetValue<decimal>("totalAmount");
+                        var invoiceNumber = invoice.GetValue<string>("invoiceNumber") ?? "";
+                        var transactionId = invoice.GetValue<string>("transactionId") ?? "";
+
                         // Check new property first (registrationId - single integer)
                         var invoiceRegistrationId = invoice.GetValue<int>("registrationId");
                         if (invoiceRegistrationId > 0 && !paymentStatusMap.ContainsKey(invoiceRegistrationId))
                         {
-                            paymentStatusMap[invoiceRegistrationId] = CleanPaymentStatus(invoice.GetValue<string>("paymentStatus") ?? "Unknown");
+                            paymentStatusMap[invoiceRegistrationId] = invoiceStatus;
+                            paymentInvoiceMap[invoiceRegistrationId] = invoice.Id;
+                            paymentAmountMap[invoiceRegistrationId] = invoiceAmount;
+                            invoiceNumberMap[invoiceRegistrationId] = invoiceNumber;
+                            transactionIdMap[invoiceRegistrationId] = transactionId;
                         }
 
                         // Also check relatedRegistrationIds for backward compatibility
@@ -1324,11 +1337,20 @@ namespace HpskSite.Controllers
                         if (!string.IsNullOrEmpty(relatedIdsJson))
                         {
                             var registrationIds = ParseRegistrationIds(relatedIdsJson);
+                            // For multi-registration invoices, split the amount evenly across the
+                            // related registrations so the per-row totals don't double-count.
+                            var perRegAmount = registrationIds.Count > 0
+                                ? invoiceAmount / registrationIds.Count
+                                : invoiceAmount;
                             foreach (var regId in registrationIds)
                             {
                                 if (!paymentStatusMap.ContainsKey(regId))
                                 {
-                                    paymentStatusMap[regId] = CleanPaymentStatus(invoice.GetValue<string>("paymentStatus") ?? "Unknown");
+                                    paymentStatusMap[regId] = invoiceStatus;
+                                    paymentInvoiceMap[regId] = invoice.Id;
+                                    paymentAmountMap[regId] = perRegAmount;
+                                    invoiceNumberMap[regId] = invoiceNumber;
+                                    transactionIdMap[regId] = transactionId;
                                 }
                             }
                         }
@@ -1417,8 +1439,12 @@ namespace HpskSite.Controllers
                             }
                         }
 
-                        // Get payment status from pre-loaded map
+                        // Get payment status / invoice / amount from pre-loaded maps
                         var paymentStatus = paymentStatusMap.TryGetValue(content.Id, out var status) ? status : "No Invoice";
+                        var invoiceId = paymentInvoiceMap.TryGetValue(content.Id, out var invId) ? invId : 0;
+                        var paymentAmount = paymentAmountMap.TryGetValue(content.Id, out var amt) ? amt : 0m;
+                        var invoiceNumber = invoiceNumberMap.TryGetValue(content.Id, out var invNum) ? invNum : "";
+                        var existingTxnId = transactionIdMap.TryGetValue(content.Id, out var txnId) ? txnId : "";
 
                         // Get shooting classes (new JSON array format)
                         var shootingClassesJson = content.GetValue<string>("shootingClasses");
@@ -1441,7 +1467,11 @@ namespace HpskSite.Controllers
                             shootingClasses = shootingClassesWithNames,
                             registrationDate = content.GetValue<DateTime>("registrationDate"),
                             isActive = content.GetValue<bool>("isActive"),
-                            paymentStatus = paymentStatus
+                            paymentStatus = paymentStatus,
+                            invoiceId = invoiceId,
+                            paymentAmount = paymentAmount,
+                            invoiceNumber = invoiceNumber,
+                            transactionId = existingTxnId
                         };
                     })
                     .OrderBy(r => r.memberName)

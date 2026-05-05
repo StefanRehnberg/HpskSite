@@ -211,7 +211,7 @@ namespace HpskSite.Controllers
         [HttpPost]
         public async Task<IActionResult> MarkAsPaid([FromBody] InvoiceActionRequest request)
         {
-            if (!await _authService.IsCurrentUserAdminAsync())
+            if (!await _authService.CanManageCompetitionInvoice(request.InvoiceId))
             {
                 return Json(new { success = false, message = "Access denied" });
             }
@@ -252,7 +252,7 @@ namespace HpskSite.Controllers
         [HttpPost]
         public async Task<IActionResult> CancelInvoice([FromBody] InvoiceActionRequest request)
         {
-            if (!await _authService.IsCurrentUserAdminAsync())
+            if (!await _authService.CanManageCompetitionInvoice(request.InvoiceId))
             {
                 return Json(new { success = false, message = "Access denied" });
             }
@@ -293,7 +293,7 @@ namespace HpskSite.Controllers
         [HttpPost]
         public async Task<IActionResult> ResendInvoiceEmail([FromBody] InvoiceActionRequest request)
         {
-            if (!await _authService.IsCurrentUserAdminAsync())
+            if (!await _authService.CanManageCompetitionInvoice(request.InvoiceId))
             {
                 return Json(new { success = false, message = "Access denied" });
             }

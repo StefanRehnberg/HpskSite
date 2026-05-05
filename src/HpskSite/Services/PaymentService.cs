@@ -430,14 +430,17 @@ namespace HpskSite.Services
         }
 
         /// <summary>
-        /// Update payment status for an invoice
+        /// Update payment status for an invoice. Optional fields are only written when supplied,
+        /// so callers can use this to set just the status, or to record a full bookkeeping entry
+        /// (paymentMethod / paymentDate / transactionId / notes) at the same time.
         /// </summary>
         public Task<bool> UpdatePaymentStatusAsync(
             int invoiceId,
             string paymentStatus,
             DateTime? paymentDate = null,
             string? transactionId = null,
-            string? notes = null)
+            string? notes = null,
+            string? paymentMethod = null)
         {
             try
             {
@@ -445,15 +448,18 @@ namespace HpskSite.Services
                 if (invoice == null) return Task.FromResult(false);
 
                 invoice.SetValue("paymentStatus", paymentStatus);
-                
+
                 if (paymentDate.HasValue)
                     invoice.SetValue("paymentDate", paymentDate.Value);
-                
+
                 if (!string.IsNullOrEmpty(transactionId))
                     invoice.SetValue("transactionId", transactionId);
-                
+
                 if (!string.IsNullOrEmpty(notes))
                     invoice.SetValue("notes", notes);
+
+                if (!string.IsNullOrEmpty(paymentMethod))
+                    invoice.SetValue("paymentMethod", paymentMethod);
 
                 var saveResult = _contentService.Save(invoice);
                 if (saveResult.Success)

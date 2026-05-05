@@ -475,7 +475,16 @@
         <!-- Registrations Tab -->
         <div class="tab-pane fade show active" id="registrations" role="tabpanel">
             <div class="mt-3">
-                @await Html.PartialAsync("CompetitionRegistrationManagement", new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId } })
+                @{
+                    // Hand the partial the competition's actual allowed classes (id+name) so the
+                    // walk-in modal's "Vapenklass" dropdown only offers what's valid here.
+                    var availableShootingClasses = competitionShootingClasses
+                        .Select(sc => new { id = sc.Id, name = sc.Name })
+                        .ToList();
+                    var regViewData = new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId } };
+                    regViewData["AvailableShootingClasses"] = availableShootingClasses;
+                }
+                @await Html.PartialAsync("CompetitionRegistrationManagement", regViewData)
             </div>
         </div>
 
