@@ -23,6 +23,11 @@
         }
         catch { }
     }
+
+    // Walk-in slot picker (item #6). Reuses the same DirektplaceringConfig.Parse helper that
+    // the public flow uses, so "enabled" semantics stay aligned.
+    var dpRaw = ViewData["DirektplaceringConfig"]?.ToString() ?? "";
+    var dpEnabled = HpskSite.Models.DirektplaceringConfig.Parse(dpRaw) != null;
 }
 
 <!-- Flatpickr (used by the mark-as-paid date picker). Loaded again here so the
@@ -376,7 +381,7 @@
                     <input type="hidden" id="walkInSelectedMemberId" value="">
                 </div>
 
-                <div class="@(rollingStartEnabled ? "mb-3" : "mb-0")">
+                <div class="@((rollingStartEnabled || dpEnabled) ? "mb-3" : "mb-0")">
                     <label for="walkInShootingClass" class="form-label fw-bold">Vapenklass</label>
                     <select class="form-select" id="walkInShootingClass">
                         <option value="">-- Välj klass --</option>
@@ -386,7 +391,7 @@
 
                 @if (rollingStartEnabled)
                 {
-                    <div class="mb-0">
+                    <div class="@(dpEnabled ? "mb-3" : "mb-0")">
                         <label for="walkInPatrolTarget" class="form-label fw-bold">Patrull</label>
                         <select class="form-select" id="walkInPatrolTarget">
                             <option value="nextAvailable" selected>Nästa lediga patrull</option>
@@ -395,6 +400,20 @@
                         </select>
                         <small class="form-text text-muted">
                             Rullande start: skytten placeras direkt på en patrull.
+                        </small>
+                    </div>
+                }
+
+                @if (dpEnabled)
+                {
+                    <div class="mb-0">
+                        <label for="walkInTeamSlot" class="form-label fw-bold">Skjutlag / tid</label>
+                        <select class="form-select" id="walkInTeamSlot">
+                            <option value="">— Inget skjutlag —</option>
+                            <!-- Available slots populated on modal open from /Competition/GetTeamAvailability -->
+                        </select>
+                        <small class="form-text text-muted">
+                            Egenbokning: välj ett skjutlag med ledig plats för skytten.
                         </small>
                     </div>
                 }
@@ -1683,6 +1702,44 @@ const walkInAvailableClasses = @Html.Raw(availableShootingClassesJson);
 // rolling start on. The flag drives the post-registration call to AssignWalkInToPatrol.
 const walkInPatrolPickerEnabled = @(rollingStartEnabled ? "true" : "false");
 
+// Item #6: walk-in slot picker for direktplacering / Egenbokning competitions. Same
+// pattern as #5 — server-side rendered only when relevant; JS fetches live availability
+// each time the modal opens so a popular slot can fill up between two cashier visits.
+const walkInDirektplaceringEnabled = @(dpEnabled ? "true" : "false");
+
+async function refreshWalkInTeamSlots() {
+    if (!walkInDirektplaceringEnabled) return;
+    const select = document.getElementById('walkInTeamSlot');
+    if (!select) return;
+    const competitionId = parseInt($('.competition-registration-management').data('competition-id'), 10);
+    // Keep the "no slot" option, drop everything else.
+    while (select.options.length > 1) select.remove(1);
+    try {
+        const resp = await fetch(`/umbraco/surface/Competition/GetTeamAvailability?competitionId=${competitionId}`);
+        const data = await resp.json();
+        if (data.success && Array.isArray(data.teams)) {
+            data.teams
+                .slice()
+                .sort((a, b) => a.teamNumber - b.teamNumber)
+                .forEach(t => {
+                    const labelBits = [`Skjutlag ${t.teamNumber}`];
+                    if (t.startTime) labelBits.push(t.startTime);
+                    if (t.label) labelBits.push(t.label);
+                    const head = labelBits.join(' · ');
+                    const tail = `${t.positionsRemaining}/${t.positionsTotal} lediga`;
+                    const opt = new Option(`${head} (${tail})`, String(t.teamNumber));
+                    if (t.isFull) {
+                        opt.disabled = true;
+                        opt.text = `${head} (FULLT)`;
+                    }
+                    select.add(opt);
+                });
+        }
+    } catch (err) {
+        console.warn('Could not load team availability for walk-in picker:', err);
+    }
+}
+
 async function refreshWalkInPatrolOptions() {
     if (!walkInPatrolPickerEnabled) return;
     const select = document.getElementById('walkInPatrolTarget');
@@ -1743,6 +1800,13 @@ function openWalkInRegistrationModal() {
         const sel = document.getElementById('walkInPatrolTarget');
         if (sel) sel.value = 'nextAvailable';
         refreshWalkInPatrolOptions();
+    }
+    // Same for the direktplacering slot picker — refresh availability on every open so
+    // a slot that filled up between visits is reflected immediately.
+    if (walkInDirektplaceringEnabled) {
+        const sel = document.getElementById('walkInTeamSlot');
+        if (sel) sel.value = '';
+        refreshWalkInTeamSlots();
     }
     walkInModalInstance.show();
     setTimeout(() => document.getElementById('walkInMemberSearch').focus(), 250);
@@ -1855,6 +1919,11 @@ async function submitWalkInRegistration() {
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Skapar...';
 
+    // Item #6: forward the chosen direktplacering slot when one is picked. Empty value
+    // means "no slot chosen" — backend treats null teamNumber as "skip slot booking".
+    const teamSlotRaw = document.getElementById('walkInTeamSlot')?.value || '';
+    const teamNumber = teamSlotRaw ? parseInt(teamSlotRaw, 10) : null;
+
     try {
         const token = $('input[name="__RequestVerificationToken"]').val();
         const response = await fetch('/umbraco/surface/RegistrationAdmin/AddLateRegistration', {
@@ -1863,7 +1932,7 @@ async function submitWalkInRegistration() {
                 'Content-Type': 'application/json',
                 'RequestVerificationToken': token
             },
-            body: JSON.stringify({ competitionId, memberId, shootingClass, startPreference })
+            body: JSON.stringify({ competitionId, memberId, shootingClass, startPreference, teamNumber })
         });
         const data = await response.json();
 

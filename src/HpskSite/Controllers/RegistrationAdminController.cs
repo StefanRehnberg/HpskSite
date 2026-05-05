@@ -571,16 +571,23 @@ namespace HpskSite.Controllers
                 var clubName = clubId > 0 ? _clubService.GetClubNameById(clubId) : "";
                 registration.SetValue("clubId", clubId);
 
-                // NEW: Store shooting classes as JSON array (single-class for late registration)
-                var shootingClassEntry = new[]
-                {
-                    new
+                // NEW: Store shooting classes as JSON array (single-class for late registration).
+                // teamNumber is set on the entry only when the cashier chose a direktplacering
+                // slot in the walk-in modal — leave it off the JSON otherwise so existing
+                // non-DP rows stay byte-identical to the legacy shape.
+                object shootingClassEntry = request.TeamNumber.HasValue
+                    ? new
+                    {
+                        @class = request.ShootingClass,
+                        startPreference = request.StartPreference ?? "Inget",
+                        teamNumber = request.TeamNumber.Value
+                    }
+                    : new
                     {
                         @class = request.ShootingClass,
                         startPreference = request.StartPreference ?? "Inget"
-                    }
-                };
-                var shootingClassesJson = System.Text.Json.JsonSerializer.Serialize(shootingClassEntry);
+                    };
+                var shootingClassesJson = System.Text.Json.JsonSerializer.Serialize(new[] { shootingClassEntry });
                 registration.SetValue("shootingClasses", shootingClassesJson);
 
                 registration.SetValue("registrationDate", DateTime.Now);
@@ -596,6 +603,14 @@ namespace HpskSite.Controllers
 
                 _contentService.Publish(registration, new[] { "*" }, -1);
 
+                // Direktplacering: invalidate the team-availability cache so the next slot-list
+                // fetch reflects this booking. The cache key matches CompetitionController's
+                // BuildTeamAvailability writer.
+                if (request.TeamNumber.HasValue)
+                {
+                    AppCaches.RuntimeCache.ClearByKey($"dp_availability_{request.CompetitionId}");
+                }
+
                 return Json(new
                 {
                     success = true,
@@ -603,6 +618,7 @@ namespace HpskSite.Controllers
                     registrationId = registration.Id,
                     memberName = member.Name,
                     shootingClass = request.ShootingClass,
+                    teamNumber = request.TeamNumber,
                     canRegenerateStartList = true,
                     note = "Thanks to identity-based results, regenerating the start list will preserve all existing scores!"
                 });
@@ -1122,6 +1138,9 @@ namespace HpskSite.Controllers
             public string ShootingClass { get; set; } = "";
             public string? StartPreference { get; set; }
             public string? Notes { get; set; }
+            /// <summary>Direktplacering: which team/slot the operator chose at the desk.
+            /// Null = no slot pick (legacy walk-in or non-direktplacering competition).</summary>
+            public int? TeamNumber { get; set; }
         }
 
         /// <summary>

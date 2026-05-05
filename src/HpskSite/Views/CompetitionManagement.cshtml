@@ -499,6 +499,11 @@
                     regViewData["RollingStart"] = competition?.HasProperty("rollingStart") == true
                         ? (competition.Value<string>("rollingStart") ?? "")
                         : "";
+                    // Walk-in slot picker (item #6): direktplacering / Egenbokning. The partial
+                    // probes for `enabled` and renders a Skjutlag dropdown when set.
+                    regViewData["DirektplaceringConfig"] = competition?.HasProperty("direktplaceringConfig") == true
+                        ? (competition.Value<string>("direktplaceringConfig") ?? "")
+                        : "";
                 }
                 @await Html.PartialAsync("CompetitionRegistrationManagement", regViewData)
             </div>
