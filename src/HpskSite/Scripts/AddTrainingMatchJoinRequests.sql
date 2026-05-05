@@ -18,12 +18,15 @@ END
 GO
 
 -- 2. Create TrainingMatchJoinRequests table
+-- Schema mirrors the (now-removed) CreateTrainingMatchJoinRequestsTable.cs migration.
 IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'TrainingMatchJoinRequests')
 BEGIN
     CREATE TABLE TrainingMatchJoinRequests (
         Id INT IDENTITY(1,1) PRIMARY KEY,
         TrainingMatchId INT NOT NULL,
         MemberId INT NOT NULL,
+        MemberName NVARCHAR(200) NULL,
+        MemberProfilePictureUrl NVARCHAR(500) NULL,
         Status NVARCHAR(20) NOT NULL DEFAULT 'Pending',
         RequestDate DATETIME NOT NULL DEFAULT GETDATE(),
         ResponseDate DATETIME NULL,
@@ -51,6 +54,20 @@ BEGIN
 END
 ELSE
 BEGIN
+    -- Backfill missing columns if the table exists from an older deploy.
+    IF NOT EXISTS (SELECT 1 FROM sys.columns
+                   WHERE object_id = OBJECT_ID(N'TrainingMatchJoinRequests') AND name = 'MemberName')
+    BEGIN
+        ALTER TABLE TrainingMatchJoinRequests ADD MemberName NVARCHAR(200) NULL;
+        PRINT 'Added MemberName column to TrainingMatchJoinRequests';
+    END
+    IF NOT EXISTS (SELECT 1 FROM sys.columns
+                   WHERE object_id = OBJECT_ID(N'TrainingMatchJoinRequests') AND name = 'MemberProfilePictureUrl')
+    BEGIN
+        ALTER TABLE TrainingMatchJoinRequests ADD MemberProfilePictureUrl NVARCHAR(500) NULL;
+        PRINT 'Added MemberProfilePictureUrl column to TrainingMatchJoinRequests';
+    END
+
     PRINT 'TrainingMatchJoinRequests table already exists';
 END
 GO
