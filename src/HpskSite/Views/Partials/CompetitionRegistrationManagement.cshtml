@@ -19,9 +19,15 @@
     <!-- Header Section -->
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h4 class="mb-0"><i class="bi bi-people me-2"></i>Anmälningar</h4>
-        <div class="d-flex gap-2">
+        <div class="d-flex gap-2 flex-wrap">
             <button type="button" class="btn btn-primary btn-sm" onclick="openWalkInRegistrationModal()" title="Anmäl en skytt vid registreringsbordet">
                 <i class="bi bi-person-plus me-1"></i>Anmäl och betala
+            </button>
+            <button type="button" class="btn btn-warning btn-sm" onclick="openSendRemindersModal()" title="Maila påminnelse till alla obetalda">
+                <i class="bi bi-envelope-exclamation me-1"></i>Skicka påminnelser
+            </button>
+            <button type="button" class="btn btn-outline-success btn-sm" onclick="openBokforingsUnderlag()" title="Öppna utskriftsvänligt bokföringsunderlag">
+                <i class="bi bi-file-earmark-text me-1"></i>Bokföringsunderlag
             </button>
             <button type="button" class="btn btn-outline-secondary btn-sm" onclick="exportCompetitionRegistrations()" title="Exportera anmälningar och betalningar som CSV">
                 <i class="bi bi-download me-1"></i>Exportera CSV
@@ -35,7 +41,7 @@
     <div class="card mb-3 border-primary">
         <div class="card-body py-2">
             <label for="competitionRegistrationSearch" class="form-label mb-1 small fw-bold">
-                <i class="bi bi-search me-1"></i>Sök på namn, klubb eller fakturanummer
+                <i class="bi bi-search me-1"></i>Sök på namn, klubb eller referens
             </label>
             <input type="text" class="form-control" id="competitionRegistrationSearch"
                    placeholder="t.ex. ”Andy Haard”, ”Haaplinge” eller ”5312-2043-1”"
@@ -81,7 +87,7 @@
         <div class="col-6 col-md-3">
             <div class="card h-100 border-secondary">
                 <div class="card-body py-2">
-                    <h6 class="card-subtitle mb-1 text-secondary small">Saknar faktura</h6>
+                    <h6 class="card-subtitle mb-1 text-secondary small">Saknar betalning</h6>
                     <div class="d-flex justify-content-between align-items-baseline">
                         <h4 class="card-title mb-0" id="summaryNoInvoiceCount">0</h4>
                         <small class="text-muted">st</small>
@@ -126,7 +132,7 @@
                         <option value="Failed">Misslyckad</option>
                         <option value="Cancelled">Makulerad</option>
                         <option value="Refunded">Återbetald</option>
-                        <option value="No Invoice">Ingen faktura</option>
+                        <option value="No Invoice">Saknar betalning</option>
                     </select>
                 </div>
             </div>
@@ -255,6 +261,68 @@
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Invoice History Modal — read-only audit trail for one invoice. -->
+<div class="modal fade" id="invoiceHistoryModal" tabindex="-1" aria-labelledby="invoiceHistoryModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-secondary text-white">
+                <h5 class="modal-title" id="invoiceHistoryModalLabel">
+                    <i class="bi bi-clock-history me-2"></i>Betalningshistorik
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <div class="small text-muted mb-2" id="invoiceHistoryHeader"></div>
+                <div id="invoiceHistoryBody">
+                    <div class="text-center py-3">
+                        <div class="spinner-border spinner-border-sm me-2" role="status"></div>Laddar historik...
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Send Payment Reminders Modal — bulk action with confirmation. -->
+<div class="modal fade" id="sendRemindersModal" tabindex="-1" aria-labelledby="sendRemindersModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-warning">
+                <h5 class="modal-title" id="sendRemindersModalLabel">
+                    <i class="bi bi-envelope-exclamation me-2"></i>Skicka betalningspåminnelser
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <p>Maila en Swish QR-påminnelse till alla skyttar med <strong>Väntande</strong> betalningsstatus.</p>
+
+                <div class="alert alert-info mb-3" id="sendRemindersInfo">
+                    <span id="sendRemindersCount" class="fw-bold">…</span> mottagare kommer att få ett mejl.
+                    <small class="text-muted d-block mt-1">Lagbetalningar och skyttar utan e-postadress hoppas över.</small>
+                </div>
+
+                <div class="mb-3">
+                    <label for="sendRemindersMessage" class="form-label">Meddelande <small class="text-muted">(valfritt)</small></label>
+                    <textarea class="form-control" id="sendRemindersMessage" rows="3"
+                              placeholder="t.ex. ”Tre dagar kvar till tävlingen — vänligen betala för att behålla din plats.”"></textarea>
+                    <small class="form-text text-muted">Lämnas tomt för att använda standardmeddelandet.</small>
+                </div>
+
+                <div id="sendRemindersResult" class="d-none"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" id="sendRemindersCancelBtn">Avbryt</button>
+                <button type="button" class="btn btn-warning" id="sendRemindersConfirmBtn" onclick="confirmSendReminders()">
+                    <i class="bi bi-send me-1"></i>Skicka påminnelser
+                </button>
             </div>
         </div>
     </div>
@@ -471,7 +539,7 @@ function getPaymentStatusText(status) {
         case 'Refunded':
             return 'Återbetald';
         case 'No Invoice':
-            return 'Ingen faktura';
+            return 'Saknar betalning';
         case 'Unknown':
             return 'Okänd';
         default:
@@ -697,7 +765,7 @@ function displayCompetitionRegistrations() {
         // Show the invoice number under the status badge so the cashier can match against
         // a Swish notification at a glance. Empty for rows that don't have an invoice yet.
         const invoiceRef = reg.invoiceNumber
-            ? `<div class="small text-muted mt-1" title="Fakturanummer / Swish-referens">
+            ? `<div class="small text-muted mt-1" title="Referens (Swish)">
                    <i class="bi bi-hash"></i>${reg.invoiceNumber}
                </div>`
             : '';
@@ -721,12 +789,12 @@ function displayCompetitionRegistrations() {
             <td>
                 <button class="btn btn-sm btn-outline-primary me-1"
                         onclick="editCompetitionRegistration(${reg.id})"
-                        title="Edit Registration">
+                        title="Redigera anmälan">
                     <i class="bi bi-pencil"></i>
                 </button>
                 <button class="btn btn-sm btn-outline-success me-1"
                         onclick="showPaymentOptionsForRegistration(${reg.id})"
-                        title="Betalningsalternativ">
+                        title="Hantera betalning">
                     <i class="bi bi-wallet2"></i>
                 </button>
                 ${reg.paymentStatus === 'Pending' ? `
@@ -736,9 +804,16 @@ function displayCompetitionRegistrations() {
                         <i class="bi bi-check-circle"></i>
                     </button>
                 ` : ''}
+                ${reg.invoiceId ? `
+                    <button class="btn btn-sm btn-outline-secondary me-1"
+                            onclick="showInvoiceHistory(${reg.invoiceId}, ${JSON.stringify(reg.memberName).replace(/"/g, '&quot;')})"
+                            title="Visa betalningshistorik">
+                        <i class="bi bi-clock-history"></i>
+                    </button>
+                ` : ''}
                 <button class="btn btn-sm btn-outline-danger"
                         onclick="confirmDeleteCompetitionRegistration(${reg.id})"
-                        title="Delete Registration">
+                        title="Ta bort anmälan">
                     <i class="bi bi-trash"></i>
                 </button>
             </td>
@@ -842,6 +917,12 @@ function refreshCompetitionRegistrations() {
 function exportCompetitionRegistrations() {
     const currentCompetitionId = $('.competition-registration-management').data('competition-id');
     window.open(`/umbraco/surface/RegistrationAdmin/ExportCompetitionRegistrations?competitionId=${currentCompetitionId}`, '_blank');
+}
+
+function openBokforingsUnderlag() {
+    const currentCompetitionId = $('.competition-registration-management').data('competition-id');
+    if (!currentCompetitionId) return;
+    window.open(`/umbraco/surface/InvoiceAdmin/BokforingsUnderlag?competitionId=${currentCompetitionId}`, '_blank');
 }
 
 function testHubCreation() {
@@ -1019,7 +1100,7 @@ function markAsPaid(registrationId) {
         return;
     }
     if (!reg.invoiceId) {
-        alert('Det finns ingen faktura för denna anmälan. Använd plånboksknappen för att skapa en faktura först.');
+        alert('Det finns ingen betalning för denna anmälan. Använd plånboksknappen för att starta en betalning först.');
         return;
     }
 
@@ -1302,7 +1383,7 @@ async function markPaidFromManageModal() {
             const response = await fetch(`/umbraco/surface/Swish/GeneratePaymentQR?competitionId=${competitionId}&targetMemberId=${reg.memberId}`);
             const data = await response.json();
             if (!data.success || !data.invoiceId) {
-                alert('Kunde inte skapa faktura: ' + (data.message || 'okänt fel'));
+                alert('Kunde inte starta betalning: ' + (data.message || 'okänt fel'));
                 return;
             }
             reg.invoiceId = data.invoiceId;
@@ -1316,7 +1397,7 @@ async function markPaidFromManageModal() {
                 if (live.paymentStatus === 'No Invoice') live.paymentStatus = 'Pending';
             }
         } catch (err) {
-            alert('Kunde inte skapa faktura: ' + err.message);
+            alert('Kunde inte starta betalning: ' + err.message);
             return;
         }
     }
@@ -1541,7 +1622,7 @@ async function submitWalkInRegistration() {
         const newRegistrationId = data.registrationId;
 
         // Eagerly create the invoice + compute the fee so the manage-invoice modal opens
-        // with the real amount instead of "0 kr / Ingen faktura". The endpoint side-effect
+        // with the real amount instead of "0 kr / Saknar betalning". The endpoint side-effect
         // creates the invoice using RegistrationFeeCalculator (the single source of truth
         // for fee math), so we get the same number as a normal Swish-pay flow would.
         let invoiceInfo = null;
@@ -1588,6 +1669,193 @@ async function submitWalkInRegistration() {
     } finally {
         btn.disabled = false;
         btn.innerHTML = '<i class="bi bi-arrow-right me-1"></i>Skapa anmälan och fortsätt';
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Invoice history modal — read-only timeline of audit events for one invoice.
+// ──────────────────────────────────────────────────────────────────────
+let invoiceHistoryModalInstance = null;
+
+function showInvoiceHistory(invoiceId, memberName) {
+    const modalEl = document.getElementById('invoiceHistoryModal');
+    if (!invoiceHistoryModalInstance) {
+        invoiceHistoryModalInstance = new bootstrap.Modal(modalEl);
+    }
+    document.getElementById('invoiceHistoryHeader').textContent = memberName ? `För ${memberName}` : '';
+    document.getElementById('invoiceHistoryBody').innerHTML = `
+        <div class="text-center py-3">
+            <div class="spinner-border spinner-border-sm me-2" role="status"></div>Laddar historik...
+        </div>`;
+    invoiceHistoryModalInstance.show();
+
+    fetch(`/umbraco/surface/InvoiceAdmin/GetInvoiceHistory?invoiceId=${invoiceId}`)
+        .then(r => r.json())
+        .then(data => renderInvoiceHistory(data))
+        .catch(err => {
+            console.error('Error loading invoice history:', err);
+            document.getElementById('invoiceHistoryBody').innerHTML =
+                '<div class="alert alert-danger">Kunde inte ladda historiken: ' + err.message + '</div>';
+        });
+}
+
+function renderInvoiceHistory(data) {
+    const body = document.getElementById('invoiceHistoryBody');
+    if (!data || !data.success) {
+        body.innerHTML = `<div class="alert alert-warning">${(data && data.message) || 'Kunde inte ladda historik.'}</div>`;
+        return;
+    }
+    const events = data.events || [];
+    if (events.length === 0) {
+        body.innerHTML = '<div class="alert alert-light mb-0">Inga händelser registrerade ännu.</div>';
+        return;
+    }
+
+    // Pretty event-type labels in Swedish
+    const labelFor = t => ({
+        Created: 'Betalning skapad',
+        MarkedPaid: 'Markerad som betald',
+        Cancelled: 'Makulerad',
+        Refunded: 'Återbetald',
+        EmailSent: 'E-post skickad',
+        StatusChanged: 'Status ändrad'
+    })[t] || t;
+    const colorFor = t => ({
+        Created: 'secondary',
+        MarkedPaid: 'success',
+        Cancelled: 'danger',
+        Refunded: 'warning',
+        EmailSent: 'info',
+        StatusChanged: 'secondary'
+    })[t] || 'secondary';
+
+    let html = '<div class="table-responsive"><table class="table table-sm align-middle mb-0">';
+    html += '<thead><tr><th>När</th><th>Händelse</th><th>Av</th><th>Metod</th><th class="text-end">Belopp</th><th>Referens</th><th>Anteckning</th></tr></thead><tbody>';
+    events.forEach(e => {
+        const when = e.occurredAt ? new Date(e.occurredAt).toLocaleString('sv-SE', {
+            year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
+        }) : '';
+        const amount = (e.amount != null && e.amount !== '') ? Math.round(Number(e.amount)) + ' kr' : '';
+        html += `<tr>
+            <td class="small text-nowrap">${escapeHistory(when)}</td>
+            <td><span class="badge bg-${colorFor(e.eventType)}">${escapeHistory(labelFor(e.eventType))}</span></td>
+            <td class="small">${escapeHistory(e.byMemberName || '—')}</td>
+            <td class="small">${escapeHistory(e.paymentMethod || '')}</td>
+            <td class="small text-end">${escapeHistory(amount)}</td>
+            <td class="small">${escapeHistory(e.reference || '')}</td>
+            <td class="small">${escapeHistory(e.notes || '')}</td>
+        </tr>`;
+    });
+    html += '</tbody></table></div>';
+    body.innerHTML = html;
+}
+
+function escapeHistory(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c =>
+        ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Bulk payment reminders — sends a Swish QR-code email to every pending
+// invoice on this competition. Each send produces one EmailSent audit event.
+// ──────────────────────────────────────────────────────────────────────
+let sendRemindersModalInstance = null;
+
+function openSendRemindersModal() {
+    const competitionId = $('.competition-registration-management').data('competition-id');
+    if (!competitionId) return;
+
+    if (!sendRemindersModalInstance) {
+        sendRemindersModalInstance = new bootstrap.Modal(document.getElementById('sendRemindersModal'));
+    }
+
+    // Reset state
+    document.getElementById('sendRemindersMessage').value = '';
+    document.getElementById('sendRemindersResult').classList.add('d-none');
+    document.getElementById('sendRemindersResult').innerHTML = '';
+    document.getElementById('sendRemindersConfirmBtn').disabled = true;
+    document.getElementById('sendRemindersCount').textContent = '…';
+
+    sendRemindersModalInstance.show();
+
+    // Pre-flight: how many will actually be emailed?
+    fetch(`/umbraco/surface/InvoiceAdmin/CountReminderRecipients?competitionId=${competitionId}`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                document.getElementById('sendRemindersCount').textContent = data.count;
+                document.getElementById('sendRemindersConfirmBtn').disabled = data.count === 0;
+                if (data.count === 0) {
+                    document.getElementById('sendRemindersInfo').classList.remove('alert-info');
+                    document.getElementById('sendRemindersInfo').classList.add('alert-secondary');
+                }
+            } else {
+                document.getElementById('sendRemindersCount').textContent = '?';
+            }
+        })
+        .catch(err => {
+            console.error('Failed to count reminder recipients:', err);
+            document.getElementById('sendRemindersCount').textContent = '?';
+        });
+}
+
+async function confirmSendReminders() {
+    const competitionId = $('.competition-registration-management').data('competition-id');
+    if (!competitionId) return;
+
+    const message = document.getElementById('sendRemindersMessage').value.trim();
+    const btn = document.getElementById('sendRemindersConfirmBtn');
+    const cancelBtn = document.getElementById('sendRemindersCancelBtn');
+    btn.disabled = true;
+    cancelBtn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Skickar...';
+
+    try {
+        const token = $('input[name="__RequestVerificationToken"]').val();
+        const params = new URLSearchParams();
+        params.append('competitionId', competitionId);
+        if (message) params.append('reminderMessage', message);
+
+        const response = await fetch('/umbraco/surface/InvoiceAdmin/SendPaymentReminders', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'RequestVerificationToken': token
+            },
+            body: params.toString()
+        });
+        const data = await response.json();
+
+        const resultBox = document.getElementById('sendRemindersResult');
+        resultBox.classList.remove('d-none');
+        if (data.success) {
+            let html = `<div class="alert alert-success mb-0">
+                <i class="bi bi-check-circle me-1"></i>${escapeHistory(data.message || 'Klart')}
+            </div>`;
+            if (data.errorCount > 0 && data.errors && data.errors.length > 0) {
+                html += `<div class="alert alert-warning mt-2 mb-0">
+                    <strong>${data.errorCount} fel:</strong>
+                    <ul class="mb-0 small">${data.errors.map(e => `<li>${escapeHistory(e)}</li>`).join('')}</ul>
+                </div>`;
+            }
+            resultBox.innerHTML = html;
+            // Refresh the registrations list so the audit history button on each row sees
+            // the new EmailSent events the next time the operator opens it.
+            loadCompetitionRegistrations();
+        } else {
+            resultBox.innerHTML = `<div class="alert alert-danger mb-0">
+                <i class="bi bi-exclamation-triangle me-1"></i>${escapeHistory(data.message || 'Misslyckades')}
+            </div>`;
+        }
+    } catch (err) {
+        document.getElementById('sendRemindersResult').classList.remove('d-none');
+        document.getElementById('sendRemindersResult').innerHTML =
+            `<div class="alert alert-danger mb-0">Ett fel uppstod: ${escapeHistory(err.message)}</div>`;
+    } finally {
+        cancelBtn.disabled = false;
+        cancelBtn.textContent = 'Stäng';  // changes meaning after submit
+        btn.disabled = true;               // prevent double-send
+        btn.innerHTML = '<i class="bi bi-check2 me-1"></i>Klart';
     }
 }
 </script>

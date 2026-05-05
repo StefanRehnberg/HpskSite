@@ -18,18 +18,21 @@ namespace HpskSite.Services
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
         private readonly IContentTypeService _contentTypeService;
         private readonly IMemberService _memberService;
+        private readonly InvoiceAuditService _auditService;
 
-        public PaymentService(ILogger<PaymentService> logger, 
-            IContentService contentService, 
+        public PaymentService(ILogger<PaymentService> logger,
+            IContentService contentService,
             IUmbracoContextAccessor umbracoContextAccessor,
             IContentTypeService contentTypeService,
-            IMemberService memberService)
+            IMemberService memberService,
+            InvoiceAuditService auditService)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _contentService = contentService ?? throw new ArgumentNullException(nameof(contentService));
             _umbracoContextAccessor = umbracoContextAccessor ?? throw new ArgumentNullException(nameof(umbracoContextAccessor));
             _contentTypeService = contentTypeService ?? throw new ArgumentNullException(nameof(contentTypeService));
             _memberService = memberService ?? throw new ArgumentNullException(nameof(memberService));
+            _auditService = auditService ?? throw new ArgumentNullException(nameof(auditService));
         }
 
         // Helper method to safely set invoice properties
@@ -406,6 +409,20 @@ namespace HpskSite.Services
                     if (publishResult.Success)
                     {
                         _logger.LogInformation("Invoice {InvoiceId} saved and published successfully.", invoice.Id);
+
+                        // Log a Created event in the audit table. Fire-and-forget; the audit
+                        // service swallows its own exceptions and the invoice is already saved.
+                        _ = _auditService.LogAsync(
+                            invoiceId: invoice.Id,
+                            competitionId: competitionId,
+                            eventType: InvoicePaymentEventTypes.Created,
+                            byMemberId: null,
+                            byMemberName: null,
+                            paymentMethod: paymentMethod,
+                            amount: totalAmount,
+                            reference: invoiceNumber,
+                            notes: $"Faktura skapad för {memberName}");
+
                         return Task.FromResult<IContent?>(invoice);
                     }
                     else
@@ -433,19 +450,25 @@ namespace HpskSite.Services
         /// Update payment status for an invoice. Optional fields are only written when supplied,
         /// so callers can use this to set just the status, or to record a full bookkeeping entry
         /// (paymentMethod / paymentDate / transactionId / notes) at the same time.
+        ///
+        /// Logs an InvoicePaymentEvents row for the transition (MarkedPaid / Cancelled / Refunded /
+        /// StatusChanged) so the audit history modal and the Bokföringsunderlag have a reliable
+        /// trail. Pass actor info if known — null acts as a system event.
         /// </summary>
-        public Task<bool> UpdatePaymentStatusAsync(
+        public async Task<bool> UpdatePaymentStatusAsync(
             int invoiceId,
             string paymentStatus,
             DateTime? paymentDate = null,
             string? transactionId = null,
             string? notes = null,
-            string? paymentMethod = null)
+            string? paymentMethod = null,
+            int? actorMemberId = null,
+            string? actorMemberName = null)
         {
             try
             {
                 var invoice = _contentService.GetById(invoiceId);
-                if (invoice == null) return Task.FromResult(false);
+                if (invoice == null) return false;
 
                 invoice.SetValue("paymentStatus", paymentStatus);
 
@@ -462,17 +485,34 @@ namespace HpskSite.Services
                     invoice.SetValue("paymentMethod", paymentMethod);
 
                 var saveResult = _contentService.Save(invoice);
-                if (saveResult.Success)
-                {
-                    _contentService.Publish(invoice, new[] { "*" }, -1);
-                    return Task.FromResult(true);
-                }
+                if (!saveResult.Success) return false;
 
-                return Task.FromResult(false);
+                _contentService.Publish(invoice, new[] { "*" }, -1);
+
+                // Log audit event for this state transition. Best effort — the underlying
+                // status update already succeeded and we don't want to fail it on audit issues.
+                var competitionId = invoice.GetValue<int>("competitionId");
+                var amount = invoice.GetValue<decimal>("totalAmount");
+                var refForLog = !string.IsNullOrEmpty(transactionId)
+                    ? transactionId
+                    : invoice.GetValue<string>("invoiceNumber");
+                await _auditService.LogAsync(
+                    invoiceId: invoiceId,
+                    competitionId: competitionId,
+                    eventType: InvoicePaymentEventTypes.FromStatus(paymentStatus),
+                    byMemberId: actorMemberId,
+                    byMemberName: actorMemberName,
+                    paymentMethod: paymentMethod,
+                    amount: amount,
+                    reference: refForLog,
+                    notes: notes);
+
+                return true;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                return Task.FromResult(false);
+                _logger.LogError(ex, "Error updating payment status for invoice {InvoiceId}", invoiceId);
+                return false;
             }
         }
 
@@ -715,6 +755,16 @@ namespace HpskSite.Services
                     if (publishResult.Success)
                     {
                         _logger.LogInformation("Team invoice {InvoiceId} created successfully for team {TeamId}", invoice.Id, teamId);
+
+                        _ = _auditService.LogAsync(
+                            invoiceId: invoice.Id,
+                            competitionId: competitionId,
+                            eventType: InvoicePaymentEventTypes.Created,
+                            paymentMethod: paymentMethod,
+                            amount: totalAmount,
+                            reference: invoiceNumber,
+                            notes: $"Lagfaktura skapad: {teamName} ({clubName})");
+
                         return Task.FromResult<IContent?>(invoice);
                     }
                     _contentService.Delete(invoice);

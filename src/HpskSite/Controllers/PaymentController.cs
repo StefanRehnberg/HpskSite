@@ -149,8 +149,18 @@ namespace HpskSite.Controllers
                     }
                 }
 
+                // Pass actor info so PaymentService can stamp the audit row with who did it.
+                int? actorId = null;
+                string? actorName = null;
+                var memberData = _memberService.GetByEmail(currentMember.Email ?? string.Empty);
+                if (memberData != null)
+                {
+                    actorId = memberData.Id;
+                    actorName = memberData.Name ?? currentMember.Name;
+                }
+
                 var success = await _paymentService.UpdatePaymentStatusAsync(
-                    invoiceId, paymentStatus, paymentDate, transactionId, notes, paymentMethod);
+                    invoiceId, paymentStatus, paymentDate, transactionId, notes, paymentMethod, actorId, actorName);
 
                 if (success)
                 {

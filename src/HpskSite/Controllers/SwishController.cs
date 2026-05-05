@@ -33,6 +33,7 @@ namespace HpskSite.Controllers
         private readonly PaymentService _paymentService;
         private readonly EmailService _emailService;
         private readonly ClubService _clubService;
+        private readonly InvoiceAuditService _auditService;
         private readonly IUmbracoDatabaseFactory _databaseFactory;
         private readonly ILogger<SwishController> _logger;
 
@@ -48,6 +49,7 @@ namespace HpskSite.Controllers
             PaymentService paymentService,
             EmailService emailService,
             ClubService clubService,
+            InvoiceAuditService auditService,
             ILogger<SwishController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
@@ -56,6 +58,7 @@ namespace HpskSite.Controllers
             _paymentService = paymentService ?? throw new ArgumentNullException(nameof(paymentService));
             _emailService = emailService ?? throw new ArgumentNullException(nameof(emailService));
             _clubService = clubService ?? throw new ArgumentNullException(nameof(clubService));
+            _auditService = auditService ?? throw new ArgumentNullException(nameof(auditService));
             _databaseFactory = databaseFactory ?? throw new ArgumentNullException(nameof(databaseFactory));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
@@ -1418,6 +1421,19 @@ namespace HpskSite.Controllers
 
                 _logger.LogInformation("Swish QR code email sent to {Email} for competition {CompetitionId}", memberEmail, competitionId);
 
+                // Audit: log who triggered this email and where it went. When an admin sends
+                // it on behalf of a different shooter (targetMemberId set), the actor is the
+                // admin; the recipient is captured in the notes for context.
+                await _auditService.LogAsync(
+                    invoiceId: invoice.Id,
+                    competitionId: competitionId,
+                    eventType: InvoicePaymentEventTypes.EmailSent,
+                    byMemberId: memberData.Id,
+                    byMemberName: memberData.Name,
+                    amount: totalAmount,
+                    reference: invoiceNumber,
+                    notes: $"QR-faktura mejlad till {memberEmail}");
+
                 return Json(new {
                     success = true,
                     message = $"QR-kod skickad till {memberEmail}",
@@ -1521,6 +1537,17 @@ namespace HpskSite.Controllers
                     invoiceNumber,
                     normalizedSwishNumber,
                     message);
+
+                // Audit: log the team-invoice email send.
+                await _auditService.LogAsync(
+                    invoiceId: invoice.Id,
+                    competitionId: competitionId,
+                    eventType: InvoicePaymentEventTypes.EmailSent,
+                    byMemberId: memberData.Id,
+                    byMemberName: memberData.Name,
+                    amount: teamFee,
+                    reference: invoiceNumber,
+                    notes: $"Lag-QR mejlad till {memberData.Email} (lag: {team.TeamName})");
 
                 return Json(new { success = true, message = $"QR-kod skickad till {memberData.Email}" });
             }

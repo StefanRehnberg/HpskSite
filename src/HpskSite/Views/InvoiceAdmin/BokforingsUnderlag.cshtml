@@ -1,0 +1,318 @@
+@model HpskSite.Models.ViewModels.BokforingsUnderlagViewModel
+@using System.Globalization
+@{
+    Layout = null;
+    var sv = CultureInfo.GetCultureInfo("sv-SE");
+    string FormatKr(decimal v) => Math.Round(v).ToString("N0", sv) + " kr";
+    string FormatDate(DateTime? d) => d.HasValue ? d.Value.ToString("yyyy-MM-dd", sv) : "—";
+    string FormatDateTime(DateTime? d) => d.HasValue ? d.Value.ToString("yyyy-MM-dd HH:mm", sv) : "—";
+    var competitionDateLabel = Model.CompetitionEndDate.HasValue && Model.CompetitionEndDate != Model.CompetitionDate
+        ? $"{FormatDate(Model.CompetitionDate)}–{FormatDate(Model.CompetitionEndDate)}"
+        : FormatDate(Model.CompetitionDate);
+}
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bokföringsunderlag – @Model.CompetitionName</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <style>
+        body { font-family: 'Segoe UI', Arial, sans-serif; padding: 24px; max-width: 1100px; margin: 0 auto; background: #fff; color: #222; }
+        h1 { font-size: 22px; margin-bottom: 4px; }
+        h2 { font-size: 16px; margin-top: 24px; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid #ccc; }
+        .meta-grid { display: grid; grid-template-columns: max-content auto; column-gap: 12px; row-gap: 4px; font-size: 12px; margin-bottom: 16px; }
+        .meta-grid dt { font-weight: 600; color: #555; }
+        .meta-grid dd { margin: 0; }
+        .summary-card { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 16px; }
+        .summary-card .cell { border: 1px solid #ddd; padding: 8px 10px; border-radius: 4px; }
+        .summary-card .cell .lbl { font-size: 10px; text-transform: uppercase; color: #666; letter-spacing: 0.05em; }
+        .summary-card .cell .val { font-size: 18px; font-weight: 600; }
+        .summary-card .cell.paid .val { color: #198754; }
+        .summary-card .cell.pending .val { color: #ad7700; }
+        .summary-card .cell.refunded .val { color: #b06b00; }
+
+        table.acc { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+        table.acc th, table.acc td { padding: 5px 8px; border-bottom: 1px solid #e0e0e0; text-align: left; vertical-align: top; }
+        table.acc th { background: #f4f4f4; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+        table.acc td.num, table.acc th.num { text-align: right; white-space: nowrap; }
+        table.acc tfoot td { font-weight: 600; border-top: 2px solid #333; border-bottom: none; }
+        table.acc .muted { color: #888; }
+
+        .signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-top: 48px; page-break-inside: avoid; }
+        .signature-line { border-top: 1px solid #333; padding-top: 4px; font-size: 11px; color: #555; }
+
+        .footer-note { font-size: 10px; color: #888; margin-top: 24px; }
+
+        .toolbar { margin-bottom: 16px; }
+        .toolbar .btn { margin-right: 6px; }
+
+        @@media print {
+            body { padding: 12px; max-width: none; }
+            .toolbar { display: none !important; }
+            h1 { font-size: 18px; }
+            h2 { font-size: 13px; margin-top: 16px; }
+            .summary-card { grid-template-columns: repeat(4, 1fr); gap: 4px; }
+            .summary-card .cell .val { font-size: 14px; }
+            table.acc { font-size: 10px; }
+            table.acc th, table.acc td { padding: 3px 6px; }
+            .page-break { page-break-before: always; }
+            .signatures { margin-top: 36px; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="toolbar">
+    <button type="button" class="btn btn-primary btn-sm" onclick="window.print()">
+        <i class="bi bi-printer me-1"></i>Skriv ut / Spara som PDF
+    </button>
+    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="window.close()">
+        <i class="bi bi-x-circle me-1"></i>Stäng
+    </button>
+</div>
+
+<h1>Bokföringsunderlag</h1>
+<dl class="meta-grid">
+    <dt>Tävling:</dt>           <dd>@Model.CompetitionName</dd>
+    <dt>Datum:</dt>             <dd>@competitionDateLabel</dd>
+    @if (!string.IsNullOrEmpty(Model.Venue))
+    {
+    <dt>Plats:</dt>             <dd>@Model.Venue</dd>
+    }
+    @if (!string.IsNullOrEmpty(Model.Organizer))
+    {
+    <dt>Arrangör:</dt>          <dd>@Model.Organizer</dd>
+    }
+    @if (!string.IsNullOrEmpty(Model.Scope))
+    {
+    <dt>Omfattning:</dt>        <dd>@Model.Scope</dd>
+    }
+    <dt>Underlag genererat:</dt> <dd>@Model.GeneratedAt.ToString("yyyy-MM-dd HH:mm", sv) @(string.IsNullOrEmpty(Model.GeneratedBy) ? "" : $"av {Model.GeneratedBy}")</dd>
+</dl>
+
+@* ── Summary cards ───────────────────────────────────────────── *@
+<h2>Sammanställning</h2>
+
+<div class="summary-card">
+    <div class="cell">
+        <div class="lbl">Anmälda</div>
+        <div class="val">@Model.Summary.TotalRegistrations</div>
+    </div>
+    <div class="cell paid">
+        <div class="lbl">Betalda</div>
+        <div class="val">@Model.Summary.PaidCount st</div>
+        <div class="lbl">@FormatKr(Model.Summary.PaidTotal)</div>
+    </div>
+    <div class="cell pending">
+        <div class="lbl">Utestående</div>
+        <div class="val">@(Model.Summary.PendingCount + Model.Summary.NoInvoiceCount) st</div>
+        <div class="lbl">@FormatKr(Model.Summary.PendingTotal) (väntande betalning)</div>
+    </div>
+    <div class="cell refunded">
+        <div class="lbl">Återbetald / makulerad</div>
+        <div class="val">@(Model.Summary.RefundedCount + Model.Summary.CancelledCount) st</div>
+        <div class="lbl">@FormatKr(Model.Summary.RefundedTotal) (återbetalt)</div>
+    </div>
+</div>
+
+@* ── Breakdown by payment method ─────────────────────────────── *@
+<h2>Inbetalningar per betalningsmetod</h2>
+
+<table class="acc">
+    <thead>
+        <tr>
+            <th>Betalningsmetod</th>
+            <th class="num">Antal</th>
+            <th class="num">Summa</th>
+        </tr>
+    </thead>
+    <tbody>
+        @if (!Model.Summary.PaidByMethod.Any())
+        {
+            <tr><td colspan="3" class="muted">Inga inbetalningar registrerade än.</td></tr>
+        }
+        else
+        {
+            @foreach (var kv in Model.Summary.PaidByMethod.OrderByDescending(p => p.Value))
+            {
+                <tr>
+                    <td>@kv.Key</td>
+                    <td class="num">@(Model.Summary.PaidCountByMethod.TryGetValue(kv.Key, out var c) ? c : 0)</td>
+                    <td class="num">@FormatKr(kv.Value)</td>
+                </tr>
+            }
+        }
+    </tbody>
+    <tfoot>
+        <tr>
+            <td>Totalt betalt</td>
+            <td class="num">@Model.Summary.PaidCount</td>
+            <td class="num">@FormatKr(Model.Summary.PaidTotal)</td>
+        </tr>
+    </tfoot>
+</table>
+
+@* ── Paid transactions (the headline list for bookkeeping) ──── *@
+<h2>Inkomna betalningar</h2>
+
+<table class="acc">
+    <thead>
+        <tr>
+            <th>Datum</th>
+            <th>Skytt</th>
+            <th>Klubb</th>
+            <th>Metod</th>
+            <th>Referens</th>
+            <th class="num">Belopp</th>
+        </tr>
+    </thead>
+    <tbody>
+        @if (!Model.PaidTransactions.Any())
+        {
+            <tr><td colspan="6" class="muted">Inga betalningar registrerade än.</td></tr>
+        }
+        else
+        {
+            @foreach (var t in Model.PaidTransactions)
+            {
+                <tr>
+                    <td>@FormatDate(t.PaymentDate)</td>
+                    <td>@t.MemberName</td>
+                    <td>@(t.ClubName ?? "")</td>
+                    <td>@(t.PaymentMethod ?? "")</td>
+                    <td>@(t.TransactionId ?? t.InvoiceNumber ?? "")</td>
+                    <td class="num">@FormatKr(t.Amount)</td>
+                </tr>
+            }
+        }
+    </tbody>
+    <tfoot>
+        <tr>
+            <td colspan="5">Totalt</td>
+            <td class="num">@FormatKr(Model.Summary.PaidTotal)</td>
+        </tr>
+    </tfoot>
+</table>
+
+@* ── Refunded ──────────────────────────────────────────────── *@
+@if (Model.RefundedTransactions.Any())
+{
+    <h2>Återbetalningar</h2>
+    <table class="acc">
+        <thead>
+            <tr>
+                <th>Datum</th>
+                <th>Skytt</th>
+                <th>Klubb</th>
+                <th>Metod</th>
+                <th>Referens</th>
+                <th>Anteckning</th>
+                <th class="num">Belopp</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var t in Model.RefundedTransactions)
+            {
+                <tr>
+                    <td>@FormatDate(t.PaymentDate)</td>
+                    <td>@t.MemberName</td>
+                    <td>@(t.ClubName ?? "")</td>
+                    <td>@(t.PaymentMethod ?? "")</td>
+                    <td>@(t.TransactionId ?? t.InvoiceNumber ?? "")</td>
+                    <td>@(t.Notes ?? "")</td>
+                    <td class="num">@FormatKr(t.Amount)</td>
+                </tr>
+            }
+        </tbody>
+        <tfoot>
+            <tr>
+                <td colspan="6">Totalt återbetalt</td>
+                <td class="num">@FormatKr(Model.Summary.RefundedTotal)</td>
+            </tr>
+        </tfoot>
+    </table>
+}
+
+@* ── Outstanding (informational, not for the books) ────────── *@
+@if (Model.OutstandingTransactions.Any())
+{
+    <h2>Utestående betalningar</h2>
+    <table class="acc">
+        <thead>
+            <tr>
+                <th>Skytt</th>
+                <th>Klubb</th>
+                <th>Referens</th>
+                <th>Skapad</th>
+                <th class="num">Belopp</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var t in Model.OutstandingTransactions)
+            {
+                <tr>
+                    <td>@t.MemberName</td>
+                    <td>@(t.ClubName ?? "")</td>
+                    <td>@t.InvoiceNumber</td>
+                    <td>@FormatDate(t.CreatedDate)</td>
+                    <td class="num">@FormatKr(t.Amount)</td>
+                </tr>
+            }
+        </tbody>
+        <tfoot>
+            <tr>
+                <td colspan="4">Totalt utestående</td>
+                <td class="num">@FormatKr(Model.Summary.PendingTotal)</td>
+            </tr>
+        </tfoot>
+    </table>
+}
+
+@* ── Cancelled ─────────────────────────────────────────────── *@
+@if (Model.CancelledTransactions.Any())
+{
+    <h2>Makulerade betalningar</h2>
+    <table class="acc">
+        <thead>
+            <tr>
+                <th>Skytt</th>
+                <th>Klubb</th>
+                <th>Referens</th>
+                <th>Anteckning</th>
+                <th class="num">Belopp</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var t in Model.CancelledTransactions)
+            {
+                <tr>
+                    <td>@t.MemberName</td>
+                    <td>@(t.ClubName ?? "")</td>
+                    <td>@t.InvoiceNumber</td>
+                    <td>@(t.Notes ?? "")</td>
+                    <td class="num">@FormatKr(t.Amount)</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@* ── Signatures ────────────────────────────────────────────── *@
+<div class="signatures">
+    <div>
+        <div class="signature-line">Kassör</div>
+    </div>
+    <div>
+        <div class="signature-line">Granskare / firmatecknare</div>
+    </div>
+</div>
+
+<div class="footer-note">
+    Underlag automatgenererat av pistol.nu @Model.GeneratedAt.ToString("yyyy-MM-dd HH:mm", sv).
+    Belopp och status motsvarar registrerade betalningar i systemet vid tidpunkten för utskrift.
+</div>
+
+</body>
+</html>
