@@ -156,6 +156,14 @@
                         <option value="No Invoice">Saknar betalning</option>
                     </select>
                 </div>
+                <div class="col-md-3">
+                    <label for="competitionCheckedInFilter" class="form-label">Filtrera på närvaro:</label>
+                    <select class="form-select" id="competitionCheckedInFilter" onchange="filterCompetitionRegistrations()">
+                        <option value="">Alla</option>
+                        <option value="in">Incheckad</option>
+                        <option value="out">Ej incheckad</option>
+                    </select>
+                </div>
             </div>
         </div>
     </div>
@@ -192,6 +200,7 @@
                                 <th>Klass</th>
                                 <th>Anmälningsdatum</th>
                                 <th>Status</th>
+                                <th>Närvaro</th>
                                 <th>Åtgärder</th>
                             </tr>
                         </thead>
@@ -693,6 +702,7 @@ function filterCompetitionRegistrations() {
     const clubFilter = document.getElementById('competitionClubFilter').value;
     const preferenceFilter = document.getElementById('competitionPreferenceFilter').value;
     const paymentFilter = document.getElementById('competitionPaymentFilter')?.value || '';
+    const checkedInFilter = document.getElementById('competitionCheckedInFilter')?.value || '';
     const searchTerm = (document.getElementById('competitionRegistrationSearch')?.value || '').trim().toLowerCase();
 
     filteredCompetitionRegistrations = competitionRegistrations.filter(reg => {
@@ -702,6 +712,9 @@ function filterCompetitionRegistrations() {
         // Check if any class has the matching start preference
         const matchesPreference = !preferenceFilter || (reg.shootingClasses && reg.shootingClasses.some(sc => sc.startPreference === preferenceFilter));
         const matchesPayment = !paymentFilter || (reg.paymentStatus || 'No Invoice') === paymentFilter;
+        const matchesCheckedIn = !checkedInFilter
+            || (checkedInFilter === 'in' && reg.isCheckedIn === true)
+            || (checkedInFilter === 'out' && !reg.isCheckedIn);
 
         // Free-text search against name, club, and Swish reference (invoice number).
         // Substring match so partial pastes from a Swish notification still hit.
@@ -715,7 +728,7 @@ function filterCompetitionRegistrations() {
             matchesSearch = haystack.includes(searchTerm);
         }
 
-        return matchesClass && matchesClub && matchesPreference && matchesPayment && matchesSearch;
+        return matchesClass && matchesClub && matchesPreference && matchesPayment && matchesCheckedIn && matchesSearch;
     });
 
     currentCompetitionPage = 1;
@@ -900,6 +913,21 @@ function displayCompetitionRegistrations() {
                     </span>
                 ` : ''}
                 ${invoiceRef}
+            </td>
+            <td>
+                <!-- Item #9: at-the-desk attendance toggle. Saves on change; reflects state
+                     on next render via the API field, but we also update the in-memory row
+                     immediately so the operator gets instant feedback. -->
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" role="switch"
+                           id="checkin_${reg.id}"
+                           ${reg.isCheckedIn ? 'checked' : ''}
+                           onchange="setCheckedIn(${reg.id}, this.checked)"
+                           title="Markera som incheckad / närvarande">
+                    <label class="form-check-label small text-muted" for="checkin_${reg.id}">
+                        ${reg.isCheckedIn ? 'Här' : ''}
+                    </label>
+                </div>
             </td>
             <td>
                 <!-- Action buttons in two groups: workflow on the left, destructive (delete)
@@ -1432,6 +1460,40 @@ function confirmMarkAsPaid() {
         btn.disabled = false;
         btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Bekräfta betalning';
     });
+}
+
+// Item #9: persist the at-the-desk attendance toggle. Optimistic — flips the in-memory
+// row immediately so the operator sees the label flip without waiting for the round trip.
+// On failure we revert the checkbox + in-memory state so the desk doesn't drift from the
+// server's view of the world.
+async function setCheckedIn(registrationId, checkedIn) {
+    const reg = competitionRegistrations.find(r => r.id === registrationId);
+    if (reg) reg.isCheckedIn = checkedIn;
+    const label = document.querySelector(`label[for="checkin_${registrationId}"]`);
+    if (label) label.textContent = checkedIn ? 'Här' : '';
+
+    try {
+        const token = $('input[name="__RequestVerificationToken"]').val();
+        const resp = await fetch('/umbraco/surface/RegistrationAdmin/SetCheckedIn', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': token
+            },
+            body: JSON.stringify({ registrationId, checkedIn })
+        });
+        const data = await resp.json();
+        if (!data.success) {
+            throw new Error(data.message || 'Misslyckades att spara närvaro.');
+        }
+    } catch (err) {
+        // Revert UI + cache on failure
+        const cb = document.getElementById(`checkin_${registrationId}`);
+        if (cb) cb.checked = !checkedIn;
+        if (reg) reg.isCheckedIn = !checkedIn;
+        if (label) label.textContent = !checkedIn ? 'Här' : '';
+        alert('Kunde inte uppdatera närvaro: ' + err.message);
+    }
 }
 
 function getPreferenceBadgeClass(preference) {

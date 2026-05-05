@@ -1511,7 +1511,8 @@ namespace HpskSite.Controllers
                             transactionId = existingTxnId,
                             paidAmount = paidAmount,
                             pendingAmount = pendingAmount,
-                            hasVariance = hasVariance
+                            hasVariance = hasVariance,
+                            isCheckedIn = content.GetValue<bool>("isCheckedIn")
                         };
                     })
                     .OrderBy(r => r.memberName)

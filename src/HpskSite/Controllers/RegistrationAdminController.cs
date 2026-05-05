@@ -753,6 +753,56 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// Toggle the at-the-desk attendance state on a registration (item #9). The flag
+        /// lives on the registration document so it persists across page reloads and is
+        /// visible to anyone reading the registrations table — no SQL migration needed.
+        /// Auth: same four-tier rule as the rest of the per-competition surface.
+        /// </summary>
+        [HttpPost]
+        public async Task<IActionResult> SetCheckedIn([FromBody] SetCheckedInRequest request)
+        {
+            try
+            {
+                var registration = _contentService.GetById(request.RegistrationId);
+                if (registration == null)
+                    return Json(new { success = false, message = "Anmälan hittades inte." });
+
+                var competitionId = registration.GetValue<int>("competitionId");
+                var competition = competitionId > 0 ? _contentService.GetById(competitionId) : null;
+                if (competition == null)
+                    return Json(new { success = false, message = "Tävling hittades inte." });
+
+                bool authorized = await _authService.IsCurrentUserAdminAsync()
+                    || await _authService.IsCompetitionManager(competitionId);
+                if (!authorized)
+                {
+                    var competitionClubId = competition.GetValue<int>("clubId");
+                    if (competitionClubId > 0)
+                    {
+                        authorized = await _authService.IsClubAdminForClub(competitionClubId)
+                                  || await _authService.IsSkjutledareForClub(competitionClubId);
+                    }
+                }
+                if (!authorized)
+                    return Json(new { success = false, message = "Access denied" });
+
+                registration.SetValue("isCheckedIn", request.CheckedIn);
+
+                var saveResult = _contentService.Save(registration);
+                if (!saveResult.Success)
+                    return Json(new { success = false, message = "Misslyckades att spara närvarostatus." });
+
+                _contentService.Publish(registration, new[] { "*" }, -1);
+
+                return Json(new { success = true, isCheckedIn = request.CheckedIn });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = "Ett fel uppstod: " + ex.Message });
+            }
+        }
+
+        /// <summary>
         /// Resolve the current logged-in member to (id, name) for stamping audit rows.
         /// Returns (null, null) when no member is logged in or the lookup fails.
         /// </summary>
@@ -1151,6 +1201,15 @@ namespace HpskSite.Controllers
         {
             public int RegistrationId { get; set; }
             public int ToMemberId { get; set; }
+        }
+
+        /// <summary>
+        /// Request model for the at-the-desk check-in toggle (item #9).
+        /// </summary>
+        public class SetCheckedInRequest
+        {
+            public int RegistrationId { get; set; }
+            public bool CheckedIn { get; set; }
         }
 
         #endregion
