@@ -152,6 +152,11 @@
     var lDamClasses = new List<HpskSite.Models.ShootingClass>();
     var mClasses = new List<HpskSite.Models.ShootingClass>();
     var shootingClassIds = "";
+    // Raw class-id list parsed from competition.shootingClassIds. Used both for the
+    // legacy precision-flavoured groupings below AND for the walk-in dropdown further
+    // down (which needs ALL ids — including Springskytte composites like "A-D 21" that
+    // ShootingClasses.GetById can't resolve).
+    var parsedShootingClassIds = new List<string>();
     var competitionType = ViewData["CompetitionType"]?.ToString() ?? "Precision";
 
     if (competition != null)
@@ -196,8 +201,6 @@
         // Parse shooting class IDs - handle JSON array format
         if (!string.IsNullOrEmpty(shootingClassIds))
         {
-            var ids = new List<string>();
-
             // Check if it's a JSON array format: ["A1","B2"]
             if (shootingClassIds.StartsWith("[") && shootingClassIds.EndsWith("]"))
             {
@@ -205,14 +208,14 @@
                 {
                     // Parse JSON array manually (simple approach)
                     var jsonContent = shootingClassIds.Substring(1, shootingClassIds.Length - 2); // Remove [ and ]
-                    ids.AddRange(jsonContent.Split(',')
+                    parsedShootingClassIds.AddRange(jsonContent.Split(',')
                         .Select(s => s.Trim().Trim('"'))
                         .Where(s => !string.IsNullOrEmpty(s)));
                 }
                 catch
                 {
                     // If JSON parsing fails, try as comma-separated
-                    ids.AddRange(shootingClassIds.Split(',')
+                    parsedShootingClassIds.AddRange(shootingClassIds.Split(',')
                         .Select(id => id.Trim())
                         .Where(id => !string.IsNullOrEmpty(id)));
                 }
@@ -220,12 +223,12 @@
             else
             {
                 // Already comma-separated or single value
-                ids.AddRange(shootingClassIds.Split(',')
+                parsedShootingClassIds.AddRange(shootingClassIds.Split(',')
                     .Select(id => id.Trim())
                     .Where(id => !string.IsNullOrEmpty(id)));
             }
 
-            foreach (var id in ids)
+            foreach (var id in parsedShootingClassIds)
             {
                 var shootingClass = HpskSite.Models.ShootingClasses.GetById(id);
                 if (shootingClass != null)
@@ -478,8 +481,15 @@
                 @{
                     // Hand the partial the competition's actual allowed classes (id+name) so the
                     // walk-in modal's "Vapenklass" dropdown only offers what's valid here.
-                    var availableShootingClasses = competitionShootingClasses
-                        .Select(sc => new { id = sc.Id, name = sc.Name })
+                    // Source from the raw parsed id list (NOT competitionShootingClasses) so
+                    // Springskytte composite IDs like "A-D 21" — which ShootingClasses.GetById
+                    // can't resolve — still appear in the dropdown. Name falls back to the id
+                    // itself when the registry doesn't know it.
+                    var availableShootingClasses = parsedShootingClassIds
+                        .Select(id => new {
+                            id,
+                            name = HpskSite.Models.ShootingClasses.GetById(id)?.Name ?? id
+                        })
                         .ToList();
                     var regViewData = new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId } };
                     regViewData["AvailableShootingClasses"] = availableShootingClasses;
