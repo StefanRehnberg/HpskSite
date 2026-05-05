@@ -1551,6 +1551,138 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             return Json(new { success = true });
         }
 
+        /// <summary>
+        /// Cashier walk-in: drop a freshly-registered shooter on a patrol in one round trip.
+        /// The endpoint reads the registration so the caller doesn't have to forward member /
+        /// class / club details (they're already on the registration document).
+        ///
+        /// Target hint resolution:
+        ///   "nextAvailable" — highest-numbered existing patrol whose WeaponGroup matches the
+        ///                     shooter (or no group set); creates patrol #1 when none exist.
+        ///   "newPatrol"     — always creates a new appended patrol with the shooter's group.
+        ///   "&lt;patrolId&gt;"     — uses the explicit patrol; trusted to be in the same competition.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> AssignWalkInToPatrol([FromBody] AssignWalkInToPatrolRequest request)
+        {
+            if (!await IsAuthorizedForCompetition(request.CompetitionId))
+                return Json(new { success = false, message = "Du har inte behörighet." });
+
+            var registration = _contentService.GetById(request.RegistrationId);
+            if (registration == null)
+                return Json(new { success = false, message = "Anmälan hittades inte." });
+
+            var shootingClassesJson = registration.GetValue<string>("shootingClasses") ?? "";
+            var shootingClasses = CompetitionRegistrationDocument.DeserializeShootingClasses(shootingClassesJson);
+            var firstClass = shootingClasses.FirstOrDefault()?.Class ?? "";
+            if (string.IsNullOrEmpty(firstClass))
+                return Json(new { success = false, message = "Anmälan saknar vapenklass." });
+
+            var weaponGroup = ShootingClasses.GetWeaponClassCode(firstClass) ?? "";
+            var memberId = registration.GetValue<int>("memberId");
+            var memberName = registration.GetValue<string>("memberName") ?? "";
+            var clubId = registration.GetValue<int>("clubId");
+            var clubName = clubId > 0 ? (_clubService.GetClubNameById(clubId) ?? "") : "";
+
+            using var db = _umbracoDatabaseFactory.CreateDatabase();
+
+            int patrolId;
+            int patrolNumber;
+            bool createdNewPatrol = false;
+
+            if (request.Target == "newPatrol")
+            {
+                patrolId = await CreateAppendedPatrolAsync(db, request.CompetitionId, weaponGroup);
+                patrolNumber = await db.ExecuteScalarAsync<int>(
+                    "SELECT PatrolNumber FROM FaltskyttePatrol WHERE Id = @0", patrolId);
+                createdNewPatrol = true;
+            }
+            else if (int.TryParse(request.Target, out var explicitId) && explicitId > 0)
+            {
+                patrolId = explicitId;
+                patrolNumber = await db.ExecuteScalarAsync<int>(
+                    "SELECT ISNULL(PatrolNumber, 0) FROM FaltskyttePatrol WHERE Id = @0 AND CompetitionId = @1",
+                    patrolId, request.CompetitionId);
+                if (patrolNumber == 0)
+                    return Json(new { success = false, message = "Patrullen kunde inte hittas." });
+            }
+            else // "nextAvailable" (default)
+            {
+                var existing = await db.FetchAsync<FaltskyttePatrol>(
+                    @"WHERE CompetitionId = @0
+                      AND (WeaponGroup = @1 OR WeaponGroup = '' OR WeaponGroup IS NULL)
+                      ORDER BY PatrolNumber DESC",
+                    request.CompetitionId, weaponGroup);
+
+                if (existing.Any())
+                {
+                    patrolId = existing.First().Id;
+                    patrolNumber = existing.First().PatrolNumber;
+                }
+                else
+                {
+                    patrolId = await CreateAppendedPatrolAsync(db, request.CompetitionId, weaponGroup);
+                    patrolNumber = await db.ExecuteScalarAsync<int>(
+                        "SELECT PatrolNumber FROM FaltskyttePatrol WHERE Id = @0", patrolId);
+                    createdNewPatrol = true;
+                }
+            }
+
+            // Same-group dedupe (matches AddShooterToPatrol's behaviour) — moving a shooter
+            // between patrols of the same weapon group via add must not leave them on both.
+            if (!string.IsNullOrEmpty(weaponGroup))
+            {
+                var sameGroupIds = ShootingClasses.All
+                    .Where(sc => sc.Weapon.ToString() == weaponGroup)
+                    .Select(sc => sc.Id)
+                    .ToList();
+                if (sameGroupIds.Count == 0) sameGroupIds.Add(firstClass);
+                await db.ExecuteAsync(
+                    @"DELETE FROM FaltskyttePatrolMember WHERE MemberId = @0
+                      AND ShootingClass IN (@2)
+                      AND PatrolId IN (SELECT Id FROM FaltskyttePatrol WHERE CompetitionId = @1)",
+                    memberId, request.CompetitionId, sameGroupIds);
+            }
+
+            var maxPos = await db.ExecuteScalarAsync<int>(
+                "SELECT ISNULL(MAX(Position), 0) FROM FaltskyttePatrolMember WHERE PatrolId = @0", patrolId);
+
+            var memberRow = new FaltskyttePatrolMember
+            {
+                PatrolId = patrolId,
+                MemberId = memberId,
+                Position = maxPos + 1,
+                ShootingClass = firstClass,
+                MemberName = memberName,
+                ClubName = clubName
+            };
+            await db.InsertAsync(memberRow);
+
+            return Json(new {
+                success = true,
+                patrolId,
+                patrolNumber,
+                patrolMemberId = memberRow.Id,
+                createdNewPatrol
+            });
+        }
+
+        private static async Task<int> CreateAppendedPatrolAsync(
+            Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabase db, int competitionId, string weaponGroup)
+        {
+            var maxNum = await db.ExecuteScalarAsync<int>(
+                "SELECT ISNULL(MAX(PatrolNumber), 0) FROM FaltskyttePatrol WHERE CompetitionId = @0", competitionId);
+            var patrol = new FaltskyttePatrol
+            {
+                CompetitionId = competitionId,
+                PatrolNumber = maxNum + 1,
+                WeaponGroup = weaponGroup
+            };
+            await db.InsertAsync(patrol);
+            return patrol.Id;
+        }
+
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> BulkMoveShooters([FromBody] FaltskylteBulkMoveShootersRequest request)

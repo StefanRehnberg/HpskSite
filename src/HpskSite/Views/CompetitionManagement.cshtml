@@ -493,6 +493,12 @@
                         .ToList();
                     var regViewData = new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId } };
                     regViewData["AvailableShootingClasses"] = availableShootingClasses;
+                    // Walk-in patrol picker (item #5): only meaningful for Fältskytte/MagnumFält
+                    // with rolling start enabled. The partial reads these to decide whether
+                    // to render the Patrull dropdown in the walk-in modal.
+                    regViewData["RollingStart"] = competition?.HasProperty("rollingStart") == true
+                        ? (competition.Value<string>("rollingStart") ?? "")
+                        : "";
                 }
                 @await Html.PartialAsync("CompetitionRegistrationManagement", regViewData)
             </div>

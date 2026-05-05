@@ -67,6 +67,20 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public int TargetPatrolId { get; set; }
     }
 
+    /// <summary>
+    /// Walk-in assignment from the registration desk. Used during a rolling-start
+    /// Fältskytte / MagnumFält competition to drop a freshly-registered shooter onto
+    /// a patrol in one round-trip. The endpoint reads the registration to get an
+    /// authoritative member name / club / class — the client only sends a target hint.
+    /// </summary>
+    public class AssignWalkInToPatrolRequest
+    {
+        public int CompetitionId { get; set; }
+        public int RegistrationId { get; set; }
+        /// <summary>"nextAvailable" | "newPatrol" | "&lt;patrolId&gt;" (an integer string for an explicit patrol).</summary>
+        public string Target { get; set; } = "nextAvailable";
+    }
+
     public class FaltskylteBulkMoveShootersRequest
     {
         public int CompetitionId { get; set; }

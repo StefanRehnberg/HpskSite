@@ -7,6 +7,22 @@
     var competitionId = ViewData["CompetitionId"]?.ToString() ?? "";
     var availableShootingClasses = ViewData["AvailableShootingClasses"] ?? new List<object>();
     var availableShootingClassesJson = System.Text.Json.JsonSerializer.Serialize(availableShootingClasses);
+
+    // Walk-in patrol picker (item #5). Only shown for Fältskytte / MagnumFält with rolling
+    // start enabled. CompetitionType is on ViewData from the host page; rollingStart is the
+    // raw JSON blob — we just probe for the enabled flag.
+    var compType = ViewData["CompetitionType"]?.ToString() ?? "Precision";
+    var rollingStartRaw = ViewData["RollingStart"]?.ToString() ?? "";
+    var rollingStartEnabled = false;
+    if ((compType == "Faltskytte" || compType == "MagnumFalt") && !string.IsNullOrEmpty(rollingStartRaw))
+    {
+        try
+        {
+            var rs = Newtonsoft.Json.JsonConvert.DeserializeObject<dynamic>(rollingStartRaw);
+            rollingStartEnabled = rs?.enabled == true;
+        }
+        catch { }
+    }
 }
 
 <!-- Flatpickr (used by the mark-as-paid date picker). Loaded again here so the
@@ -360,13 +376,28 @@
                     <input type="hidden" id="walkInSelectedMemberId" value="">
                 </div>
 
-                <div class="mb-0">
+                <div class="@(rollingStartEnabled ? "mb-3" : "mb-0")">
                     <label for="walkInShootingClass" class="form-label fw-bold">Vapenklass</label>
                     <select class="form-select" id="walkInShootingClass">
                         <option value="">-- Välj klass --</option>
                         <!-- Populated from the competition's actual allowed classes -->
                     </select>
                 </div>
+
+                @if (rollingStartEnabled)
+                {
+                    <div class="mb-0">
+                        <label for="walkInPatrolTarget" class="form-label fw-bold">Patrull</label>
+                        <select class="form-select" id="walkInPatrolTarget">
+                            <option value="nextAvailable" selected>Nästa lediga patrull</option>
+                            <option value="newPatrol">Skapa ny patrull</option>
+                            <!-- Existing patrols populated on modal open -->
+                        </select>
+                        <small class="form-text text-muted">
+                            Rullande start: skytten placeras direkt på en patrull.
+                        </small>
+                    </div>
+                }
 
                 <div id="walkInError" class="alert alert-danger mt-3 d-none"></div>
             </div>
@@ -1648,6 +1679,34 @@ let walkInSearchTimer = null;
 // (sourced from competition.shootingClassIds). Used to populate the walk-in class dropdown.
 const walkInAvailableClasses = @Html.Raw(availableShootingClassesJson);
 
+// Item #5: walk-in patrol picker is rendered server-side only when the competition has
+// rolling start on. The flag drives the post-registration call to AssignWalkInToPatrol.
+const walkInPatrolPickerEnabled = @(rollingStartEnabled ? "true" : "false");
+
+async function refreshWalkInPatrolOptions() {
+    if (!walkInPatrolPickerEnabled) return;
+    const select = document.getElementById('walkInPatrolTarget');
+    if (!select) return;
+    const competitionId = parseInt($('.competition-registration-management').data('competition-id'), 10);
+    // Strip dynamic options (everything past the two static targets).
+    while (select.options.length > 2) select.remove(2);
+    try {
+        const resp = await fetch(`/umbraco/surface/Faltskytte/GetPatrols?competitionId=${competitionId}`);
+        const data = await resp.json();
+        if (data.success && Array.isArray(data.patrols)) {
+            // Highest-numbered first matches "Nästa lediga" intuition (most recent, likely still open).
+            data.patrols.slice().sort((a, b) => b.patrolNumber - a.patrolNumber).forEach(p => {
+                const wg = p.weaponGroup ? ` · ${p.weaponGroup}` : '';
+                const count = (p.members || []).length;
+                const opt = new Option(`Patrull ${p.patrolNumber}${wg} (${count} skyttar)`, String(p.patrolId));
+                select.add(opt);
+            });
+        }
+    } catch (err) {
+        console.warn('Could not load patrols for walk-in picker:', err);
+    }
+}
+
 function openWalkInRegistrationModal() {
     // Reset state
     document.getElementById('walkInMemberSearch').value = '';
@@ -1677,6 +1736,13 @@ function openWalkInRegistrationModal() {
 
     if (!walkInModalInstance) {
         walkInModalInstance = new bootstrap.Modal(document.getElementById('walkInRegistrationModal'));
+    }
+    // Reset patrol picker to the default and (re-)fetch existing patrols so a refresh
+    // mid-day reflects what other operators have created since the modal was last open.
+    if (walkInPatrolPickerEnabled) {
+        const sel = document.getElementById('walkInPatrolTarget');
+        if (sel) sel.value = 'nextAvailable';
+        refreshWalkInPatrolOptions();
     }
     walkInModalInstance.show();
     setTimeout(() => document.getElementById('walkInMemberSearch').focus(), 250);
@@ -1808,6 +1874,29 @@ async function submitWalkInRegistration() {
         }
 
         const newRegistrationId = data.registrationId;
+
+        // Item #5: rolling-start Fältskytte / MagnumFält — drop the new shooter on a patrol
+        // immediately. Failure is non-fatal (the registration is the load-bearing operation);
+        // the operator can fix the patrol assignment from the start-list tab afterward.
+        if (walkInPatrolPickerEnabled) {
+            const target = document.getElementById('walkInPatrolTarget')?.value || 'nextAvailable';
+            try {
+                const patrolResp = await fetch('/umbraco/surface/Faltskytte/AssignWalkInToPatrol', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'RequestVerificationToken': token
+                    },
+                    body: JSON.stringify({ competitionId, registrationId: newRegistrationId, target })
+                });
+                const patrolData = await patrolResp.json();
+                if (!patrolData.success) {
+                    console.warn('Patrol assignment failed:', patrolData.message);
+                }
+            } catch (patrolErr) {
+                console.warn('Patrol assignment threw:', patrolErr);
+            }
+        }
 
         // Eagerly create the invoice + compute the fee so the manage-invoice modal opens
         // with the real amount instead of "0 kr / Saknar betalning". The endpoint side-effect
