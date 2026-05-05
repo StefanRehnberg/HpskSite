@@ -439,7 +439,10 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GenerateInvoiceQRCode(int invoiceId)
         {
-            if (!await _authService.IsCurrentUserAdminAsync())
+            // Same four-tier auth as the rest of the per-competition surface — was
+            // site-admin only, breaking the cashier's "show QR for this specific
+            // invoice" flow when used by a club admin.
+            if (!await _authService.CanManageCompetitionInvoice(invoiceId))
             {
                 return Json(new { success = false, message = "Access denied" });
             }

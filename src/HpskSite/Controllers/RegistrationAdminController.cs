@@ -21,6 +21,7 @@ namespace HpskSite.Controllers
         private readonly IContentService _contentService;
         private readonly AdminAuthorizationService _authService;
         private readonly ClubService _clubService;
+        private readonly PaymentService _paymentService;
 
         public RegistrationAdminController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -32,13 +33,15 @@ namespace HpskSite.Controllers
             IMemberService memberService,
             IContentService contentService,
             AdminAuthorizationService authService,
-            ClubService clubService)
+            ClubService clubService,
+            PaymentService paymentService)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _memberService = memberService;
             _contentService = contentService;
             _authService = authService;
             _clubService = clubService;
+            _paymentService = paymentService;
         }
 
         #region Registration Management
@@ -190,38 +193,194 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
-        /// Update a competition registration (start preference, active status)
+        /// Update a registration's classes and/or start preference. Recomputes the linked
+        /// invoice's totalAmount when classes change AND the invoice is still Pending; for
+        /// already-Paid invoices the new fee is reported back for manual reconciliation.
+        ///
+        /// Auth: same four-tier rule as the rest of the per-competition surface (site admin /
+        /// competition manager / club admin (incl. regional) / skjutledare for the comp's club).
         /// </summary>
         [HttpPost]
         public async Task<IActionResult> UpdateCompetitionRegistration([FromBody] UpdateRegistrationRequest request)
         {
-            if (!await _authService.IsCurrentUserAdminAsync())
-            {
-                return Json(new { success = false, message = "Access denied" });
-            }
-
             try
             {
                 var registration = _contentService.GetById(request.RegistrationId);
                 if (registration == null)
-                {
                     return Json(new { success = false, message = "Registration not found" });
-                }
 
-                // Update properties
-                registration.SetValue("startPreference", request.StartPreference ?? "Inget");
-                // Note: isActive property removed - use Published status instead
+                var competitionId = registration.GetValue<int>("competitionId");
+                var competition = competitionId > 0 ? _contentService.GetById(competitionId) : null;
+
+                // Four-tier auth — load competition first to find the club
+                bool authorized = await _authService.IsCurrentUserAdminAsync();
+                if (!authorized && competition != null)
+                {
+                    authorized = await _authService.IsCompetitionManager(competitionId);
+                    if (!authorized)
+                    {
+                        var clubId = competition.GetValue<int>("clubId");
+                        if (clubId > 0)
+                        {
+                            authorized = await _authService.IsClubAdminForClub(clubId)
+                                      || await _authService.IsSkjutledareForClub(clubId);
+                        }
+                    }
+                }
+                if (!authorized)
+                    return Json(new { success = false, message = "Access denied" });
+
+                // Build the new shootingClasses list. Three input shapes from the caller:
+                //   1. ShootingClasses provided  → use it (per-class start prefs preferred,
+                //      shared StartPreference applied as fallback when an entry omits one)
+                //   2. Only StartPreference set → load existing classes, re-stamp every entry
+                //   3. Neither                  → no class change (just touches save+publish)
+                var existingClasses = HpskSite.Models.CompetitionRegistrationDocument
+                    .DeserializeShootingClasses(registration.GetValue<string>("shootingClasses"));
+
+                var newClasses = request.ShootingClasses != null && request.ShootingClasses.Count > 0
+                    ? request.ShootingClasses
+                        .Where(c => !string.IsNullOrWhiteSpace(c.Class))
+                        .Select(c => new HpskSite.Models.ShootingClassEntry
+                        {
+                            Class = c.Class.Trim(),
+                            StartPreference = c.StartPreference ?? request.StartPreference ?? "Inget"
+                        })
+                        .ToList()
+                    : existingClasses
+                        .Select(c => new HpskSite.Models.ShootingClassEntry
+                        {
+                            Class = c.Class,
+                            StartPreference = request.StartPreference ?? c.StartPreference ?? "Inget"
+                        })
+                        .ToList();
+
+                if (newClasses.Count == 0)
+                    return Json(new { success = false, message = "Anmälan måste ha minst en klass." });
+
+                var newClassesJson = HpskSite.Models.CompetitionRegistrationDocument
+                    .SerializeShootingClasses(newClasses);
+                registration.SetValue("shootingClasses", newClassesJson);
 
                 var saveResult = _contentService.Save(registration);
-                if (saveResult.Success)
-                {
-                    _contentService.Publish(registration, new[] { "*" }, -1);
-                    return Json(new { success = true, message = "Registration updated successfully" });
-                }
-                else
-                {
+                if (!saveResult.Success)
                     return Json(new { success = false, message = "Failed to save registration" });
+
+                _contentService.Publish(registration, new[] { "*" }, -1);
+
+                // Invoice fee re-compute. We consider ALL non-cancelled invoices for this
+                // registration (a registration can have several after a couple of class
+                // adds: e.g. original Paid 100 + Paid top-up 50 + Pending top-up 30). The
+                // logic is:
+                //   sumPaid          = total of every Paid invoice
+                //   existingPending  = the (single) Pending invoice if one exists
+                //   currentlyBilled  = sumPaid + existingPending?.totalAmount
+                //   delta            = newFee - sumPaid       (what the shooter still owes)
+                //
+                // If delta > 0:
+                //   - patch the existing Pending invoice's totalAmount to delta, OR
+                //   - create a new Pending top-up invoice for delta
+                // If delta == 0:
+                //   - nothing to collect; cancel a leftover Pending invoice if one exists
+                // If delta < 0:
+                //   - refund situation; surface as a manual-handling note
+                string? feeChangeNote = null;
+                int? topUpInvoiceId = null;
+                bool classesChanged = !ClassListEquivalent(existingClasses, newClasses);
+                if (classesChanged && competition != null)
+                {
+                    var classCodes = newClasses.Select(c => c.Class).ToList();
+                    var newFee = HpskSite.Services.RegistrationFeeCalculator.Calculate(
+                        competition, classCodes, request.IsSubCompetition);
+
+                    var allInvoices = GetAllInvoicesForRegistration(competition, request.RegistrationId);
+                    if (allInvoices.Count > 0)
+                    {
+                        decimal sumPaid = 0m;
+                        IContent? existingPending = null;
+                        foreach (var inv in allInvoices)
+                        {
+                            var s = (inv.GetValue<string>("paymentStatus") ?? "Pending").Trim().Trim('[', ']').Trim('"');
+                            var amt = inv.GetValue<decimal>("totalAmount");
+                            if (s == "Paid")
+                            {
+                                sumPaid += amt;
+                            }
+                            else if (s == "Pending" && existingPending == null)
+                            {
+                                existingPending = inv;
+                            }
+                        }
+
+                        var delta = newFee - sumPaid;
+
+                        if (delta > 0)
+                        {
+                            if (existingPending != null)
+                            {
+                                var oldPendingAmount = existingPending.GetValue<decimal>("totalAmount");
+                                if (oldPendingAmount != delta)
+                                {
+                                    existingPending.SetValue("totalAmount", delta);
+                                    _contentService.Save(existingPending);
+                                    _contentService.Publish(existingPending, new[] { "*" }, -1);
+                                    feeChangeNote = sumPaid > 0
+                                        ? $"Tilläggsfaktura uppdaterad: {oldPendingAmount:0} kr → {delta:0} kr (totalt: {newFee:0} kr; redan betalt: {sumPaid:0} kr)."
+                                        : $"Fakturabelopp uppdaterat: {oldPendingAmount:0} kr → {delta:0} kr.";
+                                }
+                            }
+                            else
+                            {
+                                // Create a new Pending top-up invoice for the difference. The
+                                // existing Paid invoices stay untouched as the historical
+                                // record of what was actually paid, when, and by whom.
+                                var memberId = registration.GetValue<int>("memberId");
+                                var memberName = registration.GetValue<string>("memberName") ?? "";
+                                var topUp = await _paymentService.CreateInvoiceAsync(
+                                    competitionId,
+                                    memberId.ToString(),
+                                    memberName,
+                                    request.RegistrationId,
+                                    delta,
+                                    "Swish");
+                                if (topUp != null)
+                                {
+                                    topUpInvoiceId = topUp.Id;
+                                    feeChangeNote = $"Tilläggsfaktura skapad för {delta:0} kr (totalt: {newFee:0} kr; redan betalt: {sumPaid:0} kr).";
+                                }
+                                else
+                                {
+                                    feeChangeNote = $"Avgiften ökade till {newFee:0} kr men en tilläggsfaktura kunde inte skapas. Hantera manuellt.";
+                                }
+                            }
+                        }
+                        else if (delta == 0)
+                        {
+                            // Already fully covered. If there's a leftover Pending invoice
+                            // (e.g. a previous top-up that's no longer needed because a class
+                            // was removed), cancel it so the row stops nagging the operator.
+                            if (existingPending != null)
+                            {
+                                existingPending.SetValue("paymentStatus", "Cancelled");
+                                _contentService.Save(existingPending);
+                                _contentService.Publish(existingPending, new[] { "*" }, -1);
+                                feeChangeNote = $"Klassändringen täcks av befintliga betalningar ({sumPaid:0} kr). Tidigare väntande tilläggsfaktura har makulerats.";
+                            }
+                        }
+                        else // delta < 0
+                        {
+                            feeChangeNote = $"Avgiften minskade till {newFee:0} kr men {sumPaid:0} kr är redan betalt. Hantera återbetalning manuellt.";
+                        }
+                    }
                 }
+
+                return Json(new
+                {
+                    success = true,
+                    message = "Registration updated successfully",
+                    feeChangeNote,
+                    topUpInvoiceId
+                });
             }
             catch (Exception ex)
             {
@@ -230,16 +389,64 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// True when two ShootingClassEntry lists describe the same set of class codes
+        /// (order-independent). Used to skip the invoice re-compute when only e.g. start
+        /// preference changed.
+        /// </summary>
+        private static bool ClassListEquivalent(
+            List<HpskSite.Models.ShootingClassEntry> a,
+            List<HpskSite.Models.ShootingClassEntry> b)
+        {
+            if (a == null || b == null) return false;
+            if (a.Count != b.Count) return false;
+            var aSet = a.Select(x => x.Class?.Trim() ?? "").OrderBy(x => x).ToList();
+            var bSet = b.Select(x => x.Class?.Trim() ?? "").OrderBy(x => x).ToList();
+            return aSet.SequenceEqual(bSet);
+        }
+
+        /// <summary>
+        /// Look up the registrationInvoice document for a registration id, scoped to the
+        /// competition's invoicesHub. Matches both the new single-int registrationId field
+        /// and the legacy relatedRegistrationIds JSON array. Returns null when no match.
+        /// </summary>
+        private IContent? FindInvoiceForRegistration(IContent competition, int registrationId)
+        {
+            return GetAllInvoicesForRegistration(competition, registrationId).FirstOrDefault();
+        }
+
+        /// <summary>
+        /// Return EVERY non-cancelled invoice linked to a registration id, newest first.
+        /// A registration can have multiple invoices after one or more class adds (the
+        /// original invoice + one or more Paid top-ups + at most one Pending top-up). The
+        /// fee-recompute logic in UpdateCompetitionRegistration relies on summing across
+        /// all of them, not just the most recent.
+        /// </summary>
+        private List<IContent> GetAllInvoicesForRegistration(IContent competition, int registrationId)
+        {
+            var hub = _contentService.GetPagedChildren(competition.Id, 0, 100, out _)
+                .FirstOrDefault(c => c.ContentType.Alias == "registrationInvoicesHub");
+            if (hub == null) return new List<IContent>();
+
+            return _contentService.GetPagedChildren(hub.Id, 0, 1000, out _)
+                .Where(c => c.ContentType.Alias == "registrationInvoice")
+                .Where(c => c.GetValue<string>("paymentStatus") != "Cancelled")
+                .Where(c =>
+                {
+                    if (c.GetValue<int>("registrationId") == registrationId) return true;
+                    var related = c.GetValue<string>("relatedRegistrationIds") ?? "";
+                    return !string.IsNullOrEmpty(related)
+                        && ParseRegistrationIds(related).Contains(registrationId);
+                })
+                .OrderByDescending(c => c.Id)
+                .ToList();
+        }
+
+        /// <summary>
         /// Delete a competition registration
         /// </summary>
         [HttpPost]
         public async Task<IActionResult> DeleteCompetitionRegistration([FromBody] DeleteRegistrationRequest request)
         {
-            if (!await _authService.IsCurrentUserAdminAsync())
-            {
-                return Json(new { success = false, message = "Access denied" });
-            }
-
             try
             {
                 var registration = _contentService.GetById(request.RegistrationId);
@@ -247,6 +454,28 @@ namespace HpskSite.Controllers
                 {
                     return Json(new { success = false, message = "Registration not found" });
                 }
+
+                // Four-tier auth — same rule as the rest of the per-competition surface so the
+                // cashier (club admin / competition manager / skjutledare) can delete from the
+                // desk, not just site admins.
+                var competitionId = registration.GetValue<int>("competitionId");
+                var competition = competitionId > 0 ? _contentService.GetById(competitionId) : null;
+                bool authorized = await _authService.IsCurrentUserAdminAsync();
+                if (!authorized && competition != null)
+                {
+                    authorized = await _authService.IsCompetitionManager(competitionId);
+                    if (!authorized)
+                    {
+                        var clubId = competition.GetValue<int>("clubId");
+                        if (clubId > 0)
+                        {
+                            authorized = await _authService.IsClubAdminForClub(clubId)
+                                      || await _authService.IsSkjutledareForClub(clubId);
+                        }
+                    }
+                }
+                if (!authorized)
+                    return Json(new { success = false, message = "Access denied" });
 
                 var result = _contentService.Delete(registration);
                 if (result.Success)
@@ -705,13 +934,24 @@ namespace HpskSite.Controllers
         #region Request Models
 
         /// <summary>
-        /// Request model for updating registration
+        /// Request model for updating a registration. ShootingClasses (when present) overwrites
+        /// the registration's class list and triggers a re-compute of the linked invoice's fee
+        /// for Pending invoices. StartPreference (when present) is applied to every class on
+        /// the registration. Either field may be omitted to leave the corresponding state alone.
         /// </summary>
         public class UpdateRegistrationRequest
         {
             public int RegistrationId { get; set; }
             public string? StartPreference { get; set; }
-            public bool IsActive { get; set; }
+            public List<UpdateRegistrationClass>? ShootingClasses { get; set; }
+            public bool IsSubCompetition { get; set; } // mirrors the registration's existing flag
+        }
+
+        /// <summary>One class entry in an UpdateRegistrationRequest.</summary>
+        public class UpdateRegistrationClass
+        {
+            public string Class { get; set; } = "";
+            public string? StartPreference { get; set; }
         }
 
         /// <summary>
