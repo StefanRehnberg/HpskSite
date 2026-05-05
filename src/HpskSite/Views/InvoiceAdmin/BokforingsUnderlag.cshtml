@@ -155,6 +155,9 @@
 </table>
 
 @* ── Paid transactions (the headline list for bookkeeping) ──── *@
+@{
+    var anyPaidVariance = Model.PaidTransactions.Any(t => t.HasVariance);
+}
 <h2>Inkomna betalningar</h2>
 
 <table class="acc">
@@ -165,13 +168,17 @@
             <th>Klubb</th>
             <th>Metod</th>
             <th>Referens</th>
-            <th class="num">Belopp</th>
+            <th class="num">Faktura</th>
+            @if (anyPaidVariance)
+            {
+                <th class="num">Faktiskt</th>
+            }
         </tr>
     </thead>
     <tbody>
         @if (!Model.PaidTransactions.Any())
         {
-            <tr><td colspan="6" class="muted">Inga betalningar registrerade än.</td></tr>
+            <tr><td colspan="@(anyPaidVariance ? 7 : 6)" class="muted">Inga betalningar registrerade än.</td></tr>
         }
         else
         {
@@ -184,17 +191,27 @@
                     <td>@(t.PaymentMethod ?? "")</td>
                     <td>@(t.TransactionId ?? t.InvoiceNumber ?? "")</td>
                     <td class="num">@FormatKr(t.Amount)</td>
+                    @if (anyPaidVariance)
+                    {
+                        <td class="num">@(t.HasVariance ? FormatKr(t.RecordedAmount) : "")</td>
+                    }
                 </tr>
             }
         }
     </tbody>
     <tfoot>
         <tr>
-            <td colspan="5">Totalt</td>
+            <td colspan="@(anyPaidVariance ? 6 : 5)">Totalt</td>
             <td class="num">@FormatKr(Model.Summary.PaidTotal)</td>
         </tr>
     </tfoot>
 </table>
+@if (anyPaidVariance)
+{
+    <div class="muted" style="font-size:10px;margin-top:-8px;margin-bottom:8px;">
+        Avvikande belopp ("Faktiskt" ≠ "Faktura") är registrerade när kassören noterade en annan summa än det fakturerade beloppet, t.ex. vid kontant­avrundning eller delbetalning. Bokföringstotalen använder det faktiska beloppet.
+    </div>
+}
 
 @* ── Refunded ──────────────────────────────────────────────── *@
 @if (Model.RefundedTransactions.Any())

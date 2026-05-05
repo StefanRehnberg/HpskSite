@@ -795,6 +795,7 @@ namespace HpskSite.Controllers
                     MemberName = inv.GetValue<string>("memberName") ?? "",
                     ClubName = clubName,
                     Amount = inv.GetValue<decimal>("totalAmount"),
+                    ActualAmount = inv.GetValue<decimal?>("actualPaidAmount"),
                     PaymentStatus = CleanStatus(inv.GetValue<string>("paymentStatus") ?? "Pending"),
                     PaymentMethod = inv.GetValue<string>("paymentMethod"),
                     PaymentDate = inv.GetValue<DateTime?>("paymentDate"),
@@ -819,12 +820,12 @@ namespace HpskSite.Controllers
                 NoInvoiceCount = Math.Max(0, registrations.Count - allRows.Count(r => r.PaymentStatus != "Cancelled")),
                 CancelledCount = cancelledRows.Count,
                 RefundedCount = refundedRows.Count,
-                PaidTotal = paidRows.Sum(r => r.Amount),
+                PaidTotal = paidRows.Sum(r => r.RecordedAmount),
                 PendingTotal = outstandingRows.Sum(r => r.Amount),
-                RefundedTotal = refundedRows.Sum(r => r.Amount),
+                RefundedTotal = refundedRows.Sum(r => r.RecordedAmount),
                 PaidByMethod = paidRows
                     .GroupBy(r => string.IsNullOrEmpty(r.PaymentMethod) ? "Okänd" : r.PaymentMethod!)
-                    .ToDictionary(g => g.Key, g => g.Sum(r => r.Amount)),
+                    .ToDictionary(g => g.Key, g => g.Sum(r => r.RecordedAmount)),
                 PaidCountByMethod = paidRows
                     .GroupBy(r => string.IsNullOrEmpty(r.PaymentMethod) ? "Okänd" : r.PaymentMethod!)
                     .ToDictionary(g => g.Key, g => g.Count())

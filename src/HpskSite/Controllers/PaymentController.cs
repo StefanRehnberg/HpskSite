@@ -125,7 +125,8 @@ namespace HpskSite.Controllers
             DateTime? paymentDate = null,
             string? transactionId = null,
             string? notes = null,
-            string? paymentMethod = null)
+            string? paymentMethod = null,
+            decimal? actualAmount = null)
         {
             try
             {
@@ -160,7 +161,7 @@ namespace HpskSite.Controllers
                 }
 
                 var success = await _paymentService.UpdatePaymentStatusAsync(
-                    invoiceId, paymentStatus, paymentDate, transactionId, notes, paymentMethod, actorId, actorName);
+                    invoiceId, paymentStatus, paymentDate, transactionId, notes, paymentMethod, actorId, actorName, actualAmount);
 
                 if (success)
                 {

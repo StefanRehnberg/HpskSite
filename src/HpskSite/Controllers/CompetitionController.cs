@@ -1306,8 +1306,9 @@ namespace HpskSite.Controllers
                 var paymentAmountMap = new Dictionary<int, decimal>();     // registrationId -> actionable invoice amount
                 var invoiceNumberMap = new Dictionary<int, string>();      // registrationId -> invoiceNumber (Swish reference)
                 var transactionIdMap = new Dictionary<int, string>();      // registrationId -> existing transactionId (if any)
-                var paidAmountMap = new Dictionary<int, decimal>();        // registrationId -> sum of all Paid invoices
+                var paidAmountMap = new Dictionary<int, decimal>();        // registrationId -> sum of actual paid amounts (fallback to billed)
                 var pendingAmountMap = new Dictionary<int, decimal>();     // registrationId -> sum of all Pending invoices
+                var hasVarianceMap = new Dictionary<int, bool>();          // registrationId -> any paid invoice where actual != billed
                 if (invoicesHub != null)
                 {
                     var allInvoices = _contentService.GetPagedChildren(invoicesHub.Id, 0, 1000, out _)
@@ -1322,6 +1323,12 @@ namespace HpskSite.Controllers
                         var invoiceAmount = invoice.GetValue<decimal>("totalAmount");
                         var invoiceNumber = invoice.GetValue<string>("invoiceNumber") ?? "";
                         var transactionId = invoice.GetValue<string>("transactionId") ?? "";
+                        // actualPaidAmount is set when the cashier records a sum that differs from
+                        // the billed total (cash rounding, partial settlement). Fall back to the
+                        // billed amount when not set so legacy paid invoices still total correctly.
+                        var actualPaid = invoice.GetValue<decimal?>("actualPaidAmount");
+                        var paidContribution = actualPaid ?? invoiceAmount;
+                        var paidVariance = actualPaid.HasValue && actualPaid.Value != invoiceAmount;
 
                         // Check new property first (registrationId - single integer)
                         var invoiceRegistrationId = invoice.GetValue<int>("registrationId");
@@ -1329,7 +1336,10 @@ namespace HpskSite.Controllers
                         {
                             // Aggregate totals across ALL invoices for this registration
                             if (invoiceStatus == "Paid")
-                                paidAmountMap[invoiceRegistrationId] = paidAmountMap.GetValueOrDefault(invoiceRegistrationId) + invoiceAmount;
+                            {
+                                paidAmountMap[invoiceRegistrationId] = paidAmountMap.GetValueOrDefault(invoiceRegistrationId) + paidContribution;
+                                if (paidVariance) hasVarianceMap[invoiceRegistrationId] = true;
+                            }
                             else if (invoiceStatus == "Pending")
                                 pendingAmountMap[invoiceRegistrationId] = pendingAmountMap.GetValueOrDefault(invoiceRegistrationId) + invoiceAmount;
 
@@ -1354,10 +1364,17 @@ namespace HpskSite.Controllers
                             var perRegAmount = registrationIds.Count > 0
                                 ? invoiceAmount / registrationIds.Count
                                 : invoiceAmount;
+                            // Split actual amount the same way for variance reporting.
+                            var perRegActual = registrationIds.Count > 0
+                                ? paidContribution / registrationIds.Count
+                                : paidContribution;
                             foreach (var regId in registrationIds)
                             {
                                 if (invoiceStatus == "Paid")
-                                    paidAmountMap[regId] = paidAmountMap.GetValueOrDefault(regId) + perRegAmount;
+                                {
+                                    paidAmountMap[regId] = paidAmountMap.GetValueOrDefault(regId) + perRegActual;
+                                    if (paidVariance) hasVarianceMap[regId] = true;
+                                }
                                 else if (invoiceStatus == "Pending")
                                     pendingAmountMap[regId] = pendingAmountMap.GetValueOrDefault(regId) + perRegAmount;
 
@@ -1464,6 +1481,7 @@ namespace HpskSite.Controllers
                         var existingTxnId = transactionIdMap.TryGetValue(content.Id, out var txnId) ? txnId : "";
                         var paidAmount = paidAmountMap.TryGetValue(content.Id, out var pa) ? pa : 0m;
                         var pendingAmount = pendingAmountMap.TryGetValue(content.Id, out var pe) ? pe : 0m;
+                        var hasVariance = hasVarianceMap.TryGetValue(content.Id, out var hv) && hv;
 
                         // Get shooting classes (new JSON array format)
                         var shootingClassesJson = content.GetValue<string>("shootingClasses");
@@ -1492,7 +1510,8 @@ namespace HpskSite.Controllers
                             invoiceNumber = invoiceNumber,
                             transactionId = existingTxnId,
                             paidAmount = paidAmount,
-                            pendingAmount = pendingAmount
+                            pendingAmount = pendingAmount,
+                            hasVariance = hasVariance
                         };
                     })
                     .OrderBy(r => r.memberName)

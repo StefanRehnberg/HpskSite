@@ -399,6 +399,15 @@
                 </div>
                 <input type="hidden" id="markPaidInvoiceId" />
                 <input type="hidden" id="markPaidRegistrationId" />
+                <input type="hidden" id="markPaidInvoiceAmount" />
+
+                <div class="mb-3">
+                    <label for="markPaidActualAmount" class="form-label">Faktiskt belopp (kr)</label>
+                    <input type="number" min="0" step="1" class="form-control" id="markPaidActualAmount" oninput="updateMarkPaidVariance()" />
+                    <small id="markPaidVarianceNote" class="form-text text-warning d-none">
+                        <i class="bi bi-exclamation-triangle me-1"></i>Avviker från fakturabeloppet — <span id="markPaidVarianceDelta"></span>
+                    </small>
+                </div>
 
                 <div class="mb-3">
                     <label for="markPaidMethod" class="form-label">Betalningsmetod</label>
@@ -828,6 +837,11 @@ function displayCompetitionRegistrations() {
                 <span class="badge ${getPaymentStatusBadgeClass(reg.paymentStatus)}">
                     ${getPaymentStatusText(reg.paymentStatus)}
                 </span>
+                ${reg.hasVariance ? `
+                    <span class="badge bg-warning text-dark ms-1" title="Faktiskt belopp avviker från fakturabeloppet">
+                        <i class="bi bi-exclamation-triangle me-1"></i>Avvikande belopp
+                    </span>
+                ` : ''}
                 ${invoiceRef}
             </td>
             <td>
@@ -1234,13 +1248,17 @@ function markAsPaid(registrationId) {
     // ID from a callback) if one was already recorded; otherwise drop in the invoice
     // number, which is exactly what the payer sees as the Swish reference. Saves the
     // cashier from typing/pasting it from the Swish notification.
+    const billed = Math.round(Number(reg.paymentAmount) || 0);
     document.getElementById('markPaidInvoiceId').value = reg.invoiceId;
     document.getElementById('markPaidRegistrationId').value = reg.id;
+    document.getElementById('markPaidInvoiceAmount').value = billed;
     document.getElementById('markPaidShooterName').textContent = reg.memberName || '';
-    document.getElementById('markPaidAmount').textContent = Math.round(Number(reg.paymentAmount) || 0);
+    document.getElementById('markPaidAmount').textContent = billed;
+    document.getElementById('markPaidActualAmount').value = billed;
     document.getElementById('markPaidMethod').value = 'Swish';
     document.getElementById('markPaidTransactionId').value = reg.transactionId || reg.invoiceNumber || '';
     document.getElementById('markPaidNotes').value = '';
+    updateMarkPaidVariance();
 
     const modalEl = document.getElementById('markAsPaidModal');
     if (!markPaidModalInstance) {
@@ -1262,6 +1280,21 @@ function markAsPaid(registrationId) {
     markPaidModalInstance.show();
 }
 
+function updateMarkPaidVariance() {
+    const billed = Number(document.getElementById('markPaidInvoiceAmount').value) || 0;
+    const actual = Number(document.getElementById('markPaidActualAmount').value) || 0;
+    const note = document.getElementById('markPaidVarianceNote');
+    const deltaSpan = document.getElementById('markPaidVarianceDelta');
+    if (Math.abs(actual - billed) < 0.005) {
+        note.classList.add('d-none');
+        return;
+    }
+    const diff = actual - billed;
+    const sign = diff > 0 ? '+' : '−';
+    deltaSpan.textContent = `${sign}${Math.abs(Math.round(diff))} kr`;
+    note.classList.remove('d-none');
+}
+
 function confirmMarkAsPaid() {
     const invoiceId = document.getElementById('markPaidInvoiceId').value;
     if (!invoiceId) return;
@@ -1270,14 +1303,24 @@ function confirmMarkAsPaid() {
     const dateStr = document.getElementById('markPaidDate').value;
     const transactionId = document.getElementById('markPaidTransactionId').value.trim();
     const notesField = document.getElementById('markPaidNotes').value.trim();
+    const billed = Number(document.getElementById('markPaidInvoiceAmount').value) || 0;
+    const actualRaw = document.getElementById('markPaidActualAmount').value;
+    const actualAmount = actualRaw === '' ? billed : Number(actualRaw);
+    if (!Number.isFinite(actualAmount) || actualAmount < 0) {
+        alert('Ogiltigt belopp.');
+        return;
+    }
+    const variance = Math.abs(actualAmount - billed) >= 0.005;
 
     // Build a default note that captures method + reference if the user didn't write one.
     // Surfaces enough context in the invoice's notes field that a future reader can tell
-    // who marked it paid and how.
+    // who marked it paid and how. Variance is recorded so the audit trail explains why
+    // the recorded amount differs from the invoice total.
     const noteParts = [];
     if (notesField) noteParts.push(notesField);
     noteParts.push(`Markerad som betald — ${method}`);
     if (transactionId) noteParts.push(`Ref: ${transactionId}`);
+    if (variance) noteParts.push(`Faktiskt: ${Math.round(actualAmount)} kr (faktura: ${Math.round(billed)} kr)`);
     const finalNotes = noteParts.join(' | ');
 
     const btn = document.getElementById('markPaidConfirmBtn');
@@ -1292,6 +1335,7 @@ function confirmMarkAsPaid() {
     if (transactionId) params.append('transactionId', transactionId);
     params.append('notes', finalNotes);
     params.append('paymentMethod', method);
+    params.append('actualAmount', actualAmount);
 
     fetch('/umbraco/surface/Payment/UpdatePaymentStatus', {
         method: 'POST',

@@ -59,11 +59,19 @@ namespace HpskSite.Models.ViewModels
         public string MemberName { get; set; } = "";
         public string? ClubName { get; set; }
         public decimal Amount { get; set; }
+        /// <summary>Actual amount recorded at mark-as-paid time. Null when no variance was
+        /// recorded (treat as equal to <see cref="Amount"/> for totalling purposes).</summary>
+        public decimal? ActualAmount { get; set; }
         public string PaymentStatus { get; set; } = "";
         public string? PaymentMethod { get; set; }
         public DateTime? PaymentDate { get; set; }
         public DateTime? CreatedDate { get; set; }
         public string? TransactionId { get; set; }
         public string? Notes { get; set; }
+
+        /// <summary>The amount that should appear in bookkeeping totals — actual when set,
+        /// otherwise the billed amount. Lets every consumer use one rule.</summary>
+        public decimal RecordedAmount => ActualAmount ?? Amount;
+        public bool HasVariance => ActualAmount.HasValue && ActualAmount.Value != Amount;
     }
 }

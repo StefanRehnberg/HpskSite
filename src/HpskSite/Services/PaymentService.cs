@@ -463,7 +463,8 @@ namespace HpskSite.Services
             string? notes = null,
             string? paymentMethod = null,
             int? actorMemberId = null,
-            string? actorMemberName = null)
+            string? actorMemberName = null,
+            decimal? actualAmount = null)
         {
             try
             {
@@ -484,6 +485,13 @@ namespace HpskSite.Services
                 if (!string.IsNullOrEmpty(paymentMethod))
                     invoice.SetValue("paymentMethod", paymentMethod);
 
+                // Cashier may record an actual amount different from the invoice total
+                // (cash rounding, partial settlement, etc). The invoice's totalAmount is
+                // never overwritten — it remains the billed amount; the actualPaidAmount
+                // property is the recorded receipt for bookkeeping.
+                if (actualAmount.HasValue)
+                    invoice.SetValue("actualPaidAmount", actualAmount.Value);
+
                 var saveResult = _contentService.Save(invoice);
                 if (!saveResult.Success) return false;
 
@@ -492,7 +500,8 @@ namespace HpskSite.Services
                 // Log audit event for this state transition. Best effort — the underlying
                 // status update already succeeded and we don't want to fail it on audit issues.
                 var competitionId = invoice.GetValue<int>("competitionId");
-                var amount = invoice.GetValue<decimal>("totalAmount");
+                var billedAmount = invoice.GetValue<decimal>("totalAmount");
+                var loggedAmount = actualAmount ?? billedAmount;
                 var refForLog = !string.IsNullOrEmpty(transactionId)
                     ? transactionId
                     : invoice.GetValue<string>("invoiceNumber");
@@ -503,7 +512,7 @@ namespace HpskSite.Services
                     byMemberId: actorMemberId,
                     byMemberName: actorMemberName,
                     paymentMethod: paymentMethod,
-                    amount: amount,
+                    amount: loggedAmount,
                     reference: refForLog,
                     notes: notes);
 
