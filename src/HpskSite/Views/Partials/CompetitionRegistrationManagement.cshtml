@@ -479,9 +479,16 @@
                     <input type="text" class="form-control" id="markPaidTransactionId" placeholder="t.ex. Swish-referens, kvittonummer">
                 </div>
 
-                <div class="mb-0">
+                <div class="mb-3">
                     <label for="markPaidNotes" class="form-label">Anteckning <small class="text-muted">(valfritt)</small></label>
                     <textarea class="form-control" id="markPaidNotes" rows="2" placeholder="t.ex. 'Betalt vid registreringsbordet'"></textarea>
+                </div>
+
+                <div class="form-check mb-0">
+                    <input class="form-check-input" type="checkbox" id="markPaidSendReceipt">
+                    <label class="form-check-label" for="markPaidSendReceipt">
+                        Skicka kvitto via e-post till skytten
+                    </label>
                 </div>
             </div>
             <div class="modal-footer">
@@ -1308,6 +1315,10 @@ function markAsPaid(registrationId) {
     document.getElementById('markPaidMethod').value = 'Swish';
     document.getElementById('markPaidTransactionId').value = reg.transactionId || reg.invoiceNumber || '';
     document.getElementById('markPaidNotes').value = '';
+    // Receipt checkbox defaults to off — opt-in per payment so cash-only desks don't
+    // surprise members with an email about a payment they made in-person.
+    const receiptBox = document.getElementById('markPaidSendReceipt');
+    if (receiptBox) receiptBox.checked = false;
     updateMarkPaidVariance();
 
     const modalEl = document.getElementById('markAsPaidModal');
@@ -1377,6 +1388,8 @@ function confirmMarkAsPaid() {
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Sparar…';
 
+    const sendReceipt = document.getElementById('markPaidSendReceipt')?.checked === true;
+
     const token = $('input[name="__RequestVerificationToken"]').val();
     const params = new URLSearchParams();
     params.append('invoiceId', invoiceId);
@@ -1386,6 +1399,7 @@ function confirmMarkAsPaid() {
     params.append('notes', finalNotes);
     params.append('paymentMethod', method);
     params.append('actualAmount', actualAmount);
+    if (sendReceipt) params.append('sendReceipt', 'true');
 
     fetch('/umbraco/surface/Payment/UpdatePaymentStatus', {
         method: 'POST',
@@ -1400,6 +1414,12 @@ function confirmMarkAsPaid() {
         if (result.success) {
             markPaidModalInstance?.hide();
             loadCompetitionRegistrations();
+            // Receipt is best-effort. Surface the outcome so the operator knows whether
+            // it actually went out — silent failure here would defeat the point of the box.
+            if (result.receiptRequested && !result.receiptSent) {
+                alert('Betalningen registrerades, men kvittot kunde inte skickas: '
+                    + (result.receiptError || 'okänt fel'));
+            }
         } else {
             alert('Kunde inte uppdatera: ' + (result.message || 'okänt fel'));
         }
@@ -2216,6 +2236,7 @@ function renderInvoiceHistory(data) {
         Cancelled: 'Makulerad',
         Refunded: 'Återbetald',
         EmailSent: 'E-post skickad',
+        ReceiptSent: 'Kvitto skickat',
         Transferred: 'Överförd till annan skytt',
         StatusChanged: 'Status ändrad'
     })[t] || t;
@@ -2225,6 +2246,7 @@ function renderInvoiceHistory(data) {
         Cancelled: 'danger',
         Refunded: 'warning',
         EmailSent: 'info',
+        ReceiptSent: 'info',
         Transferred: 'warning',
         StatusChanged: 'secondary'
     })[t] || 'secondary';

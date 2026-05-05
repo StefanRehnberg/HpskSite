@@ -15,6 +15,7 @@ namespace HpskSite.Models
         public const string Cancelled      = "Cancelled";
         public const string Refunded       = "Refunded";
         public const string EmailSent      = "EmailSent";
+        public const string ReceiptSent    = "ReceiptSent";   // payment receipt emailed to the shooter after mark-as-paid
         public const string Transferred    = "Transferred";   // registration (and this invoice) re-pointed to a different member
         public const string StatusChanged  = "StatusChanged"; // catch-all for status flips that aren't one of the above
 

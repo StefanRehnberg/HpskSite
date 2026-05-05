@@ -1351,5 +1351,86 @@ namespace HpskSite.Services
 
             await SendEmailAsync(memberEmail, subject, body);
         }
+
+        /// <summary>
+        /// Send a payment receipt to the shooter after a cashier marks an invoice as paid.
+        /// Renders a small self-contained HTML body — no attachments, no QR — so the message
+        /// reads as a confirmation, not a payment request. The body covers: shooter, comp,
+        /// classes, billed/actual amount, method, reference, paid date and organizer.
+        ///
+        /// `actualAmount` is shown as a separate line only when it differs from `billedAmount`,
+        /// so a normal exact-match payment renders one amount line.
+        /// </summary>
+        public async Task SendPaymentReceiptAsync(
+            string memberEmail,
+            string memberName,
+            string competitionName,
+            string organizerName,
+            DateTime paidAt,
+            string shootingClasses,
+            decimal billedAmount,
+            decimal actualAmount,
+            string paymentMethod,
+            string reference,
+            string invoiceNumber)
+        {
+            if (string.IsNullOrEmpty(_smtpHost))
+            {
+                _logger.LogWarning("SMTP host not configured. Receipt not sent to {Email}", memberEmail);
+                return;
+            }
+
+            var sv = System.Globalization.CultureInfo.GetCultureInfo("sv-SE");
+            string FormatKr(decimal v) => Math.Round(v).ToString("N0", sv) + " kr";
+            var paidLabel = paidAt.ToString("yyyy-MM-dd HH:mm", sv);
+            var subject = $"Kvitto – {competitionName}";
+
+            // Variance line only when actual differs from billed; keeps the common case clean.
+            var amountRows = Math.Abs(actualAmount - billedAmount) < 0.005m
+                ? $@"<tr><td><strong>Belopp:</strong></td><td>{FormatKr(billedAmount)}</td></tr>"
+                : $@"<tr><td><strong>Fakturerat belopp:</strong></td><td>{FormatKr(billedAmount)}</td></tr>
+                     <tr><td><strong>Faktiskt betalt:</strong></td><td>{FormatKr(actualAmount)}</td></tr>";
+
+            var body = $@"<html>
+<head>
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.5; color: #333; }}
+        .container {{ max-width: 560px; margin: 0 auto; padding: 16px; }}
+        .header {{ background:#198754; color:#fff; padding:18px; border-radius:5px 5px 0 0; }}
+        .header h2 {{ margin:0; font-size:20px; }}
+        .content {{ background:#f8f9fa; border:1px solid #dee2e6; padding:24px; border-radius:0 0 5px 5px; }}
+        table.kv {{ width:100%; border-collapse:collapse; margin:14px 0; }}
+        table.kv td {{ padding:6px 8px; border-bottom:1px solid #e9ecef; vertical-align:top; }}
+        table.kv td:first-child {{ width:42%; color:#495057; }}
+        .footer {{ margin-top:18px; font-size:12px; color:#6c757d; text-align:center; }}
+    </style>
+</head>
+<body>
+    <div class='container'>
+        <div class='header'><h2>✓ Kvitto för betalning</h2></div>
+        <div class='content'>
+            <p>Hej {System.Net.WebUtility.HtmlEncode(memberName)}!</p>
+            <p>Tack för din betalning till <strong>{System.Net.WebUtility.HtmlEncode(competitionName)}</strong>.
+               Detta är ditt kvitto.</p>
+            <table class='kv'>
+                <tr><td><strong>Skytt:</strong></td><td>{System.Net.WebUtility.HtmlEncode(memberName)}</td></tr>
+                <tr><td><strong>Tävling:</strong></td><td>{System.Net.WebUtility.HtmlEncode(competitionName)}</td></tr>
+                {(string.IsNullOrEmpty(organizerName) ? "" : $"<tr><td><strong>Arrangör:</strong></td><td>{System.Net.WebUtility.HtmlEncode(organizerName)}</td></tr>")}
+                {(string.IsNullOrEmpty(shootingClasses) ? "" : $"<tr><td><strong>Klasser:</strong></td><td>{System.Net.WebUtility.HtmlEncode(shootingClasses)}</td></tr>")}
+                <tr><td><strong>Betaldatum:</strong></td><td>{paidLabel}</td></tr>
+                <tr><td><strong>Betalningsmetod:</strong></td><td>{System.Net.WebUtility.HtmlEncode(paymentMethod ?? "")}</td></tr>
+                {amountRows}
+                {(string.IsNullOrEmpty(reference) ? "" : $"<tr><td><strong>Referens:</strong></td><td>{System.Net.WebUtility.HtmlEncode(reference)}</td></tr>")}
+                {(string.IsNullOrEmpty(invoiceNumber) ? "" : $"<tr><td><strong>Fakturanummer:</strong></td><td>{System.Net.WebUtility.HtmlEncode(invoiceNumber)}</td></tr>")}
+            </table>
+            <p>Spara gärna detta kvitto för dina egna handlingar.</p>
+        </div>
+        <div class='footer'>Pistol.nu — automatiskt skickat kvitto. Svara ej på detta mejl.</div>
+    </div>
+</body>
+</html>";
+
+            await SendEmailAsync(memberEmail, subject, body);
+        }
     }
 }
