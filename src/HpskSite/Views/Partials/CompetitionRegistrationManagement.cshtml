@@ -480,13 +480,67 @@
                     </div>
                 </form>
             </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+            <div class="modal-footer flex-wrap gap-2">
                 <button type="button" class="btn btn-danger me-auto" onclick="deleteCompetitionRegistration()">
                     <i class="bi bi-trash me-1"></i>Ta bort anmälan
                 </button>
+                <button type="button" class="btn btn-outline-warning" onclick="openTransferRegistrationModal()" title="Överför hela anmälan till en annan skytt (t.ex. när en kompis tar platsen)">
+                    <i class="bi bi-arrow-left-right me-1"></i>Överför till annan skytt
+                </button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
                 <button type="button" class="btn btn-primary" onclick="saveCompetitionRegistrationChanges()">
                     <i class="bi bi-check-circle me-1"></i>Spara ändringar
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Transfer Registration Modal — re-points an existing registration (and its
+     linked invoices) to a different member. Used when shooter A drops out and
+     shooter B takes their spot at the desk. -->
+<div class="modal fade" id="transferRegistrationModal" tabindex="-1" aria-labelledby="transferRegistrationModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-warning">
+                <h5 class="modal-title" id="transferRegistrationModalLabel">
+                    <i class="bi bi-arrow-left-right me-2"></i>Överför anmälan
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="transferRegistrationId" />
+
+                <div class="alert alert-light mb-3">
+                    <small class="text-muted d-block">Från</small>
+                    <strong id="transferFromName"></strong>
+                </div>
+
+                <p class="text-muted small mb-3">
+                    Klasser, anmälningstid och eventuell betalning följer med. Eventuella
+                    fakturor pekas om till den nya skytten — historiken bevaras i
+                    betalningshistoriken.
+                </p>
+
+                <div class="mb-3">
+                    <label for="transferMemberSearch" class="form-label fw-bold">Sök ny skytt</label>
+                    <input type="text" class="form-control" id="transferMemberSearch"
+                           placeholder="Skriv namn eller e-post (minst 2 tecken)" autocomplete="off">
+                    <div id="transferMemberResults" class="list-group mt-2" style="max-height: 220px; overflow-y: auto;"></div>
+                </div>
+
+                <div class="mb-0">
+                    <label class="form-label fw-bold">Vald ny skytt</label>
+                    <div id="transferSelectedMember" class="form-control-plaintext text-muted">Ingen vald än</div>
+                    <input type="hidden" id="transferSelectedMemberId" value="">
+                </div>
+
+                <div id="transferError" class="alert alert-danger mt-3 d-none"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-warning" id="transferSubmitBtn" onclick="confirmTransferRegistration()" disabled>
+                    <i class="bi bi-check-circle me-1"></i>Överför anmälan
                 </button>
             </div>
         </div>
@@ -1760,6 +1814,155 @@ async function submitWalkInRegistration() {
 }
 
 // ──────────────────────────────────────────────────────────────────────
+// Transfer registration — re-points a registration (and its invoices) to
+// a different shooter. Used when shooter A drops out and shooter B takes
+// their spot. Member-search pattern mirrors the walk-in modal's.
+// ──────────────────────────────────────────────────────────────────────
+let transferModalInstance = null;
+let transferSearchTimer = null;
+
+function openTransferRegistrationModal() {
+    // Triggered from the Edit Registration modal's "Överför till annan skytt" button.
+    // We pull the registration id and name from the edit-modal hidden inputs (still
+    // populated at this point) so the operator doesn't lose context.
+    const regId = parseInt(document.getElementById('competitionEditRegistrationId').value, 10);
+    if (!regId) return;
+    const reg = competitionRegistrations.find(r => r.id === regId);
+    if (!reg) return;
+
+    document.getElementById('transferRegistrationId').value = regId;
+    document.getElementById('transferFromName').textContent =
+        reg.memberClub ? `${reg.memberName} (${reg.memberClub})` : reg.memberName || '';
+    document.getElementById('transferMemberSearch').value = '';
+    document.getElementById('transferMemberResults').innerHTML = '';
+    document.getElementById('transferSelectedMember').textContent = 'Ingen vald än';
+    document.getElementById('transferSelectedMember').classList.add('text-muted');
+    document.getElementById('transferSelectedMemberId').value = '';
+    document.getElementById('transferError').classList.add('d-none');
+    document.getElementById('transferSubmitBtn').disabled = true;
+
+    // Hide the edit modal first so the transfer modal stacks cleanly.
+    bootstrap.Modal.getInstance(document.getElementById('competitionEditRegistrationModal'))?.hide();
+
+    if (!transferModalInstance) {
+        transferModalInstance = new bootstrap.Modal(document.getElementById('transferRegistrationModal'));
+    }
+    setTimeout(() => {
+        transferModalInstance.show();
+        document.getElementById('transferMemberSearch').focus();
+    }, 250);
+}
+
+// Wire member-search + delegated click on the result list. Mirrors the walk-in pattern.
+document.addEventListener('DOMContentLoaded', () => {
+    const search = document.getElementById('transferMemberSearch');
+    if (search) {
+        search.addEventListener('input', () => {
+            clearTimeout(transferSearchTimer);
+            const query = search.value.trim();
+            const resultsBox = document.getElementById('transferMemberResults');
+            if (query.length < 2) {
+                resultsBox.innerHTML = '';
+                return;
+            }
+            transferSearchTimer = setTimeout(() => doTransferMemberSearch(query), 250);
+        });
+    }
+    const resultsBox = document.getElementById('transferMemberResults');
+    if (resultsBox) {
+        resultsBox.addEventListener('click', (e) => {
+            const btn = e.target.closest('.transfer-result');
+            if (!btn) return;
+            e.preventDefault();
+            const memberId = parseInt(btn.dataset.memberId, 10);
+            const memberName = btn.dataset.memberName || '';
+            const clubName = btn.dataset.clubName || '';
+            selectTransferMember(memberId, memberName, clubName);
+        });
+    }
+});
+
+function doTransferMemberSearch(query) {
+    const resultsBox = document.getElementById('transferMemberResults');
+    resultsBox.innerHTML = '<div class="list-group-item text-muted small"><span class="spinner-border spinner-border-sm me-1"></span>Söker...</div>';
+
+    fetch(`/umbraco/surface/TrainingGroup/SearchMembers?query=${encodeURIComponent(query)}`)
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) {
+                resultsBox.innerHTML = `<div class="list-group-item text-danger small">${data.message || 'Kunde inte söka'}</div>`;
+                return;
+            }
+            const results = data.data || [];
+            if (results.length === 0) {
+                resultsBox.innerHTML = '<div class="list-group-item text-muted small">Inga träffar</div>';
+                return;
+            }
+            resultsBox.innerHTML = results.map(m => `
+                <button type="button" class="list-group-item list-group-item-action transfer-result"
+                        data-member-id="${m.memberId}"
+                        data-member-name="${escapeWalkIn(m.memberName || '')}"
+                        data-club-name="${escapeWalkIn(m.clubName || '')}">
+                    <strong>${escapeWalkIn(m.memberName)}</strong>
+                    <small class="text-muted ms-2">${escapeWalkIn(m.clubName || '')}</small>
+                    <small class="text-muted d-block">${escapeWalkIn(m.email || '')}</small>
+                </button>`).join('');
+        })
+        .catch(err => {
+            console.error('Transfer member search failed:', err);
+            resultsBox.innerHTML = '<div class="list-group-item text-danger small">Sökningen misslyckades</div>';
+        });
+}
+
+function selectTransferMember(memberId, memberName, clubName) {
+    document.getElementById('transferSelectedMemberId').value = memberId;
+    const sel = document.getElementById('transferSelectedMember');
+    sel.textContent = clubName ? `${memberName} (${clubName})` : memberName;
+    sel.classList.remove('text-muted');
+    document.getElementById('transferMemberResults').innerHTML = '';
+    document.getElementById('transferMemberSearch').value = memberName;
+    document.getElementById('transferSubmitBtn').disabled = false;
+}
+
+async function confirmTransferRegistration() {
+    const registrationId = parseInt(document.getElementById('transferRegistrationId').value, 10);
+    const toMemberId = parseInt(document.getElementById('transferSelectedMemberId').value, 10);
+    if (!registrationId || !toMemberId) return;
+
+    const errBox = document.getElementById('transferError');
+    errBox.classList.add('d-none');
+    const btn = document.getElementById('transferSubmitBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Överför...';
+
+    try {
+        const token = $('input[name="__RequestVerificationToken"]').val();
+        const response = await fetch('/umbraco/surface/RegistrationAdmin/TransferRegistration', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': token
+            },
+            body: JSON.stringify({ registrationId, toMemberId })
+        });
+        const data = await response.json();
+        if (!data.success) {
+            errBox.textContent = data.message || 'Kunde inte överföra anmälan';
+            errBox.classList.remove('d-none');
+            return;
+        }
+        transferModalInstance?.hide();
+        loadCompetitionRegistrations();
+    } catch (err) {
+        errBox.textContent = 'Ett fel uppstod: ' + err.message;
+        errBox.classList.remove('d-none');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Överför anmälan';
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────
 // Invoice history modal — read-only timeline of audit events for one invoice.
 // ──────────────────────────────────────────────────────────────────────
 let invoiceHistoryModalInstance = null;
@@ -1805,6 +2008,7 @@ function renderInvoiceHistory(data) {
         Cancelled: 'Makulerad',
         Refunded: 'Återbetald',
         EmailSent: 'E-post skickad',
+        Transferred: 'Överförd till annan skytt',
         StatusChanged: 'Status ändrad'
     })[t] || t;
     const colorFor = t => ({
@@ -1813,6 +2017,7 @@ function renderInvoiceHistory(data) {
         Cancelled: 'danger',
         Refunded: 'warning',
         EmailSent: 'info',
+        Transferred: 'warning',
         StatusChanged: 'secondary'
     })[t] || 'secondary';
 

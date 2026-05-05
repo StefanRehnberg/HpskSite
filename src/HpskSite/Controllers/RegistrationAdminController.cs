@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Logging;
 using Umbraco.Cms.Core.Routing;
+using Umbraco.Cms.Core.Security;
 using Umbraco.Cms.Core.Services;
 using Umbraco.Cms.Core.Web;
 using Umbraco.Cms.Infrastructure.Persistence;
@@ -18,10 +19,12 @@ namespace HpskSite.Controllers
     public class RegistrationAdminController : SurfaceController
     {
         private readonly IMemberService _memberService;
+        private readonly IMemberManager _memberManager;
         private readonly IContentService _contentService;
         private readonly AdminAuthorizationService _authService;
         private readonly ClubService _clubService;
         private readonly PaymentService _paymentService;
+        private readonly InvoiceAuditService _auditService;
 
         public RegistrationAdminController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -31,17 +34,21 @@ namespace HpskSite.Controllers
             IProfilingLogger profilingLogger,
             IPublishedUrlProvider publishedUrlProvider,
             IMemberService memberService,
+            IMemberManager memberManager,
             IContentService contentService,
             AdminAuthorizationService authService,
             ClubService clubService,
-            PaymentService paymentService)
+            PaymentService paymentService,
+            InvoiceAuditService auditService)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _memberService = memberService;
+            _memberManager = memberManager;
             _contentService = contentService;
             _authService = authService;
             _clubService = clubService;
             _paymentService = paymentService;
+            _auditService = auditService;
         }
 
         #region Registration Management
@@ -607,6 +614,149 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// Transfer a registration from one member to another. Used when shooter A can't make
+        /// it and shooter B takes their spot at the desk. Updates the registration in-place
+        /// (preserving its id, classes, and any results-entry data linked by registrationId)
+        /// and re-points every linked invoice to the new member, so the cashier doesn't have
+        /// to delete + recreate (which would orphan the original payment).
+        ///
+        /// Auth: same four-tier rule as the rest of the per-competition surface.
+        /// Conflict: refuses if the target member already has their own registration.
+        /// </summary>
+        [HttpPost]
+        public async Task<IActionResult> TransferRegistration([FromBody] TransferRegistrationRequest request)
+        {
+            try
+            {
+                if (request == null || request.RegistrationId <= 0 || request.ToMemberId <= 0)
+                    return Json(new { success = false, message = "Ogiltiga parametrar." });
+
+                var registration = _contentService.GetById(request.RegistrationId);
+                if (registration == null)
+                    return Json(new { success = false, message = "Anmälan kunde inte hittas." });
+
+                var competitionId = registration.GetValue<int>("competitionId");
+                var competition = competitionId > 0 ? _contentService.GetById(competitionId) : null;
+                if (competition == null)
+                    return Json(new { success = false, message = "Tävlingen kunde inte hittas." });
+
+                // Four-tier auth
+                bool authorized = await _authService.IsCurrentUserAdminAsync()
+                    || await _authService.IsCompetitionManager(competitionId);
+                if (!authorized)
+                {
+                    var clubId = competition.GetValue<int>("clubId");
+                    if (clubId > 0)
+                    {
+                        authorized = await _authService.IsClubAdminForClub(clubId)
+                                  || await _authService.IsSkjutledareForClub(clubId);
+                    }
+                }
+                if (!authorized)
+                    return Json(new { success = false, message = "Access denied" });
+
+                // Resolve the new member
+                var toMember = _memberService.GetById(request.ToMemberId);
+                if (toMember == null)
+                    return Json(new { success = false, message = "Mottagande medlem kunde inte hittas." });
+
+                var fromMemberId = registration.GetValue<int>("memberId");
+                var fromMemberName = registration.GetValue<string>("memberName") ?? "";
+                if (fromMemberId == request.ToMemberId)
+                    return Json(new { success = false, message = "Anmälan är redan kopplad till denna medlem." });
+
+                // Conflict guard: target member can't already be registered for this competition
+                var existing = await CheckExistingRegistration(competitionId, request.ToMemberId);
+                if (existing != null && existing.Id != registration.Id)
+                {
+                    return Json(new
+                    {
+                        success = false,
+                        message = $"{toMember.Name} är redan anmäld till denna tävling. Slå ihop manuellt eller välj en annan mottagare."
+                    });
+                }
+
+                // Resolve the new member's club for the registration's clubId field
+                var toClubId = 0;
+                var toClubIdStr = toMember.GetValue<string>("primaryClubId");
+                if (!string.IsNullOrEmpty(toClubIdStr)) int.TryParse(toClubIdStr, out toClubId);
+                var toClubName = toClubId > 0 ? _clubService.GetClubNameById(toClubId) : null;
+
+                // Update the registration in-place. Don't touch shootingClasses or
+                // registrationDate — the spot, classes, and date all transfer to the new
+                // shooter as-is. Update the document's display Name so the backoffice tree
+                // shows the new shooter; preserve the original date in the suffix.
+                registration.SetValue("memberId", request.ToMemberId);
+                registration.SetValue("memberName", toMember.Name ?? "");
+                if (toClubId > 0) registration.SetValue("clubId", toClubId);
+                registration.Name = $"{toMember.Name} - {DateTime.Now:yyyy-MM-dd}";
+
+                var saveReg = _contentService.Save(registration);
+                if (!saveReg.Success)
+                    return Json(new { success = false, message = "Kunde inte spara den uppdaterade anmälan." });
+                _contentService.Publish(registration, new[] { "*" }, -1);
+
+                // Re-point every linked invoice. Each invoice's audit history gets a
+                // Transferred row capturing both the from and to members so the trail
+                // stays intact even after the invoice's own memberName/memberId are
+                // overwritten.
+                var (actorId, actorName) = await GetCurrentActorAsync();
+                var invoices = GetAllInvoicesForRegistration(competition, request.RegistrationId);
+                foreach (var inv in invoices)
+                {
+                    inv.SetValue("memberId", request.ToMemberId.ToString());
+                    inv.SetValue("memberName", toMember.Name ?? "");
+                    var saveInv = _contentService.Save(inv);
+                    if (saveInv.Success)
+                    {
+                        _contentService.Publish(inv, new[] { "*" }, -1);
+                        await _auditService.LogAsync(
+                            invoiceId: inv.Id,
+                            competitionId: competitionId,
+                            eventType: HpskSite.Models.InvoicePaymentEventTypes.Transferred,
+                            byMemberId: actorId,
+                            byMemberName: actorName,
+                            amount: inv.GetValue<decimal>("totalAmount"),
+                            reference: inv.GetValue<string>("invoiceNumber"),
+                            notes: $"Faktura överförd från {fromMemberName} (id {fromMemberId}) till {toMember.Name} (id {request.ToMemberId})");
+                    }
+                }
+
+                return Json(new
+                {
+                    success = true,
+                    message = $"Anmälan överförd från {fromMemberName} till {toMember.Name}.",
+                    registrationId = registration.Id,
+                    invoicesUpdated = invoices.Count
+                });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = "Ett fel uppstod vid överföring: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Resolve the current logged-in member to (id, name) for stamping audit rows.
+        /// Returns (null, null) when no member is logged in or the lookup fails.
+        /// </summary>
+        private async Task<(int? id, string? name)> GetCurrentActorAsync()
+        {
+            try
+            {
+                var current = await _memberManager.GetCurrentMemberAsync();
+                if (current == null) return (null, null);
+                var data = _memberService.GetByEmail(current.Email ?? string.Empty);
+                if (data == null) return (null, current.Name);
+                return (data.Id, data.Name ?? current.Name);
+            }
+            catch
+            {
+                return (null, null);
+            }
+        }
+
+        /// <summary>
         /// Check if a member is already registered for a competition
         /// </summary>
         private async Task<IContent?> CheckExistingRegistration(int competitionId, int memberId)
@@ -972,6 +1122,16 @@ namespace HpskSite.Controllers
             public string ShootingClass { get; set; } = "";
             public string? StartPreference { get; set; }
             public string? Notes { get; set; }
+        }
+
+        /// <summary>
+        /// Request model for transferring an existing registration to a different member.
+        /// FromMemberId is informational — the source is the registration's current owner.
+        /// </summary>
+        public class TransferRegistrationRequest
+        {
+            public int RegistrationId { get; set; }
+            public int ToMemberId { get; set; }
         }
 
         #endregion
