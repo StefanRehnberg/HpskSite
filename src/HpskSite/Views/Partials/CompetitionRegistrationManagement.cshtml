@@ -1213,12 +1213,15 @@ function renderEditDpSlotRows(registration) {
     renderDpSlotRows(host, checked, existingTeamByClass);
 }
 
-// Hook checkbox toggles in the Edit modal so per-class slot rows track what's ticked.
+// Hook checkbox toggles in the Edit modal: enforce mutex within the same bucket so
+// "swap C1 to C3" stays a swap (one ticked) instead of stacking two billable classes,
+// then re-render the per-class slot rows when direktplacering is enabled.
 document.addEventListener('DOMContentLoaded', () => {
     const list = document.getElementById('competitionEditClassList');
     if (!list) return;
     list.addEventListener('change', (e) => {
         if (!e.target.classList.contains('edit-class-cb')) return;
+        enforceClassMutex('#competitionEditClassList', e.target);
         if (!walkInDirektplaceringEnabled) return;
         const registrationId = parseInt(document.getElementById('competitionEditRegistrationId').value, 10);
         const reg = competitionRegistrations.find(r => r.id === registrationId);
@@ -1963,6 +1966,53 @@ async function refreshWalkInPatrolOptions() {
     }
 }
 
+// Mutual-exclusion bucket for a class id. Mirrors the public registration form's radio
+// groupings so a checkbox-style modal still treats "C1, C2, C3" as a swap, not a stack.
+//   "C1", "C2", "C3"             → "C:open"     (regular C — pick one)
+//   "C_Vet_Y", "C_Vet_A"         → "C:vet"      (vet C — pick one)
+//   "C_Jun"                      → "C:jun"
+//   "C1_Dam", "C2_Dam"           → "C:dam"
+//   "A_opt_1", "A_opt_2"         → "A_Opt:open"
+//   "A-D 21" (Springskytte)      → unique bucket per id (composite age/gender, no swap)
+//
+// When the operator ticks a class, anything already ticked in the same bucket is unticked
+// automatically. Two classes from *different* buckets (e.g. C1 + R1) stay independent.
+function getClassMutexBucket(classId) {
+    const id = String(classId || '');
+    if (!id) return '';
+    // Springskytte composite — each combination is its own bucket so multi-class still works.
+    if (id.includes('-')) return `springskytte:${id}`;
+
+    let weapon = id.charAt(0).toUpperCase();
+    if (/^A_opt/i.test(id)) weapon = 'A_Opt';
+
+    let subcat = 'open';
+    if (/_Jun(\b|$|_)/i.test(id)) subcat = 'jun';
+    else if (/_Vet_/i.test(id)) subcat = 'vet';
+    else if (/Dam/i.test(id)) subcat = 'dam';
+
+    return `${weapon}:${subcat}`;
+}
+
+// Apply mutex semantics within a checkbox container: when a checkbox is ticked, untick any
+// other checkbox sharing the same bucket. Returns true when the action mutated the DOM so
+// callers can re-render dependent UI (per-class slot rows, submit-button enabled state, …).
+function enforceClassMutex(containerSelector, justChanged) {
+    if (!justChanged || !justChanged.checked) return false;
+    const myBucket = getClassMutexBucket(justChanged.value);
+    if (!myBucket) return false;
+    let mutated = false;
+    document.querySelectorAll(`${containerSelector} input[type="checkbox"]`).forEach(cb => {
+        if (cb === justChanged) return;
+        if (!cb.checked) return;
+        if (getClassMutexBucket(cb.value) === myBucket) {
+            cb.checked = false;
+            mutated = true;
+        }
+    });
+    return mutated;
+}
+
 async function openWalkInRegistrationModal() {
     // Reset state
     document.getElementById('walkInMemberSearch').value = '';
@@ -2020,12 +2070,15 @@ async function openWalkInRegistrationModal() {
 }
 
 // Hook checkbox toggles after the modal builds its list so the per-class slot rows
-// stay in sync. Delegated listener on the container survives re-renders.
+// stay in sync. Delegated listener on the container survives re-renders. Auto-unticking
+// "siblings" in the same mutex bucket (C1 ↔ C2 ↔ C3, C_Vet_Y ↔ C_Vet_A, …) mirrors
+// the public registration form so swapping a class doesn't accidentally bill twice.
 document.addEventListener('DOMContentLoaded', () => {
     const list = document.getElementById('walkInClassList');
     if (!list) return;
     list.addEventListener('change', (e) => {
         if (!e.target.classList.contains('walk-in-class-cb')) return;
+        enforceClassMutex('#walkInClassList', e.target);
         if (walkInDirektplaceringEnabled) {
             const checked = Array.from(list.querySelectorAll('.walk-in-class-cb:checked'))
                 .map(cb => ({ id: cb.value, name: cb.dataset.className || cb.value }));
