@@ -1556,11 +1556,18 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         /// The endpoint reads the registration so the caller doesn't have to forward member /
         /// class / club details (they're already on the registration document).
         ///
-        /// Target hint resolution:
+        /// Multi-class registrations are handled by grouping classes by weapon group: each
+        /// weapon group resolves a target patrol independently (a shooter doing A1 + B1 lands
+        /// on a patrol for A and a patrol for B). Mutex in the walk-in form prevents two
+        /// classes in the same weapon group, but the dedupe below tolerates it just in case.
+        ///
+        /// Target hint resolution (applied per weapon group):
         ///   "nextAvailable" — highest-numbered existing patrol whose WeaponGroup matches the
-        ///                     shooter (or no group set); creates patrol #1 when none exist.
-        ///   "newPatrol"     — always creates a new appended patrol with the shooter's group.
-        ///   "&lt;patrolId&gt;"     — uses the explicit patrol; trusted to be in the same competition.
+        ///                     shooter (or no group set); creates a new patrol when none exist.
+        ///   "newPatrol"     — always creates a new appended patrol with this group.
+        ///   "&lt;patrolId&gt;"     — uses the explicit patrol when its WeaponGroup matches this
+        ///                     class's group (or the patrol has no group set); otherwise
+        ///                     falls back to "nextAvailable" semantics for that group.
         /// </summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
@@ -1575,11 +1582,12 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
 
             var shootingClassesJson = registration.GetValue<string>("shootingClasses") ?? "";
             var shootingClasses = CompetitionRegistrationDocument.DeserializeShootingClasses(shootingClassesJson);
-            var firstClass = shootingClasses.FirstOrDefault()?.Class ?? "";
-            if (string.IsNullOrEmpty(firstClass))
+            var validClasses = shootingClasses
+                .Where(sc => !string.IsNullOrEmpty(sc.Class))
+                .ToList();
+            if (validClasses.Count == 0)
                 return Json(new { success = false, message = "Anmälan saknar vapenklass." });
 
-            var weaponGroup = ShootingClasses.GetWeaponClassCode(firstClass) ?? "";
             var memberId = registration.GetValue<int>("memberId");
             var memberName = registration.GetValue<string>("memberName") ?? "";
             var clubId = registration.GetValue<int>("clubId");
@@ -1587,84 +1595,122 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
 
             using var db = _umbracoDatabaseFactory.CreateDatabase();
 
-            int patrolId;
-            int patrolNumber;
-            bool createdNewPatrol = false;
-
-            if (request.Target == "newPatrol")
+            // If the operator picked an explicit patrol, look up its group once so we can
+            // tell per class whether it's the right home or whether the class needs a fresh
+            // resolution by its own weapon group.
+            int? explicitPatrolId = null;
+            string explicitPatrolGroup = "";
+            if (int.TryParse(request.Target, out var pickedId) && pickedId > 0)
             {
-                patrolId = await CreateAppendedPatrolAsync(db, request.CompetitionId, weaponGroup);
-                patrolNumber = await db.ExecuteScalarAsync<int>(
-                    "SELECT PatrolNumber FROM FaltskyttePatrol WHERE Id = @0", patrolId);
-                createdNewPatrol = true;
-            }
-            else if (int.TryParse(request.Target, out var explicitId) && explicitId > 0)
-            {
-                patrolId = explicitId;
-                patrolNumber = await db.ExecuteScalarAsync<int>(
-                    "SELECT ISNULL(PatrolNumber, 0) FROM FaltskyttePatrol WHERE Id = @0 AND CompetitionId = @1",
-                    patrolId, request.CompetitionId);
-                if (patrolNumber == 0)
+                var picked = await db.FirstOrDefaultAsync<FaltskyttePatrol>(
+                    "WHERE Id = @0 AND CompetitionId = @1", pickedId, request.CompetitionId);
+                if (picked == null)
                     return Json(new { success = false, message = "Patrullen kunde inte hittas." });
+                explicitPatrolId = picked.Id;
+                explicitPatrolGroup = picked.WeaponGroup ?? "";
             }
-            else // "nextAvailable" (default)
-            {
-                var existing = await db.FetchAsync<FaltskyttePatrol>(
-                    @"WHERE CompetitionId = @0
-                      AND (WeaponGroup = @1 OR WeaponGroup = '' OR WeaponGroup IS NULL)
-                      ORDER BY PatrolNumber DESC",
-                    request.CompetitionId, weaponGroup);
 
-                if (existing.Any())
-                {
-                    patrolId = existing.First().Id;
-                    patrolNumber = existing.First().PatrolNumber;
-                }
-                else
+            // Group classes by weapon group; each group lands on its own patrol.
+            var classesByGroup = validClasses
+                .GroupBy(sc => ShootingClasses.GetWeaponClassCode(sc.Class) ?? "")
+                .ToList();
+
+            var assignments = new List<object>();
+            foreach (var grp in classesByGroup)
+            {
+                var weaponGroup = grp.Key;
+                int patrolId;
+                int patrolNumber;
+                bool createdNew = false;
+
+                if (request.Target == "newPatrol")
                 {
                     patrolId = await CreateAppendedPatrolAsync(db, request.CompetitionId, weaponGroup);
                     patrolNumber = await db.ExecuteScalarAsync<int>(
                         "SELECT PatrolNumber FROM FaltskyttePatrol WHERE Id = @0", patrolId);
-                    createdNewPatrol = true;
+                    createdNew = true;
                 }
+                else if (explicitPatrolId.HasValue
+                    && (string.IsNullOrEmpty(explicitPatrolGroup) || explicitPatrolGroup == weaponGroup))
+                {
+                    patrolId = explicitPatrolId.Value;
+                    patrolNumber = await db.ExecuteScalarAsync<int>(
+                        "SELECT PatrolNumber FROM FaltskyttePatrol WHERE Id = @0", patrolId);
+                }
+                else // "nextAvailable" — also the fallback when the explicit pick is in the wrong group
+                {
+                    var existing = await db.FetchAsync<FaltskyttePatrol>(
+                        @"WHERE CompetitionId = @0
+                          AND (WeaponGroup = @1 OR WeaponGroup = '' OR WeaponGroup IS NULL)
+                          ORDER BY PatrolNumber DESC",
+                        request.CompetitionId, weaponGroup);
+
+                    if (existing.Any())
+                    {
+                        patrolId = existing.First().Id;
+                        patrolNumber = existing.First().PatrolNumber;
+                    }
+                    else
+                    {
+                        patrolId = await CreateAppendedPatrolAsync(db, request.CompetitionId, weaponGroup);
+                        patrolNumber = await db.ExecuteScalarAsync<int>(
+                            "SELECT PatrolNumber FROM FaltskyttePatrol WHERE Id = @0", patrolId);
+                        createdNew = true;
+                    }
+                }
+
+                // Same-group dedupe (matches AddShooterToPatrol's behaviour) — moving a shooter
+                // between patrols of the same weapon group via add must not leave them on both.
+                if (!string.IsNullOrEmpty(weaponGroup))
+                {
+                    var sameGroupIds = ShootingClasses.All
+                        .Where(sc => sc.Weapon.ToString() == weaponGroup)
+                        .Select(sc => sc.Id)
+                        .ToList();
+                    if (sameGroupIds.Count == 0)
+                        sameGroupIds.AddRange(grp.Select(g => g.Class));
+                    await db.ExecuteAsync(
+                        @"DELETE FROM FaltskyttePatrolMember WHERE MemberId = @0
+                          AND ShootingClass IN (@2)
+                          AND PatrolId IN (SELECT Id FROM FaltskyttePatrol WHERE CompetitionId = @1)",
+                        memberId, request.CompetitionId, sameGroupIds);
+                }
+
+                // Insert one patrol-member row per class in this group. Increment maxPos
+                // across the inserts so two classes from the same shooter on the same
+                // patrol get consecutive positions.
+                var maxPos = await db.ExecuteScalarAsync<int>(
+                    "SELECT ISNULL(MAX(Position), 0) FROM FaltskyttePatrolMember WHERE PatrolId = @0", patrolId);
+
+                foreach (var classEntry in grp)
+                {
+                    maxPos++;
+                    var memberRow = new FaltskyttePatrolMember
+                    {
+                        PatrolId = patrolId,
+                        MemberId = memberId,
+                        Position = maxPos,
+                        ShootingClass = classEntry.Class,
+                        MemberName = memberName,
+                        ClubName = clubName
+                    };
+                    await db.InsertAsync(memberRow);
+                }
+
+                assignments.Add(new
+                {
+                    weaponGroup,
+                    patrolId,
+                    patrolNumber,
+                    createdNewPatrol = createdNew,
+                    classCount = grp.Count()
+                });
             }
 
-            // Same-group dedupe (matches AddShooterToPatrol's behaviour) — moving a shooter
-            // between patrols of the same weapon group via add must not leave them on both.
-            if (!string.IsNullOrEmpty(weaponGroup))
+            return Json(new
             {
-                var sameGroupIds = ShootingClasses.All
-                    .Where(sc => sc.Weapon.ToString() == weaponGroup)
-                    .Select(sc => sc.Id)
-                    .ToList();
-                if (sameGroupIds.Count == 0) sameGroupIds.Add(firstClass);
-                await db.ExecuteAsync(
-                    @"DELETE FROM FaltskyttePatrolMember WHERE MemberId = @0
-                      AND ShootingClass IN (@2)
-                      AND PatrolId IN (SELECT Id FROM FaltskyttePatrol WHERE CompetitionId = @1)",
-                    memberId, request.CompetitionId, sameGroupIds);
-            }
-
-            var maxPos = await db.ExecuteScalarAsync<int>(
-                "SELECT ISNULL(MAX(Position), 0) FROM FaltskyttePatrolMember WHERE PatrolId = @0", patrolId);
-
-            var memberRow = new FaltskyttePatrolMember
-            {
-                PatrolId = patrolId,
-                MemberId = memberId,
-                Position = maxPos + 1,
-                ShootingClass = firstClass,
-                MemberName = memberName,
-                ClubName = clubName
-            };
-            await db.InsertAsync(memberRow);
-
-            return Json(new {
                 success = true,
-                patrolId,
-                patrolNumber,
-                patrolMemberId = memberRow.Id,
-                createdNewPatrol
+                assignments
             });
         }
 
