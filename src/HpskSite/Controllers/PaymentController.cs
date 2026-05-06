@@ -20,9 +20,6 @@ namespace HpskSite.Controllers
         private readonly IContentService _contentService;
         private readonly PaymentService _paymentService;
         private readonly AdminAuthorizationService _authService;
-        private readonly EmailService _emailService;
-        private readonly ClubService _clubService;
-        private readonly InvoiceAuditService _auditService;
         private readonly ILogger<PaymentController> _logger;
 
         public PaymentController(
@@ -37,9 +34,6 @@ namespace HpskSite.Controllers
             IContentService contentService,
             PaymentService paymentService,
             AdminAuthorizationService authService,
-            EmailService emailService,
-            ClubService clubService,
-            InvoiceAuditService auditService,
             ILogger<PaymentController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
@@ -48,9 +42,6 @@ namespace HpskSite.Controllers
             _contentService = contentService;
             _paymentService = paymentService;
             _authService = authService;
-            _emailService = emailService;
-            _clubService = clubService;
-            _auditService = auditService;
             _logger = logger;
         }
 
@@ -136,7 +127,11 @@ namespace HpskSite.Controllers
             string? notes = null,
             string? paymentMethod = null,
             decimal? actualAmount = null,
-            bool sendReceipt = false)
+            // Receipt is opt-out: every Paid transition tries to email the shooter unless
+            // explicitly suppressed (cash desk where the operator doesn't want to spam an
+            // address). Members without an email still no-op silently — the audit log just
+            // never gets a ReceiptSent row.
+            bool sendReceipt = true)
         {
             try
             {
@@ -171,123 +166,28 @@ namespace HpskSite.Controllers
                 }
 
                 var success = await _paymentService.UpdatePaymentStatusAsync(
-                    invoiceId, paymentStatus, paymentDate, transactionId, notes, paymentMethod, actorId, actorName, actualAmount);
+                    invoiceId, paymentStatus, paymentDate, transactionId, notes, paymentMethod,
+                    actorId, actorName, actualAmount, sendReceiptOnPaid: sendReceipt);
 
                 if (!success)
                 {
                     return Json(new { success = false, message = "Ett fel uppstod vid uppdatering av betalningsstatus." });
                 }
 
-                // Item #8: optional email receipt. Best-effort — failure logs but doesn't
-                // bubble up; the cashier already saw "betald" and the audit row will reflect
-                // whether the receipt actually went out.
-                bool receiptSent = false;
-                string? receiptError = null;
-                if (sendReceipt && paymentStatus == "Paid")
-                {
-                    (receiptSent, receiptError) = await TrySendReceiptAsync(invoiceId, actorId, actorName);
-                }
-
+                // Receipt-send happens inside PaymentService now (so InvoiceAdmin's mark-paid
+                // path benefits from the same behaviour). The cashier UI doesn't need a
+                // success/failure echo — failures land in the application log and the audit
+                // row's absence (no ReceiptSent event) tells the operator after the fact.
                 return Json(new {
                     success = true,
                     message = "Betalningsstatus uppdaterad.",
-                    receiptRequested = sendReceipt,
-                    receiptSent,
-                    receiptError
+                    receiptRequested = sendReceipt
                 });
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error updating payment status for invoice {InvoiceId}", invoiceId);
                 return Json(new { success = false, message = $"Ett fel uppstod: {ex.Message}" });
-            }
-        }
-
-        /// <summary>
-        /// Build the receipt context and email it to the shooter. All lookups are best
-        /// effort — a missing field degrades gracefully (e.g. classes left blank when the
-        /// invoice's registration cannot be resolved) rather than blocking the email.
-        /// Logs an InvoicePaymentEvents row of type ReceiptSent so the audit trail
-        /// reflects what was actually emailed.
-        /// </summary>
-        private async Task<(bool sent, string? error)> TrySendReceiptAsync(
-            int invoiceId, int? actorId, string? actorName)
-        {
-            try
-            {
-                var invoice = _contentService.GetById(invoiceId);
-                if (invoice == null) return (false, "Faktura hittades inte.");
-
-                var memberIdStr = invoice.GetValue<string>("memberId") ?? "";
-                if (!int.TryParse(memberIdStr, out var memberId) || memberId <= 0)
-                    return (false, "Skytt saknas på fakturan.");
-
-                var member = _memberService.GetById(memberId);
-                var memberEmail = member?.Email;
-                if (string.IsNullOrWhiteSpace(memberEmail))
-                    return (false, "Skytten saknar e-postadress.");
-
-                var memberName = invoice.GetValue<string>("memberName") ?? member?.Name ?? "";
-                var billed = invoice.GetValue<decimal>("totalAmount");
-                var actual = invoice.GetValue<decimal?>("actualPaidAmount") ?? billed;
-                var paymentMethod = invoice.GetValue<string>("paymentMethod") ?? "";
-                var transactionId = invoice.GetValue<string>("transactionId") ?? "";
-                var invoiceNumber = invoice.GetValue<string>("invoiceNumber") ?? "";
-                var paidAt = invoice.GetValue<DateTime?>("paymentDate") ?? DateTime.Now;
-
-                var competitionId = invoice.GetValue<int>("competitionId");
-                var competition = competitionId > 0 ? _contentService.GetById(competitionId) : null;
-                var competitionName = competition?.GetValue<string>("competitionName") ?? competition?.Name ?? "";
-
-                var organizerClubId = competition?.GetValue<int>("clubId") ?? 0;
-                var organizerName = organizerClubId > 0 ? (_clubService.GetClubNameById(organizerClubId) ?? "") : "";
-
-                // Try to resolve the linked registration to list class names. The invoice's
-                // single-reg property is preferred; fall back to the legacy CSV/JSON property
-                // for older multi-reg invoices.
-                var classes = "";
-                var registrationId = invoice.GetValue<int>("registrationId");
-                if (registrationId > 0)
-                {
-                    var reg = _contentService.GetById(registrationId);
-                    if (reg != null)
-                    {
-                        var json = reg.GetValue<string>("shootingClasses") ?? "";
-                        var entries = HpskSite.Models.CompetitionRegistrationDocument.DeserializeShootingClasses(json);
-                        classes = string.Join(", ", entries.Select(e => e.Class).Where(c => !string.IsNullOrEmpty(c)));
-                    }
-                }
-
-                await _emailService.SendPaymentReceiptAsync(
-                    memberEmail: memberEmail,
-                    memberName: memberName,
-                    competitionName: competitionName,
-                    organizerName: organizerName,
-                    paidAt: paidAt,
-                    shootingClasses: classes,
-                    billedAmount: billed,
-                    actualAmount: actual,
-                    paymentMethod: paymentMethod,
-                    reference: transactionId,
-                    invoiceNumber: invoiceNumber);
-
-                await _auditService.LogAsync(
-                    invoiceId: invoiceId,
-                    competitionId: competitionId,
-                    eventType: HpskSite.Models.InvoicePaymentEventTypes.ReceiptSent,
-                    byMemberId: actorId,
-                    byMemberName: actorName,
-                    paymentMethod: paymentMethod,
-                    amount: actual,
-                    reference: $"Email: {memberEmail}",
-                    notes: null);
-
-                return (true, null);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to send payment receipt for invoice {InvoiceId}", invoiceId);
-                return (false, ex.Message);
             }
         }
 

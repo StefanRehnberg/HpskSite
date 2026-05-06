@@ -19,13 +19,17 @@ namespace HpskSite.Services
         private readonly IContentTypeService _contentTypeService;
         private readonly IMemberService _memberService;
         private readonly InvoiceAuditService _auditService;
+        private readonly EmailService _emailService;
+        private readonly ClubService _clubService;
 
         public PaymentService(ILogger<PaymentService> logger,
             IContentService contentService,
             IUmbracoContextAccessor umbracoContextAccessor,
             IContentTypeService contentTypeService,
             IMemberService memberService,
-            InvoiceAuditService auditService)
+            InvoiceAuditService auditService,
+            EmailService emailService,
+            ClubService clubService)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _contentService = contentService ?? throw new ArgumentNullException(nameof(contentService));
@@ -33,6 +37,8 @@ namespace HpskSite.Services
             _contentTypeService = contentTypeService ?? throw new ArgumentNullException(nameof(contentTypeService));
             _memberService = memberService ?? throw new ArgumentNullException(nameof(memberService));
             _auditService = auditService ?? throw new ArgumentNullException(nameof(auditService));
+            _emailService = emailService ?? throw new ArgumentNullException(nameof(emailService));
+            _clubService = clubService ?? throw new ArgumentNullException(nameof(clubService));
         }
 
         // Helper method to safely set invoice properties
@@ -464,7 +470,11 @@ namespace HpskSite.Services
             string? paymentMethod = null,
             int? actorMemberId = null,
             string? actorMemberName = null,
-            decimal? actualAmount = null)
+            decimal? actualAmount = null,
+            // Opt-out: every Paid transition tries to email the shooter their receipt unless
+            // the caller explicitly suppresses it. Failures here never fail the underlying
+            // status update — receipt is a best-effort side effect, just like the audit log.
+            bool sendReceiptOnPaid = true)
         {
             try
             {
@@ -516,12 +526,99 @@ namespace HpskSite.Services
                     reference: refForLog,
                     notes: notes);
 
+                // Self-paid via Swish or admin-marked at the desk — same outcome from the
+                // shooter's perspective: a receipt in their inbox. Best-effort, no throw.
+                if (sendReceiptOnPaid && paymentStatus == "Paid")
+                {
+                    await TrySendReceiptAsync(invoice, actorMemberId, actorMemberName);
+                }
+
                 return true;
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error updating payment status for invoice {InvoiceId}", invoiceId);
                 return false;
+            }
+        }
+
+        /// <summary>
+        /// Build the receipt context for a just-Paid invoice and email it to the shooter.
+        /// All lookups degrade gracefully — a missing field renders blank in the email
+        /// rather than blocking the send. Logs an InvoicePaymentEvents row of type
+        /// ReceiptSent on success so the audit trail reflects what actually went out.
+        /// </summary>
+        private async Task TrySendReceiptAsync(IContent invoice, int? actorId, string? actorName)
+        {
+            try
+            {
+                var memberIdStr = invoice.GetValue<string>("memberId") ?? "";
+                if (!int.TryParse(memberIdStr, out var memberId) || memberId <= 0) return;
+
+                var member = _memberService.GetById(memberId);
+                var memberEmail = member?.Email;
+                if (string.IsNullOrWhiteSpace(memberEmail)) return;
+
+                var memberName = invoice.GetValue<string>("memberName") ?? member?.Name ?? "";
+                var billed = invoice.GetValue<decimal>("totalAmount");
+                var actual = invoice.GetValue<decimal?>("actualPaidAmount") ?? billed;
+                var paymentMethod = invoice.GetValue<string>("paymentMethod") ?? "";
+                var transactionId = invoice.GetValue<string>("transactionId") ?? "";
+                var invoiceNumber = invoice.GetValue<string>("invoiceNumber") ?? "";
+                var paidAt = invoice.GetValue<DateTime?>("paymentDate") ?? DateTime.Now;
+
+                var competitionId = invoice.GetValue<int>("competitionId");
+                var competition = competitionId > 0 ? _contentService.GetById(competitionId) : null;
+                var competitionName = competition?.GetValue<string>("competitionName") ?? competition?.Name ?? "";
+
+                var organizerClubId = competition?.GetValue<int>("clubId") ?? 0;
+                var organizerName = organizerClubId > 0
+                    ? (_clubService.GetClubNameById(organizerClubId) ?? "")
+                    : "";
+
+                // Resolve the linked registration to list class names. Single-reg invoice
+                // (new format) preferred; legacy multi-reg invoices fall back silently to
+                // an empty class list.
+                var classes = "";
+                var registrationId = invoice.GetValue<int>("registrationId");
+                if (registrationId > 0)
+                {
+                    var reg = _contentService.GetById(registrationId);
+                    if (reg != null)
+                    {
+                        var json = reg.GetValue<string>("shootingClasses") ?? "";
+                        var entries = CompetitionRegistrationDocument.DeserializeShootingClasses(json);
+                        classes = string.Join(", ", entries.Select(e => e.Class).Where(c => !string.IsNullOrEmpty(c)));
+                    }
+                }
+
+                await _emailService.SendPaymentReceiptAsync(
+                    memberEmail: memberEmail,
+                    memberName: memberName,
+                    competitionName: competitionName,
+                    organizerName: organizerName,
+                    paidAt: paidAt,
+                    shootingClasses: classes,
+                    billedAmount: billed,
+                    actualAmount: actual,
+                    paymentMethod: paymentMethod,
+                    reference: transactionId,
+                    invoiceNumber: invoiceNumber);
+
+                await _auditService.LogAsync(
+                    invoiceId: invoice.Id,
+                    competitionId: competitionId,
+                    eventType: InvoicePaymentEventTypes.ReceiptSent,
+                    byMemberId: actorId,
+                    byMemberName: actorName,
+                    paymentMethod: paymentMethod,
+                    amount: actual,
+                    reference: $"Email: {memberEmail}",
+                    notes: null);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to send payment receipt for invoice {InvoiceId}", invoice.Id);
             }
         }
 

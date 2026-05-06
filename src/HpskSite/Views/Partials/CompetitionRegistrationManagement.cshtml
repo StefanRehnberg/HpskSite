@@ -490,7 +490,7 @@
                 </div>
 
                 <div class="form-check mb-0">
-                    <input class="form-check-input" type="checkbox" id="markPaidSendReceipt">
+                    <input class="form-check-input" type="checkbox" id="markPaidSendReceipt" checked>
                     <label class="form-check-label" for="markPaidSendReceipt">
                         Skicka kvitto via e-post till skytten
                     </label>
@@ -1403,10 +1403,10 @@ function markAsPaid(registrationId) {
     document.getElementById('markPaidMethod').value = 'Swish';
     document.getElementById('markPaidTransactionId').value = reg.transactionId || reg.invoiceNumber || '';
     document.getElementById('markPaidNotes').value = '';
-    // Receipt checkbox defaults to off — opt-in per payment so cash-only desks don't
-    // surprise members with an email about a payment they made in-person.
+    // Receipt checkbox defaults to ON — most paid transitions benefit from the shooter
+    // getting a copy. Cash-desk operators can untick when they don't want an email out.
     const receiptBox = document.getElementById('markPaidSendReceipt');
-    if (receiptBox) receiptBox.checked = false;
+    if (receiptBox) receiptBox.checked = true;
     updateMarkPaidVariance();
 
     const modalEl = document.getElementById('markAsPaidModal');
@@ -1502,12 +1502,9 @@ function confirmMarkAsPaid() {
         if (result.success) {
             markPaidModalInstance?.hide();
             loadCompetitionRegistrations();
-            // Receipt is best-effort. Surface the outcome so the operator knows whether
-            // it actually went out — silent failure here would defeat the point of the box.
-            if (result.receiptRequested && !result.receiptSent) {
-                alert('Betalningen registrerades, men kvittot kunde inte skickas: '
-                    + (result.receiptError || 'okänt fel'));
-            }
+            // Receipt is best-effort and lives inside PaymentService now. Failures land
+            // in the application log; the audit history modal shows whether a ReceiptSent
+            // event was actually written for this invoice.
         } else {
             alert('Kunde inte uppdatera: ' + (result.message || 'okänt fel'));
         }
