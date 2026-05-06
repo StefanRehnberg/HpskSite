@@ -423,6 +423,25 @@
                     </div>
                 }
 
+                @* Non-DP precision start-list picker. Only rendered when the modal isn't
+                   already showing the rolling-start patrol picker or the DP slot picker —
+                   those handle their own placement flows. The dropdown is populated and
+                   shown at runtime only when GetWalkInStartListTeams returns teams. *@
+                @if (!rollingStartEnabled && !dpEnabled)
+                {
+                    <div class="mb-0 d-none" id="walkInStartListPickerWrapper">
+                        <label for="walkInStartListTeam" class="form-label fw-bold">Skjutlag</label>
+                        <select class="form-select" id="walkInStartListTeam">
+                            <option value="">— Lägg inte på startlistan —</option>
+                            <!-- Populated when modal opens if a precisionStartList exists. -->
+                        </select>
+                        <small class="form-text text-muted">
+                            Startlista är genererad. Väljer du ett skjutlag läggs skytten dit
+                            direkt — annars måste startlistan regenereras manuellt.
+                        </small>
+                    </div>
+                }
+
                 <div id="walkInError" class="alert alert-danger mt-3 d-none"></div>
             </div>
             <div class="modal-footer">
@@ -2010,6 +2029,47 @@ function enforceClassMutex(containerSelector, justChanged) {
     return mutated;
 }
 
+// Probe the competition for an existing precisionStartList. When present, surface a
+// "Skjutlag" picker so the cashier can drop the new walk-in onto a specific team
+// without anyone having to regenerate the whole list. Hidden silently when there's
+// no start list yet — the operator can still register the shooter and let someone
+// regenerate later.
+async function refreshWalkInStartListTeams() {
+    const wrapper = document.getElementById('walkInStartListPickerWrapper');
+    const select = document.getElementById('walkInStartListTeam');
+    if (!wrapper || !select) return;
+    wrapper.classList.add('d-none');
+    while (select.options.length > 1) select.remove(1);
+    select.value = '';
+    try {
+        const competitionId = parseInt($('.competition-registration-management').data('competition-id'), 10);
+        const resp = await fetch(`/umbraco/surface/RegistrationAdmin/GetWalkInStartListTeams?competitionId=${competitionId}`);
+        const data = await resp.json();
+        if (!data.success || !data.hasStartList || !Array.isArray(data.teams) || data.teams.length === 0) return;
+
+        data.teams
+            .slice()
+            .sort((a, b) => a.teamNumber - b.teamNumber)
+            .forEach(t => {
+                const labelBits = [`Skjutlag ${t.teamNumber}`];
+                if (t.startTime) {
+                    labelBits.push(t.endTime ? `${t.startTime}-${t.endTime}` : t.startTime);
+                }
+                const head = labelBits.join(' · ');
+                const tail = `${t.positionsRemaining}/${t.positionsTotal} lediga`;
+                const opt = new Option(`${head} (${tail})`, String(t.teamNumber));
+                if (t.isFull) {
+                    opt.disabled = true;
+                    opt.text = `${head} (FULLT)`;
+                }
+                select.add(opt);
+            });
+        wrapper.classList.remove('d-none');
+    } catch (err) {
+        console.warn('Could not load start-list teams for walk-in picker:', err);
+    }
+}
+
 async function openWalkInRegistrationModal() {
     // Reset state
     document.getElementById('walkInMemberSearch').value = '';
@@ -2060,6 +2120,14 @@ async function openWalkInRegistrationModal() {
         const slots = document.getElementById('walkInDpSlotsContainer');
         if (slots) slots.innerHTML = '';
         await refreshDpTeamAvailability();
+    }
+
+    // Non-DP / non-rolling-start: probe for an existing precisionStartList and render
+    // the team picker only if one is present with usable teams. This is the equivalent
+    // of the DP slot picker for "regular" precision competitions where the start list
+    // is generated all-at-once but we still want a clean way to drop a late shooter in.
+    if (!walkInPatrolPickerEnabled && !walkInDirektplaceringEnabled) {
+        await refreshWalkInStartListTeams();
     }
 
     walkInModalInstance.show();
@@ -2246,6 +2314,34 @@ async function submitWalkInRegistration() {
                 }
             } catch (patrolErr) {
                 console.warn('Patrol assignment threw:', patrolErr);
+            }
+        }
+
+        // Non-DP precision: drop the new shooter onto the picked start team. Same fail-soft
+        // semantics as the patrol assignment above — registration is the load-bearing op.
+        if (!walkInPatrolPickerEnabled && !walkInDirektplaceringEnabled) {
+            const teamRaw = document.getElementById('walkInStartListTeam')?.value || '';
+            const teamNumber = teamRaw ? parseInt(teamRaw, 10) : null;
+            if (teamNumber != null && Number.isFinite(teamNumber)) {
+                try {
+                    const slResp = await fetch('/umbraco/surface/RegistrationAdmin/AssignWalkInToStartListTeam', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'RequestVerificationToken': token
+                        },
+                        body: JSON.stringify({ competitionId, registrationId: newRegistrationId, teamNumber })
+                    });
+                    const slData = await slResp.json();
+                    if (!slData.success) {
+                        console.warn('Start-list team assignment failed:', slData.message);
+                        errBox.textContent = 'Anmälan skapad, men kunde inte läggas på startlistan: '
+                            + (slData.message || 'okänt fel');
+                        errBox.classList.remove('d-none');
+                    }
+                } catch (slErr) {
+                    console.warn('Start-list team assignment threw:', slErr);
+                }
             }
         }
 

@@ -8,7 +8,11 @@ using Umbraco.Cms.Core.Web;
 using Umbraco.Cms.Infrastructure.Persistence;
 using Umbraco.Cms.Web.Website.Controllers;
 using HpskSite.Services;
+using HpskSite.CompetitionTypes.Precision.Controllers;
+using HpskSite.CompetitionTypes.Precision.Models;
 using Umbraco.Cms.Core.Models;
+using Umbraco.Extensions;
+using Newtonsoft.Json;
 
 namespace HpskSite.Controllers
 {
@@ -26,6 +30,8 @@ namespace HpskSite.Controllers
         private readonly PaymentService _paymentService;
         private readonly InvoiceAuditService _auditService;
         private readonly DirektplaceringStartListService _dpStartListService;
+        private readonly StartListHtmlRenderer _startListRenderer;
+        private readonly UmbracoStartListRepository _startListRepository;
 
         public RegistrationAdminController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -41,7 +47,9 @@ namespace HpskSite.Controllers
             ClubService clubService,
             PaymentService paymentService,
             InvoiceAuditService auditService,
-            DirektplaceringStartListService dpStartListService)
+            DirektplaceringStartListService dpStartListService,
+            StartListHtmlRenderer startListRenderer,
+            UmbracoStartListRepository startListRepository)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _memberService = memberService;
@@ -52,6 +60,8 @@ namespace HpskSite.Controllers
             _paymentService = paymentService;
             _auditService = auditService;
             _dpStartListService = dpStartListService;
+            _startListRenderer = startListRenderer;
+            _startListRepository = startListRepository;
         }
 
         #region Registration Management
@@ -748,6 +758,217 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// Walk-in helper for non-direktplacering precision competitions: returns the teams
+        /// from the current precisionStartList document with capacity info, so the cashier
+        /// can drop a late shooter onto a specific start team without regenerating the
+        /// whole list. Empty `teams` (with hasStartList=false) means there's nothing to
+        /// pick — frontend hides the picker in that case.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetWalkInStartListTeams(int competitionId)
+        {
+            try
+            {
+                var competition = _contentService.GetById(competitionId);
+                if (competition == null)
+                    return Json(new { success = false, message = "Tävling hittades inte." });
+
+                bool authorized = await _authService.IsCurrentUserAdminAsync()
+                    || await _authService.IsCompetitionManager(competitionId);
+                if (!authorized)
+                {
+                    var clubId = competition.GetValue<int>("clubId");
+                    if (clubId > 0)
+                    {
+                        authorized = await _authService.IsClubAdminForClub(clubId)
+                                  || await _authService.IsSkjutledareForClub(clubId);
+                    }
+                }
+                if (!authorized) return Json(new { success = false, message = "Access denied" });
+
+                // Pick the most recent valid start list (matches GetOfficialStartList's rule).
+                var startLists = _startListRepository.GetStartListsForCompetition(competitionId)
+                    .Where(sl =>
+                    {
+                        var content = sl.GetValue<string>("startListContent");
+                        return !string.IsNullOrEmpty(content) && !content.Contains("System.Threading.Tasks.Task");
+                    })
+                    .OrderByDescending(sl => sl.GetValue<DateTime>("generatedDate"))
+                    .ToList();
+
+                if (startLists.Count == 0)
+                    return Json(new { success = true, hasStartList = false, teams = Array.Empty<object>() });
+
+                var current = startLists.First();
+                var configData = current.GetValue<string>("configurationData") ?? "";
+                StartListConfiguration? config = null;
+                try
+                {
+                    config = JsonConvert.DeserializeObject<StartListConfiguration>(configData);
+                }
+                catch { /* fall through to empty */ }
+
+                if (config?.Teams == null || config.Teams.Count == 0)
+                    return Json(new { success = true, hasStartList = true, teams = Array.Empty<object>(), startListId = current.Id });
+
+                var maxPer = config.Settings?.MaxShootersPerTeam ?? 30;
+                var teams = config.Teams.Select(t => new
+                {
+                    teamNumber = t.TeamNumber,
+                    startTime = t.StartTime,
+                    endTime = t.EndTime,
+                    weaponClasses = t.WeaponClasses,
+                    shooterCount = t.Shooters?.Count ?? 0,
+                    positionsTotal = maxPer,
+                    positionsRemaining = Math.Max(0, maxPer - (t.Shooters?.Count ?? 0)),
+                    isFull = (t.Shooters?.Count ?? 0) >= maxPer
+                }).ToList();
+
+                return Json(new
+                {
+                    success = true,
+                    hasStartList = true,
+                    startListId = current.Id,
+                    teams
+                });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = "Ett fel uppstod: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Walk-in helper for non-direktplacering precision competitions: appends the
+        /// just-registered shooter to the chosen team in the precisionStartList, one row
+        /// per class on the registration. The renderer rebuilds the HTML so the published
+        /// page reflects the new placement immediately. Refuses when the chosen team is
+        /// at MaxShootersPerTeam capacity to keep the cashier from over-booking.
+        /// </summary>
+        [HttpPost]
+        public async Task<IActionResult> AssignWalkInToStartListTeam([FromBody] AssignWalkInToStartListTeamRequest request)
+        {
+            try
+            {
+                var competition = _contentService.GetById(request.CompetitionId);
+                if (competition == null)
+                    return Json(new { success = false, message = "Tävling hittades inte." });
+
+                bool authorized = await _authService.IsCurrentUserAdminAsync()
+                    || await _authService.IsCompetitionManager(request.CompetitionId);
+                if (!authorized)
+                {
+                    var clubId = competition.GetValue<int>("clubId");
+                    if (clubId > 0)
+                    {
+                        authorized = await _authService.IsClubAdminForClub(clubId)
+                                  || await _authService.IsSkjutledareForClub(clubId);
+                    }
+                }
+                if (!authorized) return Json(new { success = false, message = "Access denied" });
+
+                var registration = _contentService.GetById(request.RegistrationId);
+                if (registration == null)
+                    return Json(new { success = false, message = "Anmälan hittades inte." });
+
+                var classesJson = registration.GetValue<string>("shootingClasses") ?? "";
+                var classes = HpskSite.Models.CompetitionRegistrationDocument.DeserializeShootingClasses(classesJson);
+                if (classes.Count == 0)
+                    return Json(new { success = false, message = "Anmälan saknar klass." });
+
+                var memberId = registration.GetValue<int>("memberId");
+                var memberName = registration.GetValue<string>("memberName") ?? "";
+                var clubIdReg = registration.GetValue<int>("clubId");
+                var clubName = clubIdReg > 0 ? (_clubService.GetClubNameById(clubIdReg) ?? "Okänd klubb") : "Okänd klubb";
+
+                // Use the most recent valid start list, same pick rule as GetOfficialStartList.
+                var startLists = _startListRepository.GetStartListsForCompetition(request.CompetitionId)
+                    .Where(sl =>
+                    {
+                        var content = sl.GetValue<string>("startListContent");
+                        return !string.IsNullOrEmpty(content) && !content.Contains("System.Threading.Tasks.Task");
+                    })
+                    .OrderByDescending(sl => sl.GetValue<DateTime>("generatedDate"))
+                    .ToList();
+                if (startLists.Count == 0)
+                    return Json(new { success = false, message = "Ingen startlista finns för denna tävling." });
+
+                var startList = startLists.First();
+                var configData = startList.GetValue<string>("configurationData") ?? "";
+                var config = JsonConvert.DeserializeObject<StartListConfiguration>(configData);
+                if (config?.Teams == null)
+                    return Json(new { success = false, message = "Startlistan har ingen konfigurationsdata." });
+
+                var team = config.Teams.FirstOrDefault(t => t.TeamNumber == request.TeamNumber);
+                if (team == null)
+                    return Json(new { success = false, message = $"Skjutlag {request.TeamNumber} finns inte i startlistan." });
+
+                team.Shooters ??= new List<StartListShooter>();
+
+                var maxPer = config.Settings?.MaxShootersPerTeam ?? 30;
+                if (team.Shooters.Count + classes.Count > maxPer)
+                {
+                    var remaining = Math.Max(0, maxPer - team.Shooters.Count);
+                    return Json(new
+                    {
+                        success = false,
+                        message = remaining == 0
+                            ? $"Skjutlag {request.TeamNumber} är fullt ({maxPer} platser)."
+                            : $"Skjutlag {request.TeamNumber} har bara {remaining} ledig(a) plats(er) kvar — du försöker boka {classes.Count}."
+                    });
+                }
+
+                // Append a row per class. Position is recomputed below in one pass so adds
+                // and removes both leave a gap-free list.
+                foreach (var entry in classes)
+                {
+                    if (string.IsNullOrEmpty(entry.Class)) continue;
+                    team.Shooters.Add(new StartListShooter
+                    {
+                        Position = team.Shooters.Count + 1,
+                        Name = memberName,
+                        Club = clubName,
+                        WeaponClass = entry.Class,
+                        MemberId = memberId
+                    });
+
+                    if (!team.WeaponClasses.Contains(entry.Class))
+                        team.WeaponClasses.Add(entry.Class);
+                }
+                team.WeaponClasses = team.WeaponClasses.OrderBy(c => c).ToList();
+
+                // Renumber positions across the whole team (defensive — covers the case where
+                // the existing list had stale numbering).
+                for (int i = 0; i < team.Shooters.Count; i++)
+                {
+                    team.Shooters[i].Position = i + 1;
+                }
+                team.ShooterCount = team.Shooters.Count;
+
+                var competitionName = competition.Name ?? "";
+                startList.SetValue("configurationData", JsonConvert.SerializeObject(config));
+                startList.SetValue("startListContent", await _startListRenderer.GenerateStartListHtml(config, competitionName));
+
+                var saveResult = _contentService.Save(startList);
+                if (!saveResult.Success)
+                    return Json(new { success = false, message = "Kunde inte spara startlistan." });
+
+                _contentService.Publish(startList, new[] { "*" }, -1);
+
+                return Json(new
+                {
+                    success = true,
+                    teamNumber = team.TeamNumber,
+                    addedShooters = classes.Count
+                });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = "Ett fel uppstod: " + ex.Message });
+            }
+        }
+
+        /// <summary>
         /// Transfer a registration from one member to another. Used when shooter A can't make
         /// it and shooter B takes their spot at the desk. Updates the registration in-place
         /// (preserving its id, classes, and any results-entry data linked by registrationId)
@@ -1338,6 +1559,17 @@ namespace HpskSite.Controllers
         {
             public int RegistrationId { get; set; }
             public bool CheckedIn { get; set; }
+        }
+
+        /// <summary>
+        /// Walk-in helper request: drop a just-registered shooter onto a specific start
+        /// team in a non-direktplacering precision competition.
+        /// </summary>
+        public class AssignWalkInToStartListTeamRequest
+        {
+            public int CompetitionId { get; set; }
+            public int RegistrationId { get; set; }
+            public int TeamNumber { get; set; }
         }
 
         #endregion
