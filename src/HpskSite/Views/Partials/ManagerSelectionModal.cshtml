@@ -235,9 +235,22 @@ function populateClubFilterFromApi() {
     });
 }
 
-// Load all members
-function loadMembersForManagerSelection() {
-    fetch('/umbraco/surface/MemberAdmin/GetMembers', {
+// Load members, optionally filtered server-side by club. The MemberAdmin/GetMembers
+// endpoint is paginated (default pageSize=50) — without this filter, client-side
+// filtering by club would only see members from the first 50 system-wide, so most
+// clubs would appear nearly empty. We pass a generous pageSize so the whole roster
+// of the picked club fits in one response (the controller backs onto an in-memory
+// list, so a larger pageSize doesn't hit the DB harder).
+function loadMembersForManagerSelection(clubIdFilter = null) {
+    // Show loading state on every load — the user may switch clubs repeatedly.
+    const spinner = document.getElementById('managerLoadingSpinner');
+    if (spinner) spinner.style.display = 'block';
+
+    const params = new URLSearchParams();
+    params.set('pageSize', '500');
+    if (clubIdFilter) params.set('clubId', String(clubIdFilter));
+
+    fetch(`/umbraco/surface/MemberAdmin/GetMembers?${params.toString()}`, {
         method: 'GET',
         headers: {
             'Content-Type': 'application/json'
@@ -264,7 +277,10 @@ function loadMembersForManagerSelection() {
                 populateClubFilterFromMembers();
             }
 
-            renderManagerMembersList();
+            // Re-apply the search input value (and current club filter) so a typed
+            // query survives a club-driven refetch without the user having to retype.
+            const currentSearch = document.getElementById('managerSearchInput')?.value || '';
+            filterManagerMembers(currentSearch, managerSelectionState.selectedClubId);
             updateSelectedManagersDisplay();
         } else {
             alert('Kunde inte ladda medlemmar: ' + (data.message || 'Okänt fel'));
@@ -459,12 +475,16 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Club filter dropdown
+    // Club filter dropdown — refetch from the server when the operator picks a
+    // specific club so the whole roster of that club lands in the modal in one
+    // round trip (server-side pagination would otherwise leave most of it behind).
+    // "Alla klubbar" reloads the default page (most-recently-active members) since
+    // listing every member site-wide isn't useful for a manager pick anyway.
     const clubFilterSelect = document.getElementById('clubFilterSelect');
     if (clubFilterSelect) {
         clubFilterSelect.addEventListener('change', function(e) {
             managerSelectionState.selectedClubId = e.target.value;
-            filterManagerMembers(null, e.target.value);
+            loadMembersForManagerSelection(e.target.value || null);
         });
     }
 
