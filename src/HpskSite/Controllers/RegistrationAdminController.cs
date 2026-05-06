@@ -25,6 +25,7 @@ namespace HpskSite.Controllers
         private readonly ClubService _clubService;
         private readonly PaymentService _paymentService;
         private readonly InvoiceAuditService _auditService;
+        private readonly DirektplaceringStartListService _dpStartListService;
 
         public RegistrationAdminController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -39,7 +40,8 @@ namespace HpskSite.Controllers
             AdminAuthorizationService authService,
             ClubService clubService,
             PaymentService paymentService,
-            InvoiceAuditService auditService)
+            InvoiceAuditService auditService,
+            DirektplaceringStartListService dpStartListService)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _memberService = memberService;
@@ -49,6 +51,7 @@ namespace HpskSite.Controllers
             _clubService = clubService;
             _paymentService = paymentService;
             _auditService = auditService;
+            _dpStartListService = dpStartListService;
         }
 
         #region Registration Management
@@ -283,6 +286,18 @@ namespace HpskSite.Controllers
                 if (newClasses.Count == 0)
                     return Json(new { success = false, message = "Anmälan måste ha minst en klass." });
 
+                // Capacity check: same rule as walk-in, but exclude this registration's existing
+                // contribution so re-saving without changing slots doesn't trip the guard.
+                var dpConfigEdit = competition != null
+                    ? HpskSite.Models.DirektplaceringConfig.Parse(competition.GetValue<string>("direktplaceringConfig"))
+                    : null;
+                if (dpConfigEdit != null && newClasses.Any(c => c.TeamNumber.HasValue))
+                {
+                    var capacityError = ValidateCapacity(competitionId, dpConfigEdit, newClasses, request.RegistrationId);
+                    if (capacityError != null)
+                        return Json(new { success = false, message = capacityError });
+                }
+
                 var newClassesJson = HpskSite.Models.CompetitionRegistrationDocument
                     .SerializeShootingClasses(newClasses);
                 registration.SetValue("shootingClasses", newClassesJson);
@@ -294,12 +309,17 @@ namespace HpskSite.Controllers
                 _contentService.Publish(registration, new[] { "*" }, -1);
 
                 // Direktplacering: any add/remove or slot reshuffle changes per-team occupancy,
-                // so drop the availability cache so the next slot fetch reflects the new state.
+                // so drop the availability cache and regenerate the auto-built start list so
+                // both reflect the new state without operator action.
                 bool teamAssignmentsChanged = newClasses.Any(c => c.TeamNumber.HasValue)
                     || existingClasses.Any(c => c.TeamNumber.HasValue);
                 if (teamAssignmentsChanged && competitionId > 0)
                 {
                     AppCaches.RuntimeCache.ClearByKey($"dp_availability_{competitionId}");
+                    if (dpConfigEdit != null && competition != null)
+                    {
+                        _dpStartListService.Regenerate(competitionId, competition, dpConfigEdit);
+                    }
                 }
 
                 // Invoice fee re-compute. We consider ALL non-cancelled invoices for this
@@ -598,23 +618,54 @@ namespace HpskSite.Controllers
                 var clubName = clubId > 0 ? _clubService.GetClubNameById(clubId) : "";
                 registration.SetValue("clubId", clubId);
 
-                // NEW: Store shooting classes as JSON array (single-class for late registration).
-                // teamNumber is set on the entry only when the cashier chose a direktplacering
-                // slot in the walk-in modal — leave it off the JSON otherwise so existing
-                // non-DP rows stay byte-identical to the legacy shape.
-                object shootingClassEntry = request.TeamNumber.HasValue
-                    ? new
+                // Build the shooting-class list. Two input shapes:
+                //   1. Multi-class:   request.Classes provided  → one entry per class with optional
+                //                     per-class teamNumber (Egenbokning slot picker)
+                //   2. Single-class:  legacy shape using ShootingClass / StartPreference / TeamNumber
+                List<HpskSite.Models.ShootingClassEntry> classEntries;
+                if (request.Classes != null && request.Classes.Count > 0)
+                {
+                    classEntries = request.Classes
+                        .Where(c => !string.IsNullOrWhiteSpace(c.Class))
+                        .Select(c => new HpskSite.Models.ShootingClassEntry
+                        {
+                            Class = c.Class.Trim(),
+                            StartPreference = c.StartPreference ?? request.StartPreference ?? "Inget",
+                            TeamNumber = c.TeamNumber
+                        })
+                        .ToList();
+                }
+                else
+                {
+                    classEntries = new List<HpskSite.Models.ShootingClassEntry>
                     {
-                        @class = request.ShootingClass,
-                        startPreference = request.StartPreference ?? "Inget",
-                        teamNumber = request.TeamNumber.Value
-                    }
-                    : new
-                    {
-                        @class = request.ShootingClass,
-                        startPreference = request.StartPreference ?? "Inget"
+                        new()
+                        {
+                            Class = (request.ShootingClass ?? "").Trim(),
+                            StartPreference = request.StartPreference ?? "Inget",
+                            TeamNumber = request.TeamNumber
+                        }
                     };
-                var shootingClassesJson = System.Text.Json.JsonSerializer.Serialize(new[] { shootingClassEntry });
+                }
+
+                if (classEntries.Count == 0 || classEntries.Any(e => string.IsNullOrEmpty(e.Class)))
+                {
+                    return Json(new { success = false, message = "Anmälan måste ha minst en giltig klass." });
+                }
+
+                // Capacity validation: refuse over-booking direktplacering slots. Compute
+                // existing usage across all *other* registrations, then verify each picked
+                // teamNumber still has remaining positions after this walk-in lands.
+                var dpConfig = HpskSite.Models.DirektplaceringConfig.Parse(competition.GetValue<string>("direktplaceringConfig"));
+                if (dpConfig != null && classEntries.Any(e => e.TeamNumber.HasValue))
+                {
+                    var capacityError = ValidateCapacity(competition.Id, dpConfig, classEntries, excludeRegistrationId: null);
+                    if (capacityError != null)
+                        return Json(new { success = false, message = capacityError });
+                }
+
+                var shootingClassesJson = HpskSite.Models.CompetitionRegistrationDocument
+                    .SerializeShootingClasses(classEntries);
                 registration.SetValue("shootingClasses", shootingClassesJson);
 
                 registration.SetValue("registrationDate", DateTime.Now);
@@ -630,22 +681,23 @@ namespace HpskSite.Controllers
 
                 _contentService.Publish(registration, new[] { "*" }, -1);
 
-                // Direktplacering: invalidate the team-availability cache so the next slot-list
-                // fetch reflects this booking. The cache key matches CompetitionController's
-                // BuildTeamAvailability writer.
-                if (request.TeamNumber.HasValue)
+                // Direktplacering: invalidate availability cache and regenerate the auto-built
+                // start list so the new shooter shows up on the right team without the operator
+                // having to click "Generera startlista". Mirrors what RegisterForCompetition does.
+                if (dpConfig != null && classEntries.Any(e => e.TeamNumber.HasValue))
                 {
                     AppCaches.RuntimeCache.ClearByKey($"dp_availability_{request.CompetitionId}");
+                    _dpStartListService.Regenerate(request.CompetitionId, competition, dpConfig);
                 }
 
+                var classCodes = classEntries.Select(e => e.Class).ToList();
                 return Json(new
                 {
                     success = true,
                     message = $"Late registration created for {member.Name}. The start list can now be regenerated without losing existing results.",
                     registrationId = registration.Id,
                     memberName = member.Name,
-                    shootingClass = request.ShootingClass,
-                    teamNumber = request.TeamNumber,
+                    shootingClasses = classCodes,
                     canRegenerateStartList = true,
                     note = "Thanks to identity-based results, regenerating the start list will preserve all existing scores!"
                 });
@@ -654,6 +706,45 @@ namespace HpskSite.Controllers
             {
                 return Json(new { success = false, message = "Error creating late registration: " + ex.Message });
             }
+        }
+
+        /// <summary>
+        /// Refuse over-booking when a walk-in / edit picks direktplacering slots. Returns null
+        /// when capacity is OK; an error message otherwise. Existing usage is computed from
+        /// every other registration (or all of them when excludeRegistrationId is null), then
+        /// each picked team is checked against its configured Positions.
+        /// </summary>
+        private string? ValidateCapacity(
+            int competitionId,
+            HpskSite.Models.DirektplaceringConfig dpConfig,
+            List<HpskSite.Models.ShootingClassEntry> proposedEntries,
+            int? excludeRegistrationId)
+        {
+            var usage = _dpStartListService.GetTeamUsage(competitionId, excludeRegistrationId);
+
+            // Bucket proposed assignments per team so a multi-class registration that puts two
+            // shooters on the same team is checked against capacity once with the right count.
+            var proposedPerTeam = proposedEntries
+                .Where(e => e.TeamNumber.HasValue)
+                .GroupBy(e => e.TeamNumber!.Value)
+                .ToDictionary(g => g.Key, g => g.Count());
+
+            foreach (var (teamNumber, addCount) in proposedPerTeam)
+            {
+                var team = dpConfig.Teams.FirstOrDefault(t => t.TeamNumber == teamNumber);
+                if (team == null)
+                    return $"Skjutlag {teamNumber} finns inte längre i tävlingens konfiguration.";
+
+                var existing = usage.GetValueOrDefault(teamNumber);
+                if (existing + addCount > team.Positions)
+                {
+                    var remaining = Math.Max(0, team.Positions - existing);
+                    return remaining == 0
+                        ? $"Skjutlag {teamNumber} är fullt ({team.Positions} platser)."
+                        : $"Skjutlag {teamNumber} har bara {remaining} ledig(a) plats(er) kvar — du försöker boka {addCount}.";
+                }
+            }
+            return null;
         }
 
         /// <summary>
@@ -1215,12 +1306,19 @@ namespace HpskSite.Controllers
         {
             public int CompetitionId { get; set; }
             public int MemberId { get; set; }
+            /// <summary>Single-class shorthand. Used when Classes is null/empty so the legacy
+            /// callers (and the rolling-start-only path) keep working unchanged.</summary>
             public string ShootingClass { get; set; } = "";
             public string? StartPreference { get; set; }
             public string? Notes { get; set; }
-            /// <summary>Direktplacering: which team/slot the operator chose at the desk.
-            /// Null = no slot pick (legacy walk-in or non-direktplacering competition).</summary>
+            /// <summary>Direktplacering single-class shorthand: applies to ShootingClass when
+            /// the multi-class Classes field is not provided.</summary>
             public int? TeamNumber { get; set; }
+            /// <summary>Multi-class walk-in. When set, ShootingClass / StartPreference /
+            /// TeamNumber are ignored. Each entry can carry its own slot in direktplacering
+            /// competitions, so a shooter walking up to register A + C with different start
+            /// times completes in one round trip.</summary>
+            public List<UpdateRegistrationClass>? Classes { get; set; }
         }
 
         /// <summary>

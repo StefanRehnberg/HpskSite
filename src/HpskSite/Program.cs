@@ -19,6 +19,7 @@ builder.CreateUmbracoBuilder()
 // Register custom services
 builder.Services.AddScoped<HpskSite.Services.PaymentService>();
 builder.Services.AddScoped<HpskSite.Services.PushNotificationService>();
+builder.Services.AddScoped<HpskSite.Services.DirektplaceringStartListService>();
 
 // Register Handicap System services
 builder.Services.Configure<HpskSite.Models.HandicapSettings>(builder.Configuration.GetSection("HandicapSettings"));

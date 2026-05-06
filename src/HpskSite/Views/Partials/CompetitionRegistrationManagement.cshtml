@@ -391,16 +391,25 @@
                 </div>
 
                 <div class="@((rollingStartEnabled || dpEnabled) ? "mb-3" : "mb-0")">
-                    <label for="walkInShootingClass" class="form-label fw-bold">Vapenklass</label>
-                    <select class="form-select" id="walkInShootingClass">
-                        <option value="">-- Välj klass --</option>
-                        <!-- Populated from the competition's actual allowed classes -->
-                    </select>
+                    <label class="form-label fw-bold">Vapenklasser</label>
+                    <small class="text-muted d-block mb-2">Bocka i en eller flera klasser. Egenbokning visar skjutlag-väljare per vald klass.</small>
+                    <div id="walkInClassList" class="border rounded p-2" style="max-height: 220px; overflow-y: auto;">
+                        <!-- Populated from walkInAvailableClasses on modal open -->
+                    </div>
                 </div>
+
+                @if (dpEnabled)
+                {
+                    <div class="mb-3">
+                        <div id="walkInDpSlotsContainer">
+                            <!-- Per-class slot pickers rendered when classes are ticked. -->
+                        </div>
+                    </div>
+                }
 
                 @if (rollingStartEnabled)
                 {
-                    <div class="@(dpEnabled ? "mb-3" : "mb-0")">
+                    <div class="mb-0">
                         <label for="walkInPatrolTarget" class="form-label fw-bold">Patrull</label>
                         <select class="form-select" id="walkInPatrolTarget">
                             <option value="nextAvailable" selected>Nästa lediga patrull</option>
@@ -408,21 +417,8 @@
                             <!-- Existing patrols populated on modal open -->
                         </select>
                         <small class="form-text text-muted">
-                            Rullande start: skytten placeras direkt på en patrull.
-                        </small>
-                    </div>
-                }
-
-                @if (dpEnabled)
-                {
-                    <div class="mb-0">
-                        <label for="walkInTeamSlot" class="form-label fw-bold">Skjutlag / tid</label>
-                        <select class="form-select" id="walkInTeamSlot">
-                            <option value="">— Inget skjutlag —</option>
-                            <!-- Available slots populated on modal open from /Competition/GetTeamAvailability -->
-                        </select>
-                        <small class="form-text text-muted">
-                            Egenbokning: välj ett skjutlag med ledig plats för skytten.
+                            Rullande start: skytten placeras direkt på en patrull. Väljs för alla
+                            valda klasser inom samma vapengrupp.
                         </small>
                     </div>
                 }
@@ -548,14 +544,11 @@
                     @if (dpEnabled)
                     {
                         <div class="mb-0">
-                            <label for="competitionEditTeamSlot" class="form-label">Skjutlag / tid <small class="text-muted">(för nytillagda klasser)</small></label>
-                            <select class="form-select" id="competitionEditTeamSlot">
-                                <option value="">— Inget skjutlag —</option>
-                                <!-- Available slots populated when the modal opens -->
-                            </select>
-                            <small class="form-text text-muted">
-                                Befintliga klassers skjutlag behålls. Detta val gäller bara klasser som läggs till nu.
-                            </small>
+                            <div id="competitionEditDpSlotsContainer">
+                                <!-- Per-class slot pickers; each row labelled with its class. Existing
+                                     classes pre-fill from the registration, new classes default to
+                                     no-slot until the operator picks. -->
+                            </div>
                         </div>
                     }
                 </form>
@@ -1142,7 +1135,7 @@ function testHubCreation() {
     });
 }
 
-function editCompetitionRegistration(registrationId) {
+async function editCompetitionRegistration(registrationId) {
     const registration = competitionRegistrations.find(r => r.id === registrationId);
     if (!registration) return;
 
@@ -1190,47 +1183,48 @@ function editCompetitionRegistration(registrationId) {
     // Direktplacering: refresh the slot picker on open so capacity reflects the
     // current state. Reset the selection — adding a class is an explicit choice.
     if (walkInDirektplaceringEnabled) {
-        const slot = document.getElementById('competitionEditTeamSlot');
-        if (slot) {
-            slot.value = '';
-            refreshEditTeamSlots();
-        }
+        // Pull live availability and render per-class slot rows for whatever the registration
+        // already has. Operator-toggled checkboxes will re-render the list (handler below).
+        await refreshDpTeamAvailability();
+        renderEditDpSlotRows(registration);
     }
 
     new bootstrap.Modal(document.getElementById('competitionEditRegistrationModal')).show();
 }
 
-async function refreshEditTeamSlots() {
-    if (!walkInDirektplaceringEnabled) return;
-    const select = document.getElementById('competitionEditTeamSlot');
-    if (!select) return;
-    const competitionId = parseInt($('.competition-registration-management').data('competition-id'), 10);
-    while (select.options.length > 1) select.remove(1);
-    try {
-        const resp = await fetch(`/umbraco/surface/Competition/GetTeamAvailability?competitionId=${competitionId}`);
-        const data = await resp.json();
-        if (data.success && Array.isArray(data.teams)) {
-            data.teams
-                .slice()
-                .sort((a, b) => a.teamNumber - b.teamNumber)
-                .forEach(t => {
-                    const labelBits = [`Skjutlag ${t.teamNumber}`];
-                    if (t.startTime) labelBits.push(t.startTime);
-                    if (t.label) labelBits.push(t.label);
-                    const head = labelBits.join(' · ');
-                    const tail = `${t.positionsRemaining}/${t.positionsTotal} lediga`;
-                    const opt = new Option(`${head} (${tail})`, String(t.teamNumber));
-                    if (t.isFull) {
-                        opt.disabled = true;
-                        opt.text = `${head} (FULLT)`;
-                    }
-                    select.add(opt);
-                });
-        }
-    } catch (err) {
-        console.warn('Could not load team availability for edit picker:', err);
-    }
+// Read the Edit modal's checked classes + the registration's existing per-class team
+// assignments and rebuild the per-class slot rows from scratch.
+function renderEditDpSlotRows(registration) {
+    const host = document.getElementById('competitionEditDpSlotsContainer');
+    if (!host) return;
+
+    const existingTeamByClass = {};
+    (registration?.shootingClasses || []).forEach(sc => {
+        const key = (sc.class || sc.className || '').trim();
+        if (key && sc.teamNumber != null) existingTeamByClass[key] = sc.teamNumber;
+    });
+
+    const checked = Array.from(document.querySelectorAll('#competitionEditClassList .edit-class-cb:checked'))
+        .map(cb => {
+            const id = cb.value;
+            const lbl = cb.parentElement?.querySelector('label')?.textContent?.trim() || id;
+            return { id, name: lbl };
+        });
+    renderDpSlotRows(host, checked, existingTeamByClass);
 }
+
+// Hook checkbox toggles in the Edit modal so per-class slot rows track what's ticked.
+document.addEventListener('DOMContentLoaded', () => {
+    const list = document.getElementById('competitionEditClassList');
+    if (!list) return;
+    list.addEventListener('change', (e) => {
+        if (!e.target.classList.contains('edit-class-cb')) return;
+        if (!walkInDirektplaceringEnabled) return;
+        const registrationId = parseInt(document.getElementById('competitionEditRegistrationId').value, 10);
+        const reg = competitionRegistrations.find(r => r.id === registrationId);
+        renderEditDpSlotRows(reg);
+    });
+});
 
 // Tiny HTML attribute escaper local to this modal.
 function escapeAttr(s) {
@@ -1251,10 +1245,15 @@ function saveCompetitionRegistrationChanges() {
         if (key) existingByClass[key] = sc;
     });
 
-    const newSlotRaw = walkInDirektplaceringEnabled
-        ? (document.getElementById('competitionEditTeamSlot')?.value || '')
-        : '';
-    const newSlot = newSlotRaw ? parseInt(newSlotRaw, 10) : null;
+    // Per-class slot picks come from the dynamic rows under the class list. Each row's
+    // <select> is keyed by class id, so existing classes' picks (pre-filled from the reg)
+    // and newly-added classes' picks both surface here.
+    const slotByClass = {};
+    if (walkInDirektplaceringEnabled) {
+        document.querySelectorAll('#competitionEditDpSlotsContainer .dp-slot-select').forEach(sel => {
+            if (sel.value) slotByClass[sel.dataset.classId] = parseInt(sel.value, 10);
+        });
+    }
 
     const checkedBoxes = document.querySelectorAll('#competitionEditClassList .edit-class-cb:checked');
     const classes = Array.from(checkedBoxes).map(cb => {
@@ -1262,11 +1261,12 @@ function saveCompetitionRegistrationChanges() {
         const existing = existingByClass[key];
         const entry = { class: key };
         if (existing && existing.startPreference) entry.startPreference = existing.startPreference;
-        // Existing class → keep its slot. New class → apply the picker (when set).
-        if (existing && existing.teamNumber != null) {
+        // Slot resolution: explicit per-class pick wins; otherwise fall back to whatever the
+        // registration already had (lets a no-op save preserve the existing assignment).
+        if (slotByClass[key] != null) {
+            entry.teamNumber = slotByClass[key];
+        } else if (existing && existing.teamNumber != null) {
             entry.teamNumber = existing.teamNumber;
-        } else if (newSlot != null) {
-            entry.teamNumber = newSlot;
         }
         return entry;
     });
@@ -1841,42 +1841,102 @@ const walkInAvailableClasses = @Html.Raw(availableShootingClassesJson);
 // rolling start on. The flag drives the post-registration call to AssignWalkInToPatrol.
 const walkInPatrolPickerEnabled = @(rollingStartEnabled ? "true" : "false");
 
-// Item #6: walk-in slot picker for direktplacering / Egenbokning competitions. Same
-// pattern as #5 — server-side rendered only when relevant; JS fetches live availability
-// each time the modal opens so a popular slot can fill up between two cashier visits.
+// Item #6: walk-in slot picker for direktplacering / Egenbokning competitions. Server-
+// side rendered only when relevant; JS fetches live availability each time the modal
+// opens so a popular slot can fill up between two cashier visits. Multi-class — each
+// checked class gets its own slot dropdown.
 const walkInDirektplaceringEnabled = @(dpEnabled ? "true" : "false");
 
-async function refreshWalkInTeamSlots() {
-    if (!walkInDirektplaceringEnabled) return;
-    const select = document.getElementById('walkInTeamSlot');
-    if (!select) return;
+// Cached team availability for the current modal session — populated on open, consumed
+// by per-class slot dropdown rendering. Refresh on each modal open.
+let dpTeamAvailabilityCache = null;
+
+async function refreshDpTeamAvailability() {
+    if (!walkInDirektplaceringEnabled) { dpTeamAvailabilityCache = null; return; }
     const competitionId = parseInt($('.competition-registration-management').data('competition-id'), 10);
-    // Keep the "no slot" option, drop everything else.
-    while (select.options.length > 1) select.remove(1);
     try {
         const resp = await fetch(`/umbraco/surface/Competition/GetTeamAvailability?competitionId=${competitionId}`);
         const data = await resp.json();
-        if (data.success && Array.isArray(data.teams)) {
-            data.teams
-                .slice()
-                .sort((a, b) => a.teamNumber - b.teamNumber)
-                .forEach(t => {
-                    const labelBits = [`Skjutlag ${t.teamNumber}`];
-                    if (t.startTime) labelBits.push(t.startTime);
-                    if (t.label) labelBits.push(t.label);
-                    const head = labelBits.join(' · ');
-                    const tail = `${t.positionsRemaining}/${t.positionsTotal} lediga`;
-                    const opt = new Option(`${head} (${tail})`, String(t.teamNumber));
-                    if (t.isFull) {
-                        opt.disabled = true;
-                        opt.text = `${head} (FULLT)`;
-                    }
-                    select.add(opt);
-                });
-        }
+        dpTeamAvailabilityCache = (data.success && Array.isArray(data.teams))
+            ? data.teams.slice().sort((a, b) => a.teamNumber - b.teamNumber)
+            : [];
     } catch (err) {
-        console.warn('Could not load team availability for walk-in picker:', err);
+        console.warn('Could not load team availability:', err);
+        dpTeamAvailabilityCache = [];
     }
+}
+
+// Build a `<select>` of slots with our standard label + capacity badge. The shooter's
+// existing assignment for THIS class (if any) is excluded from the "FULLT" check so
+// re-saving an unchanged Edit doesn't disable the slot they already hold.
+function buildDpSlotSelect(classId, preselected, ownExistingForThisClass) {
+    const sel = document.createElement('select');
+    sel.className = 'form-select form-select-sm dp-slot-select';
+    sel.dataset.classId = classId;
+
+    const noneOpt = new Option('— Inget skjutlag —', '');
+    sel.add(noneOpt);
+
+    (dpTeamAvailabilityCache || []).forEach(t => {
+        const labelBits = [`Skjutlag ${t.teamNumber}`];
+        if (t.startTime) labelBits.push(t.startTime);
+        if (t.label) labelBits.push(t.label);
+        const head = labelBits.join(' · ');
+        const tail = `${t.positionsRemaining}/${t.positionsTotal} lediga`;
+        const opt = new Option(`${head} (${tail})`, String(t.teamNumber));
+        // "FULLT" only blocks NEW bookings — if this is the slot the shooter already holds
+        // for this class, leave it selectable so a no-op save doesn't fail.
+        if (t.isFull && t.teamNumber !== ownExistingForThisClass) {
+            opt.disabled = true;
+            opt.text = `${head} (FULLT)`;
+        }
+        sel.add(opt);
+    });
+
+    if (preselected != null && preselected !== '') {
+        sel.value = String(preselected);
+    }
+    return sel;
+}
+
+// Render one row per checked class into a host container. Each row shows the class label
+// and a slot dropdown. Used by both the walk-in modal and the Edit Registration modal.
+function renderDpSlotRows(hostEl, checkedClasses, existingTeamByClass) {
+    if (!walkInDirektplaceringEnabled) { hostEl.innerHTML = ''; return; }
+    // Capture current picks so re-renders (when more classes are ticked) don't clobber
+    // what the operator has already chosen.
+    const previous = {};
+    hostEl.querySelectorAll('.dp-slot-select').forEach(s => {
+        if (s.value) previous[s.dataset.classId] = s.value;
+    });
+
+    if (checkedClasses.length === 0) { hostEl.innerHTML = ''; return; }
+
+    hostEl.innerHTML = '';
+    const heading = document.createElement('div');
+    heading.className = 'form-label fw-bold mb-1';
+    heading.textContent = 'Skjutlag / tid per klass';
+    hostEl.appendChild(heading);
+
+    checkedClasses.forEach(c => {
+        const row = document.createElement('div');
+        row.className = 'd-flex align-items-center gap-2 mb-2';
+
+        const label = document.createElement('div');
+        label.className = 'small fw-semibold';
+        label.style.minWidth = '120px';
+        label.textContent = c.name || c.id;
+        row.appendChild(label);
+
+        const presel = previous[c.id] != null
+            ? previous[c.id]
+            : (existingTeamByClass && existingTeamByClass[c.id] != null ? existingTeamByClass[c.id] : '');
+        const sel = buildDpSlotSelect(c.id, presel,
+            existingTeamByClass ? existingTeamByClass[c.id] : null);
+        row.appendChild(sel);
+
+        hostEl.appendChild(row);
+    });
 }
 
 async function refreshWalkInPatrolOptions() {
@@ -1903,7 +1963,7 @@ async function refreshWalkInPatrolOptions() {
     }
 }
 
-function openWalkInRegistrationModal() {
+async function openWalkInRegistrationModal() {
     // Reset state
     document.getElementById('walkInMemberSearch').value = '';
     document.getElementById('walkInMemberResults').innerHTML = '';
@@ -1913,26 +1973,32 @@ function openWalkInRegistrationModal() {
     document.getElementById('walkInError').classList.add('d-none');
     document.getElementById('walkInSubmitBtn').disabled = true;
 
-    // Populate the class dropdown from the competition's actual allowed classes only.
-    const classSelect = document.getElementById('walkInShootingClass');
-    classSelect.innerHTML = '<option value="">-- Välj klass --</option>';
-    if (Array.isArray(walkInAvailableClasses) && walkInAvailableClasses.length > 0) {
-        walkInAvailableClasses.forEach(c => classSelect.add(new Option(c.name, c.id)));
+    // Populate the class checkbox list from the competition's actual allowed classes.
+    // Multi-class so the cashier can register A + C in a single round trip — particularly
+    // important for direktplacering competitions where each class needs its own slot.
+    const classListEl = document.getElementById('walkInClassList');
+    const classes = (Array.isArray(walkInAvailableClasses) && walkInAvailableClasses.length > 0)
+        ? walkInAvailableClasses
+        : []; // No fallback for the multi-class form — operator must have a configured class list.
+
+    if (classes.length === 0) {
+        classListEl.innerHTML = '<div class="text-muted small">Inga klasser tillgängliga för denna tävling.</div>';
     } else {
-        // Fallback: if no class list was passed (older parent view), keep the dropdown
-        // permissive by copying from the filter — better than blocking the operator.
-        const filterClasses = document.getElementById('competitionClassFilter');
-        if (filterClasses) {
-            for (let i = 1; i < filterClasses.options.length; i++) {
-                const opt = filterClasses.options[i];
-                classSelect.add(new Option(opt.textContent, opt.value));
-            }
-        }
+        classListEl.innerHTML = classes.map(c => {
+            const safeId = `walkInCls_${c.id.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+            return `
+                <div class="form-check">
+                    <input class="form-check-input walk-in-class-cb" type="checkbox"
+                           id="${safeId}" value="${c.id}" data-class-name="${(c.name || c.id).replace(/"/g, '&quot;')}">
+                    <label class="form-check-label" for="${safeId}">${c.name || c.id}</label>
+                </div>`;
+        }).join('');
     }
 
     if (!walkInModalInstance) {
         walkInModalInstance = new bootstrap.Modal(document.getElementById('walkInRegistrationModal'));
     }
+
     // Reset patrol picker to the default and (re-)fetch existing patrols so a refresh
     // mid-day reflects what other operators have created since the modal was last open.
     if (walkInPatrolPickerEnabled) {
@@ -1940,16 +2006,35 @@ function openWalkInRegistrationModal() {
         if (sel) sel.value = 'nextAvailable';
         refreshWalkInPatrolOptions();
     }
-    // Same for the direktplacering slot picker — refresh availability on every open so
-    // a slot that filled up between visits is reflected immediately.
+
+    // Pull live team availability when the modal opens. Per-class slot dropdowns are
+    // rendered as the operator ticks classes (driven by the checkbox change handler).
     if (walkInDirektplaceringEnabled) {
-        const sel = document.getElementById('walkInTeamSlot');
-        if (sel) sel.value = '';
-        refreshWalkInTeamSlots();
+        const slots = document.getElementById('walkInDpSlotsContainer');
+        if (slots) slots.innerHTML = '';
+        await refreshDpTeamAvailability();
     }
+
     walkInModalInstance.show();
     setTimeout(() => document.getElementById('walkInMemberSearch').focus(), 250);
 }
+
+// Hook checkbox toggles after the modal builds its list so the per-class slot rows
+// stay in sync. Delegated listener on the container survives re-renders.
+document.addEventListener('DOMContentLoaded', () => {
+    const list = document.getElementById('walkInClassList');
+    if (!list) return;
+    list.addEventListener('change', (e) => {
+        if (!e.target.classList.contains('walk-in-class-cb')) return;
+        if (walkInDirektplaceringEnabled) {
+            const checked = Array.from(list.querySelectorAll('.walk-in-class-cb:checked'))
+                .map(cb => ({ id: cb.value, name: cb.dataset.className || cb.value }));
+            const host = document.getElementById('walkInDpSlotsContainer');
+            if (host) renderDpSlotRows(host, checked, {});
+        }
+        refreshWalkInSubmitState();
+    });
+});
 
 // Debounced member search via the existing TrainingGroup/SearchMembers endpoint
 // (which already handles four-tier auth and returns name + email + club).
@@ -2032,36 +2117,44 @@ function selectWalkInMember(memberId, memberName, clubName) {
     refreshWalkInSubmitState();
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-    const classSel = document.getElementById('walkInShootingClass');
-    if (classSel) classSel.addEventListener('change', refreshWalkInSubmitState);
-});
-
 function refreshWalkInSubmitState() {
     const memberId = document.getElementById('walkInSelectedMemberId').value;
-    const cls = document.getElementById('walkInShootingClass').value;
-    document.getElementById('walkInSubmitBtn').disabled = !(memberId && cls);
+    const anyClassChecked = !!document.querySelector('#walkInClassList .walk-in-class-cb:checked');
+    document.getElementById('walkInSubmitBtn').disabled = !(memberId && anyClassChecked);
 }
 
 async function submitWalkInRegistration() {
     const competitionId = parseInt($('.competition-registration-management').data('competition-id'), 10);
     const memberId = parseInt(document.getElementById('walkInSelectedMemberId').value, 10);
-    const shootingClass = document.getElementById('walkInShootingClass').value;
-    // Walk-ins don't pick a start preference — start lists are typically already built by
-    // the time someone walks up. Hardcoded to 'Inget' (matches the field's default).
-    const startPreference = 'Inget';
+
+    // Multi-class: each checked class becomes one entry, paired with its per-class slot
+    // (when direktplacering is enabled). Walk-ins don't pick a start preference — start
+    // lists are typically already built by the time someone walks up.
+    const slotByClass = {};
+    if (walkInDirektplaceringEnabled) {
+        document.querySelectorAll('#walkInDpSlotsContainer .dp-slot-select').forEach(sel => {
+            if (sel.value) slotByClass[sel.dataset.classId] = parseInt(sel.value, 10);
+        });
+    }
+    const classes = Array.from(document.querySelectorAll('#walkInClassList .walk-in-class-cb:checked'))
+        .map(cb => {
+            const entry = { class: cb.value, startPreference: 'Inget' };
+            if (slotByClass[cb.value] != null) entry.teamNumber = slotByClass[cb.value];
+            return entry;
+        });
 
     const errBox = document.getElementById('walkInError');
     errBox.classList.add('d-none');
 
+    if (classes.length === 0) {
+        errBox.textContent = 'Välj minst en klass.';
+        errBox.classList.remove('d-none');
+        return;
+    }
+
     const btn = document.getElementById('walkInSubmitBtn');
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Skapar...';
-
-    // Item #6: forward the chosen direktplacering slot when one is picked. Empty value
-    // means "no slot chosen" — backend treats null teamNumber as "skip slot booking".
-    const teamSlotRaw = document.getElementById('walkInTeamSlot')?.value || '';
-    const teamNumber = teamSlotRaw ? parseInt(teamSlotRaw, 10) : null;
 
     try {
         const token = $('input[name="__RequestVerificationToken"]').val();
@@ -2071,7 +2164,7 @@ async function submitWalkInRegistration() {
                 'Content-Type': 'application/json',
                 'RequestVerificationToken': token
             },
-            body: JSON.stringify({ competitionId, memberId, shootingClass, startPreference, teamNumber })
+            body: JSON.stringify({ competitionId, memberId, classes })
         });
         const data = await response.json();
 
