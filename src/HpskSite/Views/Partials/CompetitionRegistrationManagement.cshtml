@@ -1506,7 +1506,9 @@ function confirmMarkAsPaid() {
     params.append('notes', finalNotes);
     params.append('paymentMethod', method);
     params.append('actualAmount', actualAmount);
-    if (sendReceipt) params.append('sendReceipt', 'true');
+    // Always send the flag — omitting it would let the backend default (true) override
+    // an explicit untick, defeating the opt-out.
+    params.append('sendReceipt', sendReceipt ? 'true' : 'false');
 
     fetch('/umbraco/surface/Payment/UpdatePaymentStatus', {
         method: 'POST',
