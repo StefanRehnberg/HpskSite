@@ -245,20 +245,38 @@ namespace HpskSite.Controllers
                 var existingClasses = HpskSite.Models.CompetitionRegistrationDocument
                     .DeserializeShootingClasses(registration.GetValue<string>("shootingClasses"));
 
+                // When the caller passes a class list, preserve per-class state (StartPreference
+                // and TeamNumber) for entries that were already on the registration. The Edit
+                // modal in the management UI only sends explicit values for newly-added classes,
+                // so the existing rows must keep what they had.
+                var existingByClass = existingClasses
+                    .GroupBy(c => c.Class.Trim(), StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
                 var newClasses = request.ShootingClasses != null && request.ShootingClasses.Count > 0
                     ? request.ShootingClasses
                         .Where(c => !string.IsNullOrWhiteSpace(c.Class))
-                        .Select(c => new HpskSite.Models.ShootingClassEntry
+                        .Select(c =>
                         {
-                            Class = c.Class.Trim(),
-                            StartPreference = c.StartPreference ?? request.StartPreference ?? "Inget"
+                            var key = c.Class.Trim();
+                            existingByClass.TryGetValue(key, out var existing);
+                            return new HpskSite.Models.ShootingClassEntry
+                            {
+                                Class = key,
+                                StartPreference = c.StartPreference
+                                    ?? existing?.StartPreference
+                                    ?? request.StartPreference
+                                    ?? "Inget",
+                                TeamNumber = c.TeamNumber ?? existing?.TeamNumber
+                            };
                         })
                         .ToList()
                     : existingClasses
                         .Select(c => new HpskSite.Models.ShootingClassEntry
                         {
                             Class = c.Class,
-                            StartPreference = request.StartPreference ?? c.StartPreference ?? "Inget"
+                            StartPreference = request.StartPreference ?? c.StartPreference ?? "Inget",
+                            TeamNumber = c.TeamNumber
                         })
                         .ToList();
 
@@ -274,6 +292,15 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Failed to save registration" });
 
                 _contentService.Publish(registration, new[] { "*" }, -1);
+
+                // Direktplacering: any add/remove or slot reshuffle changes per-team occupancy,
+                // so drop the availability cache so the next slot fetch reflects the new state.
+                bool teamAssignmentsChanged = newClasses.Any(c => c.TeamNumber.HasValue)
+                    || existingClasses.Any(c => c.TeamNumber.HasValue);
+                if (teamAssignmentsChanged && competitionId > 0)
+                {
+                    AppCaches.RuntimeCache.ClearByKey($"dp_availability_{competitionId}");
+                }
 
                 // Invoice fee re-compute. We consider ALL non-cancelled invoices for this
                 // registration (a registration can have several after a couple of class
@@ -1168,6 +1195,9 @@ namespace HpskSite.Controllers
         {
             public string Class { get; set; } = "";
             public string? StartPreference { get; set; }
+            /// <summary>Direktplacering team/slot for this class. When omitted on a class
+            /// the registration already had, the existing entry's team is preserved.</summary>
+            public int? TeamNumber { get; set; }
         }
 
         /// <summary>

@@ -1492,7 +1492,8 @@ namespace HpskSite.Controllers
                         {
                             @class = sc.Class,
                             className = ShootingClasses.GetById(sc.Class)?.Name ?? sc.Class,
-                            startPreference = sc.StartPreference
+                            startPreference = sc.StartPreference,
+                            teamNumber = sc.TeamNumber
                         }).ToList();
 
                         return new

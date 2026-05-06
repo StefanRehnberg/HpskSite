@@ -537,7 +537,7 @@
                         </div>
                     </div>
 
-                    <div class="mb-3">
+                    <div class="@(dpEnabled ? "mb-3" : "mb-0")">
                         <label class="form-label fw-bold">Klasser</label>
                         <small class="text-muted d-block mb-2">Bocka i klasserna skytten ska tävla i. Faktura räknas om automatiskt om beloppet ändras (förutsatt att den fortfarande är obetald).</small>
                         <div id="competitionEditClassList" class="border rounded p-2" style="max-height: 220px; overflow-y: auto;">
@@ -545,14 +545,19 @@
                         </div>
                     </div>
 
-                    <div class="mb-0">
-                        <label for="competitionEditStartPreference" class="form-label">Startpreferens (gäller alla valda klasser)</label>
-                        <select class="form-select" id="competitionEditStartPreference">
-                            <option value="Inget">Inget (ingen preferens)</option>
-                            <option value="Tidig Start">Tidig start</option>
-                            <option value="Sen Start">Sen start</option>
-                        </select>
-                    </div>
+                    @if (dpEnabled)
+                    {
+                        <div class="mb-0">
+                            <label for="competitionEditTeamSlot" class="form-label">Skjutlag / tid <small class="text-muted">(för nytillagda klasser)</small></label>
+                            <select class="form-select" id="competitionEditTeamSlot">
+                                <option value="">— Inget skjutlag —</option>
+                                <!-- Available slots populated when the modal opens -->
+                            </select>
+                            <small class="form-text text-muted">
+                                Befintliga klassers skjutlag behålls. Detta val gäller bara klasser som läggs till nu.
+                            </small>
+                        </div>
+                    }
                 </form>
             </div>
             <div class="modal-footer flex-wrap gap-2">
@@ -1182,17 +1187,49 @@ function editCompetitionRegistration(registrationId) {
             }).join('');
     }
 
-    // Pre-fill start preference: use the most common existing value, defaulting to "Inget".
-    const prefs = (registration.shootingClasses || []).map(sc => sc.startPreference || 'Inget');
-    let dominantPref = 'Inget';
-    if (prefs.length > 0) {
-        const counts = {};
-        prefs.forEach(p => { counts[p] = (counts[p] || 0) + 1; });
-        dominantPref = Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
+    // Direktplacering: refresh the slot picker on open so capacity reflects the
+    // current state. Reset the selection — adding a class is an explicit choice.
+    if (walkInDirektplaceringEnabled) {
+        const slot = document.getElementById('competitionEditTeamSlot');
+        if (slot) {
+            slot.value = '';
+            refreshEditTeamSlots();
+        }
     }
-    document.getElementById('competitionEditStartPreference').value = dominantPref;
 
     new bootstrap.Modal(document.getElementById('competitionEditRegistrationModal')).show();
+}
+
+async function refreshEditTeamSlots() {
+    if (!walkInDirektplaceringEnabled) return;
+    const select = document.getElementById('competitionEditTeamSlot');
+    if (!select) return;
+    const competitionId = parseInt($('.competition-registration-management').data('competition-id'), 10);
+    while (select.options.length > 1) select.remove(1);
+    try {
+        const resp = await fetch(`/umbraco/surface/Competition/GetTeamAvailability?competitionId=${competitionId}`);
+        const data = await resp.json();
+        if (data.success && Array.isArray(data.teams)) {
+            data.teams
+                .slice()
+                .sort((a, b) => a.teamNumber - b.teamNumber)
+                .forEach(t => {
+                    const labelBits = [`Skjutlag ${t.teamNumber}`];
+                    if (t.startTime) labelBits.push(t.startTime);
+                    if (t.label) labelBits.push(t.label);
+                    const head = labelBits.join(' · ');
+                    const tail = `${t.positionsRemaining}/${t.positionsTotal} lediga`;
+                    const opt = new Option(`${head} (${tail})`, String(t.teamNumber));
+                    if (t.isFull) {
+                        opt.disabled = true;
+                        opt.text = `${head} (FULLT)`;
+                    }
+                    select.add(opt);
+                });
+        }
+    } catch (err) {
+        console.warn('Could not load team availability for edit picker:', err);
+    }
 }
 
 // Tiny HTML attribute escaper local to this modal.
@@ -1203,14 +1240,36 @@ function escapeAttr(s) {
 
 function saveCompetitionRegistrationChanges() {
     const registrationId = parseInt(document.getElementById('competitionEditRegistrationId').value, 10);
-    const startPreference = document.getElementById('competitionEditStartPreference').value;
+    const reg = competitionRegistrations.find(r => r.id === registrationId);
 
-    // Collect ticked classes
+    // Index existing per-class state so we can preserve startPreference + teamNumber for
+    // classes that were already on the registration. Newly-added classes get the picker's
+    // chosen slot (when direktplacering is enabled) and no start preference.
+    const existingByClass = {};
+    (reg?.shootingClasses || []).forEach(sc => {
+        const key = (sc.class || sc.className || '').trim();
+        if (key) existingByClass[key] = sc;
+    });
+
+    const newSlotRaw = walkInDirektplaceringEnabled
+        ? (document.getElementById('competitionEditTeamSlot')?.value || '')
+        : '';
+    const newSlot = newSlotRaw ? parseInt(newSlotRaw, 10) : null;
+
     const checkedBoxes = document.querySelectorAll('#competitionEditClassList .edit-class-cb:checked');
-    const classes = Array.from(checkedBoxes).map(cb => ({
-        class: cb.value,
-        startPreference: startPreference
-    }));
+    const classes = Array.from(checkedBoxes).map(cb => {
+        const key = cb.value;
+        const existing = existingByClass[key];
+        const entry = { class: key };
+        if (existing && existing.startPreference) entry.startPreference = existing.startPreference;
+        // Existing class → keep its slot. New class → apply the picker (when set).
+        if (existing && existing.teamNumber != null) {
+            entry.teamNumber = existing.teamNumber;
+        } else if (newSlot != null) {
+            entry.teamNumber = newSlot;
+        }
+        return entry;
+    });
 
     if (classes.length === 0) {
         alert('Anmälan måste ha minst en klass. Vill du istället ta bort anmälan, använd knappen längst ner till vänster.');
@@ -1219,12 +1278,10 @@ function saveCompetitionRegistrationChanges() {
 
     // Preserve the existing isSubCompetition flag so the fee re-compute doesn't accidentally
     // drop a deltävling-anmälan.
-    const reg = competitionRegistrations.find(r => r.id === registrationId);
     const isSubCompetition = !!(reg && reg.isSubCompetition);
 
     const data = {
         registrationId,
-        startPreference,
         shootingClasses: classes,
         isSubCompetition
     };
