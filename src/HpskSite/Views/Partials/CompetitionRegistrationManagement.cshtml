@@ -56,20 +56,6 @@
         </div>
     </div>
 
-    <!-- Quick Search — primary at-the-desk lookup. Matches against name, club, and the
-         Swish reference (invoice number) so a treasurer can paste the reference straight
-         from a Swish notification and jump to the right row. -->
-    <div class="card mb-3 border-primary">
-        <div class="card-body py-2">
-            <label for="competitionRegistrationSearch" class="form-label mb-1 small fw-bold">
-                <i class="bi bi-search me-1"></i>Sök på namn, klubb eller referens
-            </label>
-            <input type="text" class="form-control" id="competitionRegistrationSearch"
-                   placeholder="t.ex. ”Andy Haard”, ”Haaplinge” eller ”5312-2043-1”"
-                   oninput="filterCompetitionRegistrations()" autocomplete="off">
-        </div>
-    </div>
-
     <!-- Payment Summary Cards -->
     <div class="row g-2 mb-3" id="paymentSummaryCards" style="display:none">
         <div class="col-6 col-md-3">
@@ -118,25 +104,36 @@
         </div>
     </div>
 
-    <!-- Filter Section -->
+    <!-- Search + Filters — six inputs in a single row at lg+ to minimize vertical
+         space at the desk. Search matches name, club, and Swish reference (invoice
+         number) so a treasurer can paste the reference from a Swish notification
+         and jump straight to the right row. -->
     <div class="card mb-3">
         <div class="card-body">
-            <div class="row g-3">
-                <div class="col-md-3">
-                    <label for="competitionClassFilter" class="form-label">Filtrera på klass:</label>
+            <div class="row g-2">
+                <div class="col-xl-2 col-lg-4 col-md-6">
+                    <label for="competitionRegistrationSearch" class="form-label">
+                        <i class="bi bi-search me-1"></i>Sök
+                    </label>
+                    <input type="text" class="form-control" id="competitionRegistrationSearch"
+                           placeholder="Namn, klubb, referens"
+                           oninput="filterCompetitionRegistrations()" autocomplete="off">
+                </div>
+                <div class="col-xl-2 col-lg-4 col-md-6">
+                    <label for="competitionClassFilter" class="form-label">Klass</label>
                     <select class="form-select" id="competitionClassFilter" onchange="filterCompetitionRegistrations()">
                         <option value="">Alla klasser</option>
                         <!-- Options populated dynamically by populateShootingClassFilter() -->
                     </select>
                 </div>
-                <div class="col-md-3">
-                    <label for="competitionClubFilter" class="form-label">Filtrera på klubb:</label>
+                <div class="col-xl-2 col-lg-4 col-md-6">
+                    <label for="competitionClubFilter" class="form-label">Klubb</label>
                     <select class="form-select" id="competitionClubFilter" onchange="filterCompetitionRegistrations()">
                         <option value="">Alla klubbar</option>
                     </select>
                 </div>
-                <div class="col-md-3">
-                    <label for="competitionPreferenceFilter" class="form-label">Filtrera på startpreferens:</label>
+                <div class="col-xl-2 col-lg-4 col-md-6">
+                    <label for="competitionPreferenceFilter" class="form-label">Startpreferens</label>
                     <select class="form-select" id="competitionPreferenceFilter" onchange="filterCompetitionRegistrations()">
                         <option value="">Alla preferenser</option>
                         <option value="Inget">Inget (ingen preferens)</option>
@@ -144,8 +141,8 @@
                         <option value="Sen Start">Sen start</option>
                     </select>
                 </div>
-                <div class="col-md-3">
-                    <label for="competitionPaymentFilter" class="form-label">Filtrera på betalstatus:</label>
+                <div class="col-xl-2 col-lg-4 col-md-6">
+                    <label for="competitionPaymentFilter" class="form-label">Betalstatus</label>
                     <select class="form-select" id="competitionPaymentFilter" onchange="filterCompetitionRegistrations()">
                         <option value="">Alla betalstatus</option>
                         <option value="Paid">Betald</option>
@@ -156,8 +153,8 @@
                         <option value="No Invoice">Saknar betalning</option>
                     </select>
                 </div>
-                <div class="col-md-3">
-                    <label for="competitionCheckedInFilter" class="form-label">Filtrera på närvaro:</label>
+                <div class="col-xl-2 col-lg-4 col-md-6">
+                    <label for="competitionCheckedInFilter" class="form-label">Närvaro</label>
                     <select class="form-select" id="competitionCheckedInFilter" onchange="filterCompetitionRegistrations()">
                         <option value="">Alla</option>
                         <option value="in">Incheckad</option>
