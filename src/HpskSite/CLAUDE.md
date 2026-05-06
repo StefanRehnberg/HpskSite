@@ -81,9 +81,9 @@ if (!isSiteAdmin && !isCompetitionManager && !isClubAdmin)
 - Used by: Views/Partials/ClubManagement.cshtml, Views/ClubsPage.cshtml, Views/ClubAdmin.cshtml, Views/Partials/Register.cshtml
 
 **RegistrationAdminController** (`Controllers/RegistrationAdminController.cs`)
-- 5 endpoints for competition registration management
-- GET: GetCompetitionRegistrations, GetActiveCompetitions
-- POST: UpdateCompetitionRegistration, DeleteCompetitionRegistration, ExportCompetitionRegistrations
+- ~10 endpoints for competition registration management (cashier desk + admin)
+- GET: GetCompetitionRegistrations, GetActiveCompetitions, GetWalkInStartListTeams
+- POST: UpdateCompetitionRegistration, DeleteCompetitionRegistration, ExportCompetitionRegistrations, AddLateRegistration, TransferRegistration, SetCheckedIn, AssignWalkInToStartListTeam
 - Used by: Views/Partials/RegistrationManagement.cshtml, Views/Partials/CompetitionRegistrationManagement.cshtml, Views/Partials/CompetitionExportManagement.cshtml, Views/CompetitionManagement.cshtml
 
 **Benefits of Refactoring:**
@@ -676,6 +676,59 @@ POST /umbraco/surface/RegistrationAdmin/AddLateRegistration
 
 **See Also:** [Late Registration Workflow Documentation](Documentation/LATE_REGISTRATION_WORKFLOW.md) for complete implementation details
 
+### Cashier Workflow & Multi-Class Walk-In ✅ (2026-05-06)
+
+**Overview:** End-to-end registration-desk experience for the cashier on competition day. Walk-in supports multi-class with per-class slot/patrol pickers, mark-as-paid records actual amount and emails a receipt, registrations can be re-pointed to a different shooter, and the start list updates automatically as walk-ins land.
+
+**Manual operator steps (one-time, in Umbraco backoffice):**
+- `registrationInvoice` doctype: add property `actualPaidAmount` (Decimal, optional, label "Faktiskt belopp"). Without it, the variance feature silently no-ops — billed and actual stay equal.
+- `competitionRegistration` doctype: add property `isCheckedIn` (True/False, optional, default false, label "Incheckad"). Without it, the at-the-desk attendance toggle silently no-ops.
+
+**Walk-in registration (`Anmäl och betala` modal):**
+- Multi-class via checkbox list. Mutex buckets enforce one-class-per-subcategory like the public registration form's radio groups (C1 ↔ C2 ↔ C3, C_Vet_Y ↔ C_Vet_A, A_opt_1 ↔ A_opt_2, …). Different weapon groups stay independent so A1 + C1 + R1 is a legitimate three-class walk-in.
+- Per-class slot pickers when direktplacering is enabled. Each ticked class gets its own dropdown listing teams + remaining capacity. Full slots disabled with `(FULLT)`.
+- Patrol picker for Fältskytte / MagnumFält rolling-start. "Nästa lediga", "Skapa ny patrull", or specific patrol — applied per weapon group on submit, so A1 + B1 lands on a patrol per group.
+- Non-DP slot picker (precision/MagnumPrecision/Milsnabb): when an existing `precisionStartList` exists for the competition, the modal probes `RegistrationAdmin/GetWalkInStartListTeams` and surfaces a dropdown. Picked team gets one row per registered class via `RegistrationAdmin/AssignWalkInToStartListTeam`.
+- Backend: `LateRegistrationRequest.Classes` is the multi-class shape (list of `{Class, StartPreference?, TeamNumber?}`). Single-class fields kept for legacy callers. Capacity validation refuses over-booking before writing JSON.
+
+**Mark-as-paid (`Markera som betald` modal):**
+- Operator records actual amount (defaults to invoice total). Variance triggers an "Avvikande belopp" badge on the row and a "Faktiskt" column in Bokföringsunderlag.
+- Receipt email is opt-out — checkbox defaults to checked. Receipt now fires inside `PaymentService.UpdatePaymentStatusAsync` whenever status transitions to Paid (also covers `InvoiceAdminController.MarkAsPaid`). Members without an email are silently skipped (no audit row, no error).
+- Audit log records `MarkedPaid` and (separately) `ReceiptSent` events.
+
+**Edit Registration (`Redigera anmälan` modal):**
+- Multi-class checkbox list with the same mutex bucket logic as walk-in.
+- For DP comps: per-class slot dropdowns. Existing classes pre-fill from the registration's stored `teamNumber`; newly-ticked classes start empty for explicit pick.
+- The shared "Startpreferens" dropdown is gone — per-class StartPreference is preserved server-side via `existingByClass` lookup keyed on class id (case-insensitive trim).
+- Fee re-compute follows the multi-invoice top-up model (`delta = newFee - sumPaid`; patches existing Pending or creates a new top-up Pending invoice; Paid invoices are never modified).
+- Capacity check on edit excludes this registration's own existing assignments so a no-op save doesn't trip the guard.
+
+**Transfer registration (`Överför till annan skytt`):**
+- New endpoint `RegistrationAdmin/TransferRegistration(registrationId, toMemberId)` re-points the registration AND every linked invoice to the new member, then logs a `Transferred` audit row. Refuses if the target already has their own registration for the competition.
+
+**Närvaro / Check-in toggle:**
+- Bootstrap form-switch column on the Anmälningar table. Optimistic — flips local state immediately, reverts on server failure.
+- New filter dropdown "Filtrera på närvaro": Alla / Incheckad / Ej incheckad.
+- Endpoint `RegistrationAdmin/SetCheckedIn(registrationId, checkedIn)` with the standard four-tier auth.
+
+**Auto-regen of start lists:**
+- DP path: `DirektplaceringStartListService.Regenerate(competitionId, ...)` is called from both `AddLateRegistration` (when any teamNumber is present on the new registration) and `UpdateCompetitionRegistration` (when team assignments are involved). The service was extracted from `CompetitionController` so RegistrationAdmin doesn't duplicate the renderer.
+- Non-DP path: walk-in's `AssignWalkInToStartListTeam` modifies `configurationData` and re-renders HTML via the existing `StartListHtmlRenderer`.
+- Cache: invalidates `dp_availability_<competitionId>` runtime cache key so the next `/Competition/GetTeamAvailability` fetch sees the new state.
+
+**Audit trail event types** (`Models/InvoicePaymentEvent.cs`):
+- `Created`, `MarkedPaid`, `Cancelled`, `Refunded`, `EmailSent` (Swish QR email), `ReceiptSent` (payment receipt email), `Transferred`, `StatusChanged`.
+
+**Multi-invoice top-up model:**
+- One registration can have several invoices: original Paid + zero-or-more Paid top-ups + at most one Pending top-up. Paid invoices are never modified — they're the historical record. Top-up math is `delta = newFee - sumPaid`.
+- API exposes per-row `paidAmount` and `pendingAmount` aggregates so the summary cards reflect totals correctly across multi-invoice rows. `hasVariance` is true when any paid invoice's `actualPaidAmount` differs from its `totalAmount`.
+
+**Class mutex bucket logic (`getClassMutexBucket` in CompetitionRegistrationManagement.cshtml):**
+- Maps a class id to a `weapon:subcategory` bucket. Within-bucket ticks auto-untick siblings; across-bucket ticks are independent.
+- Subcategory derivation: `_Jun` → jun, `_Vet_` → vet, contains `Dam` → dam, else open. Springskytte composite ids (containing `-`) get a unique bucket per id so multi-class registration there is unaffected.
+
+**See Also:** [Cashier Workflow Knowledge Base Doc](KnowledgeBase/docs/anmalningar-registreringsbord.md) for the user-facing version that the AI chat assistant uses.
+
 ## UI Implementation
 
 ### Navigation & Header
@@ -852,6 +905,8 @@ Navigate to **Members → Member Groups**:
 
 ### Document Type Properties — Required Additions
 - **regionalPage**: add `area` Textstring property (dropdown values: `Syd`, `Vast`, `Ost`, `Nord`). Required by the Certifications system to scope Riksinstruktör authority. Backfill on every existing region node.
+- **registrationInvoice**: add `actualPaidAmount` Decimal property (optional, label "Faktiskt belopp"). Cashier flow records what was actually collected when it differs from the billed total. Without this property, the variance feature silently no-ops (billed = actual). Added 2026-05-06.
+- **competitionRegistration**: add `isCheckedIn` True/False property (optional, default false, label "Incheckad"). Powers the at-the-desk attendance toggle on the Anmälningar table. Without this property, the toggle silently no-ops (`IContent.SetValue` on a missing property is a no-op). Added 2026-05-06.
 
 ## Common Patterns
 
