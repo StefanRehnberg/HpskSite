@@ -723,11 +723,23 @@ namespace HpskSite.Controllers
                         }
                     }
 
+                    // Resolve each club's published URL once so the frontend can render
+                    // the club name as a link without an extra round-trip. Frontend shows
+                    // top 5 by default and lets the user expand to see the rest.
+                    var publishedContent = _umbracoContextAccessor.TryGetUmbracoContext(out var ctx)
+                        ? ctx?.Content
+                        : null;
                     var topClubsByActiveMembers = activeCountByClub
                         .Where(kvp => clubNameLookup.ContainsKey(kvp.Key))
-                        .Select(kvp => new { club = clubNameLookup[kvp.Key], count = kvp.Value })
+                        .Select(kvp => new
+                        {
+                            clubId = kvp.Key,
+                            club = clubNameLookup[kvp.Key],
+                            count = kvp.Value,
+                            url = publishedContent?.GetById(kvp.Key)?.Url() ?? ""
+                        })
                         .OrderByDescending(x => x.count)
-                        .Take(5)
+                        .Take(25)
                         .Cast<object>()
                         .ToList();
 

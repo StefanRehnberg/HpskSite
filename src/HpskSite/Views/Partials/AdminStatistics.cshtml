@@ -233,6 +233,9 @@
                                 </tbody>
                             </table>
                         </div>
+                        <button type="button" class="btn btn-sm btn-link p-0 mt-2 d-none" id="topClubsByActiveMembersToggle" onclick="toggleTopActiveClubs()">
+                            Visa fler
+                        </button>
                     </div>
                 </div>
             </div>
@@ -581,6 +584,10 @@
     let statsLoaded = false;
     let chartInstances = {};
     let lastStatsData = null;
+    // "Mest aktiva klubbar (30d)" expand-state. Cache holds the full list (up to
+    // controller's take cap); expanded toggles the show-5 vs show-all view.
+    let topActiveClubsCache = [];
+    let topActiveClubsExpanded = false;
 
     // Theme-aware colors
     function getColors() {
@@ -828,14 +835,54 @@
             }
 
             var actBody = document.getElementById('topClubsByActiveMembersBody');
-            if (d.clubActivities.topClubsByActiveMembers && d.clubActivities.topClubsByActiveMembers.length) {
-                actBody.innerHTML = d.clubActivities.topClubsByActiveMembers.map(function (c) {
-                    return '<tr><td>' + escapeHtml(c.club) + '</td><td class="text-end">' + c.count + '</td></tr>';
-                }).join('');
-            } else {
-                actBody.innerHTML = '<tr><td colspan="2" class="text-center text-muted">Inga aktiva klubbar</td></tr>';
+            var actToggle = document.getElementById('topClubsByActiveMembersToggle');
+            // Stash the full list on the body so the toggle can re-render without a refetch.
+            // Default view shows top 5; clicking "Visa fler" expands to the full set.
+            topActiveClubsCache = d.clubActivities.topClubsByActiveMembers || [];
+            topActiveClubsExpanded = false;
+            renderTopActiveClubs();
+        }
+
+        function renderTopActiveClubs() {
+            var body = document.getElementById('topClubsByActiveMembersBody');
+            var toggle = document.getElementById('topClubsByActiveMembersToggle');
+            if (!body) return;
+
+            if (!topActiveClubsCache || topActiveClubsCache.length === 0) {
+                body.innerHTML = '<tr><td colspan="2" class="text-center text-muted">Inga aktiva klubbar</td></tr>';
+                if (toggle) toggle.classList.add('d-none');
+                return;
+            }
+
+            var visible = topActiveClubsExpanded
+                ? topActiveClubsCache
+                : topActiveClubsCache.slice(0, 5);
+
+            body.innerHTML = visible.map(function (c) {
+                // Club name is a link to the club's published page when the URL is known;
+                // fall back to plain text for legacy entries that lack one.
+                var label = c.url
+                    ? '<a href="' + escapeHtml(c.url) + '" class="text-decoration-none">' + escapeHtml(c.club) + '</a>'
+                    : escapeHtml(c.club);
+                return '<tr><td>' + label + '</td><td class="text-end">' + c.count + '</td></tr>';
+            }).join('');
+
+            // Toggle is only useful when there's more than the default page-size to show.
+            if (toggle) {
+                if (topActiveClubsCache.length > 5) {
+                    toggle.classList.remove('d-none');
+                    toggle.textContent = topActiveClubsExpanded ? 'Visa färre' : 'Visa fler (' + (topActiveClubsCache.length - 5) + ')';
+                } else {
+                    toggle.classList.add('d-none');
+                }
             }
         }
+
+        // Exposed on window so the inline onclick on the "Visa fler" button can find it.
+        window.toggleTopActiveClubs = function () {
+            topActiveClubsExpanded = !topActiveClubsExpanded;
+            renderTopActiveClubs();
+        };
 
         // Section D: Training matches per month (bar chart)
         if (d.trainingMatchesPerMonth && d.trainingMatchesPerMonth.length) {
