@@ -395,6 +395,7 @@ namespace HpskSite.Controllers
                             .Where(c => c.ContentType.Alias == "clubSimpleEvent")
                             .Select(e => new
                             {
+                                clubId = club.Id,
                                 clubName = club.Name ?? "",
                                 eventType = e.Value<string>("eventType") ?? "Annat",
                                 eventDate = e.Value<DateTime?>("eventDate")
@@ -428,21 +429,37 @@ namespace HpskSite.Controllers
                         .Cast<object>()
                         .ToList();
 
+                    // Lookup tables used by the top-clubs cards on the frontend so each
+                    // row can render the club name as a link to the club's published page.
+                    var clubNameLookup = allClubNodes.ToDictionary(c => c.Id, c => c.Name ?? "");
+                    var clubUrlLookup = allClubNodes.ToDictionary(c => c.Id, c => c.Url() ?? "");
+
                     var topClubsByEvents = allClubEvents
                         .Where(e => e.eventDate.HasValue && e.eventDate.Value.Year == now.Year)
-                        .GroupBy(e => e.clubName)
-                        .Select(g => new { club = g.Key, count = g.Count() })
+                        .GroupBy(e => e.clubId)
+                        .Select(g => new
+                        {
+                            clubId = g.Key,
+                            club = clubNameLookup.GetValueOrDefault(g.Key, g.First().clubName),
+                            count = g.Count(),
+                            url = clubUrlLookup.GetValueOrDefault(g.Key, "")
+                        })
                         .OrderByDescending(g => g.count)
-                        .Take(5)
+                        .Take(25)
                         .Cast<object>()
                         .ToList();
 
-                    var clubNameLookup = allClubNodes.ToDictionary(c => c.Id, c => c.Name ?? "");
                     var topClubsByMembers = membersByClub
                         .Where(kvp => clubNameLookup.ContainsKey(kvp.Key))
-                        .Select(kvp => new { club = clubNameLookup[kvp.Key], count = kvp.Value })
+                        .Select(kvp => new
+                        {
+                            clubId = kvp.Key,
+                            club = clubNameLookup[kvp.Key],
+                            count = kvp.Value,
+                            url = clubUrlLookup.GetValueOrDefault(kvp.Key, "")
+                        })
                         .OrderByDescending(x => x.count)
-                        .Take(5)
+                        .Take(25)
                         .Cast<object>()
                         .ToList();
 
@@ -723,12 +740,8 @@ namespace HpskSite.Controllers
                         }
                     }
 
-                    // Resolve each club's published URL once so the frontend can render
-                    // the club name as a link without an extra round-trip. Frontend shows
-                    // top 5 by default and lets the user expand to see the rest.
-                    var publishedContent = _umbracoContextAccessor.TryGetUmbracoContext(out var ctx)
-                        ? ctx?.Content
-                        : null;
+                    // Reuse the clubName/Url lookups built earlier so the top-clubs cards
+                    // on the frontend can render each row as a link to the club's page.
                     var topClubsByActiveMembers = activeCountByClub
                         .Where(kvp => clubNameLookup.ContainsKey(kvp.Key))
                         .Select(kvp => new
@@ -736,7 +749,7 @@ namespace HpskSite.Controllers
                             clubId = kvp.Key,
                             club = clubNameLookup[kvp.Key],
                             count = kvp.Value,
-                            url = publishedContent?.GetById(kvp.Key)?.Url() ?? ""
+                            url = clubUrlLookup.GetValueOrDefault(kvp.Key, "")
                         })
                         .OrderByDescending(x => x.count)
                         .Take(25)
