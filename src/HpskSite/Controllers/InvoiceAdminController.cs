@@ -714,7 +714,7 @@ namespace HpskSite.Controllers
         /// Same four-tier auth as the rest of the per-competition surface.
         /// </summary>
         [HttpGet]
-        public async Task<IActionResult> BokforingsUnderlag(int competitionId)
+        public async Task<IActionResult> BokforingsUnderlag(int competitionId, bool includeOutstanding = true)
         {
             if (competitionId <= 0) return BadRequest("competitionId is required");
 
@@ -836,6 +836,10 @@ namespace HpskSite.Controllers
                 ? _clubService.GetClubNameById(organizerClubId)
                 : null;
 
+            // For final bookkeeping verification the operator only wants what's actually
+            // been collected — outstanding (Pending / No Invoice) rows would muddy the
+            // verifikat. When includeOutstanding is false, drop the section entirely so
+            // the printout doesn't even mention pending amounts.
             var model = new BokforingsUnderlagViewModel
             {
                 CompetitionId = competitionId,
@@ -847,9 +851,10 @@ namespace HpskSite.Controllers
                 Scope = competition.GetValue<string>("competitionScope"),
                 GeneratedAt = DateTime.Now,
                 GeneratedBy = actorName,
+                IncludeOutstanding = includeOutstanding,
                 Summary = summary,
                 PaidTransactions = paidRows,
-                OutstandingTransactions = outstandingRows,
+                OutstandingTransactions = includeOutstanding ? outstandingRows : new List<BokforingsTransactionRow>(),
                 CancelledTransactions = cancelledRows,
                 RefundedTransactions = refundedRows
             };

@@ -95,6 +95,14 @@
 @* ── Summary cards ───────────────────────────────────────────── *@
 <h2>Sammanställning</h2>
 
+@if (!Model.IncludeOutstanding)
+{
+    <div class="muted" style="font-size:11px; margin-bottom:8px; font-style:italic;">
+        Utskrift för bokföringsverifikat — endast inkomna betalningar visas. Utestående
+        avgifter har medvetet utelämnats.
+    </div>
+}
+
 <div class="summary-card">
     <div class="cell">
         <div class="lbl">Anmälda</div>
@@ -105,11 +113,14 @@
         <div class="val">@Model.Summary.PaidCount st</div>
         <div class="lbl">@FormatKr(Model.Summary.PaidTotal)</div>
     </div>
-    <div class="cell pending">
-        <div class="lbl">Utestående</div>
-        <div class="val">@(Model.Summary.PendingCount + Model.Summary.NoInvoiceCount) st</div>
-        <div class="lbl">@FormatKr(Model.Summary.PendingTotal) (väntande betalning)</div>
-    </div>
+    @if (Model.IncludeOutstanding)
+    {
+        <div class="cell pending">
+            <div class="lbl">Utestående</div>
+            <div class="val">@(Model.Summary.PendingCount + Model.Summary.NoInvoiceCount) st</div>
+            <div class="lbl">@FormatKr(Model.Summary.PendingTotal) (väntande betalning)</div>
+        </div>
+    }
     <div class="cell refunded">
         <div class="lbl">Återbetald / makulerad</div>
         <div class="val">@(Model.Summary.RefundedCount + Model.Summary.CancelledCount) st</div>

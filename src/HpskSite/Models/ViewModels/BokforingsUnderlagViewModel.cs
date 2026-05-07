@@ -17,6 +17,11 @@ namespace HpskSite.Models.ViewModels
         public DateTime GeneratedAt { get; set; }
         public string? GeneratedBy { get; set; }   // Operator name; shown in the footer
 
+        /// <summary>True when the operator chose to include the Utestående (Pending /
+        /// No Invoice) section. False produces a "verifikat-friendly" print with only
+        /// what has actually been paid. Drives the summary card visibility too.</summary>
+        public bool IncludeOutstanding { get; set; } = true;
+
         public BokforingsSummary Summary { get; set; } = new();
 
         /// <summary>Paid transactions, oldest first (chronological for the bookkeeper).</summary>

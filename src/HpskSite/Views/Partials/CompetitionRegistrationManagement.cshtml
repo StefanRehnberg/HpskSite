@@ -222,6 +222,38 @@
     </div>
 </div>
 
+<!-- Bokföringsunderlag option modal — asks whether to include outstanding payments.
+     The default print includes everything (running view); the verifikat-friendly
+     variant for the final book-keeping confirmation only lists what was actually paid. -->
+<div class="modal fade" id="bokforingsUnderlagModal" tabindex="-1" aria-labelledby="bokforingsUnderlagModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title" id="bokforingsUnderlagModalLabel">
+                    <i class="bi bi-file-earmark-text me-2"></i>Bokföringsunderlag
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-3">Vill du inkludera utestående betalningar i underlaget?</p>
+                <ul class="small text-muted mb-0">
+                    <li><strong>Inkludera utestående</strong> — fullständig översikt som visar både inkomna och utestående betalningar. Bra under tävlingsdagen och vid uppföljning.</li>
+                    <li><strong>Endast betalda</strong> — bokföringsverifikat. Endast inkomna betalningar listas. Bra för slutgiltig bokföring.</li>
+                </ul>
+            </div>
+            <div class="modal-footer flex-wrap gap-2">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-outline-success" onclick="openBokforingsUnderlagWithMode(true)">
+                    <i class="bi bi-list-check me-1"></i>Inkludera utestående
+                </button>
+                <button type="button" class="btn btn-success" onclick="openBokforingsUnderlagWithMode(false)">
+                    <i class="bi bi-receipt me-1"></i>Endast betalda
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Manage Invoice Modal — desk workflow hub for a single registration's payment.
      Replaces the older Betalningsalternativ + Swish-QR modals. Has two visual states
      (action picker / QR display) toggled by JS. Lazily creates the invoice on first
@@ -1087,7 +1119,17 @@ function exportCompetitionRegistrations() {
 function openBokforingsUnderlag() {
     const currentCompetitionId = $('.competition-registration-management').data('competition-id');
     if (!currentCompetitionId) return;
-    window.open(`/umbraco/surface/InvoiceAdmin/BokforingsUnderlag?competitionId=${currentCompetitionId}`, '_blank');
+    // Ask whether to include outstanding payments — verifikat-friendly print is opt-in
+    // since "everything" is the more common day-of-competition view.
+    new bootstrap.Modal(document.getElementById('bokforingsUnderlagModal')).show();
+}
+
+function openBokforingsUnderlagWithMode(includeOutstanding) {
+    const currentCompetitionId = $('.competition-registration-management').data('competition-id');
+    if (!currentCompetitionId) return;
+    bootstrap.Modal.getInstance(document.getElementById('bokforingsUnderlagModal'))?.hide();
+    const url = `/umbraco/surface/InvoiceAdmin/BokforingsUnderlag?competitionId=${currentCompetitionId}&includeOutstanding=${includeOutstanding ? 'true' : 'false'}`;
+    window.open(url, '_blank');
 }
 
 function testHubCreation() {
