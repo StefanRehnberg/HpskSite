@@ -592,6 +592,15 @@ namespace HpskSite.Services
                     }
                 }
 
+                // Operator-entered transactionId wins when present (it's the Swish-app
+                // reference the cashier saw); else fall back to the system-generated
+                // invoice number, which is the same string the shooter saw as the Swish
+                // payment message. The two are functionally the same reference for the
+                // shooter — show one Referens row, not "Referens" + "Fakturanummer".
+                var displayReference = !string.IsNullOrWhiteSpace(transactionId)
+                    ? transactionId
+                    : invoiceNumber;
+
                 await _emailService.SendPaymentReceiptAsync(
                     memberEmail: memberEmail,
                     memberName: memberName,
@@ -602,8 +611,7 @@ namespace HpskSite.Services
                     billedAmount: billed,
                     actualAmount: actual,
                     paymentMethod: paymentMethod,
-                    reference: transactionId,
-                    invoiceNumber: invoiceNumber);
+                    reference: displayReference);
 
                 await _auditService.LogAsync(
                     invoiceId: invoice.Id,

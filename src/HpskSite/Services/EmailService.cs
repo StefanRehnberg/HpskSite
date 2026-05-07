@@ -1376,8 +1376,7 @@ namespace HpskSite.Services
             decimal billedAmount,
             decimal actualAmount,
             string paymentMethod,
-            string reference,
-            string invoiceNumber)
+            string reference)
         {
             if (string.IsNullOrEmpty(_smtpHost))
             {
@@ -1426,7 +1425,6 @@ namespace HpskSite.Services
                 <tr><td><strong>Betalningsmetod:</strong></td><td>{System.Net.WebUtility.HtmlEncode(paymentMethod ?? "")}</td></tr>
                 {amountRows}
                 {(string.IsNullOrEmpty(reference) ? "" : $"<tr><td><strong>Referens:</strong></td><td>{System.Net.WebUtility.HtmlEncode(reference)}</td></tr>")}
-                {(string.IsNullOrEmpty(invoiceNumber) ? "" : $"<tr><td><strong>Fakturanummer:</strong></td><td>{System.Net.WebUtility.HtmlEncode(invoiceNumber)}</td></tr>")}
             </table>
             <p>Spara gärna detta kvitto för dina egna handlingar.</p>
         </div>
