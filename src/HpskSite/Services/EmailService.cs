@@ -1318,11 +1318,12 @@ namespace HpskSite.Services
                 var guideLabel = roleType == "regional"
                     ? "Se guide f&ouml;r kretsadministrat&ouml;rer"
                     : "Se guide f&ouml;r klubbadministrat&ouml;rer";
-                // Link must point to the Videoguider page — that's the only page that
+                // Link must point to the Tutorials page — that's the only page that
                 // loads tutorialHelper.js and renders the #tutorialModal overlay. Linking
                 // to "/" lands on the homepage where the ?tutorial= query param has no
-                // listener and the user just sees the home page.
-                var tutorialUrl = $"{siteUrl}/videoguider?tutorial={tutorialId}";
+                // listener and the user just sees the home page. The page's URL slug
+                // comes from the Umbraco node name ("Tutorials" → /tutorials).
+                var tutorialUrl = $"{siteUrl}/tutorials?tutorial={tutorialId}";
 
                 tutorialSection = $@"
     <div style='background-color: #e7f1ff; border-left: 4px solid #0d6efd; padding: 15px; margin: 20px 0;'>
