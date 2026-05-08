@@ -961,8 +961,9 @@ namespace HpskSite.Services
 
             <p>För att slutföra din anmälan, betala tävlingsavgiften med Swish genom att scanna QR-koden nedan:</p>
 
-            <div class='qr-code'>
-                <img src='cid:swishQRCode' alt='Swish QR Code' />
+            <div class='qr-code' style='text-align: center; margin: 30px 0; padding: 20px; background-color: white; border: 2px solid #0d6efd; border-radius: 10px;'>
+                <img src='cid:swishQRCode' alt='Swish QR Code' width='200' height='200'
+                     style='width: 200px; height: 200px; max-width: 200px; display: block; margin: 0 auto;' />
                 <p style='margin-top: 15px; color: #6c757d; font-size: 14px;'>
                     <i>📱 Scanna QR-koden med Swish-appen</i>
                 </p>
