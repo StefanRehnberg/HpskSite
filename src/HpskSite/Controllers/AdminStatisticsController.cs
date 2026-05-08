@@ -114,15 +114,27 @@ namespace HpskSite.Controllers
 
                 using var db = _databaseFactory.CreateDatabase();
 
-                // Daily aggregation (last 30 days, including today)
+                // Daily aggregation (last 30 days, including today). "Engaged session" =
+                // visited ≥ 2 distinct paths within the same day. The cookie-blind crawler
+                // problem (each request from a cookie-less scraper gets a fresh SessionHash)
+                // produces a flood of single-page sessions; filtering to ≥ 2 paths in a day
+                // strips them out without needing UA-level rules.
                 var dailyRows = await db.FetchAsync<DailyVisitorRow>(
                     @"SELECT
-                          CAST(VisitedAt AS DATE) AS [Day],
-                          COUNT(DISTINCT SessionHash) AS Visitors,
-                          COUNT(*) AS PageViews
-                      FROM [VisitorLogs]
-                      WHERE VisitedAt >= @0
-                      GROUP BY CAST(VisitedAt AS DATE)
+                          [Day],
+                          COUNT(*) AS Visitors,
+                          SUM(PageCount) AS PageViews
+                      FROM (
+                          SELECT
+                              CAST(VisitedAt AS DATE) AS [Day],
+                              SessionHash,
+                              COUNT(*) AS PageCount
+                          FROM [VisitorLogs]
+                          WHERE VisitedAt >= @0
+                          GROUP BY CAST(VisitedAt AS DATE), SessionHash
+                          HAVING COUNT(DISTINCT [Path]) >= 2
+                      ) AS s
+                      GROUP BY [Day]
                       ORDER BY [Day]",
                     dailyStart);
 
@@ -143,14 +155,24 @@ namespace HpskSite.Controllers
 
                 // Weekly aggregation (last 53 weeks, Monday-start, regardless of DATEFIRST).
                 // 1900-01-01 was a Monday, so (DATEDIFF(day, '19000101', VisitedAt) % 7) gives 0 for Monday.
+                // Same engagement filter as daily — sessions with ≥ 2 distinct paths within
+                // the same week count as one engaged visitor; everything else is dropped.
                 var weeklyRows = await db.FetchAsync<WeeklyVisitorRow>(
                     @"SELECT
-                          DATEADD(day, -((DATEDIFF(day, '19000101', VisitedAt)) % 7), CAST(VisitedAt AS DATE)) AS WeekStart,
-                          COUNT(DISTINCT SessionHash) AS Visitors,
-                          COUNT(*) AS PageViews
-                      FROM [VisitorLogs]
-                      WHERE VisitedAt >= @0
-                      GROUP BY DATEADD(day, -((DATEDIFF(day, '19000101', VisitedAt)) % 7), CAST(VisitedAt AS DATE))
+                          WeekStart,
+                          COUNT(*) AS Visitors,
+                          SUM(PageCount) AS PageViews
+                      FROM (
+                          SELECT
+                              DATEADD(day, -((DATEDIFF(day, '19000101', VisitedAt)) % 7), CAST(VisitedAt AS DATE)) AS WeekStart,
+                              SessionHash,
+                              COUNT(*) AS PageCount
+                          FROM [VisitorLogs]
+                          WHERE VisitedAt >= @0
+                          GROUP BY DATEADD(day, -((DATEDIFF(day, '19000101', VisitedAt)) % 7), CAST(VisitedAt AS DATE)), SessionHash
+                          HAVING COUNT(DISTINCT [Path]) >= 2
+                      ) AS s
+                      GROUP BY WeekStart
                       ORDER BY WeekStart",
                     weeklyStart);
 

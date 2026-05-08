@@ -34,10 +34,22 @@ namespace HpskSite.Middleware
             ".txt", ".json"
         };
 
+        // UA substrings that mark a request as non-human. The list catches well-behaved
+        // crawlers that declare themselves; UA-forging scrapers slip through here but are
+        // filtered out at the stats layer by the "≥ 2 distinct paths in a session" rule.
         private static readonly string[] BotMarkers =
         {
             "bot", "crawler", "spider", "slurp", "facebookexternalhit",
-            "embedly", "preview", "monitor", "uptime"
+            "embedly", "preview", "monitor", "uptime",
+            // CLI / library user agents that don't carry cookies
+            "scrapy", "wget", "curl", "python-requests", "httpclient",
+            "go-http-client", "okhttp", "java/", "lighthouse", "pingdom",
+            "headless", "phantom",
+            // SEO / link-graph crawlers
+            "ahrefs", "semrush", "dotbot", "mj12", "petalbot",
+            // LLM / answer-engine crawlers
+            "gptbot", "claudebot", "anthropic", "perplexitybot",
+            "oai-searchbot", "youbot", "bytespider", "applebot", "yandexbot"
         };
 
         private readonly RequestDelegate _next;
