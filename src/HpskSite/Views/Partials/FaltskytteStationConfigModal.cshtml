@@ -269,14 +269,17 @@ function faltCfgSwitchTab(wc, btn) {
 function faltCfgUpdateLinkButtons() {
     var linkBtn = document.getElementById('faltCfg_linkBtn');
     var unlinkBtn = document.getElementById('faltCfg_unlinkBtn');
-    var grp = faltCfgGetLinkedGroup(faltCfgActiveTab);
-    if (grp) {
-        if (linkBtn) linkBtn.style.display = 'none';
-        if (unlinkBtn) unlinkBtn.style.display = '';
-    } else {
-        if (linkBtn) linkBtn.style.display = '';
-        if (unlinkBtn) unlinkBtn.style.display = 'none';
-    }
+    var wc = faltCfgActiveTab;
+    var grp = faltCfgGetLinkedGroup(wc);
+    // Link button stays available as long as there are still unlinked classes to
+    // add — that way an existing 2-way group (A ↔ A_Opt) can be extended to 3 or
+    // more without having to unlink first. Unlink button shows whenever this tab
+    // is part of any group.
+    var hasUnlinkedOthers = faltCfgWeaponClasses.some(function (c) {
+        return c !== wc && !faltCfgGetLinkedGroup(c);
+    });
+    if (linkBtn) linkBtn.style.display = hasUnlinkedOthers ? '' : 'none';
+    if (unlinkBtn) unlinkBtn.style.display = grp ? '' : 'none';
 }
 
 function faltCfgLinkTab() {
@@ -286,26 +289,49 @@ function faltCfgLinkTab() {
         return c !== wc && !faltCfgGetLinkedGroup(c);
     });
     if (others.length === 0) { alert('Inga tillgängliga vapenklasser att länka med.'); return; }
-    var choice = prompt('Länka ' + wc + ' med vilken vapenklass?\nTillgängliga: ' + others.join(', ') +
-        '\n\nDe kommer dela samma konfiguration. ' + wc + ':s konfiguration används.');
+    var choice = prompt('Länka ' + wc + ' med vilken vapenklass?\n' +
+        'Tillgängliga: ' + others.join(', ') +
+        '\n\nDu kan ange flera klasser separerade med komma (t.ex. "A_Opt, R").\n' +
+        'De kommer dela samma konfiguration. ' + wc + ':s konfiguration används.');
     if (!choice) return;
-    // Case-insensitive match against the canonical list. The previous toUpperCase()
-    // broke A_Opt because "A_OPT" ≠ "A_Opt" — and only A_Opt has a lowercase letter
-    // in its canonical form, so plain A / B / C / R / L / M slipped through unnoticed.
-    var typed = choice.trim();
-    var matched = others.find(function (c) { return c.toUpperCase() === typed.toUpperCase(); });
-    if (!matched) { alert('"' + typed + '" är inte tillgänglig.'); return; }
-    choice = matched;
 
-    // Check if wc is already in a group
+    // Accept comma- or whitespace-separated input so the operator can link several
+    // classes in one go (e.g. "A_Opt, R"). Match each entry case-insensitively
+    // against the canonical list so casing typos don't bite — A_Opt is the only
+    // mixed-case class so this is the realistic mistake to guard against.
+    var entries = choice.split(/[,\s]+/)
+        .map(function (e) { return e.trim(); })
+        .filter(function (e) { return e.length > 0; });
+    if (entries.length === 0) return;
+
+    var matched = [];
+    var unmatched = [];
+    entries.forEach(function (e) {
+        var c = others.find(function (o) { return o.toUpperCase() === e.toUpperCase(); });
+        if (c) {
+            if (matched.indexOf(c) < 0) matched.push(c);
+        } else {
+            unmatched.push(e);
+        }
+    });
+
+    if (unmatched.length > 0) {
+        alert('Följande vapenklasser kunde inte länkas: ' + unmatched.join(', '));
+        return;
+    }
+    if (matched.length === 0) return;
+
+    // Add all matched classes to wc's existing group (or create a new one).
     var existingGrp = faltCfgGetLinkedGroup(wc);
     if (existingGrp) {
-        existingGrp.push(choice);
+        matched.forEach(function (c) { existingGrp.push(c); });
     } else {
-        faltCfgLinkedGroups.push([wc, choice]);
+        faltCfgLinkedGroups.push([wc].concat(matched));
     }
-    // Copy wc's config to the linked class
-    faltCfgData[choice] = JSON.parse(JSON.stringify(faltCfgData[wc]));
+    // Copy wc's config to each newly-linked class so the linked tabs start in sync.
+    matched.forEach(function (c) {
+        faltCfgData[c] = JSON.parse(JSON.stringify(faltCfgData[wc]));
+    });
     faltCfgSaveLinkedGroups();
     buildTabs();
     faltCfgUpdateLinkButtons();
