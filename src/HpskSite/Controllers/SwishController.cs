@@ -1189,12 +1189,10 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Medlemsdata kunde inte hittas." });
                 }
 
-                // Get member email
-                var memberEmail = memberData.Email;
-                if (string.IsNullOrEmpty(memberEmail))
-                {
-                    return Json(new { success = false, message = "Ingen e-postadress registrerad för ditt konto." });
-                }
+                // The recipient (shooter) email is resolved later, after we've decided
+                // whether targetMemberId points at someone other than the logged-in user.
+                // Don't bail here on missing memberData.Email — when an admin sends a QR
+                // on behalf of a shooter, the admin's own email is irrelevant.
 
                 // Get competition details
                 var umbracoContext = UmbracoContext;
@@ -1407,10 +1405,43 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = $"QR-kod generering misslyckades: {qrEx.Message}" });
                 }
 
+                // Resolve the actual recipient. When an admin clicks "Skicka QR via e-post"
+                // on a shooter's row, targetMemberId points at the shooter — that's who
+                // should get the email, not the admin. Fall back to the logged-in user
+                // when targetMemberId is empty or matches them (the public self-pay path).
+                string recipientEmail;
+                string recipientName;
+                if (!string.IsNullOrEmpty(targetMemberId)
+                    && int.TryParse(targetMemberId, out var targetMemberIdInt)
+                    && targetMemberIdInt != memberData.Id)
+                {
+                    var targetMember = _memberService.GetById(targetMemberIdInt);
+                    if (targetMember == null)
+                    {
+                        return Json(new { success = false, message = "Mottagande skytt kunde inte hittas." });
+                    }
+                    if (string.IsNullOrEmpty(targetMember.Email))
+                    {
+                        var displayName = targetMemberNameFromReg ?? targetMember.Name ?? "skytten";
+                        return Json(new { success = false, message = $"{displayName} saknar e-postadress." });
+                    }
+                    recipientEmail = targetMember.Email;
+                    recipientName = targetMemberNameFromReg ?? targetMember.Name ?? "Medlem";
+                }
+                else
+                {
+                    if (string.IsNullOrEmpty(memberData.Email))
+                    {
+                        return Json(new { success = false, message = "Ingen e-postadress registrerad för ditt konto." });
+                    }
+                    recipientEmail = memberData.Email;
+                    recipientName = currentMember.Name ?? "Medlem";
+                }
+
                 // Send email with QR code as inline attachment
                 await _emailService.SendSwishQRCodeEmailAsync(
-                    memberEmail,
-                    currentMember.Name ?? "Medlem",
+                    recipientEmail,
+                    recipientName,
                     competitionName ?? "Tävling",
                     qrCodeBytes,
                     totalAmount,
@@ -1419,11 +1450,11 @@ namespace HpskSite.Controllers
                     normalizedSwishNumber,
                     message);
 
-                _logger.LogInformation("Swish QR code email sent to {Email} for competition {CompetitionId}", memberEmail, competitionId);
+                _logger.LogInformation("Swish QR code email sent to {Email} for competition {CompetitionId}", recipientEmail, competitionId);
 
-                // Audit: log who triggered this email and where it went. When an admin sends
-                // it on behalf of a different shooter (targetMemberId set), the actor is the
-                // admin; the recipient is captured in the notes for context.
+                // Audit: actor = the logged-in admin who triggered the send; recipient
+                // captured in the notes so the history modal shows where the email
+                // actually went.
                 await _auditService.LogAsync(
                     invoiceId: invoice.Id,
                     competitionId: competitionId,
@@ -1432,12 +1463,12 @@ namespace HpskSite.Controllers
                     byMemberName: memberData.Name,
                     amount: totalAmount,
                     reference: invoiceNumber,
-                    notes: $"QR-faktura mejlad till {memberEmail}");
+                    notes: $"QR-faktura mejlad till {recipientEmail}");
 
                 return Json(new {
                     success = true,
-                    message = $"QR-kod skickad till {memberEmail}",
-                    email = memberEmail
+                    message = $"QR-kod skickad till {recipientEmail}",
+                    email = recipientEmail
                 });
             }
             catch (Exception ex)
