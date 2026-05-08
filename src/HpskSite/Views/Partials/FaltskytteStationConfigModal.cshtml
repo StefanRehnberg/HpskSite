@@ -289,8 +289,13 @@ function faltCfgLinkTab() {
     var choice = prompt('Länka ' + wc + ' med vilken vapenklass?\nTillgängliga: ' + others.join(', ') +
         '\n\nDe kommer dela samma konfiguration. ' + wc + ':s konfiguration används.');
     if (!choice) return;
-    choice = choice.trim().toUpperCase();
-    if (others.indexOf(choice) < 0) { alert('"' + choice + '" är inte tillgänglig.'); return; }
+    // Case-insensitive match against the canonical list. The previous toUpperCase()
+    // broke A_Opt because "A_OPT" ≠ "A_Opt" — and only A_Opt has a lowercase letter
+    // in its canonical form, so plain A / B / C / R / L / M slipped through unnoticed.
+    var typed = choice.trim();
+    var matched = others.find(function (c) { return c.toUpperCase() === typed.toUpperCase(); });
+    if (!matched) { alert('"' + typed + '" är inte tillgänglig.'); return; }
+    choice = matched;
 
     // Check if wc is already in a group
     var existingGrp = faltCfgGetLinkedGroup(wc);
