@@ -56,9 +56,10 @@
         </div>
     </div>
 
-    <!-- Payment Summary Cards -->
+    <!-- Payment Summary Cards. 5 cards across at lg+, 2 per row on mobile/tablet so the
+         odd-count layout still wraps cleanly without leaving an orphan card. -->
     <div class="row g-2 mb-3" id="paymentSummaryCards" style="display:none">
-        <div class="col-6 col-md-3">
+        <div class="col-6 col-lg">
             <div class="card h-100">
                 <div class="card-body py-2">
                     <h6 class="card-subtitle mb-1 text-muted small">Anmälda</h6>
@@ -69,7 +70,18 @@
                 </div>
             </div>
         </div>
-        <div class="col-6 col-md-3">
+        <div class="col-6 col-lg">
+            <div class="card h-100">
+                <div class="card-body py-2">
+                    <h6 class="card-subtitle mb-1 text-muted small">Starter</h6>
+                    <div class="d-flex justify-content-between align-items-baseline">
+                        <h4 class="card-title mb-0" id="summaryStartsCount">0</h4>
+                        <small class="text-muted">klasser</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-lg">
             <div class="card h-100 border-success">
                 <div class="card-body py-2">
                     <h6 class="card-subtitle mb-1 text-success small">Betalt</h6>
@@ -80,7 +92,7 @@
                 </div>
             </div>
         </div>
-        <div class="col-6 col-md-3">
+        <div class="col-6 col-lg">
             <div class="card h-100 border-warning">
                 <div class="card-body py-2">
                     <h6 class="card-subtitle mb-1 text-warning small">Väntande</h6>
@@ -91,7 +103,7 @@
                 </div>
             </div>
         </div>
-        <div class="col-6 col-md-3">
+        <div class="col-6 col-lg">
             <div class="card h-100 border-secondary">
                 <div class="card-body py-2">
                     <h6 class="card-subtitle mb-1 text-secondary small">Saknar betalning</h6>
@@ -797,6 +809,9 @@ function updatePaymentSummary() {
     let paidCount = 0, paidAmount = 0;
     let pendingCount = 0, pendingAmount = 0;
     let noInvoiceCount = 0;
+    // "Starter" = total class entries across all registrations. A shooter
+    // registered for two classes contributes 2 starts, not 1.
+    let totalStarts = 0;
 
     regs.forEach(r => {
         const status = r.paymentStatus || 'No Invoice';
@@ -807,10 +822,12 @@ function updatePaymentSummary() {
         if (status === 'Paid') paidCount++;
         else if (status === 'Pending') pendingCount++;
         else if (status === 'No Invoice') noInvoiceCount++;
+        totalStarts += Array.isArray(r.shootingClasses) ? r.shootingClasses.length : 0;
     });
 
     document.getElementById('summaryRegCount').textContent = regs.length;
     document.getElementById('summaryUniqueMembers').textContent = uniqueMembers;
+    document.getElementById('summaryStartsCount').textContent = totalStarts;
     document.getElementById('summaryPaidCount').textContent = paidCount;
     document.getElementById('summaryPaidAmount').textContent = `${Math.round(paidAmount)} kr`;
     document.getElementById('summaryPendingCount').textContent = pendingCount;
