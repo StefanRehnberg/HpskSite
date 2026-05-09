@@ -1006,7 +1006,14 @@ function showSwishPaymentModal(competitionId, targetMemberId = '') {
         .then(response => response.json())
         .then(data => {
             if (data.success) {
+                const swishAppButton = data.swishAppUrl ? `
+                    <a href="${data.swishAppUrl}" class="btn btn-success btn-lg w-100 mb-2">
+                        <i class="bi bi-phone me-1"></i> Öppna Swish och betala
+                    </a>
+                    <div class="text-muted small mb-3">— eller scanna QR-koden med Swish-appen på en annan telefon —</div>
+                ` : '';
                 modalBody.innerHTML = `
+                    ${swishAppButton}
                     <div class="mb-3">
                         <img src="${data.qrCode}" alt="Swish QR Code" style="max-width: 300px; width: 100%;" class="img-fluid">
                     </div>
@@ -1017,9 +1024,6 @@ function showSwishPaymentModal(competitionId, targetMemberId = '') {
                         <p class="mb-1"><strong>Klass${data.registrationCount > 1 ? 'er' : ''}:</strong> ${data.shootingClasses}</p>
                         <p class="mb-0"><strong>Fakturanummer:</strong> ${data.invoiceNumber}</p>
                     </div>
-                    <p class="text-muted small mt-3 mb-0">
-                        <i class="bi bi-phone"></i> Scanna QR-koden med Swish-appen för att betala
-                    </p>
                 `;
             } else {
                 modalBody.innerHTML = `

@@ -491,6 +491,7 @@ namespace HpskSite.Controllers
                 return Json(new {
                     success = true,
                     qrCode = $"data:image/png;base64,{qrCodeBase64}",
+                    swishAppUrl = SwishQrCodeGenerator.GetSwishAppUrl(normalizedSwishNumber, amountString, message),
                     amount = totalAmount,
                     registrationCount = userShootingClasses.Count,
                     shootingClasses = string.Join(", ", userShootingClasses),
@@ -1060,33 +1061,20 @@ namespace HpskSite.Controllers
         {
             try
             {
-                // Validate parameters
                 if (string.IsNullOrEmpty(payee) || amount <= 0 || string.IsNullOrEmpty(message))
                 {
                     return BadRequest("Invalid payment parameters");
                 }
 
-                // Create payment data object
-                var paymentData = new
-                {
-                    version = 1,
-                    payee = payee,
-                    amount = amount,
-                    message = message
-                };
-
-                // Serialize to JSON
-                var jsonData = System.Text.Json.JsonSerializer.Serialize(paymentData);
-
-                // Encode to base64
-                var base64Data = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(jsonData));
-
-                // Create Swish deep link
-                var swishDeepLink = $"swish://payment?data={base64Data}";
+                // Single source of truth for the swish:// deep-link format —
+                // same helper that builds the working QR. Previously this
+                // endpoint built a JSON-then-base64 payload that the Swish
+                // app rejects with "Felaktig länk".
+                var amountString = amount.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
+                var swishDeepLink = SwishQrCodeGenerator.GetSwishAppUrl(payee, amountString, message);
 
                 _logger.LogInformation("Redirecting to Swish for payment - Payee: {Payee}, Amount: {Amount}", payee, amount);
 
-                // Return redirect to Swish app
                 return Redirect(swishDeepLink);
             }
             catch (Exception ex)
@@ -1463,7 +1451,7 @@ namespace HpskSite.Controllers
                     byMemberName: memberData.Name,
                     amount: totalAmount,
                     reference: invoiceNumber,
-                    notes: $"QR-faktura mejlad till {recipientEmail}");
+                    notes: $"QR-kod mejlad till {recipientEmail}");
 
                 return Json(new {
                     success = true,

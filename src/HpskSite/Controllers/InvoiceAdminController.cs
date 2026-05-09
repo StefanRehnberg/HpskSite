@@ -415,7 +415,7 @@ namespace HpskSite.Controllers
                     byMemberName: actorName,
                     amount: totalAmount,
                     reference: invoiceNumber,
-                    notes: $"QR-faktura mejlad till {memberEmail}");
+                    notes: $"QR-kod mejlad till {memberEmail}");
 
                 return Json(new
                 {
@@ -479,14 +479,16 @@ namespace HpskSite.Controllers
 
                 // Generate QR code
                 var normalizedSwishNumber = swishNumber.Trim().Replace(" ", "").Replace("-", "");
-                var qrCodeBytes = SwishQrCodeGenerator.GeneratePng(normalizedSwishNumber, totalAmount.ToString("F2"), message);
+                var amountString = totalAmount.ToString("F2");
+                var qrCodeBytes = SwishQrCodeGenerator.GeneratePng(normalizedSwishNumber, amountString, message);
                 var qrCodeBase64 = Convert.ToBase64String(qrCodeBytes);
 
                 return Json(new
                 {
                     success = true,
                     qrCodeBase64 = qrCodeBase64,
-                    amount = totalAmount.ToString("F2"),
+                    swishAppUrl = SwishQrCodeGenerator.GetSwishAppUrl(normalizedSwishNumber, amountString, message),
+                    amount = amountString,
                     invoiceNumber = invoiceNumber,
                     competitionName = competition.Name
                 });
