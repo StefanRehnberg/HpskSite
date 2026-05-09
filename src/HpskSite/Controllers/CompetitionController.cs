@@ -1490,6 +1490,18 @@ namespace HpskSite.Controllers
                         var shootingClassesJson = content.GetValue<string>("shootingClasses");
                         var shootingClasses = CompetitionRegistrationDocument.DeserializeShootingClasses(shootingClassesJson);
 
+                        // Fallback for "Saknar betalning" rows: when no invoice exists yet
+                        // the maps don't carry an amount, so the manage-payment modal shows
+                        // 0 kr while the QR (which always recomputes via the calculator)
+                        // shows the real fee. Surface the expected fee here so both surfaces
+                        // agree — the invoice gets created lazily on QR-generate / mark-paid.
+                        if (paymentAmount == 0m && invoiceId == 0)
+                        {
+                            var classIds = shootingClasses.Select(sc => sc.Class).ToList();
+                            var isSubComp = content.GetValue<bool>("isSubCompetition");
+                            paymentAmount = RegistrationFeeCalculator.Calculate(competition, classIds, isSubComp);
+                        }
+
                         // Convert class IDs to display names
                         var shootingClassesWithNames = shootingClasses.Select(sc => new
                         {

@@ -427,7 +427,7 @@ namespace HpskSite.Services
                             paymentMethod: paymentMethod,
                             amount: totalAmount,
                             reference: invoiceNumber,
-                            notes: $"Faktura skapad för {memberName}");
+                            notes: "Betalningsunderlag skapat");
 
                         return Task.FromResult<IContent?>(invoice);
                     }
@@ -877,7 +877,7 @@ namespace HpskSite.Services
                             paymentMethod: paymentMethod,
                             amount: totalAmount,
                             reference: invoiceNumber,
-                            notes: $"Lagfaktura skapad: {teamName} ({clubName})");
+                            notes: $"Betalningsunderlag skapat: {teamName} ({clubName})");
 
                         return Task.FromResult<IContent?>(invoice);
                     }

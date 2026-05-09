@@ -493,6 +493,10 @@
                         .ToList();
                     var regViewData = new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId } };
                     regViewData["AvailableShootingClasses"] = availableShootingClasses;
+                    // Default the quick-create new-member club picker in the walk-in modal
+                    // to the competition's organising club. Cashier almost always wants to
+                    // add a guest into the host club; saves a click.
+                    regViewData["CompetitionClubId"] = competition?.Value<int>("clubId") ?? 0;
                     // Walk-in patrol picker (item #5): only meaningful for Fältskytte/MagnumFält
                     // with rolling start enabled. The partial reads these to decide whether
                     // to render the Patrull dropdown in the walk-in modal.

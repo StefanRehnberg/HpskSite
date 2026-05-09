@@ -36,7 +36,7 @@
 <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
 
-<div class="competition-registration-management" data-competition-id="@competitionId">
+<div class="competition-registration-management" data-competition-id="@competitionId" data-competition-club-id="@(ViewData["CompetitionClubId"]?.ToString() ?? "")">
     <!-- Header Section -->
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h4 class="mb-0"><i class="bi bi-people me-2"></i>Anmälningar</h4>
@@ -423,6 +423,41 @@
                     <input type="text" class="form-control" id="walkInMemberSearch"
                            placeholder="Skriv namn eller e-post (minst 2 tecken)" autocomplete="off">
                     <div id="walkInMemberResults" class="list-group mt-2" style="max-height: 220px; overflow-y: auto;"></div>
+                </div>
+
+                <div class="mb-3">
+                    <button type="button" class="btn btn-outline-success btn-sm" id="walkInQuickCreateToggleBtn" onclick="toggleWalkInQuickCreate()">
+                        <i class="bi bi-person-plus me-1"></i><span id="walkInQuickCreateBtnText">Lägg till ny medlem</span>
+                    </button>
+                    <div id="walkInQuickCreateForm" style="display:none" class="mt-2 p-2 border rounded bg-body">
+                        <div class="row g-2">
+                            <div class="col-md-6">
+                                <input type="text" class="form-control form-control-sm" id="walkInQcFirstName" placeholder="Förnamn" autocomplete="off" data-1p-ignore="true">
+                            </div>
+                            <div class="col-md-6">
+                                <input type="text" class="form-control form-control-sm" id="walkInQcLastName" placeholder="Efternamn" autocomplete="off" data-1p-ignore="true">
+                            </div>
+                            <div class="col-md-6">
+                                <input type="email" class="form-control form-control-sm" id="walkInQcEmail" placeholder="E-post" autocomplete="off" data-1p-ignore="true">
+                            </div>
+                            <div class="col-md-6">
+                                <select class="form-select form-select-sm" id="walkInQcClub">
+                                    <option value="">Laddar klubbar...</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="d-flex align-items-center gap-2 mt-2">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="walkInQcAutoApprove" checked>
+                                <label class="form-check-label small" for="walkInQcAutoApprove">Godkänn direkt</label>
+                            </div>
+                            <button type="button" class="btn btn-success btn-sm ms-auto" onclick="walkInQuickCreateMember()">
+                                <i class="bi bi-check-lg me-1"></i>Skapa
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="toggleWalkInQuickCreate()">Avbryt</button>
+                        </div>
+                        <div id="walkInQcMessage" class="mt-1 small"></div>
+                    </div>
                 </div>
 
                 <div class="mb-3">
@@ -2188,9 +2223,142 @@ async function openWalkInRegistrationModal() {
         await refreshWalkInStartListTeams();
     }
 
+    // Reset quick-create state every time the modal opens — collapsed form, cleared
+    // inputs, club picker re-populated (cached after first load) with the
+    // competition's organising club preselected.
+    resetWalkInQuickCreate();
+    ensureWalkInQuickCreateClubs();
+
     walkInModalInstance.show();
     setTimeout(() => document.getElementById('walkInMemberSearch').focus(), 250);
 }
+
+// ─── Quick-create new member (mirrors the public modal's flow) ──────
+
+let walkInQcClubsLoaded = false;
+
+function resetWalkInQuickCreate() {
+    const form = document.getElementById('walkInQuickCreateForm');
+    if (form) form.style.display = 'none';
+    ['walkInQcFirstName', 'walkInQcLastName', 'walkInQcEmail'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+    const auto = document.getElementById('walkInQcAutoApprove');
+    if (auto) auto.checked = true;
+    const msg = document.getElementById('walkInQcMessage');
+    if (msg) msg.innerHTML = '';
+    const btnText = document.getElementById('walkInQuickCreateBtnText');
+    if (btnText) btnText.textContent = 'Lägg till ny medlem';
+}
+
+async function ensureWalkInQuickCreateClubs() {
+    const select = document.getElementById('walkInQcClub');
+    if (!select) return;
+    const competitionClubId = $('.competition-registration-management').data('competition-club-id');
+    if (walkInQcClubsLoaded) {
+        // Re-select the competition's club on every open — operator may have left the
+        // list on a different value last time and forgotten to switch back.
+        if (competitionClubId) select.value = String(competitionClubId);
+        updateWalkInQuickCreateBtnText();
+        return;
+    }
+    try {
+        const resp = await fetch('/umbraco/surface/Competition/GetClubsForRegistration', {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        const data = await resp.json();
+        if (data && Array.isArray(data.clubs)) {
+            const opts = ['<option value="">Välj klubb...</option>']
+                .concat(data.clubs.map(c => `<option value="${c.id}">${escapeWalkIn(c.name)}</option>`));
+            select.innerHTML = opts.join('');
+            walkInQcClubsLoaded = true;
+            if (competitionClubId) select.value = String(competitionClubId);
+            updateWalkInQuickCreateBtnText();
+        }
+    } catch (err) {
+        console.error('Could not load clubs for walk-in quick-create:', err);
+    }
+}
+
+function updateWalkInQuickCreateBtnText() {
+    const select = document.getElementById('walkInQcClub');
+    const btnText = document.getElementById('walkInQuickCreateBtnText');
+    if (!select || !btnText) return;
+    const opt = select.options[select.selectedIndex];
+    btnText.textContent = (select.value && opt && opt.text)
+        ? `Lägg till ny medlem i ${opt.text}`
+        : 'Lägg till ny medlem';
+}
+
+function toggleWalkInQuickCreate() {
+    const form = document.getElementById('walkInQuickCreateForm');
+    if (!form) return;
+    if (form.style.display === 'none') {
+        form.style.display = '';
+        document.getElementById('walkInQcFirstName')?.focus();
+    } else {
+        form.style.display = 'none';
+        const msg = document.getElementById('walkInQcMessage');
+        if (msg) msg.innerHTML = '';
+    }
+}
+
+async function walkInQuickCreateMember() {
+    const firstName = (document.getElementById('walkInQcFirstName').value || '').trim();
+    const lastName  = (document.getElementById('walkInQcLastName').value || '').trim();
+    const email     = (document.getElementById('walkInQcEmail').value || '').trim();
+    const clubId    = document.getElementById('walkInQcClub').value;
+    const autoApprove = document.getElementById('walkInQcAutoApprove').checked;
+    const msg = document.getElementById('walkInQcMessage');
+
+    if (!firstName || !lastName) { msg.innerHTML = '<span class="text-danger">Ange för- och efternamn.</span>'; return; }
+    if (!email || !email.includes('@@')) { msg.innerHTML = '<span class="text-danger">Ange en giltig e-postadress.</span>'; return; }
+    if (!clubId) { msg.innerHTML = '<span class="text-danger">Välj en klubb.</span>'; return; }
+
+    msg.innerHTML = '<span class="text-muted">Skapar...</span>';
+
+    try {
+        const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value;
+        const resp = await fetch('/umbraco/surface/Member/QuickCreateMember', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+            body: JSON.stringify({ firstName, lastName, email, clubId: parseInt(clubId, 10), autoApprove })
+        });
+        const data = await resp.json();
+        if (data.success) {
+            const actionText = data.alreadyExisted ? ' hittad (redan registrerad)' : ' skapad';
+            msg.innerHTML = `<span class="text-success"><i class="bi bi-check-circle me-1"></i>${escapeWalkIn(data.memberName)}${actionText}</span>`;
+
+            // Drop the freshly-created member straight into the search field +
+            // selection, so the cashier can keep going to class selection.
+            const clubOpt = document.getElementById('walkInQcClub').options[document.getElementById('walkInQcClub').selectedIndex];
+            const clubName = clubOpt ? clubOpt.text : '';
+            selectWalkInMember(data.memberId, data.memberName, clubName);
+
+            setTimeout(() => {
+                const form = document.getElementById('walkInQuickCreateForm');
+                if (form) form.style.display = 'none';
+                ['walkInQcFirstName', 'walkInQcLastName', 'walkInQcEmail'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.value = '';
+                });
+                msg.innerHTML = '';
+            }, 1200);
+        } else {
+            msg.innerHTML = `<span class="text-danger">${escapeWalkIn(data.message || 'Fel vid skapande.')}</span>`;
+        }
+    } catch (err) {
+        console.error('walkInQuickCreateMember error:', err);
+        msg.innerHTML = '<span class="text-danger">Nätverksfel.</span>';
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const select = document.getElementById('walkInQcClub');
+    if (select) select.addEventListener('change', updateWalkInQuickCreateBtnText);
+});
 
 // Hook checkbox toggles after the modal builds its list so the per-class slot rows
 // stay in sync. Delegated listener on the container survives re-renders. Auto-unticking

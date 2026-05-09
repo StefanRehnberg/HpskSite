@@ -541,6 +541,30 @@ namespace HpskSite.Controllers
                 if (!authorized)
                     return Json(new { success = false, message = "Access denied" });
 
+                // Cancel any Pending invoices linked to this registration BEFORE deleting it.
+                // Otherwise they orphan and Bokföringsunderlag keeps listing them as
+                // "Utestående betalningar" — no shooter exists to chase. Paid invoices stay
+                // untouched: the money was actually collected and bookkeeping needs to see it.
+                if (competition != null)
+                {
+                    var (actorId, actorName) = await GetCurrentActorAsync();
+                    var linkedInvoices = GetAllInvoicesForRegistration(competition, request.RegistrationId);
+                    foreach (var inv in linkedInvoices)
+                    {
+                        var status = inv.GetValue<string>("paymentStatus") ?? "Pending";
+                        if (status.Trim().Trim('[', ']').Trim('"', '\'').Trim() == "Pending")
+                        {
+                            await _paymentService.UpdatePaymentStatusAsync(
+                                invoiceId: inv.Id,
+                                paymentStatus: "Cancelled",
+                                notes: "Anmälan borttagen",
+                                actorMemberId: actorId,
+                                actorMemberName: actorName,
+                                sendReceiptOnPaid: false);
+                        }
+                    }
+                }
+
                 var result = _contentService.Delete(registration);
                 if (result.Success)
                 {
@@ -1073,7 +1097,7 @@ namespace HpskSite.Controllers
                             byMemberName: actorName,
                             amount: inv.GetValue<decimal>("totalAmount"),
                             reference: inv.GetValue<string>("invoiceNumber"),
-                            notes: $"Faktura överförd från {fromMemberName} (id {fromMemberId}) till {toMember.Name} (id {request.ToMemberId})");
+                            notes: $"Betalningsunderlag överfört från {fromMemberName} (id {fromMemberId}) till {toMember.Name} (id {request.ToMemberId})");
                     }
                 }
 
