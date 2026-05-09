@@ -42,6 +42,9 @@
                     <button class="btn btn-outline-info btn-sm" onclick="faltPrintPatrolList()" id="faltPrintBtn" style="display:none">
                         <i class="bi bi-printer me-1"></i>Skriv ut
                     </button>
+                    <button class="btn btn-outline-secondary btn-sm" onclick="faltRenumberPatrols()" id="faltRenumberBtn" style="display:none" title="Numrera om patruller löpande 1..N (stänger luckor och löser dubbletter)">
+                        <i class="bi bi-sort-numeric-down me-1"></i>Renumrera
+                    </button>
                     <button class="btn btn-outline-danger btn-sm" onclick="faltDeleteAllPatrols()" id="faltDeleteAllBtn" style="display:none">
                         <i class="bi bi-trash me-1"></i>Ta bort alla
                     </button>
@@ -244,6 +247,7 @@
         var container = document.getElementById('faltPatrolsContainer');
         var deleteAllBtn = document.getElementById('faltDeleteAllBtn');
         var printBtn = document.getElementById('faltPrintBtn');
+        var renumberBtn = document.getElementById('faltRenumberBtn');
 
         loading.style.display = '';
         empty.style.display = 'none';
@@ -259,10 +263,12 @@
                 empty.style.display = '';
                 deleteAllBtn.style.display = 'none';
                 printBtn.style.display = 'none';
+                if (renumberBtn) renumberBtn.style.display = 'none';
             } else {
                 container.style.display = '';
                 deleteAllBtn.style.display = '';
                 printBtn.style.display = '';
+                if (renumberBtn) renumberBtn.style.display = '';
                 renderPatrols();
             }
 
@@ -643,6 +649,13 @@
         if (!confirmIfResultsExist('Ta bort alla patruller')) return;
         if (!confirm('Ta bort ALLA patruller?')) return;
         var data = await apiPost('DeletePatrols', { competitionId: parseInt(compId) });
+        if (data.success) loadFaltPatrols();
+        else alert('Fel: ' + (data.message || 'Okänt fel'));
+    };
+
+    window.faltRenumberPatrols = async function() {
+        if (!confirm('Numrera om alla patruller löpande 1..N? Patrullernas ordning behålls — det är bara numreringen som städas.')) return;
+        var data = await apiPost('RenumberPatrols', { competitionId: parseInt(compId) });
         if (data.success) loadFaltPatrols();
         else alert('Fel: ' + (data.message || 'Okänt fel'));
     };

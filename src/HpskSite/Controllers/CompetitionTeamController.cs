@@ -253,7 +253,7 @@ namespace HpskSite.Controllers
                         teamName = t.Team.TeamName,
                         teamClass = t.Team.TeamClass,
                         clubId = t.Team.ClubId,
-                        clubName = t.ClubName,
+                        clubName = HpskSite.Helpers.ClubNameHelper.Shorten(t.ClubName ?? ""),
                         createdBy = t.Team.CreatedBy,
                         isRelay = t.Team.IsRelay,
                         members = t.Members.Select(m => new
@@ -367,7 +367,7 @@ namespace HpskSite.Controllers
                         {
                             rank = t.Rank,
                             teamName = t.TeamName,
-                            clubName = t.ClubName,
+                            clubName = HpskSite.Helpers.ClubNameHelper.Shorten(t.ClubName ?? ""),
                             totalScore = t.TotalScore,
                             totalXCount = t.TotalXCount,
                             totalTimeSeconds = t.TotalTimeSeconds,

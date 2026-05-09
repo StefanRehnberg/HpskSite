@@ -58,6 +58,7 @@
                 <div>
                     <h5 class="mb-0 d-inline"><i class="bi bi-trophy me-2"></i>Resultatlista</h5>
                     <span class="badge ms-2" id="faltResultStatusBadge">Preliminär</span>
+                    <div class="text-muted small mt-1" id="faltResultMeta" style="display:none"></div>
                 </div>
                 <div class="d-flex gap-2">
                     <button class="btn btn-outline-primary btn-sm" onclick="faltRefreshResults(event)">
@@ -264,11 +265,24 @@ async function faltLoadResults(compId, container) {
 
         _faltLastResults = data.results;
         faltUpdateResultStatus(data.results.isOfficial);
+        faltUpdateResultMeta(data.results);
         renderFaltResultList(data.results, container);
     } catch (err) {
         container.innerHTML = '<div class="alert alert-danger">Nätverksfel vid hämtning av resultat.</div>';
         console.error(err);
     }
+}
+
+function faltUpdateResultMeta(results) {
+    var el = document.getElementById('faltResultMeta');
+    if (!el) return;
+    var parts = [];
+    if (results.competitionName) parts.push(results.competitionName);
+    if (results.competitionDate) parts.push(results.competitionDate);
+    if (results.organizerName) parts.push(results.organizerName);
+    if (parts.length === 0) { el.style.display = 'none'; return; }
+    el.textContent = parts.join(' · ');
+    el.style.display = '';
 }
 
 function faltUpdateResultStatus(isOfficial) {
@@ -397,12 +411,33 @@ function faltPrintResultList(event) {
     var stationConfigs = faltExtractStationConfigs(results);
     var statusText = results.isOfficial ? 'Officiell' : 'Preliminär';
 
+    // Build a proper header — competition name as the main title, then a meta
+    // line with date / organiser / "Resultatlista" / status, mirroring what the
+    // Precision result page surfaces. Falls back gracefully if any field is
+    // missing (older cached responses, locally unset organiser, etc.).
+    var compName = results.competitionName || '';
+    var compDate = results.competitionDate || '';
+    var organizer = results.organizerName || '';
+    var metaParts = [];
+    if (compDate) metaParts.push(compDate);
+    if (organizer) metaParts.push(organizer);
+    metaParts.push('Resultatlista');
+    metaParts.push(statusText);
+    var metaLine = metaParts.join(' · ');
+
+    var pad2 = function(n) { return n < 10 ? '0' + n : n; };
+    var now = new Date();
+    var printedAt = now.getFullYear() + '-' + pad2(now.getMonth() + 1) + '-' + pad2(now.getDate())
+        + ' ' + pad2(now.getHours()) + ':' + pad2(now.getMinutes());
+
+    var titleText = compName ? compName + ' — Resultatlista' : 'Resultatlista';
+
     var w = window.open('', '_blank');
-    w.document.write('<html><head><title>Resultatlista</title>');
+    w.document.write('<html><head><title>' + titleText + '</title>');
     w.document.write('<style>');
     w.document.write('body{font-family:sans-serif;margin:15px;font-size:11px}');
-    w.document.write('h1{font-size:1.4em;margin:0 0 4px}');
-    w.document.write('.status{font-size:0.9em;color:#666;margin-bottom:10px}');
+    w.document.write('h1{font-size:1.4em;margin:0 0 2px}');
+    w.document.write('.meta{font-size:0.9em;color:#555;margin-bottom:10px;border-bottom:1px solid #ccc;padding-bottom:6px}');
     w.document.write('h2{font-size:1.1em;margin:14px 0 4px;border-bottom:1px solid #999;padding-bottom:2px}');
     w.document.write('table{width:100%;border-collapse:collapse;margin-bottom:10px}');
     w.document.write('th,td{padding:2px 4px;text-align:center;border:1px solid #ddd;white-space:nowrap}');
@@ -411,10 +446,11 @@ function faltPrintResultList(event) {
     w.document.write('th:nth-child(2),th:nth-child(3){text-align:left}');
     w.document.write('.medal-s{color:#0d6efd;font-weight:bold}');
     w.document.write('.medal-b{color:#ffc107;font-weight:bold}');
+    w.document.write('.print-footer{margin-top:18px;font-size:0.8em;color:#666;border-top:1px solid #ccc;padding-top:6px;text-align:right}');
     w.document.write('@@media print{body{margin:10mm}h2{page-break-after:avoid}table{page-break-inside:avoid}}');
     w.document.write('<' + '/style><' + '/head><body>');
-    w.document.write('<h1>Resultatlista</h1>');
-    w.document.write('<div class="status">' + statusText + '</div>');
+    w.document.write('<h1>' + (compName || 'Resultatlista') + '<' + '/h1>');
+    w.document.write('<div class="meta">' + metaLine + '<' + '/div>');
 
     results.classGroups.forEach(function(group) {
         w.document.write('<h2>' + group.className + ' (' + group.shooters.length + ' deltagare)</h2>');
@@ -453,6 +489,7 @@ function faltPrintResultList(event) {
         w.document.write('</tbody></table>');
     });
 
+    w.document.write('<div class="print-footer">Utskriven: ' + printedAt + '<' + '/div>');
     w.document.write('<' + '/body><' + '/html>');
     w.document.close();
     w.print();
@@ -480,20 +517,39 @@ function faltPrintSubCompResultList(event) {
     var isPoang = results.scoringMode === 'Poang';
     var stationConfigs = faltExtractStationConfigs(results);
 
+    var subCompName = '@Html.Raw(subCompetitionName)';
+    var compName = results.competitionName || '';
+    var compDate = results.competitionDate || '';
+    var organizer = results.organizerName || '';
+    var subMetaParts = [];
+    if (compDate) subMetaParts.push(compDate);
+    if (organizer) subMetaParts.push(organizer);
+    if (compName) subMetaParts.push(compName);
+    subMetaParts.push(subCompName);
+    var subMetaLine = subMetaParts.join(' · ');
+    var pad2 = function(n) { return n < 10 ? '0' + n : n; };
+    var now = new Date();
+    var printedAt = now.getFullYear() + '-' + pad2(now.getMonth() + 1) + '-' + pad2(now.getDate())
+        + ' ' + pad2(now.getHours()) + ':' + pad2(now.getMinutes());
+    var subTitleText = compName ? compName + ' — ' + subCompName : subCompName;
+
     var w = window.open('', '_blank');
-    w.document.write('<html><head><title>@Html.Raw(subCompetitionName)</title>');
+    w.document.write('<html><head><title>' + subTitleText + '</title>');
     w.document.write('<style>');
     w.document.write('body{font-family:sans-serif;margin:15px;font-size:11px}');
-    w.document.write('h1{font-size:1.4em;margin:0 0 10px}');
+    w.document.write('h1{font-size:1.4em;margin:0 0 2px}');
+    w.document.write('.meta{font-size:0.9em;color:#555;margin-bottom:10px;border-bottom:1px solid #ccc;padding-bottom:6px}');
     w.document.write('h2{font-size:1.1em;margin:14px 0 4px;border-bottom:1px solid #999;padding-bottom:2px}');
     w.document.write('table{width:100%;border-collapse:collapse;margin-bottom:10px}');
     w.document.write('th,td{padding:2px 4px;text-align:center;border:1px solid #ddd;white-space:nowrap}');
     w.document.write('th{background:#f0f0f0;font-size:0.9em}');
     w.document.write('td:nth-child(2),td:nth-child(3){text-align:left}');
     w.document.write('th:nth-child(2),th:nth-child(3){text-align:left}');
+    w.document.write('.print-footer{margin-top:18px;font-size:0.8em;color:#666;border-top:1px solid #ccc;padding-top:6px;text-align:right}');
     w.document.write('@@media print{body{margin:10mm}h2{page-break-after:avoid}table{page-break-inside:avoid}}');
     w.document.write('<' + '/style><' + '/head><body>');
-    w.document.write('<h1>@Html.Raw(subCompetitionName)</h1>');
+    w.document.write('<h1>' + (compName || subCompName) + '<' + '/h1>');
+    w.document.write('<div class="meta">' + subMetaLine + '<' + '/div>');
 
     results.classGroups.forEach(function(group) {
         w.document.write('<h2>' + group.className + ' (' + group.shooters.length + ' deltagare)</h2>');
@@ -530,6 +586,7 @@ function faltPrintSubCompResultList(event) {
         w.document.write('</tbody></table>');
     });
 
+    w.document.write('<div class="print-footer">Utskriven: ' + printedAt + '<' + '/div>');
     w.document.write('<' + '/body><' + '/html>');
     w.document.close();
     w.print();
