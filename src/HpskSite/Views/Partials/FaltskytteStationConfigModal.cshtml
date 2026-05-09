@@ -12,8 +12,17 @@
     <div class="modal-dialog modal-xl modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title"><i class="bi bi-gear me-2"></i>Stationskonfigurator</h5>
-                <button type="button" class="btn-close" onclick="faltCfgTryClose()"></button>
+                <h5 class="modal-title me-3 mb-0"><i class="bi bi-gear me-2"></i>Stationskonfigurator</h5>
+                <!-- Mode toggle. Simple = one shared shape per station + per-class param matrix.
+                     Advanced = the original per-class tabs with linking. Persisted as _mode in the
+                     stored config; defaults to advanced for back-compat. -->
+                <div class="btn-group btn-group-sm" role="group" aria-label="Konfigurationsläge">
+                    <input type="radio" class="btn-check" name="faltCfgModeRadio" id="faltCfgMode_simple" value="simple" onchange="faltCfgRequestMode('simple')">
+                    <label class="btn btn-outline-primary" for="faltCfgMode_simple" title="Bygg stationen en gång; sätt skjuttid m.m. per klass">Enkelt läge</label>
+                    <input type="radio" class="btn-check" name="faltCfgModeRadio" id="faltCfgMode_advanced" value="advanced" checked onchange="faltCfgRequestMode('advanced')">
+                    <label class="btn btn-outline-primary" for="faltCfgMode_advanced" title="Per-klass-flikar med länkning">Avancerat läge</label>
+                </div>
+                <button type="button" class="btn-close ms-auto" onclick="faltCfgTryClose()"></button>
             </div>
             <div class="modal-body">
 
@@ -23,14 +32,24 @@
                         <label class="form-label fw-bold">Antal stationer</label>
                         <input type="number" class="form-control" id="faltCfg_stationCount" min="2" max="12" value="8" style="width:80px" onchange="faltCfgUpdateStations()">
                     </div>
+                    <div class="col-auto">
+                        <span id="faltCfgSimpleNote" class="text-muted small fst-italic" style="display:none">
+                            <i class="bi bi-info-circle me-1"></i>Enkelt läge: bygg målgrupper en gång &mdash; skjuttid och övriga parametrar sätts per klass per station.
+                        </span>
+                    </div>
+                    <div class="col-auto" id="faltCfgSimpleLinkButton" style="display:none">
+                        <button class="btn btn-outline-primary btn-sm" onclick="faltCfgLinkInSimpleMode()" title="Länka vapenklasser så de delar Skjuttid och övriga förutsättningar">
+                            <i class="bi bi-link-45deg me-1"></i>Länka klasser...
+                        </button>
+                    </div>
                 </div>
 
-                <!-- Weapon class tabs -->
+                <!-- Weapon class tabs (advanced mode only) -->
                 <ul class="nav nav-tabs mb-3" id="faltCfgWeaponTabs" role="tablist">
                 </ul>
 
-                <!-- Link / Copy controls -->
-                <div class="mb-3 d-flex flex-wrap gap-3 align-items-end">
+                <!-- Link / Copy controls (advanced mode only) -->
+                <div class="mb-3 d-flex flex-wrap gap-3 align-items-end" id="faltCfgLinkAndCopyControls">
                     <div class="d-flex gap-2 align-items-center">
                         <span class="text-muted small">Kopiera från:</span>
                         <select class="form-select form-select-sm" id="faltCfg_copySource" style="width:auto">
@@ -74,7 +93,136 @@ let faltCfgStationCount = 8;
 let faltCfgExpandedStation = 1; // Track which station card is open
 let faltCfgDirtyStations = new Set(); // Stations with unsaved changes
 let faltCfgLinkedGroups = []; // e.g. [["A","R"], ["B","C"]] — linked weapon classes share configs
+let faltCfgMode = "advanced"; // "simple" | "advanced". Simple = shared shape + per-class param matrix.
 const faltCfgScoringMode = () => document.getElementById('wizard_scoringMode')?.value || 'Normal';
+
+// Reserved metadata keys stored in faltCfgData alongside weapon classes. When iterating
+// weapon-class entries, skip these. Add new keys here (with leading underscore) instead
+// of polluting the iteration sites.
+const FALT_CFG_META_KEYS = new Set(['_linkedGroups', '_mode']);
+function faltCfgIsMetaKey(k) { return FALT_CFG_META_KEYS.has(k); }
+
+// Scale a figure's four timing fields by `ratio`, in place. Same clamp
+// pattern the advanced-mode "Kopiera från … Δsek" copy uses.
+function faltCfgScaleFigureTimings(fig, ratio) {
+    if (!fig || ratio === 1) return;
+    if (fig.delayBeforeShowSec) fig.delayBeforeShowSec = Math.max(0, Math.round(fig.delayBeforeShowSec * ratio));
+    if (fig.showTimeSec)        fig.showTimeSec        = Math.max(1, Math.round(fig.showTimeSec        * ratio));
+    if (fig.hideAfterSec)       fig.hideAfterSec       = Math.max(1, Math.round(fig.hideAfterSec       * ratio));
+    if (fig.reappearSec)        fig.reappearSec        = Math.max(0, Math.round(fig.reappearSec        * ratio));
+}
+
+// Mirror SHAPE (target groups + figures, including images / descriptions /
+// behavior) from srcWc to all other weapon classes. Timing fields scale
+// proportionally to each destination class's shootingTimeSec relative to
+// the source — so a 30s canonical with an 8s show window becomes ~6s in a
+// 22s class. Per-class params (shootingTimeSec, positions, support hand,
+// max shots) live on the destination station object and stay untouched.
+function faltCfgSyncShape(srcWc) {
+    var src = faltCfgData[srcWc];
+    if (!src || !src.stations) return;
+    faltCfgWeaponClasses.forEach(function (wc) {
+        if (wc === srcWc) return;
+        if (!faltCfgData[wc]) faltCfgData[wc] = { stations: [] };
+        var srcStations = src.stations;
+        var destStations = faltCfgData[wc].stations || [];
+        // Make sure dest has the same number of stations as src
+        while (destStations.length < srcStations.length) {
+            destStations.push(createDefaultStation(destStations.length + 1));
+        }
+        srcStations.forEach(function (srcSt, i) {
+            var destSt = destStations[i];
+            destSt.station = srcSt.station;
+            destSt.targetGroups = JSON.parse(JSON.stringify(srcSt.targetGroups || []));
+            // Scale timings into dest's shootingTimeSec budget. Skip the walk
+            // when times match exactly to avoid pointless rounding drift.
+            var srcTime = srcSt.shootingTimeSec || 30;
+            var destTime = destSt.shootingTimeSec || srcTime;
+            if (srcTime > 0 && destTime > 0 && srcTime !== destTime) {
+                var ratio = destTime / srcTime;
+                destSt.targetGroups.forEach(function (tg) {
+                    (tg.figures || []).forEach(function (fig) {
+                        faltCfgScaleFigureTimings(fig, ratio);
+                    });
+                });
+            }
+        });
+        if (destStations.length > srcStations.length) destStations.length = srcStations.length;
+        faltCfgData[wc].stations = destStations;
+    });
+}
+
+// Structural equality: two stations have the same target groups, figures,
+// images, descriptions, and behaviors. Per-class params (Skjuttid, positions,
+// max shots) AND figure timings (delay/show/hide/reappear) are intentionally
+// ignored — both are allowed to differ per class in simple mode (timings get
+// scaled proportionally by faltCfgSyncShape).
+function faltCfgShapeEqual(a, b) {
+    if (!a || !b) return false;
+    var ga = a.targetGroups || [], gb = b.targetGroups || [];
+    if (ga.length !== gb.length) return false;
+    for (var g = 0; g < ga.length; g++) {
+        var tga = ga[g], tgb = gb[g];
+        if ((tga.imageUrl || '') !== (tgb.imageUrl || '')) return false;
+        if ((tga.description || '') !== (tgb.description || '')) return false;
+        var fa = tga.figures || [], fb = tgb.figures || [];
+        if (fa.length !== fb.length) return false;
+        for (var i = 0; i < fa.length; i++) {
+            var x = fa[i], y = fb[i];
+            if (!!x.isPoangmal !== !!y.isPoangmal) return false;
+            if ((x.behavior || 'Fast') !== (y.behavior || 'Fast')) return false;
+            if ((x.targetName || '') !== (y.targetName || '')) return false;
+            if ((x.targetColor || '') !== (y.targetColor || '')) return false;
+            if ((x.imageUrl || '') !== (y.imageUrl || '')) return false;
+            if ((x.targetsPerFigure || 1) !== (y.targetsPerFigure || 1)) return false;
+        }
+    }
+    return true;
+}
+
+// Returns true if every weapon class has the same shape per station (Skjuttid etc. may
+// still differ). When false, switching to simple mode is a destructive merge that needs
+// confirmation.
+function faltCfgAllClassesShareShape() {
+    var classes = faltCfgWeaponClasses;
+    if (classes.length <= 1) return true;
+    var first = faltCfgData[classes[0]];
+    if (!first || !first.stations) return true;
+    for (var i = 1; i < classes.length; i++) {
+        var other = faltCfgData[classes[i]];
+        if (!other || !other.stations) return false;
+        if (first.stations.length !== other.stations.length) return false;
+        for (var s = 0; s < first.stations.length; s++) {
+            if (!faltCfgShapeEqual(first.stations[s], other.stations[s])) return false;
+        }
+    }
+    return true;
+}
+
+// Toggle visibility of advanced-mode chrome (tabs + link/copy controls) and the simple-
+// mode info banner. Called on mode change and after open.
+function faltCfgRenderModeChrome() {
+    var tabsEl = document.getElementById('faltCfgWeaponTabs');
+    var linkCopyEl = document.getElementById('faltCfgLinkAndCopyControls');
+    var simpleNote = document.getElementById('faltCfgSimpleNote');
+    var simpleLinkBtn = document.getElementById('faltCfgSimpleLinkButton');
+    var simpleRadio = document.getElementById('faltCfgMode_simple');
+    var advancedRadio = document.getElementById('faltCfgMode_advanced');
+
+    if (faltCfgMode === 'simple') {
+        if (tabsEl) tabsEl.style.display = 'none';
+        if (linkCopyEl) linkCopyEl.style.display = 'none';
+        if (simpleNote) simpleNote.style.display = '';
+        if (simpleLinkBtn) simpleLinkBtn.style.display = '';
+        if (simpleRadio) simpleRadio.checked = true;
+    } else {
+        if (tabsEl) tabsEl.style.display = '';
+        if (linkCopyEl) linkCopyEl.style.display = '';
+        if (simpleNote) simpleNote.style.display = 'none';
+        if (simpleLinkBtn) simpleLinkBtn.style.display = 'none';
+        if (advancedRadio) advancedRadio.checked = true;
+    }
+}
 
 // Returns the linked group array that contains wc, or null
 function faltCfgGetLinkedGroup(wc) {
@@ -100,12 +248,29 @@ function faltCfgSyncLinked(wc) {
 const SHOOTER_POSITIONS = ["Stående", "Knästående", "Sittande", "Liggande", "Valfri"];
 const WEAPON_POSITIONS = ["45 grader", "Riktning tillåten"];
 const SUPPORT_HAND = ["Ej stödhand", "Stödhand tillåten"];
-const TARGET_BEHAVIORS = ["Fast", "Framsvängande", "Bortsvängande"];
+const TARGET_BEHAVIORS = ["Fast", "Framsvängande", "Bortsvängande", "Rörligt"];
 
 // ─── Model-update helpers ───────────────────────────────────────────
 // Every form control calls one of these on change. The model is always current.
 
 function faltCfgMarkDirty(wc, stationNum) {
+    if (faltCfgMode === 'simple') {
+        // Order matters: faltCfgSyncLinked first so any linked siblings of wc
+        // pick up its updated per-class params (Skjuttid, positions, …);
+        // faltCfgSyncShape then re-derives every non-canonical class's shape +
+        // scaled timings against canonical's now-correct shootingTimeSec.
+        var canonical = faltCfgGetCanonicalClass();
+        faltCfgSyncLinked(wc);
+        faltCfgSyncShape(canonical);
+        faltCfgWeaponClasses.forEach(function (c) {
+            faltCfgDirtyStations.add(c + '_' + stationNum);
+        });
+        var ds = document.getElementById('faltCfgSimpleDirty_' + stationNum);
+        var ss = document.getElementById('faltCfgSimpleSaved_' + stationNum);
+        if (ds) ds.style.display = '';
+        if (ss) ss.style.display = 'none';
+        return;
+    }
     // Sync linked classes and mark them all dirty
     faltCfgSyncLinked(wc);
     var grp = faltCfgGetLinkedGroup(wc);
@@ -121,7 +286,26 @@ function faltCfgMarkDirty(wc, stationNum) {
 
 function faltCfgUpdateStation(wc, stationNum, field, value) {
     var station = faltCfgData[wc]?.stations?.find(function(s) { return s.station === stationNum; });
-    if (station) { station[field] = value; faltCfgMarkDirty(wc, stationNum); }
+    if (!station) return;
+    // Simple mode: editing this class's shootingTimeSec re-fits its moving-
+    // figure timings to the new total. Without it, dropping a class from 25 →
+    // 20 sek would leave 8s show windows in a 20s budget. Advanced mode skips
+    // this — the operator has the explicit "Kopiera från … Δsek" button when
+    // they want proportional scaling.
+    if (field === 'shootingTimeSec' && faltCfgMode === 'simple') {
+        var oldVal = station.shootingTimeSec || 0;
+        var newVal = value || 0;
+        if (oldVal > 0 && newVal > 0 && oldVal !== newVal) {
+            var ratio = newVal / oldVal;
+            (station.targetGroups || []).forEach(function (tg) {
+                (tg.figures || []).forEach(function (fig) {
+                    faltCfgScaleFigureTimings(fig, ratio);
+                });
+            });
+        }
+    }
+    station[field] = value;
+    faltCfgMarkDirty(wc, stationNum);
 }
 
 function faltCfgUpdateGroup(wc, stationNum, tgIdx, field, value) {
@@ -146,17 +330,20 @@ function faltCfgOpen(weaponClasses, existingConfig) {
     if (faltCfgData.WeaponConfigs || faltCfgData.weaponConfigs) {
         var wc = faltCfgData.WeaponConfigs || faltCfgData.weaponConfigs;
         var linked = faltCfgData._linkedGroups;
+        var mode = faltCfgData._mode;
         faltCfgData = {};
         Object.keys(wc).forEach(function(k) { faltCfgData[k] = wc[k]; });
         if (linked) faltCfgData._linkedGroups = linked;
+        if (mode) faltCfgData._mode = mode;
     }
 
     faltCfgLinkedGroups = faltCfgData._linkedGroups || [];
+    faltCfgMode = faltCfgData._mode === 'simple' ? 'simple' : 'advanced';
     faltCfgStationCount = parseInt(document.getElementById('faltCfg_stationCount').value) || 8;
 
     // Detect station count from existing config (handle both camelCase and PascalCase)
     for (const wc of Object.keys(faltCfgData)) {
-        if (wc === '_linkedGroups') continue;
+        if (faltCfgIsMetaKey(wc)) continue;
         var st = faltCfgData[wc]?.stations || faltCfgData[wc]?.Stations;
         if (st?.length > 0) {
             faltCfgStationCount = st.length;
@@ -174,6 +361,7 @@ function faltCfgOpen(weaponClasses, existingConfig) {
     buildTabs();
     faltCfgActiveTab = faltCfgGetVisibleTabs()[0] || faltCfgWeaponClasses[0];
     faltCfgUpdateLinkButtons();
+    faltCfgRenderModeChrome();
     renderActiveTab();
 
     bootstrap.Modal.getOrCreateInstance(document.getElementById('faltStationConfigModal')).show();
@@ -364,6 +552,11 @@ function faltCfgSaveLinkedGroups() {
     } else {
         delete faltCfgData._linkedGroups;
     }
+    if (faltCfgMode === 'simple') {
+        faltCfgData._mode = 'simple';
+    } else {
+        delete faltCfgData._mode;
+    }
 }
 
 function faltCfgCopyFrom() {
@@ -419,6 +612,7 @@ function faltCfgCopyStation(stationNum, wc) {
 // ─── Rendering ──────────────────────────────────────────────────────
 
 function renderActiveTab() {
+    if (faltCfgMode === 'simple') return faltCfgRenderSimpleMode();
     const container = document.getElementById('faltCfgTabContent');
     const wc = faltCfgActiveTab;
     const stations = faltCfgData[wc]?.stations || [];
@@ -474,7 +668,7 @@ function renderActiveTab() {
                                 onchange="faltCfgUpdateStation('${wc}',${st.station},'supportHand',this.value)">${SUPPORT_HAND.map(p => `<option ${p === st.supportHand ? 'selected' : ''}>${p}</option>`).join('')}</select>
                         </div>
                         ${!isPoang ? `<div class="col-auto">
-                            <label class="form-label small mb-0">Max skott/fig</label>
+                            <label class="form-label small mb-0">Max träff/fig</label>
                             <input type="number" class="form-control form-control-sm" min="1" max="6" value="${st.maxShotsPerFigure || 6}" style="width:65px"
                                 onchange="faltCfgUpdateStation('${wc}',${st.station},'maxShotsPerFigure',parseInt(this.value)||6)">
                         </div>` : ''}
@@ -802,6 +996,245 @@ async function faltCfgUploadFigImage2(inputEl, stationNum, wc, tgIdx, fIdx) {
     } catch(err) { console.error(err); }
 }
 
+// ─── Simple mode ────────────────────────────────────────────────────
+// In simple mode all weapon classes share the same shape (target groups +
+// figures + images + descriptions + behaviour timing), but each class can
+// have its own Skjuttid / Utgångsläge / Vapenläge / Stödhand / Max skott.
+// Wire format is unchanged — the mode is purely a UX layer over the same
+// per-class storage. The shared shape is canonicalised on the first weapon
+// class in faltCfgWeaponClasses; faltCfgMarkDirty mirrors it to the others.
+
+function faltCfgGetCanonicalClass() {
+    return faltCfgWeaponClasses[0] || 'C';
+}
+
+function faltCfgRenderSimpleMode() {
+    var container = document.getElementById('faltCfgTabContent');
+    var canonical = faltCfgGetCanonicalClass();
+    var stations = faltCfgData[canonical]?.stations || [];
+    var isPoang = faltCfgScoringMode() === 'Poang';
+    var html = '';
+    stations.forEach(function (st) {
+        var collapseId = 'faltCfgStationSimple_' + st.station;
+        var anyDirty = faltCfgWeaponClasses.some(function (c) {
+            return faltCfgDirtyStations.has(c + '_' + st.station);
+        });
+
+        // Per-class param matrix — one row per visible group. Linked classes
+        // collapse into a single row labelled "A, R" (etc.); edits propagate
+        // to all linked siblings via faltCfgSyncLinked in faltCfgMarkDirty.
+        var matrixRows = '';
+        faltCfgGetVisibleTabs().forEach(function (wc) {
+            var wst = faltCfgData[wc]?.stations?.find(function (s) { return s.station === st.station; });
+            if (!wst) return;
+            var grp = faltCfgGetLinkedGroup(wc);
+            var label = grp ? grp.join(', ') : wc;
+            var unlinkBtn = grp
+                ? ' <button class="btn btn-outline-warning btn-sm py-0 px-1 ms-1" onclick="faltCfgUnlinkInSimpleMode(\'' + wc + '\')" title="Avlänka"><i class="bi bi-x-circle"></i></button>'
+                : '';
+            matrixRows +=
+                '<tr>' +
+                  '<td class="fw-bold">' + label + unlinkBtn + '</td>' +
+                  '<td><input type="number" class="form-control form-control-sm" min="5" max="120" value="' + wst.shootingTimeSec + '" style="width:80px"' +
+                    " onchange=\"faltCfgUpdateStation('" + wc + "'," + st.station + ",'shootingTimeSec',parseInt(this.value)||30)\"></td>" +
+                  '<td><select class="form-select form-select-sm"' +
+                    " onchange=\"faltCfgUpdateStation('" + wc + "'," + st.station + ",'shooterStartPosition',this.value)\">" +
+                    SHOOTER_POSITIONS.map(function (p) { return '<option' + (p === wst.shooterStartPosition ? ' selected' : '') + '>' + p + '</option>'; }).join('') +
+                  '</select></td>' +
+                  '<td><select class="form-select form-select-sm"' +
+                    " onchange=\"faltCfgUpdateStation('" + wc + "'," + st.station + ",'weaponStartPosition',this.value)\">" +
+                    WEAPON_POSITIONS.map(function (p) { return '<option' + (p === wst.weaponStartPosition ? ' selected' : '') + '>' + p + '</option>'; }).join('') +
+                  '</select></td>' +
+                  '<td><select class="form-select form-select-sm"' +
+                    " onchange=\"faltCfgUpdateStation('" + wc + "'," + st.station + ",'supportHand',this.value)\">" +
+                    SUPPORT_HAND.map(function (p) { return '<option' + (p === wst.supportHand ? ' selected' : '') + '>' + p + '</option>'; }).join('') +
+                  '</select></td>' +
+                  (!isPoang ? '<td><input type="number" class="form-control form-control-sm" min="1" max="6" value="' + (wst.maxShotsPerFigure || 6) + '" style="width:65px"' +
+                    " onchange=\"faltCfgUpdateStation('" + wc + "'," + st.station + ",'maxShotsPerFigure',parseInt(this.value)||6)\"></td>" : '') +
+                '</tr>';
+        });
+
+        // Target groups — rendered once against the canonical class. Edits flow
+        // through faltCfgMarkDirty → faltCfgSyncShape which mirrors them to all
+        // other classes before the next render.
+        var tgsHtml = '';
+        (st.targetGroups || []).forEach(function (tg, tgIdx) {
+            var isLastGroup = (st.targetGroups || []).length <= 1;
+            tgsHtml += renderTargetGroup(tg, tgIdx, st.station, canonical, isPoang, isLastGroup);
+        });
+
+        html +=
+            '<div class="card mb-2" data-station="' + st.station + '">' +
+              '<div class="card-header py-2" role="button" data-bs-toggle="collapse" data-bs-target="#' + collapseId + '">' +
+                '<div class="d-flex justify-content-between align-items-center">' +
+                  '<span><strong>Station ' + st.station + '</strong>' +
+                    '<span id="faltCfgSimpleSaved_' + st.station + '" class="badge bg-success ms-2" style="display:none">Sparad</span>' +
+                    '<span id="faltCfgSimpleDirty_' + st.station + '" class="badge bg-warning text-dark ms-2"' + (anyDirty ? '' : ' style="display:none"') + '>Osparad</span>' +
+                  '</span>' +
+                  '<span class="d-flex align-items-center gap-2">' +
+                    '<span class="text-muted small">' + (st.targetGroups || []).length + ' målgr.</span>' +
+                    '<button class="btn btn-success btn-sm" onclick="event.stopPropagation(); faltCfgSimpleSaveStation(' + st.station + ')">' +
+                      '<i class="bi bi-check-lg me-1"></i>Spara stationen' +
+                    '</button>' +
+                    '<button class="btn btn-outline-info btn-sm" onclick="event.stopPropagation(); faltCfgPrintStation(' + st.station + ',\'' + canonical + '\')" title="Skriv ut stationskort">' +
+                      '<i class="bi bi-printer"></i>' +
+                    '</button>' +
+                  '</span>' +
+                '</div>' +
+              '</div>' +
+              '<div id="' + collapseId + '" class="collapse ' + (st.station === faltCfgExpandedStation ? 'show' : '') + '">' +
+                '<div class="card-body">' +
+                  '<label class="form-label small fw-bold mb-1">Förutsättningar (per vapenklass)</label>' +
+                  '<div class="table-responsive mb-3">' +
+                    '<table class="table table-sm table-bordered align-middle mb-0">' +
+                      '<thead><tr>' +
+                        '<th>Vapenklass</th>' +
+                        '<th>Skjuttid (sek)</th>' +
+                        '<th>Utgångsläge</th>' +
+                        '<th>Vapenläge</th>' +
+                        '<th>Stödhand</th>' +
+                        (!isPoang ? '<th>Max träff/fig</th>' : '') +
+                      '</tr></thead>' +
+                      '<tbody>' + matrixRows + '</tbody>' +
+                    '</table>' +
+                  '</div>' +
+                  '<label class="form-label small fw-bold mb-1">Målgrupper (delas mellan alla vapenklasser)</label>' +
+                  '<div class="tg-container">' + tgsHtml + '</div>' +
+                  '<button class="btn btn-outline-secondary btn-sm mt-2" onclick="faltCfgAddTargetGroup(' + st.station + ',\'' + canonical + '\')">' +
+                    '<i class="bi bi-plus-lg me-1"></i>Lägg till målgrupp' +
+                  '</button>' +
+                '</div>' +
+              '</div>' +
+            '</div>';
+    });
+
+    container.innerHTML = html;
+
+    // Track which station the user expands manually
+    container.querySelectorAll('.collapse').forEach(function (el) {
+        el.addEventListener('shown.bs.collapse', function () {
+            var card = this.closest('.card[data-station]');
+            if (card) faltCfgExpandedStation = parseInt(card.dataset.station);
+        });
+    });
+}
+
+// Simple-mode linking: classes in a linked group share per-class params
+// (Skjuttid, positions, support hand, max shots) AND show as a single row in
+// the per-class param matrix. Shape is already shared via faltCfgSyncShape,
+// so linking only adds param sharing on top.
+function faltCfgLinkInSimpleMode() {
+    var available = faltCfgWeaponClasses.filter(function (c) { return !faltCfgGetLinkedGroup(c); });
+    if (available.length < 2) {
+        alert('Behöver minst två olänkade vapenklasser för att kunna länka.');
+        return;
+    }
+    var choice = prompt(
+        'Vilka vapenklasser ska länkas? Länkade klasser delar Skjuttid och ' +
+        'övriga förutsättningar och visas på samma rad i tabellen.\n\n' +
+        'Tillgängliga: ' + available.join(', ') + '\n\n' +
+        'Separera med komma, t.ex. "A, R" eller "A, A_Opt, R":');
+    if (!choice) return;
+    var entries = choice.split(/[,\s]+/)
+        .map(function (e) { return e.trim(); })
+        .filter(function (e) { return e.length > 0; });
+    if (entries.length < 2) { alert('Ange minst två klasser.'); return; }
+
+    var matched = [];
+    var unmatched = [];
+    entries.forEach(function (e) {
+        var c = available.find(function (o) { return o.toUpperCase() === e.toUpperCase(); });
+        if (c) {
+            if (matched.indexOf(c) < 0) matched.push(c);
+        } else {
+            unmatched.push(e);
+        }
+    });
+    if (unmatched.length > 0) {
+        alert('Följande är inte tillgängliga eller redan länkade: ' + unmatched.join(', '));
+        return;
+    }
+    if (matched.length < 2) return;
+
+    // First matched class becomes the group representative; copy its data to
+    // siblings so they start with identical per-class params.
+    faltCfgLinkedGroups.push(matched);
+    var srcKey = matched[0];
+    matched.slice(1).forEach(function (c) {
+        faltCfgData[c] = JSON.parse(JSON.stringify(faltCfgData[srcKey]));
+    });
+    faltCfgSaveLinkedGroups();
+    renderActiveTab();
+}
+
+function faltCfgUnlinkInSimpleMode(repClass) {
+    var grp = faltCfgGetLinkedGroup(repClass);
+    if (!grp) return;
+    if (!confirm('Avlänka ' + grp.join(', ') + '? Varje klass behåller sina nuvarande förutsättningar.')) return;
+    faltCfgLinkedGroups = faltCfgLinkedGroups.filter(function (g) { return g !== grp; });
+    faltCfgSaveLinkedGroups();
+    renderActiveTab();
+}
+
+function faltCfgRequestMode(newMode) {
+    if (newMode === faltCfgMode) return;
+    if (newMode === 'simple') {
+        // Switching from advanced → simple is a destructive merge if classes
+        // don't already share a shape per station: figures unique to one class
+        // would be lost. Warn, let the operator confirm; bail back to advanced
+        // if they cancel.
+        if (!faltCfgAllClassesShareShape()) {
+            var canonical = faltCfgGetCanonicalClass();
+            var ok = confirm(
+                'Vapenklasserna har olika målgrupper / figurer per station. ' +
+                'I enkelt läge delas formen mellan alla klasser, så ' + canonical +
+                ':s konfiguration används och övriga klassers särfall försvinner.\n\n' +
+                'Vill du fortsätta?');
+            if (!ok) {
+                document.getElementById('faltCfgMode_advanced').checked = true;
+                return;
+            }
+            faltCfgSyncShape(canonical);
+            (faltCfgData[canonical]?.stations || []).forEach(function (st) {
+                faltCfgWeaponClasses.forEach(function (c) {
+                    faltCfgDirtyStations.add(c + '_' + st.station);
+                });
+            });
+        }
+        // Linked groups are preserved across the mode switch — in simple mode
+        // they collapse to a single matrix row, sharing per-class params.
+    }
+    faltCfgMode = newMode;
+    faltCfgSaveLinkedGroups(); // also persists _mode flag
+    faltCfgRenderModeChrome();
+    if (faltCfgMode === 'advanced') {
+        buildTabs();
+        faltCfgActiveTab = faltCfgGetVisibleTabs()[0] || faltCfgWeaponClasses[0];
+        faltCfgUpdateLinkButtons();
+    }
+    renderActiveTab();
+}
+
+async function faltCfgSimpleSaveStation(stationNum) {
+    // Shape is already kept in sync via markDirty; per-class params are stored
+    // on each class's station object. Just flush JSON like advanced save does.
+    faltCfgSaveLinkedGroups();
+    var json = JSON.stringify(faltCfgData);
+    document.getElementById(faltCfgGetTargetFieldId()).value = json;
+
+    if (faltCfgIsEditMode()) {
+        var ok = await faltCfgSaveToServer(json);
+        if (!ok) return;
+    }
+    faltCfgWeaponClasses.forEach(function (c) {
+        faltCfgDirtyStations.delete(c + '_' + stationNum);
+    });
+    var savedBadge = document.getElementById('faltCfgSimpleSaved_' + stationNum);
+    var dirtyBadge = document.getElementById('faltCfgSimpleDirty_' + stationNum);
+    if (savedBadge) savedBadge.style.display = '';
+    if (dirtyBadge) dirtyBadge.style.display = 'none';
+}
+
 // ─── Save / Close ───────────────────────────────────────────────────
 
 function faltCfgGetTargetFieldId() {
@@ -933,6 +1366,9 @@ function faltDescribeBehavior(tg) {
         if (tg.reappearSec > 0) s += ', visar igen efter ' + tg.reappearSec + ' sek';
         return s;
     }
+    if (tg.behavior === 'R\u00f6rligt') {
+        return 'R\u00f6rligt';
+    }
     return 'Fast';
 }
 
@@ -960,24 +1396,34 @@ function faltCfgPrintStation(stationNum, wc) {
     var station = faltCfgData[wc]?.stations?.find(function(s){return s.station===stationNum;});
     if (!station) return;
 
-    // Collect all weapon classes that have this station and are structurally equal
+    // Combine classes that share STRUCTURE — figures, behaviours, images. In
+    // simple mode per-class params (Skjuttid, positions, Stödhand, Max skott)
+    // are intentionally allowed to differ, so we use shape-equal there;
+    // advanced mode keeps the stricter structural check (params must also
+    // match) so its existing print behaviour is unchanged.
+    var equalityFn = (faltCfgMode === 'simple') ? faltCfgShapeEqual : faltCfgStationsStructurallyEqual;
     var combinedClasses = {};  // { wc: stationConfig }
     faltCfgWeaponClasses.forEach(function(c) {
         var st = faltCfgData[c]?.stations?.find(function(s){return s.station===stationNum;});
-        if (st && faltCfgStationsStructurallyEqual(station, st)) combinedClasses[c] = st;
+        if (st && equalityFn(station, st)) combinedClasses[c] = st;
     });
     var classKeys = Object.keys(combinedClasses);
     var isCombined = classKeys.length > 1;
 
-    // Group classes with identical shooting times for compact display
-    function groupByTime(classes, field) {
+    // Group classes by the value of `field`. When all classes share the
+    // same value, prefixes are dropped ("16 sek" instead of "A,B,C: 16 sek").
+    function groupByField(classes, field, suffix) {
+        suffix = suffix || '';
         var groups = {};
+        var order = [];
         classes.forEach(function(c) {
-            var val = combinedClasses[c][field] || combinedClasses[c].shootingTimeSec;
-            if (!groups[val]) groups[val] = [];
-            groups[val].push(c);
+            var val = combinedClasses[c][field];
+            var key = (val == null || val === '') ? '—' : String(val);
+            if (!groups[key]) { groups[key] = []; order.push(key); }
+            groups[key].push(c);
         });
-        return Object.keys(groups).map(function(v) { return groups[v].join(',') + ': ' + v + ' sek'; }).join(' &nbsp;|&nbsp; ');
+        if (order.length === 1) return order[0] + suffix;
+        return order.map(function(k) { return groups[k].join(',') + ': ' + k + suffix; }).join(' &nbsp;|&nbsp; ');
     }
 
     var w = window.open('', '_blank');
@@ -986,6 +1432,12 @@ function faltCfgPrintStation(stationNum, wc) {
     w.document.write('body{font-family:sans-serif;margin:30px;max-width:210mm}');
     w.document.write('h1{font-size:1.8em;border-bottom:3px solid #333;padding-bottom:8px}');
     w.document.write('.rules{background:#f0f0f0;padding:12px;border-radius:6px;margin:15px 0;font-size:0.95em}');
+    w.document.write('.rules-shared{margin-bottom:4px}');
+    w.document.write('.rules-tbl{border-collapse:collapse;margin-top:4px;font-size:0.95em}');
+    w.document.write('.rules-tbl th,.rules-tbl td{padding:1px 10px 1px 0;text-align:left}');
+    w.document.write('.rules-tbl th{font-weight:600;border-bottom:1px solid #888}');
+    w.document.write('.rules-tbl td{border-bottom:1px solid #ddd}');
+    w.document.write('.rules-tbl tr:last-child td{border-bottom:none}');
     w.document.write('.tg{border:2px solid #666;border-radius:8px;padding:15px;margin:20px 0;page-break-inside:avoid}');
     w.document.write('.tg h3{margin:0 0 10px;font-size:1.2em}');
     w.document.write('.tg-desc{font-style:italic;margin:10px 0;font-size:0.95em;line-height:1.4}');
@@ -1009,14 +1461,71 @@ function faltCfgPrintStation(stationNum, wc) {
     // Förutsättningar
     w.document.write('<div class="rules">');
     if (isCombined) {
-        w.document.write('<strong>Skjuttid:<' + '/strong> ' + groupByTime(classKeys, 'shootingTimeSec'));
+        // Compact table layout: pull params that all classes share into a
+        // single line above (saves vertical space + reduces visual noise),
+        // and tabulate the varying ones with rows merged by full signature
+        // so e.g. A,A_Opt,R collapse onto one row when their entire param
+        // set matches.
+        var fields = [
+            { key: 'shootingTimeSec', label: 'Skjuttid', suffix: ' sek' },
+            { key: 'shooterStartPosition', label: 'Utg\u00e5ngsl\u00e4ge' },
+            { key: 'weaponStartPosition', label: 'Vapenl\u00e4ge' },
+            { key: 'supportHand', label: 'St\u00f6dhand', descriptive: true }
+        ];
+        // Max skott column only when any class actually limits it (< 6).
+        var anyMaxLimited = classKeys.some(function (c) {
+            var v = combinedClasses[c].maxShotsPerFigure;
+            return v && v < 6;
+        });
+        if (anyMaxLimited) fields.push({ key: 'maxShotsPerFigure', label: 'Max träff/fig' });
+
+        var sharedFields = [];
+        var varyingFields = [];
+        fields.forEach(function (f) {
+            var firstVal = combinedClasses[classKeys[0]][f.key];
+            var allSame = classKeys.every(function (c) { return combinedClasses[c][f.key] === firstVal; });
+            (allSame ? sharedFields : varyingFields).push(f);
+        });
+
+        if (sharedFields.length > 0) {
+            var parts = sharedFields.map(function (f) {
+                var v = combinedClasses[classKeys[0]][f.key];
+                if (f.descriptive) return '<strong>' + v + '<' + '/strong>';
+                return '<strong>' + f.label + ':<' + '/strong> ' + v + (f.suffix || '');
+            });
+            w.document.write('<div class="rules-shared">' + parts.join(' &nbsp;|&nbsp; ') + '<' + '/div>');
+        }
+
+        if (varyingFields.length > 0) {
+            // Group classes by their full varying-field signature
+            var sigGroups = {};
+            var sigOrder = [];
+            classKeys.forEach(function (c) {
+                var sig = varyingFields.map(function (f) { return String(combinedClasses[c][f.key]); }).join('|');
+                if (!sigGroups[sig]) { sigGroups[sig] = []; sigOrder.push(sig); }
+                sigGroups[sig].push(c);
+            });
+            w.document.write('<table class="rules-tbl"><thead><tr><th>Vapenklass<' + '/th>');
+            varyingFields.forEach(function (f) { w.document.write('<th>' + f.label + '<' + '/th>'); });
+            w.document.write('<' + '/tr><' + '/thead><tbody>');
+            sigOrder.forEach(function (sig) {
+                w.document.write('<tr><td>' + sigGroups[sig].join(', ') + '<' + '/td>');
+                varyingFields.forEach(function (f) {
+                    var v = combinedClasses[sigGroups[sig][0]][f.key];
+                    var cell = (v == null ? '' : v) + (f.suffix || '');
+                    w.document.write('<td>' + cell + '<' + '/td>');
+                });
+                w.document.write('<' + '/tr>');
+            });
+            w.document.write('<' + '/tbody><' + '/table>');
+        }
     } else {
         w.document.write('<strong>Skjuttid:<' + '/strong> ' + station.shootingTimeSec + ' sek');
+        w.document.write(' &nbsp;|&nbsp; <strong>Utg\u00e5ngsl\u00e4ge:<' + '/strong> ' + station.shooterStartPosition);
+        w.document.write(' &nbsp;|&nbsp; <strong>Vapenl\u00e4ge:<' + '/strong> ' + station.weaponStartPosition);
+        w.document.write(' &nbsp;|&nbsp; <strong>' + station.supportHand + '<' + '/strong>');
+        if (station.maxShotsPerFigure && station.maxShotsPerFigure < 6) w.document.write('<br><strong>Max träff/fig:<' + '/strong> ' + station.maxShotsPerFigure);
     }
-    w.document.write(' &nbsp;|&nbsp; <strong>Utg\u00e5ngsl\u00e4ge:<' + '/strong> ' + station.shooterStartPosition);
-    w.document.write(' &nbsp;|&nbsp; <strong>Vapenl\u00e4ge:<' + '/strong> ' + station.weaponStartPosition);
-    w.document.write(' &nbsp;|&nbsp; <strong>' + station.supportHand + '<' + '/strong>');
-    if (station.maxShotsPerFigure && station.maxShotsPerFigure < 6) w.document.write('<br><strong>Max skott per figur:<' + '/strong> ' + station.maxShotsPerFigure);
     w.document.write('<' + '/div>');
 
     // Target groups and figures
@@ -1042,7 +1551,7 @@ function faltCfgPrintStation(stationNum, wc) {
                     var cFig = combinedClasses[c].targetGroups[tgIdx].figures[fIdx];
                     var desc = faltDescribeBehavior(cFig);
                     // Strip the behavior name prefix since we already printed it
-                    desc = desc.replace(/^(Framsv\u00e4ngande|Bortsv\u00e4ngande)/, '').replace(/^,\s*/, '');
+                    desc = desc.replace(/^(Framsv\u00e4ngande|Bortsv\u00e4ngande|R\u00f6rligt)/, '').replace(/^,\s*/, '');
                     if (!timingGroups[desc]) timingGroups[desc] = [];
                     timingGroups[desc].push(c);
                 });
