@@ -10,6 +10,10 @@
     var competitionType = ViewData["CompetitionType"]?.ToString() ?? "";
     var stationNumber = ViewData["StationNumber"]?.ToString() ?? "0";
     var isLoggedIn = (bool)(ViewData["IsLoggedIn"] ?? false);
+    // Set by StationPage when faltskytteSelfServiceResults is on AND the
+    // viewer isn't logged in — surfaces a clearer "log in to enter scores"
+    // CTA so shooters know self-service is available for this competition.
+    var showSelfServicePrompt = (bool)(ViewData["ShowSelfServiceLoginPrompt"] ?? false);
     var isFaltskytte = competitionType is "Faltskytte" or "MagnumFalt";
 }
 
@@ -42,9 +46,22 @@
             @if (!isLoggedIn)
             {
                 <div class="mt-3 pt-3 border-top">
-                    <a href="/login-register?returnUrl=/station?c=@(competitionId)%26s=@(stationNumber)" class="btn btn-outline-primary btn-sm">
-                        <i class="bi bi-box-arrow-in-right me-1"></i>Logga in för resultatinmatning
-                    </a>
+                    @if (showSelfServicePrompt)
+                    {
+                        <div class="alert alert-info mb-2 small">
+                            <i class="bi bi-info-circle me-1"></i>
+                            <strong>Självservice är aktiverat</strong> för denna tävling — logga in för att fylla i resultat för din patrull.
+                        </div>
+                        <a href="/login-register?returnUrl=/station?c=@(competitionId)%26s=@(stationNumber)" class="btn btn-primary w-100">
+                            <i class="bi bi-box-arrow-in-right me-1"></i>Logga in och registrera resultat
+                        </a>
+                    }
+                    else
+                    {
+                        <a href="/login-register?returnUrl=/station?c=@(competitionId)%26s=@(stationNumber)" class="btn btn-outline-primary btn-sm">
+                            <i class="bi bi-box-arrow-in-right me-1"></i>Logga in för resultatinmatning
+                        </a>
+                    }
                 </div>
             }
         </div>

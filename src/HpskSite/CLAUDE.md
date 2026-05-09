@@ -907,6 +907,7 @@ Navigate to **Members → Member Groups**:
 - **regionalPage**: add `area` Textstring property (dropdown values: `Syd`, `Vast`, `Ost`, `Nord`). Required by the Certifications system to scope Riksinstruktör authority. Backfill on every existing region node.
 - **registrationInvoice**: add `actualPaidAmount` Decimal property (optional, label "Faktiskt belopp"). Cashier flow records what was actually collected when it differs from the billed total. Without this property, the variance feature silently no-ops (billed = actual). Added 2026-05-06.
 - **competitionRegistration**: add `isCheckedIn` True/False property (optional, default false, label "Incheckad"). Powers the at-the-desk attendance toggle on the Anmälningar table. Without this property, the toggle silently no-ops (`IContent.SetValue` on a missing property is a no-op). Added 2026-05-06.
+- **competition**: add `faltskytteSelfServiceResults` True/False property (optional, default false, label "Tillåt självservice (skyttar fyller i resultat)"). When ON, logged-in shooters in a patrol can enter results for that patrol on `/station?c=X&s=N`; staff retains full edit. Without this property the wizard checkbox silently no-ops. Added 2026-05-09. Also requires running `Migrations/add-currentstation-to-faltskyttepatrol.sql` in SSMS to add the per-patrol cursor column.
 
 ## Common Patterns
 

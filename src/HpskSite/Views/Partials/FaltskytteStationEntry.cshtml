@@ -25,8 +25,18 @@
 
 @{
     var presetStation = ViewData["PresetStationNumber"]?.ToString() ?? "";
+    var isSelfService = ViewData["IsSelfService"] is bool b && b;
+    var presetPatrolId = ViewData["PresetPatrolId"]?.ToString() ?? "";
+    var presetPatrolNumber = ViewData["PresetPatrolNumber"]?.ToString() ?? "";
+    var presetPatrolWeapon = ViewData["PresetPatrolWeapon"]?.ToString() ?? "";
 }
-<div class="faltskytte-station-entry" data-competition-id="@competitionId" data-preset-station="@presetStation">
+<div class="faltskytte-station-entry"
+     data-competition-id="@competitionId"
+     data-preset-station="@presetStation"
+     data-self-service="@(isSelfService ? "1" : "0")"
+     data-preset-patrol-id="@presetPatrolId"
+     data-preset-patrol-number="@presetPatrolNumber"
+     data-preset-patrol-weapon="@presetPatrolWeapon">
 
 <!-- Numeric keypad overlay for Poängräkning -->
 <div id="fseKeypad" onclick="if(event.target===this)fseKeypadCancel()">
@@ -144,6 +154,12 @@
     var containerEl = document.querySelector('.faltskytte-station-entry');
     var compId = containerEl?.dataset.competitionId;
     var presetStation = parseInt(containerEl?.dataset.presetStation) || 0;
+    // Self-service mode flags. When true: scoped to one patrol, roll call is
+    // skipped (team self-marks), and the patrol's CurrentStation gates writes.
+    var selfService = containerEl?.dataset.selfService === '1';
+    var ssPatrolId = parseInt(containerEl?.dataset.presetPatrolId) || 0;
+    var ssPatrolNumber = parseInt(containerEl?.dataset.presetPatrolNumber) || 0;
+    var ssLocked = false; // computed after GetStationEntryData returns the patrol's CurrentStation
     var competitionConfig = null;
     var maxReshoots = 0;
     var scoringMode = 'Normal';
@@ -156,6 +172,22 @@
 
     // Init
     (async function() {
+        // Self-service: advance the patrol's cursor to this station before any
+        // results UI loads. Re-scanning the same station is a server-side no-op
+        // (the UPDATE skips when CurrentStation already matches). Staff visits
+        // never reach this branch — the page renders the staff entry surface
+        // without setting selfService=true.
+        if (selfService && ssPatrolId > 0 && presetStation > 0) {
+            try {
+                var token = document.querySelector('input[name="__RequestVerificationToken"]')?.value;
+                await fetch('/umbraco/surface/Faltskytte/AdvancePatrolCursor', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+                    body: JSON.stringify({ competitionId: parseInt(compId, 10), patrolId: ssPatrolId, stationNumber: presetStation })
+                });
+            } catch (e) { /* best effort — server still enforces cursor on save */ }
+        }
+
         var resp = await fetch('/umbraco/surface/Faltskytte/GetStationConfig?competitionId=' + compId);
         var data = await resp.json();
         if (data.success) {
@@ -194,6 +226,15 @@
         stationData = data.data;
         shooterHits = {}; // Clear local state on station load
 
+        // Self-service: keep only the user's resolved patrol in the list AND
+        // jump straight into it — the team should never see other patrols and
+        // shouldn't have to tap a list of one.
+        if (selfService && ssPatrolNumber > 0 && Array.isArray(stationData.patrols)) {
+            stationData.patrols = stationData.patrols.filter(function (p) {
+                return p.patrolNumber === ssPatrolNumber;
+            });
+        }
+
         var html = '';
         (stationData.patrols || []).forEach(function(p) {
             var total = p.members.length;
@@ -211,12 +252,36 @@
                 '</div></div>';
         });
         listEl.innerHTML = html || '<p class="text-muted text-center">Inga patruller.</p>';
+
+        // Self-service: auto-select the (single) patrol so the team lands
+        // directly on the entry surface without an extra tap.
+        if (selfService && ssPatrolNumber > 0 && (stationData.patrols || []).length === 1) {
+            fseSelectPatrol(ssPatrolNumber);
+        }
     };
 
     window.fseSelectPatrol = function(patrolNum) {
         currentPatrol = (stationData.patrols || []).find(function(p) { return p.patrolNumber === patrolNum; });
         if (!currentPatrol) return;
         currentPatrolWc = currentPatrol.weaponGroup || 'C';
+
+        // Self-service lock check: if the patrol has already moved on to a
+        // different station, this station is read-only for the team. Server
+        // enforces the same rule on save; this is the UI hint.
+        ssLocked = !!(selfService
+            && currentPatrol.currentStation
+            && currentPatrol.currentStation !== stationData.stationNumber);
+
+        // Self-service mode skips the roll-call screen entirely — the team
+        // self-marks attendance by being there. Auto-include every member as
+        // present and jump straight into entry. Lock state (if any) is then
+        // applied by fseStartEntry / save UI.
+        if (selfService) {
+            presentMembers = new Set();
+            (currentPatrol.members || []).forEach(function (m) { presentMembers.add(m.memberId); });
+            fseStartEntry();
+            return;
+        }
 
         // Show roll call screen
         document.getElementById('fseRcStationLabel').textContent = 'Station ' + stationData.stationNumber;
@@ -277,10 +342,46 @@
 
         document.getElementById('fseStationLabel').textContent = 'Station ' + stationData.stationNumber;
         document.getElementById('fsePatrolLabel').textContent = 'Patrull ' + currentPatrol.patrolNumber;
+        fseApplySelfServiceUi();
 
         document.getElementById('fseRollCallScreen').style.display = 'none';
         document.getElementById('fseEntryScreen').style.display = '';
         fseLoadAndRenderShooter();
+    };
+
+    // Self-service: rewire the "Upprop" back button to "Byt patrull" (there's
+    // no roll-call screen to return to in this mode) and surface a lock
+    // banner / disable save when the team has moved past this station.
+    function fseApplySelfServiceUi() {
+        if (!selfService) return;
+
+        var backBtn = document.querySelector('#fseEntryScreen button[onclick="fseBackToRollCall()"]');
+        if (backBtn) {
+            backBtn.innerHTML = '<i class="bi bi-arrow-repeat me-1"></i>Byt patrull';
+            backBtn.setAttribute('onclick', 'fseBytPatrull()');
+        }
+
+        var entryScreen = document.getElementById('fseEntryScreen');
+        var existing = document.getElementById('fseLockBanner');
+        if (existing) existing.remove();
+        var saveBtn = document.getElementById('fseSaveBtn');
+        if (ssLocked) {
+            var banner = document.createElement('div');
+            banner.id = 'fseLockBanner';
+            banner.className = 'alert alert-warning text-center mb-2';
+            banner.innerHTML = '<i class="bi bi-lock-fill me-1"></i><strong>Stationen är låst.</strong> Be en funktionär att ändra resultatet.';
+            entryScreen.insertBefore(banner, entryScreen.firstChild);
+            if (saveBtn) saveBtn.disabled = true;
+        } else if (saveBtn) {
+            saveBtn.disabled = false;
+        }
+    }
+
+    window.fseBytPatrull = function() {
+        try { localStorage.removeItem('hpsk_faltselfservice_' + compId); } catch (e) {}
+        var url = new URL(window.location.href);
+        url.searchParams.delete('p');
+        window.location.href = url.toString();
     };
 
     window.fseBackFromRollCall = function() {

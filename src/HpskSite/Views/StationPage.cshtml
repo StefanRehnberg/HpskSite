@@ -1,9 +1,12 @@
 ﻿@using Umbraco.Cms.Web.Common.PublishedModels
 @using Newtonsoft.Json
+@using HpskSite.CompetitionTypes.Faltskytte.Models
+@using HpskSite.CompetitionTypes.Faltskytte.Services
 @inject Umbraco.Cms.Core.Services.IMemberService MemberService
 @inject Umbraco.Cms.Core.Security.IMemberManager MemberManager
 @inject Umbraco.Cms.Core.Services.IContentService ContentService
 @inject HpskSite.Services.ClubService ClubService
+@inject Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabaseFactory DbFactory
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
     Layout = "Master.cshtml";
@@ -70,6 +73,58 @@
     bool isSpringskytte = competitionType == "Springskytte";
     bool isPrecision = !isFaltskytte && !isSpringskytte;
 
+    // ── Fältskytte self-service mode ─────────────────────────────
+    // Tri-modal: staff (canEnterResults), self-service (logged-in shooter
+    // in a patrol of a competition with faltskytteSelfServiceResults on),
+    // or public (everyone else). Resolved here so the rendering tree
+    // below can dispatch on a single state.
+    bool selfServiceFlag = competition != null
+        && competition.HasProperty("faltskytteSelfServiceResults")
+        && competition.Value<bool>("faltskytteSelfServiceResults");
+
+    // "none" | "picker" | "resolved"
+    string selfServiceMode = "none";
+    int? selfServicePatrolId = null;
+    int? selfServicePatrolNumber = null;
+    string? selfServicePatrolWeapon = null;
+    var selfServicePatrols = new List<FaltskyttePatrol>();
+
+    if (isFaltskytte && !canEnterResults && isLoggedIn && competition != null && selfServiceFlag)
+    {
+        var memberData = MemberService.GetByEmail(currentMember!.Email ?? "");
+        if (memberData != null)
+        {
+            using var db = DbFactory.CreateDatabase();
+            selfServicePatrols = await FaltskytteSelfServiceQueries
+                .GetPatrolsForMemberAsync(db, competitionId, memberData.Id);
+
+            if (selfServicePatrols.Count > 0)
+            {
+                // Did the picker (or a previous resolution) hand us ?p=patrolId?
+                int.TryParse(Context.Request.Query["p"].FirstOrDefault(), out var pParam);
+                FaltskyttePatrol? resolved = null;
+                if (pParam > 0)
+                    resolved = selfServicePatrols.FirstOrDefault(p => p.Id == pParam);
+                if (resolved == null && selfServicePatrols.Count == 1)
+                    resolved = selfServicePatrols[0];
+
+                if (resolved != null)
+                {
+                    selfServiceMode = "resolved";
+                    selfServicePatrolId = resolved.Id;
+                    selfServicePatrolNumber = resolved.PatrolNumber;
+                    selfServicePatrolWeapon = resolved.WeaponGroup;
+                }
+                else
+                {
+                    selfServiceMode = "picker";
+                }
+            }
+        }
+    }
+
+    bool willEnter = canEnterResults || selfServiceMode == "resolved";
+
     ViewBag.Title = competition != null
         ? $"Station {stationNumber} — {competitionName}"
         : "Station";
@@ -119,9 +174,9 @@
             <i class="bi bi-exclamation-triangle me-2"></i>Tävlingen hittades inte.
         </div>
     }
-    else if (canEnterResults)
+    else if (willEnter)
     {
-        <!-- Authorized: Show result entry UI -->
+        <!-- Authorized (staff or self-service shooter): Show result entry UI -->
         <script>
         try {
             localStorage.setItem('hpsk_station_resume', JSON.stringify({
@@ -139,6 +194,13 @@
             entryViewData["CompetitionId"] = competitionId;
             entryViewData["CompetitionName"] = competitionName;
             entryViewData["PresetStationNumber"] = stationNumber;
+            // Self-service hints — partial filters its patrol list to this one
+            // patrol, skips roll call, and renders a locked read-only view if
+            // CurrentStation drifts away from the requested station.
+            entryViewData["IsSelfService"] = selfServiceMode == "resolved";
+            entryViewData["PresetPatrolId"] = selfServicePatrolId;
+            entryViewData["PresetPatrolNumber"] = selfServicePatrolNumber;
+            entryViewData["PresetPatrolWeapon"] = selfServicePatrolWeapon;
             @await Html.PartialAsync("FaltskytteStationEntry", entryViewData)
         }
         else if (isSpringskytte)
@@ -165,15 +227,63 @@
             @await Html.PartialAsync("CompetitionResultsManagement", entryViewData)
         }
     }
+    else if (selfServiceMode == "picker")
+    {
+        <!-- Multi-class shooter: pick which patrol to use for this round.
+             The choice is reflected in the URL via ?p=<patrolId> — when the
+             page reloads with that param the resolution branch picks it up
+             and renders the entry surface scoped to the chosen patrol. -->
+        <div class="text-center py-4">
+            <h4><i class="bi bi-people me-2"></i>Vilken patrull skjuter du i nu?</h4>
+            <p class="text-muted small mb-3">Du är anmäld i flera klasser. Välj patrull för att fortsätta till station @stationNumber.</p>
+            <div class="d-grid gap-2 col-md-6 mx-auto">
+                @foreach (var p in selfServicePatrols)
+                {
+                    var label = $"Patrull {p.PatrolNumber}" + (string.IsNullOrEmpty(p.WeaponGroup) ? "" : $" ({p.WeaponGroup})");
+                    var href = $"/station?c={competitionId}&s={stationNumber}&p={p.Id}";
+                    <a class="btn btn-primary btn-lg" href="@href" data-faltselfservice-pick="@p.Id"><i class="bi bi-arrow-right me-1"></i>@label</a>
+                }
+            </div>
+        </div>
+        <script>
+        // Persist the picker choice so subsequent scans resolve straight to
+        // this patrol without prompting again. Cleared by a "Byt patrull"
+        // link in the entry partial header.
+        document.querySelectorAll('[data-faltselfservice-pick]').forEach(function(a) {
+            a.addEventListener('click', function() {
+                try {
+                    localStorage.setItem('hpsk_faltselfservice_' + @competitionId, a.getAttribute('data-faltselfservice-pick'));
+                } catch(e) {}
+            });
+        });
+        // Auto-resolve from cache: if we have a remembered patrolId for this
+        // competition, redirect to it before the user has to tap.
+        (function() {
+            try {
+                var cached = localStorage.getItem('hpsk_faltselfservice_' + @competitionId);
+                if (!cached) return;
+                var pid = parseInt(cached, 10);
+                if (!pid) return;
+                // Only auto-resolve if this patrol is still in the picker list
+                var match = document.querySelector('[data-faltselfservice-pick="' + pid + '"]');
+                if (match) window.location.replace(match.getAttribute('href'));
+            } catch(e) {}
+        })();
+        </script>
+    }
     else
     {
-        <!-- Not authorized: Show station info card -->
+        <!-- Not authorized for entry: Show station info card -->
         var infoViewData = new ViewDataDictionary(ViewData);
         infoViewData["CompetitionId"] = competitionId;
         infoViewData["CompetitionName"] = competitionName;
         infoViewData["CompetitionType"] = competitionType;
         infoViewData["StationNumber"] = stationNumber;
         infoViewData["IsLoggedIn"] = isLoggedIn;
+        // When self-service is enabled and the viewer isn't logged in, the
+        // info card surfaces a small "Logga in för att registrera resultat"
+        // link so shooters know how to switch to the entry view.
+        infoViewData["ShowSelfServiceLoginPrompt"] = selfServiceFlag && !isLoggedIn;
         @await Html.PartialAsync("StationInfoCard", infoViewData)
     }
 

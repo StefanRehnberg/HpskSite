@@ -479,6 +479,16 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                             <input type="number" class="form-control form-control-sm" id="edit_patrolSize" min="2" max="12" value="2" style="max-width: 80px;">
                         </div>
                         <input type="hidden" id="edit_rollingStart" name="rollingStart">
+                        <div class="form-check mb-3">
+                            <input class="form-check-input" type="checkbox" id="edit_faltskytteSelfServiceResults" name="faltskytteSelfServiceResults">
+                            <label class="form-check-label fw-bold" for="edit_faltskytteSelfServiceResults">Tillåt skyttar i laget att fylla i resultat (självservice)</label>
+                            <div class="form-text small mt-1">
+                                Lämpligt för mindre tävlingar utan stationschefer. Skyttar som är med i en patrull
+                                kan logga in och fylla i resultat för sin egen patrull. Funktionärer har alltid full åtkomst.
+                                En skytt kan bara redigera resultatet på den station patrullen är vid &mdash; tidigare stationer
+                                låses så fort patrullen skannar QR-koden vid nästa station.
+                            </div>
+                        </div>
                         <div class="mb-3">
                             <button type="button" class="btn btn-outline-primary btn-sm" onclick="openEditFaltStationConfigurator()">
                                 <i class="bi bi-gear me-1"></i>Konfigurera stationer
@@ -1017,6 +1027,8 @@ window.populateEditModal = function(competition) {
         document.getElementById('edit_rollingStartSettings').style.display = rsEnabled ? '' : 'none';
         document.getElementById('edit_patrolSize').value = (rsConfig && rsConfig.patrolSize) || 2;
         document.getElementById('edit_rollingStart').value = competition.rollingStart || '';
+        var ssEl = document.getElementById('edit_faltskytteSelfServiceResults');
+        if (ssEl) ssEl.checked = !!competition.faltskytteSelfServiceResults;
         document.getElementById('edit_faltStationConfigJson').value = competition.stationConfig || '';
         var cfgSummary = document.getElementById('edit_faltConfigSummary');
         if (cfgSummary && competition.stationConfig) {
@@ -1240,12 +1252,19 @@ function saveCompetition() {
             continue;
         }
 
-        if (key === 'showLiveResults' || key === 'addToMenu' || key === 'allowDualCClass' || key === 'isClubOnly' || key === 'isAwardingStandardMedals' || key === 'allowSelfReporting' || key === 'allowTeams' || key === 'allowStafett') {
+        if (key === 'showLiveResults' || key === 'addToMenu' || key === 'allowDualCClass' || key === 'isClubOnly' || key === 'isAwardingStandardMedals' || key === 'allowSelfReporting' || key === 'allowTeams' || key === 'allowStafett' || key === 'faltskytteSelfServiceResults') {
             fields[key] = value === 'on';
         } else {
             fields[key] = value;
         }
     }
+
+    // FormData omits unchecked checkboxes, which means switching one OFF and
+    // saving wouldn't actually clear the property. Force the current state
+    // for the Fältskytte self-service flag (the only boolean we care about
+    // strictly turning off in this flow).
+    var ssEl = document.getElementById('edit_faltskytteSelfServiceResults');
+    if (ssEl) fields.faltskytteSelfServiceResults = ssEl.checked;
 
     // Extract seriesId — for existing competitions it's handled via Move after save,
     // but for new competitions (copy/create) it must be passed to CreateCompetition

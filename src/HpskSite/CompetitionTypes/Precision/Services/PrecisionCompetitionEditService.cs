@@ -351,6 +351,7 @@ namespace HpskSite.CompetitionTypes.Precision.Services
                 "patrolIntervalMinutes" => "patrolIntervalMinutes",
                 "maxReshoots" => "maxReshoots",
                 "rollingStart" => "rollingStart",
+                "faltskytteSelfServiceResults" => "faltskytteSelfServiceResults",
                 "subCompetitionName" => "subCompetitionName",
                 // Direktplacering
                 "direktplaceringConfig" => "direktplaceringConfig",
@@ -375,7 +376,7 @@ namespace HpskSite.CompetitionTypes.Precision.Services
                     or "juniorRegistrationFee" or "subCompetitionFee" =>
                     decimal.TryParse(value.ToString(), out var decVal) && decVal >= 0 ? decVal : (object)null,
 
-                "showLiveResults" or "isActive" or "isClubOnly" or "allowDualCClass" or "addToMenu" or "isAwardingStandardMedals" or "allowSelfReporting" or "allowTeams" or "allowStafett" =>
+                "showLiveResults" or "isActive" or "isClubOnly" or "allowDualCClass" or "addToMenu" or "isAwardingStandardMedals" or "allowSelfReporting" or "allowTeams" or "allowStafett" or "faltskytteSelfServiceResults" =>
                     bool.TryParse(value.ToString(), out var boolVal) ? boolVal : false,
 
                 "competitionDate" or "competitionEndDate" or "registrationOpenDate" or "registrationCloseDate" =>

@@ -343,6 +343,15 @@
                                 <div class="form-text small">Antal skyttar per patrull. Ny patrull skapas automatiskt när föregående är full.</div>
                             </div>
 
+                            <div class="form-check mb-3">
+                                <input class="form-check-input" type="checkbox" id="wizard_faltskytteSelfServiceResults">
+                                <label class="form-check-label fw-bold" for="wizard_faltskytteSelfServiceResults">Tillåt skyttar i laget att fylla i resultat (självservice)</label>
+                                <div class="form-text small mt-1">
+                                    Lämpligt för mindre tävlingar utan stationschefer. Skyttar i en patrull kan logga in och
+                                    fylla i resultat för sin egen patrull. Funktionärer har alltid full åtkomst.
+                                </div>
+                            </div>
+
                             <div class="mb-3">
                                 <button type="button" class="btn btn-outline-primary" onclick="openFaltStationConfigurator()">
                                     <i class="bi bi-gear me-1"></i>Konfigurera stationer
@@ -1878,6 +1887,8 @@ function submitWizard() {
         fields.maxReshoots = document.getElementById('wizard_maxReshoots').value;
         var rsEnabled = document.getElementById('wizard_rollingStart').checked;
         fields.rollingStart = rsEnabled ? JSON.stringify({ enabled: true, patrolSize: parseInt(document.getElementById('wizard_patrolSize').value) || 2 }) : '';
+        var ssEl = document.getElementById('wizard_faltskytteSelfServiceResults');
+        fields.faltskytteSelfServiceResults = !!(ssEl && ssEl.checked);
     }
 
     // Add Direktplacering config

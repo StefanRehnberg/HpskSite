@@ -19,6 +19,14 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
 
         /// <summary>Weapon group for this patrol, e.g. "C", "A", "A+R", "M"</summary>
         public string? WeaponGroup { get; set; }
+
+        /// <summary>
+        /// Self-service mode cursor: the station this patrol is currently at.
+        /// Advanced when a shooter in the patrol scans a different station's QR;
+        /// stations other than this one become read-only for shooters (staff
+        /// always retain full edit). Null until the patrol's first scan.
+        /// </summary>
+        public int? CurrentStation { get; set; }
     }
 
     [TableName("FaltskyttePatrolMember")]

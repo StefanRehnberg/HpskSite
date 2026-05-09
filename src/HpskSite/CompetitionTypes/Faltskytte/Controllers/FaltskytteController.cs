@@ -10,6 +10,7 @@ using Umbraco.Cms.Web.Website.Controllers;
 using Umbraco.Extensions;
 using Umbraco.Cms.Core.Security;
 using HpskSite.CompetitionTypes.Faltskytte.Models;
+using HpskSite.CompetitionTypes.Faltskytte.Services;
 using HpskSite.Models;
 using HpskSite.Services;
 using HpskSite.CompetitionTypes.Precision.Controllers;
@@ -86,6 +87,66 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                     return true;
             }
             return false;
+        }
+
+        // ── Self-service auth helpers ───────────────────────────────
+        // Used when faltskytteSelfServiceResults is on for a competition: a
+        // logged-in shooter who's in a patrol can read all stations of that
+        // competition, and write scores at the patrol's CurrentStation.
+
+        private async Task<int> GetCurrentMemberIdAsync()
+        {
+            var current = await _memberManager.GetCurrentMemberAsync();
+            if (current == null) return 0;
+            var data = _memberService.GetByEmail(current.Email ?? "");
+            return data?.Id ?? 0;
+        }
+
+        private bool IsSelfServiceEnabledFor(int competitionId)
+        {
+            var competition = _contentService.GetById(competitionId);
+            return competition != null
+                && competition.HasProperty("faltskytteSelfServiceResults")
+                && competition.GetValue<bool>("faltskytteSelfServiceResults");
+        }
+
+        /// <summary>
+        /// True when the current user can read this competition's station data.
+        /// Staff (existing four-tier) always can; otherwise a logged-in member
+        /// who has any patrol in this competition AND self-service is on can.
+        /// </summary>
+        private async Task<bool> CanReadStationAsync(int competitionId)
+        {
+            if (await IsAuthorizedForCompetition(competitionId)) return true;
+            if (!IsSelfServiceEnabledFor(competitionId)) return false;
+            var memberId = await GetCurrentMemberIdAsync();
+            if (memberId == 0) return false;
+            using var db = _umbracoDatabaseFactory.CreateDatabase();
+            var patrols = await FaltskytteSelfServiceQueries
+                .GetPatrolsForMemberAsync(db, competitionId, memberId);
+            return patrols.Any();
+        }
+
+        /// <summary>
+        /// True when the current user can WRITE a result for the given patrol
+        /// at the given station. Staff bypass — always true. Otherwise requires
+        /// self-service flag on, the user is in this patrol, and the patrol's
+        /// CurrentStation matches stationNumber (older stations are locked).
+        /// </summary>
+        private async Task<bool> IsAuthorizedForSelfServiceWriteAsync(
+            int competitionId, int patrolNumber, int stationNumber)
+        {
+            if (await IsAuthorizedForCompetition(competitionId)) return true;
+            if (!IsSelfServiceEnabledFor(competitionId)) return false;
+            var memberId = await GetCurrentMemberIdAsync();
+            if (memberId == 0) return false;
+            using var db = _umbracoDatabaseFactory.CreateDatabase();
+            var patrol = await FaltskytteSelfServiceQueries
+                .GetPatrolAsync(db, competitionId, patrolNumber);
+            if (patrol == null) return false;
+            if (patrol.CurrentStation != stationNumber) return false;
+            return await FaltskytteSelfServiceQueries
+                .IsMemberInPatrolAsync(db, patrol.Id, memberId);
         }
 
         // ── Station Config ──────────────────────────────────────────
@@ -177,7 +238,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         [HttpGet]
         public async Task<IActionResult> GetStationEntryData(int competitionId, int stationNumber)
         {
-            if (!await IsAuthorizedForCompetition(competitionId))
+            if (!await CanReadStationAsync(competitionId))
                 return Json(new { success = false, message = "Du har inte behörighet." });
 
             var competition = _contentService.GetById(competitionId);
@@ -217,13 +278,14 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                     PatrolNumber = p.PatrolNumber,
                     StartTime = p.StartTime,
                     WeaponGroup = p.WeaponGroup,
+                    CurrentStation = p.CurrentStation,
                     Members = members.Select(m => new FaltskyttePatrolMemberView
                     {
                         PatrolMemberId = m.Id,
                         MemberId = m.MemberId,
                         Position = m.Position,
                         Name = m.MemberName,
-                        Club = m.ClubName,
+                        Club = HpskSite.Helpers.ClubNameHelper.Shorten(m.ClubName),
                         ShootingClass = m.ShootingClass,
                         HasResult = completedKeys.Contains(m.MemberId + "_" + m.ShootingClass)
                     }).ToList(),
@@ -255,6 +317,55 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             });
         }
 
+        // ── Self-service: advance patrol cursor ─────────────────────
+
+        public class AdvancePatrolCursorRequest
+        {
+            public int CompetitionId { get; set; }
+            public int PatrolId { get; set; }
+            public int StationNumber { get; set; }
+        }
+
+        /// <summary>
+        /// Advances a patrol's CurrentStation cursor in self-service mode. Called
+        /// once by the station page on initial load when a self-service shooter
+        /// resolves to a single patrol. Re-scanning the same station is a no-op
+        /// (the UPDATE WHERE clause skips). Staff loads of /station never call
+        /// this endpoint, so cursor moves are driven exclusively by shooter scans.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> AdvancePatrolCursor([FromBody] AdvancePatrolCursorRequest request)
+        {
+            if (request == null || request.CompetitionId <= 0 || request.PatrolId <= 0 || request.StationNumber <= 0)
+                return Json(new { success = false, message = "Saknar parametrar." });
+
+            if (!IsSelfServiceEnabledFor(request.CompetitionId))
+                return Json(new { success = false, message = "Självservice är inte aktiverat." });
+
+            var memberId = await GetCurrentMemberIdAsync();
+            if (memberId == 0)
+                return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            using var db = _umbracoDatabaseFactory.CreateDatabase();
+            // Verify the patrol belongs to this competition AND the caller is in it
+            // — otherwise this could be used to move someone else's cursor.
+            var patrol = await db.FirstOrDefaultAsync<FaltskyttePatrol>(
+                "WHERE Id = @0 AND CompetitionId = @1", request.PatrolId, request.CompetitionId);
+            if (patrol == null)
+                return Json(new { success = false, message = "Patrullen hittades inte." });
+
+            var inPatrol = await FaltskytteSelfServiceQueries
+                .IsMemberInPatrolAsync(db, request.PatrolId, memberId);
+            if (!inPatrol)
+                return Json(new { success = false, message = "Du är inte med i denna patrull." });
+
+            await FaltskytteSelfServiceQueries
+                .AdvanceCursorAsync(db, request.PatrolId, request.StationNumber);
+
+            return Json(new { success = true, currentStation = request.StationNumber });
+        }
+
         // ── Re-shoot Info ───────────────────────────────────────────
 
         /// <summary>
@@ -263,7 +374,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         [HttpGet]
         public async Task<IActionResult> GetReshootInfo(int competitionId, int memberId, string? shootingClass = null)
         {
-            if (!await IsAuthorizedForCompetition(competitionId))
+            if (!await CanReadStationAsync(competitionId))
                 return Json(new { success = false, message = "Du har inte behörighet." });
 
             var competition = _contentService.GetById(competitionId);
@@ -318,6 +429,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         {
             try
             {
+                if (!await CanReadStationAsync(competitionId))
+                    return Json(new { success = false, message = "Du har inte behörighet." });
+
                 using var db = _umbracoDatabaseFactory.CreateDatabase();
                 FaltskytteResultEntry? result;
                 if (!string.IsNullOrEmpty(shootingClass))
@@ -354,7 +468,12 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         {
             try
             {
-                if (!await IsAuthorizedForCompetition(request.CompetitionId))
+                // Staff bypass via the standard four-tier check; otherwise allow self-service
+                // writes when (a) the competition has self-service on, (b) the writer is in the
+                // patrol whose results they're saving, and (c) the patrol's CurrentStation
+                // cursor matches the station they're writing to (older stations are locked).
+                if (!await IsAuthorizedForSelfServiceWriteAsync(
+                        request.CompetitionId, request.PatrolNumber, request.StationNumber))
                     return Json(new FaltskylteSaveResultResponse { Success = false, Message = "Du har inte behörighet." });
 
                 var currentMember = await _memberManager.GetCurrentMemberAsync();
@@ -540,7 +659,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                         {
                             MemberId = memberId,
                             Name = member?.MemberName ?? "Okänd skytt",
-                            Club = member?.ClubName ?? "",
+                            Club = HpskSite.Helpers.ClubNameHelper.Shorten(member?.ClubName ?? ""),
                             ShootingClass = HpskSite.Models.ShootingClasses.GetById(g.Key.ShootingClass)?.Name
                                 ?? g.Key.ShootingClass,
                             Stations = stationResults,
@@ -608,6 +727,19 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                     medalService.CalculateStandardMedals(shooterResults, scoringMode, stationCount, isChampionship);
                 }
 
+                // Header metadata for the result-list printout / on-screen card —
+                // matches what the Precision result page surfaces (competition
+                // name, date, organiser, status).
+                var competitionName = competition.Name ?? competition.GetValue<string>("competitionName") ?? "";
+                var competitionDateValue = competition.GetValue<DateTime?>("competitionDate");
+                var competitionDateStr = competitionDateValue.HasValue
+                    ? competitionDateValue.Value.ToString("yyyy-MM-dd")
+                    : "";
+                var organizerClubId = competition.GetValue<int>("clubId");
+                var organizerName = organizerClubId > 0
+                    ? (_clubService.GetClubNameById(organizerClubId) ?? "")
+                    : "";
+
                 return Json(new
                 {
                     success = true,
@@ -619,7 +751,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                         ScoringMode = scoringMode,
                         StationCount = stationCount,
                         Config = competitionConfig,
-                        ClassGroups = classGroups
+                        ClassGroups = classGroups,
+                        CompetitionName = competitionName,
+                        CompetitionDate = competitionDateStr,
+                        OrganizerName = organizerName
                     }
                 });
             }
@@ -1102,10 +1237,14 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
 
             if (openPatrol == null)
             {
-                // Create new patrol — number within weapon group for rolling start
+                // Create new patrol — global numbering across weapon groups so
+                // each patrol's number is unique competition-wide. Per-group
+                // numbering would both duplicate ("Patrull 1" in C and Patrull 1
+                // in A) and trip the (CompetitionId, PatrolNumber) UQ constraint
+                // once a second weapon group joins.
                 var maxNum = await db.ExecuteScalarAsync<int>(
-                    "SELECT ISNULL(MAX(PatrolNumber), 0) FROM FaltskyttePatrol WHERE CompetitionId = @0 AND WeaponGroup = @1",
-                    request.CompetitionId, weaponGroup);
+                    "SELECT ISNULL(MAX(PatrolNumber), 0) FROM FaltskyttePatrol WHERE CompetitionId = @0",
+                    request.CompetitionId);
                 openPatrol = new FaltskyttePatrol
                 {
                     CompetitionId = request.CompetitionId,
@@ -1324,6 +1463,12 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                     }
                 }
 
+                // Defensive global renumber. Generations performed by older code
+                // paths could leave per-weapon-group "1, 2, 3" sequences in the
+                // database; this pass closes gaps and resolves any duplicates so
+                // every patrol in the competition has a unique number 1..N.
+                await RenumberAllPatrolsAsync(db, request.CompetitionId);
+
                 _logger.LogInformation("Generated {PatrolCount} Fältskytte patrols ({Group}) for competition {CompId}",
                     result.TotalPatrols, weaponGroupLabel, request.CompetitionId);
 
@@ -1402,7 +1547,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                         MemberId = m.MemberId,
                         Position = m.Position,
                         Name = m.MemberName,
-                        Club = m.ClubName,
+                        Club = HpskSite.Helpers.ClubNameHelper.Shorten(m.ClubName),
                         ShootingClass = m.ShootingClass
                     }).ToList()
             }).ToList();
@@ -1729,6 +1874,66 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             return patrol.Id;
         }
 
+        /// <summary>
+        /// Renumber every patrol in the competition continuously (1..N) preserving
+        /// existing relative order. Closes gaps and resolves any duplicate
+        /// PatrolNumber values — older code paths or off-script imports could leave
+        /// per-weapon-group "1, 2, 3" series in place; this pass turns those into a
+        /// single global sequence.
+        /// Two-phase to avoid the (CompetitionId, PatrolNumber) UQ collision when
+        /// fixing duplicates: bump everyone above the target range first, then walk
+        /// in order assigning 1..N.
+        /// </summary>
+        private static async Task RenumberAllPatrolsAsync(
+            Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabase db, int competitionId)
+        {
+            var allPatrols = await db.FetchAsync<FaltskyttePatrol>(
+                "WHERE CompetitionId = @0 ORDER BY PatrolNumber, Id", competitionId);
+            if (allPatrols.Count == 0) return;
+
+            // Snapshot the original ordering before we mutate the in-memory list.
+            var ordered = allPatrols.Select(p => p.Id).ToList();
+
+            // Phase 1: lift every row out of the 1..N target range. bump > count
+            // guarantees the post-bump range and the target range don't overlap.
+            var bump = allPatrols.Count + 1000;
+            await db.ExecuteAsync(
+                "UPDATE FaltskyttePatrol SET PatrolNumber = PatrolNumber + @0 WHERE CompetitionId = @1",
+                bump, competitionId);
+
+            // Phase 2: walk the original order and reassign sequential numbers.
+            for (int i = 0; i < ordered.Count; i++)
+            {
+                await db.ExecuteAsync(
+                    "UPDATE FaltskyttePatrol SET PatrolNumber = @0 WHERE Id = @1",
+                    i + 1, ordered[i]);
+            }
+        }
+
+        /// <summary>
+        /// Force a global renumber of all patrols in the competition. Closes gaps
+        /// and resolves any per-weapon-group duplicate numbering left over from
+        /// older data.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> RenumberPatrols([FromBody] CompetitionIdRequest request)
+        {
+            if (!await IsAuthorizedForCompetition(request.CompetitionId))
+                return Json(new { success = false, message = "Du har inte behörighet." });
+
+            using var db = _umbracoDatabaseFactory.CreateDatabase();
+            await RenumberAllPatrolsAsync(db, request.CompetitionId);
+            var count = await db.ExecuteScalarAsync<int>(
+                "SELECT COUNT(*) FROM FaltskyttePatrol WHERE CompetitionId = @0", request.CompetitionId);
+            return Json(new { success = true, count });
+        }
+
+        public class CompetitionIdRequest
+        {
+            public int CompetitionId { get; set; }
+        }
+
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> BulkMoveShooters([FromBody] FaltskylteBulkMoveShootersRequest request)
@@ -1886,7 +2091,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 startTime = p.StartTime,
                 weaponGroup = p.WeaponGroup,
                 members = allMembers.Where(m => m.PatrolId == p.Id)
-                    .Select(m => new { name = m.MemberName, club = m.ClubName, shootingClass = m.ShootingClass }).ToList()
+                    .Select(m => new {
+                        name = m.MemberName,
+                        club = HpskSite.Helpers.ClubNameHelper.Shorten(m.ClubName),
+                        shootingClass = m.ShootingClass
+                    }).ToList()
             }).ToList();
 
             return Json(new { success = true, published = true, patrols = result });

@@ -172,6 +172,12 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public List<FaltskyttePatrolMemberView> Members { get; set; } = new();
         /// <summary>How many members have results entered at the queried station</summary>
         public int CompletedCount { get; set; }
+        /// <summary>
+        /// Self-service cursor: the station this patrol is currently at. Null
+        /// until the patrol's first scan. Used by the entry partial to lock
+        /// older stations to read-only for shooters (staff always edits).
+        /// </summary>
+        public int? CurrentStation { get; set; }
     }
 
     public class FaltskyttePatrolMemberView
@@ -257,5 +263,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         /// <summary>Full per-weapon-class config (includes Förutsättningar, target groups, etc.)</summary>
         public FaltskytteCompetitionConfig Config { get; set; } = new();
         public List<FaltskytteClassGroup> ClassGroups { get; set; } = new();
+        /// <summary>Competition name — surfaced so the result list / printout can show a proper header.</summary>
+        public string CompetitionName { get; set; } = "";
+        /// <summary>Competition date, formatted as YYYY-MM-DD by the server.</summary>
+        public string CompetitionDate { get; set; } = "";
+        /// <summary>Organising club name (or empty for non-club competitions).</summary>
+        public string OrganizerName { get; set; } = "";
     }
 }
