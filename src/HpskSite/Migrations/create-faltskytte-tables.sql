@@ -37,7 +37,7 @@ BEGIN
         CompetitionId INT NOT NULL,
         PatrolNumber INT NOT NULL,
         StartTime DATETIME2 NULL,
-        WeaponGroup NVARCHAR(10) NULL,
+        WeaponGroup NVARCHAR(50) NULL,
 
         CONSTRAINT UQ_Faltskytte_Patrol UNIQUE (CompetitionId, PatrolNumber)
     );
