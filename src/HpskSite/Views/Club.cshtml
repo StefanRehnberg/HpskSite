@@ -480,6 +480,11 @@ window.currentClubId = clubId;
                     @await Html.PartialAsync("ClubCalendar")
                 </div>
 
+                <!-- TIER 2: Competitions Tab (All logged-in users) -->
+                <div class="tab-pane fade" id="clubCompetitions" role="tabpanel">
+                    @await Html.PartialAsync("ClubCompetitionsList")
+                </div>
+
                 <!-- TIER 2: Members Directory (All logged-in users) -->
                 <div class="tab-pane fade" id="clubMembers" role="tabpanel">
                     @await Html.PartialAsync("ClubInstructorsPublicPanel")

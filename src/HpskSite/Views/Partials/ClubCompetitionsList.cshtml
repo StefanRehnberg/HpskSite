@@ -1,0 +1,188 @@
+@using Umbraco.Cms.Web.Common.PublishedModels;
+@using Umbraco.Extensions;
+@using HpskSite.Models;
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    var clubId = ViewBag.clubId as int? ?? 0;
+    var today = DateTime.Today;
+
+    // Single tree traversal — same pattern as CompetitionsHub.cshtml
+    var allCompetitions = clubId > 0
+        ? Model.Root().DescendantsOrSelf()
+            .Where(x => x.ContentType.Alias == "competition"
+                     && x.Value<int>("clubId") == clubId
+                     && x.Value<bool>("isClubOnly"))
+            .ToList()
+        : new List<IPublishedContent>();
+
+    // Years that actually have comps (current year preselected if available, else most recent)
+    var availableYears = allCompetitions
+        .Select(c => c.Value<DateTime>("competitionDate").Year)
+        .Where(y => y > 1900)
+        .Distinct()
+        .OrderByDescending(y => y)
+        .ToList();
+    var currentYear = today.Year;
+    var defaultYear = availableYears.Contains(currentYear)
+        ? currentYear
+        : availableYears.FirstOrDefault();
+}
+
+<div class="card mb-3">
+    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <h5 class="mb-0"><i class="bi bi-trophy me-2"></i>Klubbinterna tävlingar</h5>
+        @if (availableYears.Any())
+        {
+            <div class="d-flex align-items-center">
+                <label for="clubCompetitionsYearFilter" class="me-2 small text-muted mb-0">År:</label>
+                <select id="clubCompetitionsYearFilter" class="form-select form-select-sm" style="width:auto">
+                    @foreach (var y in availableYears)
+                    {
+                        if (y == defaultYear)
+                        {
+                            <option value="@y" selected>@y</option>
+                        }
+                        else
+                        {
+                            <option value="@y">@y</option>
+                        }
+                    }
+                </select>
+            </div>
+        }
+    </div>
+    <div class="card-body">
+        @if (!allCompetitions.Any())
+        {
+            <p class="text-muted mb-0">Inga klubbinterna tävlingar registrerade.</p>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table table-hover align-middle">
+                    <thead>
+                        <tr>
+                            <th style="width:44px"></th>
+                            <th>Tävling</th>
+                            <th>Typ</th>
+                            <th>Datum</th>
+                            <th>Status</th>
+                            <th class="text-end"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="clubCompetitionsTableBody">
+                        @foreach (var comp in allCompetitions.OrderByDescending(c => c.Value<DateTime>("competitionDate")))
+                        {
+                            var compDate = comp.Value<DateTime>("competitionDate");
+                            var compEndDate = comp.Value<DateTime?>("competitionEndDate");
+                            var hasValidEnd = compEndDate.HasValue && compEndDate.Value.Year > 1900 && compEndDate.Value.Date >= compDate.Date;
+                            var effectiveEnd = hasValidEnd ? compEndDate!.Value.Date : compDate.Date;
+                            var isPast = effectiveEnd < today;
+                            var isOngoing = compDate.Date <= today && effectiveEnd >= today;
+                            var year = compDate.Year;
+
+                            var compTypeId = comp.Value<string>("competitionType") ?? "";
+                            var compTypeObj = CompetitionTypes.GetById(compTypeId)
+                                ?? CompetitionTypes.GetByName(compTypeId)
+                                ?? CompetitionTypes.GetFuzzy(compTypeId);
+                            var compTypeName = compTypeObj?.Name ?? (string.IsNullOrEmpty(compTypeId) ? "Okänd typ" : compTypeId);
+                            var iconId = compTypeObj?.Id ?? "";
+
+                            var isExternal = comp.Value<bool>("isExternal");
+
+                            string statusLabel;
+                            string statusClass;
+                            if (isPast)
+                            {
+                                statusLabel = "Avslutad";
+                                statusClass = "secondary";
+                            }
+                            else if (isOngoing)
+                            {
+                                statusLabel = "Pågående";
+                                statusClass = "primary";
+                            }
+                            else
+                            {
+                                statusLabel = "Kommande";
+                                statusClass = "info";
+                            }
+
+                            // Past + internal + official result page → link to /resultat/
+                            // Else → /competition/xxxx
+                            var compUrl = comp.Url();
+                            var linkUrl = compUrl;
+                            var linkText = isPast ? "Visa" : "Visa";
+
+                            if (isPast && !isExternal)
+                            {
+                                var resultPage = comp.Children
+                                    .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
+                                if (resultPage != null && resultPage.Value<bool>("isOfficial"))
+                                {
+                                    linkUrl = compUrl.TrimEnd('/') + "/resultat/";
+                                    linkText = "Resultat";
+                                }
+                            }
+
+                            var rowStyle = (year == defaultYear) ? "" : "display:none;";
+                            <tr class="club-competition-row" data-year="@year" style="@rowStyle">
+                                <td>
+                                    @if (!string.IsNullOrEmpty(iconId))
+                                    {
+                                        <img src="/images/competition-types/@(iconId).png"
+                                             alt="@compTypeName"
+                                             title="@compTypeName"
+                                             style="width:30px;height:30px;object-fit:contain"
+                                             onerror="this.style.display='none'" />
+                                    }
+                                </td>
+                                <td>
+                                    <div class="fw-semibold">@comp.Name</div>
+                                </td>
+                                <td>@compTypeName</td>
+                                <td>
+                                    @compDate.ToString("yyyy-MM-dd")
+                                    @if (hasValidEnd && effectiveEnd != compDate.Date)
+                                    {
+                                        <small class="text-muted d-block">till @effectiveEnd.ToString("yyyy-MM-dd")</small>
+                                    }
+                                </td>
+                                <td><span class="badge bg-@statusClass">@statusLabel</span></td>
+                                <td class="text-end">
+                                    <a href="@linkUrl" class="btn btn-sm btn-outline-primary">
+                                        <i class="bi bi-arrow-right me-1"></i>@linkText
+                                    </a>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                <p id="clubCompetitionsEmptyForYear" class="text-muted small mb-0" style="display:none;">
+                    Inga tävlingar registrerade för valt år.
+                </p>
+            </div>
+        }
+    </div>
+</div>
+
+<script>
+(function() {
+    var yearFilter = document.getElementById('clubCompetitionsYearFilter');
+    if (!yearFilter) return;
+    var emptyMsg = document.getElementById('clubCompetitionsEmptyForYear');
+    yearFilter.addEventListener('change', function() {
+        var selected = this.value;
+        var visibleCount = 0;
+        document.querySelectorAll('.club-competition-row').forEach(function(row) {
+            if (row.dataset.year === selected) {
+                row.style.display = '';
+                visibleCount++;
+            } else {
+                row.style.display = 'none';
+            }
+        });
+        if (emptyMsg) emptyMsg.style.display = visibleCount === 0 ? '' : 'none';
+    });
+})();
+</script>
