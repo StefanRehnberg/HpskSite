@@ -1057,20 +1057,14 @@
 					{
 						<!-- Registered Shooters Button -->
 						<div class="mb-2">
-							<button type="button" class="btn btn-outline-primary w-100" data-bs-toggle="modal" data-bs-target="#registeredShootersModal">
+							<button type="button" class="btn btn-outline-primary w-100" onclick="openRegisteredShootersModal()">
 								<i class="bi bi-people-fill me-1"></i> Visa anmälda skyttar
 							</button>
 						</div>
 
 						<!-- Start List Section -->
 						<div class="mb-2">
-							@if (currentMember == null)
-							{
-								<p class="text-muted small mb-0">
-									<i class="bi bi-lock me-1"></i> Du behöver vara inloggad för att se @(isFaltskytte ? "patrullistan" : "startlistan").
-								</p>
-							}
-							else if (isFaltskytte)
+							@if (isFaltskytte)
 							{
 								<div id="faltPublicPatrols_@Model.Id">
 									<p class="text-muted small mb-0">
@@ -1084,8 +1078,12 @@
 										.then(function(r) { return r.json(); })
 										.then(function(data) {
 											if (!data.success || !data.published || !data.patrols || data.patrols.length === 0) return;
-											container.innerHTML = '<button class="btn btn-info w-100" onclick="faltShowPublicPatrols_@(Model.Id)()">' +
+											container.innerHTML = '<button class="btn btn-info w-100" onclick="handlePatrullistaClick_@(Model.Id)()">' +
 												'<i class="bi bi-people me-1"><\/i> Visa patrullista<\/button>';
+											window['handlePatrullistaClick_@(Model.Id)'] = function() {
+												if (!currentUserIsLoggedIn) { showLoginRequiredModal('patrullistan'); return; }
+												window['faltShowPublicPatrols_@(Model.Id)']();
+											};
 											window['faltShowPublicPatrols_@(Model.Id)'] = function() {
 												var byGroup = {};
 												data.patrols.forEach(function(p) {
@@ -1162,7 +1160,7 @@
 										}
 										var hasCustomName = !string.IsNullOrEmpty(slName) && slName != "Startlista";
 										var buttonText = hasCustomName ? $"Startlista: {slName}" : "Visa startlista";
-										<a href="@sl.Url()" class="btn btn-info w-100 mb-1" target="_blank">
+										<a href="@sl.Url()" class="btn btn-info w-100 mb-1" target="_blank" onclick="if (!currentUserIsLoggedIn) { event.preventDefault(); showLoginRequiredModal('startlistan'); }">
 											<i class="bi bi-list-ol me-1"></i> @buttonText
 										</a>
 									}
@@ -1176,7 +1174,7 @@
 							}
 							else if (hasOfficialStartList)
 							{
-								<a href="@startListPageUrl" class="btn btn-info w-100" target="_blank">
+								<a href="@startListPageUrl" class="btn btn-info w-100" target="_blank" onclick="if (!currentUserIsLoggedIn) { event.preventDefault(); showLoginRequiredModal('startlistan'); }">
 									<i class="bi bi-list-ol me-1"></i> Visa startlista
 								</a>
 							}
@@ -1598,6 +1596,25 @@ window.CompetitionConfig = {
     </div>
 </div>
 
+@* Login Required Modal (shared) *@
+<div class="modal fade" id="loginRequiredModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-lock me-2"></i>Inloggning krävs</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="loginRequiredModalBody">
+                Du behöver vara inloggad för att se denna information.
+            </div>
+            <div class="modal-footer">
+                <a href="/login-register" class="btn btn-primary"><i class="bi bi-box-arrow-in-right me-1"></i> Logga in</a>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 @* Swish Payment Modal *@
 <div class="modal fade" id="swishPaymentModal" tabindex="-1" aria-labelledby="swishPaymentModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
@@ -1842,6 +1859,19 @@ const currentUserName = '@Html.Raw(currentMemberName.Replace("'", "\\'"))';
 const currentUserClub = '@Html.Raw(currentMemberClub.Replace("'", "\\'"))';
 const currentUserIsLoggedIn = @(currentMember != null ? "true" : "false");
 
+window.showLoginRequiredModal = function(whatLabel) {
+    var body = document.getElementById('loginRequiredModalBody');
+    if (body) body.textContent = 'Du behöver vara inloggad för att se ' + whatLabel + '.';
+    var el = document.getElementById('loginRequiredModal');
+    if (el) bootstrap.Modal.getOrCreateInstance(el).show();
+};
+
+window.openRegisteredShootersModal = function() {
+    if (!currentUserIsLoggedIn) { showLoginRequiredModal('anmälda skyttar'); return; }
+    var el = document.getElementById('registeredShootersModal');
+    if (el) bootstrap.Modal.getOrCreateInstance(el).show();
+};
+
 document.addEventListener('DOMContentLoaded', function() {
     const competitionId = @Model.Id;
 
@@ -1938,11 +1968,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
                         modalBody.innerHTML = html;
                     } else {
-                        if (!currentUserIsLoggedIn) {
-                            modalBody.innerHTML = '<p class="text-center text-muted"><i class="bi bi-lock me-1"></i> Du behöver vara inloggad för att se anmälda skyttar.</p>';
-                        } else {
-                            modalBody.innerHTML = '<p class="text-center text-muted">Inga anmälda skyttar än.</p>';
-                        }
+                        modalBody.innerHTML = '<p class="text-center text-muted">Inga anmälda skyttar än.</p>';
                     }
                 })
                 .catch(error => {
