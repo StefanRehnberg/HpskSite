@@ -210,8 +210,8 @@
     var yearFilter = document.getElementById('regionCompetitionsYearFilter');
     if (!yearFilter) return;
     var emptyMsg = document.getElementById('regionCompetitionsEmptyForYear');
-    yearFilter.addEventListener('change', function() {
-        var selected = this.value;
+    function syncRows() {
+        var selected = yearFilter.value;
         var visibleCount = 0;
         document.querySelectorAll('.region-competition-row').forEach(function(row) {
             if (row.dataset.year === selected) {
@@ -222,6 +222,12 @@
             }
         });
         if (emptyMsg) emptyMsg.style.display = visibleCount === 0 ? '' : 'none';
-    });
+    }
+    yearFilter.addEventListener('change', syncRows);
+    // Browsers (Firefox, Chrome) restore the dropdown's last-selected value on
+    // back/forward navigation and full reloads. The rows are still in their
+    // Razor-rendered default-year state — sync them to whatever the select
+    // actually shows so the two stay in agreement on first paint.
+    syncRows();
 })();
 </script>
