@@ -571,19 +571,23 @@
                         statusClass = "warning";
                         buttonClass = "btn-warning";
                     }
-                    else if (compDate.Date == now.Date)
+                    else if (compDate.Date <= now.Date)
                     {
+                        // Single-day starting today, or ongoing multi-day competition
                         status = "active";
                         statusText = "<i class=\"bi bi-play-circle me-1\"></i> Pågående tävling";
                         statusClass = "primary";
                         buttonClass = "btn-primary";
                     }
-                    else if (regCloseDate < now && compDate.Date > now.Date)
+                    else
                     {
-                        status = "active";
-                        statusText = "<i class=\"bi bi-play-circle me-1\"></i> Pågående tävling";
-                        statusClass = "primary";
-                        buttonClass = "btn-primary";
+                        // Competition is in the future but the registration window is no longer (or never was) accepting entries here
+                        status = "upcoming";
+                        statusText = isExternal
+                            ? "<i class=\"bi bi-calendar-event me-1\"></i> Kommande tävling"
+                            : "<i class=\"bi bi-clock-history me-1\"></i> Anmälan stängd";
+                        statusClass = "info";
+                        buttonClass = "btn-info";
                     }
                 }
 
@@ -941,6 +945,7 @@
                         var allShootingClassIds = string.Join(",", competitionShootingClasses.Select(sc => sc.Id));
                         var allWeaponClasses = string.Join(",", competitionShootingClasses.Select(sc => sc.Weapon.ToString()).Distinct());
                         var isActive = competition.Value<bool>("isActive");
+                        var isExternal = competition.Value<bool>("isExternal");
 
                         // Get region - from club if competition has clubId, otherwise from direct regionalFederation
                         var listCompetitionClubId = competition.Value<int>("clubId");
@@ -993,12 +998,23 @@
                                 statusClass = "warning";
                                 buttonClass = "btn-warning";
                             }
-                            else if (compDate.Date == now.Date || (regCloseDate < now && compDate.Date >= now.Date))
+                            else if (compDate.Date <= now.Date)
                             {
+                                // Single-day starting today, or ongoing multi-day competition
                                 status = "active";
                                 statusText = "<i class=\"bi bi-play-circle me-1\"></i> Pågående";
                                 statusClass = "primary";
                                 buttonClass = "btn-primary";
+                            }
+                            else
+                            {
+                                // Competition is in the future but the registration window is no longer (or never was) accepting entries here
+                                status = "upcoming";
+                                statusText = isExternal
+                                    ? "<i class=\"bi bi-calendar-event me-1\"></i> Kommande tävling"
+                                    : "<i class=\"bi bi-clock-history me-1\"></i> Anmälan stängd";
+                                statusClass = "info";
+                                buttonClass = "btn-info";
                             }
                         }
 
