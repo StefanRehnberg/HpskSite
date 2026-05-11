@@ -1210,7 +1210,9 @@
 												html += '<p class="text-muted small mb-1"><i class="bi bi-hourglass-split me-1"><\/i> Resultatlistan \u00e4r prelimin\u00e4r.<\/p>';
 												html += '<button class="btn btn-outline-light w-100" onclick="faltShowResultsModal_@(Model.Id)()"><i class="bi bi-trophy me-1"><\/i> Visa resultat<\/button>';
 											}
-											html += '<button class="btn btn-outline-light w-100 mt-1" onclick="openResultBoard()"><i class="bi bi-tv me-1"><\/i> Resultattavla<\/button>';
+											if (@(showLiveResults ? "true" : "false")) {
+												html += '<button class="btn btn-outline-light w-100 mt-1" onclick="openResultBoard()"><i class="bi bi-tv me-1"><\/i> Visa Live resultat<\/button>';
+											}
 											el.innerHTML = html;
 											// Store results for modal
 											window['faltResultsData_@(Model.Id)'] = data.results;
@@ -1268,7 +1270,7 @@
 								@if (showLiveResults)
 								{
 									<button class="btn btn-outline-light w-100 mt-2" onclick="openResultBoard()">
-										<i class="bi bi-tv me-1"></i> Resultattavla
+										<i class="bi bi-tv me-1"></i> Visa Live resultat
 									</button>
 								}
 							}
@@ -1277,7 +1279,7 @@
 								@if (hasResultPage)
 								{
 									<button class="btn btn-outline-light w-100 mt-2" onclick="openResultBoard()">
-										<i class="bi bi-tv me-1"></i> Resultattavla
+										<i class="bi bi-tv me-1"></i> Visa Live resultat
 									</button>
 								}
 								else
@@ -1858,7 +1860,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (hasResults) {
                 var container = document.getElementById('liveResultsCheck');
                 if (container) {
-                    container.innerHTML = '<button class="btn btn-outline-light w-100 mt-2" onclick="openResultBoard()"><i class="bi bi-tv me-1"></i> Resultattavla</button>';
+                    container.innerHTML = '<button class="btn btn-outline-light w-100 mt-2" onclick="openResultBoard()"><i class="bi bi-tv me-1"></i> Visa Live resultat</button>';
                 }
             }
         })

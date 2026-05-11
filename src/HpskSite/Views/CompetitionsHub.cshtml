@@ -297,6 +297,14 @@
                 var totalCompetitions = seriesCompetitions.Count();
                 var progressPercentage = totalCompetitions > 0 ? (seriesCompletedCount * 100 / totalCompetitions) : 0;
 
+                // Derive series regions from its child competitions (CSV of distinct non-empty regions)
+                var seriesRegions = string.Join(",", seriesCompetitions.Select(c =>
+                {
+                    var ccid = c.Value<int>("clubId");
+                    if (ccid > 0 && clubRegionLookup.TryGetValue(ccid, out var cr)) return cr;
+                    return c.Value<string>("regionalFederation") ?? "";
+                }).Where(r => !string.IsNullOrEmpty(r)).Distinct());
+
                 // Calculate series status based on series dates (not competition dates)
                 var seriesStatus = "inactive";
                 var seriesStatusText = "<i class=\"bi bi-pause-circle me-1\"></i> Inaktiv";
@@ -350,6 +358,7 @@
                      data-name="@seriesName.ToLower()"
                      data-description="@seriesShortDescription?.ToLower()"
                      data-series="@series.Id"
+                     data-region="@seriesRegions"
                      data-date="@(seriesStartDate != DateTime.MinValue ? seriesStartDate.ToString("yyyy-MM-dd") : "")"
                      data-search-text="@((seriesName + " " + seriesShortDescription + " serie").ToLower())">
                     <div class="card h-100 border-@seriesStatusClass series-highlight">
@@ -731,6 +740,14 @@
                         var seriesCompletedCountList = seriesCompetitions.Where(c => c.Value<DateTime>("competitionDate").Date < now.Date).Count();
                         var totalCompetitionsList = seriesCompetitions.Count();
 
+                        // Derive series regions from its child competitions (CSV of distinct non-empty regions)
+                        var seriesRegions = string.Join(",", seriesCompetitions.Select(c =>
+                        {
+                            var ccid = c.Value<int>("clubId");
+                            if (ccid > 0 && clubRegionLookup.TryGetValue(ccid, out var cr)) return cr;
+                            return c.Value<string>("regionalFederation") ?? "";
+                        }).Where(r => !string.IsNullOrEmpty(r)).Distinct());
+
                         // Calculate series status based on series dates (not competition dates)
                         var seriesStatus = "inactive";
                         var seriesStatusText = "<i class=\"bi bi-pause-circle me-1\"></i> Inaktiv";
@@ -767,6 +784,7 @@
                             data-name="@seriesName.ToLower()"
                             data-description="@seriesShortDescription?.ToLower()"
                             data-series="@series.Id"
+                            data-region="@seriesRegions"
                             data-date="@(seriesStartDate != DateTime.MinValue ? seriesStartDate.ToString("yyyy-MM-dd") : "")"
                             data-search-text="@((seriesName + " " + seriesShortDescription + " serie").ToLower())">
 
@@ -1378,11 +1396,12 @@ document.addEventListener('DOMContentLoaded', function() {
             let matchesWeaponClass = !selectedWeaponClass ||
                 cardWeaponClass.split(',').some(wc => wc.trim() === selectedWeaponClass);
 
-            // Region filter - if selectedRegions is empty, show all; otherwise check if card's region is selected
-            // Also show competitions with no region (national competitions) when any region is selected
+            // Region filter - if selectedRegions is empty, show all; otherwise check if any of the card's regions is selected
+            // Also show competitions with no region (national competitions) when any region is selected.
+            // Series cards can carry a CSV of regions (one per child competition), so split before matching.
             let matchesRegion = selectedRegions.size === 0 ||
-                selectedRegions.has(cardRegion) ||
-                cardRegion === '';
+                cardRegion === '' ||
+                cardRegion.split(',').some(r => selectedRegions.has(r));
 
             // Series filtering removed - series are always shown
 
