@@ -829,6 +829,72 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             return Json(new { success = true });
         }
 
+        /// <summary>
+        /// One-shot backfill: creates the missing "Resultat" competitionResult child page
+        /// for any Faltskytte/MagnumFalt competition that has faltskytteResultsOfficial=true
+        /// but was published before the publish-flow fix and therefore lacks the page node.
+        /// Idempotent — safe to run multiple times. Site-admin only.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> BackfillResultPages()
+        {
+            if (!await _adminAuthorizationService.IsCurrentUserAdminAsync())
+                return Json(new { success = false, message = "Endast sajtadmin." });
+
+            var candidates = UmbracoContext.Content.GetAtRoot()
+                .SelectMany(r => r.DescendantsOrSelf())
+                .Where(c => c.ContentType.Alias == "competition")
+                .Where(c =>
+                {
+                    var t = c.Value<string>("competitionType") ?? "";
+                    return t == "Faltskytte" || t == "MagnumFalt";
+                })
+                .Where(c => c.Value<bool>("faltskytteResultsOfficial"))
+                .ToList();
+
+            int created = 0, alreadyHad = 0, failed = 0;
+            var createdNames = new List<string>();
+
+            foreach (var compNode in candidates)
+            {
+                try
+                {
+                    var compContent = _contentService.GetById(compNode.Id);
+                    if (compContent == null) { failed++; continue; }
+
+                    var existing = _contentService.GetPagedChildren(compContent.Id, 0, int.MaxValue, out _)
+                        .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
+                    if (existing != null) { alreadyHad++; continue; }
+
+                    var resultPage = _contentService.Create("Resultat", compContent.Id, "competitionResult");
+                    resultPage.SetValue("resultType", "Final Results");
+                    resultPage.SetValue("isOfficial", true);
+                    resultPage.SetValue("lastUpdated", DateTime.Now);
+                    _contentService.Save(resultPage);
+                    _contentService.Publish(resultPage, new[] { "*" }, -1);
+
+                    created++;
+                    createdNames.Add(compNode.Name);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Backfill failed for competition {CompetitionId}", compNode.Id);
+                    failed++;
+                }
+            }
+
+            return Json(new
+            {
+                success = true,
+                total = candidates.Count,
+                created,
+                alreadyHad,
+                failed,
+                createdNames
+            });
+        }
+
         // ── Target Catalog ───────────────────────────────────────────
 
         /// <summary>Returns all field targets with variants for the target picker.</summary>

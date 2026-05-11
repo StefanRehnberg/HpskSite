@@ -123,6 +123,14 @@
                                     linkUrl = compUrl.TrimEnd('/') + "/resultat/";
                                     linkText = "Resultat";
                                 }
+                                else if ((compTypeId == "Faltskytte" || compTypeId == "MagnumFalt")
+                                         && comp.Value<bool>("faltskytteResultsOfficial"))
+                                {
+                                    // Legacy Fältskytte: results are official on the competition itself
+                                    // but the result page node hasn't been backfilled yet — link to the
+                                    // competition page where the result modal serves the data.
+                                    linkText = "Resultat";
+                                }
                             }
 
                             var rowStyle = (year == defaultYear) ? "" : "display:none;";
