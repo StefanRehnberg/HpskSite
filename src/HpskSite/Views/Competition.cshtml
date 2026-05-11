@@ -1064,7 +1064,13 @@
 
 						<!-- Start List Section -->
 						<div class="mb-2">
-							@if (isFaltskytte)
+							@if (currentMember == null)
+							{
+								<p class="text-muted small mb-0">
+									<i class="bi bi-lock me-1"></i> Du behöver vara inloggad för att se @(isFaltskytte ? "patrullistan" : "startlistan").
+								</p>
+							}
+							else if (isFaltskytte)
 							{
 								<div id="faltPublicPatrols_@Model.Id">
 									<p class="text-muted small mb-0">
@@ -1834,6 +1840,7 @@ window.formatAgeSpan = function(cls) {
 // Current user information for highlighting
 const currentUserName = '@Html.Raw(currentMemberName.Replace("'", "\\'"))';
 const currentUserClub = '@Html.Raw(currentMemberClub.Replace("'", "\\'"))';
+const currentUserIsLoggedIn = @(currentMember != null ? "true" : "false");
 
 document.addEventListener('DOMContentLoaded', function() {
     const competitionId = @Model.Id;
@@ -1931,7 +1938,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
                         modalBody.innerHTML = html;
                     } else {
-                        modalBody.innerHTML = '<p class="text-center text-muted">Inga anmälda skyttar än.</p>';
+                        if (!currentUserIsLoggedIn) {
+                            modalBody.innerHTML = '<p class="text-center text-muted"><i class="bi bi-lock me-1"></i> Du behöver vara inloggad för att se anmälda skyttar.</p>';
+                        } else {
+                            modalBody.innerHTML = '<p class="text-center text-muted">Inga anmälda skyttar än.</p>';
+                        }
                     }
                 })
                 .catch(error => {
