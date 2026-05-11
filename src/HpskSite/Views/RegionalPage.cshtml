@@ -176,6 +176,11 @@
         }
     </div>
 
+    <!-- Competitions Tab (visible to all visitors) -->
+    <div class="tab-pane fade" id="regionCompetitions" role="tabpanel" aria-labelledby="regionCompetitions-tab">
+        @await Html.PartialAsync("RegionCompetitionsList")
+    </div>
+
     @if (isLoggedIn)
     {
         <!-- Records (Hall of Fame) Tab -->
