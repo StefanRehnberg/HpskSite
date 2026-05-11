@@ -810,6 +810,22 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             _contentService.Save(competition);
             _contentService.Publish(competition, new[] { "*" }, -1);
 
+            // Ensure a competitionResult child page exists so the comp gets a /resultat/ URL.
+            // CompetitionResult.cshtml renders Fältskytte by fetching live results from
+            // GetFaltskytteResults — no resultData needs to be serialized here.
+            var resultPage = _contentService.GetPagedChildren(competition.Id, 0, int.MaxValue, out _)
+                .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
+
+            if (resultPage == null)
+            {
+                resultPage = _contentService.Create("Resultat", competition.Id, "competitionResult");
+                resultPage.SetValue("resultType", "Final Results");
+            }
+            resultPage.SetValue("isOfficial", request.IsOfficial);
+            resultPage.SetValue("lastUpdated", DateTime.Now);
+            _contentService.Save(resultPage);
+            _contentService.Publish(resultPage, new[] { "*" }, -1);
+
             return Json(new { success = true });
         }
 
