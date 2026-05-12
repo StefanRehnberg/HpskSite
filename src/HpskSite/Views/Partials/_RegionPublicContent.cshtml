@@ -301,19 +301,15 @@
                 </a>
                 @{
                     var rootPage = Model.Root();
-                    var competitionsPage = rootPage?.Children.FirstOrDefault(x => x.ContentType.Alias == "competitionsHub");
                     var trainingPage = rootPage?.Children.FirstOrDefault(x => x.Url().Contains("skyttetrappan"));
                 }
-                @if (competitionsPage != null)
-                {
-                    <a href="@competitionsPage.Url()" class="list-group-item list-group-item-action d-flex align-items-center">
-                        <i class="bi bi-trophy me-3 text-primary"></i>
-                        <div>
-                            <strong>Tävlingar</strong>
-                            <small class="d-block text-muted">Se kommande tävlingar</small>
-                        </div>
-                    </a>
-                }
+                <a href="#" onclick="document.getElementById('regionCompetitions-tab').click(); return false;" class="list-group-item list-group-item-action d-flex align-items-center">
+                    <i class="bi bi-trophy me-3 text-primary"></i>
+                    <div>
+                        <strong>Tävlingar</strong>
+                        <small class="d-block text-muted">Tävlingar i @regionName</small>
+                    </div>
+                </a>
                 @if (trainingPage != null)
                 {
                     <a href="@trainingPage.Url()" class="list-group-item list-group-item-action d-flex align-items-center">
