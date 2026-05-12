@@ -435,20 +435,13 @@ window.currentClubId = clubId;
                                             <small class="d-block text-muted">Rekord i @clubName</small>
                                         </div>
                                     </a>
-                                    @{
-                                        var rootPage = Model.Root();
-                                        var competitionsPage = rootPage?.Children.FirstOrDefault(x => x.ContentType.Alias == "competitionsHub");
-                                    }
-                                    @if (competitionsPage != null)
-                                    {
-                                        <a href="@competitionsPage.Url()" class="list-group-item list-group-item-action d-flex align-items-center">
-                                            <i class="bi bi-trophy me-3 text-primary"></i>
-                                            <div>
-                                                <strong>Tävlingar</strong>
-                                                <small class="d-block text-muted">Se alla tävlingar</small>
-                                            </div>
-                                        </a>
-                                    }
+                                    <a href="#" onclick="document.getElementById('clubCompetitions-tab').click(); return false;" class="list-group-item list-group-item-action d-flex align-items-center">
+                                        <i class="bi bi-trophy me-3 text-primary"></i>
+                                        <div>
+                                            <strong>Tävlingar</strong>
+                                            <small class="d-block text-muted">Tävlingar arrangerade av @clubName</small>
+                                        </div>
+                                    </a>
                                     <div id="clubQuickLinkDocuments"></div>
                                 </div>
                             </div>

@@ -4,7 +4,7 @@
     ViewBag.Title = "Videoguider";
 }
 
-@await Html.PartialAsync("TutorialModal")
+@* TutorialModal + tutorialHelper.js are loaded site-wide in Master.cshtml *@
 
 <div class="container-fluid" style="max-width: 1000px;">
     <!-- Header -->
@@ -116,7 +116,6 @@
     }
 </style>
 
-<script src="/js/tutorialHelper.js"></script>
 <script>
 (function() {
     var allTutorials = [];

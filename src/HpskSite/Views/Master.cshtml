@@ -662,6 +662,10 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
 
+    @* Tutorial modal + helper — site-wide so "Guide" buttons in any page work *@
+    @await Html.PartialAsync("TutorialModal")
+    <script src="/js/tutorialHelper.js"></script>
+
     @* Hidden logout form for proper Umbraco form handling *@
     @if (isLoggedIn)
     {
