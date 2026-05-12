@@ -368,11 +368,18 @@
                         let seriesCountForRow = 0;
                         let showFinals = false;
 
+                        // Use the MAX series count across all shooters in this class so that
+                        // shooters with missing series rows still align with the header
+                        // (missing cells render as 0 in the body below).
+                        const maxSeriesCount = classGroup.shooters.length > 0
+                            ? Math.max(0, ...classGroup.shooters.map(s => (s.results || []).length))
+                            : 0;
+
                         if (isGrouped12) {
                             seriesColCount = 12;
                             totalColCount = 3; // 3 group subtotals (10s/8s/6s or Prec/Duell/Fält)
                         } else if (classGroup.shooters.length > 0 && classGroup.shooters[0].results) {
-                            seriesCountForRow = classGroup.shooters[0].results.length;
+                            seriesCountForRow = maxSeriesCount;
                             if (hasFinalsRound && seriesCountForRow >= totalSeriesCount) {
                                 seriesColCount = qualificationSeriesCount + numberOfFinalSeries;
                                 totalColCount = 1; // mid Tot between qualification and finals
@@ -440,7 +447,7 @@
                                 html += `<th class="subtotal-col" style="width:${totalPct}%">${groupHeaders[g]}</th>`;
                             }
                         } else if (classGroup.shooters.length > 0 && classGroup.shooters[0].results) {
-                            const seriesCount = classGroup.shooters[0].results.length;
+                            const seriesCount = maxSeriesCount;
 
                             if (hasFinalsRound && seriesCount >= totalSeriesCount) {
                                 for (let i = 1; i <= qualificationSeriesCount; i++) {
@@ -529,17 +536,20 @@
                                 });
                             } else if (hasFinalsRound && seriesScores.length >= totalSeriesCount) {
                                 for (let i = 0; i < qualificationSeriesCount; i++) {
-                                    html += `<td class="text-center">${i < seriesScores.length ? seriesScores[i].score : '-'}</td>`;
+                                    html += `<td class="text-center">${i < seriesScores.length ? seriesScores[i].score : 0}</td>`;
                                 }
                                 qualificationScore = seriesScores.slice(0, qualificationSeriesCount).reduce((sum, s) => sum + s.score, 0);
                                 html += `<td class="text-center"><strong>${qualificationScore}</strong></td>`;
                                 for (let i = qualificationSeriesCount; i < totalSeriesCount; i++) {
-                                    html += `<td class="text-center">${i < seriesScores.length ? seriesScores[i].score : '-'}</td>`;
+                                    html += `<td class="text-center">${i < seriesScores.length ? seriesScores[i].score : 0}</td>`;
                                 }
                             } else {
-                                seriesScores.forEach(s => {
-                                    html += `<td class="text-center">${s.score}</td>`;
-                                });
+                                // Iterate up to seriesColCount (max across shooters) so cells line up
+                                // with the header. Shooters who are missing a series get 0 in that slot.
+                                for (let i = 0; i < seriesColCount; i++) {
+                                    const s = i < seriesScores.length ? seriesScores[i].score : 0;
+                                    html += `<td class="text-center">${s}</td>`;
+                                }
                             }
 
                             html += `
