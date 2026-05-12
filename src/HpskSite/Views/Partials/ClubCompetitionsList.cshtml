@@ -60,14 +60,14 @@
         else
         {
             <div class="table-responsive">
-                <table class="table table-hover align-middle">
+                <table class="table table-hover align-middle club-competitions-table">
                     <thead>
                         <tr>
                             <th style="width:44px"></th>
-                            <th>Tävling</th>
-                            <th>Typ</th>
-                            <th>Datum</th>
-                            <th>Status</th>
+                            <th class="sortable" data-sort-key="name" role="button">Tävling <i class="sort-indicator bi bi-caret-down opacity-25"></i></th>
+                            <th class="sortable" data-sort-key="type" role="button">Typ <i class="sort-indicator bi bi-caret-down opacity-25"></i></th>
+                            <th class="sortable" data-sort-key="date" role="button">Datum <i class="sort-indicator bi bi-caret-down-fill"></i></th>
+                            <th class="sortable" data-sort-key="status" role="button">Status <i class="sort-indicator bi bi-caret-down opacity-25"></i></th>
                             <th class="text-end"></th>
                         </tr>
                     </thead>
@@ -93,20 +93,24 @@
 
                             string statusLabel;
                             string statusClass;
+                            int statusOrder; // Sort order: ongoing → upcoming → past
                             if (isPast)
                             {
                                 statusLabel = "Avslutad";
                                 statusClass = "secondary";
+                                statusOrder = 2;
                             }
                             else if (isOngoing)
                             {
                                 statusLabel = "Pågående";
                                 statusClass = "primary";
+                                statusOrder = 0;
                             }
                             else
                             {
                                 statusLabel = "Kommande";
                                 statusClass = "info";
+                                statusOrder = 1;
                             }
 
                             // Past + internal + official result page → link to /resultat/
@@ -135,7 +139,13 @@
                             }
 
                             var rowStyle = (year == defaultYear) ? "" : "display:none;";
-                            <tr class="club-competition-row" data-year="@year" style="@rowStyle">
+                            <tr class="club-competition-row"
+                                data-year="@year"
+                                data-sort-name="@comp.Name.ToLowerInvariant()"
+                                data-sort-type="@compTypeName.ToLowerInvariant()"
+                                data-sort-date="@compDate.ToString("yyyy-MM-dd")"
+                                data-sort-status="@statusOrder"
+                                style="@rowStyle">
                                 <td>
                                     @if (!string.IsNullOrEmpty(iconId))
                                     {
@@ -175,8 +185,69 @@
     </div>
 </div>
 
+<style>
+    .club-competitions-table th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+    .club-competitions-table th.sortable:hover { background-color: rgba(0,0,0,0.04); }
+    .club-competitions-table th.sortable .sort-indicator { font-size: .75rem; margin-left: .15rem; }
+</style>
+
 <script>
 (function() {
+    // Sortable column headers
+    var tableBody = document.getElementById('clubCompetitionsTableBody');
+    if (tableBody) {
+        var thead = tableBody.parentElement.querySelector('thead');
+        var headers = thead ? Array.from(thead.querySelectorAll('th.sortable')) : [];
+        var currentKey = 'date';
+        var currentDir = 'desc';
+
+        function sortRows() {
+            var rows = Array.from(tableBody.querySelectorAll('tr.club-competition-row'));
+            rows.sort(function(a, b) {
+                var av = a.getAttribute('data-sort-' + currentKey) || '';
+                var bv = b.getAttribute('data-sort-' + currentKey) || '';
+                var cmp;
+                // Pure-integer sort for status order; everything else string-compares (yyyy-MM-dd works too).
+                if (/^-?\d+$/.test(av) && /^-?\d+$/.test(bv)) {
+                    cmp = parseInt(av, 10) - parseInt(bv, 10);
+                } else {
+                    cmp = av.localeCompare(bv, 'sv');
+                }
+                return currentDir === 'asc' ? cmp : -cmp;
+            });
+            rows.forEach(function(r) { tableBody.appendChild(r); });
+            updateIndicators();
+        }
+
+        function updateIndicators() {
+            headers.forEach(function(h) {
+                var icon = h.querySelector('.sort-indicator');
+                if (!icon) return;
+                if (h.dataset.sortKey === currentKey) {
+                    icon.className = 'sort-indicator bi ' + (currentDir === 'asc' ? 'bi-caret-up-fill' : 'bi-caret-down-fill');
+                } else {
+                    icon.className = 'sort-indicator bi bi-caret-down opacity-25';
+                }
+            });
+        }
+
+        headers.forEach(function(h) {
+            h.addEventListener('click', function() {
+                var key = h.dataset.sortKey;
+                if (!key) return;
+                if (key === currentKey) {
+                    currentDir = currentDir === 'asc' ? 'desc' : 'asc';
+                } else {
+                    currentKey = key;
+                    currentDir = (key === 'date') ? 'desc' : 'asc';
+                }
+                sortRows();
+            });
+        });
+
+        updateIndicators();
+    }
+
     var yearFilter = document.getElementById('clubCompetitionsYearFilter');
     if (!yearFilter) return;
     var emptyMsg = document.getElementById('clubCompetitionsEmptyForYear');
