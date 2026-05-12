@@ -1204,6 +1204,66 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// Send welcome email when someone is added to a training group as a trainer.
+        /// Sibling of SendTrainingGroupMemberAddedAsync — same look + feel, trainer-flavoured copy.
+        /// otherTrainerNames should already exclude the recipient.
+        /// </summary>
+        public async Task SendTrainingGroupTrainerAddedAsync(
+            string memberEmail,
+            string memberName,
+            string groupName,
+            string otherTrainerNames,
+            string startDate,
+            string clubName)
+        {
+            var subject = $"Du är nu tränare för träningsgruppen {groupName}";
+            var siteUrl = _configuration["SiteUrl"] ?? "https://pistol.nu";
+            var trainingUrl = $"{siteUrl}/skyttetrappan/";
+
+            var body = $@"
+<html>
+<head>
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+        .button {{
+            display: inline-block;
+            background-color: #0d6efd;
+            color: white !important;
+            padding: 12px 24px;
+            text-decoration: none;
+            border-radius: 5px;
+            font-weight: bold;
+        }}
+    </style>
+</head>
+<body>
+    <h2>Hej {memberName}!</h2>
+    <p>Du har lagts till som <strong>tr&auml;nare</strong> f&ouml;r tr&auml;ningsgruppen <strong>{groupName}</strong> p&aring; Skyttetrappan.</p>
+
+    <div style='background-color: #e7f1ff; border-left: 4px solid #0d6efd; padding: 15px; margin: 20px 0;'>
+        <p style='margin: 0;'><strong>Gruppinformation:</strong></p>
+        <ul style='margin: 10px 0 0 0;'>
+            <li><strong>Grupp:</strong> {groupName}</li>
+            <li><strong>Klubb:</strong> {clubName}</li>
+            <li><strong>Startdatum:</strong> {startDate}</li>
+            {(string.IsNullOrEmpty(otherTrainerNames) ? "" : $"<li><strong>&Ouml;vriga tr&auml;nare:</strong> {otherTrainerNames}</li>")}
+        </ul>
+    </div>
+
+    <p>Som tr&auml;nare kan du nu f&ouml;lja medlemmarnas framsteg, godk&auml;nna avklarade steg och skicka gruppmeddelanden fr&aring;n gruppens sida.</p>
+
+    <p style='text-align: center; margin: 30px 0;'>
+        <a href=""{trainingUrl}"" class=""button"">&Ouml;ppna Skyttetrappan</a>
+    </p>
+
+    <p>Med v&auml;nliga h&auml;lsningar,<br/>Pistol.nu</p>
+</body>
+</html>";
+
+            await SendEmailAsync(memberEmail, subject, body);
+        }
+
+        /// <summary>
         /// Send notification email when a training step is approved
         /// </summary>
         public async Task SendTrainingStepApprovedAsync(

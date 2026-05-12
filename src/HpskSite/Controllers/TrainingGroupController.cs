@@ -262,15 +262,30 @@ namespace HpskSite.Controllers
                         if (!string.IsNullOrEmpty(memberEmail))
                         {
                             var group = _trainingGroupService.GetTrainingGroup(trainingGroupId);
-                            var trainerNames = string.Join(", ", group?.Members
-                                .Where(m => m.Role == "Trainer")
-                                .Select(m => m.MemberName) ?? Enumerable.Empty<string>());
                             var clubName = group?.ClubName ?? "";
                             var startDate = group?.StartDate.ToString("yyyy-MM-dd") ?? "";
 
-                            _ = _emailService.SendTrainingGroupMemberAddedAsync(
-                                memberEmail, member.Name ?? "", group?.Name ?? "",
-                                trainerNames, startDate, clubName);
+                            if (role == "Trainer")
+                            {
+                                // Trainer welcome — list OTHER trainers in the group (exclude the recipient).
+                                var otherTrainerNames = string.Join(", ", group?.Members
+                                    .Where(m => m.Role == "Trainer" && m.MemberId != memberId)
+                                    .Select(m => m.MemberName) ?? Enumerable.Empty<string>());
+
+                                _ = _emailService.SendTrainingGroupTrainerAddedAsync(
+                                    memberEmail, member.Name ?? "", group?.Name ?? "",
+                                    otherTrainerNames, startDate, clubName);
+                            }
+                            else
+                            {
+                                var trainerNames = string.Join(", ", group?.Members
+                                    .Where(m => m.Role == "Trainer")
+                                    .Select(m => m.MemberName) ?? Enumerable.Empty<string>());
+
+                                _ = _emailService.SendTrainingGroupMemberAddedAsync(
+                                    memberEmail, member.Name ?? "", group?.Name ?? "",
+                                    trainerNames, startDate, clubName);
+                            }
                         }
                     }
                     catch (Exception emailEx)
