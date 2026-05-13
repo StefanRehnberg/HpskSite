@@ -609,7 +609,7 @@ namespace HpskSite.Controllers
                     overallAverage = 0.0,
                     recentAverage = 0.0,
                     recentAverageByClass = new List<object>(),
-                    personalBests = new[] { "A", "B", "C", "R", "L" }.Select(wc => new
+                    personalBests = new[] { "A", "B", "C", "R", "M", "L" }.Select(wc => new
                     {
                         weaponClass = wc,
                         bestAverage = (double?)null
@@ -642,7 +642,7 @@ namespace HpskSite.Controllers
                 .GroupBy(r => r.WeaponClass)
                 .ToDictionary(g => g.Key, g => Math.Round(g.Max(r => r.AverageScore), 1));
 
-            var weaponClasses = new[] { "A", "B", "C", "R", "L" };
+            var weaponClasses = new[] { "A", "B", "C", "R", "M", "L" };
             var personalBests = weaponClasses.Select(wc => new
             {
                 weaponClass = wc,
