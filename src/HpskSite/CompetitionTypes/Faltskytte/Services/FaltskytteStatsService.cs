@@ -10,7 +10,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
 {
     /// <summary>
     /// Aggregates a member's Fältskytte results across all comps for use on
-    /// /user-profile (dashboard cards + Resultat-tab table).
+    /// /user-profile-page (dashboard cards + Resultat-tab table).
     ///
     /// Two row sources:
     ///   - Hosted   — rows in FaltskytteResultEntry for comps run on pistol.nu
@@ -280,7 +280,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         }
     }
 
-    /// <summary>One Fältskytte comp entry as the user sees it on /user-profile.</summary>
+    /// <summary>One Fältskytte comp entry as the user sees it on /user-profile-page.</summary>
     public class FaltskytteSeasonEntry
     {
         public string Source { get; set; } = "";        // "Hosted" | "External"

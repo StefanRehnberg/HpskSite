@@ -585,7 +585,7 @@
                                 </a>
                                 <ul class="dropdown-menu dropdown-menu-end">
                                     @{
-                                        var userProfileUrl = Model.Root().Children.FirstOrDefault(x => x.ContentType.Alias == "userProfile")?.Url() ?? "/user-profile";
+                                        var userProfileUrl = Model.Root().Children.FirstOrDefault(x => x.ContentType.Alias == "userProfile")?.Url() ?? "/user-profile-page/";
                                     }
                                     <li><a class="dropdown-item" href="@userProfileUrl"><i class="bi bi-person"></i> Min Sida</a></li>
                                     @if (memberClubs.Count > 0)

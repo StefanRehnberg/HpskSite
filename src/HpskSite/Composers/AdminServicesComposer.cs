@@ -56,7 +56,7 @@ namespace HpskSite.Composers
             // many clubs don't run results through pistol.nu)
             builder.Services.AddScoped<CompetitionChampionsService>();
 
-            // Fältskytte member-stats aggregator (powers /user-profile dashboard + Resultat tab)
+            // Fältskytte member-stats aggregator (powers /user-profile-page dashboard + Resultat tab)
             builder.Services.AddScoped<FaltskytteStatsService>();
 
             // Register BrevoEmailService and named HttpClient

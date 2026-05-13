@@ -743,7 +743,7 @@ POST /umbraco/surface/RegistrationAdmin/AddLateRegistration
 - **/clubs** - Club directory for club admins
 - **/skyttetrappan** - Training system interface
 - **/login-register** - Login and registration page
-- **/user-profile** - User profile with dashboard, training results
+- **/user-profile-page** - User profile with dashboard, training results
 
 ### Date & Time Pickers ✅ (Standardized 2025-11-21)
 
