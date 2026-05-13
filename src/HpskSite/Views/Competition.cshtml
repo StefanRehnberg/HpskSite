@@ -1190,7 +1190,7 @@
 						<div class="mt-2">
 							@if (hasResultPage && isResultsOfficial)
 							{
-								<a href="@resultsUrl" class="btn btn-warning w-100" target="_blank">
+								<a href="@resultsUrl" class="btn btn-warning w-100" target="_blank" onclick="if (!currentUserIsLoggedIn) { event.preventDefault(); showLoginRequiredModal('resultatlistan'); }">
 									<i class="bi bi-trophy me-1"></i> Visa resultat
 								</a>
 
