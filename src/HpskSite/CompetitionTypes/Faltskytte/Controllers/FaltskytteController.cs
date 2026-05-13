@@ -128,25 +128,68 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         }
 
         /// <summary>
-        /// True when the current user can WRITE a result for the given patrol
-        /// at the given station. Staff bypass — always true. Otherwise requires
-        /// self-service flag on, the user is in this patrol, and the patrol's
-        /// CurrentStation matches stationNumber (older stations are locked).
+        /// Authorises a self-service WRITE: staff bypass, otherwise requires
+        /// the self-service flag on, the user logged in and in the patrol.
+        ///
+        /// Cursor logic:
+        ///   - If <see cref="FaltskyttePatrol.CurrentStation"/> is NULL or equals
+        ///     the station being saved, the save is allowed and the cursor is
+        ///     advanced as part of this call. This makes the save self-contained
+        ///     and removes the brittle dependency on the page's AdvancePatrolCursor
+        ///     POST having succeeded.
+        ///   - If the cursor is set to a DIFFERENT station, the patrol has moved
+        ///     on; the older station is locked for shooters and a clear error
+        ///     message is returned. Staff (handled by the bypass above) can still
+        ///     edit any station regardless of the cursor.
         /// </summary>
-        private async Task<bool> IsAuthorizedForSelfServiceWriteAsync(
+        private async Task<(bool Ok, string? Error)> AuthorizeSelfServiceWriteAsync(
             int competitionId, int patrolNumber, int stationNumber)
         {
-            if (await IsAuthorizedForCompetition(competitionId)) return true;
-            if (!IsSelfServiceEnabledFor(competitionId)) return false;
+            if (await IsAuthorizedForCompetition(competitionId)) return (true, null);
+
+            if (!IsSelfServiceEnabledFor(competitionId))
+            {
+                _logger.LogWarning("Fältskytte self-service write rejected: self-service is not enabled for competition {CompId}", competitionId);
+                return (false, "Självservice är inte aktiverat för denna tävling.");
+            }
+
             var memberId = await GetCurrentMemberIdAsync();
-            if (memberId == 0) return false;
+            if (memberId == 0)
+            {
+                _logger.LogWarning("Fältskytte self-service write rejected: caller is not logged in (competition {CompId})", competitionId);
+                return (false, "Du måste vara inloggad.");
+            }
+
             using var db = _umbracoDatabaseFactory.CreateDatabase();
             var patrol = await FaltskytteSelfServiceQueries
                 .GetPatrolAsync(db, competitionId, patrolNumber);
-            if (patrol == null) return false;
-            if (patrol.CurrentStation != stationNumber) return false;
-            return await FaltskytteSelfServiceQueries
+            if (patrol == null)
+            {
+                _logger.LogWarning("Fältskytte self-service write rejected: patrol {PatrolNumber} not found in competition {CompId}", patrolNumber, competitionId);
+                return (false, "Patrullen hittades inte.");
+            }
+
+            var inPatrol = await FaltskytteSelfServiceQueries
                 .IsMemberInPatrolAsync(db, patrol.Id, memberId);
+            if (!inPatrol)
+            {
+                _logger.LogWarning("Fältskytte self-service write rejected: member {MemberId} is not in patrol {PatrolId} (competition {CompId})", memberId, patrol.Id, competitionId);
+                return (false, "Du är inte med i denna patrull.");
+            }
+
+            // Cursor is on a DIFFERENT station → patrol has moved on, this station is locked.
+            if (patrol.CurrentStation.HasValue && patrol.CurrentStation.Value != stationNumber)
+            {
+                _logger.LogInformation("Fältskytte self-service write rejected: patrol {PatrolId} cursor is at station {Cursor}, write requested for station {Requested}", patrol.Id, patrol.CurrentStation.Value, stationNumber);
+                return (false,
+                    $"Den här stationen är låst eftersom patrullen har gått vidare till station {patrol.CurrentStation.Value}. " +
+                    $"Be en funktionär att hjälpa till om resultatet på station {stationNumber} behöver rättas.");
+            }
+
+            // Cursor is NULL (first save for this patrol) or already matches — advance it.
+            // The UPDATE is a no-op when CurrentStation already equals stationNumber.
+            await FaltskytteSelfServiceQueries.AdvanceCursorAsync(db, patrol.Id, stationNumber);
+            return (true, null);
         }
 
         // ── Station Config ──────────────────────────────────────────
@@ -469,12 +512,16 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             try
             {
                 // Staff bypass via the standard four-tier check; otherwise allow self-service
-                // writes when (a) the competition has self-service on, (b) the writer is in the
-                // patrol whose results they're saving, and (c) the patrol's CurrentStation
-                // cursor matches the station they're writing to (older stations are locked).
-                if (!await IsAuthorizedForSelfServiceWriteAsync(
-                        request.CompetitionId, request.PatrolNumber, request.StationNumber))
-                    return Json(new FaltskylteSaveResultResponse { Success = false, Message = "Du har inte behörighet." });
+                // writes when the competition has self-service on, the writer is logged in and
+                // in the patrol, and the patrol's cursor is either NULL (first save for this
+                // patrol) or already on this station. The cursor is auto-advanced inside the
+                // auth check, so the save is self-contained — no separate AdvancePatrolCursor
+                // round-trip is required. A patrol that's moved on to a later station returns
+                // a specific "låst"-message so the shooter knows why.
+                var (ok, authError) = await AuthorizeSelfServiceWriteAsync(
+                    request.CompetitionId, request.PatrolNumber, request.StationNumber);
+                if (!ok)
+                    return Json(new FaltskylteSaveResultResponse { Success = false, Message = authError ?? "Du har inte behörighet." });
 
                 var currentMember = await _memberManager.GetCurrentMemberAsync();
                 if (currentMember == null)
