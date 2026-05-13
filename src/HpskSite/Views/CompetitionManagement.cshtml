@@ -549,7 +549,43 @@
                     // iframe would 404 ("Page not Found"). The partial falls back to a friendly inline message
                     // ("inga publicerade resultat ännu") when this is empty.
                     var resultChild = competition?.Children()?.FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
-                    resultsViewData["ResultPageUrl"] = resultChild != null ? (resultChild.Url().TrimEnd('/') + "/") : "";
+
+                    // Safety net: for Fältskytte/MagnumFält comps the Resultat page should always exist
+                    // (created eagerly when the comp is created or copied). If it's missing — legacy comp
+                    // that pre-dates the eager creation, or some other edge case — quietly create it here
+                    // on first view so the admin Resultat tab always works. Default state is Preliminär
+                    // (isOfficial=false), so the public "Visa resultat"-button stays hidden until the
+                    // admin explicitly clicks Officiell.
+                    var compTypeForResultPage = competition?.Value<string>("competitionType");
+                    if (resultChild == null && (compTypeForResultPage == "Faltskytte" || compTypeForResultPage == "MagnumFalt") && competition != null)
+                    {
+                        try
+                        {
+                            var compContent = ContentService.GetById(competition.Id);
+                            if (compContent != null)
+                            {
+                                var existing = ContentService.GetPagedChildren(compContent.Id, 0, int.MaxValue, out _)
+                                    .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
+                                if (existing == null)
+                                {
+                                    var newResultPage = ContentService.Create("Resultat", compContent.Id, "competitionResult");
+                                    newResultPage.SetValue("resultType", "Final Results");
+                                    newResultPage.SetValue("isOfficial", false);
+                                    newResultPage.SetValue("lastUpdated", DateTime.Now);
+                                    ContentService.Save(newResultPage);
+                                    ContentService.Publish(newResultPage, new[] { "*" }, -1);
+                                }
+                            }
+                        }
+                        catch { /* best effort — the partial will show the friendly empty-state if creation fails */ }
+                        // URL is deterministic from the competition's URL + the "/resultat/" slug, even before
+                        // the published cache picks up the just-created child.
+                        resultsViewData["ResultPageUrl"] = competition.Url().TrimEnd('/') + "/resultat/";
+                    }
+                    else
+                    {
+                        resultsViewData["ResultPageUrl"] = resultChild != null ? (resultChild.Url().TrimEnd('/') + "/") : "";
+                    }
                     // NumberOfSeriesOrStations is already in ViewData from line 39
                 }
                 @if ((ViewData["CompetitionType"]?.ToString() ?? "Precision") == "Springskytte")

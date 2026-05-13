@@ -1082,6 +1082,14 @@ namespace HpskSite.Controllers
                     });
                 }
 
+                // Fältskytte/MagnumFält: eagerly create the "Resultat" child page so the
+                // admin Resultat tab can embed /competitions/.../resultat/ immediately —
+                // no need to click Officiell/Preliminär first just to see live results.
+                // Public "Visa resultat"-button stays hidden until isOfficial=true.
+                // (CompetitionManagement.cshtml has a fallback that creates this lazily on
+                // first tab open for legacy comps that pre-date this change.)
+                EnsureFaltskytteResultPage(newCompetition, competitionTypeId);
+
                 // Invalidate caches
                 InvalidateCompetitionCaches();
 
@@ -1787,6 +1795,9 @@ namespace HpskSite.Controllers
                     });
                 }
 
+                // Eager Resultat page for Fältskytte/MagnumFält copies — no-op for other types.
+                EnsureFaltskytteResultPage(newCompetition, newCompetition.GetValue<string>("competitionType"));
+
                 // Invalidate caches
                 InvalidateCompetitionCaches();
 
@@ -2190,6 +2201,36 @@ namespace HpskSite.Controllers
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// Ensures the "Resultat" child page exists for a Fältskytte/MagnumFält
+        /// competition. No-op for other competition types and for comps that already
+        /// have the child. Safe to call from any create or copy path. Failures are
+        /// logged and swallowed — CompetitionManagement.cshtml has a lazy fallback
+        /// that retries on first view.
+        /// </summary>
+        private void EnsureFaltskytteResultPage(Umbraco.Cms.Core.Models.IContent competition, string? competitionType)
+        {
+            if (competition == null) return;
+            if (competitionType != "Faltskytte" && competitionType != "MagnumFalt") return;
+            try
+            {
+                var existing = _contentService.GetPagedChildren(competition.Id, 0, int.MaxValue, out _)
+                    .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
+                if (existing != null) return;
+
+                var resultPage = _contentService.Create("Resultat", competition.Id, "competitionResult");
+                resultPage.SetValue("resultType", "Final Results");
+                resultPage.SetValue("isOfficial", false);
+                resultPage.SetValue("lastUpdated", DateTime.Now);
+                _contentService.Save(resultPage);
+                _contentService.Publish(resultPage, new[] { "*" }, -1);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Could not create Resultat page for competition {competition.Id} (type {competitionType}): {ex.Message}");
+            }
         }
 
         /// <summary>
@@ -2919,6 +2960,8 @@ namespace HpskSite.Controllers
                                 if (publishCompResult.Success)
                                 {
                                     copiedCompetitionCount++;
+                                    // Eager Resultat page for Fältskytte/MagnumFält — no-op otherwise.
+                                    EnsureFaltskytteResultPage(newComp, newComp.GetValue<string>("competitionType"));
                                 }
                             }
                         }
