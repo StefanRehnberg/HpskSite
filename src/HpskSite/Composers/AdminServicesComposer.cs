@@ -2,6 +2,7 @@ using Umbraco.Cms.Core.Composing;
 using Umbraco.Cms.Core.DependencyInjection;
 using HpskSite.Services;
 using HpskSite.Models.Configuration;
+using HpskSite.CompetitionTypes.Faltskytte.Services;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace HpskSite.Composers
@@ -54,6 +55,9 @@ namespace HpskSite.Composers
             // Manual klubb-/kretsmästare entries (auto-compute approach abandoned —
             // many clubs don't run results through pistol.nu)
             builder.Services.AddScoped<CompetitionChampionsService>();
+
+            // Fältskytte member-stats aggregator (powers /user-profile dashboard + Resultat tab)
+            builder.Services.AddScoped<FaltskytteStatsService>();
 
             // Register BrevoEmailService and named HttpClient
             builder.Services.AddHttpClient("Brevo");

@@ -1,0 +1,302 @@
+@*
+    Fältskytte Score Entry Modal — self-entered external comps.
+    Separate from TrainingScoreEntry.cshtml because the data shape is different
+    (no series, no shot-by-shot; just träff/figurer aggregates + placement + medal).
+*@
+
+<div class="modal fade" id="addFaltskytteScoreModal" tabindex="-1" aria-labelledby="addFaltskytteScoreModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-fullscreen-sm-down">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="addFaltskytteScoreModalLabel">
+                    <i class="bi bi-plus-circle"></i> Lägg in Fältskytte-resultat
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <form id="faltskytteScoreForm">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" id="faltEntryId" value="">
+
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-6">
+                            <label for="faltDate" class="form-label">Datum <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="faltDate" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="faltCompetitionName" class="form-label">Tävling / plats <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="faltCompetitionName" placeholder="t.ex. Värmlandsfältet" required>
+                        </div>
+
+                        <div class="col-md-4">
+                            <label for="faltShootingClass" class="form-label">Skytteklass <span class="text-danger">*</span></label>
+                            <select class="form-select" id="faltShootingClass" required>
+                                <option value="">Välj klass...</option>
+                                <optgroup label="C — Kal. 22">
+                                    <option value="C1">C1</option>
+                                    <option value="C2">C2</option>
+                                    <option value="C3">C3</option>
+                                    <option value="C_Vet_Y">C Vet Y</option>
+                                    <option value="C_Vet_A">C Vet Ä</option>
+                                    <option value="C_Jun">C Jun</option>
+                                    <option value="C1_Dam">C1 Dam</option>
+                                    <option value="C2_Dam">C2 Dam</option>
+                                    <option value="C3_Dam">C3 Dam</option>
+                                </optgroup>
+                                <optgroup label="A — Tjänstevapen">
+                                    <option value="A1">A1</option>
+                                    <option value="A2">A2</option>
+                                    <option value="A3">A3</option>
+                                </optgroup>
+                                <optgroup label="A Opt — Optisk">
+                                    <option value="A_opt_1">A Opt 1</option>
+                                    <option value="A_opt_2">A Opt 2</option>
+                                    <option value="A_opt_3">A Opt 3</option>
+                                </optgroup>
+                                <optgroup label="B — Kal. 32-45">
+                                    <option value="B1">B1</option>
+                                    <option value="B2">B2</option>
+                                    <option value="B3">B3</option>
+                                </optgroup>
+                                <optgroup label="R — Revolver">
+                                    <option value="R1">R1</option>
+                                    <option value="R2">R2</option>
+                                    <option value="R3">R3</option>
+                                </optgroup>
+                                <optgroup label="M — Magnum">
+                                    <option value="M1">M1</option>
+                                    <option value="M2">M2</option>
+                                    <option value="M3">M3</option>
+                                    <option value="M4">M4</option>
+                                    <option value="M5">M5</option>
+                                    <option value="M6">M6</option>
+                                    <option value="M7">M7</option>
+                                    <option value="M8">M8</option>
+                                    <option value="M9">M9</option>
+                                </optgroup>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="faltMode" class="form-label">Typ <span class="text-danger">*</span></label>
+                            <select class="form-select" id="faltMode" required>
+                                <option value="Normalfalt" selected>Normalfält</option>
+                                <option value="Poangfalt">Poängfält</option>
+                            </select>
+                            <div class="form-text">Styr bara visningen: <code>32/22</code> vs <code>54 p</code>.</div>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="faltStationCount" class="form-label">Antal stationer <span class="text-danger">*</span></label>
+                            <input type="number" class="form-control" id="faltStationCount" min="1" max="16" value="8" required>
+                            <div class="form-text">Max träff = <span id="faltMaxHitsHint">48</span> (stationer × 6).</div>
+                        </div>
+
+                        <div class="col-md-6">
+                            <label for="faltHits" class="form-label">Antal träff <span class="text-danger">*</span></label>
+                            <div class="input-group">
+                                <input type="number" class="form-control" id="faltHits" min="0" required>
+                                <span class="input-group-text" id="faltMaxHitsSuffix">av 48</span>
+                            </div>
+                            <div class="form-text">Första värdet i resultatnotationen (<code>32/22</code>).</div>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Träffade figurer <span class="text-danger">*</span></label>
+                            <div class="input-group">
+                                <input type="number" class="form-control" id="faltFigures" min="0" required>
+                                <span class="input-group-text">av</span>
+                                <input type="number" class="form-control" id="faltFiguresMax" min="1" placeholder="t.ex. 32" required>
+                            </div>
+                            <div class="form-text">Andra värdet i resultatnotationen.</div>
+                        </div>
+
+                        <div class="col-md-6">
+                            <label class="form-label">Placering <span class="text-muted">(valfritt)</span></label>
+                            <div class="input-group">
+                                <input type="number" class="form-control" id="faltPlacement" min="1">
+                                <span class="input-group-text">av</span>
+                                <input type="number" class="form-control" id="faltParticipants" min="1">
+                            </div>
+                            <div class="form-text">Inom din klass. Används för placeringskortet och topp-%.</div>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="faltMedal" class="form-label">Standardmedalj</label>
+                            <select class="form-select" id="faltMedal">
+                                <option value="" selected>Ingen</option>
+                                <option value="S">Silver</option>
+                                <option value="B">Brons</option>
+                            </select>
+                        </div>
+
+                        <div class="col-12">
+                            <label for="faltNotes" class="form-label">Anteckningar</label>
+                            <input type="text" class="form-control" id="faltNotes" placeholder="t.ex. byig vind, ny ammunition">
+                        </div>
+                    </div>
+
+                    <div id="faltPreview" class="alert alert-secondary py-2 small mb-0 d-none">
+                        <strong>Förhandsvisning:</strong>
+                        <span id="faltPreviewHeadline" class="ms-1"></span>
+                        &nbsp;·&nbsp; <span id="faltPreviewHitPct"></span>
+                        &nbsp;·&nbsp; <span id="faltPreviewFigurePct"></span>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="faltSaveBtn" onclick="saveFaltskytteScore()">
+                    <i class="bi bi-save"></i> Spara
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    (function () {
+        // Run when the partial parses — Flatpickr is already loaded by TrainingScoreEntry.cshtml.
+        function initFalt() {
+            if (typeof flatpickr === 'undefined') { return setTimeout(initFalt, 100); }
+            flatpickr('#faltDate', { locale: 'sv', dateFormat: 'Y-m-d', maxDate: 'today' });
+        }
+        initFalt();
+
+        function recomputePreview() {
+            var stations = parseInt(document.getElementById('faltStationCount').value, 10) || 0;
+            var maxHits = Math.max(0, stations * 6);
+            document.getElementById('faltMaxHitsHint').textContent = maxHits;
+            document.getElementById('faltMaxHitsSuffix').textContent = 'av ' + maxHits;
+            document.getElementById('faltHits').max = maxHits;
+
+            var hits = parseInt(document.getElementById('faltHits').value, 10);
+            var figures = parseInt(document.getElementById('faltFigures').value, 10);
+            var figuresMax = parseInt(document.getElementById('faltFiguresMax').value, 10);
+            var mode = document.getElementById('faltMode').value;
+            var preview = document.getElementById('faltPreview');
+
+            if (Number.isFinite(hits) && Number.isFinite(figures) && figuresMax > 0 && maxHits > 0) {
+                var headline = mode === 'Poangfalt' ? (hits + figures) + ' p' : (hits + '/' + figures);
+                document.getElementById('faltPreviewHeadline').textContent = headline;
+                document.getElementById('faltPreviewHitPct').textContent = 'Träff ' + Math.round(1000 * hits / maxHits) / 10 + ' %';
+                document.getElementById('faltPreviewFigurePct').textContent = 'Figur ' + Math.round(1000 * figures / figuresMax) / 10 + ' %';
+                preview.classList.remove('d-none');
+            } else {
+                preview.classList.add('d-none');
+            }
+        }
+
+        ['faltStationCount', 'faltHits', 'faltFigures', 'faltFiguresMax', 'faltMode'].forEach(function (id) {
+            document.getElementById(id).addEventListener('input', recomputePreview);
+            document.getElementById(id).addEventListener('change', recomputePreview);
+        });
+    })();
+
+    // Open empty for "new" entry. openFaltskytteScoreModalForEdit(row) prefills.
+    function openFaltskytteScoreModal() {
+        document.getElementById('faltskytteScoreForm').reset();
+        document.getElementById('faltEntryId').value = '';
+        document.getElementById('faltStationCount').value = 8;
+        document.getElementById('faltMaxHitsHint').textContent = 48;
+        document.getElementById('faltMaxHitsSuffix').textContent = 'av 48';
+        document.getElementById('faltPreview').classList.add('d-none');
+        document.getElementById('addFaltskytteScoreModalLabel').innerHTML = '<i class="bi bi-plus-circle"></i> Lägg in Fältskytte-resultat';
+        new bootstrap.Modal(document.getElementById('addFaltskytteScoreModal')).show();
+    }
+
+    function openFaltskytteScoreModalForEdit(row) {
+        document.getElementById('faltskytteScoreForm').reset();
+        document.getElementById('faltEntryId').value = row.trainingScoreId || '';
+        document.getElementById('faltDate')._flatpickr.setDate(row.date);
+        document.getElementById('faltCompetitionName').value = row.competitionName || '';
+        document.getElementById('faltShootingClass').value = row.shootingClass || '';
+        document.getElementById('faltMode').value = row.mode || 'Normalfalt';
+        document.getElementById('faltStationCount').value = row.stationCount || 8;
+        document.getElementById('faltHits').value = row.totalHits ?? '';
+        document.getElementById('faltFigures').value = row.totalFigures ?? '';
+        document.getElementById('faltFiguresMax').value = row.maxFigures ?? '';
+        document.getElementById('faltPlacement').value = row.placement ?? '';
+        document.getElementById('faltParticipants').value = row.participants ?? '';
+        document.getElementById('faltMedal').value = row.standardMedal || '';
+        document.getElementById('faltNotes').value = row.notes || '';
+        document.getElementById('addFaltskytteScoreModalLabel').innerHTML = '<i class="bi bi-pencil-square"></i> Redigera Fältskytte-resultat';
+        var maxHits = (parseInt(row.stationCount, 10) || 0) * 6;
+        document.getElementById('faltMaxHitsHint').textContent = maxHits;
+        document.getElementById('faltMaxHitsSuffix').textContent = 'av ' + maxHits;
+        new bootstrap.Modal(document.getElementById('addFaltskytteScoreModal')).show();
+    }
+
+    async function saveFaltskytteScore() {
+        var btn = document.getElementById('faltSaveBtn');
+        var idVal = document.getElementById('faltEntryId').value;
+        var isEdit = !!idVal;
+
+        // Collect & validate locally before posting.
+        var payload = {
+            id: isEdit ? parseInt(idVal, 10) : null,
+            date: document.getElementById('faltDate').value,
+            competitionName: document.getElementById('faltCompetitionName').value.trim(),
+            shootingClass: document.getElementById('faltShootingClass').value,
+            mode: document.getElementById('faltMode').value,
+            stationCount: parseInt(document.getElementById('faltStationCount').value, 10),
+            hits: parseInt(document.getElementById('faltHits').value, 10),
+            figures: parseInt(document.getElementById('faltFigures').value, 10),
+            figuresMax: parseInt(document.getElementById('faltFiguresMax').value, 10),
+            placement: document.getElementById('faltPlacement').value ? parseInt(document.getElementById('faltPlacement').value, 10) : null,
+            participants: document.getElementById('faltParticipants').value ? parseInt(document.getElementById('faltParticipants').value, 10) : null,
+            standardMedal: document.getElementById('faltMedal').value || null,
+            notes: document.getElementById('faltNotes').value.trim()
+        };
+
+        var missing = [];
+        if (!payload.date) missing.push('Datum');
+        if (!payload.competitionName) missing.push('Tävling');
+        if (!payload.shootingClass) missing.push('Skytteklass');
+        if (!Number.isFinite(payload.stationCount)) missing.push('Antal stationer');
+        if (!Number.isFinite(payload.hits)) missing.push('Antal träff');
+        if (!Number.isFinite(payload.figures)) missing.push('Träffade figurer');
+        if (!Number.isFinite(payload.figuresMax)) missing.push('Totalt antal figurer');
+        if (missing.length) {
+            alert('Följande fält saknas eller är ogiltiga: ' + missing.join(', '));
+            return;
+        }
+
+        var token = document.querySelector('#faltskytteScoreForm input[name="__RequestVerificationToken"]').value;
+        btn.disabled = true;
+        try {
+            var endpoint = isEdit
+                ? '/umbraco/surface/TrainingScoring/UpdateFaltskytteScore'
+                : '/umbraco/surface/TrainingScoring/RecordFaltskytteScore';
+            var resp = await fetch(endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+                body: JSON.stringify(payload)
+            });
+            var data = await resp.json();
+            if (!data.success) {
+                alert(data.message || 'Något gick fel.');
+                return;
+            }
+            bootstrap.Modal.getInstance(document.getElementById('addFaltskytteScoreModal')).hide();
+            if (typeof loadResults === 'function') loadResults();
+            if (typeof loadDashboard === 'function') loadDashboard();
+        } catch (err) {
+            alert('Något gick fel: ' + err.message);
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    async function deleteFaltskytteScore(id) {
+        if (!confirm('Är du säker på att du vill ta bort detta Fältskytte-resultat?')) return;
+        try {
+            var resp = await fetch('/umbraco/surface/TrainingScoring/DeleteFaltskytteScore?id=' + id, { method: 'DELETE' });
+            var data = await resp.json();
+            if (!data.success) {
+                alert(data.message || 'Kunde inte ta bort.');
+                return;
+            }
+            if (typeof loadResults === 'function') loadResults();
+            if (typeof loadDashboard === 'function') loadDashboard();
+        } catch (err) {
+            alert('Något gick fel: ' + err.message);
+        }
+    }
+</script>

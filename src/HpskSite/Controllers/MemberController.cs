@@ -15,6 +15,7 @@ using HpskSite.Models;
 using HpskSite.Shared.Models;
 using HpskSite.Services;
 using HpskSite.CompetitionTypes.Precision.Services;
+using HpskSite.CompetitionTypes.Faltskytte.Services;
 using System.Text.Json;
 using NPoco;
 using Microsoft.AspNetCore.Hosting;
@@ -37,6 +38,7 @@ namespace HpskSite.Controllers
         private readonly IHandicapCalculator _handicapCalculator;
         private readonly AdminAuthorizationService _authorizationService;
         private readonly UnifiedResultsService _unifiedResultsService;
+        private readonly FaltskytteStatsService _faltskytteStatsService;
         private const string ClubMemberTypeAlias = "hpskClub";
 
         public MemberController(
@@ -57,7 +59,8 @@ namespace HpskSite.Controllers
             IShooterStatisticsService statisticsService,
             IHandicapCalculator handicapCalculator,
             AdminAuthorizationService authorizationService,
-            UnifiedResultsService unifiedResultsService)
+            UnifiedResultsService unifiedResultsService,
+            FaltskytteStatsService faltskytteStatsService)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _memberService = memberService;
@@ -74,6 +77,7 @@ namespace HpskSite.Controllers
             _handicapCalculator = handicapCalculator;
             _authorizationService = authorizationService;
             _unifiedResultsService = unifiedResultsService;
+            _faltskytteStatsService = faltskytteStatsService;
         }
 
         [HttpGet]
@@ -768,6 +772,24 @@ namespace HpskSite.Controllers
                 var memberId = member.Id;
                 var filterYear = year ?? DateTime.Now.Year;
                 var results = new List<object>();
+
+                // Fältskytte uses a completely different data shape (träff/figurer, no
+                // series). Delegate to the dedicated stats service and return early so
+                // the rest of this method stays Precision-style and untouched.
+                if (competitionType == "Faltskytte")
+                {
+                    var faltSeason = await _faltskytteStatsService.GetMemberSeasonAsync(memberId, filterYear);
+                    if (weaponClass != "Alla")
+                    {
+                        faltSeason = faltSeason.Where(e => e.WeaponGroup == weaponClass).ToList();
+                    }
+                    return Json(new
+                    {
+                        success = true,
+                        competitionType = "Faltskytte",
+                        results = faltSeason
+                    });
+                }
 
                 using (var db = _databaseFactory.CreateDatabase())
                 {

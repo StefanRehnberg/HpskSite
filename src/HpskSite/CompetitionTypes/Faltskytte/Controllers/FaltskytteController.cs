@@ -853,8 +853,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 .Where(c => c.Value<bool>("faltskytteResultsOfficial"))
                 .ToList();
 
-            int created = 0, alreadyHad = 0, failed = 0;
+            int created = 0, alreadyOk = 0, synced = 0, failed = 0;
             var createdNames = new List<string>();
+            var syncedNames = new List<string>();
 
             foreach (var compNode in candidates)
             {
@@ -865,7 +866,31 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
 
                     var existing = _contentService.GetPagedChildren(compContent.Id, 0, int.MaxValue, out _)
                         .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
-                    if (existing != null) { alreadyHad++; continue; }
+
+                    if (existing != null)
+                    {
+                        // Existing page — make sure its isOfficial flag matches the comp's
+                        // faltskytteResultsOfficial. They can drift apart if an old publish
+                        // ran before the publish-flow fix that writes both in lockstep, or
+                        // if a publish of the result page failed silently. Without this
+                        // sync, the comp page's "Visa resultat" button stays hidden even
+                        // when the admin sees "Officiell" in the results panel.
+                        var current = existing.GetValue<bool>("isOfficial");
+                        if (!current)
+                        {
+                            existing.SetValue("isOfficial", true);
+                            existing.SetValue("lastUpdated", DateTime.Now);
+                            _contentService.Save(existing);
+                            _contentService.Publish(existing, new[] { "*" }, -1);
+                            synced++;
+                            syncedNames.Add(compNode.Name);
+                        }
+                        else
+                        {
+                            alreadyOk++;
+                        }
+                        continue;
+                    }
 
                     var resultPage = _contentService.Create("Resultat", compContent.Id, "competitionResult");
                     resultPage.SetValue("resultType", "Final Results");
@@ -889,9 +914,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 success = true,
                 total = candidates.Count,
                 created,
-                alreadyHad,
+                synced,
+                alreadyOk,
                 failed,
-                createdNames
+                createdNames,
+                syncedNames
             });
         }
 

@@ -116,6 +116,7 @@
                                         <option value="Duell">Duell</option>
                                         <option value="NationellHelmatch">Nationell Helmatch</option>
                                         <option value="MagnumPrecision">Magnum Precision</option>
+                                        <option value="Faltskytte">Fältskytte</option>
                                     </select>
                                     <select id="yearFilter" class="form-select form-select-sm" style="width: auto;" onchange="loadResults()">
                                         @* Options populated by JavaScript *@
@@ -673,6 +674,7 @@
 @* Include Training Score Modals *@
 @await Html.PartialAsync("~/Views/Partials/TrainingScoreEntry.cshtml")
 @await Html.PartialAsync("~/Views/Partials/TrainingScoreDetail.cshtml")
+@await Html.PartialAsync("~/Views/Partials/FaltskytteScoreEntry.cshtml")
 
 @* Share Dashboard Modal *@
 <div class="modal fade" id="shareDashboardModal" tabindex="-1" aria-labelledby="shareDashboardModalLabel" aria-hidden="true">
@@ -1409,6 +1411,11 @@ async function loadDashboard() {
 
         if (result.success) {
             dashboardData = result.data;
+            // Fältskytte uses a different payload shape — render with its own function.
+            if (compType === 'Faltskytte') {
+                renderFaltskytteDashboard(dashboardData);
+                return;
+            }
             // Default to current year only if it exists in available years
             const currentYear = new Date().getFullYear();
             const defaultYears = dashboardData.availableYears && dashboardData.availableYears.includes(currentYear)
@@ -1898,6 +1905,7 @@ function renderDashboard(data, selectedYears = null) {
                             <option value="Duell" ${data.competitionType === 'Duell' ? 'selected' : ''}>Duell</option>
                             <option value="NationellHelmatch" ${data.competitionType === 'NationellHelmatch' ? 'selected' : ''}>Nationell Helmatch</option>
                             <option value="MagnumPrecision" ${data.competitionType === 'MagnumPrecision' ? 'selected' : ''}>Magnum Precision</option>
+                            <option value="Faltskytte" ${data.competitionType === 'Faltskytte' ? 'selected' : ''}>Fältskytte</option>
                         </select>
                         <select id="dashboardYearFilter" class="form-select form-select-sm" style="width: auto;" onchange="onDashboardYearChange(this)">
                             <option value="all" ${selectedYears === null ? 'selected' : ''}>Alla</option>
@@ -2379,7 +2387,11 @@ function loadResults() {
         .then(response => response.json())
         .then(data => {
             if (data.success) {
-                renderResultsTable(data.results);
+                if (competitionType === 'Faltskytte') {
+                    renderFaltskytteResultsTable(data.results || []);
+                } else {
+                    renderResultsTable(data.results);
+                }
             } else {
                 content.innerHTML = `
                     <div class="alert alert-danger">
@@ -2415,6 +2427,11 @@ function renderResultsTable(results) {
     }
 
     const html = `
+        <p class="small text-muted mb-2">
+            <i class="bi bi-trophy text-primary"></i> = tävling.
+            <i class="bi bi-people text-warning ms-2"></i> = träningsmatch.
+            <i class="bi bi-pencil-square text-success ms-2"></i> = egen träning.
+        </p>
         <div class="table-responsive">
             <table class="table table-striped table-hover">
                 <thead>
@@ -2648,7 +2665,352 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+// ========== FÄLTSKYTTE (separate render path — different data shape) ==========
+//
+// Fältskytte rows don't fit the series/total/average shape, so the Resultat tab
+// + Dashboard get dedicated render functions that the standard ones delegate to
+// when discipline === 'Faltskytte'.
+
+let _faltSelectedYear = null;
+
+function _faltHeadline(row) {
+    return row.mode === 'Poangfalt'
+        ? `${row.totalHits + row.totalFigures} p`
+        : `${row.totalHits}/${row.totalFigures}`;
+}
+function _faltSourceIcon(row) {
+    return row.source === 'Hosted'
+        ? '<i class="bi bi-trophy text-primary me-2" title="Tävling på pistol.nu"></i>'
+        : '<i class="bi bi-globe text-secondary me-2" title="Extern tävling (egen registrering)"></i>';
+}
+function _faltModeLabel(mode) { return mode === 'Poangfalt' ? 'Poängfält' : 'Normalfält'; }
+function _faltPlacementChip(p, n) {
+    if (!p || !n) return '<span class="text-muted">—</span>';
+    const pct = 100 * p / n;
+    let cls = '';
+    if (pct <= 15) cls = ' style="background:#d1e7dd;color:#0a3622;"';
+    else if (pct <= 33) cls = ' style="background:#fff3cd;color:#664d03;"';
+    return `<span class="badge bg-light text-dark"${cls}>${p} / ${n}</span>`;
+}
+function _faltMedalIcon(m) {
+    if (m === 'S') return '<img src="/images/StdMedS.png" alt="Silver" style="height:18px;width:auto;" title="Silver">';
+    if (m === 'B') return '<img src="/images/StdMedB.png" alt="Brons" style="height:18px;width:auto;" title="Brons">';
+    return '<span class="text-muted">—</span>';
+}
+
+function _faltEditFromButton(btn) {
+    try {
+        const row = JSON.parse(btn.getAttribute('data-fs-row'));
+        openFaltskytteScoreModalForEdit(row);
+    } catch (e) { console.error('Bad fs-row data', e); }
+}
+
+function renderFaltskytteResultsTable(rows) {
+    const content = document.getElementById('resultsContent');
+    if (!content) return;
+
+    if (!rows || rows.length === 0) {
+        content.innerHTML = `
+            <div class="alert alert-info">
+                <h5><i class="bi bi-info-circle"></i> Inga Fältskytte-resultat</h5>
+                <p>Det finns inga Fältskytte-resultat för de valda filtren. Lägg in egna resultat från externa tävlingar via knappen ovan.</p>
+                <button class="btn btn-primary" onclick="openTrainingScoreModal()">
+                    <i class="bi bi-plus-circle"></i> Lägg in Resultat
+                </button>
+            </div>`;
+        return;
+    }
+
+    const html = `
+        <p class="small text-muted mb-2">
+            <i class="bi bi-trophy text-primary"></i> = tävling på pistol.nu (resultat hämtas automatiskt).
+            <i class="bi bi-globe text-secondary ms-2"></i> = extern tävling som du själv lagt in.
+        </p>
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>Datum</th>
+                        <th>Tävling</th>
+                        <th>Klass</th>
+                        <th class="text-end">Resultat</th>
+                        <th class="text-end">Träff %</th>
+                        <th class="text-end">Figur %</th>
+                        <th class="text-center">Placering</th>
+                        <th class="text-center" title="Standardmedalj">StM</th>
+                        <th class="text-center"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                ${rows.map(r => {
+                    const dateStr = new Date(r.date).toLocaleDateString('sv-SE');
+                    const compLink = r.source === 'Hosted' && r.competitionId
+                        ? `<a href="/competitions/${r.competitionId}">${escapeHtml(r.competitionName)}</a>`
+                        : escapeHtml(r.competitionName);
+                    const actions = r.source === 'External'
+                        ? `<button class="btn btn-sm btn-outline-secondary me-1" data-fs-row='${escapeHtml(JSON.stringify(r))}' onclick='_faltEditFromButton(this)' title="Redigera"><i class="bi bi-pencil"></i></button>
+                           <button class="btn btn-sm btn-outline-danger" onclick="deleteFaltskytteScore(${r.trainingScoreId})" title="Ta bort"><i class="bi bi-trash"></i></button>`
+                        : `<span class="text-muted" title="Officiellt resultat — kan inte redigeras"><i class="bi bi-lock"></i></span>`;
+                    const hitClass = r.hitPercent >= 80 ? 'fw-semibold text-success'
+                                  : r.hitPercent >= 60 ? 'fw-semibold'
+                                  : '';
+                    return `
+                        <tr>
+                            <td>${_faltSourceIcon(r)}${dateStr}</td>
+                            <td>${compLink}<span class="ms-1 text-muted small">· ${_faltModeLabel(r.mode)}</span></td>
+                            <td><span class="badge bg-secondary">${escapeHtml(r.shootingClassName || r.shootingClass)}</span></td>
+                            <td class="text-end fw-semibold">${_faltHeadline(r)}</td>
+                            <td class="text-end ${hitClass}">${r.hitPercent.toFixed(1)} %</td>
+                            <td class="text-end">${r.figurePercent.toFixed(1)} %</td>
+                            <td class="text-center">${_faltPlacementChip(r.placement, r.participants)}</td>
+                            <td class="text-center">${_faltMedalIcon(r.standardMedal)}</td>
+                            <td class="text-center">${actions}</td>
+                        </tr>`;
+                }).join('')}
+                </tbody>
+            </table>
+        </div>
+        <div class="text-muted mt-2"><small><i class="bi bi-info-circle"></i> Visar ${rows.length} resultat</small></div>`;
+    content.innerHTML = html;
+}
+
+function renderFaltskytteDashboard(data) {
+    const content = document.getElementById('dashboardContent');
+    if (!content) return;
+
+    const years = data.availableYears || [];
+    if (_faltSelectedYear === null || !years.includes(_faltSelectedYear)) {
+        _faltSelectedYear = data.defaultYear || (years[0] ?? new Date().getFullYear());
+    }
+    const stats = data.statsByYear?.[String(_faltSelectedYear)] || _faltEmptyStats();
+
+    let trendHtml = '';
+    if (data.hitPercentYoYDelta !== null && data.hitPercentYoYDelta !== undefined) {
+        const d = data.hitPercentYoYDelta;
+        const sign = d > 0 ? '+' : '';
+        const color = Math.abs(d) < 0.5 ? 'secondary' : (d > 0 ? 'success' : 'danger');
+        const arrow = Math.abs(d) < 0.5 ? 'arrow-right' : (d > 0 ? 'arrow-up' : 'arrow-down');
+        trendHtml = `<small class="text-${color} text-center d-block"><i class="bi bi-${arrow}"></i> ${sign}${d} % mot förra året</small>`;
+    }
+
+    content.innerHTML = `
+        <div class="row mb-3">
+            <div class="col-12 d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Översikt — Fältskytte</h5>
+                <div class="d-flex gap-2 align-items-center">
+                    <select id="dashboardTypeFilter" class="form-select form-select-sm" style="width:auto;" onchange="loadDashboard()">
+                        <option value="Precision">Precision</option>
+                        <option value="Milsnabb">Milsnabb</option>
+                        <option value="Duell">Duell</option>
+                        <option value="NationellHelmatch">Nationell Helmatch</option>
+                        <option value="MagnumPrecision">Magnum Precision</option>
+                        <option value="Faltskytte" selected>Fältskytte</option>
+                    </select>
+                    <select class="form-select form-select-sm" style="width:auto;" onchange="onFaltYearChange(this)">
+                        ${years.map(y => `<option value="${y}" ${y === _faltSelectedYear ? 'selected' : ''}>${y}</option>`).join('')}
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mb-4">
+            <div class="col-md-3 mb-3">
+                <div class="card stats-card h-100">
+                    <div class="card-body">
+                        <h6 class="text-muted mb-2"><i class="bi bi-clipboard-data"></i> Aktivitet</h6>
+                        <h3 class="mb-3 text-center">${stats.totalCompetitions} <small class="text-muted fs-6">tävlingar</small></h3>
+                        <div class="small">
+                            ${(stats.activityByWeaponGroup || []).map((w, i, arr) => `
+                                <div class="d-flex justify-content-between ${i < arr.length - 1 ? 'border-bottom' : ''} py-1">
+                                    <span><strong>${w.weaponGroup}</strong></span>
+                                    <span class="text-muted">${w.count} tävl.</span>
+                                </div>
+                            `).join('') || '<div class="text-muted text-center py-2">Inga tävlingar</div>'}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-3 mb-3">
+                <div class="card stats-card h-100">
+                    <div class="card-body">
+                        <h6 class="text-muted mb-2"><i class="bi bi-bullseye"></i> Träffprocent</h6>
+                        <h3 class="mb-2 text-center">${stats.hitPercentAvg.toFixed(1)} <small class="text-muted fs-6">% snitt</small></h3>
+                        <div class="small">
+                            ${(stats.hitPercentByWeaponGroup || []).map(w => `
+                                <div class="d-flex justify-content-between"><span>${w.weaponGroup}</span><span class="text-muted">${w.hitPercent.toFixed(1)} %</span></div>
+                                <div class="pct-bar mb-1"><div style="width:${Math.min(100, w.hitPercent)}%"></div></div>
+                            `).join('') || '<div class="text-muted text-center py-2">—</div>'}
+                        </div>
+                        ${trendHtml ? '<hr class="my-2">' + trendHtml : ''}
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-2 mb-3 px-2">
+                <div class="card stats-card h-100">
+                    <div class="card-body text-center">
+                        <h6 class="text-muted mb-2" style="font-size:.8rem;"><i class="bi bi-award"></i> Standardmedaljer</h6>
+                        ${(stats.medalStats.silverCount + stats.medalStats.bronzeCount) > 0 ? `
+                            <div class="d-flex justify-content-around mb-2">
+                                <div class="text-center">
+                                    <img src="/images/StdMedS.png" alt="Silver" style="height:32px;width:auto;">
+                                    <div class="fw-bold">${stats.medalStats.silverCount} st</div>
+                                </div>
+                                <div class="text-center">
+                                    <img src="/images/StdMedB.png" alt="Brons" style="height:32px;width:auto;">
+                                    <div class="fw-bold">${stats.medalStats.bronzeCount} st</div>
+                                </div>
+                            </div>
+                            <hr class="my-2">
+                            <div><strong>${stats.medalStats.totalPoints}</strong> <span class="text-muted small">poäng</span></div>
+                        ` : `<div class="text-muted py-3"><i class="bi bi-dash-circle fs-3"></i><p class="mb-0 mt-1 small">Inga medaljer</p></div>`}
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-4 mb-3">
+                <div class="card stats-card h-100">
+                    <div class="card-body">
+                        <h6 class="text-muted mb-3"><i class="bi bi-trophy-fill"></i> Placeringar</h6>
+                        ${stats.placement.best ? `
+                            <div class="row text-center g-2">
+                                <div class="col-4">
+                                    <div class="text-muted small">Bästa</div>
+                                    <h4 class="mb-0">${stats.placement.best.placement}<small class="fs-6 text-muted">/${stats.placement.best.participants}</small></h4>
+                                    <small class="text-muted">${escapeHtml(stats.placement.best.competitionName || '')}</small>
+                                </div>
+                                <div class="col-4">
+                                    <div class="text-muted small">Median</div>
+                                    <h4 class="mb-0">${stats.placement.median.placement}<small class="fs-6 text-muted">/${stats.placement.median.participants}</small></h4>
+                                    <small class="text-muted">topp ${stats.placement.topPercent ?? '—'} %</small>
+                                </div>
+                                <div class="col-4">
+                                    <div class="text-muted small">Pallplatser</div>
+                                    <h4 class="mb-0">${stats.placement.podiums}</h4>
+                                    <small class="text-muted">av ${stats.totalCompetitions} tävl.</small>
+                                </div>
+                            </div>
+                        ` : `<div class="text-muted text-center py-3"><i class="bi bi-info-circle"></i><p class="mb-0 mt-1 small">Ingen placeringsdata än</p></div>`}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mb-4">
+            <div class="col-12 mb-3">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                        <h5 class="mb-0"><i class="bi bi-graph-up-arrow"></i> Utveckling över tid</h5>
+                        <div class="btn-group btn-group-sm" id="faltChartToggle">
+                            <button type="button" class="btn btn-outline-secondary active" data-metric="hit" onclick="renderFaltskytteChart('hit', this)">Träff %</button>
+                            <button type="button" class="btn btn-outline-secondary" data-metric="figure" onclick="renderFaltskytteChart('figure', this)">Figur %</button>
+                            <button type="button" class="btn btn-outline-secondary" data-metric="placement" onclick="renderFaltskytteChart('placement', this)">Placering %</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="faltskytteChart" style="height:280px;"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <style>
+          .pct-bar { height:6px; background:var(--bs-tertiary-bg); border-radius:3px; overflow:hidden; }
+          .pct-bar > div { height:100%; background:#0d6efd; }
+        </style>
+    `;
+
+    setTimeout(() => renderFaltskytteChart('hit'), 50);
+}
+
+function _faltEmptyStats() {
+    return {
+        totalCompetitions: 0,
+        activityByWeaponGroup: [],
+        hitPercentAvg: 0,
+        hitPercentByWeaponGroup: [],
+        figurePercentAvg: 0,
+        medalStats: { silverCount: 0, bronzeCount: 0, totalPoints: 0 },
+        placement: { best: null, median: null, podiums: 0, topPercent: null }
+    };
+}
+
+function onFaltYearChange(sel) {
+    _faltSelectedYear = parseInt(sel.value, 10);
+    renderFaltskytteDashboard(dashboardData);
+}
+
+let _faltChartInstance = null;
+function renderFaltskytteChart(metric, btn) {
+    if (btn) {
+        document.querySelectorAll('#faltChartToggle .btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+    }
+    const canvas = document.getElementById('faltskytteChart');
+    if (!canvas || !dashboardData) return;
+
+    // Filter to selected year and points where metric is available.
+    const points = (dashboardData.chartData || [])
+        .filter(p => p.year === _faltSelectedYear)
+        .filter(p => metric !== 'placement' || p.placementPercent !== null);
+
+    // Group by weapon group → one dataset per group, scatter style.
+    const groupColors = { 'C': '#0d6efd', 'A': '#dc3545', 'A_Opt': '#fd7e14', 'B': '#198754', 'R': '#6f42c1', 'M': '#20c997' };
+    const groups = [...new Set(points.map(p => p.weaponGroup))].sort();
+    const datasets = groups.map(g => ({
+        label: g,
+        data: points
+            .filter(p => p.weaponGroup === g)
+            .sort((a, b) => new Date(a.date) - new Date(b.date))
+            .map(p => ({
+                x: new Date(p.date),
+                y: metric === 'hit' ? p.hitPercent : metric === 'figure' ? p.figurePercent : p.placementPercent,
+                headline: p.headline,
+                competitionName: p.competitionName,
+                mode: p.mode
+            })),
+        backgroundColor: groupColors[g] || '#6c757d',
+        borderColor: groupColors[g] || '#6c757d',
+        borderWidth: 2,
+        tension: 0.2
+    }));
+
+    if (_faltChartInstance) _faltChartInstance.destroy();
+    _faltChartInstance = new Chart(canvas, {
+        type: 'line',
+        data: { datasets },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                x: { type: 'time', time: { unit: 'month', tooltipFormat: 'yyyy-MM-dd' } },
+                y: { beginAtZero: true, max: 100, title: { display: true, text: '%' } }
+            },
+            plugins: {
+                legend: { position: 'top' },
+                tooltip: {
+                    callbacks: {
+                        title: ctx => new Date(ctx[0].raw.x).toLocaleDateString('sv-SE'),
+                        label: ctx => {
+                            const p = ctx.raw;
+                            return `${p.competitionName} — ${p.headline} (${ctx.dataset.label}, ${p.mode === 'Poangfalt' ? 'Poängfält' : 'Normalfält'})`;
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
 function openTrainingScoreModal() {
+    // Switch to the Fältskytte modal when the Resultat tab is filtered to Fältskytte —
+    // its data shape (no series, träff/figurer) doesn't fit the standard form.
+    const discipline = document.getElementById('competitionTypeFilter')?.value;
+    if (discipline === 'Faltskytte') {
+        openFaltskytteScoreModal();
+        return;
+    }
     const modal = new bootstrap.Modal(document.getElementById('addTrainingScoreModal'));
     modal.show();
 }

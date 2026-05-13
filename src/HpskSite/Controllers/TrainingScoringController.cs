@@ -10,7 +10,9 @@ using Umbraco.Cms.Web.Website.Controllers;
 using HpskSite.Models;
 using HpskSite.Shared.Models;
 using HpskSite.Services;
+using HpskSite.CompetitionTypes.Faltskytte.Services;
 using NPoco;
+using System.Text.Json;
 
 namespace HpskSite.Controllers
 {
@@ -26,6 +28,7 @@ namespace HpskSite.Controllers
         private readonly IContentService _contentService;
         private readonly UnifiedResultsService _unifiedResultsService;
         private readonly IShooterStatisticsService _statisticsService;
+        private readonly FaltskytteStatsService _faltskytteStatsService;
 
         public TrainingScoringController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -38,7 +41,8 @@ namespace HpskSite.Controllers
             IMemberService memberService,
             IContentService contentService,
             UnifiedResultsService unifiedResultsService,
-            IShooterStatisticsService statisticsService)
+            IShooterStatisticsService statisticsService,
+            FaltskytteStatsService faltskytteStatsService)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _memberManager = memberManager;
@@ -47,6 +51,7 @@ namespace HpskSite.Controllers
             _contentService = contentService;
             _unifiedResultsService = unifiedResultsService;
             _statisticsService = statisticsService;
+            _faltskytteStatsService = faltskytteStatsService;
         }
 
         #region Public Endpoints (Member Access)
@@ -398,6 +403,14 @@ namespace HpskSite.Controllers
                 if (member == null)
                 {
                     return Json(new { success = false, message = "Member not found" });
+                }
+
+                // Fältskytte uses a fundamentally different data shape (träff/figurer,
+                // no series). Build a dedicated dashboard payload and return early.
+                if (competitionType == "Faltskytte")
+                {
+                    var faltDashboard = await BuildFaltskytteDashboardAsync(member.Id);
+                    return Json(new { success = true, data = faltDashboard });
                 }
 
                 // Get all results — use UnifiedResultsService for Precision only.
@@ -1174,6 +1187,351 @@ namespace HpskSite.Controllers
             }
 
             return results.OrderByDescending(r => r.Date).ToList();
+        }
+
+        #endregion
+
+        #region Fältskytte (dashboard + self-entry CRUD)
+
+        /// <summary>
+        /// Build the Fältskytte-specific dashboard payload. Aggregates one season's
+        /// worth of <see cref="FaltskytteSeasonEntry"/> rows into the cards + chart
+        /// data the frontend renders for the Fältskytte view.
+        /// </summary>
+        private async Task<object> BuildFaltskytteDashboardAsync(int memberId)
+        {
+            // Whole-history pull; the frontend filters by year client-side.
+            var all = await _faltskytteStatsService.GetMemberSeasonAsync(memberId, null);
+            var availableYears = all.Select(e => e.Date.Year).Distinct().OrderByDescending(y => y).ToList();
+            if (!availableYears.Any()) availableYears.Add(DateTime.Now.Year);
+
+            var currentYear = DateTime.Now.Year;
+            var defaultYear = availableYears.Contains(currentYear) ? currentYear : availableYears.First();
+            var seasonForDefault = all.Where(e => e.Date.Year == defaultYear).ToList();
+
+            // Build per-year stats so the year dropdown can switch without a server round-trip.
+            var statsByYear = availableYears.ToDictionary(y => y.ToString(), y => SummarizeFaltskytteSeason(all.Where(e => e.Date.Year == y).ToList()));
+
+            // Year-over-year delta on overall träff %
+            double? yoYDelta = null;
+            if (availableYears.Contains(defaultYear - 1))
+            {
+                var prev = all.Where(e => e.Date.Year == defaultYear - 1).ToList();
+                if (prev.Any() && seasonForDefault.Any())
+                {
+                    yoYDelta = Math.Round(seasonForDefault.Average(e => e.HitPercent) - prev.Average(e => e.HitPercent), 1);
+                }
+            }
+
+            return new
+            {
+                competitionType = "Faltskytte",
+                availableYears,
+                defaultYear,
+                statsByYear,
+                hitPercentYoYDelta = yoYDelta,
+                // Chart data covers all years; the frontend filters by selectedYear.
+                chartData = all.Select(e => new
+                {
+                    date = e.Date,
+                    year = e.Date.Year,
+                    weaponGroup = e.WeaponGroup,
+                    mode = e.Mode,
+                    source = e.Source,
+                    hitPercent = e.HitPercent,
+                    figurePercent = e.FigurePercent,
+                    placementPercent = e.Placement.HasValue && e.Participants.HasValue && e.Participants.Value > 1
+                        ? Math.Round(100.0 * (1.0 - ((e.Placement.Value - 1.0) / (e.Participants.Value - 1.0))), 1)
+                        : (double?)null,
+                    headline = e.Mode == "Poangfalt" ? $"{e.TotalHits + e.TotalFigures} p" : $"{e.TotalHits}/{e.TotalFigures}",
+                    competitionName = e.CompetitionName
+                }).OrderBy(x => x.date).ToList()
+            };
+        }
+
+        private static object SummarizeFaltskytteSeason(List<FaltskytteSeasonEntry> season)
+        {
+            if (!season.Any())
+            {
+                return new
+                {
+                    totalCompetitions = 0,
+                    activityByWeaponGroup = new List<object>(),
+                    hitPercentAvg = 0.0,
+                    hitPercentByWeaponGroup = new List<object>(),
+                    figurePercentAvg = 0.0,
+                    medalStats = new { silverCount = 0, bronzeCount = 0, totalPoints = 0 },
+                    placement = new
+                    {
+                        best = (object?)null,
+                        median = (object?)null,
+                        podiums = 0,
+                        topPercent = (double?)null
+                    }
+                };
+            }
+
+            var activityByWeaponGroup = season
+                .GroupBy(e => e.WeaponGroup)
+                .OrderBy(g => g.Key)
+                .Select(g => new { weaponGroup = g.Key, count = g.Count() })
+                .ToList<object>();
+
+            var hitPercentByWeaponGroup = season
+                .GroupBy(e => e.WeaponGroup)
+                .OrderBy(g => g.Key)
+                .Select(g => new
+                {
+                    weaponGroup = g.Key,
+                    hitPercent = Math.Round(g.Average(e => e.HitPercent), 1),
+                    figurePercent = Math.Round(g.Average(e => e.FigurePercent), 1),
+                    count = g.Count()
+                })
+                .ToList<object>();
+
+            var silverCount = season.Count(e => e.StandardMedal == "S");
+            var bronzeCount = season.Count(e => e.StandardMedal == "B");
+
+            // Placement metrics (only entries with known placement+participants).
+            var placed = season
+                .Where(e => e.Placement.HasValue && e.Participants.HasValue && e.Participants.Value > 0)
+                .Select(e => new { e.CompetitionName, e.Placement, e.Participants, percent = 100.0 * e.Placement!.Value / e.Participants!.Value })
+                .OrderBy(p => p.percent)
+                .ToList();
+
+            object? best = null;
+            object? median = null;
+            double? topPercent = null;
+            int podiums = 0;
+            if (placed.Any())
+            {
+                var b = placed.First();
+                best = new { placement = b.Placement, participants = b.Participants, competitionName = b.CompetitionName };
+
+                var midIdx = placed.Count / 2;
+                var m = placed.ElementAt(midIdx);
+                median = new { placement = m.Placement, participants = m.Participants };
+
+                topPercent = Math.Round(placed.Average(p => p.percent), 1);
+                podiums = placed.Count(p => p.Placement <= 3);
+            }
+
+            return new
+            {
+                totalCompetitions = season.Count,
+                activityByWeaponGroup,
+                hitPercentAvg = Math.Round(season.Average(e => e.HitPercent), 1),
+                hitPercentByWeaponGroup,
+                figurePercentAvg = Math.Round(season.Average(e => e.FigurePercent), 1),
+                medalStats = new
+                {
+                    silverCount,
+                    bronzeCount,
+                    totalPoints = silverCount * 2 + bronzeCount
+                },
+                placement = new
+                {
+                    best,
+                    median,
+                    podiums,
+                    topPercent
+                }
+            };
+        }
+
+        /// <summary>
+        /// Record a self-entered Fältskytte result (external comp). Persists in
+        /// TrainingScores with Discipline='Faltskytte' and IsCompetition=1. The
+        /// Fältskytte-specific fields (mode/stationCount/hits/figures/...) are
+        /// packed into the SeriesScores JSON column.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> RecordFaltskytteScore([FromBody] FaltskytteScoreRequest request)
+        {
+            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            if (currentMember == null)
+                return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            try
+            {
+                var member = _memberService.GetByEmail(currentMember.Email ?? string.Empty);
+                if (member == null) return Json(new { success = false, message = "Medlem hittades inte." });
+
+                var error = ValidateFaltskytteRequest(request);
+                if (error != null) return Json(new { success = false, message = error });
+
+                var weaponClass = ShootingClasses.GetWeaponClassCode(request.ShootingClass);
+                if (string.IsNullOrEmpty(weaponClass))
+                    return Json(new { success = false, message = "Okänd skytteklass." });
+
+                var payloadJson = JsonSerializer.Serialize(new FaltskytteExternalPayload
+                {
+                    CompetitionName = request.CompetitionName ?? "",
+                    Mode = request.Mode,
+                    StationCount = request.StationCount,
+                    Hits = request.Hits,
+                    Figures = request.Figures,
+                    FiguresMax = request.FiguresMax,
+                    Placement = request.Placement,
+                    Participants = request.Participants
+                });
+
+                using var db = _databaseFactory.CreateDatabase();
+                db.Insert("TrainingScores", "Id", true, new
+                {
+                    MemberId = member.Id,
+                    TrainingDate = request.Date,
+                    WeaponClass = weaponClass,
+                    Discipline = "Faltskytte",
+                    IsCompetition = true,
+                    CompetitionPlace = request.Placement,            // int? — placement, not name
+                    CompetitionShootingClass = request.ShootingClass,
+                    CompetitionStdMedal = request.StandardMedal ?? "",
+                    SeriesScores = payloadJson,
+                    TotalScore = request.Hits, // best-effort scalar for any legacy aggregation
+                    XCount = 0,
+                    Notes = request.Notes ?? string.Empty,
+                    CreatedAt = DateTime.Now,
+                    UpdatedAt = DateTime.Now
+                });
+
+                return Json(new { success = true });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = "Kunde inte spara: " + ex.Message });
+            }
+        }
+
+        /// <summary>Update a self-entered Fältskytte row. Owner-only.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> UpdateFaltskytteScore([FromBody] FaltskytteScoreRequest request)
+        {
+            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            if (currentMember == null)
+                return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            try
+            {
+                var member = _memberService.GetByEmail(currentMember.Email ?? string.Empty);
+                if (member == null) return Json(new { success = false, message = "Medlem hittades inte." });
+
+                if (!request.Id.HasValue) return Json(new { success = false, message = "Id saknas." });
+
+                var error = ValidateFaltskytteRequest(request);
+                if (error != null) return Json(new { success = false, message = error });
+
+                var weaponClass = ShootingClasses.GetWeaponClassCode(request.ShootingClass);
+                if (string.IsNullOrEmpty(weaponClass))
+                    return Json(new { success = false, message = "Okänd skytteklass." });
+
+                using var db = _databaseFactory.CreateDatabase();
+                var existing = db.SingleOrDefault<dynamic>("SELECT MemberId, Discipline FROM TrainingScores WHERE Id = @0", request.Id.Value);
+                if (existing == null) return Json(new { success = false, message = "Resultatet finns inte." });
+                if ((int)existing.MemberId != member.Id) return Json(new { success = false, message = "Du kan bara redigera dina egna resultat." });
+                if (((string?)existing.Discipline) != "Faltskytte") return Json(new { success = false, message = "Endast Fältskytte-rader kan uppdateras via denna endpoint." });
+
+                var payloadJson = JsonSerializer.Serialize(new FaltskytteExternalPayload
+                {
+                    CompetitionName = request.CompetitionName ?? "",
+                    Mode = request.Mode,
+                    StationCount = request.StationCount,
+                    Hits = request.Hits,
+                    Figures = request.Figures,
+                    FiguresMax = request.FiguresMax,
+                    Placement = request.Placement,
+                    Participants = request.Participants
+                });
+
+                db.Execute(@"UPDATE TrainingScores
+                              SET TrainingDate = @0, WeaponClass = @1, CompetitionPlace = @2,
+                                  CompetitionShootingClass = @3, CompetitionStdMedal = @4,
+                                  SeriesScores = @5, TotalScore = @6, Notes = @7, UpdatedAt = @8
+                              WHERE Id = @9",
+                    request.Date,
+                    weaponClass,
+                    (object?)request.Placement ?? DBNull.Value,   // int? — placement, not name
+                    request.ShootingClass,
+                    request.StandardMedal ?? "",
+                    payloadJson,
+                    request.Hits,
+                    request.Notes ?? string.Empty,
+                    DateTime.Now,
+                    request.Id.Value);
+
+                return Json(new { success = true });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = "Kunde inte uppdatera: " + ex.Message });
+            }
+        }
+
+        /// <summary>Delete a self-entered Fältskytte row. Owner-only.</summary>
+        [HttpDelete]
+        public async Task<IActionResult> DeleteFaltskytteScore(int id)
+        {
+            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            if (currentMember == null)
+                return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            try
+            {
+                var member = _memberService.GetByEmail(currentMember.Email ?? string.Empty);
+                if (member == null) return Json(new { success = false, message = "Medlem hittades inte." });
+
+                using var db = _databaseFactory.CreateDatabase();
+                var existing = db.SingleOrDefault<dynamic>("SELECT MemberId, Discipline FROM TrainingScores WHERE Id = @0", id);
+                if (existing == null) return Json(new { success = false, message = "Resultatet finns inte." });
+                if ((int)existing.MemberId != member.Id) return Json(new { success = false, message = "Du kan bara ta bort dina egna resultat." });
+                if (((string?)existing.Discipline) != "Faltskytte") return Json(new { success = false, message = "Endast Fältskytte-rader kan tas bort via denna endpoint." });
+
+                db.Execute("DELETE FROM TrainingScores WHERE Id = @0", id);
+                return Json(new { success = true });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = "Kunde inte ta bort: " + ex.Message });
+            }
+        }
+
+        private static string? ValidateFaltskytteRequest(FaltskytteScoreRequest r)
+        {
+            if (r.Date == default) return "Datum saknas.";
+            if (string.IsNullOrWhiteSpace(r.ShootingClass)) return "Skytteklass saknas.";
+            if (r.Mode != "Normalfalt" && r.Mode != "Poangfalt") return "Ogiltig fälttyp.";
+            if (r.StationCount < 1 || r.StationCount > 16) return "Antal stationer måste vara mellan 1 och 16.";
+            var maxHits = r.StationCount * 6;
+            if (r.Hits < 0 || r.Hits > maxHits) return $"Antal träff måste vara 0–{maxHits}.";
+            if (r.FiguresMax < 1) return "Totalt antal figurer måste vara minst 1.";
+            if (r.Figures < 0 || r.Figures > r.FiguresMax) return $"Träffade figurer måste vara 0–{r.FiguresMax}.";
+            if (r.Placement.HasValue || r.Participants.HasValue)
+            {
+                if (!(r.Placement.HasValue && r.Participants.HasValue))
+                    return "Ange både placering och totalt antal deltagare, eller lämna båda tomma.";
+                if (r.Placement.Value < 1) return "Placering måste vara minst 1.";
+                if (r.Participants.Value < r.Placement.Value) return "Totalt antal deltagare kan inte vara mindre än placering.";
+            }
+            return null;
+        }
+
+        public class FaltskytteScoreRequest
+        {
+            public int? Id { get; set; }
+            public DateTime Date { get; set; }
+            public string? CompetitionName { get; set; }
+            public string ShootingClass { get; set; } = "";
+            public string Mode { get; set; } = "Normalfalt"; // "Normalfalt" | "Poangfalt"
+            public int StationCount { get; set; }
+            public int Hits { get; set; }
+            public int Figures { get; set; }
+            public int FiguresMax { get; set; }
+            public int? Placement { get; set; }
+            public int? Participants { get; set; }
+            public string? StandardMedal { get; set; } // "S" | "B" | null
+            public string? Notes { get; set; }
         }
 
         #endregion
