@@ -131,16 +131,14 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         /// Authorises a self-service WRITE: staff bypass, otherwise requires
         /// the self-service flag on, the user logged in and in the patrol.
         ///
-        /// Cursor logic:
-        ///   - If <see cref="FaltskyttePatrol.CurrentStation"/> is NULL or equals
-        ///     the station being saved, the save is allowed and the cursor is
-        ///     advanced as part of this call. This makes the save self-contained
-        ///     and removes the brittle dependency on the page's AdvancePatrolCursor
-        ///     POST having succeeded.
-        ///   - If the cursor is set to a DIFFERENT station, the patrol has moved
-        ///     on; the older station is locked for shooters and a clear error
-        ///     message is returned. Staff (handled by the bypass above) can still
-        ///     edit any station regardless of the cursor.
+        /// Cursor logic (cursor = highest station the patrol has reached):
+        ///   - Cursor NULL, equal to the requested station, or BEHIND the
+        ///     requested station → forward motion (or first save). Cursor is
+        ///     advanced to the requested station and the save is allowed.
+        ///   - Cursor AHEAD of the requested station → patrol has already moved
+        ///     past this one. Reject with a clear "låst"-message; ask staff for
+        ///     help to edit an older station.
+        /// Staff (handled by the bypass above) can edit any station regardless.
         /// </summary>
         private async Task<(bool Ok, string? Error)> AuthorizeSelfServiceWriteAsync(
             int competitionId, int patrolNumber, int stationNumber)
@@ -177,17 +175,19 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 return (false, "Du är inte med i denna patrull.");
             }
 
-            // Cursor is on a DIFFERENT station → patrol has moved on, this station is locked.
-            if (patrol.CurrentStation.HasValue && patrol.CurrentStation.Value != stationNumber)
+            // Cursor AHEAD of the requested station → patrol has moved past this one,
+            // station is locked for shooters. (Forward motion and same-station are
+            // both fine and handled by the auto-advance below.)
+            if (patrol.CurrentStation.HasValue && patrol.CurrentStation.Value > stationNumber)
             {
-                _logger.LogInformation("Fältskytte self-service write rejected: patrol {PatrolId} cursor is at station {Cursor}, write requested for station {Requested}", patrol.Id, patrol.CurrentStation.Value, stationNumber);
+                _logger.LogInformation("Fältskytte self-service write rejected: patrol {PatrolId} cursor is at station {Cursor}, write requested for older station {Requested}", patrol.Id, patrol.CurrentStation.Value, stationNumber);
                 return (false,
                     $"Den här stationen är låst eftersom patrullen har gått vidare till station {patrol.CurrentStation.Value}. " +
                     $"Be en funktionär att hjälpa till om resultatet på station {stationNumber} behöver rättas.");
             }
 
-            // Cursor is NULL (first save for this patrol) or already matches — advance it.
-            // The UPDATE is a no-op when CurrentStation already equals stationNumber.
+            // Cursor NULL, equal, or behind — natural forward motion. Auto-advance.
+            // The UPDATE skips when CurrentStation already equals stationNumber.
             await FaltskytteSelfServiceQueries.AdvanceCursorAsync(db, patrol.Id, stationNumber);
             return (true, null);
         }

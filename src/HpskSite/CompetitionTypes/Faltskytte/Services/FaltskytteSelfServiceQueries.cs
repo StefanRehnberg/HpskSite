@@ -53,9 +53,12 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         }
 
         /// <summary>
-        /// Advances the patrol's CurrentStation cursor to the given station,
-        /// but only if it differs from the existing value (so re-scanning the
-        /// same station is a true no-op and doesn't churn the row).
+        /// Advances the patrol's CurrentStation cursor to the given station —
+        /// only forward. The cursor is monotonic: it tracks the highest station
+        /// the patrol has reached so older stations stay locked for shooters
+        /// (staff can still edit anything). Going to an older station via QR
+        /// scan or page load is a no-op — the cursor stays where it was.
+        /// Same-station re-scan is also a no-op.
         /// </summary>
         public static async Task AdvanceCursorAsync(
             IDatabase db, int patrolId, int stationNumber)
@@ -64,7 +67,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                 @"UPDATE FaltskyttePatrol
                   SET CurrentStation = @0
                   WHERE Id = @1
-                    AND (CurrentStation IS NULL OR CurrentStation <> @0)",
+                    AND (CurrentStation IS NULL OR CurrentStation < @0)",
                 stationNumber, patrolId);
         }
     }

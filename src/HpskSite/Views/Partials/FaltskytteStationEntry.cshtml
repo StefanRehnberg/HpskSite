@@ -265,12 +265,13 @@
         if (!currentPatrol) return;
         currentPatrolWc = currentPatrol.weaponGroup || 'C';
 
-        // Self-service lock check: if the patrol has already moved on to a
-        // different station, this station is read-only for the team. Server
-        // enforces the same rule on save; this is the UI hint.
+        // Self-service lock check: only lock when the patrol's cursor is AHEAD
+        // of this station — i.e. the patrol has moved past, and this is an old
+        // station. Forward motion (cursor null, equal, or behind) is fine — the
+        // server auto-advances the cursor on save. Same rule, both sides.
         ssLocked = !!(selfService
             && currentPatrol.currentStation
-            && currentPatrol.currentStation !== stationData.stationNumber);
+            && currentPatrol.currentStation > stationData.stationNumber);
 
         // Self-service mode skips the roll-call screen entirely — the team
         // self-marks attendance by being there. Auto-include every member as
