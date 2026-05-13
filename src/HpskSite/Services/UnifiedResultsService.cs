@@ -71,6 +71,11 @@ namespace HpskSite.Services
                 // Query from TrainingScores table - includes both training and competition entries
                 // TrainingMatchId determines if entry is from a training match
                 // IsCompetition column determines whether entry is shown as training or competition
+                // Discipline filter: this service powers the Precision dashboard / Resultat list, so
+                // it must return Precision rows only. Other disciplines (Milsnabb/Duell/Fältskytte/...)
+                // have their own load paths. Without the filter, Fältskytte rows (TotalScore = hits,
+                // e.g. 48 of 48) would leak into Precision averages and drag the dashboard down.
+                // NULL is included for backward compat with rows that pre-date the Discipline column.
                 var query = @"
                     SELECT
                         Id,
@@ -85,6 +90,7 @@ namespace HpskSite.Services
                         TrainingMatchId
                     FROM TrainingScores
                     WHERE MemberId = @0
+                      AND (Discipline = 'Precision' OR Discipline IS NULL)
                     ORDER BY TrainingDate DESC";
 
                 var scores = db.Fetch<dynamic>(query, memberId);
