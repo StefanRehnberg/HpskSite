@@ -317,7 +317,8 @@ namespace HpskSite.Controllers
 
                     int totalClubs = allClubNodes.Count;
 
-                    // Active club: has ≥1 approved member AND has event within last 3 months or future
+                    // Active club: has ≥1 approved member AND (has event within last 3 months
+                    //              OR has a club competition within last 3 months)
                     var membersByClub = approvedMembers
                         .Select(m =>
                         {
@@ -333,6 +334,26 @@ namespace HpskSite.Controllers
                     int clubsWithMembers = allClubNodes.Count(club => membersByClub.ContainsKey(club.Id));
 
                     var threeMonthsAgo = today.AddMonths(-3);
+
+                    // Pre-compute the set of club IDs that have a competition with date
+                    // within the last 3 months. Done once here instead of per-club inside
+                    // the Count() loop. Note: the main competitions section further down
+                    // re-loads allCompetitions for its own purposes — keep them separate
+                    // for now since they need slightly different filters.
+                    var clubIdsWithRecentComp = (root.Children
+                            .FirstOrDefault(c => c.ContentType.Alias == "competitionsHub")
+                            ?.Descendants()
+                            .Where(c => c.ContentType.Alias == "competition")
+                            ?? Enumerable.Empty<Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent>())
+                        .Where(c =>
+                        {
+                            var d = c.Value<DateTime?>("competitionDate");
+                            return d.HasValue && d.Value >= threeMonthsAgo;
+                        })
+                        .Select(c => c.Value<int>("clubId"))
+                        .Where(id => id > 0)
+                        .ToHashSet();
+
                     int activeClubs = allClubNodes.Count(club =>
                     {
                         if (!membersByClub.ContainsKey(club.Id)) return false;
@@ -343,7 +364,8 @@ namespace HpskSite.Controllers
                                 var eventDate = e.Value<DateTime?>("eventDate");
                                 return eventDate.HasValue && eventDate.Value >= threeMonthsAgo;
                             });
-                        return hasRecentEvent;
+                        var hasRecentClubComp = clubIdsWithRecentComp.Contains(club.Id);
+                        return hasRecentEvent || hasRecentClubComp;
                     });
 
                     // New clubs (last 30 days): earliest member CreateDate for that club within 30 days
