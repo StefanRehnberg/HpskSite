@@ -93,7 +93,11 @@
                     }
                     else
                     {
-                        <div class="alert alert-warning m-3 mb-0">Resultatsidans URL kunde inte hittas.</div>
+                        <div class="alert alert-info m-3 mb-0">
+                            <i class="bi bi-info-circle me-2"></i>
+                            <strong>Inga publicerade resultat ännu.</strong>
+                            När resultaten är klara, klicka <strong>Officiell</strong> (eller <strong>Preliminär</strong>) här ovan för att publicera resultatlistan. Då skapas <code>/resultat/</code>-sidan och den visas här.
+                        </div>
                     }
                 </div>
             </div>
@@ -150,7 +154,8 @@ function faltRestoreIframe() {
     if (!container) return;
     var url = document.querySelector('.faltskytte-results-management')?.dataset.resultPageUrl || '';
     if (!url) {
-        container.innerHTML = '<div class="alert alert-warning m-3 mb-0">Resultatsidans URL kunde inte hittas.</div>';
+        // No /resultat/ page yet — keep the friendly "publicera först"-info that
+        // was rendered server-side. (Don't overwrite it with an error.)
         return;
     }
     // Bust cache so the iframe reflects the latest official/preliminary state and any new merge config.
@@ -350,8 +355,17 @@ async function faltPublishResults(official, event) {
         var data = await resp.json();
         if (data.success) {
             faltUpdateResultStatus(official);
-            // Reload the embedded /resultat/ view so the Officiell/Preliminär badge inside it updates too.
-            faltRestoreIframe();
+            // First publish creates the /resultat/ page node on the server, which means
+            // the data-result-page-url attribute is still empty client-side. A full
+            // reload picks up the new URL and swaps the inline info-message for the
+            // iframe. Subsequent publishes just refresh the existing iframe to update
+            // the Officiell/Preliminär badge inside it.
+            var hadUrl = !!document.querySelector('.faltskytte-results-management')?.dataset.resultPageUrl;
+            if (hadUrl) {
+                faltRestoreIframe();
+            } else {
+                window.location.reload();
+            }
         }
         else alert('Fel: ' + (data.message || 'Okänt fel'));
     } catch(e) { alert('Nätverksfel.'); }

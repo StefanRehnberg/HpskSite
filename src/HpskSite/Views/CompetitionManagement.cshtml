@@ -544,8 +544,12 @@
                     resultsViewData["CompetitionId"] = competitionId;
                     resultsViewData["CompetitionName"] = competition?.Value<string>("competitionName") ?? "Tävling";
                     resultsViewData["SubCompetitionName"] = competition?.HasProperty("subCompetitionName") == true ? competition.Value<string>("subCompetitionName") ?? "" : "";
-                    // Result page URL — used by Fältskytte/Springskytte admin partials to embed the canonical /resultat/ view
-                    resultsViewData["ResultPageUrl"] = competition != null ? (competition.Url().TrimEnd('/') + "/resultat/") : "";
+                    // Result page URL — used by Fältskytte/Springskytte admin partials to embed the canonical /resultat/ view.
+                    // Only set if a competitionResult child node named "Resultat" actually exists; otherwise the
+                    // iframe would 404 ("Page not Found"). The partial falls back to a friendly inline message
+                    // ("inga publicerade resultat ännu") when this is empty.
+                    var resultChild = competition?.Children()?.FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
+                    resultsViewData["ResultPageUrl"] = resultChild != null ? (resultChild.Url().TrimEnd('/') + "/") : "";
                     // NumberOfSeriesOrStations is already in ViewData from line 39
                 }
                 @if ((ViewData["CompetitionType"]?.ToString() ?? "Precision") == "Springskytte")
