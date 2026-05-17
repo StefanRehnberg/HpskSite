@@ -1,8 +1,8 @@
 # Content not in this repo
 
-The HpskSite engine is open-source under AGPL-3.0 (see [LICENSE](LICENSE)). The pistol.nu
-content — data, images, written guides — is intentionally **not** committed to this
-repository. A fresh clone will be missing the paths listed below.
+The HpskSite engine is source-available under FSL-1.1-Apache-2.0 (see [LICENSE](LICENSE)).
+The pistol.nu content — data, images, written guides — is intentionally **not** committed
+to this repository. A fresh clone will be missing the paths listed below.
 
 For the project maintainer, this is invisible: local working trees still contain everything,
 and `dotnet publish` picks the files up from disk on deploy. For new contributors, the site
@@ -46,13 +46,12 @@ To get the content for a development environment, contact the maintainer.
 
 ## Why
 
-The code is open: the engine, the schema, the patterns. Anyone can read it, learn from it,
-fork it, or run their own instance under AGPL-3.0. The *curated content* — the work of
+The engine is source-available: anyone can read it, learn from it, contribute to it, or run
+their own internal instance under FSL-1.1-Apache-2.0. The *curated content* — the work of
 collecting Swedish clubs, photographing field targets, writing user guides — is not the
-engine and would let a competitor bootstrap from zero without any of that effort. Keeping it
-out of the public repo isn't a perfect barrier (past commits still contain it; anyone who
-cloned the repo before keeps their copy) but stops the repo being a one-stop shop for that
-data going forward.
+engine and is kept out of the public repo so the repository isn't a one-stop shop for that
+data.
 
-If you want to use the engine and you have your own data and content, that's exactly what
-this licence is for. Fork and run.
+If you want to study the codebase, contribute improvements, or run it for non-commercial
+use, the licence supports that — please get in touch. The licence does not permit using
+the software to offer a competing commercial product or service.
