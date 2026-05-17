@@ -48,6 +48,12 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             foreach (var shooter in shooters)
             {
                 var weaponGroup = ExtractWeaponGroup(shooter.ShootingClass);
+                // A-family medal pooling: AM/AP/AG shooters are ranked together with the
+                // open A class for medal eligibility (SPSF rule). A_Opt is a parallel
+                // weapon group and stays separate.
+                if (weaponGroup == "A_M" || weaponGroup == "A_P" || weaponGroup == "A_G")
+                    weaponGroup = "A";
+
                 string groupKey;
 
                 if (splitGroupC && weaponGroup == "C")

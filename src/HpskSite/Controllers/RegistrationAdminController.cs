@@ -312,6 +312,13 @@ namespace HpskSite.Controllers
                     .SerializeShootingClasses(newClasses);
                 registration.SetValue("shootingClasses", newClassesJson);
 
+                // Persist the deltävling opt-in. We need to know the previous stored value to
+                // decide whether the fee changed when only this flag flipped (no class diff).
+                bool previousIsSubCompetition = registration.HasProperty("isSubCompetition")
+                    && registration.GetValue<bool>("isSubCompetition");
+                if (registration.HasProperty("isSubCompetition"))
+                    registration.SetValue("isSubCompetition", request.IsSubCompetition);
+
                 var saveResult = _contentService.Save(registration);
                 if (!saveResult.Success)
                     return Json(new { success = false, message = "Failed to save registration" });
@@ -351,7 +358,8 @@ namespace HpskSite.Controllers
                 string? feeChangeNote = null;
                 int? topUpInvoiceId = null;
                 bool classesChanged = !ClassListEquivalent(existingClasses, newClasses);
-                if (classesChanged && competition != null)
+                bool subCompetitionChanged = previousIsSubCompetition != request.IsSubCompetition;
+                if ((classesChanged || subCompetitionChanged) && competition != null)
                 {
                     var classCodes = newClasses.Select(c => c.Class).ToList();
                     var newFee = HpskSite.Services.RegistrationFeeCalculator.Calculate(
@@ -705,6 +713,8 @@ namespace HpskSite.Controllers
                 registration.SetValue("registrationDate", DateTime.Now);
                 registration.SetValue("registeredBy", "Admin (Late Registration)");
                 registration.SetValue("isActive", true);
+                if (registration.HasProperty("isSubCompetition"))
+                    registration.SetValue("isSubCompetition", request.IsSubCompetition);
 
                 // Save and publish
                 var saveResult = _contentService.Save(registration);
@@ -1564,6 +1574,10 @@ namespace HpskSite.Controllers
             /// competitions, so a shooter walking up to register A + C with different start
             /// times completes in one round trip.</summary>
             public List<UpdateRegistrationClass>? Classes { get; set; }
+            /// <summary>Opt-in to the competition's deltävling (sub-competition). Persisted on
+            /// the registration so subsequent fee recomputes via RegistrationFeeCalculator add
+            /// the surcharge consistently. Defaults to false when the cashier doesn't tick it.</summary>
+            public bool IsSubCompetition { get; set; }
         }
 
         /// <summary>

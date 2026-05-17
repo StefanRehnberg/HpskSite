@@ -1528,7 +1528,8 @@ namespace HpskSite.Controllers
                             paidAmount = paidAmount,
                             pendingAmount = pendingAmount,
                             hasVariance = hasVariance,
-                            isCheckedIn = content.GetValue<bool>("isCheckedIn")
+                            isCheckedIn = content.GetValue<bool>("isCheckedIn"),
+                            isSubCompetition = content.HasProperty("isSubCompetition") && content.GetValue<bool>("isSubCompetition")
                         };
                     })
                     .OrderBy(r => r.memberName)
@@ -2159,7 +2160,8 @@ namespace HpskSite.Controllers
                                 id = r.Id,
                                 shootingClasses = shootingClasses,  // ✅ Returns array of class objects
                                 registrationDate = r.GetValue<DateTime>("registrationDate"),
-                                isPublished = r.Published
+                                isPublished = r.Published,
+                                isSubCompetition = r.HasProperty("isSubCompetition") && r.GetValue<bool>("isSubCompetition")
                             };
                         })
                         .ToList<object>();

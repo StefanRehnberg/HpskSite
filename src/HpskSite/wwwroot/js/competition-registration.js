@@ -63,7 +63,7 @@ function initializeRegistrationModal() {
     });
 
     // Handle radio button changes for each class group
-    const nonCClassGroups = ['selectedAClass', 'selectedAOptClass', 'selectedBClass', 'selectedRClass', 'selectedMClass'];
+    const nonCClassGroups = ['selectedAClass', 'selectedAOptClass', 'selectedAMClass', 'selectedAPClass', 'selectedAGClass', 'selectedBClass', 'selectedRClass', 'selectedMClass'];
     const cClassGroups = ['selectedCRegular', 'selectedCVet', 'selectedCDam', 'selectedCJun'];
     const lClassGroups = ['selectedLRegular', 'selectedLVet', 'selectedLDam', 'selectedLJun'];
 
@@ -392,7 +392,7 @@ function updateSubmitButton() {
     if (!submitBtn) return;
 
     // Check if any radio button is selected from any group
-    const radioGroups = ['selectedAClass', 'selectedAOptClass', 'selectedBClass', 'selectedRClass', 'selectedCRegular', 'selectedCVet', 'selectedCDam', 'selectedCJun', 'selectedLRegular', 'selectedLVet', 'selectedLDam', 'selectedLJun', 'selectedMClass'];
+    const radioGroups = ['selectedAClass', 'selectedAOptClass', 'selectedAMClass', 'selectedAPClass', 'selectedAGClass', 'selectedBClass', 'selectedRClass', 'selectedCRegular', 'selectedCVet', 'selectedCDam', 'selectedCJun', 'selectedLRegular', 'selectedLVet', 'selectedLDam', 'selectedLJun', 'selectedMClass'];
     let hasSelection = false;
 
     for (let groupName of radioGroups) {
@@ -415,7 +415,7 @@ function updateRegistrationButton() {
 }
 
 function validateLevelConsistency(newClassId) {
-    const radioGroups = ['selectedAClass', 'selectedAOptClass', 'selectedBClass', 'selectedRClass', 'selectedCRegular', 'selectedCVet', 'selectedCDam', 'selectedCJun', 'selectedLRegular', 'selectedLVet', 'selectedLDam', 'selectedLJun', 'selectedMClass'];
+    const radioGroups = ['selectedAClass', 'selectedAOptClass', 'selectedAMClass', 'selectedAPClass', 'selectedAGClass', 'selectedBClass', 'selectedRClass', 'selectedCRegular', 'selectedCVet', 'selectedCDam', 'selectedCJun', 'selectedLRegular', 'selectedLVet', 'selectedLDam', 'selectedLJun', 'selectedMClass'];
     const selectedRadios = [];
 
     // Get all currently selected radio buttons
@@ -502,13 +502,23 @@ function validateLClassSelection(newClassId) {
 }
 
 function getClassLevel(classId) {
+    if (!classId) return null;
     // M-classes are exempt from level matching
-    if (classId && classId.startsWith('M')) {
+    if (classId.startsWith('M')) {
         return null;
     }
 
-    // Extract level from class ID/name
-    // Assumes class names like "A1", "B2", "C3", "R1", "L1", "C1_Dam", etc.
+    // A-family subgroup IDs (A_m_1, A_p_2, A_g_3, A_opt_1) — level is the trailing digit.
+    // These don't match the simple /([ABCRL])([123])/ regex because the digit isn't
+    // directly after the weapon-group letter, so we extract by ID first.
+    const familyMatch = classId.match(/^A_(?:m|p|g|opt)_([123])$/i);
+    if (familyMatch) return familyMatch[1];
+
+    // Standard IDs (A1, B2, C3, R1, L1) and composites (C1_Dam, L3_Dam).
+    const idMatch = classId.match(/^([ABCRL])([123])(?:_|$)/);
+    if (idMatch) return idMatch[2];
+
+    // Fallback: parse from display name (e.g. when the regex above can't see the digit).
     const className = getClassDisplayName(classId);
     const levelMatch = className.match(/([ABCRL])([123])/);
     return levelMatch ? levelMatch[2] : null;
@@ -518,6 +528,10 @@ function getClassDisplayName(classId) {
     // Get the display name from the label associated with this class
     const labelSelectors = [
         `label[for="class_A_${classId}"] strong`,
+        `label[for="class_AOpt_${classId}"] strong`,
+        `label[for="class_AM_${classId}"] strong`,
+        `label[for="class_AP_${classId}"] strong`,
+        `label[for="class_AG_${classId}"] strong`,
         `label[for="class_B_${classId}"] strong`,
         `label[for="class_R_${classId}"] strong`,
         `label[for="class_CR_${classId}"] strong`,
@@ -541,7 +555,7 @@ function getClassDisplayName(classId) {
 }
 
 function updateClassAvailability() {
-    const radioGroups = ['selectedAClass', 'selectedAOptClass', 'selectedBClass', 'selectedRClass', 'selectedCRegular', 'selectedCVet', 'selectedCDam', 'selectedCJun', 'selectedLRegular', 'selectedLVet', 'selectedLDam', 'selectedLJun', 'selectedMClass'];
+    const radioGroups = ['selectedAClass', 'selectedAOptClass', 'selectedAMClass', 'selectedAPClass', 'selectedAGClass', 'selectedBClass', 'selectedRClass', 'selectedCRegular', 'selectedCVet', 'selectedCDam', 'selectedCJun', 'selectedLRegular', 'selectedLVet', 'selectedLDam', 'selectedLJun', 'selectedMClass'];
     const selectedRadios = [];
 
     // Get all currently selected radio buttons
@@ -637,7 +651,7 @@ async function submitRegistrationForm() {
     };
 
     try {
-        const radioGroups = ['selectedAClass', 'selectedAOptClass', 'selectedBClass', 'selectedRClass', 'selectedCRegular', 'selectedCVet', 'selectedCDam', 'selectedCJun', 'selectedLRegular', 'selectedLVet', 'selectedLDam', 'selectedLJun', 'selectedMClass'];
+        const radioGroups = ['selectedAClass', 'selectedAOptClass', 'selectedAMClass', 'selectedAPClass', 'selectedAGClass', 'selectedBClass', 'selectedRClass', 'selectedCRegular', 'selectedCVet', 'selectedCDam', 'selectedCJun', 'selectedLRegular', 'selectedLVet', 'selectedLDam', 'selectedLJun', 'selectedMClass'];
         const selectedClasses = [];
         const startPreferencesMap = {};
 
@@ -1171,6 +1185,9 @@ function initializeCClassValidation() {
         registrationForm.addEventListener('submit', function(e) {
             const selectedA = document.querySelector('input[name="selectedAClass"]:checked');
             const selectedAOpt = document.querySelector('input[name="selectedAOptClass"]:checked');
+            const selectedAM = document.querySelector('input[name="selectedAMClass"]:checked');
+            const selectedAP = document.querySelector('input[name="selectedAPClass"]:checked');
+            const selectedAG = document.querySelector('input[name="selectedAGClass"]:checked');
             const selectedB = document.querySelector('input[name="selectedBClass"]:checked');
             const selectedR = document.querySelector('input[name="selectedRClass"]:checked');
             const selectedCRegular = document.querySelector('input[name="selectedCRegular"]:checked');
@@ -1183,7 +1200,7 @@ function initializeCClassValidation() {
             const selectedLDam = document.querySelector('input[name="selectedLDam"]:checked');
             const selectedM = document.querySelector('input[name="selectedMClass"]:checked');
 
-            const hasAnySelection = selectedA || selectedAOpt || selectedB || selectedR || selectedCRegular || selectedCVet || selectedCJun || selectedCDam || selectedLRegular || selectedLVet || selectedLJun || selectedLDam || selectedM;
+            const hasAnySelection = selectedA || selectedAOpt || selectedAM || selectedAP || selectedAG || selectedB || selectedR || selectedCRegular || selectedCVet || selectedCJun || selectedCDam || selectedLRegular || selectedLVet || selectedLJun || selectedLDam || selectedM;
 
             if (!hasAnySelection) {
                 e.preventDefault();
@@ -1217,6 +1234,28 @@ function initializeCClassValidation() {
                         selectedLevel = match[1];
                         levelSource = `A Opt ${selectedLevel}`;
                     }
+                }
+            }
+
+            // Check AM/AP/AG classes for level — A-family subgroups, same competence ladder
+            // as plain A. Each is its own weapon group; level must match across groups.
+            const aFamilySubs = [
+                { selected: selectedAM, regex: /^A_m_([123])$/, name: 'AM' },
+                { selected: selectedAP, regex: /^A_p_([123])$/, name: 'AP' },
+                { selected: selectedAG, regex: /^A_g_([123])$/, name: 'AG' }
+            ];
+            for (const sub of aFamilySubs) {
+                if (!sub.selected) continue;
+                const match = sub.selected.value.match(sub.regex);
+                if (!match) continue;
+                if (selectedLevel && selectedLevel !== match[1]) {
+                    e.preventDefault();
+                    alert(`Du har valt ${levelSource} och ${sub.name}${match[1]}. Du måste välja samma nivå (1-3) i alla klasser.`);
+                    return false;
+                }
+                if (!selectedLevel) {
+                    selectedLevel = match[1];
+                    levelSource = `${sub.name}${selectedLevel}`;
                 }
             }
 
@@ -1823,6 +1862,16 @@ function addExistingRegistrationBadges() {
         }
     });
 
+    // Pre-fill the deltävling checkbox from the existing registration so the modal
+    // reflects the persisted state when reopened. Any change here counts as a "selection
+    // changed" event so the Anmäl button enables even when classes stay the same.
+    const subCompCheckbox = document.getElementById('subCompetitionCheckbox');
+    if (subCompCheckbox) {
+        const wasSubCompetition = existingRegistrations.some(reg => reg.isSubCompetition === true);
+        subCompCheckbox.checked = wasSubCompetition;
+        subCompCheckbox.dataset.originallyChecked = wasSubCompetition ? 'true' : 'false';
+    }
+
     // Initialize button state management after badges and auto-check
     initializeButtonStateManagement();
 }
@@ -1840,6 +1889,7 @@ function isClassAlreadyRegistered(classId) {
 // Capture original selection state
 function captureOriginalSelection() {
     const originalClasses = [];
+    let originalIsSubCompetition = false;
     if (existingRegistrations.length > 0) {
         existingRegistrations.forEach(reg => {
             if (reg.shootingClasses && Array.isArray(reg.shootingClasses)) {
@@ -1847,15 +1897,17 @@ function captureOriginalSelection() {
                     originalClasses.push(classEntry.class);
                 });
             }
+            if (reg.isSubCompetition === true) originalIsSubCompetition = true;
         });
     }
-    return originalClasses.sort();
+    return { classes: originalClasses.sort(), isSubCompetition: originalIsSubCompetition };
 }
 
 // Check if selection has changed from original
-function hasSelectionChanged(originalClasses) {
+function hasSelectionChanged(original) {
     const currentClasses = [];
-    const radioGroups = ['selectedAClass', 'selectedAOptClass', 'selectedBClass', 'selectedRClass',
+    const radioGroups = ['selectedAClass', 'selectedAOptClass', 'selectedAMClass', 'selectedAPClass', 'selectedAGClass',
+                       'selectedBClass', 'selectedRClass',
                        'selectedCRegular', 'selectedCVet', 'selectedCDam', 'selectedCJun',
                        'selectedLRegular', 'selectedLVet', 'selectedLDam', 'selectedLJun',
                        'selectedMClass'];
@@ -1868,8 +1920,15 @@ function hasSelectionChanged(originalClasses) {
     });
 
     const sortedCurrent = currentClasses.sort();
+    const originalClasses = original.classes;
 
-    // Compare arrays
+    // Sub-competition checkbox is part of the "is this a change" check — toggling only
+    // the deltävling opt-in must enable the Anmäl button.
+    const subCompCheckbox = document.getElementById('subCompetitionCheckbox');
+    const currentIsSubCompetition = !!(subCompCheckbox && subCompCheckbox.checked);
+    if (currentIsSubCompetition !== !!original.isSubCompetition) return true;
+
+    // Compare class arrays
     if (originalClasses.length !== sortedCurrent.length) return true;
 
     for (let i = 0; i < originalClasses.length; i++) {
@@ -1884,15 +1943,15 @@ function updateButtonState() {
     const submitBtn = document.getElementById('modalRegisterBtn');
     if (!submitBtn) return;
 
-    const originalClasses = captureOriginalSelection();
+    const original = captureOriginalSelection();
 
     if (existingRegistrations.length > 0) {
-        const changed = hasSelectionChanged(originalClasses);
+        const changed = hasSelectionChanged(original);
 
         if (!changed) {
             // Selection matches existing registration - disable button
             submitBtn.disabled = true;
-            submitBtn.title = 'Välj andra klasser för att ändra anmälan';
+            submitBtn.title = 'Välj andra klasser eller ändra deltävlingsval för att uppdatera anmälan';
         } else {
             // Selection changed - enable button
             submitBtn.disabled = false;
@@ -1917,6 +1976,14 @@ function initializeButtonStateManagement() {
     document.querySelectorAll('input[type="radio"]').forEach(radio => {
         radio.addEventListener('change', updateButtonState);
     });
+
+    // The deltävling checkbox is also part of the "did the registration change?"
+    // signal — listen so toggling only the checkbox enables the Anmäl button.
+    const subCompCheckbox = document.getElementById('subCompetitionCheckbox');
+    if (subCompCheckbox && !subCompCheckbox.dataset.changeListenerBound) {
+        subCompCheckbox.addEventListener('change', updateButtonState);
+        subCompCheckbox.dataset.changeListenerBound = 'true';
+    }
 }
 
 // Show confirmation dialog for updating an existing registration
@@ -2274,7 +2341,7 @@ async function registerAndJoinPatrol() {
 
     try {
         // Collect selected classes (same logic as submitRegistrationForm)
-        var radioGroups = ['selectedAClass', 'selectedAOptClass', 'selectedBClass', 'selectedRClass', 'selectedCRegular', 'selectedCVet', 'selectedCDam', 'selectedCJun', 'selectedLRegular', 'selectedLVet', 'selectedLDam', 'selectedLJun', 'selectedMClass'];
+        var radioGroups = ['selectedAClass', 'selectedAOptClass', 'selectedAMClass', 'selectedAPClass', 'selectedAGClass', 'selectedBClass', 'selectedRClass', 'selectedCRegular', 'selectedCVet', 'selectedCDam', 'selectedCJun', 'selectedLRegular', 'selectedLVet', 'selectedLDam', 'selectedLJun', 'selectedMClass'];
         var selectedClasses = [];
         radioGroups.forEach(function(groupName) {
             var checked = document.querySelector('input[name="' + groupName + '"]:checked');
@@ -2495,7 +2562,7 @@ async function fetchDpTeamAvailability() {
 function onDpClassSelectionChanged() {
     if (!window.CompetitionConfig?.isDirektplacering || !dpTeamAvailability) return;
 
-    const radioGroups = ['selectedAClass', 'selectedAOptClass', 'selectedBClass', 'selectedRClass', 'selectedCRegular', 'selectedCVet', 'selectedCDam', 'selectedCJun', 'selectedLRegular', 'selectedLVet', 'selectedLDam', 'selectedLJun', 'selectedMClass'];
+    const radioGroups = ['selectedAClass', 'selectedAOptClass', 'selectedAMClass', 'selectedAPClass', 'selectedAGClass', 'selectedBClass', 'selectedRClass', 'selectedCRegular', 'selectedCVet', 'selectedCDam', 'selectedCJun', 'selectedLRegular', 'selectedLVet', 'selectedLDam', 'selectedLJun', 'selectedMClass'];
     const selectedClasses = [];
 
     radioGroups.forEach(groupName => {

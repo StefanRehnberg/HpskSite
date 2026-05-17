@@ -209,7 +209,7 @@ function renderJoinModalMatches(matches) {
     const list = document.getElementById('joinModalMatchList');
     if (!list) return;
 
-    const weaponColors = { A: 'info', B: 'purple', C: 'success', R: 'warning', P: 'danger', M: 'dark', L: 'secondary' };
+    const weaponColors = { A: 'info', A_Opt: 'info', A_M: 'info', A_P: 'info', A_G: 'info', B: 'purple', C: 'success', R: 'warning', P: 'danger', M: 'dark', L: 'secondary' };
 
     list.innerHTML = '<div class="list-group">' + matches.map((m, index) => {
         // Compact avatars (max 3)

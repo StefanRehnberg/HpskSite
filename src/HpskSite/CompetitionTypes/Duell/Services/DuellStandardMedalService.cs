@@ -124,7 +124,11 @@ namespace HpskSite.CompetitionTypes.Duell.Services
         private static string ExtractWeaponGroup(string shootingClass)
         {
             var code = ShootingClasses.GetWeaponClassCode(shootingClass);
-            if (code == "A" || code == "A_Opt" || code == "B" || code == "C")
+            // Defensive: even though Duell competitions don't pool A-family for medals,
+            // accept the new A-subgroup codes so they pass through to their own ranking
+            // bucket rather than getting silently lumped into "C" by the unknown-fallback.
+            if (code == "A" || code == "A_Opt" || code == "A_M" || code == "A_P" || code == "A_G"
+                || code == "B" || code == "C")
                 return code;
             return "C";
         }

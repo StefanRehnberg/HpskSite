@@ -61,11 +61,15 @@ namespace HpskSite.CompetitionTypes.Milsnabb.Services
         /// </summary>
         private static (int Bronze, int Silver) GetMilsnabbFixedScoreRequirements(string weaponGroup, int seriesCount)
         {
-            // Milsnabb fixed score thresholds (12 series only). A_Opt follows A's thresholds.
+            // Milsnabb fixed score thresholds (12 series only). A_Opt and the A-family
+            // subgroups (AM/AP/AG) all follow the open A class thresholds.
             return (weaponGroup, seriesCount) switch
             {
                 ("A", 12) => (516, 540),
                 ("A_Opt", 12) => (516, 540),
+                ("A_M", 12) => (516, 540),
+                ("A_P", 12) => (516, 540),
+                ("A_G", 12) => (516, 540),
                 ("R", 12) => (528, 552),
                 ("B", 12) => (537, 561),
                 ("C", 12) => (540, 564),
@@ -78,7 +82,8 @@ namespace HpskSite.CompetitionTypes.Milsnabb.Services
         private static string ExtractWeaponGroup(string shootingClass)
         {
             var code = ShootingClasses.GetWeaponClassCode(shootingClass);
-            if (code == "A" || code == "A_Opt" || code == "B" || code == "C" || code == "R")
+            if (code == "A" || code == "A_Opt" || code == "A_M" || code == "A_P" || code == "A_G"
+                || code == "B" || code == "C" || code == "R")
                 return code;
             return "C";
         }

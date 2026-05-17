@@ -26,6 +26,20 @@ namespace HpskSite.Models
             new ShootingClass("A_opt_1", "A Opt 1", "Vapenklass A optisk för nybörjare", WeaponClass.A_Opt),
             new ShootingClass("A_opt_2", "A Opt 2", "Vapenklass A optisk för Guldmärkesskyttar", WeaponClass.A_Opt),
             new ShootingClass("A_opt_3", "A Opt 3", "Vapenklass A optisk för Riksmästare", WeaponClass.A_Opt),
+            // Optional A-family subgroups, only offered when a competition explicitly opts in.
+            // Display-grouped as their own weapon classes (AM/AP/AG never merge with each other or
+            // with A), but pooled into a single "A family" ranking for percentage-based standard
+            // medal calculation per SPSF rules. Level (1-3) follows the same competence ladder as
+            // regular A, so existing precisionShooterClass / handicap settings apply unchanged.
+            new ShootingClass("A_m_1", "AM1", "Vapenklass AM (militära pistoler, äldre modell) för nybörjare", WeaponClass.A_M),
+            new ShootingClass("A_m_2", "AM2", "Vapenklass AM (militära pistoler, äldre modell) för Guldmärkesskyttar", WeaponClass.A_M),
+            new ShootingClass("A_m_3", "AM3", "Vapenklass AM (militära pistoler, äldre modell) för Riksmästare", WeaponClass.A_M),
+            new ShootingClass("A_p_1", "AP1", "Vapenklass AP (fickmodell, t.ex. Walther PP/PPK) för nybörjare", WeaponClass.A_P),
+            new ShootingClass("A_p_2", "AP2", "Vapenklass AP (fickmodell, t.ex. Walther PP/PPK) för Guldmärkesskyttar", WeaponClass.A_P),
+            new ShootingClass("A_p_3", "AP3", "Vapenklass AP (fickmodell, t.ex. Walther PP/PPK) för Riksmästare", WeaponClass.A_P),
+            new ShootingClass("A_g_1", "AG1", "Vapenklass AG (moderna tjänstepistoler, t.ex. Glock 17/19) för nybörjare", WeaponClass.A_G),
+            new ShootingClass("A_g_2", "AG2", "Vapenklass AG (moderna tjänstepistoler, t.ex. Glock 17/19) för Guldmärkesskyttar", WeaponClass.A_G),
+            new ShootingClass("A_g_3", "AG3", "Vapenklass AG (moderna tjänstepistoler, t.ex. Glock 17/19) för Riksmästare", WeaponClass.A_G),
             new ShootingClass("B1", "B1", "Vapenklass B för nybörjare", WeaponClass.B),
             new ShootingClass("B2", "B2", "Vapenklass B för Guldmärkesskyttar", WeaponClass.B),
             new ShootingClass("B3", "B3", "Vapenklass B för Riksmästare", WeaponClass.B),
@@ -113,6 +127,21 @@ namespace HpskSite.Models
         /// Tjänstevapen med optiskt riktmedel
         /// </summary>
         A_Opt,
+        /// <summary>
+        /// AM: Militära pistoler av äldre modell (m/07, m/40, P08)
+        /// — A-family subgroup, separate display class, pooled with A for medal calc.
+        /// </summary>
+        A_M,
+        /// <summary>
+        /// AP: Pistoler av fickmodell (Walther PP, PPK)
+        /// — A-family subgroup, separate display class, pooled with A for medal calc.
+        /// </summary>
+        A_P,
+        /// <summary>
+        /// AG: Moderna tjänstepistoler med fasta riktmedel (Glock 17, 19)
+        /// — A-family subgroup, separate display class, pooled with A for medal calc.
+        /// </summary>
+        A_G,
         /// <summary>
         /// Kal. 32-45
         /// </summary>

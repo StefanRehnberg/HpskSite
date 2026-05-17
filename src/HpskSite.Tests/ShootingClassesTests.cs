@@ -66,5 +66,64 @@ namespace HpskSite.Tests
             // Old single A_opt entry must be gone — call sites should migrate to one of the 3 levels.
             Assert.Null(ShootingClasses.GetById("A_opt"));
         }
+
+        // ── A-family subgroups (AM/AP/AG): own weapon groups, 1-3 competence ladder ──
+
+        [Theory]
+        [InlineData("A_m_1", "A_M")]
+        [InlineData("A_m_2", "A_M")]
+        [InlineData("A_m_3", "A_M")]
+        [InlineData("A_p_1", "A_P")]
+        [InlineData("A_p_2", "A_P")]
+        [InlineData("A_p_3", "A_P")]
+        [InlineData("A_g_1", "A_G")]
+        [InlineData("A_g_2", "A_G")]
+        [InlineData("A_g_3", "A_G")]
+        public void GetWeaponClassCode_ResolvesAFamilySubgroupsById(string id, string expected)
+        {
+            Assert.Equal(expected, ShootingClasses.GetWeaponClassCode(id));
+        }
+
+        [Theory]
+        [InlineData("AM1", "A_M")]
+        [InlineData("AM2", "A_M")]
+        [InlineData("AM3", "A_M")]
+        [InlineData("AP1", "A_P")]
+        [InlineData("AP2", "A_P")]
+        [InlineData("AP3", "A_P")]
+        [InlineData("AG1", "A_G")]
+        [InlineData("AG2", "A_G")]
+        [InlineData("AG3", "A_G")]
+        public void GetWeaponClassCode_ResolvesAFamilySubgroupsByName(string name, string expected)
+        {
+            Assert.Equal(expected, ShootingClasses.GetWeaponClassCode(name));
+        }
+
+        [Fact]
+        public void Registry_ContainsAFamilySubgroupLevels()
+        {
+            Assert.NotNull(ShootingClasses.GetById("A_m_1"));
+            Assert.NotNull(ShootingClasses.GetById("A_m_2"));
+            Assert.NotNull(ShootingClasses.GetById("A_m_3"));
+            Assert.NotNull(ShootingClasses.GetById("A_p_1"));
+            Assert.NotNull(ShootingClasses.GetById("A_p_2"));
+            Assert.NotNull(ShootingClasses.GetById("A_p_3"));
+            Assert.NotNull(ShootingClasses.GetById("A_g_1"));
+            Assert.NotNull(ShootingClasses.GetById("A_g_2"));
+            Assert.NotNull(ShootingClasses.GetById("A_g_3"));
+        }
+
+        [Fact]
+        public void AFamilySubgroups_HaveDistinctWeaponClassEnums()
+        {
+            // Each subgroup is its own weapon class — they don't share with A or each other.
+            Assert.Equal(WeaponClass.A_M, ShootingClasses.GetWeaponClass("A_m_1"));
+            Assert.Equal(WeaponClass.A_P, ShootingClasses.GetWeaponClass("A_p_1"));
+            Assert.Equal(WeaponClass.A_G, ShootingClasses.GetWeaponClass("A_g_1"));
+            // And NOT A — the registry separation is the whole point of the subgroup design.
+            Assert.NotEqual(WeaponClass.A, ShootingClasses.GetWeaponClass("A_m_1"));
+            Assert.NotEqual(WeaponClass.A, ShootingClasses.GetWeaponClass("A_p_1"));
+            Assert.NotEqual(WeaponClass.A, ShootingClasses.GetWeaponClass("A_g_1"));
+        }
     }
 }

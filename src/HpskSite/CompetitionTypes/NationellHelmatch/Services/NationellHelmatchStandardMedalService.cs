@@ -38,6 +38,10 @@ namespace HpskSite.CompetitionTypes.NationellHelmatch.Services
             foreach (var shooter in shooters)
             {
                 var weaponGroup = ExtractWeaponGroup(shooter.ShootingClass);
+                // A-family medal pooling: AM/AP/AG shooters are ranked with the open A
+                // class for medal eligibility (SPSF rule). A_Opt stays separate.
+                if (weaponGroup == "A_M" || weaponGroup == "A_P" || weaponGroup == "A_G")
+                    weaponGroup = "A";
 
                 string groupKey;
                 if (shouldSplitGroupC && weaponGroup == "C")
@@ -125,7 +129,8 @@ namespace HpskSite.CompetitionTypes.NationellHelmatch.Services
         private static string ExtractWeaponGroup(string shootingClass)
         {
             var code = ShootingClasses.GetWeaponClassCode(shootingClass);
-            if (code == "A" || code == "A_Opt" || code == "B" || code == "C")
+            if (code == "A" || code == "A_Opt" || code == "A_M" || code == "A_P" || code == "A_G"
+                || code == "B" || code == "C")
                 return code;
             return "C";
         }

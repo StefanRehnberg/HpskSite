@@ -535,11 +535,59 @@ if (stringValue.TrimStart().StartsWith("[")) {
 - `Controllers/CompetitionResultsController.cs` — `AnalyzeClassMerges` GET endpoint, merge logic in `CalculateFinalResults`
 - `Views/Partials/CompetitionResultsManagement.cshtml` — modal UI + JS two-step flow
 
-**Rules:** Class 1 never merges. A/B class 2+3 can merge. C/L Dam→open class, Vet Ä→Vet Y→open (cascading), Jun→admin choice. R2+R3 for Milsnabb only. Never across weapon groups. MagnumPrecision/Springskytte excluded.
+**Rules:** Class 1 never merges. A/B class 2+3 can merge. A_Opt, A_M, A_P, A_G follow the same level-2/3 rule within their own subgroup — never with each other and never with the open A class. C/L Dam→open class, Vet Ä→Vet Y→open (cascading), Jun→admin choice. R2+R3 for Milsnabb only. Never across weapon groups. MagnumPrecision/Springskytte excluded.
 
 **Implementation:** Merging at GroupBy level (shooter's ShootingClass untouched). Merge config persisted as `mergeConfig` property on `competitionResult` document type (Textarea). Re-applied on preliminary result reload.
 
 **Umbraco Setup:** `competitionResult` document type needs `mergeConfig` property (Textarea).
+
+### Sub-competition (Deltävling) Result Lists ✅ COMPLETE (2026-05-17)
+**Overview:** When a competition has `subCompetitionName` set, the admin Resultat tab renders a second result-list card for the Deltävling subset (shooters with `isSubCompetition=true` on their registration). The Deltävling list publishes independently from the main list and gets its own public **Visa resultat** button on the competition page.
+
+**Key behaviour:**
+- **Independent publish state**: `subCompetitionIsOfficial` on the `competitionResult` node, separate from main `isOfficial`.
+- **Independent merge config**: `subCompetitionMergeConfig` (separate analysis over only the Deltävling subset's class counts).
+- **Live recompute**: Deltävling results are always recomputed from the DB (no frozen snapshot). Main keeps the snapshot-on-publish behaviour.
+- **Public URL**: `/resultat/?sub=true` renders the Deltävling subset. `Competition.cshtml` shows a second **Visa [subCompetitionName] resultat** button only when `subCompetitionIsOfficial=true`.
+- **Admin embed**: Fältskytte's admin Deltävling card iframes `/resultat/?sub=true` so it looks identical to the main card.
+
+**Key files:**
+- `CompetitionTypes/Faltskytte/Controllers/FaltskytteController.cs` — `GetFaltskytteResults?subCompetitionOnly=true`, `AnalyzeFaltskytteMerges?subCompetitionOnly=true`, `SaveMergeConfig + PublishResults` with `IsSubCompetition` flag.
+- `Controllers/CompetitionResultsController.cs` — `GetResultsList`, `AnalyzeClassMerges`, `CreateResultsList`, `ToggleResultsOfficial` all accept `subCompetitionOnly` / `IsSubCompetition`.
+- `CompetitionTypes/Springskytte/Controllers/SpringskytteController.cs` — `GetSpringskytteResults?subCompetitionOnly=true`, `CalculateSpringskytteSubFinalResults` (publishes the Deltävling).
+- `Views/CompetitionResult.cshtml` — branches on `?sub=true` query param; title + heading reflect `subCompetitionName`.
+- `Views/Competition.cshtml` — second public button, gated on `hasResultPage && subCompetitionName != "" && subCompetitionIsOfficial`.
+
+**Umbraco operator setup**: add two properties to `competitionResult` doctype — see "Document Type Properties — Required Additions" section. Without them, sub-comp publish + sub-comp merge silently fail.
+
+### Standard Medals — A-family pooling rule ✅ (2026-05-17)
+**Rule:** When standard medals are calculated, shooters in AM, AP, AG, and the open A class are pooled into a single "A family" ranking — percentage quotas (top 1/9 silver, top 1/3 bronze) are computed across the combined pool. Fixed-score thresholds (267/277 for 6 series, etc.) apply identically to every A-family subgroup. **A_Opt is NOT in the pool** — it's a parallel weapon group with its own ranking.
+
+**Result-list display vs medal grouping are decoupled**: shooters appear in their original display class (AM2 stays AM2) but their medal eligibility is computed against the pooled A-family.
+
+**Implementation:** `GroupByWeaponGroup` in each medal service folds A_M/A_P/A_G into the "A" bucket. Fixed-score tables include explicit `("A_M", n)`, `("A_P", n)`, `("A_G", n)` entries matching A's numbers. Applies to:
+- `CompetitionTypes/Precision/Services/StandardMedalCalculationService.cs`
+- `CompetitionTypes/Milsnabb/Services/MilsnabbStandardMedalService.cs`
+- `CompetitionTypes/Faltskytte/Services/FaltskytteStandardMedalService.cs`
+- `CompetitionTypes/NationellHelmatch/Services/NationellHelmatchStandardMedalService.cs`
+
+Medal calculation is gated on `competition.isAwardingStandardMedals && !competition.isClubOnly` (BR-PS.1.3). When OFF, the medal service short-circuits and views drop the Std column from result tables (Fältskytte/Springskytte/Precision public renderers respect this flag).
+
+Tests: `HpskSite.Tests/Services/StandardMedalCalculationServiceTests.AFamilyPooling.cs` covers pooling, fixed-score parity, and A_Opt isolation.
+
+### AM/AP/AG Weapon Subgroups ✅ (2026-05-17)
+**Optional weapon subgroups offered by some competitions** for dividing the A weapon group by pistol type:
+- **AM**: Militära pistoler av äldre modell (m/07, m/40, P08)
+- **AP**: Pistoler av fickmodell (Walther PP, PPK)
+- **AG**: Moderna tjänstepistoler med fasta riktmedel (Glock 17, 19)
+
+Each is a separate `WeaponClass` enum value (`A_M`, `A_P`, `A_G`) with 3 competence levels (AM1/AM2/AM3 etc.) following the same 1–3 ladder as A. Class IDs: `A_m_1`, `A_m_2`, …, `A_g_3`. Display names: `AM1`, `AP2`, etc.
+
+**Scope**: Precision, Fältskytte, Milsnabb, NationellHelmatch. (Not MagnumPrecision, Duell, Springskytte.)
+
+**Shooter declares competence (1/2/3) ONCE on `precisionShooterClass`** — same property covers A, A_Opt, AM, AP, AG. Handicap settings apply uniformly across the A-family.
+
+**Per-competition opt-in**: the wizard/edit modal class checkboxes include the 9 new entries; competitions opt in by ticking them. Existing competitions are unaffected.
 
 ### CompetitionController (Public + Admin endpoints)
 **Location:** `Controllers/CompetitionController.cs`
@@ -908,6 +956,8 @@ Navigate to **Members → Member Groups**:
 - **registrationInvoice**: add `actualPaidAmount` Decimal property (optional, label "Faktiskt belopp"). Cashier flow records what was actually collected when it differs from the billed total. Without this property, the variance feature silently no-ops (billed = actual). Added 2026-05-06.
 - **competitionRegistration**: add `isCheckedIn` True/False property (optional, default false, label "Incheckad"). Powers the at-the-desk attendance toggle on the Anmälningar table. Without this property, the toggle silently no-ops (`IContent.SetValue` on a missing property is a no-op). Added 2026-05-06.
 - **competition**: add `faltskytteSelfServiceResults` True/False property (optional, default false, label "Tillåt självservice (skyttar fyller i resultat)"). When ON, logged-in shooters in a patrol can enter results for that patrol on `/station?c=X&s=N`; staff retains full edit. Without this property the wizard checkbox silently no-ops. Added 2026-05-09. Also requires running `Migrations/add-currentstation-to-faltskyttepatrol.sql` in SSMS to add the per-patrol cursor column.
+- **competitionResult**: add `subCompetitionIsOfficial` True/False property (optional, default false, label "Deltävling publicerad som officiell"). Powers the independent Deltävling publish toggle. Without it, the Publicera button on the Deltävling section returns an error and the second public "Visa resultat" button cannot appear. Added 2026-05-17.
+- **competitionResult**: add `subCompetitionMergeConfig` Textarea property (optional, label "Deltävling – sammanslagningskonfiguration (JSON)"). Stores the Deltävling's own class-merge config — separate from the main `mergeConfig` so the subset analyses its own <5-shooter classes. Without it, sub-comp Sammanslagning silently no-ops. Added 2026-05-17.
 
 ## Common Patterns
 

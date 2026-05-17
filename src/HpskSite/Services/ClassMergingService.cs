@@ -113,7 +113,7 @@ namespace HpskSite.Services
                 return $"{weaponGroup} Vet";
             }
 
-            // Class 2+3 merge (A2+A3, B2+B3, R2+R3) → "A2+3"
+            // Class 2+3 merge (A2+A3, B2+B3, R2+R3, AM2+AM3 …) → "A2+3" / "AM2+3"
             var sourceLevel = GetCompetenceLevel(source);
             var targetLevel = GetCompetenceLevel(target);
             if (sourceLevel != null && targetLevel != null &&
@@ -124,7 +124,16 @@ namespace HpskSite.Services
                 var weaponGroup = GetWeaponGroup(source);
                 var low = Math.Min(sourceLevel.Value, targetLevel.Value);
                 var high = Math.Max(sourceLevel.Value, targetLevel.Value);
-                return $"{weaponGroup}{low}+{high}";
+                // Use display-name prefix so AM2+AM3 renders as "AM2+3" (not "A_M2+3").
+                var prefix = weaponGroup switch
+                {
+                    "A_Opt" => "A Opt ",
+                    "A_M" => "AM",
+                    "A_P" => "AP",
+                    "A_G" => "AG",
+                    _ => weaponGroup
+                };
+                return $"{prefix}{low}+{high}";
             }
 
             // Dam merging into open class → "C2+Dam"
@@ -164,8 +173,11 @@ namespace HpskSite.Services
             if (weaponGroup == "M")
                 return null;
 
-            // ── Weapon groups A, A_Opt, B: class 2 ↔ 3 ──
-            if (weaponGroup == "A" || weaponGroup == "A_Opt" || weaponGroup == "B")
+            // ── Weapon groups A, A_Opt, A_M, A_P, A_G, B: class 2 ↔ 3 ──
+            // A-family subgroups (AM/AP/AG) merge internally only — never across subgroups
+            // and never with the open A class. Same competence-ladder rule as A.
+            if (weaponGroup == "A" || weaponGroup == "A_Opt" || weaponGroup == "A_M"
+                || weaponGroup == "A_P" || weaponGroup == "A_G" || weaponGroup == "B")
                 return BuildLevel23Suggestion(className, count, classCounts, weaponGroup);
 
             // ── Weapon group R: class 2 ↔ 3 (Milsnabb, Fältskytte, MagnumFält) ──
@@ -193,7 +205,14 @@ namespace HpskSite.Services
 
             if (!classCounts.ContainsKey(partnerName)) return null;
 
-            var weaponGroupLabel = weaponGroup == "A_Opt" ? "A Opt" : weaponGroup;
+            var weaponGroupLabel = weaponGroup switch
+            {
+                "A_Opt" => "A Opt",
+                "A_M" => "AM",
+                "A_P" => "AP",
+                "A_G" => "AG",
+                _ => weaponGroup
+            };
             return new MergeSuggestion
             {
                 SourceClass = className,
@@ -316,6 +335,11 @@ namespace HpskSite.Services
         private static string FormatLevelName(string weaponGroup, int level)
         {
             if (weaponGroup == "A_Opt") return $"A Opt {level}";
+            // A-family subgroups use the compact display name (AM1/AP1/AG1) — not the
+            // underscore-style ID. Mirrors how the registry lists them.
+            if (weaponGroup == "A_M") return $"AM{level}";
+            if (weaponGroup == "A_P") return $"AP{level}";
+            if (weaponGroup == "A_G") return $"AG{level}";
             return $"{weaponGroup}{level}";
         }
 
@@ -393,7 +417,12 @@ namespace HpskSite.Services
                 { "R1", 41 }, { "R2", 42 }, { "R3", 43 },
                 { "L1", 50 }, { "L1 Dam", 51 }, { "L2", 52 }, { "L2 Dam", 53 },
                 { "L3", 54 }, { "L3 Dam", 55 },
-                { "L Vet Y", 56 }, { "L Vet Ä", 57 }, { "L Jun", 58 }
+                { "L Vet Y", 56 }, { "L Vet Ä", 57 }, { "L Jun", 58 },
+                // A-family subgroups sort at the end so existing positions stay stable.
+                // Within the family they're grouped by subgroup then level.
+                { "AM1", 60 }, { "AM2", 61 }, { "AM3", 62 },
+                { "AP1", 63 }, { "AP2", 64 }, { "AP3", 65 },
+                { "AG1", 66 }, { "AG2", 67 }, { "AG3", 68 }
             };
             return order.GetValueOrDefault(className, 999);
         }

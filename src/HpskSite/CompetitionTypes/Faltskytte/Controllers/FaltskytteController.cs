@@ -610,7 +610,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         /// Gets all results for a competition, grouped by class.
         /// </summary>
         [HttpGet]
-        public async Task<IActionResult> AnalyzeFaltskytteMerges(int competitionId)
+        public async Task<IActionResult> AnalyzeFaltskytteMerges(int competitionId, bool subCompetitionOnly = false)
         {
             try
             {
@@ -625,7 +625,15 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 // Count distinct members per class from result entries (a participant = has at least one station result)
                 var allResults = await db.FetchAsync<FaltskytteResultEntry>(
                     "WHERE CompetitionId = @0", competitionId);
-                var classCounts = allResults
+                IEnumerable<FaltskytteResultEntry> filteredResults = allResults;
+                if (subCompetitionOnly)
+                {
+                    var registrations = await _startListRepository.GetCompetitionRegistrations(competitionId);
+                    var subCompMemberIds = new HashSet<int>(
+                        registrations.Where(r => r.IsSubCompetition).Select(r => r.MemberId));
+                    filteredResults = allResults.Where(r => subCompMemberIds.Contains(r.MemberId));
+                }
+                var classCounts = filteredResults
                     .GroupBy(r => new { r.MemberId, r.ShootingClass })
                     .Select(g => g.Key)
                     .GroupBy(k => HpskSite.Models.ShootingClasses.GetById(k.ShootingClass)?.Name ?? k.ShootingClass)
@@ -634,8 +642,21 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 var service = new ClassMergingService();
                 var analysis = service.AnalyzeFromCounts(classCounts, compType);
 
-                // Load saved merge config
-                var savedConfig = competition.HasProperty("mergeConfig") ? competition.GetValue<string>("mergeConfig") ?? "" : "";
+                // Load saved merge config — sub-comp lives on the competitionResult node,
+                // main lives on the competition itself (legacy location).
+                string savedConfig;
+                if (subCompetitionOnly)
+                {
+                    var resultPageNode = _contentService.GetPagedChildren(competition.Id, 0, int.MaxValue, out _)
+                        .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
+                    savedConfig = resultPageNode != null && resultPageNode.HasProperty("subCompetitionMergeConfig")
+                        ? resultPageNode.GetValue<string>("subCompetitionMergeConfig") ?? ""
+                        : "";
+                }
+                else
+                {
+                    savedConfig = competition.HasProperty("mergeConfig") ? competition.GetValue<string>("mergeConfig") ?? "" : "";
+                }
 
                 return Json(new { success = true, analysis, savedConfig });
             }
@@ -726,12 +747,28 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                     shooterResults = shooterResults.Where(s => subCompMemberIds.Contains(s.MemberId)).ToList();
                 }
 
+                // Locate the competitionResult child node — used both for the sub-comp's
+                // own merge config / official flag and as a fallback when nothing was passed
+                // in. The node may not exist yet if results have never been published.
+                var resultPageNode = _contentService.GetPagedChildren(competition.Id, 0, int.MaxValue, out _)
+                    .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
+
                 // Build merge lookup from config (if provided)
                 var mergeLookup = new Dictionary<string, string>(); // source class → combined group name
                 if (string.IsNullOrEmpty(mergeConfig))
                 {
-                    // Try loading saved merge config from competition
-                    mergeConfig = competition.HasProperty("mergeConfig") ? competition.GetValue<string>("mergeConfig") ?? "" : "";
+                    // Sub-comp reads from its own slot on the competitionResult node;
+                    // main reads from the competition's mergeConfig (existing pattern).
+                    if (subCompetitionOnly)
+                    {
+                        mergeConfig = resultPageNode != null && resultPageNode.HasProperty("subCompetitionMergeConfig")
+                            ? resultPageNode.GetValue<string>("subCompetitionMergeConfig") ?? ""
+                            : "";
+                    }
+                    else
+                    {
+                        mergeConfig = competition.HasProperty("mergeConfig") ? competition.GetValue<string>("mergeConfig") ?? "" : "";
+                    }
                 }
                 if (!string.IsNullOrEmpty(mergeConfig))
                 {
@@ -765,8 +802,15 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                     .OrderBy(g => GetClassSortOrder(g.ClassName))
                     .ToList();
 
-                // Calculate standard medals (not for sub-competitions)
-                if (!subCompetitionOnly)
+                // Standard medals are calculated on whatever shooter set we have — for the
+                // Deltävling that's the (smaller) filtered subset, so 1/9 silver and 1/3 bronze
+                // quotas are computed over the Deltävling participants only. Gated on
+                // isAwardingStandardMedals AND !isClubOnly per BR-PS.1.3 (club competitions
+                // never award standard medals). When either gate fails the StandardMedal field
+                // on each shooter stays empty and the views drop the Std column.
+                var isAwardingStandardMedals = competition.GetValue<bool>("isAwardingStandardMedals");
+                var isClubOnly = competition.GetValue<bool>("isClubOnly");
+                if (isAwardingStandardMedals && !isClubOnly)
                 {
                     var medalService = new Services.FaltskytteStandardMedalService();
                     var scope = competition.GetValue<string>("competitionScope") ?? "";
@@ -787,6 +831,26 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                     ? (_clubService.GetClubNameById(organizerClubId) ?? "")
                     : "";
 
+                // IsOfficial reflects whichever flag is relevant for this payload:
+                //   sub-comp → resultPageNode.subCompetitionIsOfficial
+                //   main    → competition.faltskytteResultsOfficial
+                bool isOfficialForPayload;
+                if (subCompetitionOnly)
+                {
+                    isOfficialForPayload = resultPageNode != null
+                        && resultPageNode.HasProperty("subCompetitionIsOfficial")
+                        && resultPageNode.GetValue<bool>("subCompetitionIsOfficial");
+                }
+                else
+                {
+                    isOfficialForPayload = competition.HasProperty("faltskytteResultsOfficial")
+                        && competition.GetValue<bool>("faltskytteResultsOfficial");
+                }
+
+                var subCompetitionName = competition.HasProperty("subCompetitionName")
+                    ? competition.GetValue<string>("subCompetitionName") ?? ""
+                    : "";
+
                 return Json(new
                 {
                     success = true,
@@ -794,14 +858,17 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                     {
                         CompetitionId = competitionId,
                         UpdatedAt = DateTime.Now,
-                        IsOfficial = competition.HasProperty("faltskytteResultsOfficial") && competition.GetValue<bool>("faltskytteResultsOfficial"),
+                        IsOfficial = isOfficialForPayload,
                         ScoringMode = scoringMode,
                         StationCount = stationCount,
                         Config = competitionConfig,
                         ClassGroups = classGroups,
                         CompetitionName = competitionName,
                         CompetitionDate = competitionDateStr,
-                        OrganizerName = organizerName
+                        OrganizerName = organizerName,
+                        IsSubCompetition = subCompetitionOnly,
+                        SubCompetitionName = subCompetitionName,
+                        IsAwardingStandardMedals = isAwardingStandardMedals && !isClubOnly
                     }
                 });
             }
@@ -824,7 +891,30 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             if (competition == null)
                 return Json(new { success = false, message = "Tävlingen hittades inte." });
 
-            if (competition.HasProperty("mergeConfig"))
+            if (request.IsSubCompetition)
+            {
+                // Deltävling merge config lives on the competitionResult node so it stays
+                // bundled with the published Deltävling state. Create the node lazily —
+                // we don't want SaveMergeConfig to require Publish to run first.
+                var resultPageNode = _contentService.GetPagedChildren(competition.Id, 0, int.MaxValue, out _)
+                    .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
+                if (resultPageNode == null)
+                {
+                    resultPageNode = _contentService.Create("Resultat", competition.Id, "competitionResult");
+                    resultPageNode.SetValue("resultType", "Final Results");
+                }
+                if (resultPageNode.HasProperty("subCompetitionMergeConfig"))
+                {
+                    resultPageNode.SetValue("subCompetitionMergeConfig", request.MergeConfig ?? "");
+                    _contentService.Save(resultPageNode);
+                    _contentService.Publish(resultPageNode, new[] { "*" }, -1);
+                }
+                else
+                {
+                    _logger.LogWarning("competitionResult node for comp {CompId} missing 'subCompetitionMergeConfig' property — Deltävling merge config not saved. Add this property to the competitionResult document type.", request.CompetitionId);
+                }
+            }
+            else if (competition.HasProperty("mergeConfig"))
             {
                 competition.SetValue("mergeConfig", request.MergeConfig ?? "");
                 _contentService.Save(competition);
@@ -850,12 +940,17 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             if (competition == null)
                 return Json(new { success = false, message = "Tävlingen hittades inte." });
 
-            if (!competition.HasProperty("faltskytteResultsOfficial"))
+            // Main publish requires the legacy flag on the competition; sub-comp publish
+            // only writes to the competitionResult node so we don't require that flag.
+            if (!request.IsSubCompetition && !competition.HasProperty("faltskytteResultsOfficial"))
                 return Json(new { success = false, message = "Egenskapen 'faltskytteResultsOfficial' saknas på tävlingens dokumenttyp. Lägg till den i Umbraco backoffice (True/False)." });
 
-            competition.SetValue("faltskytteResultsOfficial", request.IsOfficial);
-            _contentService.Save(competition);
-            _contentService.Publish(competition, new[] { "*" }, -1);
+            if (!request.IsSubCompetition)
+            {
+                competition.SetValue("faltskytteResultsOfficial", request.IsOfficial);
+                _contentService.Save(competition);
+                _contentService.Publish(competition, new[] { "*" }, -1);
+            }
 
             // Ensure a competitionResult child page exists so the comp gets a /resultat/ URL.
             // CompetitionResult.cshtml renders Fältskytte by fetching live results from
@@ -868,7 +963,17 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 resultPage = _contentService.Create("Resultat", competition.Id, "competitionResult");
                 resultPage.SetValue("resultType", "Final Results");
             }
-            resultPage.SetValue("isOfficial", request.IsOfficial);
+
+            if (request.IsSubCompetition)
+            {
+                if (!resultPage.HasProperty("subCompetitionIsOfficial"))
+                    return Json(new { success = false, message = "Egenskapen 'subCompetitionIsOfficial' saknas på dokumenttypen competitionResult. Lägg till den i Umbraco backoffice (True/False)." });
+                resultPage.SetValue("subCompetitionIsOfficial", request.IsOfficial);
+            }
+            else
+            {
+                resultPage.SetValue("isOfficial", request.IsOfficial);
+            }
             resultPage.SetValue("lastUpdated", DateTime.Now);
             _contentService.Save(resultPage);
             _contentService.Publish(resultPage, new[] { "*" }, -1);

@@ -138,6 +138,9 @@
     var competitionShootingClasses = new List<HpskSite.Models.ShootingClass>();
     var aClasses = new List<HpskSite.Models.ShootingClass>();
     var aOptClasses = new List<HpskSite.Models.ShootingClass>();
+    var aMClasses = new List<HpskSite.Models.ShootingClass>();
+    var aPClasses = new List<HpskSite.Models.ShootingClass>();
+    var aGClasses = new List<HpskSite.Models.ShootingClass>();
     var bClasses = new List<HpskSite.Models.ShootingClass>();
     var cClasses = new List<HpskSite.Models.ShootingClass>();
     var cRegularClasses = new List<HpskSite.Models.ShootingClass>();
@@ -241,6 +244,9 @@
         // Group available shooting classes by weapon (so A_opt_X is its own group, not lumped into A).
         aClasses    = competitionShootingClasses.Where(sc => sc.Weapon == HpskSite.Models.WeaponClass.A).ToList();
         aOptClasses = competitionShootingClasses.Where(sc => sc.Weapon == HpskSite.Models.WeaponClass.A_Opt).ToList();
+        aMClasses   = competitionShootingClasses.Where(sc => sc.Weapon == HpskSite.Models.WeaponClass.A_M).ToList();
+        aPClasses   = competitionShootingClasses.Where(sc => sc.Weapon == HpskSite.Models.WeaponClass.A_P).ToList();
+        aGClasses   = competitionShootingClasses.Where(sc => sc.Weapon == HpskSite.Models.WeaponClass.A_G).ToList();
         bClasses    = competitionShootingClasses.Where(sc => sc.Weapon == HpskSite.Models.WeaponClass.B).ToList();
         cClasses    = competitionShootingClasses.Where(sc => sc.Weapon == HpskSite.Models.WeaponClass.C).ToList();
         rClasses    = competitionShootingClasses.Where(sc => sc.Weapon == HpskSite.Models.WeaponClass.R).ToList();
@@ -507,6 +513,12 @@
                     // probes for `enabled` and renders a Skjutlag dropdown when set.
                     regViewData["DirektplaceringConfig"] = competition?.HasProperty("direktplaceringConfig") == true
                         ? (competition.Value<string>("direktplaceringConfig") ?? "")
+                        : "";
+                    // Deltävling: the partial renders a checkbox in the walk-in and edit
+                    // modals when this is non-empty. Fee is recomputed server-side via
+                    // RegistrationFeeCalculator, so we don't need to pass the fee here.
+                    regViewData["SubCompetitionName"] = competition?.HasProperty("subCompetitionName") == true
+                        ? (competition.Value<string>("subCompetitionName") ?? "")
                         : "";
                 }
                 @await Html.PartialAsync("CompetitionRegistrationManagement", regViewData)
@@ -800,6 +812,9 @@ window.CompetitionConfig = {
             { "CompetitionName", competition.Value<string>("competitionName") },
             { "AClasses", aClasses },
             { "AOptClasses", aOptClasses },
+            { "AMClasses", aMClasses },
+            { "APClasses", aPClasses },
+            { "AGClasses", aGClasses },
             { "BClasses", bClasses },
             { "CClasses", cClasses },
             { "CRegularClasses", cRegularClasses },

@@ -18,6 +18,7 @@
     var competitionName = ViewData["CompetitionName"]?.ToString() ?? "Springskytte";
     var isStationPage = ViewData["IsStationPage"] != null && (bool)ViewData["IsStationPage"];
     var presetWeaponClass = ViewData["PresetWeaponClass"]?.ToString() ?? "";
+    var subCompetitionName = ViewData["SubCompetitionName"]?.ToString() ?? "";
 }
 
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
@@ -182,6 +183,32 @@
             </div>
         </div>
     </div>
+
+    @if (!string.IsNullOrEmpty(subCompetitionName))
+    {
+    <!-- Deltävling Result List Section — same structural shape as the main Springskytte
+         result list above. Filters to IsSubCompetition shooters, recalculates medals
+         over the subset, and publishes via subCompetitionIsOfficial so the public
+         competition page can surface its own Visa resultat button. Layout mirrors the
+         main section exactly (no extra wrapper headings) — the Deltävling name sits in
+         the button row as a small label so the visual rhythm matches. -->
+    <div class="mt-3" id="springSubResultsListSection">
+        <div class="d-flex align-items-center gap-2 mb-2">
+            <span class="fw-semibold me-2"><i class="bi bi-trophy me-1"></i>@subCompetitionName</span>
+            <button class="btn btn-outline-primary btn-sm" onclick="springCreateSubResultsList(event)">
+                <i class="bi bi-arrow-clockwise me-1"></i>Uppdatera
+            </button>
+            <span class="badge bg-secondary" id="springSubResultsStatusBadge" style="display:none;"></span>
+        </div>
+        <div id="springSubResultsBody">
+            <div id="springSubResultsContent">
+                <div class="text-center py-4 text-muted">
+                    <p class="mt-2">Klicka "Uppdatera" för att skapa deltävlingens resultatlista</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    }
     }
 </div>
 
@@ -261,6 +288,10 @@ let springScreenLocked = false;
 document.addEventListener('DOMContentLoaded', () => {
     springLoadShooters();
     springLoadResultsList();
+    // Auto-load Deltävling results when the section is present (subCompetitionName configured)
+    if (document.getElementById('springSubResultsListSection')) {
+        springLoadSubResultsList();
+    }
 });
 
 // ===== DATA LOADING =====
@@ -1479,6 +1510,9 @@ async function springLoadResultsList() {
 
         if (data.success && data.classGroups?.length > 0) {
             if (body) body.style.display = 'block';
+            // Hide the Std column entirely when the competition doesn't award standard
+            // medals (or it's a club competition — server already gates the calc itself).
+            const awardingMedals = data.isAwardingStandardMedals === true;
 
             let html = '';
             for (const group of data.classGroups) {
@@ -1496,7 +1530,7 @@ async function springLoadResultsList() {
                                     <th>Skjutp.</th>
                                     <th class="time-col">Tillägg</th>
                                     <th class="time-col fw-bold">Sluttid</th>
-                                    <th>Std</th>
+                                    ${awardingMedals ? '<th>Std</th>' : ''}
                                 </tr>
                             </thead>
                             <tbody>`;
@@ -1513,7 +1547,7 @@ async function springLoadResultsList() {
                                     <td>${s.shootingScore ?? '-'}</td>
                                     <td class="time-col">${s.penaltyTimeDisplay}</td>
                                     <td class="time-col fw-bold">${s.totalTimeDisplay}</td>
-                                    <td>${medal}</td>
+                                    ${awardingMedals ? `<td>${medal}</td>` : ''}
                                 </tr>`;
                 }
                 html += `
@@ -1526,6 +1560,99 @@ async function springLoadResultsList() {
         }
     } catch (err) {
         console.error('Error loading results:', err);
+    }
+}
+
+// ===== DELTÄVLING (SUB-COMPETITION) RESULTS LIST =====
+// Mirror of springCreateResultsList / springLoadResultsList but routed to the
+// sub-comp endpoints: CalculateSpringskytteSubFinalResults flips
+// subCompetitionIsOfficial=true; GetSpringskytteResults?subCompetitionOnly=true
+// returns the filtered subset with medals recomputed on it.
+
+async function springCreateSubResultsList(event) {
+    if (event) event.stopPropagation();
+    if (!confirm('Vill du beräkna och publicera deltävlingens resultatlista?')) return;
+
+    const btn = event?.target?.closest('button');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Beräknar...'; }
+
+    try {
+        const response = await fetch('/umbraco/surface/Springskytte/CalculateSpringskytteSubFinalResults', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]')?.value
+            },
+            body: JSON.stringify(springCompetitionId)
+        });
+        const data = await response.json();
+        if (data.success) {
+            showSpringMessage(data.message, 'success');
+            springLoadSubResultsList();
+        } else {
+            alert(data.message || 'Fel vid beräkning.');
+        }
+    } catch (err) {
+        alert('Ett fel uppstod.');
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Uppdatera'; }
+    }
+}
+
+async function springLoadSubResultsList() {
+    try {
+        const response = await fetch(`/umbraco/surface/Springskytte/GetSpringskytteResults?competitionId=${springCompetitionId}&subCompetitionOnly=true`);
+        const data = await response.json();
+
+        const content = document.getElementById('springSubResultsContent');
+        if (!content) return;
+
+        if (data.success && data.classGroups?.length > 0) {
+            const awardingMedals = data.isAwardingStandardMedals === true;
+            let html = '';
+            for (const group of data.classGroups) {
+                html += `
+                <div class="mb-4">
+                    <h6 class="border-bottom pb-1">${group.className}</h6>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-striped springskytte-results-table">
+                            <thead>
+                                <tr>
+                                    <th>Plats</th>
+                                    <th>Namn</th>
+                                    <th>Förening</th>
+                                    <th class="time-col">Löptid</th>
+                                    <th>Skjutp.</th>
+                                    <th class="time-col">Tillägg</th>
+                                    <th class="time-col fw-bold">Sluttid</th>
+                                    ${awardingMedals ? '<th>Std</th>' : ''}
+                                </tr>
+                            </thead>
+                            <tbody>`;
+                for (const s of group.shooters) {
+                    const medal = s.standardMedal === 'S' ? '<span class="badge bg-secondary">S</span>'
+                        : s.standardMedal === 'B' ? '<span class="badge" style="background:#cd7f32;color:#fff;">B</span>'
+                        : '';
+                    html += `
+                                <tr>
+                                    <td>${s.status ? s.status : (s.rank || '-')}</td>
+                                    <td>${s.name}${s.startOrder ? ' (' + s.startOrder + ')' : ''}</td>
+                                    <td>${s.club}</td>
+                                    <td class="time-col">${s.sprintTimeDisplay}</td>
+                                    <td>${s.shootingScore ?? '-'}</td>
+                                    <td class="time-col">${s.penaltyTimeDisplay}</td>
+                                    <td class="time-col fw-bold">${s.totalTimeDisplay}</td>
+                                    ${awardingMedals ? `<td>${medal}</td>` : ''}
+                                </tr>`;
+                }
+                html += `</tbody></table></div></div>`;
+            }
+            content.innerHTML = html;
+        } else {
+            content.innerHTML = '<div class="text-center py-4 text-muted"><p class="mt-2">Inga deltävlingsresultat ännu.</p></div>';
+        }
+    } catch (err) {
+        console.error('Error loading sub-competition results:', err);
     }
 }
 

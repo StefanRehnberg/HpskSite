@@ -44,6 +44,14 @@ namespace HpskSite.CompetitionTypes.Precision.Services
             foreach (var shooter in shooters)
             {
                 var weaponGroup = ExtractWeaponGroup(shooter.ShootingClass);
+                // A-family medal pooling: AM/AP/AG shooters compete in their own display
+                // classes but are ranked together with the open A class for medal eligibility
+                // (SPSF rule: "vid beräkning av standardmedaljer sammanförs alla deltagare i
+                // vapengrupp A till en gemensam lista, oavsett om de skjutit i AM, AP, AG
+                // eller den öppna A-klassen"). A_Opt is a parallel weapon group and stays
+                // separate.
+                if (weaponGroup == "A_M" || weaponGroup == "A_P" || weaponGroup == "A_G")
+                    weaponGroup = "A";
 
                 string groupKey;
                 if (shouldSplitGroupC && weaponGroup == "C")
@@ -207,24 +215,34 @@ namespace HpskSite.CompetitionTypes.Precision.Services
         /// </summary>
         private (int Bronze, int Silver) GetFixedScoreRequirements(string weaponGroup, int seriesCount)
         {
-            // Table from BR-PS.2.4.2. A_Opt follows the same thresholds as A.
+            // Table from BR-PS.2.4.2. A_Opt and the A-family subgroups (AM/AP/AG) all
+            // follow the same thresholds as the open A class.
             return (weaponGroup, seriesCount) switch
             {
                 // 6 series
                 ("A", 6) => (267, 277),
                 ("A_Opt", 6) => (267, 277),
+                ("A_M", 6) => (267, 277),
+                ("A_P", 6) => (267, 277),
+                ("A_G", 6) => (267, 277),
                 ("B", 6) => (273, 282),
                 ("C", 6) => (276, 283),
 
                 // 7 series
                 ("A", 7) => (312, 323),
                 ("A_Opt", 7) => (312, 323),
+                ("A_M", 7) => (312, 323),
+                ("A_P", 7) => (312, 323),
+                ("A_G", 7) => (312, 323),
                 ("B", 7) => (319, 329),
                 ("C", 7) => (322, 330),
 
                 // 10 series
                 ("A", 10) => (445, 461),
                 ("A_Opt", 10) => (445, 461),
+                ("A_M", 10) => (445, 461),
+                ("A_P", 10) => (445, 461),
+                ("A_G", 10) => (445, 461),
                 ("B", 10) => (455, 470),
                 ("C", 10) => (460, 471),
 
@@ -240,7 +258,8 @@ namespace HpskSite.CompetitionTypes.Precision.Services
         private string ExtractWeaponGroup(string shootingClass)
         {
             var code = ShootingClasses.GetWeaponClassCode(shootingClass);
-            if (code == "A" || code == "A_Opt" || code == "B" || code == "C")
+            if (code == "A" || code == "A_Opt" || code == "A_M" || code == "A_P" || code == "A_G"
+                || code == "B" || code == "C")
                 return code;
             return "C"; // Unknown class → default to C (preserves previous behaviour)
         }

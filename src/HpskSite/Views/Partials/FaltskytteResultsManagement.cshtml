@@ -106,24 +106,58 @@
 
     @if (!string.IsNullOrEmpty(subCompetitionName))
     {
-    <!-- Sub-Competition Results -->
+    <!-- Sub-Competition Results — mirrors the main card's layout so the cashier / admin
+         gets the same toolbar (Sammanslagning, Officiell/Preliminär, collapsible) for the
+         Deltävling subset. Rendered inline (not via iframe like the main) because the
+         backend already returns a fully-formed result payload with medals + merges, and
+         the public /resultat/?sub=true page handles the equivalent for end users. -->
     <div class="card mt-3">
-        <div class="card-header py-2">
+        <div class="card-header" role="button" onclick="toggleFaltSection('faltSubResultBody', 'faltSubResultChevron')">
             <div class="d-flex justify-content-between align-items-center">
-                <h6 class="mb-0"><i class="bi bi-trophy me-2"></i>@subCompetitionName</h6>
+                <div>
+                    <h5 class="mb-0 d-inline"><i class="bi bi-trophy me-2"></i>@subCompetitionName</h5>
+                    <span class="badge ms-2" id="faltSubResultStatusBadge">Preliminär</span>
+                    <div class="text-muted small mt-1" id="faltSubResultMeta" style="display:none"></div>
+                </div>
                 <div class="d-flex gap-2">
-                    <button class="btn btn-outline-primary btn-sm" onclick="var c=document.querySelector('.faltskytte-results-management')?.dataset.competitionId; if(c) faltLoadSubCompResults(c, document.getElementById('faltSubCompResultContent'));">
+                    <button class="btn btn-outline-primary btn-sm" onclick="faltRefreshSubResults(event)">
                         <i class="bi bi-arrow-clockwise me-1"></i>Uppdatera
+                    </button>
+                    <button class="btn btn-outline-secondary btn-sm" onclick="faltShowSubMergeConfig(event)">
+                        <i class="bi bi-intersect me-1"></i>Sammanslagning...
                     </button>
                     <button class="btn btn-outline-info btn-sm" onclick="faltPrintSubCompResultList(event)">
                         <i class="bi bi-printer me-1"></i>Skriv ut
                     </button>
+                    <button class="btn btn-success btn-sm" id="faltPublishSubResultsBtn" style="display:none" onclick="faltPublishSubResults(true, event)">
+                        <i class="bi bi-globe me-1"></i>Officiell
+                    </button>
+                    <button class="btn btn-outline-warning btn-sm" id="faltUnpublishSubResultsBtn" style="display:none" onclick="faltPublishSubResults(false, event)">
+                        <i class="bi bi-eye-slash me-1"></i>Preliminär
+                    </button>
+                    <i class="bi bi-chevron-down" id="faltSubResultChevron"></i>
                 </div>
             </div>
         </div>
-        <div class="card-body">
-            <div id="faltSubCompResultContent">
-                <div class="text-muted small py-2">Laddar deltävlingsresultat...</div>
+        <div id="faltSubResultBody">
+            <div class="card-body p-0">
+                <div id="faltSubCompResultContent">
+                    @if (!string.IsNullOrEmpty(resultPageUrl))
+                    {
+                        <iframe id="faltSubResultIframe"
+                                src="@(resultPageUrl + "?sub=true")"
+                                title="Deltävlingsresultat"
+                                style="width:100%; height:75vh; border:0; display:block"></iframe>
+                    }
+                    else
+                    {
+                        <div class="alert alert-info m-3 mb-0">
+                            <i class="bi bi-info-circle me-2"></i>
+                            <strong>Inga publicerade resultat ännu.</strong>
+                            Klicka <strong>Officiell</strong> ovan på huvudresultaten eller deltävlingen för att skapa <code>/resultat/</code>-sidan. Då visas deltävlingen här via iframe.
+                        </div>
+                    }
+                </div>
             </div>
         </div>
     </div>
@@ -466,6 +500,7 @@ function faltPrintResultList(event) {
     var isPoang = results.scoringMode === 'Poang';
     var stationConfigs = faltExtractStationConfigs(results);
     var statusText = results.isOfficial ? 'Officiell' : 'Preliminär';
+    var awardingMedals = results.isAwardingStandardMedals === true;
 
     // Build a proper header — competition name as the main title, then a meta
     // line with date / organiser / "Resultatlista" / status, mirroring what the
@@ -516,7 +551,9 @@ function faltPrintResultList(event) {
             w.document.write('<th>' + i + (cfg && cfg.hasPoangmal ? '*' : '') + '</th>');
         }
         w.document.write(isPoang ? '<th><b>Po\u00e4ng</b></th>' : '<th><b>Tot</b></th>');
-        w.document.write('<th>Pm</th><th>Std</th></tr></thead><tbody>');
+        w.document.write('<th>Pm</th>');
+        if (awardingMedals) w.document.write('<th>Std</th>');
+        w.document.write('</tr></thead><tbody>');
 
         group.shooters.forEach(function(shooter, idx) {
             w.document.write('<tr><td>' + (idx+1) + '</td>');
@@ -537,8 +574,10 @@ function faltPrintResultList(event) {
                 ? '<td><b>' + shooter.totalPoints + '</b></td>'
                 : '<td><b>' + shooter.totalHits + '/' + shooter.totalFigures + '</b></td>');
             w.document.write('<td>' + (shooter.totalTiebreakerScore || '') + '</td>');
-            var sm = shooter.standardMedal || '';
-            w.document.write('<td class="' + (sm==='S'?'medal-s':sm==='B'?'medal-b':'') + '">' + sm + '</td>');
+            if (awardingMedals) {
+                var sm = shooter.standardMedal || '';
+                w.document.write('<td class="' + (sm==='S'?'medal-s':sm==='B'?'medal-b':'') + '">' + sm + '</td>');
+            }
             w.document.write('</tr>');
         });
 
@@ -567,9 +606,21 @@ function faltPrintResultList(event) {
             })
             .catch(function() { /* best-effort */ });
     }
-    // Auto-load sub-competition results if configured
-    var subCompContainer = document.getElementById('faltSubCompResultContent');
-    if (compId && subCompContainer) faltLoadSubCompResults(compId, subCompContainer);
+    // Auto-sync sub-competition status badge if configured. The iframe loads its own
+    // content from /resultat/?sub=true; we only need the JSON to keep the badge + meta
+    // in sync and to populate _faltSubCompResults for the Skriv ut button.
+    if (compId && document.getElementById('faltSubResultStatusBadge')) {
+        fetch('/umbraco/surface/Faltskytte/GetFaltskytteResults?competitionId=' + compId + '&subCompetitionOnly=true')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data && data.success && data.results) {
+                    faltUpdateSubResultStatus(!!data.results.isOfficial);
+                    faltUpdateSubResultMeta(data.results);
+                    _faltSubCompResults = data.results;
+                }
+            })
+            .catch(function() { /* best-effort */ });
+    }
 })();
 
 var _faltSubCompResults = null;
@@ -584,6 +635,7 @@ function faltPrintSubCompResultList(event) {
 
     var isPoang = results.scoringMode === 'Poang';
     var stationConfigs = faltExtractStationConfigs(results);
+    var subAwardingMedals = results.isAwardingStandardMedals === true;
 
     var subCompName = '@Html.Raw(subCompetitionName)';
     var compName = results.competitionName || '';
@@ -613,6 +665,8 @@ function faltPrintSubCompResultList(event) {
     w.document.write('th{background:#f0f0f0;font-size:0.9em}');
     w.document.write('td:nth-child(2),td:nth-child(3){text-align:left}');
     w.document.write('th:nth-child(2),th:nth-child(3){text-align:left}');
+    w.document.write('.medal-s{color:#0d6efd;font-weight:bold}');
+    w.document.write('.medal-b{color:#ffc107;font-weight:bold}');
     w.document.write('.print-footer{margin-top:18px;font-size:0.8em;color:#666;border-top:1px solid #ccc;padding-top:6px;text-align:right}');
     w.document.write('@@media print{body{margin:10mm}h2{page-break-after:avoid}table{page-break-inside:avoid}}');
     w.document.write('<' + '/style><' + '/head><body>');
@@ -627,7 +681,9 @@ function faltPrintSubCompResultList(event) {
             w.document.write('<th>' + i + (cfg && cfg.hasPoangmal ? '*' : '') + '</th>');
         }
         w.document.write(isPoang ? '<th><b>Po\u00e4ng</b></th>' : '<th><b>Tot</b></th>');
-        w.document.write('<th>Pm</th></tr></thead><tbody>');
+        w.document.write('<th>Pm</th>');
+        if (subAwardingMedals) w.document.write('<th>Std</th>');
+        w.document.write('</tr></thead><tbody>');
 
         group.shooters.forEach(function(shooter, idx) {
             w.document.write('<tr><td>' + (idx+1) + '</td>');
@@ -648,6 +704,10 @@ function faltPrintSubCompResultList(event) {
                 ? '<td><b>' + shooter.totalPoints + '</b></td>'
                 : '<td><b>' + shooter.totalHits + '/' + shooter.totalFigures + '</b></td>');
             w.document.write('<td>' + (shooter.totalTiebreakerScore || '') + '</td>');
+            if (subAwardingMedals) {
+                var sm = shooter.standardMedal || '';
+                w.document.write('<td class="' + (sm==='S'?'medal-s':sm==='B'?'medal-b':'') + '">' + sm + '</td>');
+            }
             w.document.write('</tr>');
         });
 
@@ -659,20 +719,188 @@ function faltPrintSubCompResultList(event) {
     w.document.close();
     w.print();
 }
-async function faltLoadSubCompResults(compId, container) {
-    container.innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm"></div> Laddar...</div>';
+// Restore the iframe view in the sub-comp container after a merge-config UI session.
+// Mirrors faltRestoreIframe for the main section. The iframe always points at
+// /resultat/?sub=true; cache-busted on each restore to pick up status/merge changes.
+function faltRestoreSubIframe() {
+    var container = document.getElementById('faltSubCompResultContent');
+    if (!container) return;
+    var url = document.querySelector('.faltskytte-results-management')?.dataset.resultPageUrl || '';
+    if (!url) return; // Keep the friendly "publicera först"-info that was rendered server-side
+    var sep = url.indexOf('?') >= 0 ? '&' : '?';
+    container.innerHTML = '<iframe id="faltSubResultIframe" src="' + url + sep + 'sub=true&t=' + Date.now()
+        + '" title="Deltävlingsresultat" style="width:100%; height:75vh; border:0; display:block"></iframe>';
+}
+
+// Reload the embedded /resultat/?sub=true page and resync the status badge.
+async function faltRefreshSubResults(event) {
+    if (event) event.stopPropagation();
+    var compId = document.querySelector('.faltskytte-results-management')?.dataset.competitionId;
+    if (!compId) return;
+    faltRestoreSubIframe();
     try {
-        var url = '/umbraco/surface/Faltskytte/GetFaltskytteResults?competitionId=' + compId + '&subCompetitionOnly=true';
-        var resp = await fetch(url);
+        var resp = await fetch('/umbraco/surface/Faltskytte/GetFaltskytteResults?competitionId=' + compId + '&subCompetitionOnly=true');
         var data = await resp.json();
-        if (!data.success || !data.results?.classGroups?.length) {
-            container.innerHTML = '<div class="text-muted small py-2">Inga resultat för deltävlingen.</div>';
-            return;
+        if (data && data.success && data.results) {
+            faltUpdateSubResultStatus(!!data.results.isOfficial);
+            faltUpdateSubResultMeta(data.results);
+            _faltSubCompResults = data.results;
         }
-        _faltSubCompResults = data.results;
-        renderFaltResultList(data.results, container);
-    } catch(e) {
-        container.innerHTML = '<div class="text-muted small">Kunde inte ladda deltävlingsresultat.</div>';
+    } catch (e) { /* status sync is best-effort */ }
+}
+
+function faltUpdateSubResultStatus(isOfficial) {
+    var badge = document.getElementById('faltSubResultStatusBadge');
+    var pubBtn = document.getElementById('faltPublishSubResultsBtn');
+    var unpubBtn = document.getElementById('faltUnpublishSubResultsBtn');
+    if (!badge) return;
+    if (isOfficial) {
+        badge.className = 'badge bg-success ms-2'; badge.textContent = 'Officiell';
+        if (pubBtn) pubBtn.style.display = 'none';
+        if (unpubBtn) unpubBtn.style.display = '';
+    } else {
+        badge.className = 'badge bg-warning text-dark ms-2'; badge.textContent = 'Preliminär';
+        if (pubBtn) pubBtn.style.display = '';
+        if (unpubBtn) unpubBtn.style.display = 'none';
     }
 }
+
+function faltUpdateSubResultMeta(results) {
+    var el = document.getElementById('faltSubResultMeta');
+    if (!el) return;
+    var parts = [];
+    if (results.subCompetitionName) parts.push(results.subCompetitionName);
+    if (results.competitionName) parts.push(results.competitionName);
+    if (results.competitionDate) parts.push(results.competitionDate);
+    if (parts.length === 0) { el.style.display = 'none'; return; }
+    el.textContent = parts.join(' · ');
+    el.style.display = '';
+}
+
+async function faltPublishSubResults(official, event) {
+    if (event) event.stopPropagation();
+    var msg = official ? 'Markera deltävlingens resultatlista som officiell?' : 'Ändra deltävlingens resultatlista till preliminär?';
+    if (!confirm(msg)) return;
+    var compId = document.querySelector('.faltskytte-results-management')?.dataset.competitionId;
+    try {
+        var resp = await fetch('/umbraco/surface/Faltskytte/PublishResults', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value },
+            body: JSON.stringify({ competitionId: parseInt(compId), isOfficial: official, isSubCompetition: true })
+        });
+        var data = await resp.json();
+        if (data.success) {
+            faltUpdateSubResultStatus(official);
+            // Refresh competition page on tab next focus — the public "Visa resultat" button
+            // gating depends on the new flag, but we don't need to reload here.
+        } else {
+            alert('Fel: ' + (data.message || 'Okänt fel'));
+        }
+    } catch(e) {
+        alert('Nätverksfel.');
+    }
+}
+
+var _faltSubMergeConfig = null; // pending sub-comp merge config (in-modal session)
+
+async function faltShowSubMergeConfig(event) {
+    if (event) event.stopPropagation();
+    var compId = document.querySelector('.faltskytte-results-management')?.dataset.competitionId;
+    var container = document.getElementById('faltSubCompResultContent');
+    if (!compId || !container) return;
+    container.innerHTML = '<div class="text-center py-3 px-3"><div class="spinner-border spinner-border-sm"></div> Analyserar klasser...</div>';
+    document.getElementById('faltSubResultBody').style.display = '';
+    try {
+        var mergeResp = await fetch('/umbraco/surface/Faltskytte/AnalyzeFaltskytteMerges?competitionId=' + compId + '&subCompetitionOnly=true');
+        var mergeData = await mergeResp.json();
+        if (mergeData.success && mergeData.analysis) {
+            _faltSubMergeConfig = mergeData.savedConfig || null;
+            if (mergeData.analysis.suggestions && mergeData.analysis.suggestions.length > 0) {
+                faltShowSubMergeModal(mergeData.analysis, mergeData.savedConfig);
+            } else {
+                container.innerHTML = '<div class="alert alert-info m-3">Alla klasser i deltävlingen har 5 eller fler deltagare — ingen sammanslagning behövs.</div>';
+                setTimeout(function() { faltRestoreSubIframe(); }, 1500);
+            }
+        }
+    } catch (err) {
+        container.innerHTML = '<div class="alert alert-danger m-3">Nätverksfel.</div>';
+        console.error(err);
+    }
+}
+
+function faltShowSubMergeModal(analysis, savedConfig) {
+    var savedActions = [];
+    if (savedConfig) try { savedActions = JSON.parse(savedConfig); } catch(e) {}
+    var savedMap = {};
+    savedActions.forEach(function(a) { savedMap[a.sourceClass] = a.targetClass; });
+
+    var html = '<div class="mb-3"><p class="small text-muted">Följande klasser har färre än 5 deltagare i deltävlingen och kan slås samman:</p></div>';
+    analysis.suggestions.forEach(function(s) {
+        var checked = savedMap[s.sourceClass] ? ' checked' : '';
+        var targetVal = savedMap[s.sourceClass] || s.defaultTarget || '';
+        var targetHtml = '';
+        if (s.requiresAdminChoice && s.possibleTargets && s.possibleTargets.length > 0) {
+            targetHtml = '<select class="form-select form-select-sm d-inline-block falt-sub-merge-target" data-source="' + s.sourceClass + '" style="width:auto">';
+            s.possibleTargets.forEach(function(t) {
+                targetHtml += '<option value="' + t + '"' + (t === targetVal ? ' selected' : '') + '>' + t + '</option>';
+            });
+            targetHtml += '</select>';
+        } else {
+            targetHtml = '<strong>' + (s.defaultTarget || '') + '</strong>';
+        }
+        html += '<div class="form-check mb-2">' +
+            '<input class="form-check-input falt-sub-merge-check" type="checkbox" value="' + s.sourceClass + '"' +
+            ' data-target="' + targetVal + '"' + checked + '>' +
+            '<label class="form-check-label">' +
+            '<strong>' + s.sourceClass + '</strong> (' + s.sourceCount + ' st) → ' + targetHtml +
+            '<br><small class="text-muted">' + s.reason + '</small></label></div>';
+    });
+
+    html += '<div class="mt-3 small"><table class="table table-sm"><thead><tr><th>Klass</th><th>Antal</th><th>Medaljer</th></tr></thead><tbody>';
+    analysis.classes.forEach(function(c) {
+        html += '<tr class="' + (c.belowThreshold ? 'table-warning' : '') + '">' +
+            '<td>' + c.className + '</td><td>' + c.participantCount + '</td><td>' + (c.medalImpact || 'Alla') + '</td></tr>';
+    });
+    html += '</tbody></table></div>';
+
+    var container = document.getElementById('faltSubCompResultContent');
+    container.innerHTML = '<div class="card m-3"><div class="card-header"><strong>Sammanslagning av klasser (deltävling)</strong></div>' +
+        '<div class="card-body">' + html +
+        '<div class="d-flex gap-2 mt-3">' +
+        '<button class="btn btn-primary" onclick="faltApplySubMerges()"><i class="bi bi-check-lg me-1"></i>Skapa med sammanslagning</button>' +
+        '<button class="btn btn-outline-secondary" onclick="faltSkipSubMerges()">Skapa utan sammanslagning</button>' +
+        '</div></div></div>';
+}
+
+window.faltApplySubMerges = async function() {
+    var actions = [];
+    document.querySelectorAll('.falt-sub-merge-check:checked').forEach(function(cb) {
+        var source = cb.value;
+        var dropdown = document.querySelector('.falt-sub-merge-target[data-source="' + source + '"]');
+        var target = dropdown ? dropdown.value : cb.dataset.target;
+        if (target) actions.push({ sourceClass: source, targetClass: target });
+    });
+    var configJson = actions.length > 0 ? JSON.stringify(actions) : '';
+    var compId = document.querySelector('.faltskytte-results-management')?.dataset.competitionId;
+    await fetch('/umbraco/surface/Faltskytte/SaveMergeConfig', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value },
+        body: JSON.stringify({ competitionId: parseInt(compId), mergeConfig: configJson, isSubCompetition: true })
+    });
+    _faltSubMergeConfig = configJson;
+    faltRestoreSubIframe();
+    await faltRefreshSubResults();
+};
+
+window.faltSkipSubMerges = async function() {
+    var compId = document.querySelector('.faltskytte-results-management')?.dataset.competitionId;
+    await fetch('/umbraco/surface/Faltskytte/SaveMergeConfig', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value },
+        body: JSON.stringify({ competitionId: parseInt(compId), mergeConfig: '', isSubCompetition: true })
+    });
+    _faltSubMergeConfig = null;
+    faltRestoreSubIframe();
+    await faltRefreshSubResults();
+};
 </script>

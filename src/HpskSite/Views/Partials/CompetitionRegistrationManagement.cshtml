@@ -28,6 +28,12 @@
     // the public flow uses, so "enabled" semantics stay aligned.
     var dpRaw = ViewData["DirektplaceringConfig"]?.ToString() ?? "";
     var dpEnabled = HpskSite.Models.DirektplaceringConfig.Parse(dpRaw) != null;
+
+    // Deltävling (sub-competition) opt-in. When the competition has a configured name,
+    // the walk-in + edit modals render a checkbox so the cashier can opt the shooter in
+    // (and the backend recomputes the fee via RegistrationFeeCalculator).
+    var subCompetitionName = ViewData["SubCompetitionName"]?.ToString() ?? "";
+    var subCompetitionEnabled = !string.IsNullOrWhiteSpace(subCompetitionName);
 }
 
 <!-- Flatpickr (used by the mark-as-paid date picker). Loaded again here so the
@@ -499,6 +505,22 @@
                     </div>
                 }
 
+                @* Deltävling opt-in. Mirrors the public registration modal's checkbox so
+                   the cashier can register a walk-in into the sub-competition in one step.
+                   Backend recomputes the fee via RegistrationFeeCalculator when persisting,
+                   so the auto-generated invoice picks up the surcharge. *@
+                @if (subCompetitionEnabled)
+                {
+                    <div class="mb-3 p-2 rounded border" style="background-color: var(--bs-info-bg-subtle);">
+                        <div class="form-check mb-0">
+                            <input class="form-check-input" type="checkbox" id="walkInSubCompetitionCheckbox">
+                            <label class="form-check-label" for="walkInSubCompetitionCheckbox">
+                                Anmäl även till <strong>@subCompetitionName</strong>
+                            </label>
+                        </div>
+                    </div>
+                }
+
                 @* Non-DP precision start-list picker. Only rendered when the modal isn't
                    already showing the rolling-start patrol picker or the DP slot picker —
                    those handle their own placement flows. The dropdown is populated and
@@ -638,11 +660,25 @@
 
                     @if (dpEnabled)
                     {
-                        <div class="mb-0">
+                        <div class="mb-3">
                             <div id="competitionEditDpSlotsContainer">
                                 <!-- Per-class slot pickers; each row labelled with its class. Existing
                                      classes pre-fill from the registration, new classes default to
                                      no-slot until the operator picks. -->
+                            </div>
+                        </div>
+                    }
+
+                    @* Deltävling opt-in. Pre-checked from reg.isSubCompetition; toggling here
+                       triggers the fee re-compute path on save. *@
+                    @if (subCompetitionEnabled)
+                    {
+                        <div class="mb-0 p-2 rounded border" style="background-color: var(--bs-info-bg-subtle);">
+                            <div class="form-check mb-0">
+                                <input class="form-check-input" type="checkbox" id="competitionEditSubCompetitionCheckbox">
+                                <label class="form-check-label" for="competitionEditSubCompetitionCheckbox">
+                                    Anmäld även till <strong>@subCompetitionName</strong>
+                                </label>
                             </div>
                         </div>
                     }
@@ -1299,6 +1335,12 @@ async function editCompetitionRegistration(registrationId) {
         renderEditDpSlotRows(registration);
     }
 
+    // Pre-fill the deltävling checkbox from the registration. Untoggling here will
+    // recompute the fee downward (and surface a refund note); toggling on creates a
+    // top-up invoice via the standard multi-invoice flow.
+    const editSubCompCb = document.getElementById('competitionEditSubCompetitionCheckbox');
+    if (editSubCompCb) editSubCompCb.checked = !!registration.isSubCompetition;
+
     new bootstrap.Modal(document.getElementById('competitionEditRegistrationModal')).show();
 }
 
@@ -1389,9 +1431,13 @@ function saveCompetitionRegistrationChanges() {
         return;
     }
 
-    // Preserve the existing isSubCompetition flag so the fee re-compute doesn't accidentally
-    // drop a deltävling-anmälan.
-    const isSubCompetition = !!(reg && reg.isSubCompetition);
+    // Deltävling opt-in: read the modal's checkbox when rendered (competition has a
+    // configured subCompetitionName), otherwise fall back to whatever the registration
+    // already had so a fee re-compute doesn't accidentally drop the surcharge.
+    const editSubCompCb = document.getElementById('competitionEditSubCompetitionCheckbox');
+    const isSubCompetition = editSubCompCb
+        ? !!editSubCompCb.checked
+        : !!(reg && reg.isSubCompetition);
 
     const data = {
         registrationId,
@@ -2092,8 +2138,15 @@ function getClassMutexBucket(classId) {
     // Springskytte composite — each combination is its own bucket so multi-class still works.
     if (id.includes('-')) return `springskytte:${id}`;
 
+    // A-family weapon groups: A, A_Opt, A_M, A_P, A_G are each their own bucket so a
+    // shooter can register in A1 + AM1 + AP1 + AG1 + A_opt_1 simultaneously. Without
+    // this, the simple first-char mapping would lump them all into "A" and the cashier
+    // mutex would auto-untick when a second A-family class is picked.
     let weapon = id.charAt(0).toUpperCase();
     if (/^A_opt/i.test(id)) weapon = 'A_Opt';
+    else if (/^A_m_/i.test(id)) weapon = 'A_M';
+    else if (/^A_p_/i.test(id)) weapon = 'A_P';
+    else if (/^A_g_/i.test(id)) weapon = 'A_G';
 
     let subcat = 'open';
     if (/_Jun(\b|$|_)/i.test(id)) subcat = 'jun';
@@ -2172,6 +2225,11 @@ async function openWalkInRegistrationModal() {
     document.getElementById('walkInSelectedMemberId').value = '';
     document.getElementById('walkInError').classList.add('d-none');
     document.getElementById('walkInSubmitBtn').disabled = true;
+
+    // Reset the deltävling opt-in on each open so a stale tick from a previous walk-in
+    // doesn't silently surcharge the next shooter.
+    const walkInSubCompCb = document.getElementById('walkInSubCompetitionCheckbox');
+    if (walkInSubCompCb) walkInSubCompCb.checked = false;
 
     // Populate the class checkbox list from the competition's actual allowed classes.
     // Multi-class so the cashier can register A + C in a single round trip — particularly
@@ -2502,13 +2560,15 @@ async function submitWalkInRegistration() {
 
     try {
         const token = $('input[name="__RequestVerificationToken"]').val();
+        const subCompCb = document.getElementById('walkInSubCompetitionCheckbox');
+        const isSubCompetition = !!(subCompCb && subCompCb.checked);
         const response = await fetch('/umbraco/surface/RegistrationAdmin/AddLateRegistration', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'RequestVerificationToken': token
             },
-            body: JSON.stringify({ competitionId, memberId, classes })
+            body: JSON.stringify({ competitionId, memberId, classes, isSubCompetition })
         });
         const data = await response.json();
 

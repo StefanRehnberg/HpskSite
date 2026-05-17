@@ -23,6 +23,22 @@
     var isSpringskytte = competitionTypeId == "Springskytte";
     var isFaltskytte = competitionTypeId == "Faltskytte" || competitionTypeId == "MagnumFalt";
 
+    // Deltävling toggle: when /resultat/?sub=true is requested, the page renders the
+    // sub-competition subset (filtered to registrations with isSubCompetition=true).
+    // Used to label the heading, swap the public title, and route the result-loading
+    // endpoint to subCompetitionOnly=true. Falls back to the main list when missing.
+    var isSubCompetitionView = false;
+    var subCompetitionName = "";
+    try
+    {
+        var subParam = Context.Request.Query["sub"].ToString();
+        isSubCompetitionView = string.Equals(subParam, "true", StringComparison.OrdinalIgnoreCase);
+        subCompetitionName = competition.Value<string>("subCompetitionName") ?? "";
+        // Defensive: ignore ?sub=true when the competition has no deltävling configured.
+        if (string.IsNullOrWhiteSpace(subCompetitionName)) isSubCompetitionView = false;
+    }
+    catch { /* keep defaults */ }
+
     // Team results support
     var allowTeams = false;
     try { allowTeams = competition.Value<bool>("allowTeams"); } catch { }
@@ -77,7 +93,7 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>@Model.Name - @competition.Name</title>
+    <title>@(isSubCompetitionView ? subCompetitionName : Model.Name) - @competition.Name</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
     <style>
@@ -198,7 +214,7 @@
             <div>
                 <h1>
                         <i class="bi bi-trophy text-warning me-2"></i>
-                                @Model.Name
+                                @(isSubCompetitionView ? subCompetitionName : Model.Name)
                 </h1>
                 <p class="text-muted mb-0">@competition.Name</p>
                             </div>
@@ -211,7 +227,7 @@
 
         <!-- Print Header -->
         <div class="print-only mb-4">
-            <h1>@Model.Name @competition.Name</h1>
+            <h1>@(isSubCompetitionView ? subCompetitionName : Model.Name) @competition.Name</h1>
             <hr>
         </div>
 
@@ -305,6 +321,11 @@
     const isSpringskytte = @(isSpringskytte.ToString().ToLower());
     const isFaltskytte = @(isFaltskytte.ToString().ToLower());
 
+    // Deltävling view: when set, every result-loading endpoint gets &subCompetitionOnly=true
+    // and the resulting rows are the IsSubCompetition-only subset with their own merges + medals.
+    const isSubCompetitionView = @(isSubCompetitionView.ToString().ToLower());
+    const subQs = isSubCompetitionView ? '&subCompetitionOnly=true' : '';
+
     // Team results
     const allowTeams = @(allowTeams.ToString().ToLower());
 
@@ -332,7 +353,7 @@
             }
 
             try {
-                const response = await fetch(`/umbraco/surface/CompetitionResults/GetResultsList?competitionId=${competitionId}`);
+                const response = await fetch(`/umbraco/surface/CompetitionResults/GetResultsList?competitionId=${competitionId}${subQs}`);
                 const data = await response.json();
                 
                 if (!data.success || !data.exists) {
@@ -674,7 +695,7 @@
         // Springskytte results rendering
         async function loadSpringskytteResults(container) {
             try {
-                const response = await fetch(`/umbraco/surface/Springskytte/GetSpringskytteResults?competitionId=${competitionId}`);
+                const response = await fetch(`/umbraco/surface/Springskytte/GetSpringskytteResults?competitionId=${competitionId}${subQs}`);
                 const data = await response.json();
 
                 if (!data.success || !data.classGroups?.length) {
@@ -686,6 +707,7 @@
                     return;
                 }
 
+                const springAwardingMedals = data.isAwardingStandardMedals === true;
                 let html = '';
                 data.classGroups.forEach(group => {
                     html += `
@@ -703,7 +725,7 @@
                                         <th>Skjutp.</th>
                                         <th>Tillägg</th>
                                         <th>Sluttid</th>
-                                        <th>Medalj</th>
+                                        ${springAwardingMedals ? '<th>Medalj</th>' : ''}
                                     </tr>
                                 </thead>
                                 <tbody>`;
@@ -725,7 +747,7 @@
                                         <td class="text-center">${s.shootingScore ?? '-'}</td>
                                         <td class="text-center">${s.penaltyTimeDisplay || '-'}</td>
                                         <td class="text-center"><strong>${s.totalTimeDisplay || '-'}</strong></td>
-                                        <td class="text-center">${medal}</td>
+                                        ${springAwardingMedals ? `<td class="text-center">${medal}</td>` : ''}
                                     </tr>`;
                     });
 
@@ -773,7 +795,7 @@
 
         async function loadFaltskytteResults(container) {
             try {
-                const response = await fetch(`/umbraco/surface/Faltskytte/GetFaltskytteResults?competitionId=${competitionId}`);
+                const response = await fetch(`/umbraco/surface/Faltskytte/GetFaltskytteResults?competitionId=${competitionId}${subQs}`);
                 const data = await response.json();
 
                 if (!data.success) {
@@ -784,6 +806,7 @@
                 const results = data.results;
                 const isPoang = results.scoringMode === 'Poang';
                 const stationConfigs = faltExtractStationConfigs(results);
+                const faltAwardingMedals = results.isAwardingStandardMedals === true;
                 let html = '';
 
                 results.classGroups.forEach(group => {
@@ -802,7 +825,9 @@
                     html += isPoang
                         ? `<th class="text-center fw-bold">Poäng</th>`
                         : `<th class="text-center fw-bold">Tot</th>`;
-                    html += `<th class="text-center">Pm</th><th class="text-center">Std</th></tr></thead><tbody>`;
+                    html += `<th class="text-center">Pm</th>`;
+                    if (faltAwardingMedals) html += `<th class="text-center">Std</th>`;
+                    html += `</tr></thead><tbody>`;
 
                     group.shooters.forEach((shooter, idx) => {
                         const isCurrentUser = shooter.name === currentUserName;
@@ -828,8 +853,10 @@
                             ? `<td class="text-center fw-bold">${shooter.totalPoints}</td>`
                             : `<td class="text-center fw-bold">${shooter.totalHits}/${shooter.totalFigures}</td>`;
                         html += `<td class="text-center">${shooter.totalTiebreakerScore || ''}</td>`;
-                        var stdM = shooter.standardMedal || '';
-                        html += `<td class="text-center fw-bold${stdM === 'S' ? ' text-primary' : stdM === 'B' ? ' text-warning' : ''}">${stdM}</td>`;
+                        if (faltAwardingMedals) {
+                            var stdM = shooter.standardMedal || '';
+                            html += `<td class="text-center fw-bold${stdM === 'S' ? ' text-primary' : stdM === 'B' ? ' text-warning' : ''}">${stdM}</td>`;
+                        }
                         html += `</tr>`;
                     });
 

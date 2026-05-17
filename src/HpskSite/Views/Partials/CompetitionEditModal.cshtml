@@ -1760,7 +1760,7 @@ function openEditFaltStationConfigurator() {
         } catch(e) { checkedIds = raw.split(','); }
     }
     // Use the registry helper so A_opt_X classes resolve to "A_Opt" (their own group), not "A".
-    var allowedGroups = ['A','A_Opt','B','C','R','M'];
+    var allowedGroups = ['A','A_Opt','A_M','A_P','A_G','B','C','R','M'];
     var wcs = [...new Set(checkedIds.map(function(c) { return window.getWeaponClassCode(c); }))]
         .filter(function(w) { return allowedGroups.indexOf(w) >= 0; });
     if (wcs.length > 0) weaponClasses = wcs;

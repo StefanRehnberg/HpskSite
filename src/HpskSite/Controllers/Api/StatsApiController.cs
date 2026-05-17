@@ -314,6 +314,10 @@ namespace HpskSite.Controllers.Api
             return weaponClass switch
             {
                 "A" => "Tjänstevapen",
+                "A_Opt" => "A Opt — Optisk",
+                "A_M" => "AM — Militära pistoler",
+                "A_P" => "AP — Fickmodell",
+                "A_G" => "AG — Moderna tjänstepistoler",
                 "B" => "Kal. 32-45",
                 "C" => "Kal. 22",
                 "R" => "Revolver",

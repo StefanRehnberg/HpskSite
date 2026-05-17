@@ -2314,7 +2314,7 @@ namespace HpskSite.Controllers
         }
 
         [HttpGet]
-        public async Task<IActionResult> AnalyzeClassMerges(int competitionId)
+        public async Task<IActionResult> AnalyzeClassMerges(int competitionId, bool subCompetitionOnly = false)
         {
             try
             {
@@ -2332,6 +2332,11 @@ namespace HpskSite.Controllers
                     return Json(new { success = true, suggestions = Array.Empty<object>(), classes = Array.Empty<object>() });
 
                 var results = await GetCompetitionResultsInternal(competitionId);
+                if (subCompetitionOnly)
+                {
+                    var subIds = GetSubCompetitionMemberIds(competitionId);
+                    results = results.Where(r => subIds.Contains(r.MemberId)).ToList();
+                }
 
                 // Fallback to cached result data if DB is empty
                 if (!results.Any())
@@ -2432,8 +2437,14 @@ namespace HpskSite.Controllers
                 var resultPage = _contentService.GetPagedChildren(competition.Id, 0, int.MaxValue, out long total)
                     .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
 
-                // Get all results for this competition
+                // Get all results for this competition; if this is a Deltävling rebuild,
+                // narrow down to the IsSubCompetition members.
                 var results = await GetCompetitionResultsInternal(request.CompetitionId);
+                if (request.IsSubCompetition)
+                {
+                    var subIds = GetSubCompetitionMemberIds(request.CompetitionId);
+                    results = results.Where(r => subIds.Contains(r.MemberId)).ToList();
+                }
 
                 FinalResults finalResults;
 
@@ -2490,19 +2501,39 @@ namespace HpskSite.Controllers
                     _logger.LogInformation("Created new result page for competition {CompetitionId}", request.CompetitionId);
                 }
 
-                // Keep existing isOfficial status
+                // Keep existing isOfficial status (main flag — sub-comp uses subCompetitionIsOfficial)
                 var existingIsOfficial = resultPage.GetValue<bool>("isOfficial");
 
-                // Update the result page
-                resultPage.SetValue("resultData", Newtonsoft.Json.JsonConvert.SerializeObject(finalResults));
-                resultPage.SetValue("lastUpdated", DateTime.Now);
-                resultPage.SetValue("isOfficial", existingIsOfficial); // Keep existing status
-                resultPage.SetValue("resultType", "Final Results");
+                if (request.IsSubCompetition)
+                {
+                    // Deltävling path: don't overwrite the main resultData / mergeConfig.
+                    // Just persist the sub-comp merge config; live recompute when read.
+                    if (resultPage.HasProperty("subCompetitionMergeConfig"))
+                    {
+                        resultPage.SetValue("subCompetitionMergeConfig", request.Merges?.Any() == true
+                            ? Newtonsoft.Json.JsonConvert.SerializeObject(request.Merges)
+                            : "");
+                    }
+                    else
+                    {
+                        _logger.LogWarning("competitionResult node for comp {CompId} missing 'subCompetitionMergeConfig' property — Deltävling merge config not saved.", request.CompetitionId);
+                    }
+                    resultPage.SetValue("lastUpdated", DateTime.Now);
+                    resultPage.SetValue("resultType", "Final Results");
+                }
+                else
+                {
+                    // Update the result page (main results path)
+                    resultPage.SetValue("resultData", Newtonsoft.Json.JsonConvert.SerializeObject(finalResults));
+                    resultPage.SetValue("lastUpdated", DateTime.Now);
+                    resultPage.SetValue("isOfficial", existingIsOfficial); // Keep existing status
+                    resultPage.SetValue("resultType", "Final Results");
 
-                // Persist merge config so GetResultsList can re-apply on preliminary reload
-                resultPage.SetValue("mergeConfig", request.Merges?.Any() == true
-                    ? Newtonsoft.Json.JsonConvert.SerializeObject(request.Merges)
-                    : "");
+                    // Persist merge config so GetResultsList can re-apply on preliminary reload
+                    resultPage.SetValue("mergeConfig", request.Merges?.Any() == true
+                        ? Newtonsoft.Json.JsonConvert.SerializeObject(request.Merges)
+                        : "");
+                }
 
                 // Save and publish
                 _contentService.Save(resultPage);
@@ -2530,7 +2561,7 @@ namespace HpskSite.Controllers
         }
 
         [HttpGet]
-        public async Task<IActionResult> GetResultsList(int competitionId)
+        public async Task<IActionResult> GetResultsList(int competitionId, bool subCompetitionOnly = false)
         {
             try
             {
@@ -2561,15 +2592,31 @@ namespace HpskSite.Controllers
                 DateTime lastUpdated;
                 bool isOfficial = false;
 
+                // Pre-resolve the IsSubCompetition member set once. Used for both the
+                // preliminary recompute and the (rare) live path when no result page exists.
+                HashSet<int>? subIds = subCompetitionOnly ? GetSubCompetitionMemberIds(competitionId) : null;
+
                 if (resultPage != null)
                 {
                     var finalResultsList = resultPage;
-                    isOfficial = finalResultsList.GetValue<bool>("isOfficial");
-                    var resultDataJson = finalResultsList.GetValue<string>("resultData");
-
-                    if (isOfficial)
+                    // Read the relevant Official flag — main vs sub live on different properties
+                    // so each section can be published independently.
+                    if (subCompetitionOnly)
                     {
-                        // Official results: Use saved JSON snapshot (frozen final version)
+                        isOfficial = finalResultsList.HasProperty("subCompetitionIsOfficial")
+                            && finalResultsList.GetValue<bool>("subCompetitionIsOfficial");
+                    }
+                    else
+                    {
+                        isOfficial = finalResultsList.GetValue<bool>("isOfficial");
+                    }
+
+                    // Deltävling is always recomputed live from the filtered DB rows — we don't
+                    // store a separate sub-comp snapshot. Main path keeps its frozen-snapshot
+                    // behaviour when Officiell so historical snapshots stay stable.
+                    if (isOfficial && !subCompetitionOnly)
+                    {
+                        var resultDataJson = finalResultsList.GetValue<string>("resultData");
                         _logger.LogInformation("Loading official (frozen) results for competition {CompetitionId}", competitionId);
 
                         if (string.IsNullOrEmpty(resultDataJson))
@@ -2582,18 +2629,27 @@ namespace HpskSite.Controllers
                     }
                     else
                     {
-                        // Preliminary results: Always generate fresh from database
-                        _logger.LogInformation("Loading preliminary (live) results from database for competition {CompetitionId}", competitionId);
+                        // Preliminary results OR sub-comp (any state): generate fresh from DB
+                        _logger.LogInformation("Loading {Mode} results from database for competition {CompetitionId}",
+                            subCompetitionOnly ? "sub-competition" : "preliminary", competitionId);
 
                         var dbResults = await GetCompetitionResultsInternal(competitionId);
+                        if (subCompetitionOnly && subIds != null)
+                        {
+                            dbResults = dbResults.Where(r => subIds.Contains(r.MemberId)).ToList();
+                        }
 
                         if (!dbResults.Any())
                         {
                             return Json(new { Success = false, Message = "Inga resultat finns i databasen ännu.", Exists = false });
                         }
 
-                        // Read stored merge config (if any) to re-apply on fresh generation
-                        var mergeConfigJson = finalResultsList.GetValue<string>("mergeConfig");
+                        // Read stored merge config from the slot that matches the current mode
+                        var mergeConfigJson = subCompetitionOnly
+                            ? (finalResultsList.HasProperty("subCompetitionMergeConfig")
+                                ? finalResultsList.GetValue<string>("subCompetitionMergeConfig")
+                                : null)
+                            : finalResultsList.GetValue<string>("mergeConfig");
                         List<ClassMergeAction>? storedMerges = null;
                         if (!string.IsNullOrEmpty(mergeConfigJson))
                         {
@@ -2604,7 +2660,7 @@ namespace HpskSite.Controllers
                         resultData = await CalculateFinalResults(dbResults, competitionId, storedMerges);
                         lastUpdated = DateTime.Now;
 
-                        _logger.LogInformation("Generated fresh preliminary results with {Count} shooters",
+                        _logger.LogInformation("Generated fresh results with {Count} shooters",
                             resultData.ClassGroups.Sum(g => g.Shooters.Count));
                     }
                 }
@@ -2614,6 +2670,10 @@ namespace HpskSite.Controllers
                     _logger.LogInformation("No result page, generating live results from database for competition {CompetitionId}", competitionId);
 
                     var dbResults = await GetCompetitionResultsInternal(competitionId);
+                    if (subCompetitionOnly && subIds != null)
+                    {
+                        dbResults = dbResults.Where(r => subIds.Contains(r.MemberId)).ToList();
+                    }
 
                     if (!dbResults.Any())
                     {
@@ -2710,11 +2770,25 @@ namespace HpskSite.Controllers
 
                 var finalResultsList = resultPage;
 
-                // Toggle or set the isOfficial flag
-                var newIsOfficial = request.IsOfficial ?? !finalResultsList.GetValue<bool>("isOfficial");
+                // Read whichever flag is being toggled (main isOfficial or subCompetitionIsOfficial)
+                bool currentFlag;
+                if (request.IsSubCompetition)
+                {
+                    if (!finalResultsList.HasProperty("subCompetitionIsOfficial"))
+                        return Json(new { Success = false, Message = "Egenskapen 'subCompetitionIsOfficial' saknas på dokumenttypen competitionResult. Lägg till den i Umbraco backoffice (True/False)." });
+                    currentFlag = finalResultsList.GetValue<bool>("subCompetitionIsOfficial");
+                }
+                else
+                {
+                    currentFlag = finalResultsList.GetValue<bool>("isOfficial");
+                }
 
-                // If making official, regenerate results from database to ensure latest format
-                if (newIsOfficial)
+                // Toggle or set the flag
+                var newIsOfficial = request.IsOfficial ?? !currentFlag;
+
+                // Main publish: regenerate the frozen result snapshot. Sub-comp publish doesn't
+                // store a snapshot — sub results are always live-recomputed in GetResultsList.
+                if (newIsOfficial && !request.IsSubCompetition)
                 {
                     var dbResults = await GetCompetitionResultsInternal(request.CompetitionId);
                     if (dbResults.Any())
@@ -2727,14 +2801,23 @@ namespace HpskSite.Controllers
                     }
                 }
 
-                finalResultsList.SetValue("isOfficial", newIsOfficial);
+                if (request.IsSubCompetition)
+                {
+                    finalResultsList.SetValue("subCompetitionIsOfficial", newIsOfficial);
+                }
+                else
+                {
+                    finalResultsList.SetValue("isOfficial", newIsOfficial);
+                }
                 finalResultsList.SetValue("lastUpdated", DateTime.Now);
 
                 // Save and publish
                 _contentService.Save(finalResultsList);
                 _contentService.Publish(finalResultsList, new[] { "*" }, -1);
 
-                _logger.LogInformation("Toggled isOfficial for competition {CompetitionId} to {IsOfficial}", request.CompetitionId, newIsOfficial);
+                _logger.LogInformation("Toggled {Flag} for competition {CompetitionId} to {IsOfficial}",
+                    request.IsSubCompetition ? "subCompetitionIsOfficial" : "isOfficial",
+                    request.CompetitionId, newIsOfficial);
 
                 return Json(new
                 {
@@ -3232,6 +3315,35 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// <summary>
+        /// Returns the MemberIds of registrations with isSubCompetition=true for the given competition.
+        /// Used by the Deltävling result paths to filter the source result rows to the subset of
+        /// shooters who opted into the sub-competition at registration time.
+        /// </summary>
+        private HashSet<int> GetSubCompetitionMemberIds(int competitionId)
+        {
+            var ids = new HashSet<int>();
+            var competition = _contentService.GetById(competitionId);
+            if (competition == null) return ids;
+
+            var children = _contentService.GetPagedChildren(competition.Id, 0, 100, out _);
+            var hub = children.FirstOrDefault(c => c.ContentType.Alias == "competitionRegistrationsHub");
+            if (hub == null) return ids;
+
+            var registrations = _contentService.GetPagedChildren(hub.Id, 0, int.MaxValue, out _)
+                .Where(c => c.ContentType.Alias == "competitionRegistration")
+                .Where(c => c.GetValue<int>("competitionId") == competitionId)
+                .Where(c => c.HasProperty("isSubCompetition") && c.GetValue<bool>("isSubCompetition"));
+
+            foreach (var r in registrations)
+            {
+                var memberId = r.GetValue<int>("memberId");
+                if (memberId > 0) ids.Add(memberId);
+            }
+            return ids;
+        }
+
+        /// <summary>
         /// Update the shooter's weapon class in the competition registration
         /// </summary>
         private bool UpdateRegistrationShooterClass(int competitionId, int memberId, string oldClass, string newClass)
@@ -3329,12 +3441,19 @@ namespace HpskSite.Controllers
     {
         public int CompetitionId { get; set; }
         public List<HpskSite.Services.ClassMergeAction>? Merges { get; set; }
+        /// <summary>When true, persist merges to subCompetitionMergeConfig and treat the
+        /// result generation as the Deltävling subset. The main resultData snapshot is
+        /// left untouched.</summary>
+        public bool IsSubCompetition { get; set; }
     }
 
     public class ToggleResultsOfficialRequest
     {
         public int CompetitionId { get; set; }
         public bool? IsOfficial { get; set; } // null = toggle, true/false = set explicit value
+        /// <summary>When true, flip subCompetitionIsOfficial on the competitionResult node
+        /// instead of the main isOfficial flag. Drives the second public Visa resultat button.</summary>
+        public bool IsSubCompetition { get; set; }
     }
 
     /// <summary>

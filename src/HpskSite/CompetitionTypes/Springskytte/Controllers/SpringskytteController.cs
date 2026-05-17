@@ -306,7 +306,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
         // ===== RESULTS LIST & CALCULATION =====
 
         [HttpGet]
-        public async Task<IActionResult> GetSpringskytteResults(int competitionId)
+        public async Task<IActionResult> GetSpringskytteResults(int competitionId, bool subCompetitionOnly = false)
         {
             try
             {
@@ -317,6 +317,18 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
 
                 if (!entries.Any())
                     return Json(new { success = true, results = new List<object>(), classGroups = new List<object>() });
+
+                // Deltävling filter: keep only the shooters who opted into the sub-competition
+                // at registration time. Medals are calculated below over this filtered subset.
+                if (subCompetitionOnly)
+                {
+                    var registrations = await _startListRepository.GetCompetitionRegistrations(competitionId);
+                    var subCompMemberIds = new HashSet<int>(
+                        registrations.Where(r => r.IsSubCompetition).Select(r => r.MemberId));
+                    entries = entries.Where(e => subCompMemberIds.Contains(e.MemberId)).ToList();
+                    if (!entries.Any())
+                        return Json(new { success = true, results = new List<object>(), classGroups = new List<object>() });
+                }
 
                 // Load start order from content nodes (authoritative source)
                 var startOrderLookup = new Dictionary<string, int>();
@@ -392,12 +404,96 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     .ThenBy(g => g.ageGenderClass)
                     .ToList();
 
-                return Json(new { success = true, classGroups });
+                // Surface the medal-award flag so the view can hide the Std column when
+                // the competition doesn't award standard medals (or is club-only per BR-PS.1.3).
+                var isAwardingStandardMedals = (competition?.GetValue<bool>("isAwardingStandardMedals") ?? false)
+                    && !(competition?.GetValue<bool>("isClubOnly") ?? false);
+
+                return Json(new { success = true, classGroups, isAwardingStandardMedals });
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error getting Springskytte results for CompetitionId={CompetitionId}", competitionId);
                 return Json(new { success = false, message = "Ett fel uppstod." });
+            }
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> CalculateSpringskytteSubFinalResults([FromBody] int competitionId)
+        {
+            try
+            {
+                if (!await HasCompetitionAccess(competitionId))
+                    return Json(new { success = false, message = "Åtkomst nekad." });
+
+                using var db = _umbracoDatabaseFactory.CreateDatabase();
+                var entries = await db.FetchAsync<SpringskytteResultEntry>(
+                    "WHERE CompetitionId = @0", competitionId);
+                if (!entries.Any())
+                    return Json(new { success = false, message = "Inga resultat hittades." });
+
+                // Filter to the Deltävling subset before medal/sort/group work.
+                var registrations = await _startListRepository.GetCompetitionRegistrations(competitionId);
+                var subCompMemberIds = new HashSet<int>(
+                    registrations.Where(r => r.IsSubCompetition).Select(r => r.MemberId));
+                entries = entries.Where(e => subCompMemberIds.Contains(e.MemberId)).ToList();
+                if (!entries.Any())
+                    return Json(new { success = false, message = "Inga deltävlingsresultat hittades." });
+
+                var memberIds = entries.Select(e => e.MemberId).Distinct().ToList();
+                var memberDict = LoadMemberInfo(memberIds);
+
+                var shooterResults = entries.Select(e =>
+                {
+                    var (name, club) = memberDict.TryGetValue(e.MemberId, out var info)
+                        ? info
+                        : ($"Skytt {e.MemberId}", "Okänd klubb");
+                    return _scoringService.BuildShooterResult(e, name, club);
+                }).ToList();
+
+                var competition = _contentService.GetById(competitionId);
+
+                // Calculate medals on the Deltävling subset (1/9 silver, 1/3 bronze within
+                // the subset). Gated on the competition's isAwardingStandardMedals flag AND
+                // !isClubOnly per BR-PS.1.3 — club competitions never award standard medals.
+                var isAwardingMedals = competition?.GetValue<bool>("isAwardingStandardMedals") ?? false;
+                var isClubOnlyForMedals = competition?.GetValue<bool>("isClubOnly") ?? false;
+                if (isAwardingMedals && !isClubOnlyForMedals)
+                {
+                    var subMedalService = new SpringskytteMedalService();
+                    subMedalService.CalculateStandardMedals(shooterResults);
+                }
+                if (competition != null)
+                {
+                    var resultPage = _contentService.GetPagedChildren(competition.Id, 0, 50, out _)
+                        .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
+                    if (resultPage == null)
+                    {
+                        resultPage = _contentService.Create("Resultat", competition.Id, "competitionResult");
+                        resultPage.SetValue("resultType", "Final Results");
+                    }
+                    if (!resultPage.HasProperty("subCompetitionIsOfficial"))
+                        return Json(new { success = false, message = "Egenskapen 'subCompetitionIsOfficial' saknas på dokumenttypen competitionResult. Lägg till den i Umbraco backoffice (True/False)." });
+                    resultPage.SetValue("subCompetitionIsOfficial", true);
+                    resultPage.SetValue("lastUpdated", DateTime.Now);
+                    _contentService.Save(resultPage);
+                    _contentService.Publish(resultPage, new[] { "*" });
+                    _logger.LogInformation("Published Springskytte sub-competition results for CompetitionId={CompetitionId}, {Count} shooters",
+                        competitionId, shooterResults.Count);
+                }
+
+                return Json(new
+                {
+                    success = true,
+                    message = $"Deltävlingens resultat beräknade för {shooterResults.Count} skyttar.",
+                    shooterCount = shooterResults.Count
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error calculating Springskytte sub-competition results for CompetitionId={CompetitionId}", competitionId);
+                return Json(new { success = false, message = "Ett fel uppstod vid beräkning av deltävlingens slutresultat." });
             }
         }
 
@@ -429,9 +525,16 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     return _scoringService.BuildShooterResult(e, name, club);
                 }).ToList();
 
-                // Calculate medals
-                var medalService = new SpringskytteMedalService();
-                medalService.CalculateStandardMedals(shooterResults);
+                // Calculate medals — gated on isAwardingStandardMedals AND !isClubOnly
+                // (BR-PS.1.3: club competitions don't award standard medals).
+                var compForMedals = _contentService.GetById(competitionId);
+                var mainAwardingMedals = compForMedals?.GetValue<bool>("isAwardingStandardMedals") ?? false;
+                var mainIsClubOnly = compForMedals?.GetValue<bool>("isClubOnly") ?? false;
+                if (mainAwardingMedals && !mainIsClubOnly)
+                {
+                    var medalService = new SpringskytteMedalService();
+                    medalService.CalculateStandardMedals(shooterResults);
+                }
 
                 // Sort using tiebreaker
                 var tieBreaker = new SpringskytteTieBreaker();

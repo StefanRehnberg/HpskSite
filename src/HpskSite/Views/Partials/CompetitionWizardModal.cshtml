@@ -676,6 +676,51 @@
             </div>
         </div>
 
+        <!-- AM-klasser (own weapon class — militära pistoler av äldre modell) -->
+        <div class="class-section mb-3" id="classSection_A_M">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0">AM-klasser <small class="text-muted">(militära pistoler av äldre modell)</small></h6>
+                <button type="button" class="btn btn-sm btn-outline-primary" onclick="toggleClassSection('A_M')">
+                    <span class="select-all-a_m-text">Välj alla</span>
+                </button>
+            </div>
+            <div class="row">
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-A_M" type="checkbox" value="A_m_1" id="class_A_m_1"><label class="form-check-label" for="class_A_m_1">AM1</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-A_M" type="checkbox" value="A_m_2" id="class_A_m_2"><label class="form-check-label" for="class_A_m_2">AM2</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-A_M" type="checkbox" value="A_m_3" id="class_A_m_3"><label class="form-check-label" for="class_A_m_3">AM3</label></div></div>
+            </div>
+        </div>
+
+        <!-- AP-klasser (own weapon class — pistoler av fickmodell) -->
+        <div class="class-section mb-3" id="classSection_A_P">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0">AP-klasser <small class="text-muted">(pistoler av fickmodell)</small></h6>
+                <button type="button" class="btn btn-sm btn-outline-primary" onclick="toggleClassSection('A_P')">
+                    <span class="select-all-a_p-text">Välj alla</span>
+                </button>
+            </div>
+            <div class="row">
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-A_P" type="checkbox" value="A_p_1" id="class_A_p_1"><label class="form-check-label" for="class_A_p_1">AP1</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-A_P" type="checkbox" value="A_p_2" id="class_A_p_2"><label class="form-check-label" for="class_A_p_2">AP2</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-A_P" type="checkbox" value="A_p_3" id="class_A_p_3"><label class="form-check-label" for="class_A_p_3">AP3</label></div></div>
+            </div>
+        </div>
+
+        <!-- AG-klasser (own weapon class — moderna tjänstepistoler) -->
+        <div class="class-section mb-3" id="classSection_A_G">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0">AG-klasser <small class="text-muted">(moderna tjänstepistoler)</small></h6>
+                <button type="button" class="btn btn-sm btn-outline-primary" onclick="toggleClassSection('A_G')">
+                    <span class="select-all-a_g-text">Välj alla</span>
+                </button>
+            </div>
+            <div class="row">
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-A_G" type="checkbox" value="A_g_1" id="class_A_g_1"><label class="form-check-label" for="class_A_g_1">AG1</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-A_G" type="checkbox" value="A_g_2" id="class_A_g_2"><label class="form-check-label" for="class_A_g_2">AG2</label></div></div>
+                <div class="col-4"><div class="form-check"><input class="form-check-input class-checkbox class-A_G" type="checkbox" value="A_g_3" id="class_A_g_3"><label class="form-check-label" for="class_A_g_3">AG3</label></div></div>
+            </div>
+        </div>
+
         <!-- B-klasser -->
         <div class="class-section mb-3" id="classSection_B">
             <div class="d-flex justify-content-between align-items-center mb-2">
@@ -1107,7 +1152,7 @@ function openFaltStationConfigurator() {
     // Determine weapon classes from selected shooting classes via the registry helper,
     // so A_opt_X classes group as their own weapon class instead of being lumped into A.
     const checkedClasses = Array.from(document.querySelectorAll('.class-checkbox:checked')).map(cb => cb.value);
-    const allowedGroups = ['A', 'A_Opt', 'B', 'C', 'R', 'M'];
+    const allowedGroups = ['A', 'A_Opt', 'A_M', 'A_P', 'A_G', 'B', 'C', 'R', 'M'];
     let weaponClasses = [...new Set(checkedClasses.map(c => window.getWeaponClassCode(c)))].filter(w => allowedGroups.includes(w));
     if (weaponClasses.length === 0) weaponClasses = ['C'];
 

@@ -105,12 +105,18 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
     {
         public int CompetitionId { get; set; }
         public string? MergeConfig { get; set; }
+        /// <summary>When true, persist to the Deltävling slot (`subCompetitionMergeConfig`
+        /// on the competitionResult node) instead of the main competition's `mergeConfig`.</summary>
+        public bool IsSubCompetition { get; set; }
     }
 
     public class PublishResultsRequest
     {
         public int CompetitionId { get; set; }
         public bool IsOfficial { get; set; }
+        /// <summary>When true, flip the Deltävling's published state (`subCompetitionIsOfficial`
+        /// on the competitionResult node) instead of the main result list's official flag.</summary>
+        public bool IsSubCompetition { get; set; }
     }
 
     public class JoinNextPatrolRequest
@@ -269,5 +275,16 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public string CompetitionDate { get; set; } = "";
         /// <summary>Organising club name (or empty for non-club competitions).</summary>
         public string OrganizerName { get; set; } = "";
+        /// <summary>True when this payload represents the Deltävling subset (filtered to
+        /// IsSubCompetition shooters with sub-comp merge config). Lets the UI know which
+        /// state badge / publish endpoint to use.</summary>
+        public bool IsSubCompetition { get; set; }
+        /// <summary>Display name of the Deltävling, from the competition's `subCompetitionName`
+        /// property. Empty when this competition doesn't have a Deltävling configured.</summary>
+        public string SubCompetitionName { get; set; } = "";
+        /// <summary>Whether the competition awards Standardmedaljer. Drives Std column
+        /// visibility in result list renderers; the medal calculator is gated on this
+        /// (and !isClubOnly) server-side so when false, every shooter's StandardMedal is empty.</summary>
+        public bool IsAwardingStandardMedals { get; set; }
     }
 }

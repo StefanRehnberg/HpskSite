@@ -5,7 +5,9 @@
 
 @{
     var competitionId = ViewData["CompetitionId"]?.ToString() ?? "";
-    
+    var subCompetitionName = ViewData["SubCompetitionName"]?.ToString() ?? "";
+    var resultPageUrl = ViewData["ResultPageUrl"]?.ToString() ?? "";
+
     // Get values from ViewData with appropriate defaults
     var numberOfSeriesOrStations = ViewData["NumberOfSeriesOrStations"] as int?;
     var numberOfFinalSeries = ViewData["NumberOfFinalSeries"] as int?;
@@ -216,6 +218,46 @@
             </div>
         </div>
     </div>
+
+    @if (!string.IsNullOrEmpty(subCompetitionName))
+    {
+    <!-- Deltävling Result List Section — mirrors the main Resultatlista section
+         (collapsible, same toolbar) but routes every action through the sub-comp
+         endpoints (subCompetitionOnly=true / isSubCompetition=true). The body embeds
+         /resultat/?sub=true so the admin sees exactly what the public will see. -->
+    <div class="mt-3" id="subResultsListSection">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <h5 class="mb-0"><i class="bi bi-trophy me-2"></i>@subCompetitionName</h5>
+            <div class="d-flex align-items-center gap-2" id="subResultsListActions">
+                <button class="btn btn-outline-primary btn-sm" onclick="createSubResultsList(event)" id="btnCreateSubResultsList">
+                    <i class="bi bi-arrow-clockwise me-1"></i>Uppdatera
+                </button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="showSubMergeAnalysisModal(event)" id="btnSubAnalyzeMerges">
+                    <i class="bi bi-intersect me-1"></i>Sammanslagning...
+                </button>
+                <span class="badge bg-warning fs-6 px-3 py-2" id="subResultsListStatusBadge" style="display: none;">
+                    <i class="bi bi-exclamation-triangle me-1"></i>Preliminär
+                </span>
+                <button class="btn btn-success btn-sm" id="btnSubMarkOfficial" onclick="markSubResultsOfficial(event)" style="display: none;">
+                    <i class="bi bi-check-circle me-1"></i>Publicera
+                </button>
+                <button class="btn btn-outline-warning btn-sm" id="btnSubMarkPreliminary" onclick="markSubResultsPreliminary(event)" style="display: none;">
+                    <i class="bi bi-arrow-counterclockwise me-1"></i>Avpublicera
+                </button>
+            </div>
+        </div>
+        <div id="subResultsListBody">
+            <div id="subNoResultsMessage" class="text-center py-4" style="display: none;">
+                <p class="text-muted">Klicka "Uppdatera" för att skapa en resultatlista för deltävlingen.</p>
+            </div>
+            <div id="subResultsDisplay" style="display: none;">
+                <div id="subResultsIframeContainer">
+                    <iframe id="subResultsManagementIframe" src="" style="width: 100%; height: 800px; border: 1px solid #dee2e6; border-radius: 0.375rem;"></iframe>
+                </div>
+            </div>
+        </div>
+    </div>
+    }
     } @* end if !isStationPage *@
 </div>
 
@@ -780,24 +822,254 @@ function openResultsInNewTab(event) {
     }
 }
 
+// ─── Deltävling (sub-competition) result handlers ──────────────────────────
+// Mirror createResultsList / loadResultsList / markResults* but routed to the
+// sub-comp slots (subCompetitionOnly=true / isSubCompetition=true). The merge
+// modal is shared with the main flow — _subMergeContext tells the existing
+// applyMergesAndCreateResults / submitCreateResultsListNoMerges handlers which
+// path to take after the user clicks the modal's confirmation button.
+let _subMergeContext = false;
+let currentSubResultsListData = null;
+
+async function createSubResultsList(event) {
+    if (event) event.stopPropagation();
+
+    const competitionId = $('.competition-results-management').data('competition-id');
+    if (!competitionId) { alert('Ingen tävling vald.'); return; }
+
+    const button = event?.target?.closest('button');
+    if (!button) return;
+    const originalText = button.innerHTML;
+    button.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Analyserar...';
+    button.disabled = true;
+
+    try {
+        const resp = await fetch(`/umbraco/surface/CompetitionResults/AnalyzeClassMerges?competitionId=${competitionId}&subCompetitionOnly=true`);
+        const data = await resp.json();
+
+        if (!data.success) {
+            alert('Fel vid analys: ' + (data.message || 'Okänt fel'));
+            return;
+        }
+
+        if (!data.classes || data.classes.length === 0) {
+            if (confirm('Det finns inga resultat i deltävlingen att bearbeta ännu. Vill du skapa en tom resultatlista?')) {
+                submitCreateSubResultsList(competitionId, null);
+            }
+        } else if (data.suggestions && data.suggestions.length > 0) {
+            _subMergeContext = true;
+            renderMergeModal(data.classes, data.suggestions);
+            new bootstrap.Modal(document.getElementById('classMergeModal')).show();
+        } else {
+            if (confirm('Alla klasser i deltävlingen har minst 5 deltagare. Vill du skapa/uppdatera deltävlingens resultatlista?')) {
+                submitCreateSubResultsList(competitionId, null);
+            }
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Ett fel uppstod vid analys av deltävlingens klasser.');
+    } finally {
+        button.innerHTML = originalText;
+        button.disabled = false;
+    }
+}
+
+function showSubMergeAnalysisModal(event) {
+    // Same flow as the toolbar's "Uppdatera" — Sammanslagning is just an alias
+    // for re-running the analysis + applying merges in one click.
+    createSubResultsList(event);
+}
+
+function submitCreateSubResultsList(competitionId, merges) {
+    const btn = document.getElementById('btnCreateSubResultsList');
+    if (btn) {
+        btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Skapar...';
+        btn.disabled = true;
+    }
+
+    const body = { competitionId: parseInt(competitionId), isSubCompetition: true };
+    if (merges) body.merges = merges;
+
+    fetch('/umbraco/surface/CompetitionResults/CreateResultsList', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'RequestVerificationToken': $('input[name="__RequestVerificationToken"]').val()
+        },
+        body: JSON.stringify(body)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showSaveMessage('Deltävlingens resultatlista har uppdaterats! (' + data.resultsCount + ' deltagare)', 'success');
+            loadSubResultsList();
+        } else {
+            alert('Fel vid skapande av resultatlista: ' + (data.message || 'Okänt fel'));
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Ett fel uppstod vid skapande av deltävlingens resultatlista.');
+    })
+    .finally(() => {
+        if (btn) {
+            btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Uppdatera';
+            btn.disabled = false;
+        }
+    });
+}
+
+async function loadSubResultsList() {
+    const competitionId = $('.competition-results-management').data('competition-id');
+    if (!competitionId) return;
+
+    try {
+        const response = await fetch(`/umbraco/surface/CompetitionResults/GetResultsList?competitionId=${competitionId}&subCompetitionOnly=true`);
+        const data = await response.json();
+
+        const section = document.getElementById('subResultsListSection');
+        if (!section) return;
+
+        const noResultsMessage = document.getElementById('subNoResultsMessage');
+        const resultsDisplay = document.getElementById('subResultsDisplay');
+        const statusBadge = document.getElementById('subResultsListStatusBadge');
+        const btnMarkOfficial = document.getElementById('btnSubMarkOfficial');
+        const btnMarkPreliminary = document.getElementById('btnSubMarkPreliminary');
+
+        if (data.success && data.exists) {
+            currentSubResultsListData = data.results;
+            section.style.display = 'block';
+            if (noResultsMessage) noResultsMessage.style.display = 'none';
+            if (resultsDisplay) resultsDisplay.style.display = 'block';
+            if (statusBadge) statusBadge.style.display = 'inline-block';
+            updateSubResultsListStatus(data.isOfficial);
+
+            if (data.resultPageUrl) {
+                const iframe = document.getElementById('subResultsManagementIframe');
+                if (iframe) iframe.src = data.resultPageUrl + (data.resultPageUrl.indexOf('?') >= 0 ? '&' : '?') + 'sub=true';
+            }
+        } else {
+            section.style.display = 'block';
+            if (noResultsMessage) noResultsMessage.style.display = 'block';
+            if (resultsDisplay) resultsDisplay.style.display = 'none';
+            if (statusBadge) statusBadge.style.display = 'none';
+            if (btnMarkOfficial) btnMarkOfficial.style.display = 'none';
+            if (btnMarkPreliminary) btnMarkPreliminary.style.display = 'none';
+        }
+    } catch (error) {
+        console.error('Error loading sub-comp results list:', error);
+    }
+}
+
+function updateSubResultsListStatus(isOfficial) {
+    const statusBadge = document.getElementById('subResultsListStatusBadge');
+    const btnMarkOfficial = document.getElementById('btnSubMarkOfficial');
+    const btnMarkPreliminary = document.getElementById('btnSubMarkPreliminary');
+    if (!statusBadge) return;
+
+    if (isOfficial) {
+        statusBadge.className = 'badge bg-success fs-6 px-3 py-2';
+        statusBadge.innerHTML = '<i class="bi bi-check-circle me-1"></i>Publicerad';
+        if (btnMarkOfficial) btnMarkOfficial.style.display = 'none';
+        if (btnMarkPreliminary) btnMarkPreliminary.style.display = 'inline-block';
+    } else {
+        statusBadge.className = 'badge bg-warning fs-6 px-3 py-2';
+        statusBadge.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>Preliminär';
+        if (btnMarkOfficial) btnMarkOfficial.style.display = 'inline-block';
+        if (btnMarkPreliminary) btnMarkPreliminary.style.display = 'none';
+    }
+}
+
+async function markSubResultsOfficial(event) {
+    if (event) event.stopPropagation();
+    if (!confirm('Vill du markera deltävlingens resultatlista som officiell?')) return;
+    await toggleSubResultsOfficial(true, event);
+}
+
+async function markSubResultsPreliminary(event) {
+    if (event) event.stopPropagation();
+    if (!confirm('Vill du återställa deltävlingens resultatlista till preliminär?')) return;
+    await toggleSubResultsOfficial(false, event);
+}
+
+async function toggleSubResultsOfficial(makeOfficial, event) {
+    const competitionId = $('.competition-results-management').data('competition-id');
+    const button = event?.target?.closest('button');
+    const originalText = button?.innerHTML;
+    if (button) { button.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Sparar...'; button.disabled = true; }
+
+    try {
+        const response = await fetch('/umbraco/surface/CompetitionResults/ToggleResultsOfficial', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': $('input[name="__RequestVerificationToken"]').val()
+            },
+            body: JSON.stringify({ competitionId: parseInt(competitionId), isOfficial: makeOfficial, isSubCompetition: true })
+        });
+        const data = await response.json();
+        if (data.success) {
+            showSaveMessage(data.message, 'success');
+            updateSubResultsListStatus(data.isOfficial);
+        } else {
+            alert('Fel: ' + (data.message || 'Okänt fel'));
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Ett fel uppstod vid uppdatering av status.');
+    } finally {
+        if (button && originalText !== undefined) { button.innerHTML = originalText; button.disabled = false; }
+    }
+}
+
+// Patch the existing merge-modal action handlers to honour _subMergeContext —
+// the modal is shared between the main and sub flows, so the "Skapa" buttons
+// need to route to whichever endpoint matches the open context.
+(function() {
+    const _origApply = window.applyMergesAndCreateResults;
+    window.applyMergesAndCreateResults = function() {
+        const competitionId = $('.competition-results-management').data('competition-id');
+        const merges = collectMergeConfig();
+        bootstrap.Modal.getInstance(document.getElementById('classMergeModal')).hide();
+        if (_subMergeContext) {
+            _subMergeContext = false;
+            submitCreateSubResultsList(competitionId, merges.length > 0 ? merges : null);
+        } else {
+            submitCreateResultsList(competitionId, merges.length > 0 ? merges : null);
+        }
+    };
+    const _origSkip = window.submitCreateResultsListNoMerges;
+    window.submitCreateResultsListNoMerges = function() {
+        const competitionId = $('.competition-results-management').data('competition-id');
+        bootstrap.Modal.getInstance(document.getElementById('classMergeModal')).hide();
+        if (_subMergeContext) {
+            _subMergeContext = false;
+            submitCreateSubResultsList(competitionId, null);
+        } else {
+            submitCreateResultsList(competitionId, null);
+        }
+    };
+})();
+
 // Load results list when page loads or when tab is shown
 $(document).ready(function() {
     // Try multiple selectors for different page contexts
     $('button[data-bs-target="#results"], #results-tab').on('shown.bs.tab', function () {
         // Try to load results list when tab is shown
-        setTimeout(() => loadResultsList(), 500);
+        setTimeout(() => { loadResultsList(); loadSubResultsList(); }, 500);
     });
 
     // Also try on page load if results tab is active
     if ($('#results').hasClass('active') || $('#results').hasClass('show')) {
-        setTimeout(() => loadResultsList(), 500);
+        setTimeout(() => { loadResultsList(); loadSubResultsList(); }, 500);
     }
-    
+
     // Force load after a short delay to ensure everything is initialized
     setTimeout(() => {
         const competitionId = $('.competition-results-management').data('competition-id');
         if (competitionId) {
             loadResultsList();
+            loadSubResultsList();
         }
     }, 1000);
 });

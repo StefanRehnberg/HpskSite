@@ -4,6 +4,9 @@
     var competitionName = ViewData["CompetitionName"]?.ToString() ?? "";
     var aClasses = ViewData["AClasses"] as List<ShootingClass> ?? new List<ShootingClass>();
     var aOptClasses = ViewData["AOptClasses"] as List<ShootingClass> ?? new List<ShootingClass>();
+    var aMClasses = ViewData["AMClasses"] as List<ShootingClass> ?? new List<ShootingClass>();
+    var aPClasses = ViewData["APClasses"] as List<ShootingClass> ?? new List<ShootingClass>();
+    var aGClasses = ViewData["AGClasses"] as List<ShootingClass> ?? new List<ShootingClass>();
     var bClasses = ViewData["BClasses"] as List<ShootingClass> ?? new List<ShootingClass>();
     var cRegularClasses = ViewData["CRegularClasses"] as List<ShootingClass> ?? new List<ShootingClass>();
     var cVetClasses = ViewData["CVetClasses"] as List<ShootingClass> ?? new List<ShootingClass>();
@@ -137,6 +140,96 @@
 											<button type="button" class="btn p-1 border-0 text-secondary"
 													onclick="openPreferenceModal('@shootingClass.Id', '@shootingClass.Name', 'A_Opt')"
 													disabled data-class="AOpt_@shootingClass.Id">
+												<i class="bi bi-pencil" style="font-size: 0.8rem;"></i>
+											</button>
+										</div>
+									</div>
+								}
+							</div>
+						}
+
+						@* AM Classes Group (own weapon group — militära pistoler av äldre modell) *@
+						@if (aMClasses.Any())
+						{
+							<div class="mb-2">
+								<h6 class="text-primary border-bottom border-primary pb-1 mb-1">
+									<i class="bi bi-trophy"></i> AM-klasser
+								</h6>
+								@foreach (var shootingClass in aMClasses)
+								{
+									<div class="row align-items-center gx-1 py-0">
+										<div class="col-1">
+											<input class="form-check-input" type="radio" name="selectedAMClass" value="@shootingClass.Id" id="class_AM_@shootingClass.Id">
+										</div>
+										<div class="col-9">
+											<label class="form-check-label" for="class_AM_@shootingClass.Id">
+												<strong>@shootingClass.Name</strong> - <small class="text-muted">@shootingClass.Description</small>
+											</label>
+										</div>
+										<div class="col-2 text-end">
+											<button type="button" class="btn p-1 border-0 text-secondary"
+													onclick="openPreferenceModal('@shootingClass.Id', '@shootingClass.Name', 'A_M')"
+													disabled data-class="AM_@shootingClass.Id">
+												<i class="bi bi-pencil" style="font-size: 0.8rem;"></i>
+											</button>
+										</div>
+									</div>
+								}
+							</div>
+						}
+
+						@* AP Classes Group (own weapon group — pistoler av fickmodell) *@
+						@if (aPClasses.Any())
+						{
+							<div class="mb-2">
+								<h6 class="text-primary border-bottom border-primary pb-1 mb-1">
+									<i class="bi bi-trophy"></i> AP-klasser
+								</h6>
+								@foreach (var shootingClass in aPClasses)
+								{
+									<div class="row align-items-center gx-1 py-0">
+										<div class="col-1">
+											<input class="form-check-input" type="radio" name="selectedAPClass" value="@shootingClass.Id" id="class_AP_@shootingClass.Id">
+										</div>
+										<div class="col-9">
+											<label class="form-check-label" for="class_AP_@shootingClass.Id">
+												<strong>@shootingClass.Name</strong> - <small class="text-muted">@shootingClass.Description</small>
+											</label>
+										</div>
+										<div class="col-2 text-end">
+											<button type="button" class="btn p-1 border-0 text-secondary"
+													onclick="openPreferenceModal('@shootingClass.Id', '@shootingClass.Name', 'A_P')"
+													disabled data-class="AP_@shootingClass.Id">
+												<i class="bi bi-pencil" style="font-size: 0.8rem;"></i>
+											</button>
+										</div>
+									</div>
+								}
+							</div>
+						}
+
+						@* AG Classes Group (own weapon group — moderna tjänstepistoler) *@
+						@if (aGClasses.Any())
+						{
+							<div class="mb-2">
+								<h6 class="text-primary border-bottom border-primary pb-1 mb-1">
+									<i class="bi bi-trophy"></i> AG-klasser
+								</h6>
+								@foreach (var shootingClass in aGClasses)
+								{
+									<div class="row align-items-center gx-1 py-0">
+										<div class="col-1">
+											<input class="form-check-input" type="radio" name="selectedAGClass" value="@shootingClass.Id" id="class_AG_@shootingClass.Id">
+										</div>
+										<div class="col-9">
+											<label class="form-check-label" for="class_AG_@shootingClass.Id">
+												<strong>@shootingClass.Name</strong> - <small class="text-muted">@shootingClass.Description</small>
+											</label>
+										</div>
+										<div class="col-2 text-end">
+											<button type="button" class="btn p-1 border-0 text-secondary"
+													onclick="openPreferenceModal('@shootingClass.Id', '@shootingClass.Name', 'A_G')"
+													disabled data-class="AG_@shootingClass.Id">
 												<i class="bi bi-pencil" style="font-size: 0.8rem;"></i>
 											</button>
 										</div>

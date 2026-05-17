@@ -210,6 +210,9 @@
     // Group available shooting classes by weapon (so A_opt_X is its own group, not lumped into A).
     var aClasses    = competitionShootingClasses.Where(sc => sc.Weapon == HpskSite.Models.WeaponClass.A).ToList();
     var aOptClasses = competitionShootingClasses.Where(sc => sc.Weapon == HpskSite.Models.WeaponClass.A_Opt).ToList();
+    var aMClasses   = competitionShootingClasses.Where(sc => sc.Weapon == HpskSite.Models.WeaponClass.A_M).ToList();
+    var aPClasses   = competitionShootingClasses.Where(sc => sc.Weapon == HpskSite.Models.WeaponClass.A_P).ToList();
+    var aGClasses   = competitionShootingClasses.Where(sc => sc.Weapon == HpskSite.Models.WeaponClass.A_G).ToList();
     var bClasses    = competitionShootingClasses.Where(sc => sc.Weapon == HpskSite.Models.WeaponClass.B).ToList();
     var cClasses    = competitionShootingClasses.Where(sc => sc.Weapon == HpskSite.Models.WeaponClass.C).ToList();
     var rClasses    = competitionShootingClasses.Where(sc => sc.Weapon == HpskSite.Models.WeaponClass.R).ToList();
@@ -471,9 +474,18 @@
     var resultPageNode = competitionChildren.FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
     var hasResultPage = resultPageNode != null;
     var isResultsOfficial = resultPageNode?.Value<bool>("isOfficial") ?? false;
+    // Deltävling result list — published independently of the main result list. When
+    // subCompetitionIsOfficial is true on the same competitionResult node, a second
+    // public button is rendered pointing at /resultat/?sub=true (handled by the
+    // /resultat/ page). Value<bool> returns false when the property is missing, so
+    // we don't need a separate HasProperty guard — a clean falsy value is the
+    // correct "no sub-comp published yet" answer.
+    var isSubResultsOfficial = resultPageNode?.Value<bool>("subCompetitionIsOfficial") ?? false;
+    var hasSubCompetition = !string.IsNullOrWhiteSpace(subCompetitionNameRaw);
 
     // Results URL (used in sidebar and JavaScript)
     var resultsUrl = Model.Url().TrimEnd('/') + "/resultat/";
+    var subResultsUrl = resultsUrl + "?sub=true";
 }
 
 <div class="container mt-4">
@@ -1224,6 +1236,12 @@
 									<i class="bi bi-hourglass-split me-1"></i> Resultat har inte publicerats än.
 								</p>
 							}
+							@if (hasResultPage && hasSubCompetition && isSubResultsOfficial)
+							{
+								<a href="@subResultsUrl" class="btn btn-warning w-100 mt-2" target="_blank" onclick="if (!currentUserIsLoggedIn) { event.preventDefault(); showLoginRequiredModal('resultatlistan'); }">
+									<i class="bi bi-trophy me-1"></i> Visa @subCompetitionNameRaw resultat
+								</a>
+							}
 						</div>
 					}
 					else
@@ -1346,6 +1364,9 @@
 			{ "CompetitionName", competitionName },
 			{ "AClasses", aClasses },
 			{ "AOptClasses", aOptClasses },
+			{ "AMClasses", aMClasses },
+			{ "APClasses", aPClasses },
+			{ "AGClasses", aGClasses },
 			{ "BClasses", bClasses },
 			{ "CClasses", cClasses },
 			{ "CRegularClasses", cRegularClasses },
