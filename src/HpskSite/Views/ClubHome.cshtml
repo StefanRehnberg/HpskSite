@@ -45,7 +45,7 @@
     @await Html.PartialAsync("ClubHeader")
 
     <!-- Club Navigation Tabs -->
-    <div class="container mt-4">
+    <div class="container-fluid mt-4">
         @await Html.PartialAsync("ClubNavigation")
 
         <!-- Tab Content -->
@@ -60,7 +60,7 @@
                             <div class="card mb-4">
                                 <div class="card-body">
                                     <h5 class="card-title">Välkommen</h5>
-                                    <p class="card-text">@Html.Raw(welcomeMessage)</p>
+                                    <div class="card-text prose">@Html.Raw(welcomeMessage)</div>
                                 </div>
                             </div>
                         }

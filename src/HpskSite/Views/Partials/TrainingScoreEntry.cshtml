@@ -171,19 +171,15 @@
 
                             @* Button Grid *@
                             <div class="button-grid">
-                                <div class="button-row">
+                                <div class="shot-buttons">
                                     <button type="button" class="btn btn-primary shot-btn" data-value="X" onclick="addShot('X')">X</button>
                                     <button type="button" class="btn btn-primary shot-btn" data-value="10" onclick="addShot('10')">10</button>
                                     <button type="button" class="btn btn-primary shot-btn" data-value="9" onclick="addShot('9')">9</button>
                                     <button type="button" class="btn btn-primary shot-btn" data-value="8" onclick="addShot('8')">8</button>
-                                </div>
-                                <div class="button-row">
                                     <button type="button" class="btn btn-primary shot-btn" data-value="7" onclick="addShot('7')">7</button>
                                     <button type="button" class="btn btn-primary shot-btn" data-value="6" onclick="addShot('6')">6</button>
                                     <button type="button" class="btn btn-primary shot-btn" data-value="5" onclick="addShot('5')">5</button>
                                     <button type="button" class="btn btn-primary shot-btn" data-value="4" onclick="addShot('4')">4</button>
-                                </div>
-                                <div class="button-row">
                                     <button type="button" class="btn btn-primary shot-btn" data-value="3" onclick="addShot('3')">3</button>
                                     <button type="button" class="btn btn-primary shot-btn" data-value="2" onclick="addShot('2')">2</button>
                                     <button type="button" class="btn btn-primary shot-btn" data-value="1" onclick="addShot('1')">1</button>
@@ -893,13 +889,14 @@ document.addEventListener('DOMContentLoaded', function() {
     margin: 0 auto;
 }
 
-.button-row {
+.shot-buttons {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     gap: 0.5rem;
 }
 
 .button-row.action-row {
+    display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 1rem;
     margin-top: 0.5rem;
@@ -985,8 +982,8 @@ document.addEventListener('DOMContentLoaded', function() {
         padding: 1rem;
     }
 
-    /* Button grid - 3 columns on tablets */
-    .button-row {
+    /* Shot button grid - 3 columns on tablets */
+    .shot-buttons {
         grid-template-columns: repeat(3, 1fr);
         gap: 0.75rem;
     }
@@ -1010,7 +1007,7 @@ document.addEventListener('DOMContentLoaded', function() {
         padding: 0 0.5rem;
     }
 
-    .button-row {
+    .shot-buttons {
         gap: 0.5rem;
     }
 

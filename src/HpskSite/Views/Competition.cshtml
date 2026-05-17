@@ -488,7 +488,7 @@
     var subResultsUrl = resultsUrl + "?sub=true";
 }
 
-<div class="container mt-4">
+<div class="container-fluid mt-4">
     <div class="row">
         <div class="col-12">
             <!-- Breadcrumb with Series Context -->
@@ -773,7 +773,9 @@
 						<h3 class="card-title h5 mb-0"><i class="bi bi-text-paragraph me-2"></i>Beskrivning</h3>
 					</div>
 					<div class="card-body">
-						@Html.Raw(System.Net.WebUtility.HtmlDecode(description))
+						<div class="prose">
+							@Html.Raw(System.Net.WebUtility.HtmlDecode(description))
+						</div>
 					</div>
 				</div>
 			}

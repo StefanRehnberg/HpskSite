@@ -31,7 +31,7 @@
     @await Html.PartialAsync("ClubHeader", new { clubId = clubId, logo = logo, bannerImage = bannerImage, isClubAdmin = isClubAdmin })
 
     <!-- Club Navigation Tabs -->
-    <div class="container mt-4">
+    <div class="container-fluid mt-4">
         @await Html.PartialAsync("ClubNavigation", new { clubId = clubId, isClubAdmin = isClubAdmin })
 
         <!-- Tab Content -->

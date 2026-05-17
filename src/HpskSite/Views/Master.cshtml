@@ -383,7 +383,7 @@
     <header>
         <!-- Combined Compact Navigation Header -->
         <nav class="navbar navbar-expand-lg navbar-dark navbar-custom">
-            <div class="container">
+            <div class="container-fluid">
                 <a class="navbar-brand" href="@Model.Root().Url()">
                     <div>
                         <div class="site-title">@(Model.Root().Value<string>("siteTitle") ?? "Hallands Pistolskytteförbund")</div>
@@ -635,12 +635,12 @@
         </nav>
     </header>
 
-    <main class="container mt-4">
+    <main class="container-fluid mt-4">
         @RenderBody()
     </main>
 
     <footer class="mt-5 py-4 border-top" style="background-color: var(--footer-bg); color: var(--footer-text); border-top-color: var(--footer-border) !important;">
-        <div class="container">
+        <div class="container-fluid">
             <div class="row">
                 <div class="col-md-6">
                     <p class="mb-0">&copy; @DateTime.Now.Year Pistol.nu. All rights reserved.</p>
@@ -932,7 +932,7 @@
     <!-- Cookie Consent Banner -->
     <div id="cookieConsentBanner" class="position-fixed bottom-0 start-0 end-0 p-3 bg-dark text-white"
          style="z-index: 9999; display: none;">
-        <div class="container d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div class="container-fluid d-flex justify-content-between align-items-center flex-wrap gap-2">
             <span>
                 <i class="bi bi-shield-check me-2"></i>
                 Vi använder cookies för inloggning och funktionalitet.

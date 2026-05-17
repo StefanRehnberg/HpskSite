@@ -191,7 +191,7 @@
     var colorDarkB = HexToInt(colorDark.Substring(5, 2));
 }
 
-<div class="container mt-4">
+<div class="container-fluid mt-4">
     <!-- Admin Toolbar -->
     @if (isAdmin)
     {
@@ -524,7 +524,7 @@
                         <h5 class="mb-0"><i class="bi bi-text-paragraph me-2"></i>Beskrivning</h5>
                     </div>
                     <div class="card-body">
-                        <div id="event-description-content"></div>
+                        <div id="event-description-content" class="prose"></div>
                     </div>
                 </div>
             }

@@ -56,3 +56,15 @@
   --chart-text: #f8f9fa;
   --chart-grid: rgba(255, 255, 255, 0.1);
 }
+
+/* Readable text-column wrapper for long-form prose / RTE content.
+   Use .prose for body copy (~75ch), .prose-wide for hero leads (~90ch). */
+.prose {
+  max-width: 75ch;
+  margin-inline: auto;
+}
+
+.prose-wide {
+  max-width: 90ch;
+  margin-inline: auto;
+}

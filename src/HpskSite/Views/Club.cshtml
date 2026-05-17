@@ -119,7 +119,7 @@ window.currentClubId = clubId;
     @if (!isLoggedIn)
     {
         <!-- TIER 1: PUBLIC VIEW - About section only -->
-        <div class="container mt-4">
+        <div class="container-fluid mt-4">
             <div class="row">
                 <div class="col-lg-8">
                     <!-- About Club -->
@@ -132,7 +132,9 @@ window.currentClubId = clubId;
                                 </h5>
                             </div>
                             <div class="card-body">
-                                @Html.Raw(welcomeMessage)
+                                <div class="prose">
+                                    @Html.Raw(welcomeMessage)
+                                </div>
                             </div>
                         </div>
                     }
@@ -197,7 +199,7 @@ window.currentClubId = clubId;
     else
     {
         <!-- TIER 2 & 3: MEMBER/ADMIN VIEW - With tabs and role-based functionality -->
-        <div class="container mt-4">
+        <div class="container-fluid mt-4">
             @await Html.PartialAsync("ClubNavigation")
 
             <!-- Tab Content -->
@@ -458,7 +460,9 @@ window.currentClubId = clubId;
                                 <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Om klubben</h5>
                             </div>
                             <div class="card-body">
-                                @Html.Raw(welcomeMessage)
+                                <div class="prose">
+                                    @Html.Raw(welcomeMessage)
+                                </div>
                             </div>
                         </div>
                     }

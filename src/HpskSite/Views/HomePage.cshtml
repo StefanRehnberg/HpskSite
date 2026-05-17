@@ -86,11 +86,11 @@
                         <h1 class="display-4 fw-bold">@welcomeTitle</h1>
                         @if (!string.IsNullOrEmpty(welcomeText))
                         {
-                            <div class="lead mt-3">@Html.Raw(welcomeText)</div>
+                            <div class="lead mt-3 prose-wide">@Html.Raw(welcomeText)</div>
                         }
                         else
                         {
-                            <p class="lead mt-3">Hitta din krets och upptäck skytteföreningar i din region.</p>
+                            <p class="lead mt-3 prose-wide">Hitta din krets och upptäck skytteföreningar i din region.</p>
                         }
                     </div>
                 </div>
@@ -159,7 +159,9 @@
                     <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Om oss</h5>
                 </div>
                 <div class="card-body">
-                    @Html.Raw(aboutText)
+                    <div class="prose">
+                        @Html.Raw(aboutText)
+                    </div>
                 </div>
             </div>
         }

@@ -62,7 +62,7 @@
 @* Check if user is logged in *@
 @if (!isLoggedIn)
 {
-    <div class="container mt-4">
+    <div class="container-fluid mt-4">
         <div class="alert alert-warning">
             <h4>Access Denied</h4>
             <p>You must be logged in to access this page.</p>
@@ -75,7 +75,7 @@
 @* Check if user has admin access (site admin or regional admin) *@
 @if (!hasAccess)
 {
-    <div class="container mt-4">
+    <div class="container-fluid mt-4">
         <div class="alert alert-danger">
             <h4>Access Denied</h4>
             <p>You must be a site administrator or regional administrator to access this page.</p>
@@ -86,7 +86,7 @@
     return;
 }
 
-<div class="container">
+<div class="container-fluid">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
             <h1>Administration Panel</h1>
