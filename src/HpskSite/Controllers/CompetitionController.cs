@@ -1,4 +1,5 @@
 ﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
 using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Logging;
 using Umbraco.Cms.Core.Models;
@@ -29,6 +30,13 @@ namespace HpskSite.Controllers
         private readonly ClubService _clubService;
         private readonly AdminAuthorizationService _authorizationService;
         private readonly DirektplaceringStartListService _dpStartListService;
+        // Used to create a fresh DI scope for deferred background work. The controller's
+        // own scoped services (_contentService, _dpStartListService) get disposed when the
+        // HTTP request ends — capturing them in a Task.Run lambda that fires later leaks
+        // half-broken connections, which manifests as DataReader exceptions during
+        // ContentService.Publish + orphaned ContentTree write locks (id -333) that
+        // freeze the whole site. EnqueueBackground builds a fresh scope per task.
+        private readonly IServiceScopeFactory _scopeFactory;
 
         public CompetitionController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -44,7 +52,8 @@ namespace HpskSite.Controllers
             ILogger<CompetitionController> logger,
             ClubService clubService,
             AdminAuthorizationService authorizationService,
-            DirektplaceringStartListService dpStartListService)
+            DirektplaceringStartListService dpStartListService,
+            IServiceScopeFactory scopeFactory)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _memberManager = memberManager;
@@ -55,6 +64,40 @@ namespace HpskSite.Controllers
             _clubService = clubService;
             _authorizationService = authorizationService;
             _dpStartListService = dpStartListService;
+            _scopeFactory = scopeFactory;
+        }
+
+        /// <summary>
+        /// Run <paramref name="work"/> in a background task after an optional delay,
+        /// using a fresh DI scope. Use this for any background work that touches
+        /// scoped services (IContentService, DirektplaceringStartListService, etc.)
+        /// to avoid leaking write locks via disposed-scope-captured services.
+        /// </summary>
+        private void EnqueueBackground(TimeSpan delay, Action<IServiceProvider> work, string description)
+        {
+            var scopeFactory = _scopeFactory;
+            var fallbackLogger = _logger;
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    if (delay > TimeSpan.Zero) await Task.Delay(delay);
+                    using var scope = scopeFactory.CreateScope();
+                    try
+                    {
+                        work(scope.ServiceProvider);
+                    }
+                    catch (Exception ex)
+                    {
+                        var logger = scope.ServiceProvider.GetService<ILogger<CompetitionController>>() ?? fallbackLogger;
+                        logger.LogWarning(ex, "Background work failed: {Description}", description);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    fallbackLogger.LogWarning(ex, "Background scope creation failed: {Description}", description);
+                }
+            });
         }
 
         // Helper method to detect AJAX requests
@@ -260,18 +303,16 @@ namespace HpskSite.Controllers
                             _logger.LogWarning("Hub saved but URL segment rebuild timed out (non-critical)");
                         }
                         registrationsHub = newHub;
-                        // Publish hub in background
+                        // Publish hub in background. Runs in a fresh DI scope so the
+                        // IContentService isn't the disposed request-scoped one (that
+                        // path leaks ContentTree write locks — see EnqueueBackground).
                         var hubId = newHub.Id;
-                        _ = Task.Run(async () =>
+                        EnqueueBackground(TimeSpan.FromSeconds(10), sp =>
                         {
-                            try
-                            {
-                                await Task.Delay(10000);
-                                var hub = _contentService.GetById(hubId);
-                                if (hub != null) _contentService.Publish(hub, new[] { "*" }, -1);
-                            }
-                            catch { /* hub publish is non-critical */ }
-                        });
+                            var contentService = sp.GetRequiredService<IContentService>();
+                            var hub = contentService.GetById(hubId);
+                            if (hub != null) contentService.Publish(hub, new[] { "*" }, -1);
+                        }, $"publish registrationsHub {hubId}");
                     }
                     catch (Exception ex)
                     {
@@ -501,20 +542,17 @@ namespace HpskSite.Controllers
 
                         InvalidateDirektplaceringCache(competitionId);
 
-                        // Auto-update the start list in background
+                        // Auto-update the start list in background, in a fresh DI scope.
+                        // The Regenerate(int) overload re-fetches the competition from the
+                        // background scope's own IContentService — passing the IContent from
+                        // the request scope (which is being disposed) would carry the same
+                        // stale-connection bug as the publish path above.
                         var compId = competitionId;
-                        _ = Task.Run(async () =>
+                        EnqueueBackground(TimeSpan.FromSeconds(5), sp =>
                         {
-                            try
-                            {
-                                await Task.Delay(5000); // Wait for registration publish
-                                AutoGenerateDirektplaceringStartList(compId, competition, dpConfig);
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger.LogWarning(ex, "Background start list update failed for competition {CompId}", compId);
-                            }
-                        });
+                            var dpService = sp.GetRequiredService<DirektplaceringStartListService>();
+                            dpService.Regenerate(compId);
+                        }, $"DP start list regenerate {compId}");
                     }
                     finally
                     {
@@ -535,52 +573,43 @@ namespace HpskSite.Controllers
                     _logger.LogWarning("Registration saved but URL segment rebuild timed out (non-critical) for regId={RegId}", registration.Id);
                 }
                 }
-                // Delayed fire-and-forget publish
+                // Delayed fire-and-forget publish. Runs in a fresh DI scope (the previous
+                // capture-_contentService pattern is what was leaking ContentTree write
+                // locks (-333) on Simply.com — confirmed by the production trace log).
                 var registrationId_forPublish = registration.Id;
-                _ = Task.Run(async () =>
+                EnqueueBackground(TimeSpan.FromSeconds(10), sp =>
                 {
-                    try
+                    var contentService = sp.GetRequiredService<IContentService>();
+                    var logger = sp.GetRequiredService<ILogger<CompetitionController>>();
+                    var content = contentService.GetById(registrationId_forPublish);
+                    if (content != null)
                     {
-                        await Task.Delay(10000);
-                        var content = _contentService.GetById(registrationId_forPublish);
-                        if (content != null)
-                        {
-                            _contentService.Publish(content, new[] { "*" }, -1);
-                            _logger.LogInformation("Background publish completed for registration {RegId}", registrationId_forPublish);
-                        }
+                        contentService.Publish(content, new[] { "*" }, -1);
+                        logger.LogInformation("Background publish completed for registration {RegId}", registrationId_forPublish);
                     }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Background publish failed for registration {RegId}", registrationId_forPublish);
-                    }
-                });
+                }, $"publish registration {registrationId_forPublish}");
 
                 // Cancel old invoice in background if fee changed
                 if (isUpdate && oldInvoiceId.HasValue && oldFee != newFee)
                 {
                     var invoiceIdToCancel = oldInvoiceId.Value;
                     var feeInfo = $"{oldFee:F2} to {newFee:F2}";
-                    _ = Task.Run(async () =>
+                    // Cancel old invoice in background — fresh DI scope to avoid the
+                    // disposed-scope content-service capture that was leaking locks.
+                    EnqueueBackground(TimeSpan.FromSeconds(10), sp =>
                     {
-                        try
+                        var contentService = sp.GetRequiredService<IContentService>();
+                        var oldInvoice = contentService.GetById(invoiceIdToCancel);
+                        if (oldInvoice != null)
                         {
-                            await Task.Delay(10000); // Wait for registration publish to finish first
-                            var oldInvoice = _contentService.GetById(invoiceIdToCancel);
-                            if (oldInvoice != null)
-                            {
-                                oldInvoice.SetValue("paymentStatus", "Cancelled");
-                                var notes = oldInvoice.GetValue<string>("notes") ?? "";
-                                notes += $"\n[{DateTime.Now:yyyy-MM-dd HH:mm}] Cancelled - Fee change from {feeInfo} SEK";
-                                oldInvoice.SetValue("notes", notes);
-                                _contentService.Save(oldInvoice);
-                                _contentService.Publish(oldInvoice, new[] { "*" }, -1);
-                            }
+                            oldInvoice.SetValue("paymentStatus", "Cancelled");
+                            var notes = oldInvoice.GetValue<string>("notes") ?? "";
+                            notes += $"\n[{DateTime.Now:yyyy-MM-dd HH:mm}] Cancelled - Fee change from {feeInfo} SEK";
+                            oldInvoice.SetValue("notes", notes);
+                            contentService.Save(oldInvoice);
+                            contentService.Publish(oldInvoice, new[] { "*" }, -1);
                         }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning(ex, "Failed to cancel old invoice {InvoiceId}", invoiceIdToCancel);
-                        }
-                    });
+                    }, $"cancel old invoice {invoiceIdToCancel}");
                 }
 
                 int registrationId = registration.Id;
@@ -2526,13 +2555,6 @@ namespace HpskSite.Controllers
         private void InvalidateDirektplaceringCache(int competitionId)
         {
             AppCaches.RuntimeCache.ClearByKey($"dp_availability_{competitionId}");
-        }
-
-        // Delegates to DirektplaceringStartListService so RegistrationAdminController (and future
-        // bulk-import paths) can keep the start list in sync without re-implementing the renderer.
-        private void AutoGenerateDirektplaceringStartList(int competitionId, IContent competition, DirektplaceringConfig dpConfig)
-        {
-            _dpStartListService.Regenerate(competitionId, competition, dpConfig);
         }
 
         #endregion
