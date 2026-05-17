@@ -461,9 +461,9 @@ namespace HpskSite.Controllers
 
                 // Validate Swish number format
                 var normalizedSwishNumber = swishNumber.Trim().Replace(" ", "").Replace("-", "");
-                if (!normalizedSwishNumber.All(char.IsDigit) || normalizedSwishNumber.Length != 10 || !normalizedSwishNumber.StartsWith("0"))
+                if (!SwishQrCodeGenerator.IsValidSwishNumber(normalizedSwishNumber))
                 {
-                    return Json(new { success = false, message = "Swish-numret måste vara 10 siffror som börjar med 0 (t.ex. 0701234567)." });
+                    return Json(new { success = false, message = "Swish-numret måste vara 10 siffror — antingen en privat-/Företag-mobil som börjar med 07 (t.ex. 0701234567) eller ett Swish Handel-alias som börjar med 123 (t.ex. 1234567890)." });
                 }
 
                 _logger.LogInformation("Generating QR code - SwishNumber: {SwishNumber}, Amount: {Amount}, Message: {Message}", 
@@ -761,7 +761,7 @@ namespace HpskSite.Controllers
                 var message = $"Lag: {invoiceNumber}";
 
                 var normalizedSwishNumber = swishNumber.Trim().Replace(" ", "").Replace("-", "");
-                if (!normalizedSwishNumber.All(char.IsDigit) || normalizedSwishNumber.Length != 10 || !normalizedSwishNumber.StartsWith("0"))
+                if (!SwishQrCodeGenerator.IsValidSwishNumber(normalizedSwishNumber))
                     return Json(new { success = false, message = "Ogiltigt Swish-nummer." });
 
                 byte[] qrCodeBytes = SwishQrCodeGenerator.GeneratePng(normalizedSwishNumber, amountString, message);
@@ -893,9 +893,9 @@ namespace HpskSite.Controllers
 
                     // Validate Swish number format
                     var normalizedSwishNumber = swishNumber?.Trim().Replace(" ", "").Replace("-", "") ?? "";
-                    if (!normalizedSwishNumber.All(char.IsDigit) || normalizedSwishNumber.Length != 10 || !normalizedSwishNumber.StartsWith("0"))
+                    if (!SwishQrCodeGenerator.IsValidSwishNumber(normalizedSwishNumber))
                     {
-                        return Json(new { success = false, message = "Swish-numret måste vara 10 siffror som börjar med 0 (t.ex. 0701234567)." });
+                        return Json(new { success = false, message = "Swish-numret måste vara 10 siffror — antingen en privat-/Företag-mobil som börjar med 07 (t.ex. 0701234567) eller ett Swish Handel-alias som börjar med 123 (t.ex. 1234567890)." });
                     }
 
                     var amountString = totalAmount.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
@@ -1375,9 +1375,9 @@ namespace HpskSite.Controllers
 
                 // Validate Swish number format
                 var normalizedSwishNumber = swishNumber.Trim().Replace(" ", "").Replace("-", "");
-                if (!normalizedSwishNumber.All(char.IsDigit) || normalizedSwishNumber.Length != 10 || !normalizedSwishNumber.StartsWith("0"))
+                if (!SwishQrCodeGenerator.IsValidSwishNumber(normalizedSwishNumber))
                 {
-                    return Json(new { success = false, message = "Swish-numret måste vara 10 siffror som börjar med 0 (t.ex. 0701234567)." });
+                    return Json(new { success = false, message = "Swish-numret måste vara 10 siffror — antingen en privat-/Företag-mobil som börjar med 07 (t.ex. 0701234567) eller ett Swish Handel-alias som börjar med 123 (t.ex. 1234567890)." });
                 }
 
                 // Generate QR code
@@ -1541,7 +1541,7 @@ namespace HpskSite.Controllers
 
                 var message = $"Lag: {invoiceNumber}";
                 var normalizedSwishNumber = swishNumber.Trim().Replace(" ", "").Replace("-", "");
-                if (!normalizedSwishNumber.All(char.IsDigit) || normalizedSwishNumber.Length != 10 || !normalizedSwishNumber.StartsWith("0"))
+                if (!SwishQrCodeGenerator.IsValidSwishNumber(normalizedSwishNumber))
                     return Json(new { success = false, message = "Ogiltigt Swish-nummer." });
 
                 var qrCodeBytes = SwishQrCodeGenerator.GeneratePng(normalizedSwishNumber, amountString, message);

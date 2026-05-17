@@ -591,7 +591,16 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
 
                     <div class="mb-3">
                         <label for="swishNumber" class="form-label">Swish-nummer</label>
-                        <input type="text" class="form-control" id="swishNumber" name="swishNumber" value="@swishNumber" placeholder="1123456789">
+                        <div class="input-group">
+                            <input type="text" class="form-control" id="swishNumber" name="swishNumber" value="@swishNumber"
+                                   pattern="^(07\d{8}|123\d{7})$" maxlength="10"
+                                   oninput="validateSwishNumberField(this, 'edit_swishStatus')"
+                                   placeholder="0701234567 eller 1234567890">
+                            <button type="button" class="btn btn-outline-secondary" onclick="validateSwishNumberField(document.getElementById('swishNumber'), 'edit_swishStatus', true)">
+                                <i class="bi bi-check2-circle me-1"></i>Validera
+                            </button>
+                        </div>
+                        <small id="edit_swishStatus" class="form-text text-muted">10 siffror som börjar med <strong>07</strong> (privat/Företag) eller <strong>123</strong> (Swish Handel).</small>
                     </div>
 
                     @if (editModalIsSiteAdmin)
