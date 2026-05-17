@@ -1,0 +1,423 @@
+@*
+    Shared member-security modal — used from both:
+      - Views/Partials/UserManagement.cshtml (Admin Page → Användare tab)
+      - Views/Partials/ClubAdminPanel.cshtml (Club admin Medlemmar tab)
+
+    Backend already permits site/regional/club admins via
+    AdminAuthorizationService.CanEditMemberAsync, so this partial is safe to
+    include anywhere the row-level "Säkerhet" button is shown.
+*@
+
+<!-- Member Security Modal -->
+<div class="modal fade" id="memberSecurityModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="bi bi-shield-lock me-2"></i>Säkerhetshantering
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="securityMemberId">
+
+                <!-- Loading state -->
+                <div id="securityLoading" class="text-center py-4">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Laddar...</span>
+                    </div>
+                    <div class="text-muted mt-2">Laddar säkerhetsinformation...</div>
+                </div>
+
+                <!-- Content (hidden while loading) -->
+                <div id="securityContent" style="display: none;">
+                    <!-- Member info -->
+                    <div class="mb-3">
+                        <h6 class="text-muted mb-1">Medlem</h6>
+                        <div class="fw-semibold" id="securityMemberName">-</div>
+                        <small class="text-muted" id="securityMemberEmail">-</small>
+                    </div>
+
+                    <hr>
+
+                    <!-- Lockout status -->
+                    <div class="mb-4">
+                        <h6 class="mb-2">
+                            <i class="bi bi-lock me-1"></i>Kontostatus
+                        </h6>
+                        <div id="lockoutStatusContainer">
+                            <!-- Status badge will be inserted here -->
+                        </div>
+                    </div>
+
+                    <!-- Account details -->
+                    <div class="mb-4">
+                        <h6 class="mb-2">
+                            <i class="bi bi-info-circle me-1"></i>Kontoinformation
+                        </h6>
+                        <table class="table table-sm table-borderless mb-0">
+                            <tr>
+                                <td class="text-muted" style="width: 50%;">Misslyckade inloggningar:</td>
+                                <td><span id="securityFailedCount">0</span></td>
+                            </tr>
+                            <tr>
+                                <td class="text-muted">Har lösenord:</td>
+                                <td><span id="securityHasPassword">-</span></td>
+                            </tr>
+                            <tr>
+                                <td class="text-muted">Godkänd:</td>
+                                <td><span id="securityIsApproved">-</span></td>
+                            </tr>
+                            <tr>
+                                <td class="text-muted">Senast aktiv:</td>
+                                <td><span id="securityLastActive">-</span></td>
+                            </tr>
+                        </table>
+                    </div>
+
+                    <hr>
+
+                    <!-- Actions -->
+                    <div>
+                        <h6 class="mb-3">
+                            <i class="bi bi-gear me-1"></i>Åtgärder
+                        </h6>
+
+                        <!-- Unlock button (shown only when locked) -->
+                        <div id="unlockSection" style="display: none;" class="mb-3">
+                            <button type="button" class="btn btn-warning w-100" onclick="unlockMember()">
+                                <i class="bi bi-unlock me-1"></i>Lås upp konto
+                            </button>
+                            <small class="text-muted d-block mt-1">
+                                Återställer låsningen och nollställer räknaren för misslyckade inloggningar.
+                            </small>
+                        </div>
+
+                        <!-- Password reset button -->
+                        <div class="mb-3">
+                            <button type="button" class="btn btn-outline-primary w-100" onclick="sendPasswordResetAdmin()">
+                                <i class="bi bi-envelope me-1"></i>Skicka lösenordsåterställning
+                            </button>
+                            <small class="text-muted d-block mt-1">
+                                Skickar ett e-postmeddelande med länk för att återställa lösenordet.
+                            </small>
+                        </div>
+
+                        <!-- Send invitation button -->
+                        <div class="mb-3">
+                            <button type="button" class="btn btn-outline-secondary w-100" onclick="sendInvitationFromSecurity()">
+                                <i class="bi bi-person-plus me-1"></i>Skicka inbjudan
+                            </button>
+                            <small class="text-muted d-block mt-1">
+                                Skickar en inbjudan för att skapa ett nytt lösenord (för nya medlemmar).
+                            </small>
+                        </div>
+
+                        <hr>
+
+                        <!-- Set password section (collapsible) -->
+                        <div>
+                            <a class="text-decoration-none" data-bs-toggle="collapse" href="#setPasswordCollapse" role="button" aria-expanded="false" aria-controls="setPasswordCollapse">
+                                <i class="bi bi-chevron-right me-1" id="setPasswordCollapseIcon"></i>
+                                <i class="bi bi-key me-1"></i>Sätt nytt lösenord manuellt
+                            </a>
+                            <div class="collapse mt-2" id="setPasswordCollapse">
+                                <div class="card card-body">
+                                    <div class="mb-2">
+                                        <label for="adminNewPassword" class="form-label small">Nytt lösenord</label>
+                                        <input type="password" class="form-control form-control-sm" id="adminNewPassword"
+                                               placeholder="Minst 6 tecken" minlength="6">
+                                    </div>
+                                    <div class="mb-2">
+                                        <label for="adminConfirmPassword" class="form-label small">Bekräfta lösenord</label>
+                                        <input type="password" class="form-control form-control-sm" id="adminConfirmPassword"
+                                               placeholder="Upprepa lösenord">
+                                    </div>
+                                    <button type="button" class="btn btn-primary btn-sm" onclick="setMemberPassword()">
+                                        <i class="bi bi-check-lg me-1"></i>Sätt lösenord
+                                    </button>
+                                    <small class="text-muted d-block mt-2">
+                                        <i class="bi bi-info-circle me-1"></i>
+                                        Använd detta om medlemmen inte kan ta emot e-post. Meddela det nya lösenordet på annat sätt.
+                                    </small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// =============================================
+// Member Security Management Functions
+// =============================================
+
+function showSecurityModal(memberId) {
+    // Store member ID
+    document.getElementById('securityMemberId').value = memberId;
+
+    // Show loading, hide content
+    document.getElementById('securityLoading').style.display = 'block';
+    document.getElementById('securityContent').style.display = 'none';
+
+    // Show modal
+    const modal = new bootstrap.Modal(document.getElementById('memberSecurityModal'));
+    modal.show();
+
+    // Load security status
+    loadMemberSecurityStatus(memberId);
+}
+
+function loadMemberSecurityStatus(memberId) {
+    fetch(`/umbraco/surface/MemberAdmin/GetMemberSecurityStatus?memberId=${memberId}`)
+        .then(response => response.json())
+        .then(data => {
+            document.getElementById('securityLoading').style.display = 'none';
+            document.getElementById('securityContent').style.display = 'block';
+
+            if (data.success && data.data) {
+                const info = data.data;
+
+                // Update member info
+                document.getElementById('securityMemberName').textContent = info.memberName || '-';
+                document.getElementById('securityMemberEmail').textContent = info.email || '-';
+
+                // Update lockout status
+                const lockoutContainer = document.getElementById('lockoutStatusContainer');
+                const unlockSection = document.getElementById('unlockSection');
+
+                if (info.isLockedOut) {
+                    lockoutContainer.innerHTML = `
+                        <div class="alert alert-danger py-2 mb-2">
+                            <i class="bi bi-exclamation-triangle-fill me-1"></i>
+                            <strong>Kontot är låst</strong>
+                        </div>
+                        <small class="text-muted">
+                            Låst till: ${info.lockoutEndLocal || 'Okänt'}
+                        </small>
+                    `;
+                    unlockSection.style.display = 'block';
+                } else {
+                    lockoutContainer.innerHTML = `
+                        <div class="alert alert-success py-2 mb-0">
+                            <i class="bi bi-check-circle-fill me-1"></i>
+                            <strong>Kontot är aktivt</strong>
+                        </div>
+                    `;
+                    unlockSection.style.display = 'none';
+                }
+
+                // Update account details
+                document.getElementById('securityFailedCount').textContent = info.accessFailedCount || '0';
+                document.getElementById('securityHasPassword').innerHTML = info.hasPassword
+                    ? '<span class="badge bg-success">Ja</span>'
+                    : '<span class="badge bg-warning text-dark">Nej</span>';
+                document.getElementById('securityIsApproved').innerHTML = info.isApproved
+                    ? '<span class="badge bg-success">Ja</span>'
+                    : '<span class="badge bg-warning text-dark">Nej</span>';
+                document.getElementById('securityLastActive').textContent = info.lastActiveDisplay || 'Aldrig';
+            } else {
+                alert('Fel vid laddning av säkerhetsinformation: ' + (data.message || 'Okänt fel'));
+                bootstrap.Modal.getInstance(document.getElementById('memberSecurityModal')).hide();
+            }
+        })
+        .catch(error => {
+            console.error('Error loading security status:', error);
+            alert('Kunde inte ladda säkerhetsinformation');
+            bootstrap.Modal.getInstance(document.getElementById('memberSecurityModal')).hide();
+        });
+}
+
+function unlockMember() {
+    const memberId = document.getElementById('securityMemberId').value;
+    if (!memberId) {
+        alert('Ingen medlem vald');
+        return;
+    }
+
+    if (!confirm('Är du säker på att du vill låsa upp detta konto?')) {
+        return;
+    }
+
+    const formData = new FormData();
+    const token = document.querySelector('input[name="__RequestVerificationToken"]');
+    if (token) {
+        formData.append('__RequestVerificationToken', token.value);
+    }
+    formData.append('memberId', memberId);
+
+    fetch('/umbraco/surface/MemberAdmin/UnlockMember', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('Kontot har låsts upp.');
+            // Reload security status to update the UI
+            loadMemberSecurityStatus(memberId);
+        } else {
+            alert('Fel: ' + (data.message || 'Okänt fel'));
+        }
+    })
+    .catch(error => {
+        console.error('Error unlocking member:', error);
+        alert('Kunde inte låsa upp kontot');
+    });
+}
+
+function sendPasswordResetAdmin() {
+    const memberId = document.getElementById('securityMemberId').value;
+    if (!memberId) {
+        alert('Ingen medlem vald');
+        return;
+    }
+
+    const memberEmail = document.getElementById('securityMemberEmail').textContent;
+    if (!confirm(`Skicka lösenordsåterställning till ${memberEmail}?`)) {
+        return;
+    }
+
+    const formData = new FormData();
+    const token = document.querySelector('input[name="__RequestVerificationToken"]');
+    if (token) {
+        formData.append('__RequestVerificationToken', token.value);
+    }
+    formData.append('memberId', memberId);
+
+    fetch('/umbraco/surface/MemberAdmin/SendPasswordResetAdmin', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('Lösenordsåterställning har skickats till ' + memberEmail);
+        } else {
+            alert('Fel: ' + (data.message || 'Okänt fel'));
+        }
+    })
+    .catch(error => {
+        console.error('Error sending password reset:', error);
+        alert('Kunde inte skicka lösenordsåterställning');
+    });
+}
+
+function sendInvitationFromSecurity() {
+    const memberId = document.getElementById('securityMemberId').value;
+    if (!memberId) {
+        alert('Ingen medlem vald');
+        return;
+    }
+
+    const memberEmail = document.getElementById('securityMemberEmail').textContent;
+    if (!confirm(`Skicka inbjudan till ${memberEmail}? Medlemmen får ett e-postmeddelande med länk för att skapa ett nytt lösenord.`)) {
+        return;
+    }
+
+    const formData = new FormData();
+    const token = document.querySelector('input[name="__RequestVerificationToken"]');
+    if (token) {
+        formData.append('__RequestVerificationToken', token.value);
+    }
+    formData.append('memberId', memberId);
+
+    fetch('/umbraco/surface/MemberAdmin/SendInvitation', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('Inbjudan har skickats till ' + memberEmail);
+        } else {
+            alert('Fel: ' + (data.message || 'Okänt fel'));
+        }
+    })
+    .catch(error => {
+        console.error('Error sending invitation:', error);
+        alert('Kunde inte skicka inbjudan');
+    });
+}
+
+function setMemberPassword() {
+    const memberId = document.getElementById('securityMemberId').value;
+    if (!memberId) {
+        alert('Ingen medlem vald');
+        return;
+    }
+
+    const newPassword = document.getElementById('adminNewPassword').value;
+    const confirmPassword = document.getElementById('adminConfirmPassword').value;
+
+    // Validate
+    if (!newPassword || newPassword.length < 6) {
+        alert('Lösenordet måste vara minst 6 tecken.');
+        return;
+    }
+
+    if (newPassword !== confirmPassword) {
+        alert('Lösenorden matchar inte.');
+        return;
+    }
+
+    const memberName = document.getElementById('securityMemberName').textContent;
+    if (!confirm(`Är du säker på att du vill sätta ett nytt lösenord för ${memberName}?\n\nOBS: Du måste meddela det nya lösenordet till medlemmen på annat sätt.`)) {
+        return;
+    }
+
+    const formData = new FormData();
+    const token = document.querySelector('input[name="__RequestVerificationToken"]');
+    if (token) {
+        formData.append('__RequestVerificationToken', token.value);
+    }
+    formData.append('memberId', memberId);
+    formData.append('newPassword', newPassword);
+
+    fetch('/umbraco/surface/MemberAdmin/SetMemberPassword', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('Lösenordet har satts. Meddela medlemmen det nya lösenordet.');
+            // Clear the password fields
+            document.getElementById('adminNewPassword').value = '';
+            document.getElementById('adminConfirmPassword').value = '';
+            // Collapse the section
+            const collapse = bootstrap.Collapse.getInstance(document.getElementById('setPasswordCollapse'));
+            if (collapse) collapse.hide();
+            // Reload security status to update the UI (hasPassword might have changed)
+            loadMemberSecurityStatus(memberId);
+        } else {
+            alert('Fel: ' + (data.message || 'Okänt fel'));
+        }
+    })
+    .catch(error => {
+        console.error('Error setting password:', error);
+        alert('Kunde inte sätta lösenord');
+    });
+}
+
+// Toggle chevron icon on collapse for set password section
+document.addEventListener('DOMContentLoaded', function() {
+    const setPasswordCollapse = document.getElementById('setPasswordCollapse');
+    if (setPasswordCollapse) {
+        setPasswordCollapse.addEventListener('show.bs.collapse', function () {
+            const icon = document.getElementById('setPasswordCollapseIcon');
+            if (icon) icon.classList.replace('bi-chevron-right', 'bi-chevron-down');
+        });
+        setPasswordCollapse.addEventListener('hide.bs.collapse', function () {
+            const icon = document.getElementById('setPasswordCollapseIcon');
+            if (icon) icon.classList.replace('bi-chevron-down', 'bi-chevron-right');
+        });
+    }
+});
+</script>
