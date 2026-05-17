@@ -436,8 +436,11 @@ function displayMembers(members) {
                 <td class="d-none d-md-table-cell">${renderBoardRoleBadges(member.id)}</td>
                 <td class="text-center">
                     ${showDashboardBtn ? `
-                        <button class="btn btn-sm btn-outline-info member-action-btn" onclick="viewMemberDashboard(${member.id}, '${escapeHtml(member.name)}')" title="Visa dashboard">
+                        <button class="btn btn-sm member-action-btn position-relative ${member.hasData ? 'btn-outline-info' : 'btn-outline-secondary opacity-50'}"
+                                onclick="viewMemberDashboard(${member.id}, '${escapeHtml(member.name)}')"
+                                title="${member.hasData ? 'Visa dashboard' : 'Visa dashboard (ingen data)'}">
                             <i class="bi bi-speedometer2"></i>
+                            ${member.hasData ? '<span class="position-absolute top-0 start-100 translate-middle p-1 bg-success border border-light rounded-circle has-data-dot"><span class="visually-hidden">Har data</span></span>' : ''}
                         </button>
                     ` : ''}
                 </td>
@@ -729,9 +732,29 @@ function declineMember(memberId, memberName) {
 
 // ========== MEMBER DASHBOARD FUNCTIONS ==========
 
-// Store current member info for year filter reload
+// Store current member info for year/tab reload
 let currentDashboardMemberId = null;
 let currentDashboardMemberName = null;
+let currentDashboardDiscipline = 'Precision';
+
+function getActiveDisciplineFromTabs() {
+    const active = document.querySelector('#memberDashboardDisciplineTabs .nav-link.active');
+    return active ? active.dataset.discipline : 'Precision';
+}
+
+function setActiveDisciplineTab(discipline) {
+    document.querySelectorAll('#memberDashboardDisciplineTabs .nav-link').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.discipline === discipline);
+    });
+}
+
+function applyDataPresenceDots(presence) {
+    // presence is { Precision: bool, Milsnabb: bool, ... }
+    document.querySelectorAll('#memberDashboardDisciplineTabs .has-data-dot[data-dot]').forEach(dot => {
+        const has = presence && presence[dot.dataset.dot] === true;
+        dot.classList.toggle('d-none', !has);
+    });
+}
 
 async function viewMemberDashboard(memberId, memberName, year = null, competitionType = null) {
     currentDashboardMemberId = memberId;
@@ -742,10 +765,11 @@ async function viewMemberDashboard(memberId, memberName, year = null, competitio
     const titleEl = document.getElementById('memberDashboardTitle');
     const contentEl = document.getElementById('memberDashboardContent');
     const yearFilter = document.getElementById('memberDashboardYearFilter');
-    const disciplineFilter = document.getElementById('memberDashboardDisciplineFilter');
 
-    // Use selected discipline or default
-    const discipline = competitionType || disciplineFilter.value || 'Precision';
+    // Use explicit param, else active tab, else default
+    const discipline = competitionType || getActiveDisciplineFromTabs() || 'Precision';
+    currentDashboardDiscipline = discipline;
+    setActiveDisciplineTab(discipline);
 
     // Set title and show loading
     titleEl.innerHTML = `<i class="bi bi-speedometer2 me-2"></i>Dashboard - ${memberName}`;
@@ -769,12 +793,20 @@ async function viewMemberDashboard(memberId, memberName, year = null, competitio
         const result = await response.json();
 
         if (result.success) {
+            // Update per-discipline dots in the tab strip
+            applyDataPresenceDots(result.dataPresence || {});
+
             // Populate year filter
-            yearFilter.innerHTML = result.data.availableYears
-                .map(y => `<option value="${y}" ${y === result.data.selectedYear ? 'selected' : ''}>${y}</option>`)
+            yearFilter.innerHTML = (result.data.availableYears || [])
+                .map(y => `<option value="${y}" ${y === (result.data.selectedYear || result.data.defaultYear) ? 'selected' : ''}>${y}</option>`)
                 .join('');
 
-            renderMemberDashboard(result.data, contentEl);
+            // Fältskytte uses a different data shape; route to its dedicated renderer.
+            if (result.data.competitionType === 'Faltskytte') {
+                renderMemberDashboardFaltskytte(result.data, contentEl);
+            } else {
+                renderMemberDashboard(result.data, contentEl);
+            }
         } else {
             contentEl.innerHTML = `
                 <div class="alert alert-warning">
@@ -792,13 +824,21 @@ async function viewMemberDashboard(memberId, memberName, year = null, competitio
     }
 }
 
-// Handle year or discipline filter change
+// Year dropdown change
 function onMemberDashboardFilterChange() {
     if (currentDashboardMemberId && currentDashboardMemberName) {
         const year = document.getElementById('memberDashboardYearFilter').value;
-        const discipline = document.getElementById('memberDashboardDisciplineFilter').value;
-        viewMemberDashboard(currentDashboardMemberId, currentDashboardMemberName, year || null, discipline);
+        viewMemberDashboard(currentDashboardMemberId, currentDashboardMemberName, year || null, currentDashboardDiscipline);
     }
+}
+
+// Tab click
+function onMemberDashboardDisciplineTabClick(btn) {
+    if (!currentDashboardMemberId) return;
+    const discipline = btn.dataset.discipline;
+    setActiveDisciplineTab(discipline);
+    // Switching discipline resets the year (each discipline has its own availableYears).
+    viewMemberDashboard(currentDashboardMemberId, currentDashboardMemberName, null, discipline);
 }
 
 function renderMemberDashboard(data, container) {
@@ -953,6 +993,132 @@ function renderMemberDashboard(data, container) {
     `;
 }
 
+// ── Fältskytte (mini) ──
+// Lightweight cards rendering of the Fältskytte dashboard payload built by
+// FaltskytteStatsService.BuildMemberDashboardAsync. Same data shape as the
+// main /user-profile-page Dashboard but no Chart.js — keeps the modal fast
+// and avoids canvas-id clashes.
+function renderMemberDashboardFaltskytte(data, container) {
+    const years = data.availableYears || [];
+    const selectedYearEl = document.getElementById('memberDashboardYearFilter');
+    const selectedYear = (selectedYearEl && selectedYearEl.value)
+        ? parseInt(selectedYearEl.value, 10)
+        : (data.defaultYear || (years[0] || new Date().getFullYear()));
+    const stats = (data.statsByYear && data.statsByYear[selectedYear]) || null;
+
+    if (!stats || stats.totalCompetitions === 0) {
+        container.innerHTML = `
+            <div class="alert alert-info">
+                <i class="bi bi-info-circle me-2"></i>Ingen Fältskytte-data för ${selectedYear}.
+            </div>
+        `;
+        return;
+    }
+
+    const yoy = data.hitPercentYoYDelta;
+    let yoyBadge = '';
+    if (yoy !== null && yoy !== undefined) {
+        const sign = yoy > 0 ? '+' : '';
+        const cls = Math.abs(yoy) < 0.5 ? 'secondary' : (yoy > 0 ? 'success' : 'danger');
+        yoyBadge = `<span class="badge bg-${cls} ms-2">${sign}${yoy} pp YoY</span>`;
+    }
+
+    const activityHtml = (stats.activityByWeaponGroup || [])
+        .map(g => `<span class="badge bg-secondary me-1">${escapeHtml(g.weaponGroup)}: ${g.count}</span>`)
+        .join('') || '<span class="text-muted small">Ingen data</span>';
+
+    const hitByGroupHtml = (stats.hitPercentByWeaponGroup || [])
+        .map(g => `<span class="badge bg-primary me-1">${escapeHtml(g.weaponGroup)}: ${g.hitPercent}%</span>`)
+        .join('') || '<span class="text-muted small">Ingen data</span>';
+
+    const medal = stats.medalStats || { silverCount: 0, bronzeCount: 0, totalPoints: 0 };
+    const placement = stats.placement || {};
+
+    container.innerHTML = `
+        <div class="row mb-3">
+            <div class="col-md-3 mb-3">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="text-muted mb-2"><i class="bi bi-bullseye me-1"></i>Tävlingar</h6>
+                        <h3 class="mb-0">${stats.totalCompetitions}</h3>
+                        <small class="text-muted">år ${selectedYear}</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 mb-3">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="text-muted mb-2"><i class="bi bi-percent me-1"></i>Träff %</h6>
+                        <h3 class="mb-0">${stats.hitPercentAvg}% ${yoyBadge}</h3>
+                        <small class="text-muted">Figur: ${stats.figurePercentAvg}%</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 mb-3">
+                <div class="card h-100">
+                    <div class="card-body text-center">
+                        <h6 class="text-muted mb-2" style="font-size: 0.8rem;"><i class="bi bi-award me-1"></i>Standardmedaljer</h6>
+                        ${(medal.silverCount > 0 || medal.bronzeCount > 0) ? `
+                            <div class="d-flex justify-content-around mb-2">
+                                <div class="text-center">
+                                    <img src="/images/StdMedS.png" alt="Silver" style="height: 32px; width: auto;">
+                                    <div class="fw-bold">${medal.silverCount} st</div>
+                                </div>
+                                <div class="text-center">
+                                    <img src="/images/StdMedB.png" alt="Brons" style="height: 32px; width: auto;">
+                                    <div class="fw-bold">${medal.bronzeCount} st</div>
+                                </div>
+                            </div>
+                            <hr class="my-2">
+                            <div>
+                                <strong>${medal.totalPoints}</strong>
+                                <span class="text-muted small">poäng</span>
+                            </div>
+                        ` : `
+                            <div class="text-muted py-3">
+                                <i class="bi bi-dash-circle fs-3"></i>
+                                <p class="mb-0 mt-1 small">Inga medaljer</p>
+                            </div>
+                        `}
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 mb-3">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="text-muted mb-2"><i class="bi bi-trophy me-1"></i>Placering</h6>
+                        <h3 class="mb-0">${placement.best ? `${placement.best.placement}/${placement.best.participants}` : '—'}</h3>
+                        <small class="text-muted">${placement.podiums ? `${placement.podiums} pall` : 'inga pall'}</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-md-6 mb-3">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="text-muted mb-2"><i class="bi bi-bar-chart me-1"></i>Aktivitet per vapengrupp</h6>
+                        <div>${activityHtml}</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6 mb-3">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="text-muted mb-2"><i class="bi bi-percent me-1"></i>Träff % per vapengrupp</h6>
+                        <div>${hitByGroupHtml}</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="text-center text-muted small mt-2">
+            ${years.length > 1 ? `Tillgängliga år: <strong>${years[years.length - 1]} - ${years[0]}</strong>` : `År: <strong>${years[0] || selectedYear}</strong>`}
+        </div>
+    `;
+}
+
 function renderPersonalBestsTable(personalBests) {
     if (!personalBests || personalBests.length === 0) {
         return '<div class="text-center text-muted py-3"><i class="bi bi-info-circle"></i><p class="mb-0 small">Inga rekord ännu</p></div>';
@@ -1055,20 +1221,36 @@ function renderHandicapSummary(handicapProfiles, shooterClass) {
                 <h5 class="modal-title" id="memberDashboardTitle">
                     <i class="bi bi-speedometer2 me-2"></i>Dashboard
                 </h5>
-                <div class="ms-auto me-3 d-flex gap-2">
-                    <select class="form-select form-select-sm" id="memberDashboardDisciplineFilter" style="width: auto;" onchange="onMemberDashboardFilterChange()">
-                        <option value="Precision" selected>Precision</option>
-                        <option value="Milsnabb">Milsnabb</option>
-                        <option value="Duell">Duell</option>
-                        <option value="NationellHelmatch">Nationell Helmatch</option>
-                        <option value="MagnumPrecision">Magnum Precision</option>
-                    </select>
+                <div class="ms-auto me-3">
                     <select class="form-select form-select-sm" id="memberDashboardYearFilter" style="width: auto;" onchange="onMemberDashboardFilterChange()">
                         <!-- Years populated dynamically -->
                     </select>
                 </div>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
+            <ul class="nav nav-tabs px-3 pt-2" id="memberDashboardDisciplineTabs" role="tablist">
+                @* Discipline tabs - each carries a hidden green dot shown when that discipline has data for the viewed member. *@
+                @{
+                    var disciplines = new (string Value, string Label)[]
+                    {
+                        ("Precision", "Precision"),
+                        ("Milsnabb", "Milsnabb"),
+                        ("Duell", "Duell"),
+                        ("NationellHelmatch", "Nationell Helmatch"),
+                        ("MagnumPrecision", "Magnum Precision"),
+                        ("Faltskytte", "Fältskytte")
+                    };
+                }
+                @foreach (var d in disciplines)
+                {
+                    <li class="nav-item" role="presentation">
+                        <button type="button" class="nav-link@(d.Value == "Precision" ? " active" : "")" data-discipline="@d.Value" onclick="onMemberDashboardDisciplineTabClick(this)">
+                            @d.Label
+                            <span class="has-data-dot bg-success border border-light rounded-circle d-none ms-1" data-dot="@d.Value" aria-label="Har data"></span>
+                        </button>
+                    </li>
+                }
+            </ul>
             <div class="modal-body" id="memberDashboardContent">
                 <!-- Dashboard content loaded here -->
             </div>
@@ -1078,3 +1260,18 @@ function renderHandicapSummary(handicapProfiles, shooterClass) {
         </div>
     </div>
 </div>
+
+<style>
+    /* Green data-presence dot used on the dashboard button (member row) and on each discipline tab inside the mini-Dashboard modal. */
+    .has-data-dot {
+        display: inline-block;
+        width: 0.5rem;
+        height: 0.5rem;
+        vertical-align: middle;
+    }
+    /* On the member-row button the dot is absolutely positioned (top-right corner); reset width/height to match Bootstrap's badge sizing. */
+    .member-action-btn .has-data-dot {
+        width: 0.65rem;
+        height: 0.65rem;
+    }
+</style>

@@ -39,6 +39,7 @@ namespace HpskSite.Controllers
         private readonly AdminAuthorizationService _authorizationService;
         private readonly UnifiedResultsService _unifiedResultsService;
         private readonly FaltskytteStatsService _faltskytteStatsService;
+        private readonly MemberDataPresenceService _presenceService;
         private const string ClubMemberTypeAlias = "hpskClub";
 
         public MemberController(
@@ -60,7 +61,8 @@ namespace HpskSite.Controllers
             IHandicapCalculator handicapCalculator,
             AdminAuthorizationService authorizationService,
             UnifiedResultsService unifiedResultsService,
-            FaltskytteStatsService faltskytteStatsService)
+            FaltskytteStatsService faltskytteStatsService,
+            MemberDataPresenceService presenceService)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _memberService = memberService;
@@ -78,6 +80,7 @@ namespace HpskSite.Controllers
             _authorizationService = authorizationService;
             _unifiedResultsService = unifiedResultsService;
             _faltskytteStatsService = faltskytteStatsService;
+            _presenceService = presenceService;
         }
 
         [HttpGet]
@@ -2663,6 +2666,19 @@ namespace HpskSite.Controllers
                     // sharingLevel == "all" - allow any logged-in member
                 }
 
+                // Per-discipline data presence powers the green dots on the mini-Dashboard
+                // discipline tabs. One cheap EXISTS-style query per call.
+                var dataPresence = await _presenceService.GetMemberPresenceAsync(memberId);
+
+                // Fältskytte uses a different data shape (träff/figurer, no series). Delegate
+                // to the shared builder so both this mini-Dashboard and the main Dashboard on
+                // /user-profile-page produce identical JSON.
+                if (competitionType == "Faltskytte")
+                {
+                    var faltDashboard = await _faltskytteStatsService.BuildMemberDashboardAsync(memberId);
+                    return Json(new { success = true, data = faltDashboard, dataPresence });
+                }
+
                 // Get dashboard statistics for target member
                 List<HpskSite.Shared.Models.UnifiedResultEntry> allResultsUnfiltered;
                 if (competitionType == "Precision")
@@ -2828,7 +2844,7 @@ namespace HpskSite.Controllers
                     shooterClass
                 };
 
-                return Json(new { success = true, data = stats });
+                return Json(new { success = true, data = stats, dataPresence });
             }
             catch (Exception ex)
             {

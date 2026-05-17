@@ -278,6 +278,154 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             if (v == "B" || v == "BRONS" || v == "BRONZE") return "B";
             return null;
         }
+
+        // ── Dashboard payload (cards + chart data) ──
+
+        /// <summary>
+        /// Build the Fältskytte-specific dashboard payload for a member. Aggregates
+        /// one season's worth of <see cref="FaltskytteSeasonEntry"/> rows into the
+        /// cards + chart data the frontend renders for the Fältskytte view.
+        /// </summary>
+        public async Task<object> BuildMemberDashboardAsync(int memberId)
+        {
+            // Whole-history pull; the frontend filters by year client-side.
+            var all = await GetMemberSeasonAsync(memberId, null);
+            var availableYears = all.Select(e => e.Date.Year).Distinct().OrderByDescending(y => y).ToList();
+            if (!availableYears.Any()) availableYears.Add(DateTime.Now.Year);
+
+            var currentYear = DateTime.Now.Year;
+            var defaultYear = availableYears.Contains(currentYear) ? currentYear : availableYears.First();
+            var seasonForDefault = all.Where(e => e.Date.Year == defaultYear).ToList();
+
+            // Per-year stats so the year dropdown can switch without a server round-trip.
+            var statsByYear = availableYears.ToDictionary(y => y.ToString(), y => SummarizeSeason(all.Where(e => e.Date.Year == y).ToList()));
+
+            // Year-over-year delta on overall träff %
+            double? yoYDelta = null;
+            if (availableYears.Contains(defaultYear - 1))
+            {
+                var prev = all.Where(e => e.Date.Year == defaultYear - 1).ToList();
+                if (prev.Any() && seasonForDefault.Any())
+                {
+                    yoYDelta = Math.Round(seasonForDefault.Average(e => e.HitPercent) - prev.Average(e => e.HitPercent), 1);
+                }
+            }
+
+            return new
+            {
+                competitionType = "Faltskytte",
+                availableYears,
+                defaultYear,
+                statsByYear,
+                hitPercentYoYDelta = yoYDelta,
+                // Chart data covers all years; the frontend filters by selectedYear.
+                chartData = all.Select(e => new
+                {
+                    date = e.Date,
+                    year = e.Date.Year,
+                    weaponGroup = e.WeaponGroup,
+                    mode = e.Mode,
+                    source = e.Source,
+                    hitPercent = e.HitPercent,
+                    figurePercent = e.FigurePercent,
+                    placementPercent = e.Placement.HasValue && e.Participants.HasValue && e.Participants.Value > 1
+                        ? Math.Round(100.0 * (1.0 - ((e.Placement.Value - 1.0) / (e.Participants.Value - 1.0))), 1)
+                        : (double?)null,
+                    headline = e.Mode == "Poangfalt" ? $"{e.TotalHits + e.TotalFigures} p" : $"{e.TotalHits}/{e.TotalFigures}",
+                    competitionName = e.CompetitionName
+                }).OrderBy(x => x.date).ToList()
+            };
+        }
+
+        private static object SummarizeSeason(List<FaltskytteSeasonEntry> season)
+        {
+            if (!season.Any())
+            {
+                return new
+                {
+                    totalCompetitions = 0,
+                    activityByWeaponGroup = new List<object>(),
+                    hitPercentAvg = 0.0,
+                    hitPercentByWeaponGroup = new List<object>(),
+                    figurePercentAvg = 0.0,
+                    medalStats = new { silverCount = 0, bronzeCount = 0, totalPoints = 0 },
+                    placement = new
+                    {
+                        best = (object?)null,
+                        median = (object?)null,
+                        podiums = 0,
+                        topPercent = (double?)null
+                    }
+                };
+            }
+
+            var activityByWeaponGroup = season
+                .GroupBy(e => e.WeaponGroup)
+                .OrderBy(g => g.Key)
+                .Select(g => new { weaponGroup = g.Key, count = g.Count() })
+                .ToList<object>();
+
+            var hitPercentByWeaponGroup = season
+                .GroupBy(e => e.WeaponGroup)
+                .OrderBy(g => g.Key)
+                .Select(g => new
+                {
+                    weaponGroup = g.Key,
+                    hitPercent = Math.Round(g.Average(e => e.HitPercent), 1),
+                    figurePercent = Math.Round(g.Average(e => e.FigurePercent), 1),
+                    count = g.Count()
+                })
+                .ToList<object>();
+
+            var silverCount = season.Count(e => e.StandardMedal == "S");
+            var bronzeCount = season.Count(e => e.StandardMedal == "B");
+
+            // Placement metrics (only entries with known placement+participants).
+            var placed = season
+                .Where(e => e.Placement.HasValue && e.Participants.HasValue && e.Participants.Value > 0)
+                .Select(e => new { e.CompetitionName, e.Placement, e.Participants, percent = 100.0 * e.Placement!.Value / e.Participants!.Value })
+                .OrderBy(p => p.percent)
+                .ToList();
+
+            object? best = null;
+            object? median = null;
+            double? topPercent = null;
+            int podiums = 0;
+            if (placed.Any())
+            {
+                var b = placed.First();
+                best = new { placement = b.Placement, participants = b.Participants, competitionName = b.CompetitionName };
+
+                var midIdx = placed.Count / 2;
+                var m = placed.ElementAt(midIdx);
+                median = new { placement = m.Placement, participants = m.Participants };
+
+                topPercent = Math.Round(placed.Average(p => p.percent), 1);
+                podiums = placed.Count(p => p.Placement <= 3);
+            }
+
+            return new
+            {
+                totalCompetitions = season.Count,
+                activityByWeaponGroup,
+                hitPercentAvg = Math.Round(season.Average(e => e.HitPercent), 1),
+                hitPercentByWeaponGroup,
+                figurePercentAvg = Math.Round(season.Average(e => e.FigurePercent), 1),
+                medalStats = new
+                {
+                    silverCount,
+                    bronzeCount,
+                    totalPoints = silverCount * 2 + bronzeCount
+                },
+                placement = new
+                {
+                    best,
+                    median,
+                    podiums,
+                    topPercent
+                }
+            };
+        }
     }
 
     /// <summary>One Fältskytte comp entry as the user sees it on /user-profile-page.</summary>

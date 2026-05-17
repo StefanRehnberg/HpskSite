@@ -31,6 +31,7 @@ namespace HpskSite.Controllers
         private readonly IMemberManager _memberManager;
         private readonly AdminAuthorizationService _authorizationService;
         private readonly IMediaService _mediaService;
+        private readonly MemberDataPresenceService _presenceService;
 
         public ClubController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -43,7 +44,8 @@ namespace HpskSite.Controllers
             IMemberService memberService,
             IMemberManager memberManager,
             AdminAuthorizationService authorizationService,
-            IMediaService mediaService)
+            IMediaService mediaService,
+            MemberDataPresenceService presenceService)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _contentService = contentService;
@@ -51,6 +53,7 @@ namespace HpskSite.Controllers
             _memberManager = memberManager;
             _authorizationService = authorizationService;
             _mediaService = mediaService;
+            _presenceService = presenceService;
         }
 
         /// <summary>
@@ -571,11 +574,16 @@ namespace HpskSite.Controllers
                         .ToList();
                 }
 
+                // One batched query for "which (member, discipline) pairs have any data" —
+                // powers the green dot on each row's dashboard button.
+                var presenceMap = await _presenceService.GetClubPresenceAsync();
+
                 // Build member data with privacy levels
                 foreach (var member in clubMembers.OrderBy(m => m.Name))
                 {
                     var isPrimary = member.GetValue("primaryClubId")?.ToString() == clubId.ToString();
                     var additionalClubs = member.GetValue("memberClubIds")?.ToString() ?? "";
+                    var hasData = presenceMap.TryGetValue(member.Id, out var memberDisciplines) && memberDisciplines.Count > 0;
 
                     // Basic data visible to all members
                     var memberData = new
@@ -589,6 +597,8 @@ namespace HpskSite.Controllers
                         isApproved = member.IsApproved,
                         // Dashboard sharing level for showing dashboard button
                         dashboardSharingLevel = string.IsNullOrEmpty(member.GetValue<string>("dashboardSharingLevel")) ? "club" : member.GetValue<string>("dashboardSharingLevel"),
+                        // Any-discipline data presence — drives the green dot on the dashboard button
+                        hasData = hasData,
                         // Extended properties only visible to club admins
                         address = isClubAdmin ? (member.GetValue<string>("address") ?? "") : null,
                         postalCode = isClubAdmin ? (member.GetValue<string>("postalCode") ?? "") : null,

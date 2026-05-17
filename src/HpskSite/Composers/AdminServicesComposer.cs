@@ -59,6 +59,9 @@ namespace HpskSite.Composers
             // Fältskytte member-stats aggregator (powers /user-profile-page dashboard + Resultat tab)
             builder.Services.AddScoped<FaltskytteStatsService>();
 
+            // Cheap "does member X have data in discipline Y" lookups for member-list dots and mini-dashboard tabs
+            builder.Services.AddScoped<MemberDataPresenceService>();
+
             // Register BrevoEmailService and named HttpClient
             builder.Services.AddHttpClient("Brevo");
             builder.Services.AddScoped<BrevoEmailService>();
