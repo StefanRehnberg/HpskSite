@@ -17,10 +17,8 @@
       3. Publish it. The "Om pistol.nu" nav item in Master.cshtml will pick it
          up automatically via the aboutPage doc type alias lookup.
 
-    IMAGE PLACEHOLDERS: SVGs in /images/about/ are placeholders. When real
-    screenshots are ready, drop matching .png files in the same folder and
-    update the .svg → .png references in the Image fields below (one find-
-    replace covers all 12).
+    Image assets live in /images/about/ as PNGs, one per slab. To swap a
+    screenshot, replace the file with the same filename; no view change needed.
 *@
 @using Umbraco.Cms.Core.Security
 @inject IMemberManager MemberManager
@@ -52,42 +50,49 @@
     var shooterSlabs = new[]
     {
         new {
-            Image = "/images/about/dashboard.svg",
+            Image = "/images/about/dashboard.png",
             Title = "Min Sida — din dashboard",
             Teaser = "Följ din utveckling över tid, per disciplin och vapengrupp.",
             Detail = "Din Min Sida visar diagram över hur du presterar serie för serie, vilken klass du satsar mest tid på, dina personliga rekord och din senaste 30-dagarstrend. Det fungerar för alla discipliner — även Fältskytte, där träff- och figurprocent visas istället för seriepoäng. Allt sammanställs automatiskt från tävlings- och träningsresultat.",
             Tutorial = "tutorial-03"
         },
         new {
-            Image = "/images/about/rekord.svg",
+            Image = "/images/about/rekord.png",
             Title = "Personliga rekord",
             Teaser = "Pistol.nu håller koll på alla dina rekord — du bara skjuter.",
             Detail = "För varje vapenklass och varje serielängd håller pistol.nu reda på ditt bästa resultat någonsin. Slå rekordet en gång och det syns på Min Sida och på din klubbsida. Alla rekord är kopplade till tävlingen eller träningstillfället där de sattes, så du alltid minns sammanhanget.",
             Tutorial = ""
         },
         new {
-            Image = "/images/about/traningsmatch.svg",
+            Image = "/images/about/traningsmatch.png",
             Title = "Träningsmatch — live mot kompisar och andra klubbar",
             Teaser = "Bjud in skyttar med en QR-kod och skjut tillsammans i realtid.",
             Detail = "Skapa en träningsmatch på fem sekunder, dela QR-koden med dem du tränar med, och börja räkna. Resultaten uppdateras live på allas skärmar. Tack vare vårt eget framtagna handikappsystem kan rutinerade skyttar och nybörjare tävla på lika villkor — poängen balanseras automatiskt så att alla har en chans att vinna.",
             Tutorial = "tutorial-04"
         },
         new {
-            Image = "/images/about/skyttetrappan.svg",
+            Image = "/images/about/skyttetrappan.png",
             Title = "Skyttetrappan",
             Teaser = "Strukturerat träningsprogram från nybörjare till erfaren skytt.",
             Detail = "Skyttetrappan är ett 9-nivåers, 74-stegs träningsprogram som tar dig från första provskott till säker, kunnig pistolskytt. Tränare och skjutledare på din klubb godkänner stegen du klarat. Pistol.nu håller reda på dina framsteg så du alltid vet vad nästa moment är.",
             Tutorial = "tutorial-05"
         },
         new {
-            Image = "/images/about/anmalan-swish.svg",
+            Image = "/images/about/anmalan-swish.png",
             Title = "Tävlingsanmälan + Swish",
             Teaser = "Anmäl dig till tävlingar i två klick. Betala med Swish.",
             Detail = "Hitta tävlingar i din krets, anmäl dig till de klasser du vill skjuta, och betala anmälningsavgiften direkt med en Swish-QR. På tävlingar med egenbokning väljer du själv din starttid redan vid anmälan; på övriga får du startlistan på mail när den publiceras. Många tävlingar tar dessutom emot drop-in-anmälan på plats. Slipp inbetalningskort och pappersanmälningar.",
             Tutorial = "tutorial-02"
         },
         new {
-            Image = "/images/about/faltskytte.svg",
+            Image = "/images/about/precision.png",
+            Title = "Precision via mobil",
+            Teaser = "Skriv in resultaten direkt vid banan — utan papper, utan efterarbete.",
+            Detail = "Funktionären vid banan markerar serie för serie i mobilen och resultaten landar direkt i tävlingen. Skytten och åskådarna ser sin position på resultattavlan medan tävlingen pågår. Fungerar för alla seriebaserade discipliner: Precision, Milsnabb, Duell, Magnumprecision och Nationell helmatch.",
+            Tutorial = "tutorial-08"
+        },
+        new {
+            Image = "/images/about/faltskytte.png",
             Title = "Fältskytte via mobil",
             Teaser = "Patrullchefen skjuter, mobilen räknar.",
             Detail = "Vid varje station scannar patrullchefen en QR-kod, väljer skytt och knappar in träffar. Inga papperslappar, inga räknefel, inga sena resultatlistor. Patrullen och alla andra på tävlingen ser preliminära resultat i realtid när stationerna avslutas.",
@@ -98,49 +103,49 @@
     var adminSlabs = new[]
     {
         new {
-            Image = "/images/about/admin-hemsida.svg",
+            Image = "/images/about/admin-hemsida.png",
             Title = "Gratis klubbhemsida",
             Teaser = "Ersätt Svenska Lag eller WordPress med något som är byggt för pistolskytteklubbar.",
             Detail = "Klubbsidan har färdiga sektioner för kalender, nyheter, dokument, klubbrekord, träningstider, styrelse, medlemslista och kontaktuppgifter. Varje evenemang får sin egen landningssida med bild, beskrivning, plats och anmälan — perfekt för städdagar, klubbmästerskap, kurser och samlingar. Anmälningsavgifter och andra inbetalningar tas emot via Swish direkt på sidan, med automatiska kvitton och bokföringsunderlag. Hantering av medlemsavgifter är planerad som nästa steg. Tävlingar, resultat och klubbrekord som klubben hanterar i pistol.nu visas direkt på sidan — ingen dubbel inmatning på en separat webbplats. Mindre att underhålla, mer tid till skytte.",
             Tutorial = ""
         },
         new {
-            Image = "/images/about/admin-medlemmar.svg",
+            Image = "/images/about/admin-medlemmar.png",
             Title = "Medlemshantering, certifikat och statistik",
             Teaser = "Hela registret i ett verktyg — godkännanden, roller, aktivitet och certifikat.",
             Detail = "Godkänn nya medlemmar med ett klick, fördela roller (klubbadmin, skjutledare, instruktör, banläggare, vapenkontrollant), spåra aktivitet, hantera SPSF-certifieringar och se klubbens utvecklingsstatistik. Inga Excel-filer som gnälls på.",
             Tutorial = "tutorial-07"
         },
         new {
-            Image = "/images/about/admin-mail.svg",
+            Image = "/images/about/admin-mail.png",
             Title = "Mailutskick — nyhetsbrev och händelser",
             Teaser = "Skicka snygga mail till medlemmarna utan att hantera mailserver.",
             Detail = "Pistol.nu integrerar med Brevo — en mailtjänst som hanterar utskick, mallar och avregistreringar enligt GDPR. Brevos gratisnivå räcker långt för de flesta klubbar (~300 mail per dygn). Vid större volym väljer klubben en betalplan direkt hos Brevo. Integrationen är frivillig och inga medlemsuppgifter delas utan klubbens godkännande.",
             Tutorial = ""
         },
         new {
-            Image = "/images/about/admin-tavling.svg",
+            Image = "/images/about/admin-tavling.png",
             Title = "Tävlingsadministration",
             Teaser = "Från anmälan till officiellt resultat — för alla pistoldiscipliner, i ett flöde.",
             Detail = "Pistol.nu hanterar hela tävlingsflödet för Precision, Milsnabb, Duell, Magnumprecision, Nationell helmatch, Fältskytte, Magnum fält och Springskytte — inklusive lagtävlingar, stafetter, deltävlingar och tävlingsserier (t.ex. Hallandsserien). Skapa tävlingen i guiden, ta emot anmälningar (med egenbokning eller drop-in), generera startlistor och patrullistor automatiskt, driv kassan på tävlingsdagen och registrera resultat under tävlingens gång. Preliminära resultat visas live för publik och anmälda medan tävlingen pågår. Klassammanslagning vid få deltagare och standardmedaljer beräknas automatiskt enligt SPSF:s regler. När tävlingen är klar publicerar du den officiella resultatlistan med ett klick.",
             Tutorial = "tutorial-11"
         },
         new {
-            Image = "/images/about/admin-konfigurator.svg",
+            Image = "/images/about/admin-konfigurator.png",
             Title = "Fältskyttekonfigurator",
             Teaser = "Designa stationer grafiskt — utan papper och kalkylark.",
             Detail = "Designa varje station: välj mål från målkatalogen, justera figurer och tider per vapenklass och kopiera proportionellt mellan klasserna. Utskriftsklara stations- och målblad, QR-koder för mobilrapportering vid banan — allt från samma verktyg.",
             Tutorial = ""
         },
         new {
-            Image = "/images/about/admin-kassa.svg",
+            Image = "/images/about/admin-kassa.png",
             Title = "Kassan på tävlingsdagen",
             Teaser = "Anmälan, betalning, kvitto — på samma skärm.",
             Detail = "På tävlingsdagen sköts allt från en surfplatta vid kassan: walk-in-anmälan, Swish-betalningar, kvitton via mail, omflyttning av skyttar, incheckning. Anmälda får sin patrull- eller startlisteplats direkt. Bokföringsunderlag genereras automatiskt.",
             Tutorial = ""
         },
         new {
-            Image = "/images/about/admin-krets.svg",
+            Image = "/images/about/admin-krets.png",
             Title = "Kretsfunktioner",
             Teaser = "Sammanhållande plattform för hela kretsen.",
             Detail = "Kretsens samtliga klubbar samlas under en kretssida med gemensam kalender, kretstävlingar och kretsmästare. Rekord och statistik per disciplin följs upp över alla klubbar. Kretsadministratörer kan stötta sina föreningar utan att behöva varje klubbs interna inloggning.",
@@ -179,6 +184,16 @@
         box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
         background-color: var(--bs-tertiary-bg);
     }
+    /* Portrait phone screenshots (precision.png, faltskytte.png) — cap height so
+       they don't tower over the desktop screenshots in the rest of the page. */
+    .about-slab img.about-shot[src*="precision.png"],
+    .about-slab img.about-shot[src*="faltskytte.png"] {
+        width: auto;
+        max-width: 100%;
+        max-height: 360px;
+        display: block;
+        margin-inline: auto;
+    }
     .about-slab h3 {
         font-weight: 700;
     }
@@ -199,7 +214,19 @@
         text-align: center;
         margin-top: 1.5rem;
     }
+    /* Force dark theme for the entire About page — screenshots are dark-mode
+       and look best against a dark backdrop. data-bs-theme="dark" on the
+       wrapper makes Bootstrap resolve all theme variables (text, bg, borders,
+       cards) to dark values inside this scope, regardless of the user's
+       site-wide theme toggle. The explicit background-color ensures the wrapper
+       itself paints dark (otherwise it'd inherit body's light background). */
+    .about-page-wrapper {
+        background-color: var(--bs-body-bg);
+        color: var(--bs-body-color);
+    }
 </style>
+
+<div data-bs-theme="dark" class="about-page-wrapper">
 
 @* ============================================================
    1. MISSION  — sets the tone before the feature parade
@@ -492,3 +519,5 @@
         </p>
     </div>
 </section>
+
+</div>
