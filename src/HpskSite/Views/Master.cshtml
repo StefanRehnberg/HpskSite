@@ -401,7 +401,16 @@
                             <a class="nav-link @(Model.Id == Model.Root().Id ? "active" : "")"
                                href="@Model.Root().Url()">Hem</a>
                         </li>
-                        
+
+                        @{
+                            var aboutPage = Model.Root().Children.FirstOrDefault(x => x.ContentType.Alias == "aboutPage");
+                            bool isAboutActive = (aboutPage != null && aboutPage.IsAncestorOrSelf(Model)) || Model.Url().Contains("om-pistol-nu");
+                        }
+                        <li class="nav-item">
+                            <a class="nav-link @(isAboutActive ? "active" : "")"
+                               href="@(aboutPage?.Url() ?? "/om-pistol-nu/")">Om pistol.nu</a>
+                        </li>
+
                         @{
                             var trainingStairsPage = Model.Root().Children.FirstOrDefault(x => x.Url().Contains("skyttetrappan"));
                             bool isTrainingActive = (trainingStairsPage != null && trainingStairsPage.IsAncestorOrSelf(Model)) || Model.Url().Contains("skyttetrappan");
