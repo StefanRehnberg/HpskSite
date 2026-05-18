@@ -42,8 +42,8 @@
     var userProfileUrl = Model.Root().Children.FirstOrDefault(x => x.ContentType.Alias == "userProfile")?.Url()
                          ?? "/user-profile-page/";
 
-    var contactPage = Model.Root().Children.FirstOrDefault(x => x.Name == "Contact");
-    var contactUrl = contactPage?.Url() ?? "/contact/";
+    // About page contact channel is admin's inbox — not the generic Contact page
+    var contactUrl = "mailto:admin@pistol.nu";
 
     // Demo club (Ankeborgs PSK) — anchor target for the admin CTA
     var demoClubUrl = "/ankeland/klubbar/ankeborg/";
@@ -387,7 +387,7 @@
         slabIndex++;
     }
 
-    <div class="about-cta-block mb-5">
+    <div class="about-cta-block">
         <p class="lead mb-3">Vill du se hur en aktiv klubb använder pistol.nu?</p>
         <div class="d-flex flex-wrap gap-2 justify-content-center">
             <a class="btn btn-primary btn-lg" href="@demoClubUrl">
@@ -399,6 +399,96 @@
         </div>
         <p class="text-muted small mt-3 mb-0">
             Ankeborg är vår demoklubb där du fritt kan klicka runt och se hur klubbsidan, tävlingar och resultat ser ut i praktiken.
+        </p>
+    </div>
+</section>
+
+@* ============================================================
+   4. PÅ GÅNG — small roadmap glimpse of major upcoming work
+============================================================ *@
+<section class="container-fluid">
+    <header class="about-section-heading text-center">
+        <h2 class="mb-3"><i class="bi bi-signpost-2 me-2"></i>På gång</h2>
+        <p class="text-muted prose-wide mx-auto">
+            En liten glimt av vad som är på väg in i pistol.nu härnäst.
+        </p>
+    </header>
+
+    <div class="row g-3 mb-5">
+        <div class="col-md-6 col-lg-4">
+            <div class="card h-100 border-0 shadow-sm">
+                <div class="card-body">
+                    <h6 class="card-title"><i class="bi bi-cash-stack text-primary me-2"></i>Hantering av medlemsavgifter</h6>
+                    <p class="card-text small mb-0">Klubbar ska kunna ta in årsavgifter via samma Swish-flöde som tävlingsavgifter — med automatiska kvitton och bokföringsunderlag.</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 col-lg-4">
+            <div class="card h-100 border-0 shadow-sm">
+                <div class="card-body">
+                    <h6 class="card-title"><i class="bi bi-award text-primary me-2"></i>Standardmedaljer för klubbadmins</h6>
+                    <p class="card-text small mb-0">Klubbar ska kunna sammanställa och rapportera medlemmarnas Std-medaljer säsongsvis.</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 col-lg-4">
+            <div class="card h-100 border-0 shadow-sm">
+                <div class="card-body">
+                    <h6 class="card-title"><i class="bi bi-trophy text-primary me-2"></i>Guldfordringar</h6>
+                    <p class="card-text small mb-0">Registrering, verifiering och årlig rapportering av medlemmarnas Guldfordringar — för klubbarna.</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 col-lg-4">
+            <div class="card h-100 border-0 shadow-sm">
+                <div class="card-body">
+                    <h6 class="card-title"><i class="bi bi-bullseye text-primary me-2"></i>Särskjutning i alla discipliner</h6>
+                    <p class="card-text small mb-0">Full hantering av särskjutning där det är tillämpligt — så att även täta tävlingar kan avgöras direkt i pistol.nu.</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 col-lg-4">
+            <div class="card h-100 border-0 shadow-sm">
+                <div class="card-body">
+                    <h6 class="card-title"><i class="bi bi-people text-primary me-2"></i>Delning av fältskyttestationer</h6>
+                    <p class="card-text small mb-0">Klubbar ska kunna dela och samarbeta kring stationsdesigner i konfiguratorn — utbyta beprövade upplägg utan att starta om från noll.</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 col-lg-4">
+            <div class="card h-100 border-0 shadow-sm">
+                <div class="card-body">
+                    <h6 class="card-title"><i class="bi bi-chat-square-text text-primary me-2"></i>Förslagslåda</h6>
+                    <p class="card-text small mb-0">En öppen kanal där användare lämnar förslag och röstar på vad som ska byggas härnäst.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+@* ============================================================
+   5. VEM BYGGER PISTOL.NU — credibility / personal note
+============================================================ *@
+<section class="container-fluid mb-5">
+    <header class="about-section-heading text-center">
+        <h2 class="mb-3"><i class="bi bi-tools me-2"></i>Vem bygger pistol.nu?</h2>
+    </header>
+    <div class="prose mx-auto text-center">
+        <p>
+            Bakom pistol.nu finns pistolskyttar med över 40 års erfarenhet av att
+            bygga stödsystem för affärsprocesser inom multinationella företag. De
+            senaste åren har vi arbetat med AI-system — kunskap som nu också får
+            komma sporten till nytta.
+        </p>
+        <p>
+            Pistol.nu är ideellt — precis som all annan tid vi lägger på vår sport —
+            och kommer alltid att vara det. Det här är ingen kommersiell satsning
+            och blir aldrig en.
+        </p>
+        <p class="mb-0">
+            Vi välkomnar fler som vill vara med och bidra. Just nu behöver vi särskilt
+            hjälp med att testa nya funktioner och att spela in instruktionsvideor —
+            <a href="@contactUrl">hör av dig</a> om du vill engagera dig.
         </p>
     </div>
 </section>
