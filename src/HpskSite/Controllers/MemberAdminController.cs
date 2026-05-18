@@ -74,12 +74,19 @@ namespace HpskSite.Controllers
             string sortBy = "lastActiveSortValue",
             bool sortDesc = true)
         {
-            // Allow site admins and regional admins
+            // Allow site admins, regional admins, and club admins. Club admins are
+            // restricted to members of their managed clubs further down so the picker
+            // still works (e.g. assigning Tävlingsledare from the competition modal)
+            // without exposing the full member roster.
             bool isSiteAdmin = await _authService.IsCurrentUserAdminAsync();
             var managedRegions = await _authService.GetManagedRegions();
             bool isRegionalAdmin = !isSiteAdmin && managedRegions.Any();
+            var managedClubIds = (isSiteAdmin || isRegionalAdmin)
+                ? new List<int>()
+                : await _authService.GetManagedClubIds();
+            bool isClubAdmin = !isSiteAdmin && !isRegionalAdmin && managedClubIds.Any();
 
-            if (!isSiteAdmin && !isRegionalAdmin)
+            if (!isSiteAdmin && !isRegionalAdmin && !isClubAdmin)
             {
                 return Json(new { success = false, message = "Access denied" });
             }
@@ -165,6 +172,23 @@ namespace HpskSite.Controllers
                         if (int.TryParse(memberClubIdStr, out var memberClubId))
                         {
                             return clubsInRegion.Contains(memberClubId);
+                        }
+                        return false;
+                    }).ToList();
+                }
+
+                // Apply club admin restriction (always enforced — club admins only see
+                // members of clubs they manage; the explicit clubId filter below is
+                // applied on top and an out-of-scope clubId yields an empty list).
+                if (isClubAdmin)
+                {
+                    var managedClubIdsSet = managedClubIds.ToHashSet();
+                    filteredMembers = filteredMembers.Where(m =>
+                    {
+                        var memberClubIdStr = m.GetValue("primaryClubId")?.ToString();
+                        if (int.TryParse(memberClubIdStr, out var memberClubId))
+                        {
+                            return managedClubIdsSet.Contains(memberClubId);
                         }
                         return false;
                     }).ToList();
