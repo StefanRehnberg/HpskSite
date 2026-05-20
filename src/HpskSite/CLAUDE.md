@@ -981,6 +981,25 @@ Navigate to **Members → Member Groups**:
 - **competitionResult**: add `faltskytteShootOffConfig` Textarea property (optional, label "Fältskytte – särskjutnings-station (JSON)"). Stores a single station config (with per-weapon-class variants) used for Fältskytte/MagnumFält Särskjutning. Without it, the "Konfigurera särskjutnings-station" save silently no-ops. Added 2026-05-20.
 - **competitionResult**: add `subCompetitionFaltskytteShootOffConfig` Textarea property (optional, label "Deltävling – Fältskytte särskjutnings-station (JSON)"). Same as above for the Deltävling pool. Added 2026-05-20.
 
+### Skjutlag / Patrull Label (2026-05-20)
+**What:** Freeform per-skjutlag/patrol label admins can type to disambiguate multi-day competitions (e.g. "Lördag fm", "Söndag 14 juni", "Final"). Replaces a backlog item that originally asked for a structured day-of-week + date field.
+
+**Scope:** Precision-family (Precision/Duell/Milsnabb/MagnumPrecision/NationellHelmatch) + Fältskytte/MagnumFält. Springskytte excluded (no per-team entity). Direktplacering already had `DirektplaceringTeam.Label` wired end-to-end — no change there.
+
+**Persistence:**
+- Precision-family: new `Label` field on `StartListTeam` inside the `configurationData` JSON blob on the `precisionStartList` doctype. Backward-compatible (Newtonsoft deserializes missing → `""`).
+- Fältskytte: new `Label NVARCHAR(200) NULL` column on the `FaltskyttePatrol` SQL table. **Manual operator step:** run `Migrations/add-label-to-faltskytte-patrol.sql` in SSMS.
+
+**Dual-renderer trap (don't repeat this mistake):** The Precision team header is rendered in **two** places. Adding any new `StartListTeam` field shown to users must wire both:
+- `CompetitionTypes/Precision/Controllers/StartListHtmlRenderer.cs:55` — produces the cached `startListContent` blob (admin preview, print, email). A comment is now in place flagging this.
+- `Views/PrecisionStartList.cshtml:253` — the public `/startlista/` Razor page, reads `configurationData` JSON directly via `dynamic` (so missing-property access needs a try/catch fallback to `""`).
+
+**JS dual-casing pattern:** `GetStartListForEditing` returns config with inconsistent casing — same precedent as `shooter.club || shooter.Club` at line 1691. Read team fields as `team.label || team.Label`. Used at the card header, modal lookup, and 3 move/add-shooter dropdowns in `CompetitionStartListManagement.cshtml`.
+
+**Copy unification:** the editor modal was the only surface still using "Lag N" — all references in `CompetitionStartListManagement.cshtml` and one in `CompetitionResultsManagement.cshtml:1678` updated to "Skjutlag N". Edit-modal title changed from "Redigera Lagtider" to "Redigera skjutlag"; per-team button icon changed from clock to pencil-square for edit discoverability.
+
+**Fältskytte UX:** the time-edit pencil now opens a two-step prompt (time then label) via `faltEditPatrol(patrolId, time, label)`. Old `faltEditPatrolTime(...)` kept as a backward-compat shim. Label suffix shown in: admin patrol cards, station entry roll-call/entry screens, public competition page modal, print view, walk-in slot picker, `StationPage` multi-patrol picker.
+
 ### Fältskytte Särskjutning (2026-05-20)
 **Scope:** Fältskytte (Normal mode + Poäng mode) and Magnum Fält. Same championship gate as the precision-family Särskjutning: `CompetitionScopeHelper.IsChampionshipScope` + tied score at medal places 1–3.
 
