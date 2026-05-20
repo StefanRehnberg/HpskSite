@@ -82,31 +82,31 @@
                 <!-- Search box -->
                 <div class="col-md-4">
                     <label class="form-label small mb-1">Sök</label>
-                    <!-- Browser AND password-manager autofill defenses. Chrome's heuristic
-                         autofill, 1Password, LastPass and Bitwarden all need different opt-outs:
-                           - type="search" (browsers exempt these from form autofill)
-                           - explicit non-form-ish name attribute
-                           - autocomplete="off" + data-form-type
-                           - data-1p-ignore (1Password), data-lpignore (LastPass), data-bwignore (Bitwarden)
-                           - value="" + JS clear on load + short delayed re-clear (catches late-pass autofill) -->
+                    <!-- Aggressive autofill defenses. 1Password / Chrome heuristics will fill
+                         ANY input on a logged-in page that even slightly resembles an email
+                         field, so we combine four lines of defense:
+                           1. `readonly` initially — browsers and managers refuse to autofill
+                              readonly inputs. We strip readonly on the first focus/touch.
+                           2. Hidden honeypot inputs absorb the password-manager's fill
+                              attempt before it reaches the real search box.
+                           3. Placeholder no longer mentions "e-post" (Chrome's heuristic
+                              uses placeholder text to guess field type).
+                           4. type="search" + autocomplete="off" + per-manager opt-out attrs. -->
+
+                    <!-- Honeypot: 1Password/Chrome fill these and leave the real box alone -->
+                    <input type="text" name="email" autocomplete="username" tabindex="-1" aria-hidden="true"
+                           style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0">
+                    <input type="password" name="password" autocomplete="current-password" tabindex="-1" aria-hidden="true"
+                           style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0">
+
                     <input type="search" id="filterSearch" name="userFilterQuery"
                            class="form-control form-control-sm"
-                           placeholder="Namn eller e-post..." value=""
+                           placeholder="Sök på namn..." value="" readonly
                            autocomplete="off" data-form-type="other"
-                           data-1p-ignore="true" data-lpignore="true" data-bwignore="true">
+                           data-1p-ignore="true" data-lpignore="true" data-bwignore="true"
+                           onfocus="this.removeAttribute('readonly');this.value='';"
+                           ontouchstart="this.removeAttribute('readonly')">
                 </div>
-                <script>
-                    (function () {
-                        var el = document.getElementById('filterSearch');
-                        if (!el) return;
-                        var clear = function () { if (el === document.activeElement) return; el.value = ''; };
-                        clear();
-                        // Browsers (especially Chrome) re-apply heuristic autofill *after*
-                        // DOMContentLoaded — a short delayed clear catches that pass.
-                        setTimeout(clear, 50);
-                        setTimeout(clear, 250);
-                    })();
-                </script>
                 <!-- Export button -->
                 <div class="col-md-3">
                     <button class="btn btn-outline-secondary btn-sm w-100" onclick="exportMembers()">
