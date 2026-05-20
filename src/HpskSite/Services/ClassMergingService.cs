@@ -99,32 +99,30 @@ namespace HpskSite.Services
         }
 
         /// <summary>
-        /// Produces a combined class name for merged classes.
-        /// Examples: C2 + C3 → "C2+3", C Vet Ä + C Vet Y → "C Vet",
-        /// C2 Dam + C2 → "C2+Dam", C Jun + C1 → "C1+Jun", A2 + A3 → "A2+3"
+        /// Produces a combined class name for merged classes. The suffix is driven by the
+        /// SOURCE class's category (the class being absorbed into the target) so that e.g.
+        /// "C Vet Y → C2 Dam" renders as "C2 Dam+Vet" — target plus the kind of shooters
+        /// joining it. Examples:
+        ///   C2 + C3 → "C2+3", C2 Dam + C2 → "C2+Dam", C Jun + C1 → "C1+Jun",
+        ///   C Vet Y + C2 → "C2+Vet", C Vet Y + C2 Dam → "C2 Dam+Vet",
+        ///   Dam C 3 + C 2 → "C2+Dam3", Dam C 3 + Dam C 2 → "C2+3 Dam", A2 + A3 → "A2+3"
         /// </summary>
         public static string GetCombinedClassName(string source, string target)
         {
-            // Vet Ä + Vet Y → drop the age suffix → "C Vet" / "L Vet"
-            if (IsVetAClass(source) && IsVetYClass(target) ||
-                IsVetYClass(source) && IsVetAClass(target))
-            {
-                var weaponGroup = GetWeaponGroup(source);
-                return $"{weaponGroup} Vet";
-            }
-
-            // Class 2+3 merge (A2+A3, B2+B3, R2+R3, AM2+AM3 …) → "A2+3" / "AM2+3"
             var sourceLevel = GetCompetenceLevel(source);
             var targetLevel = GetCompetenceLevel(target);
+
+            // ── Class 2+3 merge for A-family / B / R / C/L open ──────────────────────
+            // Pure level merge (no Dam/Vet/Jun marker on either side).
             if (sourceLevel != null && targetLevel != null &&
                 !IsDamClass(source) && !IsDamClass(target) &&
                 !IsVetYClass(source) && !IsVetAClass(source) &&
+                !IsVetYClass(target) && !IsVetAClass(target) &&
                 !IsJuniorClass(source) && !IsJuniorClass(target))
             {
                 var weaponGroup = GetWeaponGroup(source);
                 var low = Math.Min(sourceLevel.Value, targetLevel.Value);
                 var high = Math.Max(sourceLevel.Value, targetLevel.Value);
-                // Use display-name prefix so AM2+AM3 renders as "AM2+3" (not "A_M2+3").
                 var prefix = weaponGroup switch
                 {
                     "A_Opt" => "A Opt ",
@@ -136,26 +134,140 @@ namespace HpskSite.Services
                 return $"{prefix}{low}+{high}";
             }
 
-            // Dam merging into open class → "C2+Dam"
-            if (IsDamClass(source) && !IsDamClass(target))
-                return $"{target}+Dam";
-            if (IsDamClass(target) && !IsDamClass(source))
-                return $"{source}+Dam";
+            // ── Both Dam, different levels (e.g. Dam C 3 → Dam C 2) ──────────────────
+            if (IsDamClass(source) && IsDamClass(target) &&
+                sourceLevel != null && targetLevel != null && sourceLevel != targetLevel)
+            {
+                var weaponGroup = GetWeaponGroup(source);
+                var low = Math.Min(sourceLevel.Value, targetLevel.Value);
+                var high = Math.Max(sourceLevel.Value, targetLevel.Value);
+                return $"{weaponGroup}{low}+{high} Dam";
+            }
 
-            // Jun merging into open class → "C1+Jun"
-            if (IsJuniorClass(source) && !IsJuniorClass(target))
-                return $"{target}+Jun";
-            if (IsJuniorClass(target) && !IsJuniorClass(source))
-                return $"{source}+Jun";
+            // ── Dam crossing levels into open (e.g. Dam C 3 → C 2) ───────────────────
+            // Highlight the source's level so the result class is unambiguous about which
+            // Dam-level joined (e.g. "C2+Dam3" means "C2 with Dam C 3 shooters merged in").
+            if (IsDamClass(source) && !IsDamClass(target) &&
+                sourceLevel != null && targetLevel != null && sourceLevel != targetLevel)
+            {
+                return $"{target}+Dam{sourceLevel}";
+            }
+            if (IsDamClass(target) && !IsDamClass(source) &&
+                sourceLevel != null && targetLevel != null && sourceLevel != targetLevel)
+            {
+                return $"{source}+Dam{targetLevel}";
+            }
 
-            // Vet Y merging into open class → "C2+Vet"
-            if ((IsVetYClass(source) || IsVetAClass(source)) && !IsVetYClass(target) && !IsVetAClass(target))
-                return $"{target}+Vet";
-            if ((IsVetYClass(target) || IsVetAClass(target)) && !IsVetYClass(source) && !IsVetAClass(source))
-                return $"{source}+Vet";
+            // ── Suffix from SOURCE category (same-level, or Vet/Jun) ────────────────
+            if (IsVetYClass(source) || IsVetAClass(source)) return $"{target}+Vet";
+            if (IsJuniorClass(source)) return $"{target}+Jun";
+            if (IsDamClass(source) && !IsDamClass(target)) return $"{target}+Dam";
 
-            // Fallback: "Source/Target"
+            // ── Reverse direction (target carries the category marker) ──────────────
+            if (IsVetYClass(target) || IsVetAClass(target)) return $"{source}+Vet";
+            if (IsJuniorClass(target)) return $"{source}+Jun";
+            if (IsDamClass(target) && !IsDamClass(source)) return $"{source}+Dam";
+
+            // Fallback
             return $"{source}/{target}";
+        }
+
+        /// <summary>
+        /// Builds a single combined-class name covering multiple sources merging into one target,
+        /// e.g. target=C2 with sources=[C2 Dam, C3 Dam, C Vet Y] → "C2+Dam+Vet". Same-category
+        /// duplicates collapse (two Dam-levels both contribute one "Dam" suffix); cross-level
+        /// open sources contribute their level number. The per-shooter class column on the
+        /// public result list still shows each shooter's original class, so collapsing the
+        /// group-level name loses no information.
+        /// </summary>
+        public static string GetCombinedClassNameMulti(string target, IEnumerable<string> sources)
+        {
+            var sourceList = sources.Where(s => !string.IsNullOrEmpty(s) && s != target).ToList();
+            if (sourceList.Count == 0) return target;
+            if (sourceList.Count == 1) return GetCombinedClassName(sourceList[0], target);
+
+            bool hasDam = false, hasJun = false, hasVet = false;
+            var openLevels = new SortedSet<int>();
+
+            foreach (var s in sourceList)
+            {
+                if (IsVetYClass(s) || IsVetAClass(s)) hasVet = true;
+                else if (IsJuniorClass(s)) hasJun = true;
+                else if (IsDamClass(s)) hasDam = true;
+                else
+                {
+                    var lvl = GetCompetenceLevel(s);
+                    if (lvl != null) openLevels.Add(lvl.Value);
+                }
+            }
+
+            var suffixes = new List<string>();
+            foreach (var lvl in openLevels) suffixes.Add(lvl.ToString());
+            if (hasDam) suffixes.Add("Dam");
+            if (hasJun) suffixes.Add("Jun");
+            if (hasVet) suffixes.Add("Vet");
+
+            if (suffixes.Count == 0) return target;
+            return $"{target}+{string.Join("+", suffixes)}";
+        }
+
+        /// <summary>
+        /// Resolve a list of (source, target) merges into a single
+        /// "original class name → combined group name" lookup. Multiple merges that share a
+        /// target (or chain through one) collapse into one group via union-find — target
+        /// always wins (becomes the root). Only the root's name is computed; every member
+        /// of the resolved group maps to the same name.
+        /// </summary>
+        public static Dictionary<string, string> BuildMergeGroupLookup(IEnumerable<ClassMergeAction>? merges)
+        {
+            var lookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (merges == null) return lookup;
+
+            var parent = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            string Find(string c)
+            {
+                if (!parent.ContainsKey(c)) parent[c] = c;
+                while (parent[c] != c)
+                {
+                    parent[c] = parent[parent[c]]; // path compression
+                    c = parent[c];
+                }
+                return c;
+            }
+
+            var mergeList = merges.ToList();
+            if (mergeList.Count == 0) return lookup;
+
+            foreach (var m in mergeList)
+            {
+                if (string.IsNullOrEmpty(m.SourceClass) || string.IsNullOrEmpty(m.TargetClass)) continue;
+                Find(m.SourceClass);
+                Find(m.TargetClass);
+            }
+            foreach (var m in mergeList)
+            {
+                if (string.IsNullOrEmpty(m.SourceClass) || string.IsNullOrEmpty(m.TargetClass)) continue;
+                var sourceRoot = Find(m.SourceClass);
+                var targetRoot = Find(m.TargetClass);
+                if (sourceRoot != targetRoot)
+                    parent[sourceRoot] = targetRoot; // target wins
+            }
+
+            var byRoot = parent.Keys
+                .GroupBy(c => Find(c))
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            foreach (var (root, members) in byRoot)
+            {
+                if (members.Count <= 1) continue; // singleton — no merge needed
+                var sources = members.Where(m => !m.Equals(root, StringComparison.OrdinalIgnoreCase)).ToList();
+                var combined = GetCombinedClassNameMulti(root, sources);
+                foreach (var member in members)
+                    lookup[member] = combined;
+            }
+
+            return lookup;
         }
 
         // ── Rule engine ─────────────────────────────────────────────
@@ -225,89 +337,119 @@ namespace HpskSite.Services
         }
 
         /// <summary>
-        /// For C/L weapon groups: Dam→Open, Vet Ä→Vet Y (step 1), Vet Y→Open (step 2), Jun→Open (admin choice).
+        /// For C/L weapon groups: merge logic from SHB 2026 §D.2.3 (Teknisk specifikation, §4)
+        /// with the FR-104 "närmaste kompetensklass" fallback (clarified 2026-05-19):
+        ///   Klass 1 (any category) — absolut sammanslagningsförbud (FR-102).
+        ///   Dam C 1            → C 1 only (level 1 cannot cross to level 2/3).
+        ///   Dam C 2 / Dam C 3  → priority 1 same-level open; fallback nearest-level open or Dam.
+        ///   Junior C           → priority 1 open C-class, priority 2 Dam C-class.
+        ///   Veteran Y / Ä      → priority 1 open C-class, priority 2 Dam C-class.
+        ///   Open C 2 / C 3     → other open level (C2↔C3), then other-level Dam as fallback.
         /// </summary>
         private MergeSuggestion? BuildWeaponGroupCLSuggestion(string className, int count,
             Dictionary<string, int> classCounts, string weaponGroup)
         {
-            // ── Dam classes: merge into corresponding open class ──
+            // ── Dam C 1/2/3 ──
             if (IsDamClass(className))
             {
                 var level = GetCompetenceLevel(className);
                 if (level == null) return null;
-                var target = $"{weaponGroup}{level}";
-                if (!classCounts.ContainsKey(target)) return null;
+
+                var primaryTarget = $"{weaponGroup}{level}";
+                var primaryExists = classCounts.ContainsKey(primaryTarget);
+
+                // Level 1: only same-level open, no fallback (FR-102 spärr).
+                if (level == 1)
+                {
+                    if (!primaryExists) return null;
+                    return new MergeSuggestion
+                    {
+                        SourceClass = className,
+                        SourceCount = count,
+                        DefaultTarget = primaryTarget,
+                        PossibleTargets = new List<string> { primaryTarget },
+                        RequiresAdminChoice = false,
+                        Reason = $"Dam slås samman med motsvarande öppen klass ({primaryTarget})"
+                    };
+                }
+
+                // Level 2 or 3: priority 1 same-level open, fallback to other-level open + Dam.
+                var targets = new List<string>();
+                if (primaryExists) targets.Add(primaryTarget);
+
+                var otherLevel = level == 2 ? 3 : 2;
+                var fallbackOpen = $"{weaponGroup}{otherLevel}";
+                var fallbackDam = $"{weaponGroup}{otherLevel} Dam";
+                if (classCounts.ContainsKey(fallbackOpen) && !targets.Contains(fallbackOpen))
+                    targets.Add(fallbackOpen);
+                if (classCounts.ContainsKey(fallbackDam) && !targets.Contains(fallbackDam))
+                    targets.Add(fallbackDam);
+
+                if (targets.Count == 0) return null;
 
                 return new MergeSuggestion
                 {
                     SourceClass = className,
                     SourceCount = count,
-                    DefaultTarget = target,
-                    PossibleTargets = new List<string> { target },
-                    RequiresAdminChoice = false,
-                    Reason = $"Dam slås samman med motsvarande öppen klass ({target})"
+                    DefaultTarget = targets[0],
+                    PossibleTargets = targets,
+                    RequiresAdminChoice = targets.Count > 1,
+                    Reason = primaryExists
+                        ? $"Dam slås samman med motsvarande öppen klass ({primaryTarget})"
+                        : $"Motsvarande öppen klass ({primaryTarget}) saknas — välj närmaste klass"
                 };
             }
 
-            // ── Vet Ä: merge into Vet Y (step 1) ──
-            if (IsVetAClass(className))
-            {
-                var vetYName = className.Replace("Vet Ä", "Vet Y");
-                // Vet Y might not exist in this competition, but we still suggest it
-                return new MergeSuggestion
-                {
-                    SourceClass = className,
-                    SourceCount = count,
-                    DefaultTarget = vetYName,
-                    PossibleTargets = new List<string> { vetYName },
-                    RequiresAdminChoice = false,
-                    Reason = $"Veteran Äldre slås samman med Veteran Yngre"
-                };
-            }
-
-            // ── Vet Y: if combined with Vet Ä still < 5, merge into open class (step 2) ──
-            if (IsVetYClass(className))
-            {
-                var vetAName = className.Replace("Vet Y", "Vet Ä");
-                var vetACount = classCounts.GetValueOrDefault(vetAName, 0);
-                var combinedCount = count + vetACount;
-
-                // Only suggest further merge if combined Vet Y + Vet Ä is still < 5
-                if (combinedCount >= MergeThreshold) return null;
-
-                var openTargets = GetOpenClassTargets(weaponGroup, classCounts);
-                if (!openTargets.Any()) return null;
-
-                return new MergeSuggestion
-                {
-                    SourceClass = className,
-                    SourceCount = count,
-                    DefaultTarget = null,
-                    PossibleTargets = openTargets,
-                    RequiresAdminChoice = true,
-                    Reason = $"Veteran ({combinedCount} skyttar inkl. Vet Ä) — välj vilken öppen klass att slå samman med"
-                };
-            }
-
-            // ── Jun: merge into open class (admin choice) ──
-            if (IsJuniorClass(className))
+            // ── Junior / Vet Y / Vet Ä: priority 1 open C, priority 2 Dam C ──
+            if (IsJuniorClass(className) || IsVetYClass(className) || IsVetAClass(className))
             {
                 var openTargets = GetOpenClassTargets(weaponGroup, classCounts);
-                if (!openTargets.Any()) return null;
+                var damTargets = GetDamClassTargets(weaponGroup, classCounts);
+                var allTargets = openTargets.Concat(damTargets).ToList();
+                if (!allTargets.Any()) return null;
+
+                var defaultTarget = openTargets.FirstOrDefault() ?? damTargets.FirstOrDefault();
+
+                var categoryLabel = IsVetAClass(className) ? "Veteran Äldre"
+                                  : IsVetYClass(className) ? "Veteran Yngre"
+                                  : "Junior";
 
                 return new MergeSuggestion
                 {
                     SourceClass = className,
                     SourceCount = count,
-                    DefaultTarget = null,
-                    PossibleTargets = openTargets,
+                    DefaultTarget = defaultTarget,
+                    PossibleTargets = allTargets,
                     RequiresAdminChoice = true,
-                    Reason = "Junior — välj vilken öppen klass att slå samman med"
+                    Reason = $"{categoryLabel} — välj öppen klass (prio 1) eller Dam-klass (prio 2)"
                 };
             }
 
-            // ── Open C/L class 2 or 3: cannot merge with each other in C/L ──
-            // (Rules say class 2+3 merging only allowed in A and B)
+            // ── Open C/L class 2 or 3: FR-104 fallback — nearest competence class ──
+            // (Klass 1 already filtered upstream by IsClass1 in BuildSuggestion.)
+            var openLevel = GetCompetenceLevel(className);
+            if (openLevel == 2 || openLevel == 3)
+            {
+                var otherLevel = openLevel == 2 ? 3 : 2;
+                var targets = new List<string>();
+                var partnerOpen = $"{weaponGroup}{otherLevel}";
+                var partnerDam = $"{weaponGroup}{otherLevel} Dam";
+                if (classCounts.ContainsKey(partnerOpen)) targets.Add(partnerOpen);
+                if (classCounts.ContainsKey(partnerDam)) targets.Add(partnerDam);
+
+                if (targets.Count == 0) return null;
+
+                return new MergeSuggestion
+                {
+                    SourceClass = className,
+                    SourceCount = count,
+                    DefaultTarget = targets[0],
+                    PossibleTargets = targets,
+                    RequiresAdminChoice = targets.Count > 1,
+                    Reason = $"Klass {openLevel} och {otherLevel} i vapengrupp {weaponGroup} får slås samman"
+                };
+            }
+
             return null;
         }
 
@@ -317,6 +459,14 @@ namespace HpskSite.Services
         {
             // Return open classes (1, 2, 3) that actually exist in this competition
             var candidates = new[] { $"{weaponGroup}1", $"{weaponGroup}2", $"{weaponGroup}3" };
+            return candidates.Where(c => classCounts.ContainsKey(c)).ToList();
+        }
+
+        private static List<string> GetDamClassTargets(string weaponGroup, Dictionary<string, int> classCounts)
+        {
+            // Return Dam classes (level 1/2/3) that actually exist in this competition.
+            // Used as priority-2 targets for Junior / Vet Y / Vet Ä per SHB 2026 §D.2.3.
+            var candidates = new[] { $"{weaponGroup}1 Dam", $"{weaponGroup}2 Dam", $"{weaponGroup}3 Dam" };
             return candidates.Where(c => classCounts.ContainsKey(c)).ToList();
         }
 
@@ -389,15 +539,22 @@ namespace HpskSite.Services
 
         private static void DeduplicateBidirectionalSuggestions(List<MergeSuggestion> suggestions)
         {
-            // For A2↔A3: if both have suggestions pointing at each other, keep only one
-            var toRemove = new List<MergeSuggestion>();
+            // Pairs like A2↔A3 (or C2↔C3) produce two mirror-image suggestions that describe
+            // the same merger. Keep one. When one side is RICHER (more PossibleTargets — e.g.
+            // C3 Dam has [C2, C2 Dam] vs C2's [C3 Dam]), drop the poorer side so the admin
+            // keeps the full choice.
+            var toRemove = new HashSet<MergeSuggestion>();
             foreach (var s in suggestions)
             {
-                if (s.DefaultTarget == null) continue;
+                if (s.DefaultTarget == null || toRemove.Contains(s)) continue;
                 var reverse = suggestions.FirstOrDefault(
                     o => o != s && o.SourceClass == s.DefaultTarget && o.DefaultTarget == s.SourceClass);
-                if (reverse != null && !toRemove.Contains(s))
+                if (reverse == null || toRemove.Contains(reverse)) continue;
+
+                if (s.PossibleTargets.Count >= reverse.PossibleTargets.Count)
                     toRemove.Add(reverse);
+                else
+                    toRemove.Add(s);
             }
             foreach (var r in toRemove)
                 suggestions.Remove(r);

@@ -191,5 +191,259 @@ namespace HpskSite.Tests.Services
             Assert.DoesNotContain("A_P", s.Reason);
             Assert.DoesNotContain("A_G", s.Reason);
         }
+
+        // ── SHB 2026 §D.2.3 (Teknisk specifikation §4): Vapengrupp C ────────────────
+        //
+        // | Original (N<5) | Priority 1   | Priority 2 |
+        // | Dam C 1/2/3    | C N (same level) | —      |
+        // | Junior C       | C Klass      | Dam Klass |
+        // | Veteran Y      | C Klass      | Dam Klass |
+        // | Veteran Ä      | C Klass      | Dam Klass |
+
+        [Fact]
+        public void DamC2_MergesIntoC2_NoFallback()
+        {
+            var counts = new Dictionary<string, int> { ["C2 Dam"] = 3, ["C2"] = 6 };
+            var analysis = Service.AnalyzeFromCounts(counts, "Precision");
+            var s = analysis.Suggestions.Single(x => x.SourceClass == "C2 Dam");
+            Assert.Equal("C2", s.DefaultTarget);
+            Assert.Equal(new[] { "C2" }, s.PossibleTargets);
+            Assert.False(s.RequiresAdminChoice);
+        }
+
+        [Fact]
+        public void DamC3_NoCorrespondingOpenClass_FallsBackToNearestLevel()
+        {
+            // Per SHB §3 FR-104 (clarified 2026-05-19): only Klass 1 has the absolute spärr.
+            // When Dam C 3's priority-1 target (C 3) doesn't exist, the class falls back to
+            // the nearest competence level — C 2 (or C 2 Dam) — within the same weapon group.
+            var counts = new Dictionary<string, int>
+            {
+                ["C3 Dam"] = 1,
+                ["C2"] = 3,
+                ["C2 Dam"] = 2
+            };
+            var analysis = Service.AnalyzeFromCounts(counts, "Precision");
+            var damC3 = analysis.Suggestions.Single(s => s.SourceClass == "C3 Dam");
+
+            Assert.True(damC3.RequiresAdminChoice);
+            Assert.Equal(new[] { "C2", "C2 Dam" }, damC3.PossibleTargets);
+            Assert.Equal("C2", damC3.DefaultTarget);
+        }
+
+        [Fact]
+        public void DamC1_NoCorrespondingOpenClass_NoFallback()
+        {
+            // Klass 1 has the absolute spärr (FR-102) — Dam C 1 cannot fall back to Klass 2/3.
+            var counts = new Dictionary<string, int> { ["C1 Dam"] = 1, ["C2"] = 3 };
+            var analysis = Service.AnalyzeFromCounts(counts, "Precision");
+            Assert.DoesNotContain(analysis.Suggestions, s => s.SourceClass == "C1 Dam");
+        }
+
+        [Fact]
+        public void OpenC2AndC3_MergeAsLevel23_WhenBothPresent()
+        {
+            // FR-104 clarification: in Vapengrupp C the binary 2↔3 rule applies as fallback
+            // (same logic as A/B/R), once category mergers are exhausted.
+            var counts = new Dictionary<string, int> { ["C2"] = 3, ["C3"] = 2 };
+            var analysis = Service.AnalyzeFromCounts(counts, "Precision");
+            Assert.Single(analysis.Suggestions);
+            var s = analysis.Suggestions[0];
+            Assert.Contains(s.SourceClass, new[] { "C2", "C3" });
+            Assert.Contains(s.DefaultTarget!, new[] { "C2", "C3" });
+            Assert.NotEqual(s.SourceClass, s.DefaultTarget);
+        }
+
+        [Fact]
+        public void CombinedClassName_DamCrossingLevel_TaggedWithSourceLevel()
+        {
+            // Dam C 3 → C 2 should render as "C2+Dam3" so it's clear which Dam-level joined.
+            Assert.Equal("C2+Dam3", ClassMergingService.GetCombinedClassName("C3 Dam", "C2"));
+            Assert.Equal("C2+Dam3", ClassMergingService.GetCombinedClassName("C2", "C3 Dam"));
+        }
+
+        [Fact]
+        public void CombinedClassName_TwoDamDifferentLevels_PreservesDamMarker()
+        {
+            // Dam C 3 + Dam C 2 should render as "C2+3 Dam".
+            Assert.Equal("C2+3 Dam", ClassMergingService.GetCombinedClassName("C3 Dam", "C2 Dam"));
+            Assert.Equal("C2+3 Dam", ClassMergingService.GetCombinedClassName("C2 Dam", "C3 Dam"));
+        }
+
+        [Fact]
+        public void CVetY_OffersOpenC_AndDamC_AsPrioritizedTargets()
+        {
+            // Exactly the competition-2173 case: C Vet Y exists alongside C2 and C2/C3 Dam.
+            // Per spec, all three are valid targets (C2 = prio 1, Dam classes = prio 2),
+            // admin picks. Default = the priority-1 open class.
+            var counts = new Dictionary<string, int>
+            {
+                ["A3"] = 5,
+                ["C Vet Y"] = 1,
+                ["C2"] = 2,
+                ["C2 Dam"] = 4,
+                ["C3 Dam"] = 1
+            };
+
+            var analysis = Service.AnalyzeFromCounts(counts, "Precision");
+            var vetY = analysis.Suggestions.Single(s => s.SourceClass == "C Vet Y");
+
+            Assert.True(vetY.RequiresAdminChoice);
+            Assert.Equal("C2", vetY.DefaultTarget);
+            Assert.Equal(new[] { "C2", "C2 Dam", "C3 Dam" }, vetY.PossibleTargets);
+            Assert.Contains("Veteran Yngre", vetY.Reason);
+        }
+
+        [Fact]
+        public void CVetA_OffersOpenC_AndDamC_NotCascadeToVetY()
+        {
+            // The previous code cascaded Vet Ä → Vet Y. Per SHB 2026 spec there is no such
+            // cascade — Vet Ä goes directly to open C (priority 1) or Dam C (priority 2).
+            var counts = new Dictionary<string, int>
+            {
+                ["C Vet Ä"] = 2,
+                ["C Vet Y"] = 4, // exists, but should NOT be the target
+                ["C2"] = 3,
+                ["C1 Dam"] = 2
+            };
+
+            var analysis = Service.AnalyzeFromCounts(counts, "Precision");
+            var vetA = analysis.Suggestions.Single(s => s.SourceClass == "C Vet Ä");
+
+            Assert.True(vetA.RequiresAdminChoice);
+            Assert.DoesNotContain("C Vet Y", vetA.PossibleTargets);
+            Assert.Equal(new[] { "C2", "C1 Dam" }, vetA.PossibleTargets);
+        }
+
+        [Fact]
+        public void CJunior_OffersOpenC_AndDamC()
+        {
+            var counts = new Dictionary<string, int>
+            {
+                ["C Jun"] = 2,
+                ["C1"] = 4,
+                ["C2"] = 6,
+                ["C3 Dam"] = 3
+            };
+
+            var analysis = Service.AnalyzeFromCounts(counts, "Precision");
+            var jun = analysis.Suggestions.Single(s => s.SourceClass == "C Jun");
+
+            Assert.True(jun.RequiresAdminChoice);
+            Assert.Equal("C1", jun.DefaultTarget); // first priority-1 open class
+            Assert.Equal(new[] { "C1", "C2", "C3 Dam" }, jun.PossibleTargets);
+        }
+
+        [Fact]
+        public void CategoryClass_FallsBackToDamWhenNoOpenAvailable()
+        {
+            // No open C-classes exist — Junior must still be mergeable via priority-2 Dam.
+            var counts = new Dictionary<string, int>
+            {
+                ["C Jun"] = 1,
+                ["C2 Dam"] = 4
+            };
+
+            var analysis = Service.AnalyzeFromCounts(counts, "Precision");
+            var jun = analysis.Suggestions.Single(s => s.SourceClass == "C Jun");
+            Assert.Equal("C2 Dam", jun.DefaultTarget);
+            Assert.Equal(new[] { "C2 Dam" }, jun.PossibleTargets);
+        }
+
+        [Fact]
+        public void CombinedClassName_VetIntoDam_TargetPlusVet()
+        {
+            // C Vet Y → C2 Dam should render as "C2 Dam+Vet" (target carrying the suffix).
+            Assert.Equal("C2 Dam+Vet", ClassMergingService.GetCombinedClassName("C Vet Y", "C2 Dam"));
+            Assert.Equal("C2 Dam+Vet", ClassMergingService.GetCombinedClassName("C Vet Ä", "C2 Dam"));
+        }
+
+        [Fact]
+        public void CombinedClassName_JunIntoOpen_TargetPlusJun()
+        {
+            Assert.Equal("C2+Jun", ClassMergingService.GetCombinedClassName("C Jun", "C2"));
+            Assert.Equal("C1 Dam+Jun", ClassMergingService.GetCombinedClassName("C Jun", "C1 Dam"));
+        }
+
+        // ── Multi-source merge into a single target (BuildMergeGroupLookup) ──────────
+        // When the admin ticks several rows in the modal that all target the same class,
+        // the result must be ONE combined group, not several.
+
+        [Fact]
+        public void BuildMergeGroupLookup_ThreeSourcesIntoOneTarget_ProducesOneCombinedGroup()
+        {
+            // Competition 2173 scenario: C2 Dam, C3 Dam, and C Vet Y all merge into C2.
+            // Expected: a single group "C2+Dam+Vet" with all four classes mapping to it.
+            var merges = new List<ClassMergeAction>
+            {
+                new() { SourceClass = "C2 Dam", TargetClass = "C2" },
+                new() { SourceClass = "C3 Dam", TargetClass = "C2" },
+                new() { SourceClass = "C Vet Y", TargetClass = "C2" },
+            };
+
+            var lookup = ClassMergingService.BuildMergeGroupLookup(merges);
+
+            Assert.Equal("C2+Dam+Vet", lookup["C2"]);
+            Assert.Equal("C2+Dam+Vet", lookup["C2 Dam"]);
+            Assert.Equal("C2+Dam+Vet", lookup["C3 Dam"]);
+            Assert.Equal("C2+Dam+Vet", lookup["C Vet Y"]);
+        }
+
+        [Fact]
+        public void BuildMergeGroupLookup_SingleMerge_KeepsSingleSourceNaming()
+        {
+            // One merge → use the single-source GetCombinedClassName, not the
+            // multi-source collapsed form.
+            var merges = new List<ClassMergeAction>
+            {
+                new() { SourceClass = "C3 Dam", TargetClass = "C2" },
+            };
+
+            var lookup = ClassMergingService.BuildMergeGroupLookup(merges);
+
+            Assert.Equal("C2+Dam3", lookup["C2"]);
+            Assert.Equal("C2+Dam3", lookup["C3 Dam"]);
+        }
+
+        [Fact]
+        public void BuildMergeGroupLookup_ChainedMerges_ResolveToFinalTarget()
+        {
+            // A → B and B → C must collapse to a single group rooted at C.
+            var merges = new List<ClassMergeAction>
+            {
+                new() { SourceClass = "C2 Dam", TargetClass = "C2" },
+                new() { SourceClass = "C2", TargetClass = "C3" },
+            };
+
+            var lookup = ClassMergingService.BuildMergeGroupLookup(merges);
+
+            Assert.Equal(lookup["C3"], lookup["C2"]);
+            Assert.Equal(lookup["C3"], lookup["C2 Dam"]);
+            Assert.StartsWith("C3+", lookup["C3"]);
+        }
+
+        [Fact]
+        public void BuildMergeGroupLookup_EmptyOrNull_ReturnsEmptyLookup()
+        {
+            Assert.Empty(ClassMergingService.BuildMergeGroupLookup(null));
+            Assert.Empty(ClassMergingService.BuildMergeGroupLookup(new List<ClassMergeAction>()));
+        }
+
+        [Fact]
+        public void CombinedClassNameMulti_CollapsesMultipleDamLevelsUnderOneSuffix()
+        {
+            // C2 Dam + C3 Dam both merging into C2 → just one "Dam" suffix (not "Dam+Dam3").
+            var name = ClassMergingService.GetCombinedClassNameMulti("C2", new[] { "C2 Dam", "C3 Dam" });
+            Assert.Equal("C2+Dam", name);
+        }
+
+        [Fact]
+        public void CombinedClassNameMulti_MixedCategories_OrdersSuffixesConsistently()
+        {
+            // Open-level numbers come first, then Dam, Jun, Vet — alphabetically stable.
+            var name = ClassMergingService.GetCombinedClassNameMulti("C2",
+                new[] { "C3", "C2 Dam", "C Jun", "C Vet Y" });
+            Assert.Equal("C2+3+Dam+Jun+Vet", name);
+        }
     }
 }

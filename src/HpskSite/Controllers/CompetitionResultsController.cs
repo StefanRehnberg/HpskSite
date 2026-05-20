@@ -12,6 +12,7 @@ using Umbraco.Cms.Infrastructure.Persistence;
 using Umbraco.Cms.Web.Website.Controllers;
 using Umbraco.Extensions;
 using HpskSite.Models;
+using HpskSite.CompetitionTypes.Common.Utilities;
 using HpskSite.CompetitionTypes.Precision.Models;
 using HpskSite.CompetitionTypes.Precision.Services;
 using HpskSite.CompetitionTypes.Precision.Controllers;
@@ -53,6 +54,7 @@ namespace HpskSite.Controllers
         private readonly SeriesCalculationService _seriesCalculationService;
         private readonly AdminAuthorizationService _adminAuthorizationService;
         private readonly EmailService _emailService;
+        private readonly ShootOffService _shootOffService;
 
         public CompetitionResultsController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -71,7 +73,8 @@ namespace HpskSite.Controllers
             ClubService clubService,
             SeriesCalculationService seriesCalculationService,
             AdminAuthorizationService adminAuthorizationService,
-            EmailService emailService)
+            EmailService emailService,
+            ShootOffService shootOffService)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _contentService = contentService;
@@ -87,6 +90,7 @@ namespace HpskSite.Controllers
             _seriesCalculationService = seriesCalculationService;
             _adminAuthorizationService = adminAuthorizationService;
             _emailService = emailService;
+            _shootOffService = shootOffService;
         }
 
         [HttpPost]
@@ -2464,16 +2468,11 @@ namespace HpskSite.Controllers
                             "No database results for competition {CompetitionId}, using existing result snapshot with {Count} class groups",
                             request.CompetitionId, finalResults?.ClassGroups?.Count ?? 0);
 
-                        // Apply merges to cached data by re-grouping
+                        // Apply merges to cached data by re-grouping. Uses union-find so
+                        // multiple sources targeting the same class collapse into one group.
                         if (request.Merges?.Any() == true && finalResults?.ClassGroups != null)
                         {
-                            var groupLookup = new Dictionary<string, string>();
-                            foreach (var m in request.Merges)
-                            {
-                                var combined = ClassMergingService.GetCombinedClassName(m.SourceClass, m.TargetClass);
-                                groupLookup[m.SourceClass] = combined;
-                                groupLookup[m.TargetClass] = combined;
-                            }
+                            var groupLookup = ClassMergingService.BuildMergeGroupLookup(request.Merges);
 
                             var allShooters = finalResults.ClassGroups.SelectMany(g => g.Shooters).ToList();
                             finalResults.ClassGroups = allShooters
@@ -2626,6 +2625,10 @@ namespace HpskSite.Controllers
 
                         resultData = JsonConvert.DeserializeObject<FinalResults>(resultDataJson);
                         lastUpdated = finalResultsList.GetValue<DateTime>("lastUpdated");
+
+                        // Apply class-name overrides on top of the snapshot so renaming doesn't
+                        // require re-publishing the official result list.
+                        ApplyClassNameOverrides(resultData, ReadClassNameOverrides(finalResultsList, subCompetitionOnly: false));
                     }
                     else
                     {
@@ -2659,6 +2662,8 @@ namespace HpskSite.Controllers
                         // Generate fresh results from database (with merges if configured)
                         resultData = await CalculateFinalResults(dbResults, competitionId, storedMerges);
                         lastUpdated = DateTime.Now;
+
+                        ApplyClassNameOverrides(resultData, ReadClassNameOverrides(finalResultsList, subCompetitionOnly));
 
                         _logger.LogInformation("Generated fresh results with {Count} shooters",
                             resultData.ClassGroups.Sum(g => g.Shooters.Count));
@@ -2833,6 +2838,236 @@ namespace HpskSite.Controllers
             }
         }
 
+        // ── Särskjutning endpoints ──────────────────────────────────────────────
+        // Shoot-off scores for tied medal positions in Championship competitions.
+        // The detection of which groups are tied (TiedMedalGroups) is part of the
+        // existing GetResultsList response; these endpoints are about recording
+        // the actual shoot-off shots and removing them.
+
+        [HttpGet]
+        public async Task<IActionResult> GetShootOffStatus(int competitionId, bool subCompetitionOnly = false)
+        {
+            try
+            {
+                if (competitionId <= 0)
+                    return Json(new { Success = false, Message = "Ogiltigt tävlings-ID." });
+
+                if (!await CanManageCompetitionResults(competitionId))
+                    return Json(new { Success = false, Message = "Du har inte behörighet att hantera resultat för denna tävling." });
+
+                var results = await GetCompetitionResultsInternal(competitionId);
+                if (subCompetitionOnly)
+                {
+                    var subIds = GetSubCompetitionMemberIds(competitionId);
+                    results = results.Where(r => subIds.Contains(r.MemberId)).ToList();
+                }
+
+                // Load merge config from the existing result page so the tied-group detection
+                // matches what the admin sees on the published list.
+                List<ClassMergeAction>? merges = null;
+                var resultPage = _contentService.GetPagedChildren(competitionId, 0, int.MaxValue, out long _)
+                    .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
+                if (resultPage != null)
+                {
+                    var mergeProp = subCompetitionOnly ? "subCompetitionMergeConfig" : "mergeConfig";
+                    var mergeJson = resultPage.HasProperty(mergeProp) ? resultPage.GetValue<string>(mergeProp) : null;
+                    if (!string.IsNullOrEmpty(mergeJson))
+                    {
+                        try { merges = JsonConvert.DeserializeObject<List<ClassMergeAction>>(mergeJson); }
+                        catch { /* ignore — leave merges null */ }
+                    }
+                }
+
+                var finalResults = await CalculateFinalResults(results, competitionId, merges);
+
+                var tiedGroups = finalResults.ClassGroups
+                    .Where(cg => cg.TiedMedalGroups != null && cg.TiedMedalGroups.Any())
+                    .Select(cg => new
+                    {
+                        className = cg.ClassName,
+                        groups = cg.TiedMedalGroups
+                    })
+                    .ToList();
+
+                return Json(new { Success = true, ClassGroups = tiedGroups });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in GetShootOffStatus for competition {CompetitionId}", competitionId);
+                return Json(new { Success = false, Message = "Ett fel uppstod: " + ex.Message });
+            }
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveShootOffEntry([FromBody] ShootOffEntryRequest request)
+        {
+            try
+            {
+                if (request == null || request.CompetitionId <= 0 || request.MemberId <= 0 ||
+                    string.IsNullOrWhiteSpace(request.ShootingClass) || request.Round <= 0 ||
+                    request.Shots == null || request.Shots.Length != 5)
+                {
+                    return Json(new { Success = false, Message = "Ogiltig begäran." });
+                }
+
+                if (!await CanManageCompetitionResults(request.CompetitionId))
+                    return Json(new { Success = false, Message = "Du har inte behörighet att hantera resultat för denna tävling." });
+
+                // Validate each shot
+                foreach (var s in request.Shots)
+                {
+                    if (!ScoringUtilities.IsValidShotValue(s))
+                        return Json(new { Success = false, Message = $"Ogiltigt skottvärde: {s}" });
+                }
+
+                var actingMemberId = await GetCurrentMemberIdOrZero();
+                var shotsJson = JsonConvert.SerializeObject(request.Shots);
+
+                var (ok, err) = await _shootOffService.SaveEntryAsync(
+                    request.CompetitionId, request.MemberId, request.ShootingClass,
+                    request.Round, shotsJson, actingMemberId);
+
+                if (!ok) return Json(new { Success = false, Message = err ?? "Kunde inte spara." });
+
+                return Json(new { Success = true });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in SaveShootOffEntry");
+                return Json(new { Success = false, Message = "Ett fel uppstod: " + ex.Message });
+            }
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeleteShootOffEntry([FromBody] ShootOffDeleteRequest request)
+        {
+            try
+            {
+                if (request == null || request.CompetitionId <= 0 || request.MemberId <= 0 ||
+                    string.IsNullOrWhiteSpace(request.ShootingClass) || request.Round <= 0)
+                {
+                    return Json(new { Success = false, Message = "Ogiltig begäran." });
+                }
+
+                if (!await CanManageCompetitionResults(request.CompetitionId))
+                    return Json(new { Success = false, Message = "Du har inte behörighet att hantera resultat för denna tävling." });
+
+                var (ok, err) = await _shootOffService.DeleteEntryAsync(
+                    request.CompetitionId, request.MemberId, request.ShootingClass, request.Round);
+
+                return Json(new { Success = ok, Message = err });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in DeleteShootOffEntry");
+                return Json(new { Success = false, Message = "Ett fel uppstod: " + ex.Message });
+            }
+        }
+
+        private async Task<bool> CanManageCompetitionResults(int competitionId)
+        {
+            if (await _adminAuthorizationService.IsCurrentUserAdminAsync()) return true;
+            if (await _adminAuthorizationService.IsCompetitionManager(competitionId)) return true;
+            var competition = _contentService.GetById(competitionId);
+            var clubId = competition?.GetValue<int>("clubId") ?? 0;
+            if (clubId > 0 && await _adminAuthorizationService.IsClubAdminForClub(clubId)) return true;
+            return false;
+        }
+
+        // ── Class-name overrides ────────────────────────────────────────────────
+        // The auto-generated combined class names (e.g. "C2+Dam+Vet") are not always
+        // ideal — the admin may want to call the merged group something else for the
+        // public list. Overrides are stored per result page as JSON dict mapping the
+        // auto-generated name to the custom one. Overrides apply on top of both the
+        // frozen official snapshot and the live preliminary recompute, so renaming
+        // doesn't require re-publishing.
+
+        private static string? ReadClassNameOverrides(IContent resultPage, bool subCompetitionOnly)
+        {
+            var propName = subCompetitionOnly ? "subCompetitionClassNameOverrides" : "classNameOverrides";
+            return resultPage.HasProperty(propName) ? resultPage.GetValue<string>(propName) : null;
+        }
+
+        private static void ApplyClassNameOverrides(FinalResults? results, string? overridesJson)
+        {
+            if (results?.ClassGroups == null || string.IsNullOrEmpty(overridesJson)) return;
+            Dictionary<string, string>? overrides = null;
+            try { overrides = JsonConvert.DeserializeObject<Dictionary<string, string>>(overridesJson); }
+            catch { return; }
+            if (overrides == null || overrides.Count == 0) return;
+
+            foreach (var group in results.ClassGroups)
+            {
+                if (overrides.TryGetValue(group.ClassName, out var custom) && !string.IsNullOrWhiteSpace(custom))
+                    group.DisplayClassName = custom;
+            }
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveClassNameOverride([FromBody] ClassNameOverrideRequest request)
+        {
+            try
+            {
+                if (request == null || request.CompetitionId <= 0 || string.IsNullOrWhiteSpace(request.OriginalName))
+                    return Json(new { Success = false, Message = "Ogiltig begäran." });
+
+                if (!await CanManageCompetitionResults(request.CompetitionId))
+                    return Json(new { Success = false, Message = "Du har inte behörighet att hantera resultat för denna tävling." });
+
+                var resultPage = _contentService.GetPagedChildren(request.CompetitionId, 0, int.MaxValue, out _)
+                    .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
+                if (resultPage == null)
+                    return Json(new { Success = false, Message = "Ingen resultatsida hittades." });
+
+                var propName = request.IsSubCompetition ? "subCompetitionClassNameOverrides" : "classNameOverrides";
+                if (!resultPage.HasProperty(propName))
+                    return Json(new { Success = false, Message = $"Egenskapen '{propName}' saknas på doctypen competitionResult. Lägg till den (Textarea) i Umbraco-backoffice." });
+
+                var existingJson = resultPage.GetValue<string>(propName);
+                Dictionary<string, string> overrides;
+                try
+                {
+                    overrides = string.IsNullOrEmpty(existingJson)
+                        ? new Dictionary<string, string>()
+                        : (JsonConvert.DeserializeObject<Dictionary<string, string>>(existingJson) ?? new Dictionary<string, string>());
+                }
+                catch
+                {
+                    overrides = new Dictionary<string, string>();
+                }
+
+                // Empty custom name → revert (delete the override).
+                if (string.IsNullOrWhiteSpace(request.CustomName))
+                    overrides.Remove(request.OriginalName);
+                else
+                    overrides[request.OriginalName] = request.CustomName.Trim();
+
+                resultPage.SetValue(propName, JsonConvert.SerializeObject(overrides));
+                resultPage.SetValue("lastUpdated", DateTime.Now);
+
+                _contentService.Save(resultPage);
+                _contentService.Publish(resultPage, new[] { "*" }, -1);
+
+                return Json(new { Success = true, OriginalName = request.OriginalName, CustomName = request.CustomName });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in SaveClassNameOverride for competition {CompetitionId}", request?.CompetitionId);
+                return Json(new { Success = false, Message = "Ett fel uppstod: " + ex.Message });
+            }
+        }
+
+        private async Task<int> GetCurrentMemberIdOrZero()
+        {
+            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            if (currentMember == null || string.IsNullOrEmpty(currentMember.Email)) return 0;
+            var memberData = _memberService.GetByEmail(currentMember.Email);
+            return memberData?.Id ?? 0;
+        }
+
 
         private async Task<FinalResults> CalculateFinalResults(List<PrecisionResultEntry> results, int competitionId, List<ClassMergeAction>? merges = null)
         {
@@ -2891,17 +3126,10 @@ namespace HpskSite.Controllers
                 })
                 .ToList();
 
-            // Build merge group lookup: maps original class name → combined group name
-            var mergeGroupLookup = new Dictionary<string, string>();
-            if (merges?.Any() == true)
-            {
-                foreach (var merge in merges)
-                {
-                    var combinedName = ClassMergingService.GetCombinedClassName(merge.SourceClass, merge.TargetClass);
-                    mergeGroupLookup[merge.SourceClass] = combinedName;
-                    mergeGroupLookup[merge.TargetClass] = combinedName;
-                }
-            }
+            // Build merge group lookup: maps original class name → combined group name.
+            // Uses union-find so multiple merges into the same target (or chains) collapse
+            // into one combined group with one shared name.
+            var mergeGroupLookup = ClassMergingService.BuildMergeGroupLookup(merges);
             // Helper to resolve which group a shooter belongs to
             string GetGroupName(string shootingClass) =>
                 mergeGroupLookup.TryGetValue(shootingClass, out var group) ? group : shootingClass;
@@ -2960,9 +3188,99 @@ namespace HpskSite.Controllers
                 })
                 .ToList();
 
+            // Championship Särskjutning override: for medal-tier ties (rank ≤ 3 in any class)
+            // in Championship competitions, re-rank the tied slice using shoot-off entries.
+            // Other ranks and non-championship competitions fall through to the existing
+            // X-count + countback already applied above.
+            var competitionScope = competition?.GetValue<string>("competitionScope") ?? "";
+            if (CompetitionScopeHelper.IsChampionshipScope(competitionScope))
+            {
+                var shootOffEntries = await _shootOffService.GetEntriesForCompetitionAsync(competitionId);
+                var entriesByMember = shootOffEntries.ToLookup(e => e.MemberId);
+
+                foreach (var classGroup in classGroups)
+                {
+                    var tiedRaw = ShootOffService.DetectTiedMedalGroups(classGroup.Shooters, classGroup.ClassName);
+                    if (tiedRaw.Count == 0) continue;
+
+                    ShootOffService.ApplyShootOffOverride(classGroup.Shooters, tiedRaw, entriesByMember);
+
+                    // Project DTO (decouple admin payload from the live model)
+                    foreach (var g in tiedRaw)
+                    {
+                        var dto = new PrecisionTiedMedalGroup
+                        {
+                            MedalTier = g.MedalTier,
+                            FirstRank = g.FirstRank,
+                            LastRank = g.LastRank,
+                            TotalScore = g.TotalScore,
+                            RoundsCompleted = g.RoundsCompleted,
+                            Resolved = g.Resolved
+                        };
+                        foreach (var s in g.Shooters)
+                        {
+                            var rounds = entriesByMember[s.MemberId]
+                                .Where(e => string.Equals(e.ShootingClass, s.ShootingClass, StringComparison.OrdinalIgnoreCase))
+                                .GroupBy(e => e.Round)
+                                .OrderBy(grp => grp.Key)
+                                .Select(grp =>
+                                {
+                                    int total = 0, x = 0;
+                                    string rawShots = grp.First().Shots; // round = single 5-shot series in this version
+                                    try
+                                    {
+                                        var shotsList = Newtonsoft.Json.JsonConvert
+                                            .DeserializeObject<List<string>>(rawShots) ?? new();
+                                        total = (int)CompetitionTypes.Common.Utilities.ScoringUtilities.CalculateTotal(shotsList);
+                                        x = CompetitionTypes.Common.Utilities.ScoringUtilities.CountInnerTens(shotsList);
+                                    }
+                                    catch { /* leave 0/0 */ }
+                                    return new PrecisionShootOffRoundEntry
+                                    {
+                                        Round = grp.Key,
+                                        Shots = rawShots,
+                                        Total = total,
+                                        XCount = x
+                                    };
+                                })
+                                .ToList();
+
+                            dto.Shooters.Add(new PrecisionTiedMedalShooter
+                            {
+                                MemberId = s.MemberId,
+                                Name = s.Name,
+                                Club = s.Club,
+                                ShootingClass = s.ShootingClass,
+                                TotalScore = s.TotalScore,
+                                XCount = s.TotalXCount,
+                                IsResolved = s.ShootOffIsResolved,
+                                NextRound = s.ShootOffNextRound,
+                                Rounds = rounds
+                            });
+                        }
+                        classGroup.TiedMedalGroups.Add(dto);
+
+                        // Build a public-friendly footnote when the group is resolved.
+                        if (g.Resolved && g.Shooters.Count >= 2)
+                        {
+                            var ordered = g.Shooters
+                                .Where(s => s.ShootOffScore.HasValue)
+                                .OrderBy(s => g.Shooters.IndexOf(s))
+                                .ToList();
+                            if (ordered.Count >= 2)
+                            {
+                                var medalNouns = ShootOffService.MedalNounsForRange(g.FirstRank, g.LastRank);
+                                var parts = ordered.Select(s => $"{s.Name} {s.ShootOffScore}");
+                                classGroup.ShootOffNotes.Add(
+                                    $"Särskjutning avgjorde {medalNouns}: {string.Join(" vs ", parts)}");
+                            }
+                        }
+                    }
+                }
+            }
+
             // Calculate Standard Medal Awards if enabled
             var isAwardingStandardMedals = competition?.GetValue<bool>("isAwardingStandardMedals") ?? false;
-            var competitionScope = competition?.GetValue<string>("competitionScope") ?? "";
             var isClubOnly = competition?.GetValue<bool>("isClubOnly") ?? false;
 
             // Per BR-PS.1.3: Standard medals may not be awarded at Föreningstävlingar (club competitions).
@@ -3454,6 +3772,33 @@ namespace HpskSite.Controllers
         /// <summary>When true, flip subCompetitionIsOfficial on the competitionResult node
         /// instead of the main isOfficial flag. Drives the second public Visa resultat button.</summary>
         public bool IsSubCompetition { get; set; }
+    }
+
+    public class ClassNameOverrideRequest
+    {
+        public int CompetitionId { get; set; }
+        /// <summary>The auto-generated class name being overridden (e.g. "C2+Dam+Vet").</summary>
+        public string OriginalName { get; set; } = "";
+        /// <summary>The custom display name. Empty or null reverts to the auto-generated name.</summary>
+        public string? CustomName { get; set; }
+        public bool IsSubCompetition { get; set; }
+    }
+
+    public class ShootOffEntryRequest
+    {
+        public int CompetitionId { get; set; }
+        public int MemberId { get; set; }
+        public string ShootingClass { get; set; } = "";
+        public int Round { get; set; }
+        public string[] Shots { get; set; } = new string[5];
+    }
+
+    public class ShootOffDeleteRequest
+    {
+        public int CompetitionId { get; set; }
+        public int MemberId { get; set; }
+        public string ShootingClass { get; set; } = "";
+        public int Round { get; set; }
     }
 
     /// <summary>

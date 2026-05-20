@@ -43,6 +43,16 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public string WeaponStartPosition { get; set; } = "";
         public string SupportHand { get; set; } = "";
         public int MaxShotsPerFigure { get; set; } = 6;
+
+        /// <summary>True when this station is reserved for Särskjutning (shoot-off) only.
+        /// Such stations are filtered out of patrol generation, the result-list station
+        /// count, the public station card, the admin station-entry links, and result
+        /// aggregation. They remain selectable in the Särskjutning station picker on
+        /// the result-management page. Treated as a station-level decision — all
+        /// weapon-class instances of the same Station number should carry the same
+        /// flag (the configurator UI propagates the checkbox automatically).</summary>
+        public bool IsShootOffOnly { get; set; } = false;
+
         public List<FaltskytteTargetGroup> TargetGroups { get; set; } = new();
 
         [System.Text.Json.Serialization.JsonIgnore]

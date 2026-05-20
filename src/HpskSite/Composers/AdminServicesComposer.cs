@@ -62,6 +62,13 @@ namespace HpskSite.Composers
             // Cheap "does member X have data in discipline Y" lookups for member-list dots and mini-dashboard tabs
             builder.Services.AddScoped<MemberDataPresenceService>();
 
+            // Särskjutning (shoot-off) entries for tied medal positions in championship competitions
+            builder.Services.AddScoped<ShootOffService>();
+
+            // Fältskytte (Normal/Poäng/Magnumfält) Särskjutning — separate service since Fältskytte
+            // uses a different result-entry shape (per-station hits/figures/poängmål)
+            builder.Services.AddScoped<HpskSite.CompetitionTypes.Faltskytte.Services.FaltskytteShootOffService>();
+
             // Register BrevoEmailService and named HttpClient
             builder.Services.AddHttpClient("Brevo");
             builder.Services.AddScoped<BrevoEmailService>();

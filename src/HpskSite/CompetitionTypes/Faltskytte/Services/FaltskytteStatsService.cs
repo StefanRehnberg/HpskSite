@@ -147,10 +147,12 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                         .GroupBy(s => mergeLookup.GetValueOrDefault(s.ShootingClass, s.ShootingClass))
                         .ToDictionary(g => g.Key, g => g.OrderByDescending(s => s, tieBreaker).ToList());
 
-                    // Standard medals (same service as the live result page).
+                    // Standard medals (same service as the live result page). SHB FR-204:
+                    // C-class is split per category only at SM + Landsdelsmästerskap — NOT KrM/KM.
                     var scope = competition.GetValue<string>("competitionScope") ?? "";
-                    var isChampionship = scope == "Svenskt Mästerskap" || scope == "Landsdelsmästerskap";
-                    new FaltskytteStandardMedalService().CalculateStandardMedals(shooters, scoringMode, stationCount, isChampionship);
+                    var isSmOrLdm = scope == HpskSite.CompetitionTypes.Common.Utilities.CompetitionScopeHelper.SvensktMasterskap
+                                 || scope == HpskSite.CompetitionTypes.Common.Utilities.CompetitionScopeHelper.Landsdelsmasterskap;
+                    new FaltskytteStandardMedalService().CalculateStandardMedals(shooters, scoringMode, stationCount, isSmOrLdm);
 
                     // Find the member's row(s) — a member can register in more than one class.
                     var memberRows = shooters.Where(s => s.MemberId == memberId).ToList();

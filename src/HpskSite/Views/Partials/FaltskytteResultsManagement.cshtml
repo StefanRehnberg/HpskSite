@@ -35,7 +35,11 @@
                 var wc = data.config.weaponConfigs || data.config.WeaponConfigs || {};
                 var first = Object.values(wc)[0];
                 if (!first) return;
-                var stations = first.stations || first.Stations || [];
+                // Filter out shoot-off-only stations — they're entered via the Särskjutning
+                // card's per-shooter modal, not via the regular /station?c=X&s=N flow.
+                var stations = (first.stations || first.Stations || []).filter(function(st) {
+                    return !(st.isShootOffOnly || st.IsShootOffOnly);
+                });
                 var el = document.getElementById('faltStationLinks');
                 if (stations.length === 0) { el.innerHTML = '<span class="text-muted small">Inga stationer konfigurerade.</span>'; return; }
                 el.innerHTML = '';
@@ -162,6 +166,118 @@
         </div>
     </div>
     }
+
+    <!-- Särskjutning (shoot-off) section — auto-populates only when GetFaltskytteShootOffStatus
+         returns tied medal-tier groups (championship + tied score at gold/silver/brons). Hidden
+         for non-championship competitions and for classes without ties. -->
+    <div class="mt-3" id="faltShootOffSection" style="display: none;">
+        <div class="card border-info">
+            <div class="card-header py-2 d-flex justify-content-between align-items-center">
+                <span class="fw-bold small"><i class="bi bi-bullseye me-2"></i>Särskjutning</span>
+                <span class="badge bg-info-subtle text-info-emphasis" id="faltShootOffStatusBadge">Inga oavgjorda medaljplatser</span>
+            </div>
+            <div class="card-body py-3">
+                <div class="mb-3 d-flex align-items-center gap-2">
+                    <button type="button" class="btn btn-outline-primary btn-sm" onclick="faltOpenShootOffConfig()">
+                        <i class="bi bi-gear me-1"></i>Konfigurera särskjutnings-stationer
+                    </button>
+                    <span class="text-muted small" id="faltShootOffConfigStatus">Inga särskjutnings-stationer konfigurerade ännu.</span>
+                </div>
+                <div id="faltShootOffBody">
+                    <div class="text-muted small">Laddar...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(subCompetitionName))
+    {
+    <div class="mt-3" id="faltSubShootOffSection" style="display: none;">
+        <div class="card border-info">
+            <div class="card-header py-2 d-flex justify-content-between align-items-center">
+                <span class="fw-bold small"><i class="bi bi-bullseye me-2"></i>Särskjutning – @subCompetitionName</span>
+                <span class="badge bg-info-subtle text-info-emphasis" id="faltSubShootOffStatusBadge">Inga oavgjorda medaljplatser</span>
+            </div>
+            <div class="card-body py-3">
+                <div class="mb-3 d-flex align-items-center gap-2">
+                    <button type="button" class="btn btn-outline-primary btn-sm" onclick="faltOpenShootOffConfig(true)">
+                        <i class="bi bi-gear me-1"></i>Konfigurera särskjutnings-stationer
+                    </button>
+                    <span class="text-muted small" id="faltSubShootOffConfigStatus">Inga särskjutnings-stationer konfigurerade ännu.</span>
+                </div>
+                <div id="faltSubShootOffBody">
+                    <div class="text-muted small">Laddar...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    }
+</div>
+
+<!-- Särskjutning shot entry modal (Normal/Poäng = hits + figures + optional poängmål; Magnum = poängmål-only) -->
+<div class="modal fade" id="faltShootOffEntryModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-fullscreen-sm-down modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="bi bi-bullseye me-2"></i>
+                    Särskjutning runda <span id="faltSoModalRound"></span> — <span id="faltSoModalShooter"></span>
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body" id="faltSoModalBody">
+                <input type="hidden" id="faltSoCompetitionId" />
+                <input type="hidden" id="faltSoMemberId" />
+                <input type="hidden" id="faltSoShootingClass" />
+                <input type="hidden" id="faltSoRound" />
+                <input type="hidden" id="faltSoIsSub" />
+                <input type="hidden" id="faltSoVariation" />
+                <div id="faltSoEntryRoot"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-success" id="faltSoSaveBtn">
+                    <i class="bi bi-check-circle me-1"></i>Spara skott
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Särskjutning station-config modal -->
+<div class="modal fade" id="faltShootOffConfigModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-fullscreen-sm-down">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-gear me-2"></i>Konfigurera särskjutnings-stationer</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="faltSoCfgIsSub" />
+                <div class="alert alert-info small mb-3">
+                    Välj en eller flera av tävlingens stationer som ska användas vid särskjutning.
+                    Vid inmatning av varje runda väljer du sedan vilken station som användes för just den rundan.
+                </div>
+
+                <h6 class="mb-2">Valda särskjutnings-stationer</h6>
+                <ul id="faltSoCfgList" class="list-group mb-3"></ul>
+
+                <div class="d-flex gap-2 align-items-end">
+                    <div class="flex-grow-1">
+                        <label class="form-label mb-1">Lägg till station från tävlingen</label>
+                        <select id="faltSoCfgAddSelect" class="form-select form-select-sm"></select>
+                    </div>
+                    <button type="button" class="btn btn-outline-primary btn-sm" onclick="faltSoCfgAddStation()">
+                        <i class="bi bi-plus-circle me-1"></i>Lägg till
+                    </button>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" onclick="faltSoCfgSave()">Spara</button>
+            </div>
+        </div>
+    </div>
 </div>
 
 <script>
@@ -213,6 +329,8 @@ async function faltRefreshResults(event) {
             _faltLastResults = data.results;
         }
     } catch (e) { /* status sync is best-effort */ }
+    // Refresh the Särskjutning card after a result refresh.
+    faltLoadShootOffStatus(false);
 }
 
 // Opens merge configuration flow
@@ -605,6 +723,10 @@ function faltPrintResultList(event) {
                 }
             })
             .catch(function() { /* best-effort */ });
+        // Also populate the Särskjutning card so it appears on initial load when the
+        // competition is a championship and tied medal positions already exist —
+        // without this, the card only shows after the admin clicks Uppdatera.
+        faltLoadShootOffStatus(false);
     }
     // Auto-sync sub-competition status badge if configured. The iframe loads its own
     // content from /resultat/?sub=true; we only need the JSON to keep the badge + meta
@@ -620,6 +742,7 @@ function faltPrintResultList(event) {
                 }
             })
             .catch(function() { /* best-effort */ });
+        faltLoadShootOffStatus(true);
     }
 })();
 
@@ -747,6 +870,473 @@ async function faltRefreshSubResults(event) {
             _faltSubCompResults = data.results;
         }
     } catch (e) { /* status sync is best-effort */ }
+    faltLoadShootOffStatus(true);
+}
+
+// ─── Särskjutning admin card ────────────────────────────────────────────────
+// The card auto-shows when championship + tied medal positions exist.
+
+async function faltLoadShootOffStatus(isSub) {
+    const compId = document.querySelector('.faltskytte-results-management')?.dataset.competitionId;
+    if (!compId) return;
+    const sectionId = isSub ? 'faltSubShootOffSection' : 'faltShootOffSection';
+    const bodyId = isSub ? 'faltSubShootOffBody' : 'faltShootOffBody';
+    const badgeId = isSub ? 'faltSubShootOffStatusBadge' : 'faltShootOffStatusBadge';
+    const cfgStatusId = isSub ? 'faltSubShootOffConfigStatus' : 'faltShootOffConfigStatus';
+
+    const section = document.getElementById(sectionId);
+    const body = document.getElementById(bodyId);
+    const badge = document.getElementById(badgeId);
+    if (!section || !body) return;
+
+    const url = '/umbraco/surface/Faltskytte/GetFaltskytteShootOffStatus?competitionId=' + compId + '&subCompetitionOnly=' + (isSub ? 'true' : 'false');
+    try {
+        const resp = await fetch(url);
+        const data = await resp.json();
+        if (!data || !data.success || !Array.isArray(data.classGroups) || data.classGroups.length === 0) {
+            section.style.display = 'none';
+            return;
+        }
+        section.style.display = 'block';
+
+        // Status badge: count contested medal positions across all tied groups.
+        let unresolvedPositions = 0;
+        let totalMedalSlots = 0;
+        data.classGroups.forEach(cg => {
+            (cg.groups || []).forEach(g => {
+                const medalSlots = Math.max(0, Math.min(g.lastRank, 3) - g.firstRank + 1);
+                const unresolvedShooters = (g.shooters || []).filter(s => !s.isResolved).length;
+                unresolvedPositions += Math.min(unresolvedShooters, medalSlots);
+                totalMedalSlots += medalSlots;
+            });
+        });
+        if (badge) {
+            if (unresolvedPositions > 0) {
+                badge.className = 'badge bg-warning text-dark';
+                badge.textContent = unresolvedPositions + ' medaljplats(er) kvar att avgöra';
+            } else {
+                badge.className = 'badge bg-success';
+                badge.textContent = totalMedalSlots + ' medaljplats(er) avgjorda';
+            }
+        }
+
+        // Fetch the config status for the helper line.
+        try {
+            const cfgResp = await fetch('/umbraco/surface/Faltskytte/GetFaltskytteShootOffConfig?competitionId=' + compId + '&subCompetitionOnly=' + (isSub ? 'true' : 'false'));
+            const cfgData = await cfgResp.json();
+            const cfgEl = document.getElementById(cfgStatusId);
+            if (cfgEl) {
+                let count = 0;
+                try {
+                    const parsed = cfgData?.config ? JSON.parse(cfgData.config) : null;
+                    count = Array.isArray(parsed?.stations) ? parsed.stations.length : 0;
+                } catch { count = 0; }
+                cfgEl.textContent = count > 0
+                    ? (count === 1 ? '1 särskjutnings-station konfigurerad.' : count + ' särskjutnings-stationer konfigurerade.')
+                    : 'Inga särskjutnings-stationer konfigurerade ännu.';
+            }
+        } catch (_) { /* config status best-effort */ }
+
+        // Render group cards.
+        body.innerHTML = '';
+        data.classGroups.forEach(cg => {
+            const wrap = document.createElement('div');
+            wrap.className = 'mb-3';
+            wrap.innerHTML = '<div class="fw-bold mb-1">Klass ' + faltSoEscape(cg.displayClassName || cg.className) + '</div>';
+            (cg.groups || []).forEach(g => {
+                wrap.appendChild(faltRenderShootOffGroup(compId, cg.className, g, isSub));
+            });
+            body.appendChild(wrap);
+        });
+    } catch (err) {
+        console.error('faltLoadShootOffStatus failed', err);
+        section.style.display = 'none';
+    }
+}
+
+function faltRenderShootOffGroup(competitionId, className, group, isSub) {
+    const wrap = document.createElement('div');
+    wrap.className = 'border rounded p-2 mb-2 bg-body-tertiary';
+
+    const tierBadge = group.resolved
+        ? '<span class="badge bg-success">' + faltSoEscape(group.medalTier) + ' avgjord</span>'
+        : '<span class="badge bg-warning text-dark">' + faltSoEscape(group.medalTier) + ' – kvar att avgöra</span>';
+    const header = document.createElement('div');
+    header.className = 'd-flex justify-content-between align-items-center mb-2';
+    header.innerHTML = tierBadge + ' <span class="text-muted small">Lika score: ' + group.tiedScore + '</span>';
+    wrap.appendChild(header);
+
+    (group.shooters || []).forEach(s => {
+        const row = document.createElement('div');
+        row.className = 'd-flex align-items-center gap-2 flex-wrap mb-1';
+        const rounds = (s.rounds || [])
+            .map(r => 'R' + r.round + ': <strong>' + faltSoEscape(r.display) + '</strong>')
+            .join(' · ');
+        row.innerHTML =
+            '<div style="min-width: 200px;"><strong>' + faltSoEscape(s.name) + '</strong> <span class="text-muted small">' + faltSoEscape(s.club || '') + '</span></div>' +
+            '<div class="text-muted small flex-grow-1">' + (rounds || '<em>Inga särskjutningsskott</em>') + '</div>';
+
+        const action = document.createElement('div');
+        if (s.isResolved) {
+            action.innerHTML = '<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Avgjord</span>';
+        } else if (s.nextRound) {
+            const btn = document.createElement('button');
+            btn.className = 'btn btn-outline-primary btn-sm';
+            btn.innerHTML = '<i class="bi bi-pencil-square me-1"></i>Resultat...';
+            btn.addEventListener('click', () => faltOpenShootOffEntry({
+                competitionId, memberId: s.memberId, name: s.name,
+                shootingClass: s.shootingClass, round: s.nextRound, isSub
+            }));
+            action.appendChild(btn);
+        } else {
+            action.innerHTML = '<span class="badge bg-info-subtle text-info-emphasis"><i class="bi bi-hourglass-split me-1"></i>Väntar på övriga</span>';
+        }
+        row.appendChild(action);
+        wrap.appendChild(row);
+    });
+    return wrap;
+}
+
+// ─── Entry modal ────────────────────────────────────────────────────────────
+// State for the entry modal: the loaded shoot-off station list (so the admin can
+// pick which station was used for the current round).
+var _faltSoEntryState = { stations: [], selectedIndex: 0, variation: 'normal' };
+
+async function faltOpenShootOffEntry(ctx) {
+    document.getElementById('faltSoCompetitionId').value = ctx.competitionId;
+    document.getElementById('faltSoMemberId').value = ctx.memberId;
+    document.getElementById('faltSoShootingClass').value = ctx.shootingClass;
+    document.getElementById('faltSoRound').value = ctx.round;
+    document.getElementById('faltSoIsSub').value = ctx.isSub ? '1' : '0';
+    document.getElementById('faltSoModalRound').textContent = String(ctx.round);
+    document.getElementById('faltSoModalShooter').textContent = ctx.name || '';
+
+    // Detect variation: read meta from the last loaded result payload.
+    const lastResults = ctx.isSub ? _faltSubCompResults : _faltLastResults;
+    const isMagnum = (document.querySelector('.faltskytte-results-management')?.dataset.competitionType === 'MagnumFalt')
+                  || (lastResults?.competitionType === 'MagnumFalt');
+    const variation = isMagnum ? 'magnum' : ((lastResults?.scoringMode === 'Poang') ? 'poang' : 'normal');
+    document.getElementById('faltSoVariation').value = variation;
+    _faltSoEntryState.variation = variation;
+
+    // Load configured shoot-off stations so the admin can pick one for this round.
+    try {
+        const resp = await fetch('/umbraco/surface/Faltskytte/GetFaltskytteShootOffConfig?competitionId=' + ctx.competitionId + '&subCompetitionOnly=' + (ctx.isSub ? 'true' : 'false'));
+        const data = await resp.json();
+        let cfg = {};
+        try { cfg = data?.config ? JSON.parse(data.config) : {}; } catch { cfg = {}; }
+        _faltSoEntryState.stations = Array.isArray(cfg.stations) ? cfg.stations : [];
+    } catch (_) {
+        _faltSoEntryState.stations = [];
+    }
+    _faltSoEntryState.selectedIndex = 0;
+
+    faltSoRenderEntryForm();
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('faltShootOffEntryModal')).show();
+}
+
+function faltSoRenderEntryForm() {
+    const root = document.getElementById('faltSoEntryRoot');
+    const stations = _faltSoEntryState.stations;
+
+    if (stations.length === 0) {
+        root.innerHTML = '<div class="alert alert-warning small">Inga särskjutnings-stationer är konfigurerade ännu. Stäng denna ruta och klicka <strong>Konfigurera särskjutnings-station</strong> först.</div>';
+        document.getElementById('faltSoSaveBtn').disabled = true;
+        return;
+    }
+    document.getElementById('faltSoSaveBtn').disabled = false;
+
+    // Station picker
+    let html = '<div class="mb-3">';
+    html += '<label class="form-label">Vilken station användes?</label>';
+    html += '<select class="form-select form-select-sm" id="faltSoStationPicker" onchange="faltSoOnStationChange()">';
+    stations.forEach((s, i) => {
+        const sel = (i === _faltSoEntryState.selectedIndex) ? ' selected' : '';
+        html += '<option value="' + i + '"' + sel + '>' + faltSoEscape(s.label || ('Station ' + (i + 1))) + '</option>';
+    });
+    html += '</select></div>';
+
+    // Per-variation entry shape, sized from the selected station's figure count when available.
+    const station = stations[_faltSoEntryState.selectedIndex];
+    const figCount = faltSoCountFigures(station) || 6;
+    const maxPerFig = faltSoMaxPerFigure(station) || 5;
+
+    if (_faltSoEntryState.variation === 'magnum') {
+        html += faltSoBuildMagnumForm(figCount, maxPerFig);
+    } else {
+        html += faltSoBuildNormalPoangForm(figCount);
+    }
+    root.innerHTML = html;
+}
+
+function faltSoOnStationChange() {
+    const idx = parseInt(document.getElementById('faltSoStationPicker').value, 10) || 0;
+    _faltSoEntryState.selectedIndex = idx;
+    faltSoRenderEntryForm();
+}
+
+function faltSoCountFigures(station) {
+    if (!station || !station.config) return 0;
+    const wcfg = station.config.weaponConfigs || station.config.WeaponConfigs || {};
+    const first = Object.values(wcfg)[0];
+    if (!first) return 0;
+    const stations = first.stations || first.Stations || [];
+    const s = stations[0];
+    if (!s) return 0;
+    const groups = s.targetGroups || s.TargetGroups || [];
+    let total = 0;
+    groups.forEach(g => {
+        const figs = g.figures || g.Figures || [];
+        figs.forEach(f => total += (f.targetsPerFigure || f.TargetsPerFigure || 1));
+    });
+    return total;
+}
+
+function faltSoMaxPerFigure(station) {
+    if (!station || !station.config) return 5;
+    const wcfg = station.config.weaponConfigs || station.config.WeaponConfigs || {};
+    const first = Object.values(wcfg)[0];
+    if (!first) return 5;
+    const stations = first.stations || first.Stations || [];
+    const s = stations[0];
+    return s ? (s.maxShotsPerFigure || s.MaxShotsPerFigure || 5) : 5;
+}
+
+function faltSoBuildNormalPoangForm(figures) {
+    let html = '<div class="row g-2">';
+    html += '<div class="col-12"><div class="alert alert-info small mb-2">Ange totalt antal träffar och antal träffade figurer för rundan. Poängmål-summa är frivillig (används som tiebreaker).</div></div>';
+    const maxHits = Math.max(30, figures * 6);
+    html += '<div class="col-md-4"><label class="form-label">Träffar</label><input type="number" min="0" max="' + maxHits + '" class="form-control" id="faltSoHits" value="0"></div>';
+    html += '<div class="col-md-4"><label class="form-label">Figurer</label><input type="number" min="0" max="' + figures + '" class="form-control" id="faltSoFigures" value="0"></div>';
+    html += '<div class="col-md-4"><label class="form-label">Poängmål-summa (frivillig)</label><input type="number" min="0" class="form-control" id="faltSoTiebreaker" value="0"></div>';
+    html += '</div>';
+    return html;
+}
+
+function faltSoBuildMagnumForm(figureCount, maxPerFigure) {
+    let html = '<div class="alert alert-info small mb-2">Magnum: ange poäng per figur (max ' + maxPerFigure + ' poäng per figur). Endast en träff per figur räknas.</div>';
+    html += '<div class="row g-2">';
+    for (let i = 0; i < figureCount; i++) {
+        html += '<div class="col-4 col-md-2"><label class="form-label small">Fig ' + (i + 1) + '</label>' +
+                '<input type="number" min="0" max="' + maxPerFigure + '" class="form-control falt-so-pm" data-i="' + i + '" value="0"></div>';
+    }
+    html += '</div>';
+    html += '<div class="mt-2"><strong>Total: <span id="faltSoMagnumTotal">0</span>p</strong></div>';
+    return html;
+}
+
+document.addEventListener('input', function (ev) {
+    if (ev.target && ev.target.classList && ev.target.classList.contains('falt-so-pm')) {
+        const vals = Array.from(document.querySelectorAll('#faltSoEntryRoot .falt-so-pm'))
+            .map(el => parseInt(el.value, 10) || 0);
+        const totalEl = document.getElementById('faltSoMagnumTotal');
+        if (totalEl) totalEl.textContent = String(vals.reduce((a, b) => a + b, 0));
+    }
+});
+
+document.addEventListener('click', async function (ev) {
+    if (!ev.target.closest('#faltSoSaveBtn')) return;
+    const variation = document.getElementById('faltSoVariation').value;
+    const competitionId = parseInt(document.getElementById('faltSoCompetitionId').value, 10);
+    const memberId = parseInt(document.getElementById('faltSoMemberId').value, 10);
+    const shootingClass = document.getElementById('faltSoShootingClass').value;
+    const round = parseInt(document.getElementById('faltSoRound').value, 10);
+    const isSub = document.getElementById('faltSoIsSub').value === '1';
+
+    let payload = { competitionId, memberId, shootingClass, round };
+    if (variation === 'magnum') {
+        const vals = Array.from(document.querySelectorAll('#faltSoEntryRoot .falt-so-pm'))
+            .map(el => parseInt(el.value, 10) || 0);
+        payload.poangmalScores = JSON.stringify(vals);
+        payload.tiebreakerScore = vals.reduce((a, b) => a + b, 0);
+    } else {
+        payload.hits = parseInt(document.getElementById('faltSoHits').value, 10) || 0;
+        payload.figures = parseInt(document.getElementById('faltSoFigures').value, 10) || 0;
+        payload.tiebreakerScore = parseInt(document.getElementById('faltSoTiebreaker').value, 10) || 0;
+    }
+
+    try {
+        const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+        const resp = await fetch('/umbraco/surface/Faltskytte/SaveFaltskytteShootOffEntry', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+            body: JSON.stringify(payload)
+        });
+        const data = await resp.json();
+        if (!data.success) { alert('Kunde inte spara: ' + (data.message || 'okänt fel')); return; }
+        bootstrap.Modal.getInstance(document.getElementById('faltShootOffEntryModal'))?.hide();
+        // Refresh both the card and the result iframe.
+        await (isSub ? faltRefreshSubResults() : faltRefreshResults());
+    } catch (e) {
+        alert('Fel: ' + e);
+    }
+});
+
+// ─── Config modal ───────────────────────────────────────────────────────────
+// Shape: { stations: [ { label, config: { weaponConfigs: {...} } }, ... ] }
+// Each entry's `config` is a deep clone of one station's per-weapon-class config
+// from the competition's regular stationConfig.
+
+var _faltSoCfgState = { stations: [], competitionStations: [], competitionConfig: null };
+
+async function faltOpenShootOffConfig(isSub) {
+    const compId = document.querySelector('.faltskytte-results-management')?.dataset.competitionId;
+    document.getElementById('faltSoCfgIsSub').value = isSub ? '1' : '0';
+
+    // 1. Load the competition's regular stations so the admin can pick from them.
+    try {
+        const cfgResp = await fetch('/umbraco/surface/Faltskytte/GetStationConfig?competitionId=' + compId);
+        const cfgData = await cfgResp.json();
+        if (cfgData && cfgData.config) {
+            _faltSoCfgState.competitionConfig = cfgData.config;
+            const wcfg = cfgData.config.weaponConfigs || cfgData.config.WeaponConfigs || {};
+            const first = Object.values(wcfg)[0];
+            _faltSoCfgState.competitionStations = first?.stations || first?.Stations || [];
+        } else {
+            _faltSoCfgState.competitionConfig = null;
+            _faltSoCfgState.competitionStations = [];
+        }
+    } catch (_) {
+        _faltSoCfgState.competitionConfig = null;
+        _faltSoCfgState.competitionStations = [];
+    }
+
+    // 2. Load existing shoot-off config.
+    try {
+        const r = await fetch('/umbraco/surface/Faltskytte/GetFaltskytteShootOffConfig?competitionId=' + compId + '&subCompetitionOnly=' + (isSub ? 'true' : 'false'));
+        const d = await r.json();
+        let parsed = {};
+        try { parsed = (d && d.config) ? JSON.parse(d.config) : {}; } catch { parsed = {}; }
+        _faltSoCfgState.stations = Array.isArray(parsed.stations) ? parsed.stations : [];
+    } catch (_) {
+        _faltSoCfgState.stations = [];
+    }
+
+    faltSoCfgRender();
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('faltShootOffConfigModal')).show();
+}
+
+function faltSoCfgRender() {
+    // Selected-list
+    const list = document.getElementById('faltSoCfgList');
+    list.innerHTML = '';
+    if (_faltSoCfgState.stations.length === 0) {
+        const empty = document.createElement('li');
+        empty.className = 'list-group-item text-muted small';
+        empty.textContent = 'Inga särskjutnings-stationer valda ännu.';
+        list.appendChild(empty);
+    } else {
+        _faltSoCfgState.stations.forEach((s, i) => {
+            const li = document.createElement('li');
+            li.className = 'list-group-item d-flex justify-content-between align-items-center';
+            li.innerHTML = '<span><span class="badge bg-secondary me-2">' + (i + 1) + '</span>' + faltSoEscape(s.label || 'Station') + '</span>';
+            const rm = document.createElement('button');
+            rm.type = 'button';
+            rm.className = 'btn btn-outline-danger btn-sm';
+            rm.innerHTML = '<i class="bi bi-x-lg"></i>';
+            rm.title = 'Ta bort';
+            rm.addEventListener('click', () => { _faltSoCfgState.stations.splice(i, 1); faltSoCfgRender(); });
+            li.appendChild(rm);
+            list.appendChild(li);
+        });
+    }
+
+    // Add-from-competition dropdown. Split into two optgroups: regular stations
+    // and "Särskjutnings-stationer" (those marked IsShootOffOnly in the configurator).
+    const sel = document.getElementById('faltSoCfgAddSelect');
+    sel.innerHTML = '';
+    if (_faltSoCfgState.competitionStations.length === 0) {
+        sel.innerHTML = '<option value="">(Inga tävlings-stationer hittades)</option>';
+        sel.disabled = true;
+    } else {
+        sel.disabled = false;
+        sel.innerHTML = '<option value="">— Välj station att lägga till —</option>';
+
+        const regular = [];
+        const shootOffOnly = [];
+        _faltSoCfgState.competitionStations.forEach((st, i) => {
+            const isSo = st.isShootOffOnly || st.IsShootOffOnly || false;
+            (isSo ? shootOffOnly : regular).push({ st, i });
+        });
+
+        if (regular.length > 0) {
+            const og = document.createElement('optgroup');
+            og.label = 'Tävlingens vanliga stationer';
+            regular.forEach(({ st, i }) => {
+                const num = st.station || st.Station || (i + 1);
+                const opt = document.createElement('option');
+                opt.value = String(i);
+                opt.textContent = 'Station ' + num;
+                og.appendChild(opt);
+            });
+            sel.appendChild(og);
+        }
+        if (shootOffOnly.length > 0) {
+            const og = document.createElement('optgroup');
+            og.label = 'Särskjutnings-stationer';
+            shootOffOnly.forEach(({ st, i }) => {
+                const num = st.station || st.Station || (i + 1);
+                const opt = document.createElement('option');
+                opt.value = String(i);
+                opt.textContent = 'Särskjutnings-station ' + num;
+                og.appendChild(opt);
+            });
+            sel.appendChild(og);
+        }
+    }
+}
+
+function faltSoCfgAddStation() {
+    const sel = document.getElementById('faltSoCfgAddSelect');
+    const idx = parseInt(sel.value, 10);
+    if (isNaN(idx) || !_faltSoCfgState.competitionConfig) return;
+
+    // Deep-clone the chosen station across all weapon classes so the shoot-off
+    // entry has the same per-class variants as the source station did.
+    const src = _faltSoCfgState.competitionConfig;
+    const wcfg = src.weaponConfigs || src.WeaponConfigs || {};
+    const cloned = { weaponConfigs: {} };
+    for (const [cls, cfg] of Object.entries(wcfg)) {
+        const stations = cfg.stations || cfg.Stations || [];
+        if (idx < stations.length) {
+            cloned.weaponConfigs[cls] = { stations: [JSON.parse(JSON.stringify(stations[idx]))] };
+        }
+    }
+    const sourceStation = _faltSoCfgState.competitionStations[idx] || {};
+    const sourceNum = sourceStation.station || sourceStation.Station || (idx + 1);
+    const isShootOffOnly = sourceStation.isShootOffOnly || sourceStation.IsShootOffOnly || false;
+    const label = isShootOffOnly
+        ? 'Särskjutnings-station ' + sourceNum
+        : 'Kopia av station ' + sourceNum;
+    _faltSoCfgState.stations.push({
+        label,
+        sourceStation: sourceNum,
+        config: cloned
+    });
+    sel.value = '';
+    faltSoCfgRender();
+}
+
+async function faltSoCfgSave() {
+    const compId = parseInt(document.querySelector('.faltskytte-results-management')?.dataset.competitionId, 10);
+    const isSub = document.getElementById('faltSoCfgIsSub').value === '1';
+    const payload = { stations: _faltSoCfgState.stations };
+    try {
+        const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+        const resp = await fetch('/umbraco/surface/Faltskytte/SaveFaltskytteShootOffConfig', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+            body: JSON.stringify({ competitionId: compId, isSubCompetition: isSub, configJson: JSON.stringify(payload) })
+        });
+        const data = await resp.json();
+        if (!data.success) { alert('Kunde inte spara: ' + (data.message || 'okänt fel')); return; }
+        bootstrap.Modal.getInstance(document.getElementById('faltShootOffConfigModal'))?.hide();
+        faltLoadShootOffStatus(isSub);
+    } catch (e) { alert('Fel: ' + e); }
+}
+
+function faltSoEscape(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 }
 
 function faltUpdateSubResultStatus(isOfficial) {

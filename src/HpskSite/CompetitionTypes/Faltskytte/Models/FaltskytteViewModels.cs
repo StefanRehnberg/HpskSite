@@ -119,6 +119,40 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public bool IsSubCompetition { get; set; }
     }
 
+    public class FaltskytteShootOffConfigRequest
+    {
+        public int CompetitionId { get; set; }
+        public bool IsSubCompetition { get; set; }
+        /// <summary>JSON-serialised <see cref="FaltskytteCompetitionConfig"/> wrapping the single
+        /// shoot-off station per-weapon-class. Empty string clears the config.</summary>
+        public string? ConfigJson { get; set; }
+    }
+
+    public class FaltskytteShootOffEntryRequest
+    {
+        public int CompetitionId { get; set; }
+        public int MemberId { get; set; }
+        public string ShootingClass { get; set; } = "";
+        public int Round { get; set; }
+
+        // Normal/Poäng fields
+        public int? Hits { get; set; }
+        public int? Figures { get; set; }
+        public string? HitDistribution { get; set; }
+
+        // Poängmål — all three variations use these (Magnum uses ONLY these)
+        public int? TiebreakerScore { get; set; }
+        public string? PoangmalScores { get; set; }
+    }
+
+    public class FaltskytteShootOffDeleteRequest
+    {
+        public int CompetitionId { get; set; }
+        public int MemberId { get; set; }
+        public string ShootingClass { get; set; } = "";
+        public int Round { get; set; }
+    }
+
     public class JoinNextPatrolRequest
     {
         public int CompetitionId { get; set; }
@@ -240,6 +274,19 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public int TotalTiebreakerScore { get; set; }
         /// <summary>Standard medal: "S" (silver), "B" (bronze), or null</summary>
         public string? StandardMedal { get; set; }
+
+        // ── Särskjutning (shoot-off) — populated only for championship medal-tied shooters ──
+
+        /// <summary>Variation-formatted summary per round, e.g. ["5/4","4/4"] for Normal,
+        /// ["10p"] for Poäng, ["23p","19p"] for Magnum. Null/empty when the shooter wasn't in a shoot-off.</summary>
+        public List<string>? ShootOffRounds { get; set; }
+
+        /// <summary>True once this shooter's placement is uniquely decided by the rounds shot so far.</summary>
+        public bool ShootOffIsResolved { get; set; }
+
+        /// <summary>The next round the shooter must shoot. Null when resolved OR when they have
+        /// already shot the current round but tied opponents have not yet (waiting state).</summary>
+        public int? ShootOffNextRound { get; set; }
     }
 
     public class FaltskytteStationResult
@@ -255,7 +302,57 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
     public class FaltskytteClassGroup
     {
         public string ClassName { get; set; } = "";
+
+        /// <summary>Admin-set custom name shown to the public — falls back to <see cref="ClassName"/> when null.
+        /// Same pattern as the Precision-family override system.</summary>
+        public string? DisplayClassName { get; set; }
+
         public List<FaltskytteShooterResult> Shooters { get; set; } = new();
+
+        /// <summary>Tied medal-tier groups detected for this class (rank ≤ 3, score-equal, championship-gated).</summary>
+        public List<FaltskytteTiedMedalGroup> TiedMedalGroups { get; set; } = new();
+
+        /// <summary>Human-readable footnote lines for the public result page, e.g.
+        /// "Särskjutning avgjorde guldet: Anna A. 5/4 vs Berit B. 4/3".</summary>
+        public List<string> ShootOffNotes { get; set; } = new();
+    }
+
+    public class FaltskytteTiedMedalGroup
+    {
+        public string MedalTier { get; set; } = "";   // "Guld" / "Silver" / "Brons" / combined like "Guld + Silver"
+        public int FirstRank { get; set; }
+        public int LastRank { get; set; }
+        /// <summary>The score that ties the group (hits for Normal, points for Poäng/Magnum).</summary>
+        public int TiedScore { get; set; }
+        public int RoundsCompleted { get; set; }
+        public bool Resolved { get; set; }
+        public List<FaltskytteTiedMedalShooter> Shooters { get; set; } = new();
+    }
+
+    public class FaltskytteTiedMedalShooter
+    {
+        public int MemberId { get; set; }
+        public string Name { get; set; } = "";
+        public string Club { get; set; } = "";
+        public string ShootingClass { get; set; } = "";
+        public int TotalHits { get; set; }
+        public int TotalFigures { get; set; }
+        public int TotalPoints { get; set; }
+        public int TotalTiebreakerScore { get; set; }
+        public bool IsResolved { get; set; }
+        public int? NextRound { get; set; }
+        public List<FaltskytteShootOffRoundSummary> Rounds { get; set; } = new();
+    }
+
+    public class FaltskytteShootOffRoundSummary
+    {
+        public int Round { get; set; }
+        public string Display { get; set; } = "";  // variation-formatted, e.g. "5/4" or "23p"
+        public int? Hits { get; set; }
+        public int? Figures { get; set; }
+        public int? TiebreakerScore { get; set; }
+        public string? PoangmalScores { get; set; }
+        public string? HitDistribution { get; set; }
     }
 
     public class FaltskylteFinalResults

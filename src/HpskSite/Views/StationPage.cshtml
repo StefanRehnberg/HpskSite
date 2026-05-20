@@ -73,6 +73,26 @@
     bool isSpringskytte = competitionType == "Springskytte";
     bool isPrecision = !isFaltskytte && !isSpringskytte;
 
+    // Detect shoot-off-only stations early so we can render a friendly notice
+    // instead of routing into the regular entry/info flow. Shoot-off entries
+    // go through the Resultat tab's per-shooter modal, never via /station.
+    bool isShootOffOnlyStation = false;
+    if (isFaltskytte && competition != null && stationNumber > 0)
+    {
+        try
+        {
+            var rawCfg = competition.Value<string>("stationConfig") ?? "";
+            if (!string.IsNullOrEmpty(rawCfg))
+            {
+                var parsedCfg = FaltskytteConfigParser.Parse(rawCfg);
+                var firstWc = parsedCfg.WeaponConfigs.Values.FirstOrDefault();
+                var stCfg = firstWc?.Stations.FirstOrDefault(s => s.Station == stationNumber);
+                if (stCfg != null && stCfg.IsShootOffOnly) isShootOffOnlyStation = true;
+            }
+        }
+        catch { /* config parse failure → fall through to normal handling */ }
+    }
+
     // ── Fältskytte self-service mode ─────────────────────────────
     // Tri-modal: staff (canEnterResults), self-service (logged-in shooter
     // in a patrol of a competition with faltskytteSelfServiceResults on),
@@ -172,6 +192,17 @@
     {
         <div class="alert alert-warning">
             <i class="bi bi-exclamation-triangle me-2"></i>Tävlingen hittades inte.
+        </div>
+    }
+    else if (isShootOffOnlyStation)
+    {
+        <div class="alert alert-info">
+            <h5 class="alert-heading"><i class="bi bi-bullseye me-2"></i>Särskjutnings-station</h5>
+            <p class="mb-0">
+                Station @stationNumber är reserverad för särskjutning och hanteras via
+                <strong>Resultat-fliken</strong> på tävlingens administrationssida —
+                inte via det vanliga station-flödet.
+            </p>
         </div>
     }
     else if (willEnter)

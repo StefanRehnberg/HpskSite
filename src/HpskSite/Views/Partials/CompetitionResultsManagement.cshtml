@@ -258,6 +258,38 @@
         </div>
     </div>
     }
+
+    <!-- Särskjutning section — auto-populates for Championship competitions where any
+         class has a tied total score at medal positions 1–3. The server-side gate runs
+         in CompetitionResultsController.CalculateFinalResults using
+         CompetitionScopeHelper.IsChampionshipScope, so this card stays hidden for
+         non-championship competitions even though the markup is always rendered. -->
+    <div class="mt-3" id="shootOffSection" style="display: none;">
+        <div class="card border-info">
+            <div class="card-header py-2 d-flex justify-content-between align-items-center">
+                <span class="fw-bold small"><i class="bi bi-bullseye me-2"></i>Särskjutning</span>
+                <span class="badge bg-info-subtle text-info-emphasis" id="shootOffStatusBadge">Inga oavgjorda medaljplatser</span>
+            </div>
+            <div class="card-body py-3" id="shootOffBody">
+                <div class="text-muted small">Laddar...</div>
+            </div>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(subCompetitionName))
+    {
+    <div class="mt-3" id="subShootOffSection" style="display: none;">
+        <div class="card border-info">
+            <div class="card-header py-2 d-flex justify-content-between align-items-center">
+                <span class="fw-bold small"><i class="bi bi-bullseye me-2"></i>Särskjutning – @subCompetitionName</span>
+                <span class="badge bg-info-subtle text-info-emphasis" id="subShootOffStatusBadge">Inga oavgjorda medaljplatser</span>
+            </div>
+            <div class="card-body py-3" id="subShootOffBody">
+                <div class="text-muted small">Laddar...</div>
+            </div>
+        </div>
+    </div>
+    }
     } @* end if !isStationPage *@
 </div>
 
@@ -308,6 +340,73 @@
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
                 <button type="button" class="btn btn-warning" id="btnConfirmChangeClass" onclick="confirmChangeShooterClass()">
                     <i class="bi bi-pencil-square me-1"></i>Ändra klass
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Särskjutning Shot Entry Modal — mirrors the keypad UX used in the regular Resultatinmatning
+     view but scoped to "so-" class names so it doesn't collide with the global .shot-btn /
+     .shot-placeholder handlers defined further down this partial. -->
+<div class="modal fade" id="shootOffEntryModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-fullscreen-sm-down">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="bi bi-bullseye me-2"></i>
+                    Särskjutning runda <span id="soModalRound"></span> — <span id="soModalShooter"></span>
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="soModalCompetitionId" />
+                <input type="hidden" id="soModalMemberId" />
+                <input type="hidden" id="soModalClass" />
+                <input type="hidden" id="soModalRoundValue" />
+                <input type="hidden" id="soModalIsSub" />
+
+                <div class="d-flex align-items-center justify-content-center gap-3 mb-3">
+                    <div class="so-shots-grid">
+                        <span class="so-shot-placeholder" data-shot="0">_</span>
+                        <span class="so-shot-placeholder" data-shot="1">_</span>
+                        <span class="so-shot-placeholder" data-shot="2">_</span>
+                        <span class="so-shot-placeholder" data-shot="3">_</span>
+                        <span class="so-shot-placeholder" data-shot="4">_</span>
+                    </div>
+                    <div class="d-flex align-items-center">
+                        <span class="fw-bold me-2">=</span>
+                        <span class="fs-5 fw-bold" id="soModalTotal">0</span>
+                        <span class="ms-3 fw-bold">X:</span>
+                        <span class="fs-5 fw-bold ms-1" id="soModalXCount">0</span>
+                    </div>
+                </div>
+
+                <div class="so-keypad">
+                    <div class="row g-2">
+                        <div class="col-4"><button type="button" class="btn btn-primary w-100 so-key" data-value="X">X</button></div>
+                        <div class="col-4"><button type="button" class="btn btn-primary w-100 so-key" data-value="10">10</button></div>
+                        <div class="col-4"><button type="button" class="btn btn-primary w-100 so-key" data-value="9">9</button></div>
+                        <div class="col-4"><button type="button" class="btn btn-primary w-100 so-key" data-value="8">8</button></div>
+                        <div class="col-4"><button type="button" class="btn btn-primary w-100 so-key" data-value="7">7</button></div>
+                        <div class="col-4"><button type="button" class="btn btn-primary w-100 so-key" data-value="6">6</button></div>
+                        <div class="col-4"><button type="button" class="btn btn-primary w-100 so-key" data-value="5">5</button></div>
+                        <div class="col-4"><button type="button" class="btn btn-primary w-100 so-key" data-value="4">4</button></div>
+                        <div class="col-4"><button type="button" class="btn btn-primary w-100 so-key" data-value="3">3</button></div>
+                        <div class="col-4"><button type="button" class="btn btn-primary w-100 so-key" data-value="2">2</button></div>
+                        <div class="col-4"><button type="button" class="btn btn-primary w-100 so-key" data-value="1">1</button></div>
+                        <div class="col-4"><button type="button" class="btn btn-primary w-100 so-key" data-value="0">0</button></div>
+                        <div class="col-6"><button type="button" class="btn btn-outline-danger w-100" id="soModalClear">RENSA</button></div>
+                        <div class="col-6"><button type="button" class="btn btn-outline-secondary w-100" id="soModalBackspace"><i class="bi bi-backspace"></i> Ta bort</button></div>
+                    </div>
+                </div>
+
+                <div class="text-muted small mt-2 text-center">Tangentbord: 0–9 / X för värde · Backspace för att ta bort · Enter för Spara · Esc för Avbryt</div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-success" id="soModalSave" disabled>
+                    <i class="bi bi-check-circle me-1"></i>Spara skott
                 </button>
             </div>
         </div>
@@ -661,6 +760,9 @@ async function loadResultsList() {
                     iframe.src = currentResultPageUrl;
                 }
             }
+
+            // Refresh the Särskjutning card whenever the main result list changes.
+            loadShootOffStatus(false);
         } else {
             console.log('No results list exists yet - success:', data.success, 'exists:', data.exists);
 
@@ -948,6 +1050,9 @@ async function loadSubResultsList() {
                 const iframe = document.getElementById('subResultsManagementIframe');
                 if (iframe) iframe.src = data.resultPageUrl + (data.resultPageUrl.indexOf('?') >= 0 ? '&' : '?') + 'sub=true';
             }
+
+            // Refresh sub-comp Särskjutning card whenever the sub list changes.
+            loadShootOffStatus(true);
         } else {
             section.style.display = 'block';
             if (noResultsMessage) noResultsMessage.style.display = 'block';
@@ -959,6 +1064,311 @@ async function loadSubResultsList() {
     } catch (error) {
         console.error('Error loading sub-comp results list:', error);
     }
+}
+
+// ─── Särskjutning (shoot-off) card ───────────────────────────────────────────
+// Refreshes the tied-medal-positions card. Always called with isSub=false for the
+// main pool and isSub=true for the Deltävling pool. Server returns an empty
+// list for non-championship competitions, which keeps the card hidden.
+
+async function loadShootOffStatus(isSub) {
+    const competitionId = $('.competition-results-management').data('competition-id');
+    if (!competitionId) return;
+
+    const sectionId = isSub ? 'subShootOffSection' : 'shootOffSection';
+    const bodyId = isSub ? 'subShootOffBody' : 'shootOffBody';
+    const badgeId = isSub ? 'subShootOffStatusBadge' : 'shootOffStatusBadge';
+
+    const section = document.getElementById(sectionId);
+    const body = document.getElementById(bodyId);
+    const badge = document.getElementById(badgeId);
+    if (!section || !body) return;
+
+    const url = `/umbraco/surface/CompetitionResults/GetShootOffStatus?competitionId=${competitionId}&subCompetitionOnly=${isSub ? 'true' : 'false'}`;
+    try {
+        const response = await fetch(url);
+        const data = await response.json();
+        if (!data.success || !data.classGroups || data.classGroups.length === 0) {
+            section.style.display = 'none';
+            return;
+        }
+
+        section.style.display = 'block';
+        // Count contested medal positions across all tied groups. Contested = a medal slot
+        // (rank ≤ 3) whose owning shooter has not yet been uniquely separated from their
+        // tied opponents. Decided + Contested = total medal slots in tied groups.
+        let unresolvedPositions = 0;
+        let totalMedalSlots = 0;
+        data.classGroups.forEach(cg => {
+            (cg.groups || []).forEach(g => {
+                const medalSlots = Math.max(0, Math.min(g.lastRank, 3) - g.firstRank + 1);
+                const unresolvedShooters = (g.shooters || []).filter(s => !s.isResolved).length;
+                // Cap at medalSlots — shooters who'd end up at rank ≥ 4 don't add to medal contests.
+                const contestedHere = Math.min(unresolvedShooters, medalSlots);
+                unresolvedPositions += contestedHere;
+                totalMedalSlots += medalSlots;
+            });
+        });
+        if (badge) {
+            if (unresolvedPositions > 0) {
+                badge.className = 'badge bg-warning text-dark';
+                badge.textContent = `${unresolvedPositions} medaljplats(er) kvar att avgöra`;
+            } else {
+                badge.className = 'badge bg-success';
+                badge.textContent = `${totalMedalSlots} medaljplats(er) avgjorda`;
+            }
+        }
+
+        body.innerHTML = '';
+        data.classGroups.forEach(cg => {
+            const cgWrap = document.createElement('div');
+            cgWrap.className = 'mb-3';
+            cgWrap.innerHTML = `<div class="fw-bold mb-1">Klass ${escapeHtml(cg.className)}</div>`;
+
+            cg.groups.forEach(g => {
+                const card = renderShootOffGroup(competitionId, cg.className, g, isSub);
+                cgWrap.appendChild(card);
+            });
+            body.appendChild(cgWrap);
+        });
+    } catch (e) {
+        console.error('Error loading shoot-off status:', e);
+        section.style.display = 'none';
+    }
+}
+
+function renderShootOffGroup(competitionId, className, group, isSub) {
+    const wrap = document.createElement('div');
+    wrap.className = 'border rounded p-2 mb-2 bg-body-tertiary';
+
+    const tierBadge = group.resolved
+        ? `<span class="badge bg-success">${escapeHtml(group.medalTier)} avgjord</span>`
+        : `<span class="badge bg-warning text-dark">${escapeHtml(group.medalTier)} – kvar att avgöra</span>`;
+    const header = document.createElement('div');
+    header.className = 'd-flex justify-content-between align-items-center mb-2';
+    header.innerHTML = `${tierBadge} <span class="text-muted small">Lika poäng: ${group.totalScore}</span>`;
+    wrap.appendChild(header);
+
+    group.shooters.forEach(s => {
+        const row = document.createElement('div');
+        row.className = 'd-flex align-items-center gap-2 flex-wrap mb-1';
+        const roundsSummary = (s.rounds || [])
+            .map(r => `R${r.round}: <strong>${r.total}</strong>${r.xCount ? ` (${r.xCount}X)` : ''}`)
+            .join(' · ');
+        row.innerHTML = `
+            <div style="min-width: 200px;"><strong>${escapeHtml(s.name)}</strong> <span class="text-muted small">${escapeHtml(s.club || '')}</span></div>
+            <div class="text-muted small flex-grow-1">${roundsSummary || '<em>Inga särskjutningsskott</em>'}</div>
+        `;
+
+        // Progressive resolution per shooter:
+        //  - IsResolved → placement decided; show ✓ Avgjord
+        //  - NextRound  → must shoot this round; show entry button
+        //  - else       → has shot the current round but tied opponents haven't; show "Väntar"
+        const actionEl = document.createElement('div');
+        actionEl.className = 'd-flex align-items-center gap-2';
+
+        if (s.isResolved) {
+            actionEl.innerHTML = `<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Avgjord</span>`;
+        } else if (s.nextRound) {
+            const openBtn = document.createElement('button');
+            openBtn.className = 'btn btn-outline-primary btn-sm';
+            openBtn.innerHTML = `<i class="bi bi-pencil-square me-1"></i>Resultat...`;
+            openBtn.addEventListener('click', () => {
+                openShootOffEntryModal({
+                    competitionId,
+                    memberId: s.memberId,
+                    shooterName: s.name,
+                    shootingClass: s.shootingClass,
+                    round: s.nextRound,
+                    isSub
+                });
+            });
+            actionEl.appendChild(openBtn);
+        } else {
+            actionEl.innerHTML = `<span class="badge bg-info-subtle text-info-emphasis"><i class="bi bi-hourglass-split me-1"></i>Väntar på övriga</span>`;
+        }
+        row.appendChild(actionEl);
+
+        wrap.appendChild(row);
+    });
+
+    return wrap;
+}
+
+async function saveShootOffEntry(competitionId, memberId, shootingClass, round, shots, isSub) {
+    try {
+        const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+        const response = await fetch('/umbraco/surface/CompetitionResults/SaveShootOffEntry', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+            body: JSON.stringify({
+                competitionId: parseInt(competitionId, 10),
+                memberId, shootingClass, round, shots
+            })
+        });
+        const data = await response.json();
+        if (!data.Success && !data.success) {
+            alert('Kunde inte spara: ' + (data.Message || data.message || 'okänt fel'));
+            return false;
+        }
+        // Refresh the iframe (so badges/footnotes update) and the card itself.
+        await (isSub ? loadSubResultsList() : loadResultsList());
+        return true;
+    } catch (e) {
+        alert('Fel: ' + e);
+        return false;
+    }
+}
+
+// ── Särskjutning shot-entry modal ────────────────────────────────────────────
+// Mirrors the keypad UX from the regular Resultatinmatning view. Scoped to
+// "so-" class names so it doesn't collide with the page's global
+// .shot-btn / .shot-placeholder handlers.
+
+(function injectShootOffModalStyles() {
+    if (document.getElementById('so-keypad-styles')) return;
+    const style = document.createElement('style');
+    style.id = 'so-keypad-styles';
+    // Theming uses Bootstrap CSS variables so light/dark mode both look right.
+    // Sizes are tuned for thumb-tappable hits on small phone screens (44px+).
+    style.textContent = `
+        .so-shots-grid { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+        .so-shot-placeholder {
+            width: 44px; height: 44px;
+            border: 2px solid var(--bs-border-color);
+            background-color: var(--bs-tertiary-bg);
+            color: var(--bs-body-color);
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: bold; font-size: 18px;
+        }
+        .so-shot-placeholder.filled {
+            background-color: var(--bs-primary);
+            color: #fff;
+            border-color: var(--bs-primary);
+        }
+        .so-shot-placeholder.active {
+            box-shadow: 0 0 0 3px rgba(var(--bs-primary-rgb), .35);
+        }
+        .so-keypad .btn { min-height: 48px; font-size: 1.1rem; font-weight: 600; }
+        @@media (max-width: 380px) {
+            .so-shot-placeholder { width: 36px; height: 36px; font-size: 16px; }
+            .so-keypad .btn { font-size: 1rem; min-height: 44px; }
+        }
+    `;
+    document.head.appendChild(style);
+})();
+
+const _soModalState = {
+    shots: ['', '', '', '', ''],
+    cursor: 0,
+    keysBound: false,
+    bsModal: null
+};
+
+function openShootOffEntryModal(ctx) {
+    const modalEl = document.getElementById('shootOffEntryModal');
+    if (!modalEl) return;
+
+    document.getElementById('soModalRound').textContent = String(ctx.round);
+    document.getElementById('soModalShooter').textContent = ctx.shooterName || '';
+    document.getElementById('soModalCompetitionId').value = String(ctx.competitionId);
+    document.getElementById('soModalMemberId').value = String(ctx.memberId);
+    document.getElementById('soModalClass').value = ctx.shootingClass || '';
+    document.getElementById('soModalRoundValue').value = String(ctx.round);
+    document.getElementById('soModalIsSub').value = ctx.isSub ? '1' : '0';
+
+    _soModalState.shots = ['', '', '', '', ''];
+    _soModalState.cursor = 0;
+    renderShootOffModal();
+
+    bindShootOffModalHandlersOnce();
+
+    _soModalState.bsModal = bootstrap.Modal.getOrCreateInstance(modalEl);
+    _soModalState.bsModal.show();
+}
+
+function renderShootOffModal() {
+    const placeholders = document.querySelectorAll('#shootOffEntryModal .so-shot-placeholder');
+    let total = 0, xCount = 0;
+    placeholders.forEach((el, i) => {
+        const v = _soModalState.shots[i] || '';
+        el.textContent = v || '_';
+        el.classList.toggle('filled', !!v);
+        el.classList.toggle('active', !v && i === _soModalState.cursor);
+        if (v === 'X') { total += 10; xCount += 1; }
+        else if (v !== '') { total += parseInt(v, 10) || 0; }
+    });
+    document.getElementById('soModalTotal').textContent = String(total);
+    document.getElementById('soModalXCount').textContent = String(xCount);
+    const allFilled = _soModalState.shots.every(s => s !== '');
+    document.getElementById('soModalSave').disabled = !allFilled;
+}
+
+function appendShootOffShot(value) {
+    if (_soModalState.cursor >= 5) return;
+    _soModalState.shots[_soModalState.cursor] = value;
+    _soModalState.cursor++;
+    renderShootOffModal();
+}
+
+function backspaceShootOffShot() {
+    if (_soModalState.cursor > 0) {
+        _soModalState.cursor--;
+        _soModalState.shots[_soModalState.cursor] = '';
+        renderShootOffModal();
+    }
+}
+
+function clearShootOffShots() {
+    _soModalState.shots = ['', '', '', '', ''];
+    _soModalState.cursor = 0;
+    renderShootOffModal();
+}
+
+function bindShootOffModalHandlersOnce() {
+    if (_soModalState.keysBound) return;
+    _soModalState.keysBound = true;
+
+    // Keypad buttons
+    document.querySelectorAll('#shootOffEntryModal .so-key').forEach(btn => {
+        btn.addEventListener('click', () => appendShootOffShot(btn.getAttribute('data-value')));
+    });
+    document.getElementById('soModalClear').addEventListener('click', clearShootOffShots);
+    document.getElementById('soModalBackspace').addEventListener('click', backspaceShootOffShot);
+
+    // Save
+    document.getElementById('soModalSave').addEventListener('click', async () => {
+        if (_soModalState.shots.some(s => !s)) return;
+        const ok = await saveShootOffEntry(
+            parseInt(document.getElementById('soModalCompetitionId').value, 10),
+            parseInt(document.getElementById('soModalMemberId').value, 10),
+            document.getElementById('soModalClass').value,
+            parseInt(document.getElementById('soModalRoundValue').value, 10),
+            _soModalState.shots.slice(),
+            document.getElementById('soModalIsSub').value === '1'
+        );
+        if (ok && _soModalState.bsModal) _soModalState.bsModal.hide();
+    });
+
+    // Keyboard support — only when the modal is visible.
+    const modalEl = document.getElementById('shootOffEntryModal');
+    document.addEventListener('keydown', (e) => {
+        if (!modalEl.classList.contains('show')) return;
+        const k = e.key;
+        if (/^[0-9]$/.test(k)) { e.preventDefault(); appendShootOffShot(k); return; }
+        if (k === 'x' || k === 'X') { e.preventDefault(); appendShootOffShot('X'); return; }
+        if (k === 'Backspace') { e.preventDefault(); backspaceShootOffShot(); return; }
+        if (k === 'Enter') {
+            e.preventDefault();
+            const saveBtn = document.getElementById('soModalSave');
+            if (!saveBtn.disabled) saveBtn.click();
+        }
+    });
+}
+
+function escapeHtml(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
 function updateSubResultsListStatus(isOfficial) {

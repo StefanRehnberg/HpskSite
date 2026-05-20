@@ -560,6 +560,24 @@ if (stringValue.TrimStart().StartsWith("[")) {
 
 **Umbraco operator setup**: add two properties to `competitionResult` doctype — see "Document Type Properties — Required Additions" section. Without them, sub-comp publish + sub-comp merge silently fail.
 
+### Särskjutning (Shoot-Off) for Championship Medal Positions ✅ (2026-05-19)
+**Rule:** In Championship competitions (`competitionScope` ∈ {`Svenskt Mästerskap`, `Landsdelsmästerskap`, `Kretsmästerskap`, `Klubbmästerskap`}), tied medal positions 1–3 are resolved **only** by a 5-shot shoot-off. **None of the normal tie-breakers apply at medal positions** — not X-count, not series countback. Repeat rounds until separated. Ranks 4+ continue to use X-count + countback as before.
+
+**Scope (this iteration):** Precision, Duell, Milsnabb, MagnumPrecision, NationellHelmatch (all five share the same code path through `CompetitionResultsController.CalculateFinalResults`). Fältskytte (station re-shoot semantics) and Springskytte (full re-run) are TODO.
+
+**Implementation:**
+- Single SQL table `CompetitionShootOffEntry` keyed `(CompetitionId, MemberId, ShootingClass, Round, SeriesNumber)` — identity-based so start-list / class regeneration can't orphan entries.
+- `Services/ShootOffService.cs` — DB reads/writes plus static `DetectTiedMedalGroups()` and `ApplyShootOffOverride()`.
+- `CompetitionTypes/Common/Utilities/CompetitionScopeHelper.IsChampionshipScope()` — the four-mästerskap recognizer. Other places using SM+Landsdel only (`FaltskytteStatsService.cs:151–152`, `FaltskytteController.cs:816–817`) are pre-existing bugs and should adopt this helper.
+- `CalculateFinalResults` runs the existing sort, then on championship comps re-orders each tied medal-tier slice using shoot-off entries. Emits `classGroup.tiedMedalGroups[]` (admin payload) and `classGroup.shootOffNotes[]` (public footnote text).
+- Admin UI: auto-loading "Särskjutning" card in `Views/Partials/CompetitionResultsManagement.cshtml`, after the Deltävling section. Hidden when no tied medal groups exist. Sub-comp mirror uses the same endpoint with `subCompetitionOnly=true`.
+- Public UI: `Views/CompetitionResult.cshtml` JS appends `<span class="badge bg-info">SS: 49</span>` to the total cell when `shooter.shootOffScore != null`. Per-class footnote line under each table for resolved medal tiers.
+- Endpoints: `GET GetShootOffStatus`, `POST SaveShootOffEntry`, `POST DeleteShootOffEntry` — all three-tier auth via the new `CanManageCompetitionResults` helper.
+
+**Tests:** `HpskSite.Tests/Services/ShootOffServiceTests.cs` — 16 tests (scope helper, tie detection, single/multi-round resolution, rank-4 ignored, X-count divergence still tied, triple-tie).
+
+**Manual operator steps:** Run `Migrations/create-competition-shootoffs-table.sql` in SSMS. No new doctype properties — all state lives in SQL.
+
 ### Standard Medals — A-family pooling rule ✅ (2026-05-17)
 **Rule:** When standard medals are calculated, shooters in AM, AP, AG, and the open A class are pooled into a single "A family" ranking — percentage quotas (top 1/9 silver, top 1/3 bronze) are computed across the combined pool. Fixed-score thresholds (267/277 for 6 series, etc.) apply identically to every A-family subgroup. **A_Opt is NOT in the pool** — it's a parallel weapon group with its own ranking.
 
@@ -958,6 +976,33 @@ Navigate to **Members → Member Groups**:
 - **competition**: add `faltskytteSelfServiceResults` True/False property (optional, default false, label "Tillåt självservice (skyttar fyller i resultat)"). When ON, logged-in shooters in a patrol can enter results for that patrol on `/station?c=X&s=N`; staff retains full edit. Without this property the wizard checkbox silently no-ops. Added 2026-05-09. Also requires running `Migrations/add-currentstation-to-faltskyttepatrol.sql` in SSMS to add the per-patrol cursor column.
 - **competitionResult**: add `subCompetitionIsOfficial` True/False property (optional, default false, label "Deltävling publicerad som officiell"). Powers the independent Deltävling publish toggle. Without it, the Publicera button on the Deltävling section returns an error and the second public "Visa resultat" button cannot appear. Added 2026-05-17.
 - **competitionResult**: add `subCompetitionMergeConfig` Textarea property (optional, label "Deltävling – sammanslagningskonfiguration (JSON)"). Stores the Deltävling's own class-merge config — separate from the main `mergeConfig` so the subset analyses its own <5-shooter classes. Without it, sub-comp Sammanslagning silently no-ops. Added 2026-05-17.
+- **competitionResult**: add `classNameOverrides` Textarea property (optional, label "Anpassade klassnamn (JSON-dict)"). Stores admin-edited display names for class groups — JSON dict mapping auto-generated combined name (e.g. "C2+Dam+Vet") to custom name (e.g. "C2 Allmänt"). Empty value = no overrides. Without this property, the pen-icon rename feature on the result page silently no-ops. Added 2026-05-19.
+- **competitionResult**: add `subCompetitionClassNameOverrides` Textarea property (optional, label "Deltävling – anpassade klassnamn (JSON-dict)"). Same shape as `classNameOverrides` but applied only to the Deltävling result list (`?sub=true`). Without it, sub-comp class-name overrides silently no-op. Added 2026-05-19.
+- **competitionResult**: add `faltskytteShootOffConfig` Textarea property (optional, label "Fältskytte – särskjutnings-station (JSON)"). Stores a single station config (with per-weapon-class variants) used for Fältskytte/MagnumFält Särskjutning. Without it, the "Konfigurera särskjutnings-station" save silently no-ops. Added 2026-05-20.
+- **competitionResult**: add `subCompetitionFaltskytteShootOffConfig` Textarea property (optional, label "Deltävling – Fältskytte särskjutnings-station (JSON)"). Same as above for the Deltävling pool. Added 2026-05-20.
+
+### Fältskytte Särskjutning (2026-05-20)
+**Scope:** Fältskytte (Normal mode + Poäng mode) and Magnum Fält. Same championship gate as the precision-family Särskjutning: `CompetitionScopeHelper.IsChampionshipScope` + tied score at medal places 1–3.
+
+**Round semantics differ per variation:**
+- **Normal** — round is one or more stations; intra-round tiebreak Hits → Figures → Poängmål-total. Display: `5/4`.
+- **Poäng** — same round shape; intra-round tiebreak Points (Hits+Figures) → Poängmål-total. Display: `10p`.
+- **Magnum Fält** — single specially-configured station with all figures as poängmål, only 1 hit per figure counted (max ≈ figures × max-per-figure). Intra-round tiebreak: sum of poängmål-scores. Display: `23p`.
+
+**Architecture:**
+- Single SQL table `FaltskytteShootOffEntry` (one row per shooter per round) — `Hits`/`Figures`/`HitDistribution` nullable for Magnum; `PoangmalScores`/`TiebreakerScore` carry the score for all three variations.
+- Pluggable `IShootOffRoundComparer` strategy with three implementations (`NormalRoundComparer`, `PoangRoundComparer`, `MagnumRoundComparer`). Factory: `FaltskytteShootOffService.ComparerFor(competitionType, scoringMode)`.
+- `FaltskytteShootOffService` mirrors the precision `ShootOffService` API: `GetEntriesForCompetitionAsync`, `SaveEntryAsync`, `DeleteEntryAsync`, `DetectTiedMedalGroups`, `ApplyShootOffOverride`, `ComputeProgressiveStatus`.
+- Wired into `FaltskytteController.GetFaltskytteResults` after the existing tiebreaker sort — only fires when `IsChampionshipScope` is true. Standard-medal C-split (SM/LDM-only per SHB FR-204) stays on the narrower `isSmOrLdm` predicate.
+- **`FaltskytteController` merge lookup migrated to `ClassMergingService.BuildMergeGroupLookup`** so multi-source merges into one target collapse into a single combined group (same fix as Precision had for competition 2173).
+
+**Endpoints:** `GetFaltskytteShootOffStatus`, `GetFaltskytteShootOffConfig`, `SaveFaltskytteShootOffConfig`, `SaveFaltskytteShootOffEntry`, `DeleteFaltskytteShootOffEntry` — all in `FaltskytteController`, three-tier auth.
+
+**Admin UI** in `Views/Partials/FaltskytteResultsManagement.cshtml`: a "Särskjutning" card appears after the Deltävling section when the API returns tied medal groups. Includes a station-config editor (copy from existing station or empty mall, JSON textarea) and per-class tied-group rows with "Resultat..." buttons that open an entry modal whose form switches between hits+figures+poängmål (Normal/Poäng) and per-figure point boxes (Magnum).
+
+**Public UI** in `Views/CompetitionResult.cshtml` `loadFaltskytteResults`: new `Sär` column rendered only for classes with shoot-off rounds; per-class footnote lines summarise how each medal was decided. The auto-generated combined class name is overrideable via the existing `classNameOverrides` doctype property (admin pen icon — same mechanism as Precision).
+
+**Manual operator steps:** Run `Migrations/create-faltskytte-shootoff-entry-table.sql` in SSMS and add the two new `competitionResult` Textarea properties listed above.
 
 ## Common Patterns
 

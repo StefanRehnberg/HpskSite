@@ -411,6 +411,12 @@
                         }
                         totalColCount += 2; // final Tot + X
                         if (isAwardingStandardMedals) totalColCount += 1; // S
+                        // Add a "Sj" (Särskjutning) column only when at least one shooter in this
+                        // class has shoot-off rounds entered. The shoot-off scores are shown
+                        // separately from the qualification Tot — they only decide medal order.
+                        const classHasShootOff = classGroup.shooters.some(s =>
+                            Array.isArray(s.shootOffRoundTotals) && s.shootOffRoundTotals.length > 0);
+                        if (classHasShootOff) totalColCount += 2; // Sj column gets double width to fit "49 / 47"
                         const deleteColCount = canDeleteResults ? 1 : 0;
 
                         const platsPct = 4;
@@ -442,11 +448,23 @@
                         const namnPct = textSharePct / 2;
                         const foreningPct = textSharePct / 2;
 
-                        // Class header
+                        // Class header — admin sees a pen icon for inline-editing the class name.
+                        // The auto-generated combined name (classGroup.className) is preserved
+                        // as the override key so renaming + reverting are roundtrip-safe.
+                        const autoName = classGroup.className || '';
+                        const displayName = classGroup.displayClassName || autoName;
+                        const renameAttr = canDeleteResults
+                            ? ` data-rename="1" data-original="${autoName.replace(/"/g, '&quot;')}" data-current="${displayName.replace(/"/g, '&quot;')}"`
+                            : '';
+                        const renameBtn = canDeleteResults
+                            ? ` <button type="button" class="btn btn-link btn-sm p-0 ms-2 rename-class-btn no-print" title="Byt namn på klassgruppen" aria-label="Byt namn">
+                                  <i class="bi bi-pencil-square"></i>
+                               </button>`
+                            : '';
                         html += `
                             <div class="class-results-section">
-                                <div class="class-header">
-                                    ${classGroup.className} (${classGroup.shooters.length} deltagare)
+                                <div class="class-header"${renameAttr}>
+                                    <span class="class-header-name">${displayName}</span> (${classGroup.shooters.length} deltagare)${renameBtn}
                                 </div>
                                 <table class="results-table results-table-fixed">
                                     <thead>
@@ -489,6 +507,10 @@
                                             <th style="width:${totalPct}%">Tot</th>
                                             <th style="width:${totalPct}%">X</th>
                         `;
+
+                        if (classHasShootOff) {
+                            html += `<th style="width:${totalPct * 2}%" title="Särskjutning">Sär</th>`;
+                        }
 
                         if (isAwardingStandardMedals) {
                             html += `<th style="width:${totalPct}%">S</th>`;
@@ -578,6 +600,19 @@
                                     <td class="text-center">${totalXCount}</td>
                             `;
 
+                            if (classHasShootOff) {
+                                // Show each round's total separated by " / ". Empty cell for
+                                // shooters who weren't part of a shoot-off in this class.
+                                const rounds = Array.isArray(shooter.shootOffRoundTotals) ? shooter.shootOffRoundTotals : [];
+                                if (rounds.length > 0) {
+                                    const tip = rounds.map((t, i) => `Runda ${i + 1}: ${t}`).join(', ');
+                                    const display = rounds.join(' / ');
+                                    html += `<td class="text-center" title="${tip}"><strong>${display}</strong></td>`;
+                                } else {
+                                    html += `<td class="text-center text-muted">—</td>`;
+                                }
+                            }
+
                             if (isAwardingStandardMedals) {
                                 const medal = shooter.standardMedal || '';
                                 html += `<td class="text-center"><strong>${medal}</strong></td>`;
@@ -607,8 +642,19 @@
                                 </table>
                             </div>
                         `;
+
+                        // Särskjutning footnotes — surfaced from CalculateFinalResults when a shoot-off
+                        // resolved a medal-tier tie ("Särskjutning avgjorde guldet: Anna 50 vs Berit 47").
+                        if (Array.isArray(classGroup.shootOffNotes) && classGroup.shootOffNotes.length > 0) {
+                            html += '<div class="text-muted small mt-1 mb-3">';
+                            classGroup.shootOffNotes.forEach(note => {
+                                const safe = String(note).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+                                html += `<div><i class="bi bi-info-circle me-1"></i>${safe}</div>`;
+                            });
+                            html += '</div>';
+                        }
                     });
-                    
+
                     container.innerHTML = html;
                     
                     // Setup auto-refresh for preliminary results
@@ -690,6 +736,94 @@
             const shootingClass = btn.getAttribute('data-shooting-class') || '';
             const shooterName = btn.getAttribute('data-shooter-name') || '';
             deleteShooterFromClass(memberId, shootingClass, shooterName);
+        });
+
+        // Inline rename of a class group — admin only. Pen icon next to class title swaps
+        // the name span for an input + Spara / Avbryt / Återställ buttons.
+        async function saveClassNameOverride(originalName, customName) {
+            try {
+                const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+                const response = await fetch('/umbraco/surface/CompetitionResults/SaveClassNameOverride', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+                    body: JSON.stringify({
+                        competitionId: parseInt(competitionId, 10),
+                        originalName: originalName,
+                        customName: customName,
+                        isSubCompetition: isSubCompetitionView
+                    })
+                });
+                const data = await response.json();
+                if (!data.Success && !data.success) {
+                    alert('Kunde inte spara: ' + (data.Message || data.message || 'okänt fel'));
+                    return false;
+                }
+                return true;
+            } catch (err) {
+                console.error('Rename error', err);
+                alert('Ett fel uppstod vid namnändring.');
+                return false;
+            }
+        }
+
+        document.addEventListener('click', function (ev) {
+            const btn = ev.target.closest('.rename-class-btn');
+            if (!btn) return;
+            ev.preventDefault();
+            const header = btn.closest('.class-header');
+            if (!header || header.dataset.renaming === '1') return;
+            header.dataset.renaming = '1';
+
+            const original = header.getAttribute('data-original') || '';
+            const current = header.getAttribute('data-current') || original;
+            const nameSpan = header.querySelector('.class-header-name');
+            if (!nameSpan) return;
+
+            // Build inline editor preserving the surrounding markup so layout doesn't jump.
+            const editor = document.createElement('span');
+            editor.className = 'class-header-editor d-inline-flex align-items-center gap-2';
+            editor.innerHTML = `
+                <input type="text" class="form-control form-control-sm class-header-input" style="max-width: 24rem;" />
+                <button type="button" class="btn btn-success btn-sm class-header-save"><i class="bi bi-check-lg"></i> Spara</button>
+                <button type="button" class="btn btn-outline-secondary btn-sm class-header-cancel">Avbryt</button>
+                <button type="button" class="btn btn-outline-warning btn-sm class-header-reset" title="Återställ till automatiskt namn (${original.replace(/"/g, '&quot;')})">Återställ</button>
+            `;
+            const input = editor.querySelector('.class-header-input');
+            input.value = current;
+
+            // Hide the title span and the pen button while editing.
+            nameSpan.style.display = 'none';
+            btn.style.display = 'none';
+            header.insertBefore(editor, nameSpan.nextSibling);
+            input.focus();
+            input.select();
+
+            const finish = () => {
+                header.dataset.renaming = '';
+                editor.remove();
+                nameSpan.style.display = '';
+                btn.style.display = '';
+            };
+
+            editor.querySelector('.class-header-cancel').addEventListener('click', () => finish());
+
+            editor.querySelector('.class-header-save').addEventListener('click', async () => {
+                const newName = input.value.trim();
+                if (newName === current) { finish(); return; }
+                const ok = await saveClassNameOverride(original, newName);
+                if (ok) { finish(); location.reload(); }
+            });
+
+            editor.querySelector('.class-header-reset').addEventListener('click', async () => {
+                if (!confirm('Återställ till det automatiskt genererade namnet "' + original + '"?')) return;
+                const ok = await saveClassNameOverride(original, '');
+                if (ok) { finish(); location.reload(); }
+            });
+
+            input.addEventListener('keydown', (ev) => {
+                if (ev.key === 'Enter') { ev.preventDefault(); editor.querySelector('.class-header-save').click(); }
+                else if (ev.key === 'Escape') { ev.preventDefault(); finish(); }
+            });
         });
         
         // Springskytte results rendering
@@ -810,8 +944,13 @@
                 let html = '';
 
                 results.classGroups.forEach(group => {
+                    // Show admin-overridden display name when present, fall back to auto.
+                    const displayName = group.displayClassName || group.className || '';
+                    // Per-class "Sär" column only when at least one shooter has shoot-off rounds.
+                    const classHasShootOff = (group.shooters || []).some(s => Array.isArray(s.shootOffRounds) && s.shootOffRounds.length > 0);
+
                     html += `<div class="mb-4">`;
-                    html += `<h4 class="border-bottom pb-2">${group.className} <small class="text-muted">(${group.shooters.length} deltagare)</small></h4>`;
+                    html += `<h4 class="border-bottom pb-2">${displayName} <small class="text-muted">(${group.shooters.length} deltagare)</small></h4>`;
                     html += `<div class="table-responsive"><table class="table table-sm table-hover">`;
                     html += `<thead class="table-light"><tr>
                         <th style="width:50px" class="text-center">Plats</th>
@@ -826,6 +965,7 @@
                         ? `<th class="text-center fw-bold">Poäng</th>`
                         : `<th class="text-center fw-bold">Tot</th>`;
                     html += `<th class="text-center">Pm</th>`;
+                    if (classHasShootOff) html += `<th class="text-center" title="Särskjutning">Sär</th>`;
                     if (faltAwardingMedals) html += `<th class="text-center">Std</th>`;
                     html += `</tr></thead><tbody>`;
 
@@ -853,6 +993,15 @@
                             ? `<td class="text-center fw-bold">${shooter.totalPoints}</td>`
                             : `<td class="text-center fw-bold">${shooter.totalHits}/${shooter.totalFigures}</td>`;
                         html += `<td class="text-center">${shooter.totalTiebreakerScore || ''}</td>`;
+                        if (classHasShootOff) {
+                            const rounds = Array.isArray(shooter.shootOffRounds) ? shooter.shootOffRounds : [];
+                            if (rounds.length > 0) {
+                                const tip = rounds.map((t, i) => 'Runda ' + (i + 1) + ': ' + t).join(', ');
+                                html += `<td class="text-center" title="${tip}"><strong>${rounds.join(' / ')}</strong></td>`;
+                            } else {
+                                html += `<td class="text-center text-muted">—</td>`;
+                            }
+                        }
                         if (faltAwardingMedals) {
                             var stdM = shooter.standardMedal || '';
                             html += `<td class="text-center fw-bold${stdM === 'S' ? ' text-primary' : stdM === 'B' ? ' text-warning' : ''}">${stdM}</td>`;
@@ -860,7 +1009,19 @@
                         html += `</tr>`;
                     });
 
-                    html += `</tbody></table></div></div>`;
+                    html += `</tbody></table>`;
+
+                    // Per-class footnotes from server (e.g. "Särskjutning avgjorde guldet: Anna 5/4 vs Berit 4/3")
+                    if (Array.isArray(group.shootOffNotes) && group.shootOffNotes.length > 0) {
+                        html += '<div class="text-muted small mt-1 mb-2">';
+                        group.shootOffNotes.forEach(note => {
+                            const safe = String(note).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+                            html += `<div><i class="bi bi-info-circle me-1"></i>${safe}</div>`;
+                        });
+                        html += '</div>';
+                    }
+
+                    html += `</div></div>`;
                 });
 
                 if (!html) html = '<div class="alert alert-info">Inga resultat att visa.</div>';

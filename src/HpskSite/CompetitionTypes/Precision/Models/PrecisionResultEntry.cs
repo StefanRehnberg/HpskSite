@@ -129,6 +129,29 @@ namespace HpskSite.CompetitionTypes.Precision.Models
         // Standard Medal Award (Standardmedalj): null/""/B/S
         public string? StandardMedal { get; set; }
 
+        /// <summary>Cumulative shoot-off total across all rounds the shooter participated in. Null when no shoot-off.</summary>
+        public int? ShootOffScore { get; set; }
+
+        /// <summary>Cumulative shoot-off X-count. Display-only; does not influence placement. Null when no shoot-off.</summary>
+        public int? ShootOffXCount { get; set; }
+
+        /// <summary>Highest round number the shooter has a shoot-off entry for. Null when no shoot-off.</summary>
+        public int? ShootOffRound { get; set; }
+
+        /// <summary>Per-round shoot-off totals in chronological order (round 1 first). Null/empty
+        /// when the shooter has no shoot-off entries. The qualification TotalScore is unchanged;
+        /// the shoot-off scores are shown separately to make placement decisions transparent.</summary>
+        public List<int>? ShootOffRoundTotals { get; set; }
+
+        /// <summary>True when this shooter's placement is uniquely decided by the rounds shot so far.
+        /// Only meaningful for shooters inside a tied medal group.</summary>
+        public bool ShootOffIsResolved { get; set; }
+
+        /// <summary>The next round this shooter needs to shoot to break a remaining tie.
+        /// Null when their placement is already decided OR when they're waiting for other tied
+        /// shooters to enter the current round.</summary>
+        public int? ShootOffNextRound { get; set; }
+
         // Calculated properties
         public int TotalScore => Results.Sum(r => CalculateTotalFromShots(r.Shots));
         public int TotalXCount => Results.Sum(r => CalculateXCountFromShots(r.Shots));
@@ -163,8 +186,63 @@ namespace HpskSite.CompetitionTypes.Precision.Models
 
     public class PrecisionClassGroup
     {
+        /// <summary>Auto-generated class name — either the original class (when not merged) or the
+        /// combined name produced by <see cref="ClassMergingService"/> (e.g. "C2+Dam+Vet").
+        /// Stable as long as the merge config doesn't change. Used as the lookup key for
+        /// custom-name overrides.</summary>
         public string ClassName { get; set; } = "";
+
+        /// <summary>Admin-set custom name shown to the public. Null when no override is set —
+        /// the view then falls back to <see cref="ClassName"/>.</summary>
+        public string? DisplayClassName { get; set; }
+
         public List<PrecisionShooterResult> Shooters { get; set; } = new();
+
+        /// <summary>Tied medal-tier groups currently unresolved (Resolved=false) or resolved (Resolved=true) by Särskjutning. Empty for non-championship competitions and for classes with no medal-tier ties.</summary>
+        public List<PrecisionTiedMedalGroup> TiedMedalGroups { get; set; } = new();
+
+        /// <summary>Human-readable footnotes appended below the class table on the public result page (e.g. "Särskjutning avgjorde guldet: Anna 50 vs Berit 47").</summary>
+        public List<string> ShootOffNotes { get; set; } = new();
+    }
+
+    public class PrecisionTiedMedalGroup
+    {
+        public string MedalTier { get; set; } = "";    // "Guld" / "Silver" / "Brons"
+        public int FirstRank { get; set; }
+        public int LastRank { get; set; }
+        public int TotalScore { get; set; }
+        public int RoundsCompleted { get; set; }
+        public bool Resolved { get; set; }
+        public List<PrecisionTiedMedalShooter> Shooters { get; set; } = new();
+    }
+
+    public class PrecisionTiedMedalShooter
+    {
+        public int MemberId { get; set; }
+        public string Name { get; set; } = "";
+        public string Club { get; set; } = "";
+        public string ShootingClass { get; set; } = "";
+        public int TotalScore { get; set; }
+        public int XCount { get; set; }
+
+        /// <summary>True when this shooter's placement is uniquely decided by the rounds shot so far.</summary>
+        public bool IsResolved { get; set; }
+
+        /// <summary>The next round this shooter must shoot. Null when:
+        /// (a) IsResolved=true — their placement is decided, or
+        /// (b) they have already shot the current round but tied opponents have not — they're waiting.</summary>
+        public int? NextRound { get; set; }
+
+        /// <summary>Per-round entered totals so the admin UI can show progress (round 1 -> 50, round 2 -> 48, etc.).</summary>
+        public List<PrecisionShootOffRoundEntry> Rounds { get; set; } = new();
+    }
+
+    public class PrecisionShootOffRoundEntry
+    {
+        public int Round { get; set; }
+        public string Shots { get; set; } = "";   // JSON: ["X","10",...]
+        public int Total { get; set; }
+        public int XCount { get; set; }
     }
 
     public class PrecisionFinalResults
