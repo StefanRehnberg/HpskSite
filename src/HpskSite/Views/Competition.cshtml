@@ -1117,7 +1117,7 @@
 													grp.forEach(function(p) {
 														var t = p.startTime ? new Date(p.startTime).toLocaleTimeString('sv-SE',{hour:'2-digit',minute:'2-digit'}) : '';
 														body += '<div class="border-bottom px-3 py-2">' +
-															'<div class="mb-1"><strong>Patrull ' + p.patrolNumber + '<\/strong>' +
+															'<div class="mb-1"><strong>Patrull ' + p.patrolNumber + (p.label ? ' &mdash; ' + p.label.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : '') + '<\/strong>' +
 															(t ? '<span class="text-muted ms-2"><i class="bi bi-clock me-1"><\/i>' + t + '<\/span>' : '') +
 															'<span class="badge bg-secondary ms-2">' + p.members.length + '<\/span><\/div>';
 														p.members.forEach(function(m) {

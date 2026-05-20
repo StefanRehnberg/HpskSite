@@ -27,6 +27,13 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         /// always retain full edit). Null until the patrol's first scan.
         /// </summary>
         public int? CurrentStation { get; set; }
+
+        /// <summary>
+        /// Optional freeform short label appended to the patrol number in
+        /// admin + public renderings (e.g. "Lördag fm", "Final"). Primary
+        /// use is multi-day competitions.
+        /// </summary>
+        public string? Label { get; set; }
     }
 
     [TableName("FaltskyttePatrolMember")]

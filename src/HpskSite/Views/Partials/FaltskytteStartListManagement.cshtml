@@ -332,12 +332,16 @@
             grpPatrols.forEach(function(patrol) {
                 var startTimeStr = patrol.startTime ? new Date(patrol.startTime).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }) : '';
                 var wgEsc = (wg || '').replace(/'/g, "\\'");
+                var labelStr = patrol.label || '';
+                var labelSuffix = labelStr ? ' — ' + escapeHtmlInline(labelStr) : '';
+                var labelArg = JSON.stringify(labelStr);
                 html += '<div class="border-bottom px-3 py-2" data-patrol-id="' + patrol.patrolId + '">' +
                     '<div class="d-flex justify-content-between align-items-center mb-1">' +
                     '<span>' +
-                    '<strong>Patrull ' + patrol.patrolNumber + '</strong>' +
+                    '<strong>Patrull ' + patrol.patrolNumber + labelSuffix + '</strong>' +
                     (startTimeStr ? '<span class="text-muted ms-2"><i class="bi bi-clock me-1"></i>' + startTimeStr +
-                        ' <button class="btn btn-link btn-sm p-0 text-muted" onclick="faltEditPatrolTime(' + patrol.patrolId + ',\'' + startTimeStr + '\')" title="Ändra starttid"><i class="bi bi-pencil" style="font-size:0.7em"></i></button></span>' : '') +
+                        ' <button class="btn btn-link btn-sm p-0 text-muted" onclick="faltEditPatrol(' + patrol.patrolId + ',\'' + startTimeStr + '\',' + labelArg + ')" title="Redigera patrull"><i class="bi bi-pencil" style="font-size:0.7em"></i></button></span>' :
+                        ' <button class="btn btn-link btn-sm p-0 text-muted ms-2" onclick="faltEditPatrol(' + patrol.patrolId + ',\'\',' + labelArg + ')" title="Redigera patrull"><i class="bi bi-pencil" style="font-size:0.7em"></i></button>') +
                     '<span class="badge bg-secondary ms-2">' + patrol.members.length + '</span>' +
                     '</span>' +
                     '<span class="d-flex gap-1">' +
@@ -368,7 +372,8 @@
         var bulkTarget = document.getElementById('faltBulkTarget');
         bulkTarget.innerHTML = '<option value="">Flytta till patrull...</option>';
         allPatrols.forEach(function(p) {
-            bulkTarget.innerHTML += '<option value="' + p.patrolId + '">Patrull ' + p.patrolNumber + '</option>';
+            var lbl = p.label ? ' — ' + p.label : '';
+            bulkTarget.appendChild(new Option('Patrull ' + p.patrolNumber + lbl, String(p.patrolId)));
         });
     }
 
@@ -463,18 +468,35 @@
         else alert('Fel: ' + (data.message || 'Okänt fel'));
     };
 
-    window.faltEditPatrolTime = async function(patrolId, currentTime) {
-        if (!confirmIfResultsExist('\u00c4ndra starttid')) return;
-        var newTime = prompt('Ny starttid (HH:mm):', currentTime || '09:00');
-        if (!newTime) return;
-        var parts = newTime.split(':');
-        if (parts.length !== 2) { alert('Ogiltig tid. Använd HH:mm-format.'); return; }
-        var dt = new Date();
-        dt.setHours(parseInt(parts[0]) || 9, parseInt(parts[1]) || 0, 0, 0);
-        var data = await apiPost('UpdatePatrolTime', { competitionId: parseInt(compId), patrolId: patrolId, startTime: dt.toISOString() });
+    window.faltEditPatrol = async function(patrolId, currentTime, currentLabel) {
+        if (!confirmIfResultsExist('Redigera patrull')) return;
+        var newTime = prompt('Ny starttid (HH:mm) — lämna tomt för att inte ändra:', currentTime || '');
+        if (newTime === null) return;
+        var dt = null;
+        if (newTime && newTime.trim() !== '') {
+            var parts = newTime.split(':');
+            if (parts.length !== 2) { alert('Ogiltig tid. Använd HH:mm-format.'); return; }
+            dt = new Date();
+            dt.setHours(parseInt(parts[0]) || 9, parseInt(parts[1]) || 0, 0, 0);
+        }
+        var newLabel = prompt('Namn / dag (valfritt, t.ex. "Lördag fm"):', currentLabel || '');
+        if (newLabel === null) return;
+        var data = await apiPost('UpdatePatrolTime', { competitionId: parseInt(compId), patrolId: patrolId, startTime: dt ? dt.toISOString() : null, label: newLabel });
         if (data.success) loadFaltPatrols();
         else alert('Fel: ' + (data.message || 'Okänt fel'));
     };
+    // Backward-compat shim in case any legacy caller remains
+    window.faltEditPatrolTime = function(patrolId, currentTime) { return window.faltEditPatrol(patrolId, currentTime, ''); };
+
+    // Tiny HTML escaper for user-supplied label text rendered inside string concatenation.
+    function escapeHtmlInline(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
 
     window.faltPublish = async function(pub) {
         var msg = pub ? 'Publicera patrullistan? Den blir synlig för alla på tävlingssidan.' : 'Avpublicera patrullistan?';
@@ -691,8 +713,9 @@
             w.document.write('<h2>Vapengrupp ' + wg + ' \u2014 ' + grp.length + ' patruller, ' + total + ' skyttar</h2>');
             grp.forEach(function(p) {
                 var t = p.startTime ? new Date(p.startTime).toLocaleTimeString('sv-SE',{hour:'2-digit',minute:'2-digit'}) : '';
+                var lblHtml = p.label ? ' &mdash; ' + p.label.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : '';
                 w.document.write('<div class="patrol">');
-                w.document.write('<div class="patrol-header">Patrull ' + p.patrolNumber + (t ? '<span class="patrol-time">' + t + '</span>' : '') + '</div>');
+                w.document.write('<div class="patrol-header">Patrull ' + p.patrolNumber + lblHtml + (t ? '<span class="patrol-time">' + t + '</span>' : '') + '</div>');
                 p.members.forEach(function(m) {
                     w.document.write('<div class="member">' + m.name + ' <span class="member-class">(' + m.club + ') ' + m.shootingClass + '</span></div>');
                 });

@@ -248,9 +248,11 @@
 
                         foreach (var team in teams)
                         {
+                            string teamLabel = "";
+                            try { teamLabel = (string)team.Label ?? ""; } catch { teamLabel = ""; }
                             <div class="team-section">
                                 <div class="team-header">
-                                    Skjutlag: @team.TeamNumber - Tid (ca): @team.StartTime-@team.EndTime (@team.ShooterCount st)
+                                    Skjutlag: @team.TeamNumber@(string.IsNullOrWhiteSpace(teamLabel) ? "" : $" — {teamLabel}") - Tid (ca): @team.StartTime-@team.EndTime (@team.ShooterCount st)
 </div>
                                 <table class="start-list-table">
                                     <thead>

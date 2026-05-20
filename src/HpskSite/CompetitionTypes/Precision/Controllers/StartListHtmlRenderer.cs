@@ -52,7 +52,15 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
             {
                 foreach (var team in config.Teams)
                 {
-                    html.AppendLine($"<h3>Skjutlag: {team.TeamNumber} Tid (ca): {team.StartTime}-{team.EndTime}");
+                    // Heads up: there are TWO renderers for the team header.
+                    // This one produces the cached `startListContent` blob (admin preview, print, email).
+                    // The public /startlista/ page is rendered by Views/PrecisionStartList.cshtml from
+                    // `configurationData` directly. Any new StartListTeam field shown to users must be
+                    // wired in BOTH places — see the team-header line in that .cshtml.
+                    var labelSuffix = string.IsNullOrWhiteSpace(team.Label)
+                        ? ""
+                        : $" — {System.Net.WebUtility.HtmlEncode(team.Label)}";
+                    html.AppendLine($"<h3>Skjutlag: {team.TeamNumber}{labelSuffix} Tid (ca): {team.StartTime}-{team.EndTime}");
 
                     if (config.Settings?.Format == "En vapengrupp per Skjutlag" && team.WeaponClasses.Any())
                     {

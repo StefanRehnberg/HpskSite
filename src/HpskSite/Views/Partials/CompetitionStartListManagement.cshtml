@@ -492,7 +492,7 @@
                 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
                     <div class="d-flex flex-wrap gap-2">
                         <button type="button" class="btn btn-primary btn-sm" onclick="openCreateTeamModal()">
-                            <i class="bi bi-plus-circle me-1"></i><span class="d-none d-sm-inline">Skapa Lag</span><span class="d-sm-none">Lag</span>
+                            <i class="bi bi-plus-circle me-1"></i><span class="d-none d-sm-inline">Skapa Skjutlag</span><span class="d-sm-none">Skjutlag</span>
                         </button>
                     </div>
                     <div class="d-flex flex-wrap align-items-center gap-2">
@@ -541,7 +541,7 @@
 
                     <!-- No Teams Message -->
                     <div id="noTeamsMessage" class="alert alert-info d-none">
-                        <i class="bi bi-info-circle me-2"></i>Inga lag finns ännu. Klicka "Skapa Lag" för att börja.
+                        <i class="bi bi-info-circle me-2"></i>Inga skjutlag finns ännu. Klicka "Skapa Skjutlag" för att börja.
                     </div>
                 </div>
             </div>
@@ -645,7 +645,7 @@
 
                     <!-- Team Selection -->
                     <div class="mb-3">
-                        <label for="targetTeam" class="form-label">Välj Lag:</label>
+                        <label for="targetTeam" class="form-label">Välj Skjutlag:</label>
                         <select class="form-select" id="targetTeam" required>
                             <option value="">-- Välj lag --</option>
                         </select>
@@ -702,7 +702,7 @@
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
                 <button type="button" class="btn btn-primary" onclick="confirmCreateTeam()">
-                    <i class="bi bi-check-circle me-1"></i>Skapa Lag
+                    <i class="bi bi-check-circle me-1"></i>Skapa Skjutlag
                 </button>
             </div>
         </div>
@@ -717,12 +717,18 @@
         <div class="modal-content">
             <div class="modal-header bg-primary text-white">
                 <h5 class="modal-title" id="editTeamTimesModalLabel">
-                    <i class="bi bi-clock me-2"></i>Redigera Lagtider
+                    <i class="bi bi-pencil-square me-2"></i>Redigera skjutlag
                 </h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-                <p class="text-muted">Redigera start- och sluttid för lag <strong id="editTeamNumber"></strong></p>
+                <p class="text-muted">Redigera skjutlag <strong id="editTeamNumber"></strong></p>
+
+                <div class="mb-3">
+                    <label for="editTeamLabel" class="form-label">Namn / dag (valfritt):</label>
+                    <input type="text" class="form-control" id="editTeamLabel" maxlength="100" placeholder="T.ex. Lördag fm">
+                    <div class="form-text">Visas efter skjutlagsnumret, t.ex. "Skjutlag 1 — Lördag fm".</div>
+                </div>
 
                 <div class="mb-3">
                     <label for="editTeamStartTime" class="form-label">Starttid:</label>
@@ -746,6 +752,16 @@
 
 <script>
 // Start List Management JavaScript
+
+// Tiny HTML escaper for user-supplied label text rendered inside template literals.
+function escapeHtmlInline(s) {
+    return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
 
 // Global state to track if a published start list exists
 let hasPublishedStartList = false;
@@ -1714,20 +1730,22 @@ function createTeamCard(team, index, isOfficial) {
         shootersHtml = '<p class="text-muted p-3 mb-0 text-center"><i>Inga skyttar i detta lag</i></p>';
     }
 
+    // Same dual-casing pattern as shooter.club above — server JSON can land as camelCase OR PascalCase.
+    const teamLabel = team.label || team.Label || '';
     return `
         <div class="card mb-3 team-card" data-team-number="${team.teamNumber}">
             <div class="card-header py-2">
                 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
                     <div>
-                        <h6 class="mb-0 d-inline"><strong>Lag ${team.teamNumber}</strong></h6>
+                        <h6 class="mb-0 d-inline"><strong>Skjutlag ${team.teamNumber}${teamLabel ? ' — ' + escapeHtmlInline(teamLabel) : ''}</strong></h6>
                         <span class="badge bg-secondary ms-2">${shooterCount} skyttar</span>
                     </div>
                     <div class="d-flex align-items-center gap-2">
                         <span class="badge team-time-badge">${team.startTime} - ${team.endTime}</span>
                         <button class="btn btn-sm btn-outline-primary py-0 px-1"
                                 onclick="openEditTeamTimesModal(${window.currentStartListId}, ${team.teamNumber}, '${team.startTime}', '${team.endTime}')"
-                                title="Redigera tider">
-                            <i class="bi bi-clock"></i>
+                                title="Redigera skjutlag (namn och tider)">
+                            <i class="bi bi-pencil-square"></i>
                         </button>
                         <button class="btn btn-sm btn-outline-danger py-0 px-1"
                                 onclick="deleteTeam(${team.teamNumber})"
@@ -1797,10 +1815,12 @@ function openMoveShootersModal() {
 
     // Populate team select (exclude teams that all selected shooters are already in)
     const teamSelect = document.getElementById('moveTargetTeamSelect');
-    teamSelect.innerHTML = '<option value="">-- Välj lag --</option>';
+    teamSelect.innerHTML = '<option value="">-- Välj skjutlag --</option>';
     if (currentStartListConfig && currentStartListConfig.teams) {
         currentStartListConfig.teams.forEach(team => {
-            teamSelect.innerHTML += `<option value="${team.teamNumber}">Lag ${team.teamNumber} (${team.startTime})</option>`;
+            const lbl = team.label || team.Label || '';
+            const labelSuffix = lbl ? ' — ' + lbl : '';
+            teamSelect.appendChild(new Option(`Skjutlag ${team.teamNumber}${labelSuffix} (${team.startTime})`, String(team.teamNumber)));
         });
     }
 
@@ -1817,11 +1837,13 @@ function openMoveShooterModal(memberId, name, currentTeam) {
 
     // Populate team select excluding current team
     const teamSelect = document.getElementById('moveTargetTeamSelect');
-    teamSelect.innerHTML = '<option value="">-- Välj lag --</option>';
+    teamSelect.innerHTML = '<option value="">-- Välj skjutlag --</option>';
     if (currentStartListConfig && currentStartListConfig.teams) {
         currentStartListConfig.teams.forEach(team => {
             if (team.teamNumber !== currentTeam) {
-                teamSelect.innerHTML += `<option value="${team.teamNumber}">Lag ${team.teamNumber} (${team.startTime})</option>`;
+                const lbl = team.label || team.Label || '';
+                const labelSuffix = lbl ? ' — ' + lbl : '';
+                teamSelect.appendChild(new Option(`Skjutlag ${team.teamNumber}${labelSuffix} (${team.startTime})`, String(team.teamNumber)));
             }
         });
     }
@@ -1954,7 +1976,7 @@ function confirmUpdateWeaponClass() {
 // Delete team
 function deleteTeam(teamNumber) {
     if (!confirmIfResultsExist('Ta bort skjutlag')) return;
-    if (!confirm(`Är du säker på att du vill ta bort Lag ${teamNumber}?\n\nOBS: Laget måste vara tomt.`)) {
+    if (!confirm(`Är du säker på att du vill ta bort Skjutlag ${teamNumber}?\n\nOBS: Skjutlaget måste vara tomt.`)) {
         return;
     }
 
@@ -2080,10 +2102,12 @@ function openAddShooterModal() {
 
     // Populate team dropdown
     const teamSelect = document.getElementById('targetTeam');
-    teamSelect.innerHTML = '<option value="">-- Välj lag --</option>';
+    teamSelect.innerHTML = '<option value="">-- Välj skjutlag --</option>';
     if (currentStartListConfig && currentStartListConfig.teams) {
         currentStartListConfig.teams.forEach(team => {
-            teamSelect.innerHTML += `<option value="${team.teamNumber}">Lag ${team.teamNumber} (${team.startTime} - ${team.endTime})</option>`;
+            const lbl = team.label || team.Label || '';
+            const labelSuffix = lbl ? ' — ' + lbl : '';
+            teamSelect.appendChild(new Option(`Skjutlag ${team.teamNumber}${labelSuffix} (${team.startTime} - ${team.endTime})`, String(team.teamNumber)));
         });
     }
 
@@ -2348,8 +2372,17 @@ function openEditTeamTimesModal(startListId, teamNumber, currentStart, currentEn
         editTeamTimesModal = new bootstrap.Modal(document.getElementById('editTeamTimesModal'));
     }
 
+    // Look up the current label from the in-memory config (avoids HTML-attribute
+    // escaping headaches that come with passing freeform text via onclick=).
+    let currentLabel = '';
+    if (currentStartListConfig && Array.isArray(currentStartListConfig.teams)) {
+        const t = currentStartListConfig.teams.find(x => (x.teamNumber || x.TeamNumber) === teamNumber);
+        if (t) currentLabel = t.label || t.Label || '';
+    }
+
     // Set current values
     document.getElementById('editTeamNumber').textContent = teamNumber;
+    document.getElementById('editTeamLabel').value = currentLabel;
     document.getElementById('editTeamStartTime').value = currentStart;
     document.getElementById('editTeamEndTime').value = currentEnd;
 
@@ -2398,13 +2431,14 @@ function confirmUpdateTeamTimes() {
             startListId: window.currentStartListId,
             teamNumber: currentEditTeamNumber,
             startTime: startTime,
-            endTime: endTime
+            endTime: endTime,
+            label: document.getElementById('editTeamLabel').value || ''
         })
     })
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            showAlert('success', data.message || 'Lagets tider har uppdaterats.');
+            showAlert('success', data.message || 'Skjutlaget har uppdaterats.');
             editorHasChanges = true;  // Mark that changes were made
             editTeamTimesModal.hide();
             loadStartListForEditing(window.currentStartListId);

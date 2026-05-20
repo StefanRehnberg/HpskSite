@@ -242,9 +242,10 @@
             var allDone = done >= total && total > 0;
             var timeStr = p.startTime ? new Date(p.startTime).toLocaleTimeString('sv-SE', { hour:'2-digit', minute:'2-digit' }) : '';
 
+            var lbl = p.label ? ' — ' + p.label.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : '';
             html += '<div class="card mb-2 fse-patrol-row' + (allDone ? ' border-success' : '') + '" onclick="fseSelectPatrol(' + p.patrolNumber + ')">' +
                 '<div class="card-body py-3 d-flex align-items-center justify-content-between">' +
-                '<div><strong class="fs-5">Patrull ' + p.patrolNumber + '</strong>' +
+                '<div><strong class="fs-5">Patrull ' + p.patrolNumber + lbl + '</strong>' +
                 '<span class="badge bg-info ms-2">' + (p.weaponGroup || '') + '</span>' +
                 (timeStr ? '<span class="text-muted ms-2">' + timeStr + '</span>' : '') +
                 '<span class="text-muted ms-2 small">' + total + ' skyttar</span></div>' +
@@ -286,7 +287,7 @@
 
         // Show roll call screen
         document.getElementById('fseRcStationLabel').textContent = 'Station ' + stationData.stationNumber;
-        document.getElementById('fseRcPatrolLabel').textContent = 'Patrull ' + currentPatrol.patrolNumber;
+        document.getElementById('fseRcPatrolLabel').textContent = 'Patrull ' + currentPatrol.patrolNumber + (currentPatrol.label ? ' — ' + currentPatrol.label : '');
 
         // Render Förutsättningar on roll call screen
         var wcCfg = stationData.weaponClassStations?.[currentPatrolWc] || Object.values(stationData.weaponClassStations || {})[0];
@@ -342,7 +343,7 @@
             currentShooterIdx++;
 
         document.getElementById('fseStationLabel').textContent = 'Station ' + stationData.stationNumber;
-        document.getElementById('fsePatrolLabel').textContent = 'Patrull ' + currentPatrol.patrolNumber;
+        document.getElementById('fsePatrolLabel').textContent = 'Patrull ' + currentPatrol.patrolNumber + (currentPatrol.label ? ' — ' + currentPatrol.label : '');
         fseApplySelfServiceUi();
 
         document.getElementById('fseRollCallScreen').style.display = 'none';

@@ -1675,7 +1675,7 @@ function updateShooterDisplay() {
 
     let displayText = `${currentShooterIndex + 1}/${shootersData.length}: ${shooter.name}`;
     if (currentEntryOrder === 'startlist' && shooter.teamNumber) {
-        displayText += ` (Lag ${shooter.teamNumber})`;
+        displayText += ` (Skjutlag ${shooter.teamNumber})`;
     }
 
     shooterInfoEl.textContent = displayText;

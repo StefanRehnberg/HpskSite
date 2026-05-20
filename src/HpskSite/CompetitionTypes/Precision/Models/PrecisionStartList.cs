@@ -122,6 +122,7 @@ namespace HpskSite.CompetitionTypes.Precision.Models
         public int TeamNumber { get; set; }
         public string StartTime { get; set; } = "";
         public string EndTime { get; set; } = "";
+        public string Label { get; set; } = "";
         public List<string> WeaponClasses { get; set; } = new List<string>();
         public int ShooterCount { get; set; }
         public List<StartListShooter>? Shooters { get; set; }

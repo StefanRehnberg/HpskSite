@@ -270,7 +270,9 @@
             <div class="d-grid gap-2 col-md-6 mx-auto">
                 @foreach (var p in selfServicePatrols)
                 {
-                    var label = $"Patrull {p.PatrolNumber}" + (string.IsNullOrEmpty(p.WeaponGroup) ? "" : $" ({p.WeaponGroup})");
+                    var label = $"Patrull {p.PatrolNumber}"
+                        + (string.IsNullOrEmpty(p.Label) ? "" : $" — {p.Label}")
+                        + (string.IsNullOrEmpty(p.WeaponGroup) ? "" : $" ({p.WeaponGroup})");
                     var href = $"/station?c={competitionId}&s={stationNumber}&p={p.Id}";
                     <a class="btn btn-primary btn-lg" href="@href" data-faltselfservice-pick="@p.Id"><i class="bi bi-arrow-right me-1"></i>@label</a>
                 }

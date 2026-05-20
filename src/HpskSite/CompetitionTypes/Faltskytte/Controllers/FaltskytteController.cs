@@ -2037,6 +2037,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 PatrolNumber = p.PatrolNumber,
                 StartTime = p.StartTime,
                 WeaponGroup = p.WeaponGroup,
+                Label = p.Label,
                 Members = allMembers.Where(m => m.PatrolId == p.Id)
                     .Select(m => new FaltskyttePatrolMemberView
                     {
@@ -2462,8 +2463,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
 
             using var db = _umbracoDatabaseFactory.CreateDatabase();
             await db.ExecuteAsync(
-                "UPDATE FaltskyttePatrol SET StartTime = @0 WHERE Id = @1 AND CompetitionId = @2",
-                request.StartTime, request.PatrolId, request.CompetitionId);
+                "UPDATE FaltskyttePatrol SET StartTime = @0, Label = @1 WHERE Id = @2 AND CompetitionId = @3",
+                request.StartTime,
+                string.IsNullOrWhiteSpace(request.Label) ? null : request.Label.Trim(),
+                request.PatrolId,
+                request.CompetitionId);
 
             return Json(new { success = true });
         }
@@ -2587,6 +2591,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 patrolNumber = p.PatrolNumber,
                 startTime = p.StartTime,
                 weaponGroup = p.WeaponGroup,
+                label = p.Label,
                 members = allMembers.Where(m => m.PatrolId == p.Id)
                     .Select(m => new {
                         name = m.MemberName,

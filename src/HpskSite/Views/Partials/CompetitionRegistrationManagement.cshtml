@@ -2111,8 +2111,9 @@ async function refreshWalkInPatrolOptions() {
             // Highest-numbered first matches "Nästa lediga" intuition (most recent, likely still open).
             data.patrols.slice().sort((a, b) => b.patrolNumber - a.patrolNumber).forEach(p => {
                 const wg = p.weaponGroup ? ` · ${p.weaponGroup}` : '';
+                const lbl = p.label ? ` — ${p.label}` : '';
                 const count = (p.members || []).length;
-                const opt = new Option(`Patrull ${p.patrolNumber}${wg} (${count} skyttar)`, String(p.patrolId));
+                const opt = new Option(`Patrull ${p.patrolNumber}${lbl}${wg} (${count} skyttar)`, String(p.patrolId));
                 select.add(opt);
             });
         }

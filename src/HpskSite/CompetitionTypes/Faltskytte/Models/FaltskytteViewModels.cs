@@ -93,6 +93,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public int CompetitionId { get; set; }
         public int PatrolId { get; set; }
         public DateTime? StartTime { get; set; }
+        public string? Label { get; set; }
     }
 
     public class PublishPatrolListRequest
@@ -209,6 +210,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public int PatrolNumber { get; set; }
         public DateTime? StartTime { get; set; }
         public string? WeaponGroup { get; set; }
+        public string? Label { get; set; }
         public List<FaltskyttePatrolMemberView> Members { get; set; } = new();
         /// <summary>How many members have results entered at the queried station</summary>
         public int CompletedCount { get; set; }

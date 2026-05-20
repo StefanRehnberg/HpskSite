@@ -1277,6 +1277,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 // Update times
                 team.StartTime = request.StartTime;
                 team.EndTime = request.EndTime;
+                team.Label = request.Label ?? "";
 
                 // Sort teams by start time and renumber them
                 // Teams should always be ordered from first start to last, with Skjutlag 1 being the first to start
@@ -1308,7 +1309,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 {
                     // Publish to make changes visible on frontend
                     _contentService.Publish(startList, new[] { "*" }, -1);
-                    return Json(new { success = true, message = "Lagets tider har uppdaterats och lagen har sorterats om." });
+                    return Json(new { success = true, message = "Skjutlaget har uppdaterats och skjutlagen har sorterats om." });
                 }
                 else
                 {
@@ -2655,6 +2656,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         public int TeamNumber { get; set; }
         public string StartTime { get; set; } = "";
         public string EndTime { get; set; } = "";
+        public string? Label { get; set; }
     }
 
     public class MoveShooterRequest
