@@ -97,7 +97,7 @@
                         <div class="row">
                             <div class="col-md-6">
                                 <div class="mb-3">
-                                    <label for="wizard_clubId" class="form-label">Ansvarig klubb</label>
+                                    <label for="wizard_clubId" class="form-label">Ansvarig klubb <span class="text-danger">*</span></label>
                                     <select class="form-select" id="wizard_clubId" name="clubId" onchange="onWizardClubChange()">
                                         <option value="">-- Ingen klubb --</option>
                                     </select>
@@ -105,12 +105,15 @@
                             </div>
                             <div class="col-md-6">
                                 <div class="mb-3">
-                                    <label for="wizard_regionalFederation" class="form-label">Krets (endast om ingen klubb)</label>
+                                    <label for="wizard_regionalFederation" class="form-label">Krets (endast om ingen klubb) <span class="text-danger">*</span></label>
                                     <select class="form-select" id="wizard_regionalFederation" name="regionalFederation" onchange="onWizardRegionChange()">
                                         <option value="">-- Ingen krets --</option>
                                     </select>
                                 </div>
                             </div>
+                        </div>
+                        <div class="form-text text-muted small mb-3" style="margin-top:-0.5rem">
+                            Välj minst ett av: klubb, krets eller mästerskapstyp (Avancerat-steget). Behövs för att tävlingen ska få en lättläst URL.
                         </div>
 
                         <div class="alert alert-warning py-2 d-none" id="wizard_clubMismatchWarning">
@@ -1461,7 +1464,26 @@ function onWizardClubChange() {
         helpText.classList.add('alert-light');
     }
 
+    syncWizardClubOnlyAvailability();
     updateWizardMismatchWarning();
+}
+
+// "Endast för vald klubb" only makes sense when an actual club is selected.
+// With no club, the visibility filter (clubId == myClub) would hide the comp
+// everywhere — so we force-uncheck and disable the checkbox in that state.
+function syncWizardClubOnlyAvailability() {
+    const clubSelect = document.getElementById('wizard_clubId');
+    const cb = document.getElementById('wizard_isClubOnly');
+    if (!cb) return;
+    const hasClub = !!(clubSelect && clubSelect.value);
+    if (!hasClub) {
+        if (cb.checked) cb.checked = false;
+        cb.disabled = true;
+        // Cascade so standardmedal checkbox is re-enabled when isClubOnly is forced off.
+        onWizardIsClubOnlyChange();
+    } else {
+        cb.disabled = false;
+    }
 }
 
 // Handle region selection change
@@ -1479,6 +1501,7 @@ function onWizardRegionChange() {
         helpText.classList.add('alert-light');
     }
 
+    syncWizardClubOnlyAvailability();
     updateWizardMismatchWarning();
 }
 
@@ -1923,6 +1946,21 @@ function submitWizard() {
     }
     wizardCurrentStep = 6; // Restore to last step
 
+    // "Pick at least one" — clubId OR regionalFederation OR competitionScope must be set.
+    // Without any of them the URL provider can't produce a pretty URL (the competition
+    // would render under the legacy /competitions/{series}/{comp}/ shape).
+    const clubIdVal = (document.getElementById('wizard_clubId')?.value || '').trim();
+    const regFedVal = (document.getElementById('wizard_regionalFederation')?.value || '').trim();
+    const scopeVal = (document.getElementById('wizard_competitionScope')?.value || '').trim();
+    const hasClub = clubIdVal !== '' && parseInt(clubIdVal, 10) > 0;
+    if (!hasClub && !regFedVal && !scopeVal) {
+        // Jump back to Step 1 where the Klubb/Krets fields live, then alert.
+        wizardCurrentStep = 1;
+        updateWizardUI();
+        alert('Välj antingen ansvarig klubb, krets eller mästerskapstyp (Avancerat-steget) — annars går det inte att skapa en lättläst URL för tävlingen.');
+        return;
+    }
+
     // Temporarily enable disabled fields so FormData includes them
     const disabledFields = document.querySelectorAll('#competitionWizardForm :disabled');
     disabledFields.forEach(f => f.disabled = false);
@@ -2116,6 +2154,8 @@ window.resetWizard = function() {
         document.getElementById('wizard_isClubOnly').checked = true;
     }
     onWizardIsClubOnlyChange();
+    // Disable the checkbox when no club is selected (e.g. region-hosted or national comp).
+    syncWizardClubOnlyAvailability();
 
     // Reset Egenbokning section
     document.getElementById('wizard_enableDirektplacering').checked = false;

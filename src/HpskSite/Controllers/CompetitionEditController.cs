@@ -237,6 +237,22 @@ namespace HpskSite.Controllers
                     });
                 }
 
+                // Soft URL-correctness guard: at least one of clubId / regionalFederation /
+                // competitionScope must be set so CompetitionUrlProvider can produce a clean URL.
+                // For fields not present in the request, fall back to the existing content value
+                // (a partial-update client must not be able to leave the node in a no-URL state).
+                int hostClubId = ReadFieldOrContentAsInt(request.Fields, "clubId", content);
+                string hostRegFed = ReadFieldOrContentAsString(request.Fields, "regionalFederation", content);
+                string hostScope = ReadFieldOrContentAsString(request.Fields, "competitionScope", content);
+                if (hostClubId <= 0 && string.IsNullOrWhiteSpace(hostRegFed) && string.IsNullOrWhiteSpace(hostScope))
+                {
+                    return Ok(new
+                    {
+                        success = false,
+                        message = "Välj antingen ansvarig klubb, krets eller mästerskapstyp — annars går det inte att skapa en lättläst URL för tävlingen."
+                    });
+                }
+
                 // Route to type-specific save logic
                 var result = await RouteToTypeSpecificSave(request, content);
 
@@ -255,6 +271,48 @@ namespace HpskSite.Controllers
                     error = ex.Message
                 });
             }
+        }
+
+        /// <summary>
+        /// Read a field from the request Fields dict as an int; falls back to the content
+        /// node's stored value when the key isn't in the request (partial-update safety).
+        /// Handles JsonElement (System.Text.Json shape), boxed int, and string forms.
+        /// </summary>
+        private static int ReadFieldOrContentAsInt(Dictionary<string, object>? fields, string key, Umbraco.Cms.Core.Models.IContent content)
+        {
+            if (fields != null && fields.TryGetValue(key, out var obj) && obj != null)
+            {
+                if (obj is System.Text.Json.JsonElement je)
+                {
+                    if (je.ValueKind == System.Text.Json.JsonValueKind.Number && je.TryGetInt32(out var n)) return n;
+                    if (je.ValueKind == System.Text.Json.JsonValueKind.String && int.TryParse(je.GetString(), out var s)) return s;
+                    // Field is present but null/empty → treat as cleared (return 0, do not fall back).
+                    return 0;
+                }
+                if (obj is int direct) return direct;
+                return int.TryParse(obj.ToString(), out var parsed) ? parsed : 0;
+            }
+            // Field absent from request → keep existing content value.
+            return content.GetValue<int?>(key) ?? 0;
+        }
+
+        /// <summary>
+        /// Read a field from the request Fields dict as a trimmed string; falls back to the
+        /// content node's stored value when the key isn't in the request.
+        /// </summary>
+        private static string ReadFieldOrContentAsString(Dictionary<string, object>? fields, string key, Umbraco.Cms.Core.Models.IContent content)
+        {
+            if (fields != null && fields.TryGetValue(key, out var obj) && obj != null)
+            {
+                if (obj is System.Text.Json.JsonElement je)
+                {
+                    if (je.ValueKind == System.Text.Json.JsonValueKind.Null || je.ValueKind == System.Text.Json.JsonValueKind.Undefined) return string.Empty;
+                    if (je.ValueKind == System.Text.Json.JsonValueKind.String) return (je.GetString() ?? string.Empty).Trim();
+                    return je.ToString().Trim();
+                }
+                return (obj.ToString() ?? string.Empty).Trim();
+            }
+            return (content.GetValue<string>(key) ?? string.Empty).Trim();
         }
 
         /// <summary>

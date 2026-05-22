@@ -827,6 +827,17 @@ namespace HpskSite.Controllers
 
                 string competitionName = nameObj.ToString()!;
 
+                // Soft URL-correctness guard: at least one of clubId / regionalFederation /
+                // competitionScope must be set so CompetitionUrlProvider can produce a clean
+                // URL. Mirrors the wizard's client-side check; a buggy/old client cannot bypass it.
+                int _hostClubId = ReadFieldAsInt(request.Fields, "clubId");
+                string _hostRegFed = ReadFieldAsString(request.Fields, "regionalFederation");
+                string _hostScope = ReadFieldAsString(request.Fields, "competitionScope");
+                if (_hostClubId <= 0 && string.IsNullOrWhiteSpace(_hostRegFed) && string.IsNullOrWhiteSpace(_hostScope))
+                {
+                    return Ok(new { success = false, message = "Välj antingen ansvarig klubb, krets eller mästerskapstyp — annars går det inte att skapa en lättläst URL för tävlingen." });
+                }
+
                 if (!request.Fields.TryGetValue("competitionType", out var typeIdObj) || typeIdObj == null)
                 {
                     return Ok(new { success = false, message = "Competition type is required" });
@@ -3415,6 +3426,40 @@ namespace HpskSite.Controllers
             {
                 return Ok(new { success = false, message = "Error uploading file: " + ex.Message });
             }
+        }
+
+        /// <summary>
+        /// Read a field from the request Fields dict as an int. Handles JsonElement
+        /// (the System.Text.Json deserialization shape), boxed int, and string forms.
+        /// Returns 0 when missing/unparseable.
+        /// </summary>
+        private static int ReadFieldAsInt(Dictionary<string, object>? fields, string key)
+        {
+            if (fields == null || !fields.TryGetValue(key, out var obj) || obj == null) return 0;
+            if (obj is System.Text.Json.JsonElement je)
+            {
+                if (je.ValueKind == System.Text.Json.JsonValueKind.Number && je.TryGetInt32(out var n)) return n;
+                if (je.ValueKind == System.Text.Json.JsonValueKind.String && int.TryParse(je.GetString(), out var s)) return s;
+                return 0;
+            }
+            if (obj is int direct) return direct;
+            return int.TryParse(obj.ToString(), out var parsed) ? parsed : 0;
+        }
+
+        /// <summary>
+        /// Read a field from the request Fields dict as a trimmed string. Returns empty
+        /// when missing/null/JsonElement.Null.
+        /// </summary>
+        private static string ReadFieldAsString(Dictionary<string, object>? fields, string key)
+        {
+            if (fields == null || !fields.TryGetValue(key, out var obj) || obj == null) return string.Empty;
+            if (obj is System.Text.Json.JsonElement je)
+            {
+                if (je.ValueKind == System.Text.Json.JsonValueKind.Null || je.ValueKind == System.Text.Json.JsonValueKind.Undefined) return string.Empty;
+                if (je.ValueKind == System.Text.Json.JsonValueKind.String) return (je.GetString() ?? string.Empty).Trim();
+                return je.ToString().Trim();
+            }
+            return (obj.ToString() ?? string.Empty).Trim();
         }
     }
 

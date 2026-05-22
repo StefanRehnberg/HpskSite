@@ -1232,6 +1232,26 @@ function saveCompetition() {
     }
     fpInputs.forEach(i => i.disabled = false);
 
+    // Soft "at-least-one" check: clubId, regionalFederation, or competitionScope must
+    // be set so CompetitionUrlProvider can produce a clean URL. The wizard mutex is
+    // UI-only (a club selection disables the regionalFederation dropdown), so we check
+    // disabled state on regionalFederation the same way the field-collection logic does.
+    const _clubIdVal = parseInt(document.getElementById('clubId')?.value || '0', 10);
+    const _regSel = document.getElementById('regionalFederation');
+    const _regFedVal = _regSel && !_regSel.disabled ? (_regSel.value || '').trim() : '';
+    const _scopeVal = (document.getElementById('competitionScope')?.value || '').trim();
+    if (_clubIdVal <= 0 && !_regFedVal && !_scopeVal) {
+        const errorList = document.getElementById('errorList');
+        errorList.innerHTML = '';
+        const li = document.createElement('li');
+        li.textContent = 'Välj antingen ansvarig klubb, krets eller mästerskapstyp — annars går det inte att skapa en lättläst URL för tävlingen.';
+        errorList.appendChild(li);
+        const errDiv = document.getElementById('editFormErrors');
+        errDiv.classList.remove('d-none');
+        errDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        return;
+    }
+
     // Sync rolling start JSON before collecting form data
     var rsCheckbox = document.getElementById('edit_rollingStartEnabled');
     var rsHidden = document.getElementById('edit_rollingStart');
@@ -1550,6 +1570,8 @@ function loadClubsForSelector() {
 
                 // Update organizer UI based on club selection
                 updateEditOrganizerUI();
+                // Re-evaluate "Endast för vald klubb" now that the club value is in place.
+                syncEditClubOnlyAvailability();
             } else if (data.success && clubs.length === 0) {
                 helpText.textContent = 'Inga klubbar finns registrerade';
                 helpText.classList.add('text-warning');
@@ -1629,13 +1651,33 @@ function onEditClubChange() {
     if (document.getElementById('clubId').value) {
         regionSelect.value = '';
     }
+    syncEditClubOnlyAvailability();
     updateEditOrganizerUI();
     updateEditMismatchWarning();
 }
 
 // Handle region selection change
 function onEditRegionChange() {
+    syncEditClubOnlyAvailability();
     updateEditMismatchWarning();
+}
+
+// "Endast för vald klubb" only makes sense when an actual club is selected.
+// With no club, the visibility filter (clubId == myClub) would hide the comp
+// everywhere — so we force-uncheck and disable the checkbox in that state.
+function syncEditClubOnlyAvailability() {
+    const clubSelect = document.getElementById('clubId');
+    const cb = document.getElementById('isClubOnly');
+    if (!cb) return;
+    const hasClub = !!(clubSelect && clubSelect.value);
+    if (!hasClub) {
+        if (cb.checked) cb.checked = false;
+        cb.disabled = true;
+        // Cascade so standardmedal checkbox is re-enabled when isClubOnly is forced off.
+        onEditIsClubOnlyChange();
+    } else {
+        cb.disabled = false;
+    }
 }
 
 // Show/hide mismatch warning based on club/region changes
