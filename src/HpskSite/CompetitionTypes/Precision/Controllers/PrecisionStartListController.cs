@@ -35,6 +35,9 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         private readonly StartListGenerator _generator;
         private readonly StartListHtmlRenderer _renderer;
         private readonly ClubService _clubService;
+        private readonly PrecisionFinalsQualificationService _finalsQualificationService;
+        private readonly PrecisionQualifyingResultsService _qualifyingResultsService;
+        private readonly PrecisionFinalsStartListBuilder _finalsBuilder;
 
         public PrecisionStartListController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -53,7 +56,10 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
             UmbracoStartListRepository repository,
             StartListGenerator generator,
             StartListHtmlRenderer renderer,
-            ClubService clubService)
+            ClubService clubService,
+            PrecisionFinalsQualificationService finalsQualificationService,
+            PrecisionQualifyingResultsService qualifyingResultsService,
+            PrecisionFinalsStartListBuilder finalsBuilder)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _memberManager = memberManager;
@@ -68,6 +74,9 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
             _generator = generator;
             _renderer = renderer;
             _clubService = clubService;
+            _finalsQualificationService = finalsQualificationService;
+            _qualifyingResultsService = qualifyingResultsService;
+            _finalsBuilder = finalsBuilder;
         }
 
         [HttpGet]
@@ -672,7 +681,11 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 }
 
                 var configuration = JsonConvert.DeserializeObject<StartListConfiguration>(configData);
-                var isOfficial = startList.GetValue<bool>("isOfficialStartList");
+                // Branch on doctype so the shared editor's "Officiell" banner works for finals
+                // too — finalsStartList uses isOfficialFinalsStartList, not isOfficialStartList.
+                var isOfficial = startList.ContentType.Alias == "finalsStartList"
+                    ? startList.GetValue<bool>("isOfficialFinalsStartList")
+                    : startList.GetValue<bool>("isOfficialStartList");
 
                 return Json(new
                 {
@@ -1441,6 +1454,84 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         }
 
         /// <summary>
+        /// Move a shooter up or down by one position within their current team.
+        /// Direction is "up" or "down". No-op if already at the boundary.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> MoveShooterPosition([FromBody] MoveShooterPositionRequest request)
+        {
+            try
+            {
+                if (request.StartListId <= 0 || request.MemberId <= 0 || string.IsNullOrWhiteSpace(request.Direction))
+                    return Json(new { success = false, message = "Ogiltiga parametrar." });
+
+                var direction = request.Direction.Trim().ToLowerInvariant();
+                if (direction != "up" && direction != "down")
+                    return Json(new { success = false, message = "Ogiltig riktning." });
+
+                var startList = _contentService.GetById(request.StartListId);
+                if (startList == null)
+                    return Json(new { success = false, message = "Startlistan kunde inte hittas." });
+
+                var configData = startList.GetValue<string>("configurationData");
+                var configuration = JsonConvert.DeserializeObject<StartListConfiguration>(configData);
+                if (configuration?.Teams == null)
+                    return Json(new { success = false, message = "Startlistan har ingen konfigurationsdata." });
+
+                // Locate the shooter and their team.
+                StartListTeam? team = null;
+                int currentIndex = -1;
+                foreach (var t in configuration.Teams)
+                {
+                    if (t.Shooters == null) continue;
+                    var idx = t.Shooters.FindIndex(s => s.MemberId == request.MemberId);
+                    if (idx >= 0)
+                    {
+                        team = t;
+                        currentIndex = idx;
+                        break;
+                    }
+                }
+
+                if (team == null || team.Shooters == null || currentIndex < 0)
+                    return Json(new { success = false, message = "Skyttan kunde inte hittas i startlistan." });
+
+                var newIndex = direction == "up" ? currentIndex - 1 : currentIndex + 1;
+                if (newIndex < 0 || newIndex >= team.Shooters.Count)
+                    return Json(new { success = false, message = "Skyttan kan inte flyttas längre." });
+
+                // Swap the two shooters in the list, then renumber the whole team's positions.
+                var shooter = team.Shooters[currentIndex];
+                team.Shooters.RemoveAt(currentIndex);
+                team.Shooters.Insert(newIndex, shooter);
+                for (int i = 0; i < team.Shooters.Count; i++)
+                    team.Shooters[i].Position = i + 1;
+
+                // Save and regenerate cached HTML — same pattern as MoveShooterToTeam.
+                var competitionId = startList.GetValue<int>("competitionId");
+                var competition = _contentService.GetById(competitionId);
+                var competitionName = competition?.Name ?? "Okänd tävling";
+
+                startList.SetValue("configurationData", JsonConvert.SerializeObject(configuration));
+                var htmlContent = await _renderer.GenerateStartListHtml(configuration, competitionName);
+                startList.SetValue("startListContent", htmlContent);
+
+                var result = _contentService.Save(startList);
+                if (!result.Success)
+                    return Json(new { success = false, message = "Kunde inte spara startlistan." });
+                _contentService.Publish(startList, new[] { "*" }, -1);
+
+                return Json(new { success = true, message = $"Skyttan har flyttats {(direction == "up" ? "upp" : "ner")}." });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error moving shooter {MemberId} {Direction} in start list {StartListId}", request.MemberId, request.Direction, request.StartListId);
+                return Json(new { success = false, message = "Ett oväntat fel uppstod." });
+            }
+        }
+
+        /// <summary>
         /// Move multiple shooters to a different team
         /// </summary>
         [HttpPost]
@@ -1888,12 +1979,9 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 // Get shooter information
                 var shooterInfo = await GetShooterInfoDictionary(competitionId);
 
-                // Calculate qualifiers
+                // Calculate qualifiers (uses DI-registered singleton, no manual logger construction)
                 var maxShootersPerTeam = competition.GetValue<int>("numberOfSeriesOrStations");
-                var loggerFactory = HttpContext.RequestServices.GetService(typeof(ILoggerFactory)) as ILoggerFactory;
-                var finalsLogger = loggerFactory?.CreateLogger<PrecisionFinalsQualificationService>();
-                var finalsService = new PrecisionFinalsQualificationService(finalsLogger!);
-                var qualificationViewModel = finalsService.CalculateQualifiers(
+                var qualificationViewModel = _finalsQualificationService.CalculateQualifiers(
                     qualificationResults,
                     shooterInfo,
                     maxShootersPerTeam
@@ -1928,7 +2016,10 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         }
 
         /// <summary>
-        /// Generate and save finals start list
+        /// Generate and save the finals start list. Workflow gate: requires a published
+        /// qualifying-results snapshot (created via PublishQualifyingResults). The
+        /// per-class configuration on the finalsStartList node controls which championship
+        /// classes get their own final, merge into the C-family, or are skipped.
         /// </summary>
         [HttpPost]
         public async Task<IActionResult> GenerateFinalsStartList([FromBody] GenerateFinalsStartListRequest request)
@@ -1946,67 +2037,88 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     return Json(new { Success = false, Message = "Tävlingen hittades inte." });
                 }
 
-                // Get current user
+                // Authorization
                 var currentMember = await _memberManager.GetCurrentMemberAsync();
-                var generatedBy = request.GeneratedBy ?? currentMember?.Name ?? "Unknown";
+                if (currentMember == null)
+                    return Json(new { Success = false, Message = "Du måste vara inloggad." });
+                var memberData = _memberService.GetByEmail(currentMember.Email ?? string.Empty);
+                if (memberData == null || !await _validator.CanManageCompetition(memberData.Id, request.CompetitionId))
+                    return Json(new { Success = false, Message = "Du har inte behörighet att hantera denna tävling." });
 
-                // Calculate qualifiers
-                var qualificationResults = await GetQualificationResults(request.CompetitionId);
-                var shooterInfo = await GetShooterInfoDictionary(request.CompetitionId);
-                
-                var loggerFactory = HttpContext.RequestServices.GetService(typeof(ILoggerFactory)) as ILoggerFactory;
-                var finalsLogger = loggerFactory?.CreateLogger<PrecisionFinalsQualificationService>();
-                var finalsService = new PrecisionFinalsQualificationService(finalsLogger!);
-                var qualificationViewModel = finalsService.CalculateQualifiers(
-                    qualificationResults,
-                    shooterInfo,
-                    request.MaxShootersPerTeam
-                );
+                var generatedBy = request.GeneratedBy ?? currentMember.Name ?? "Unknown";
 
-                // NEW ARCHITECTURE: Create/update finals start list as DIRECT child of competition
+                // Workflow gate: at least one class must be frozen.
+                var snapshot = _qualifyingResultsService.GetSnapshot(request.CompetitionId);
+                if (snapshot.ClassSnapshots.Count == 0)
+                    return Json(new { Success = false, Message = "Lås minst en klass innan finalsstartlistan kan genereras." });
+
+                // Pull persisted per-class config from the existing finalsStartList node if any,
+                // otherwise use the merge-aware defaults.
                 var existingFinalsStartList = _contentService.GetPagedChildren(competition.Id, 0, 20, out _)
                     .FirstOrDefault(c => c.ContentType.Alias == "finalsStartList");
+
+                var perClassConfig = LoadFinalsConfig(existingFinalsStartList);
+
+                var settings = new FinalsStartListSettings
+                {
+                    FirstStartTime = string.IsNullOrWhiteSpace(request.FirstStartTime) ? "10:00" : request.FirstStartTime,
+                    StartInterval = string.IsNullOrWhiteSpace(request.StartInterval) ? "1:45" : request.StartInterval,
+                    MaxShootersPerTeam = request.MaxShootersPerTeam > 0 ? request.MaxShootersPerTeam : 20
+                };
+
+                var build = _finalsBuilder.Build(snapshot, perClassConfig, settings);
+                if (!build.Ok || build.Configuration == null)
+                    return Json(new { Success = false, Message = build.Message });
 
                 IContent finalsStartList;
                 if (existingFinalsStartList != null)
                 {
-                    // UPDATE existing finals start list
                     finalsStartList = existingFinalsStartList;
                     _logger.LogInformation("Updating existing finals start list {StartListId} for competition {CompetitionId}",
                         finalsStartList.Id, request.CompetitionId);
                 }
                 else
                 {
-                    // CREATE new finals start list as direct child of competition
                     finalsStartList = _contentService.Create("Finalstartlista", competition.Id, "finalsStartList");
                     _logger.LogInformation("Creating new finals start list for competition {CompetitionId}", request.CompetitionId);
                 }
-                
-                // Set properties
+
+                var totalFinalists = build.Configuration.Teams?.Sum(t => t.Shooters?.Count ?? 0) ?? 0;
                 finalsStartList.SetValue("competitionId", request.CompetitionId);
                 finalsStartList.SetValue("generatedDate", DateTime.Now);
                 finalsStartList.SetValue("generatedBy", generatedBy);
-                finalsStartList.SetValue("isOfficialFinalsStartList", false); // Start as unofficial
+                finalsStartList.SetValue("isOfficialFinalsStartList", false);
                 finalsStartList.SetValue("teamFormat", "Championship Finals");
-                finalsStartList.SetValue("totalFinalists", qualificationViewModel.TotalQualifiers);
-                finalsStartList.SetValue("maxShootersPerTeam", request.MaxShootersPerTeam);
+                finalsStartList.SetValue("totalFinalists", totalFinalists);
+                finalsStartList.SetValue("maxShootersPerTeam", settings.MaxShootersPerTeam);
 
-                // Get qualification start list ID
                 var qualStartLists = _repository.GetStartListsForCompetition(request.CompetitionId);
-                var officialQualStartList = qualStartLists.FirstOrDefault(sl => 
-                    sl.GetValue<bool>("isOfficialStartList") && 
+                var officialQualStartList = qualStartLists.FirstOrDefault(sl =>
+                    sl.GetValue<bool>("isOfficialStartList") &&
                     sl.ContentType.Alias == "precisionStartList");
-                
                 if (officialQualStartList != null)
-                {
                     finalsStartList.SetValue("qualificationStartListId", officialQualStartList.Id);
+
+                finalsStartList.SetValue("configurationData", JsonConvert.SerializeObject(build.Configuration));
+
+                // Cached HTML — used by admin preview / print. Renderer auto-detects finals
+                // format and emits the Rang/Kvalresultat columns. Isolate failures here so a
+                // renderer bug doesn't take the whole generation down — the public view reads
+                // configurationData directly anyway.
+                try
+                {
+                    var finalsHtml = await _renderer.GenerateStartListHtml(build.Configuration, competition.Name ?? "");
+                    finalsStartList.SetValue("startListContent", finalsHtml);
+                }
+                catch (Exception renderEx)
+                {
+                    _logger.LogWarning(renderEx, "Finals start list HTML render failed for competition {CompetitionId} — continuing without cached HTML", request.CompetitionId);
                 }
 
-                // Build configuration data (same format as regular start list)
-                var configData = BuildFinalsConfigurationData(qualificationViewModel);
-                finalsStartList.SetValue("configurationData", JsonConvert.SerializeObject(configData));
-
-                // Save and publish
+                // Matches the standard GenerateStartList flow: Save + Publish here. The
+                // PublishFinalsStartList endpoint (the card's Publicera button) only flips
+                // the isOfficialFinalsStartList flag with a Save — the Umbraco node is
+                // already Published from this point on.
                 var saveResult = _contentService.Save(finalsStartList);
                 if (!saveResult.Success)
                 {
@@ -2014,24 +2126,15 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                         string.Join(", ", saveResult.EventMessages?.GetAll().Select(m => m.Message) ?? Array.Empty<string>()));
                     return Json(new { Success = false, Message = "Kunde inte spara finalstartlistan." });
                 }
-
-                var publishResult = _contentService.Publish(finalsStartList, new[] { "*" }, -1);
-                if (!publishResult.Success)
-                {
-                    _logger.LogWarning("Finals start list saved but publish failed. Messages: {Messages}",
-                        string.Join(", ", publishResult.EventMessages?.GetAll().Select(m => m.Message) ?? Array.Empty<string>()));
-                }
-
-                _logger.LogInformation("Created finals start list {Id} for competition {CompetitionId}",
-                    finalsStartList.Id, request.CompetitionId);
+                _contentService.Publish(finalsStartList, new[] { "*" }, -1);
 
                 return Json(new
                 {
                     Success = true,
-                    Message = "Finalstartlistan har skapats framgångsrikt!",
+                    Message = build.Message,
                     FinalsStartListId = finalsStartList.Id,
-                    TotalFinalists = qualificationViewModel.TotalQualifiers,
-                    Teams = qualificationViewModel.ProposedTeams.Count
+                    TotalFinalists = totalFinalists,
+                    Teams = build.Configuration.Teams?.Count ?? 0
                 });
             }
             catch (Exception ex)
@@ -2039,6 +2142,277 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 _logger.LogError(ex, "Error generating finals start list for competition {CompetitionId}", request?.CompetitionId);
                 return Json(new { Success = false, Message = "Ett fel uppstod vid skapande av finalstartlista: " + ex.Message });
             }
+        }
+
+        // ====================================================================
+        // Per-class qualifying snapshot + finals config endpoints
+        // ====================================================================
+
+        /// <summary>
+        /// Freeze the current qualifying-round leaderboard for a single championship class.
+        /// Admin freezes each class independently as that class's qualifying completes.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> FreezeClassResults([FromBody] FreezeClassResultsRequest request)
+        {
+            if (request == null || request.CompetitionId <= 0 || string.IsNullOrWhiteSpace(request.ChampionshipClass))
+                return Json(new { success = false, message = "Ogiltig förfrågan." });
+
+            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            if (currentMember == null)
+                return Json(new { success = false, message = "Du måste vara inloggad." });
+            var memberData = _memberService.GetByEmail(currentMember.Email ?? string.Empty);
+            if (memberData == null || !await _validator.CanManageCompetition(memberData.Id, request.CompetitionId))
+                return Json(new { success = false, message = "Du har inte behörighet." });
+
+            var frozenBy = currentMember.Name ?? memberData.Name ?? "Unknown";
+            var (ok, message, classSnap) = await _qualifyingResultsService.FreezeClassResultsAsync(request.CompetitionId, request.ChampionshipClass, frozenBy);
+
+            return Json(new
+            {
+                success = ok,
+                message,
+                classSnapshot = ok && classSnap != null
+                    ? new
+                    {
+                        championshipClass = classSnap.ChampionshipClass,
+                        frozenAt = classSnap.FrozenAt,
+                        frozenBy = classSnap.FrozenBy,
+                        shooterCount = classSnap.QualifiedShooters.Count
+                    }
+                    : null
+            });
+        }
+
+        /// <summary>Unfreeze a single championship class.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> UnfreezeClassResults([FromBody] FreezeClassResultsRequest request)
+        {
+            if (request == null || request.CompetitionId <= 0 || string.IsNullOrWhiteSpace(request.ChampionshipClass))
+                return Json(new { success = false, message = "Ogiltig förfrågan." });
+
+            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            if (currentMember == null)
+                return Json(new { success = false, message = "Du måste vara inloggad." });
+            var memberData = _memberService.GetByEmail(currentMember.Email ?? string.Empty);
+            if (memberData == null || !await _validator.CanManageCompetition(memberData.Id, request.CompetitionId))
+                return Json(new { success = false, message = "Du har inte behörighet." });
+
+            var (ok, message) = await _qualifyingResultsService.UnfreezeClassAsync(request.CompetitionId, request.ChampionshipClass);
+            return Json(new { success = ok, message });
+        }
+
+        /// <summary>
+        /// Returns the result-list groups (sub-classes with merge config applied) and
+        /// per-group freeze state. Each group is one freezable finals unit.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetQualifyingSnapshot(int competitionId)
+        {
+            if (competitionId <= 0)
+                return Json(new { success = false });
+
+            var snapshot = _qualifyingResultsService.GetSnapshot(competitionId);
+            var availableRankings = await _qualifyingResultsService.GetAvailableClassRankingsAsync(competitionId);
+            var staleness = await _qualifyingResultsService.ComputeStalenessAsync(competitionId, snapshot);
+
+            // Result list group names come from the merge config applied to the actual
+            // sub-classes with results. Snapshot can also contain "orphan" groups (frozen
+            // but no longer present in the result list — e.g. admin changed merge config) —
+            // include those too so the admin can see/unfreeze them.
+            var groupNames = availableRankings.Select(r => r.ChampionshipClass)
+                .Concat(snapshot.ClassSnapshots.Keys)
+                .Distinct()
+                .ToList();
+
+            var perGroup = groupNames
+                .Select(group =>
+                {
+                    var ranking = availableRankings.FirstOrDefault(r => r.ChampionshipClass == group);
+                    snapshot.ClassSnapshots.TryGetValue(group, out var frozen);
+                    return new
+                    {
+                        groupName = group,
+                        // championshipClass kept for client-side backward compat
+                        championshipClass = group,
+                        totalShooters = ranking?.TotalShooters ?? 0,
+                        hasResults = ranking != null && ranking.TotalShooters > 0,
+                        frozen = frozen != null,
+                        frozenAt = frozen?.FrozenAt,
+                        frozenBy = frozen?.FrozenBy,
+                        frozenShooterCount = frozen?.QualifiedShooters.Count ?? 0,
+                        stale = frozen != null && staleness.TryGetValue(group, out var s) && s
+                    };
+                })
+                .ToList();
+
+            return Json(new
+            {
+                success = true,
+                hasResultList = availableRankings.Count > 0,
+                perClass = perGroup
+            });
+        }
+
+        /// <summary>
+        /// Returns the persisted per-group finals config (admin-set per result-list group —
+        /// possibly merged sub-classes — like "C2+Dam", "A1"). JS supplies defaults for
+        /// groups that don't yet have a saved entry.
+        /// </summary>
+        [HttpGet]
+        public IActionResult GetFinalsConfig(int competitionId)
+        {
+            if (competitionId <= 0)
+                return Json(new { success = false });
+
+            var competition = _contentService.GetById(competitionId);
+            if (competition == null)
+                return Json(new { success = false, message = "Tävlingen hittades inte." });
+
+            var finalsNode = _contentService.GetPagedChildren(competition.Id, 0, 20, out _)
+                .FirstOrDefault(c => c.ContentType.Alias == "finalsStartList");
+
+            var config = LoadFinalsConfig(finalsNode);
+
+            return Json(new { success = true, config });
+        }
+
+        /// <summary>
+        /// Persist the per-class finals config onto the finalsStartList node. Creates the
+        /// node if missing.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveFinalsConfig([FromBody] SaveFinalsConfigRequest request)
+        {
+            try
+            {
+                if (request == null || request.CompetitionId <= 0 || request.Config == null)
+                    return Json(new { success = false, message = "Ogiltig förfrågan." });
+
+                var currentMember = await _memberManager.GetCurrentMemberAsync();
+                if (currentMember == null)
+                    return Json(new { success = false, message = "Du måste vara inloggad." });
+                var memberData = _memberService.GetByEmail(currentMember.Email ?? string.Empty);
+                if (memberData == null || !await _validator.CanManageCompetition(memberData.Id, request.CompetitionId))
+                    return Json(new { success = false, message = "Du har inte behörighet." });
+
+                var competition = _contentService.GetById(request.CompetitionId);
+                if (competition == null)
+                    return Json(new { success = false, message = "Tävlingen hittades inte." });
+
+                var finalsNode = _contentService.GetPagedChildren(competition.Id, 0, 20, out _)
+                    .FirstOrDefault(c => c.ContentType.Alias == "finalsStartList");
+                if (finalsNode == null)
+                {
+                    finalsNode = _contentService.Create("Finalstartlista", competition.Id, "finalsStartList");
+                    finalsNode.SetValue("competitionId", request.CompetitionId);
+                }
+
+                finalsNode.SetValue("perClassConfigData", JsonConvert.SerializeObject(request.Config));
+
+                // Save only — perClassConfigData is admin-only and read via the draft (IContent.GetValue).
+                // Publish is expensive (NuCache rebuild + events) and isn't needed here. The next
+                // GenerateFinalsStartList call does the Save + Publish to push configurationData public.
+                var saveResult = _contentService.Save(finalsNode);
+                if (!saveResult.Success)
+                    return Json(new { success = false, message = "Kunde inte spara konfigurationen." });
+
+                return Json(new { success = true, message = "Konfiguration sparad." });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "SaveFinalsConfig failed for competition {CompetitionId}", request?.CompetitionId);
+                return Json(new { success = false, message = "Ett fel uppstod: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Dry-run: read the per-class snapshot + supplied config and return per-class
+        /// finalist counts and resolved skjutlag numbers. No persistence. Used for live
+        /// preview in the admin wizard.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public IActionResult PreviewFinalsConfig([FromBody] SaveFinalsConfigRequest request)
+        {
+            if (request == null || request.CompetitionId <= 0 || request.Config == null)
+                return Json(new { success = false, message = "Ogiltig förfrågan." });
+
+            var snapshot = _qualifyingResultsService.GetSnapshot(request.CompetitionId);
+            if (snapshot.ClassSnapshots.Count == 0)
+                return Json(new { success = true, perClass = new Dictionary<string, object>() });
+
+            var preview = _finalsBuilder.PreviewBuckets(snapshot, request.Config);
+            return Json(new
+            {
+                success = true,
+                perClass = preview.PerClass.ToDictionary(
+                    kv => kv.Key,
+                    kv => (object)new { skjutlag = kv.Value.Skjutlag, finalistCount = kv.Value.FinalistCount, totalInClass = kv.Value.TotalInClass })
+            });
+        }
+
+        /// <summary>
+        /// Toggle isOfficialFinalsStartList on the finals node.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> PublishFinalsStartList([FromBody] PublishFinalsStartListRequest request)
+        {
+            if (request == null || request.FinalsStartListId <= 0)
+                return Json(new { success = false, message = "Ogiltig förfrågan." });
+
+            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            if (currentMember == null)
+                return Json(new { success = false, message = "Du måste vara inloggad." });
+            var memberData = _memberService.GetByEmail(currentMember.Email ?? string.Empty);
+
+            var node = _contentService.GetById(request.FinalsStartListId);
+            if (node == null || node.ContentType.Alias != "finalsStartList")
+                return Json(new { success = false, message = "Finalsstartlistan hittades inte." });
+
+            var competitionId = node.GetValue<int>("competitionId");
+            if (memberData == null || !await _validator.CanManageCompetition(memberData.Id, competitionId))
+                return Json(new { success = false, message = "Du har inte behörighet." });
+
+            // Mirrors PublishStartList for the qualifying card: just flip the custom flag
+            // and Save. The Umbraco node was already Published by GenerateFinalsStartList,
+            // so there's no expensive Publish/cache rebuild here.
+            node.SetValue("isOfficialFinalsStartList", request.IsPublished);
+            var saveResult = _contentService.Save(node);
+            if (!saveResult.Success)
+                return Json(new { success = false, message = "Kunde inte spara." });
+
+            return Json(new
+            {
+                success = true,
+                message = request.IsPublished ? "Finalsstartlistan har publicerats." : "Finalsstartlistan är inte längre publicerad."
+            });
+        }
+
+        private Dictionary<string, FinalsClassConfig> LoadFinalsConfig(IContent? finalsNode)
+        {
+            if (finalsNode != null)
+            {
+                var raw = finalsNode.GetValue<string>("perClassConfigData");
+                if (!string.IsNullOrWhiteSpace(raw))
+                {
+                    try
+                    {
+                        var dict = JsonConvert.DeserializeObject<Dictionary<string, FinalsClassConfig>>(raw);
+                        if (dict != null) return dict;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Could not deserialize perClassConfigData on finals node {Id}, returning empty", finalsNode.Id);
+                    }
+                }
+            }
+            // Empty dict — JS fills in defaults per group when the group is first interacted with.
+            return new Dictionary<string, FinalsClassConfig>();
         }
 
         /// <summary>
@@ -2318,37 +2692,6 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
             return dict;
         }
 
-        private object BuildFinalsConfigurationData(PrecisionFinalsQualificationViewModel qualificationData)
-        {
-            // Build same structure as regular start list for compatibility
-            var teams = qualificationData.ProposedTeams.Select(team => new
-            {
-                TeamNumber = int.Parse(team.TeamName.Replace("Team F", "")),
-                StartTime = "", // Finals times are managed separately
-                EndTime = "",
-                ShooterCount = team.ShooterCount,
-                WeaponClasses = team.Positions.Select(p => p.ShootingClass).Distinct().ToList(),
-                Shooters = team.Positions.Select(pos => new
-                {
-                    Position = pos.Position,
-                    Name = pos.Name,
-                    Club = pos.Club,
-                    WeaponClass = pos.ShootingClass,
-                    MemberId = pos.MemberId,
-                    ChampionshipClass = pos.ChampionshipClass,
-                    QualificationScore = pos.QualificationScore,
-                    QualificationRank = pos.Rank
-                }).ToList()
-            }).ToList();
-
-            return new
-            {
-                Format = "Championship Finals",
-                MaxShootersPerTeam = qualificationData.MaxShootersPerTeam,
-                Generated = DateTime.Now,
-                Teams = teams
-            };
-        }
 
         /// <summary>
         /// Calculate the last end time from a list of teams
@@ -2612,6 +2955,26 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         public int CompetitionId { get; set; }
         public int MaxShootersPerTeam { get; set; } = 20;
         public string? GeneratedBy { get; set; }
+        public string? FirstStartTime { get; set; }
+        public string? StartInterval { get; set; }
+    }
+
+    public class FreezeClassResultsRequest
+    {
+        public int CompetitionId { get; set; }
+        public string ChampionshipClass { get; set; } = "";
+    }
+
+    public class SaveFinalsConfigRequest
+    {
+        public int CompetitionId { get; set; }
+        public Dictionary<string, HpskSite.CompetitionTypes.Precision.Models.FinalsClassConfig> Config { get; set; } = new();
+    }
+
+    public class PublishFinalsStartListRequest
+    {
+        public int FinalsStartListId { get; set; }
+        public bool IsPublished { get; set; }
     }
 
     // ============================================================================
@@ -2664,6 +3027,13 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         public int StartListId { get; set; }
         public int MemberId { get; set; }
         public int TargetTeamNumber { get; set; }
+    }
+
+    public class MoveShooterPositionRequest
+    {
+        public int StartListId { get; set; }
+        public int MemberId { get; set; }
+        public string Direction { get; set; } = "";   // "up" | "down"
     }
 
     public class BulkMoveShootersRequest

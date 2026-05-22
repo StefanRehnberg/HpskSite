@@ -2,6 +2,7 @@ using HpskSite.Models;
 using HpskSite.Models.ViewModels.Competition;
 using HpskSite.CompetitionTypes.Precision.Models;
 using HpskSite.CompetitionTypes.Precision.ViewModels;
+using HpskSite.Services;
 using Microsoft.Extensions.Logging;
 
 namespace HpskSite.CompetitionTypes.Precision.Services
@@ -127,7 +128,7 @@ namespace HpskSite.CompetitionTypes.Precision.Services
         /// <summary>
         /// Calculate qualification cutoff based on 1/6 rule with minimum 10
         /// </summary>
-        private int CalculateQualificationCutoff(int totalShooters)
+        public int CalculateQualificationCutoff(int totalShooters)
         {
             if (totalShooters < 10)
             {
@@ -138,6 +139,131 @@ namespace HpskSite.CompetitionTypes.Precision.Services
             // Top 1/6, rounded up, minimum 10
             return Math.Max(10, (int)Math.Ceiling(totalShooters / 6.0));
         }
+
+        /// <summary>
+        /// Build per-result-list-group rankings containing ALL shooters (no cutoff). The
+        /// grouping mirrors what the result list shows: each shooter's `ShootingClass` is
+        /// resolved through the merge lookup (from `competitionResult.mergeConfig`) — so if
+        /// the admin merged C2 Dam into C2, both classes' shooters land in one "C2+Dam"
+        /// group with combined ranking. Without a merge config, each sub-class becomes its
+        /// own group.
+        ///
+        /// Each output entry's `ChampionshipClass` field is the **group name** (e.g.
+        /// "C2+Dam", "A1") — keep that mental model. Same field is reused so we don't have
+        /// to bend the existing view model shape.
+        /// </summary>
+        public List<ChampionshipClassQualification> BuildFullClassRankings(
+            List<PrecisionResultEntry> qualificationResults,
+            Dictionary<int, (string Name, string Club)> shooterInfo,
+            Dictionary<string, string> mergeLookup)
+        {
+            string GroupName(string subClass)
+            {
+                // Lookup keys are the display names ("C2 Dam"), not raw class IDs ("C2_dam")
+                // — same convention as CompetitionResultsController.
+                var displayName = ShootingClasses.GetById(subClass)?.Name ?? subClass;
+                return mergeLookup.TryGetValue(displayName, out var combined) ? combined : displayName;
+            }
+
+            var shooterScores = qualificationResults
+                .GroupBy(r => new { r.MemberId, r.ShootingClass })
+                .Select(g => new
+                {
+                    g.Key.MemberId,
+                    g.Key.ShootingClass,
+                    GroupName = GroupName(g.Key.ShootingClass),
+                    QualificationScore = g.Sum(r => CalculateSeriesScore(r.Shots)),
+                    XCount = g.Sum(r => CalculateXCount(r.Shots))
+                })
+                .ToList();
+
+            var output = new List<ChampionshipClassQualification>();
+
+            // Group by the resolved result-list group name. Within each group, all sub-class
+            // shooters compete in one combined ranking.
+            foreach (var grp in shooterScores.GroupBy(s => s.GroupName).OrderBy(g => ClassSortKey(g.Key)))
+            {
+                var ranked = grp
+                    .OrderByDescending(s => s.QualificationScore)
+                    .ThenByDescending(s => s.XCount)
+                    .ToList();
+
+                if (!ranked.Any()) continue;
+
+                var classQual = new ChampionshipClassQualification
+                {
+                    ChampionshipClass = grp.Key,
+                    SubClasses = ranked.Select(s => s.ShootingClass).Distinct().ToList(),
+                    TotalShooters = ranked.Count,
+                    Qualifiers = ranked.Count,
+                    QualificationRule = "Snapshot (kvalresultat låsta)"
+                };
+
+                int rank = 1;
+                foreach (var shooter in ranked)
+                {
+                    var info = shooterInfo.GetValueOrDefault(shooter.MemberId, ("Unknown", "Unknown"));
+                    classQual.QualifiedShooters.Add(new QualifiedShooter
+                    {
+                        MemberId = shooter.MemberId,
+                        Name = info.Item1,
+                        Club = info.Item2,
+                        ShootingClass = shooter.ShootingClass,
+                        ChampionshipClass = grp.Key,
+                        QualificationScore = shooter.QualificationScore,
+                        QualificationRank = rank++,
+                        XCount = shooter.XCount
+                    });
+                }
+
+                output.Add(classQual);
+            }
+
+            return output;
+        }
+
+        /// <summary>
+        /// Backward-compatible overload (no merge lookup) — each sub-class is its own group.
+        /// Used by paths that haven't yet been wired through the result-list merge config.
+        /// </summary>
+        public List<ChampionshipClassQualification> BuildFullClassRankings(
+            List<PrecisionResultEntry> qualificationResults,
+            Dictionary<int, (string Name, string Club)> shooterInfo)
+            => BuildFullClassRankings(qualificationResults, shooterInfo, new Dictionary<string, string>());
+
+        /// <summary>
+        /// Sort key for group names — uses the same ordering as the result list so the
+        /// finals admin UI matches what the admin sees on the result list.
+        /// </summary>
+        private static int ClassSortKey(string groupName)
+        {
+            // Match the prefix of the first source class. Combined names like "C2+Dam"
+            // sort with the C2 group; "A2+3" sorts with A2.
+            var lookup = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+            {
+                { "C1", 1 }, { "C1 Dam", 2 }, { "C1 Jun", 3 },
+                { "C2", 4 }, { "C2 Dam", 5 }, { "C2 Jun", 6 },
+                { "C3", 7 }, { "C3 Dam", 8 }, { "C3 Jun", 9 },
+                { "C Vet Y", 10 }, { "C Vet Ä", 11 }, { "C Jun", 12 },
+                { "B1", 16 }, { "B2", 19 }, { "B3", 22 },
+                { "A1", 31 }, { "A2", 34 }, { "A3", 37 },
+                { "A Opt 1", 38 }, { "A Opt 2", 39 }, { "A Opt 3", 40 },
+                { "R1", 41 }, { "R2", 42 }, { "R3", 43 }
+            };
+            // Match the longest known prefix in the lookup, so "C2+Dam" matches "C2".
+            var bestKey = lookup.Keys
+                .Where(k => groupName.StartsWith(k, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(k => k.Length)
+                .FirstOrDefault();
+            return bestKey != null ? lookup[bestKey] : 999;
+        }
+
+        /// <summary>
+        /// The 7 championship classes used by the LEGACY "ProposedTeams" logic in
+        /// CalculateQualifiers. The new finals pipeline uses result-list groups instead and
+        /// doesn't touch this list.
+        /// </summary>
+        public static IReadOnlyList<string> ChampionshipClasses => ChampionshipClassMappings.Keys.ToList();
 
         private string GetQualificationRuleDescription(int totalShooters, int cutoff)
         {

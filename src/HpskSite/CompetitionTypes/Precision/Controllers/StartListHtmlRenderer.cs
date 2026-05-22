@@ -43,6 +43,10 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 }
             }
 
+            // Finals start lists ride the same renderer but emit extra Rang/Kvalresultat
+            // columns so audience can see the leaderboard-derived lane order.
+            var isFinals = config.Settings?.Format == "Championship Finals";
+
             html.AppendLine("<div class='start-list-content'>");
             html.AppendLine($"<h3 class='competition-title'>{competitionName}</h3>");
             // Format and Generated date are now hidden - they're shown in the collapsible info section
@@ -57,12 +61,15 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     // The public /startlista/ page is rendered by Views/PrecisionStartList.cshtml from
                     // `configurationData` directly. Any new StartListTeam field shown to users must be
                     // wired in BOTH places — see the team-header line in that .cshtml.
+                    // The finals public view (/finalsstartlista/) is in Views/PrecisionFinalsStartList.cshtml
+                    // and follows the same dual-renderer pattern.
                     var labelSuffix = string.IsNullOrWhiteSpace(team.Label)
                         ? ""
                         : $" — {System.Net.WebUtility.HtmlEncode(team.Label)}";
-                    html.AppendLine($"<h3>Skjutlag: {team.TeamNumber}{labelSuffix} Tid (ca): {team.StartTime}-{team.EndTime}");
+                    var teamWord = isFinals ? "Final" : "Skjutlag";
+                    html.AppendLine($"<h3>{teamWord}: {team.TeamNumber}{labelSuffix} Tid (ca): {team.StartTime}-{team.EndTime}");
 
-                    if (config.Settings?.Format == "En vapengrupp per Skjutlag" && team.WeaponClasses.Any())
+                    if (!isFinals && config.Settings?.Format == "En vapengrupp per Skjutlag" && team.WeaponClasses.Any())
                     {
                         var displayClasses = team.WeaponClasses.Select(GetShootingClassName);
                         html.AppendLine($" Vapengrupp: {string.Join(" ", displayClasses)}");
@@ -71,18 +78,24 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     html.AppendLine($" ({team.ShooterCount} st)</h3>");
 
                     html.AppendLine("<table class='table table-striped'>");
-                    html.AppendLine("<thead><tr><th>Plats</th><th>Namn</th><th>Förening</th>");
-
-                    if (config.Settings?.Format == "Mixade Skjutlag")
+                    if (isFinals)
                     {
-                        html.AppendLine("<th>Vapengrupp</th>");
+                        html.AppendLine("<thead><tr><th>Plats</th><th>Rang</th><th>Namn</th><th>Förening</th><th>Klass</th><th>Kvalresultat</th></tr></thead>");
                     }
                     else
                     {
-                        html.AppendLine("<th>Klass</th>");
+                        html.AppendLine("<thead><tr><th>Plats</th><th>Namn</th><th>Förening</th>");
+                        if (config.Settings?.Format == "Mixade Skjutlag")
+                        {
+                            html.AppendLine("<th>Vapengrupp</th>");
+                        }
+                        else
+                        {
+                            html.AppendLine("<th>Klass</th>");
+                        }
+                        html.AppendLine("</tr></thead>");
                     }
 
-                    html.AppendLine("</tr></thead>");
                     html.AppendLine("<tbody>");
 
                     if (team.Shooters != null)
@@ -102,9 +115,22 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
 
                             html.AppendLine($"<tr{rowClass}>");
                             html.AppendLine($"<td>{shooter.Position}</td>");
+                            if (isFinals)
+                            {
+                                html.AppendLine($"<td>{(shooter.QualificationRank.HasValue ? shooter.QualificationRank.Value.ToString() : "")}</td>");
+                            }
                             html.AppendLine($"<td>{shooter.Name}</td>");
                             html.AppendLine($"<td>{shooter.Club}</td>");
                             html.AppendLine($"<td>{GetShootingClassName(shooter.WeaponClass)}</td>");
+                            if (isFinals)
+                            {
+                                var scoreCell = shooter.QualificationScore.HasValue
+                                    ? (shooter.QualificationXCount.HasValue && shooter.QualificationXCount.Value > 0
+                                        ? $"{shooter.QualificationScore.Value} ({shooter.QualificationXCount.Value}X)"
+                                        : shooter.QualificationScore.Value.ToString())
+                                    : "";
+                                html.AppendLine($"<td>{scoreCell}</td>");
+                            }
                             html.AppendLine("</tr>");
                         }
                     }

@@ -69,6 +69,14 @@ namespace HpskSite.Composers
             // uses a different result-entry shape (per-station hits/figures/poängmål)
             builder.Services.AddScoped<HpskSite.CompetitionTypes.Faltskytte.Services.FaltskytteShootOffService>();
 
+            // Precision finals start list pipeline:
+            //   QualificationService — ranks shooters and computes the 1/6+min10 cutoff (existed before, now DI-registered)
+            //   QualifyingResultsService — snapshot the qualifying leaderboard before finals are built
+            //   FinalsStartListBuilder — turn snapshot + per-class config into a finals StartListConfiguration
+            builder.Services.AddScoped<HpskSite.CompetitionTypes.Precision.Services.PrecisionFinalsQualificationService>();
+            builder.Services.AddScoped<HpskSite.CompetitionTypes.Precision.Services.PrecisionQualifyingResultsService>();
+            builder.Services.AddScoped<HpskSite.CompetitionTypes.Precision.Services.PrecisionFinalsStartListBuilder>();
+
             // Register BrevoEmailService and named HttpClient
             builder.Services.AddHttpClient("Brevo");
             builder.Services.AddScoped<BrevoEmailService>();

@@ -126,6 +126,10 @@ namespace HpskSite.CompetitionTypes.Precision.Models
         public List<string> WeaponClasses { get; set; } = new List<string>();
         public int ShooterCount { get; set; }
         public List<StartListShooter>? Shooters { get; set; }
+
+        // Finals-only: display string for merged classes, e.g. "C + C Dam + C Jun".
+        // Null/empty for regular qualifying teams.
+        public string? ChampionshipClasses { get; set; }
     }
 
     public class StartListShooter
@@ -135,5 +139,13 @@ namespace HpskSite.CompetitionTypes.Precision.Models
         public string Club { get; set; } = "";
         public string WeaponClass { get; set; } = "";
         public int MemberId { get; set; }
+
+        // Finals-only: leaderboard rank within the shooter's championship class (1 = top).
+        // Null when this row is from a qualifying start list.
+        public int? QualificationRank { get; set; }
+        public int? QualificationScore { get; set; }
+        public int? QualificationXCount { get; set; }
+        // The shooter's original championship class even after merge ("C", "C Dam", "C Jun", ...).
+        public string? ChampionshipClass { get; set; }
     }
 }

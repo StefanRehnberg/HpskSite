@@ -358,65 +358,10 @@
         }
     </div>
 
-    <!-- Finals Start List Section (only shown for championships) -->
-    <div id="finalsStartListSection" class="card mt-4 d-none">
-        <div class="card-header bg-success text-white">
-            <h5><i class="bi bi-trophy me-2"></i>Finalstartlista</h5>
-        </div>
-        <div class="card-body">
-            <!-- Loading State -->
-            <div id="finalsCheckLoading" class="text-center py-3">
-                <div class="spinner-border spinner-border-sm" role="status">
-                    <span class="visually-hidden">Kontrollerar...</span>
-                </div>
-                <small class="ms-2 text-muted">Kontrollerar kvalificering...</small>
-            </div>
-
-            <!-- Not Ready State -->
-            <div id="finalsNotReady" class="d-none">
-                <div class="alert alert-warning mb-0">
-                    <h6><i class="bi bi-exclamation-triangle me-2"></i>Kvalificering Ej Klar</h6>
-                    <p class="mb-2">Kvalificeringsrundan är inte komplett. Finalstartlista kan inte genereras ännu.</p>
-                    <ul class="small mb-0" id="finalsNotReadyReasons">
-                    </ul>
-                </div>
-            </div>
-
-            <!-- Ready State -->
-            <div id="finalsReady" class="d-none">
-                <div class="alert alert-success">
-                    <h6><i class="bi bi-check-circle me-2"></i>Redo att Generera Finalstartlista</h6>
-                    <p class="mb-0">Kvalificeringsrundan är komplett. Du kan nu generera finalstartlistan.</p>
-                </div>
-
-                <!-- Qualification Summary -->
-                <div id="qualificationSummary" class="mb-3">
-                    <!-- Will be populated dynamically -->
-                </div>
-
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <label class="form-label">Max skyttar per finallag:</label>
-                        <input type="number" class="form-control" id="finalsMaxShootersPerTeam" value="20" min="10" max="30" style="width: 120px; display: inline-block;">
-                    </div>
-                    <button class="btn btn-success" onclick="generateFinalsStartList()">
-                        <i class="bi bi-trophy me-1"></i>Generera Finalstartlista
-                    </button>
-                </div>
-            </div>
-
-            <!-- Existing Finals Start List -->
-            <div id="finalsExists" class="d-none">
-                <div class="alert alert-info">
-                    <h6><i class="bi bi-info-circle me-2"></i>Finalstartlista Finns</h6>
-                    <p class="mb-0">En finalstartlista har redan genererats för denna tävling.</p>
-                </div>
-                <div id="finalsStartListInfo" class="mt-3">
-                    <!-- Will be populated dynamically -->
-                </div>
-            </div>
-        </div>
-    </div>
+    @* Finals start list UI lives in its own partial — CompetitionFinalsStartListManagement.cshtml.
+       The legacy "Finalstartlista" card that used to live here (eligibility check + inline generate)
+       was replaced 2026-05-22 by the standalone partial which mirrors the standard Startlista layout
+       (official card + modal wizard + shared start-list editor). See CLAUDE.md "Finals Start List". *@
 
 </div>
 
@@ -1339,223 +1284,10 @@ function showAlert(type, message, duration = 5000) {
     }
 }
 
-// ========================================
-// Finals Start List Management
-// ========================================
-
-let finalsQualificationData = null;
-
-function checkFinalsEligibility() {
-    const competitionId = $('.competition-startlist-management').data('competition-id');
-    if (!competitionId) return;
-
-    // Get competition configuration from the management page
-    const numberOfFinalSeries = parseInt($('#comp-results').data('number-of-final-series') || 0);
-    
-    if (numberOfFinalSeries <= 0) {
-        // Not a championship, hide finals section
-        $('#finalsStartListSection').addClass('d-none');
-        return;
-    }
-
-    // Show the finals section
-    $('#finalsStartListSection').removeClass('d-none');
-
-    // Check if finals start list already exists
-    fetch(`/umbraco/surface/PrecisionStartList/GetFinalsStartList?competitionId=${competitionId}`)
-        .then(response => response.json())
-        .then(data => {
-            if (data.success && data.exists) {
-                showExistingFinalsList(data);
-            } else {
-                // Check qualification status
-                checkQualificationStatus();
-            }
-        })
-        .catch(error => {
-            console.error('Error checking finals start list:', error);
-            checkQualificationStatus();
-        });
-}
-
-function checkQualificationStatus() {
-    const competitionId = $('.competition-startlist-management').data('competition-id');
-    
-    $('#finalsCheckLoading').removeClass('d-none');
-    $('#finalsReady').addClass('d-none');
-    $('#finalsNotReady').addClass('d-none');
-    $('#finalsExists').addClass('d-none');
-
-    fetch(`/umbraco/surface/PrecisionStartList/CalculateFinalsQualifiers?competitionId=${competitionId}`)
-        .then(response => response.json())
-        .then(data => {
-            $('#finalsCheckLoading').addClass('d-none');
-            
-            if (data.success && data.data) {
-                finalsQualificationData = data.data;
-                displayQualificationSummary(data.data);
-                $('#finalsReady').removeClass('d-none');
-            } else {
-                // Show not ready state
-                $('#finalsNotReady').removeClass('d-none');
-                const reasonsList = document.getElementById('finalsNotReadyReasons');
-                reasonsList.innerHTML = `<li>${data.message || 'Inga kvalificeringsresultat finns ännu.'}</li>`;
-            }
-        })
-        .catch(error => {
-            console.error('Error checking qualification status:', error);
-            $('#finalsCheckLoading').addClass('d-none');
-            $('#finalsNotReady').removeClass('d-none');
-            const reasonsList = document.getElementById('finalsNotReadyReasons');
-            reasonsList.innerHTML = `<li>Ett fel uppstod vid kontroll av kvalificering: ${error.message}</li>`;
-        });
-}
-
-function displayQualificationSummary(qualData) {
-    const summaryDiv = document.getElementById('qualificationSummary');
-    
-    let html = '<h6>Kvalificerade Skyttar per Klass:</h6>';
-    html += '<div class="table-responsive">';
-    html += '<table class="table table-sm table-bordered">';
-    html += '<thead><tr><th>Klass</th><th>Totalt</th><th>Kvalificerade</th><th>Regel</th><th>Cutoff</th></tr></thead>';
-    html += '<tbody>';
-    
-    if (qualData.classSummaries && qualData.classSummaries.length > 0) {
-        qualData.classSummaries.forEach(cls => {
-            html += `<tr>
-                <td><strong>${cls.championshipClassName}</strong></td>
-                <td>${cls.totalShootersInClass}</td>
-                <td><span class="badge bg-success">${cls.qualifiers}</span></td>
-                <td><small>${cls.qualificationRule}</small></td>
-                <td>${cls.cutoffScore || 'N/A'}</td>
-            </tr>`;
-        });
-    }
-    
-    html += '</tbody></table></div>';
-    html += `<p class="mt-2"><strong>Totalt antal finalister: ${qualData.totalQualifiers}</strong></p>`;
-    
-    summaryDiv.innerHTML = html;
-}
-
-function showExistingFinalsList(data) {
-    $('#finalsCheckLoading').addClass('d-none');
-    $('#finalsReady').addClass('d-none');
-    $('#finalsNotReady').addClass('d-none');
-    $('#finalsExists').removeClass('d-none');
-    
-    const infoDiv = document.getElementById('finalsStartListInfo');
-    const isOfficial = data.isOfficial ? 'Officiell' : 'Preliminär';
-    const officialBadge = data.isOfficial ? 'bg-success' : 'bg-warning';
-    
-    let html = `
-        <div class="table-responsive">
-            <table class="table table-sm">
-                <tr>
-                    <th>Status:</th>
-                    <td><span class="badge ${officialBadge}">${isOfficial}</span></td>
-                </tr>
-                <tr>
-                    <th>Genererad:</th>
-                    <td>${formatDate(data.generatedDate)}</td>
-                </tr>
-                <tr>
-                    <th>Antal Finalister:</th>
-                    <td>${data.totalFinalists}</td>
-                </tr>
-            </table>
-        </div>
-        <div class="d-flex gap-2">
-            <button class="btn btn-primary" onclick="window.open('/umbraco/surface/PrecisionStartList/PreviewStartList?competitionId=${$('.competition-startlist-management').data('competition-id')}&finalsStartListId=${data.finalsStartListId}', '_blank')">
-                <i class="bi bi-eye me-1"></i>Visa Finalstartlista
-            </button>
-            <button class="btn btn-outline-primary" onclick="printStartList('/umbraco/surface/PrecisionStartList/PreviewStartList?competitionId=${$('.competition-startlist-management').data('competition-id')}&finalsStartListId=${data.finalsStartListId}')">
-                <i class="bi bi-printer me-1"></i>Skriv ut
-            </button>
-        </div>
-    `;
-    
-    infoDiv.innerHTML = html;
-}
-
-function generateFinalsStartList() {
-    if (!confirmIfResultsExist('Generera finalstartlista')) return;
-    const competitionId = $('.competition-startlist-management').data('competition-id');
-    const maxShootersPerTeam = parseInt(document.getElementById('finalsMaxShootersPerTeam').value) || 20;
-    
-    if (maxShootersPerTeam < 10 || maxShootersPerTeam > 30) {
-        showAlert('danger', 'Max skyttar per lag måste vara mellan 10 och 30.');
-        return;
-    }
-
-    if (!finalsQualificationData) {
-        showAlert('danger', 'Kvalificeringsdata saknas. Försök ladda om sidan.');
-        return;
-    }
-
-    // Show confirmation
-    const confirmMessage = `Generera finalstartlista?\n\n` +
-        `• Antal kvalificerade: ${finalsQualificationData.totalQualifiers}\n` +
-        `• Max skyttar per lag: ${maxShootersPerTeam}\n` +
-        `• Förväntade lag: ${Math.ceil(finalsQualificationData.totalQualifiers / maxShootersPerTeam)}`;
-
-    if (!confirm(confirmMessage)) {
-        return;
-    }
-
-    // Show loading state
-    const generateBtn = document.querySelector('button[onclick="generateFinalsStartList()"]');
-    const originalText = generateBtn.innerHTML;
-    generateBtn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Genererar...';
-    generateBtn.disabled = true;
-
-    // Call generation API
-    fetch('/umbraco/surface/PrecisionStartList/GenerateFinalsStartList', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            CompetitionId: parseInt(competitionId),
-            MaxShootersPerTeam: maxShootersPerTeam
-        })
-    })
-    .then(response => {
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        return response.json();
-    })
-    .then(data => {
-        // Reset button
-        generateBtn.innerHTML = originalText;
-        generateBtn.disabled = false;
-
-        if (data.success) {
-            let successMessage = `✅ ${data.message}`;
-            successMessage += `<div class="mt-2">
-                <strong>Sammanfattning:</strong><br>
-                • ${data.totalFinalists} finalister<br>
-                • ${data.teams} finallag skapade
-            </div>`;
-
-            showAlert('success', successMessage, 10000);
-
-            // Reload finals section
-            setTimeout(() => {
-                checkFinalsEligibility();
-            }, 1000);
-        } else {
-            showAlert('danger', `❌ ${data.message || 'Ett fel uppstod vid generering av finalstartlistan.'}`);
-        }
-    })
-    .catch(error => {
-        console.error('Finals start list generation error:', error);
-        generateBtn.innerHTML = originalText;
-        generateBtn.disabled = false;
-        showAlert('danger', `❌ Ett fel uppstod: ${error.message}`);
-    });
-}
+// Legacy "Finals Start List Management" block (~200 lines: checkFinalsEligibility,
+// checkQualificationStatus, displayQualificationSummary, showExistingFinalsList,
+// generateFinalsStartList, finalsQualificationData global) deleted 2026-05-22 —
+// fully replaced by Views/Partials/CompetitionFinalsStartListManagement.cshtml.
 
 // ========================================
 // START LIST EDITOR FUNCTIONS (Phase 3)
@@ -1707,6 +1439,13 @@ function createTeamCard(team, index, isOfficial) {
                                         <i class="bi bi-three-dots-vertical"></i>
                                     </button>
                                     <ul class="dropdown-menu dropdown-menu-end">
+                                        <li><a class="dropdown-item" href="#" onclick="moveShooterPosition(${shooter.memberId}, 'up'); return false;">
+                                            <i class="bi bi-arrow-up me-2"></i>Flytta upp
+                                        </a></li>
+                                        <li><a class="dropdown-item" href="#" onclick="moveShooterPosition(${shooter.memberId}, 'down'); return false;">
+                                            <i class="bi bi-arrow-down me-2"></i>Flytta ner
+                                        </a></li>
+                                        <li><hr class="dropdown-divider"></li>
                                         <li><a class="dropdown-item" href="#" onclick="openEditWeaponClassModal(${shooter.memberId}, '${shooter.name.replace(/'/g, "\\'")}', '${shooter.weaponClass}', ${team.teamNumber}); return false;">
                                             <i class="bi bi-pencil me-2"></i>Ändra vapenklass
                                         </a></li>
@@ -2030,6 +1769,38 @@ function openAddShooterToTeamModal(teamNumber) {
 }
 
 // Remove shooter from team
+// Move shooter up or down by one position within their current team. Calls
+// PrecisionStartListController.MoveShooterPosition which swaps with the adjacent shooter
+// and renumbers the team's positions. Works for both qualifying and finals lists.
+function moveShooterPosition(memberId, direction) {
+    const startListId = window.currentStartListId;
+    if (!startListId || !memberId) return;
+
+    const token = $('input[name="__RequestVerificationToken"]').val() ||
+                  $('input[name="__RequestVerificationToken"]:first').val() ||
+                  document.querySelector('input[name="__RequestVerificationToken"]')?.value;
+    if (!token) { showAlert('danger', 'Säkerhetstoken saknas. Försök ladda om sidan.'); return; }
+
+    fetch('/umbraco/surface/PrecisionStartList/MoveShooterPosition', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+        body: JSON.stringify({ startListId: startListId, memberId: memberId, direction: direction })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            editorHasChanges = true;
+            loadStartListForEditing(startListId);
+        } else {
+            showAlert('warning', data.message || 'Kunde inte flytta skyttan.');
+        }
+    })
+    .catch(err => {
+        console.error('Error moving shooter position:', err);
+        showAlert('danger', 'Ett oväntat fel uppstod.');
+    });
+}
+
 function removeShooterFromTeam(startListId, memberId, shooterName) {
     if (!confirmIfResultsExist('Ta bort skytt fr\u00e5n lag')) return;
     if (!confirm(`Är du säker på att du vill ta bort ${shooterName} från startlistan?\n\nOBS: Detta går inte att ångra.`)) {
@@ -2483,7 +2254,6 @@ $(document).ready(function() {
         $('button[data-bs-target="#comp-startlists"], button[data-bs-target="#startlists"]').on('shown.bs.tab shown.bs.pill click', function () {
             console.log('Start Lists tab activated via jQuery event');
             loadStartLists();
-            checkFinalsEligibility();
         });
 
         // Also trigger load on document ready if this tab is active
@@ -2491,7 +2261,6 @@ $(document).ready(function() {
             $('#startlists').hasClass('active') || $('#startlists').hasClass('show')) {
             console.log('Start Lists tab is active on page load');
             loadStartLists();
-            checkFinalsEligibility();
         }
     } catch (e) {
         console.error('Error in CompetitionStartListManagement initialization:', e);
@@ -2512,7 +2281,6 @@ document.addEventListener('DOMContentLoaded', function() {
             // Small delay to let Bootstrap show the tab
             setTimeout(function() {
                 loadStartLists();
-                checkFinalsEligibility();
             }, 100);
         });
     });

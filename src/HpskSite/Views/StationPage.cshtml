@@ -255,6 +255,10 @@
             entryViewData["CompetitionType"] = competitionType;
             entryViewData["IsStationPage"] = true;
             entryViewData["PresetTeamNumber"] = stationNumber;
+            // Phase comes from the URL: ?phase=finals pins this entry view to the finals
+            // start list + finals series rows; anything else defaults to qualification.
+            var phaseParam = Context.Request.Query["phase"].ToString();
+            entryViewData["PresetPhase"] = phaseParam == "finals" ? "finals" : "qualification";
             @await Html.PartialAsync("CompetitionResultsManagement", entryViewData)
         }
     }

@@ -544,6 +544,15 @@
                     var isDp = false;
                     try { var dpJson = competition?.HasProperty("direktplaceringConfig") == true ? (competition.Value<string>("direktplaceringConfig") ?? "") : ""; isDp = dpJson.Contains("\"enabled\":true") || dpJson.Contains("\"Enabled\":true"); } catch { }
                     @await Html.PartialAsync("CompetitionStartListManagement", new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId }, { "IsDirektplacering", isDp } })
+
+                    // Finals start-list card — only for precision-family competitions that have finals series configured.
+                    // The card itself further gates on snapshot existence, etc.
+                    var numFinalSeries = 0;
+                    try { numFinalSeries = competition?.HasProperty("numberOfFinalSeries") == true ? competition.Value<int>("numberOfFinalSeries") : 0; } catch { }
+                    if (numFinalSeries > 0)
+                    {
+                        @await Html.PartialAsync("CompetitionFinalsStartListManagement", new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId } })
+                    }
                 }
             </div>
         </div>

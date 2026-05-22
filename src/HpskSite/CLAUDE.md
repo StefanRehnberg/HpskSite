@@ -980,6 +980,55 @@ Navigate to **Members → Member Groups**:
 - **competitionResult**: add `subCompetitionClassNameOverrides` Textarea property (optional, label "Deltävling – anpassade klassnamn (JSON-dict)"). Same shape as `classNameOverrides` but applied only to the Deltävling result list (`?sub=true`). Without it, sub-comp class-name overrides silently no-op. Added 2026-05-19.
 - **competitionResult**: add `faltskytteShootOffConfig` Textarea property (optional, label "Fältskytte – särskjutnings-station (JSON)"). Stores a single station config (with per-weapon-class variants) used for Fältskytte/MagnumFält Särskjutning. Without it, the "Konfigurera särskjutnings-station" save silently no-ops. Added 2026-05-20.
 - **competitionResult**: add `subCompetitionFaltskytteShootOffConfig` Textarea property (optional, label "Deltävling – Fältskytte särskjutnings-station (JSON)"). Same as above for the Deltävling pool. Added 2026-05-20.
+- **precisionStartList**: add `qualifyingResultsSnapshot` Textarea property (optional, label "Kvalresultat — frusna klasser (JSON)"). Stores the per-championship-class snapshot dict — each frozen class carries its own `FrozenAt`, `FrozenBy`, `ChecksumAtFreeze`, and ranked `QualifiedShooters` list inside the same blob. Without this property, freezing silently no-ops. Added 2026-05-21.
+- **finalsStartList**: add `perClassConfigData` Textarea property (optional, label "Per-klass-konfiguration (JSON)"). Stores the admin's per-championship-class skjutlag-assignment + cut overrides so they survive regeneration. Added 2026-05-21.
+- **finalsStartList**: add `startListContent` Textarea property (optional, label "Cachad HTML"). Mirrors the property on `precisionStartList`. Added 2026-05-21.
+
+### Finals Start List for Precision Competitions (2026-05-21)
+
+**Freeze granularity = result-list group, NOT championship class.** A "group" is whatever the result list shows — a sub-class like "A1" if no merge, or a combined name like "C2+Dam" if the admin merged C2 Dam into C2 via `competitionResult.mergeConfig`. The merge lookup is read by `PrecisionQualifyingResultsService.GetMergeLookup` and applied inside `PrecisionFinalsQualificationService.BuildFullClassRankings` so finals always match the result list.
+
+This means the **result list must be generated first** (click "Uppdatera" on the Resultat tab). Without it, the finals tab shows an empty state explaining what to do.
+
+**Skjutlag-assignment model:** each group has a `SkjutlagNumber` + `OrderInSkjutlag`. Multiple groups can share the same skjutlag — they appear as **contiguous position blocks** ordered by `OrderInSkjutlag`. Each group's leader (rank 1) is always at the start of its block; positions within the block follow the group's leaderboard. There is **no score-based re-ranking across groups**.
+
+Example: "C" shares skjutlag 1 with "C Vet Y". C (order 0) fills positions 1–10; C Vet Y (order 1) fills positions 11–17. C rank 1 at pos 1, C Vet Y rank 1 at pos 11.
+
+**Per-group freeze (not global):** admin clicks "Frys" per group as that group's qualifying completes. Each frozen group stores its own SHA checksum over (`MemberId`, `SeriesNumber`, `Shots`) tuples scoped to the **members** in that group at freeze time. Re-computing detects post-freeze edits — admin can refreeze any individual group without disturbing the others. Snapshot also keeps "orphan" groups (frozen but no longer present in the result list, e.g. after a merge-config change) so the admin can see/unfreeze them.
+
+**Workflow gate:** finals start list cannot be generated until at least one group is frozen.
+
+**`FinalsClassConfig`:** `{ Skip, SkjutlagNumber, OrderInSkjutlag, FinalistCountOverride?, IncludeAllShooters }`. Defaults are filled in by the JS on first render (each frozen group gets its own incrementing skjutlag number).
+
+**Cut rule:** still the SHB default — top 1/6 (rounded up, min 10) with tie-extension at the cutoff score. Overridable per class via `FinalistCountOverride` or fully via `IncludeAllShooters`.
+
+**Shared model trick (avoids duplicate editor endpoints):** `StartListShooter` and `StartListTeam` got optional nullable fields — `QualificationRank`, `QualificationScore`, `QualificationXCount`, `ChampionshipClass`, `ChampionshipClasses` — so all existing editor endpoints (`MoveShooterToTeam`, `AddShooterToStartList`, `UpdateTeamTimes`, `CreateNewTeam`, `DeleteTeam`, `RemoveShooterFromStartList`) work transparently for both qualifying and finals lists. The Step 4 editor in the wizard calls these same endpoints with the finals start list id. The renderer detects `Settings.Format == "Championship Finals"` and emits extra Rang/Kvalresultat columns.
+
+**Dual-renderer trap (same warning as the regular start list):** the public finals page is rendered by `Views/PrecisionFinalsStartList.cshtml` (reads `configurationData` JSON directly via `dynamic`); the cached `startListContent` blob comes from `StartListHtmlRenderer.GenerateStartListHtml` (with `isFinals = format == "Championship Finals"`). Any visible-field addition must be wired in BOTH places.
+
+**Admin UI (`CompetitionFinalsStartListManagement.cshtml`, Rev 2 2026-05-22):** mirrors the standard Startlista layout — a "Skapa ny finalsstartlista" button at the top, an "Official finals start list card" with status badge / Publicera / Avpublicera / Redigera / Öppna i ny flik / iframe of the published page, and a "no list yet" empty state. The 3-step **generation wizard lives entirely inside a Bootstrap modal** `#generateFinalsStartListModal`: Steg 1 (per-group freeze), Steg 2 (per-group skjutlag config + live preview), Steg 3 (start time / interval / max + Generera). On Generera success the modal hides itself and the card refreshes.
+
+**Editing reuses the shared `#startListEditorModal` (from `CompetitionStartListManagement.cshtml`)** — the finals card's Redigera button calls `window.openStartListEditor(finalsId)`. This works because the editor is parameterized on `window.currentStartListId` and the 9 editor endpoints (MoveShooterToTeam, AddShooterToStartList, RemoveShooterFromStartList, UpdateTeamTimes, CreateNewTeam, DeleteTeam, BulkMoveShooters, UpdateShooterWeaponClass, SearchAvailableShooters) operate generically on any start-list node. The only doctype-specific concern — the "Officiell" banner inside the editor — is handled by branching on `startList.ContentType.Alias == "finalsStartList"` inside `GetStartListForEditing` to read `isOfficialFinalsStartList` for finals lists. A `hidden.bs.modal` listener on the editor refreshes the finals card iframe when the editor was opened for the finals list.
+
+The legacy `#finalsStartListSection` markup + `checkFinalsEligibility` / `displayQualificationSummary` / `showExistingFinalsList` / legacy `generateFinalsStartList` JS block in `CompetitionStartListManagement.cshtml` was removed in this rev (it had been dormant since the new partial replaced it).
+
+**Endpoints:**
+- `FreezeClassResults` / `UnfreezeClassResults` — per-class freeze
+- `GetQualifyingSnapshot` — per-class state (has results, frozen?, frozenAt, frozenBy, shooter count, staleness flag)
+- `GetFinalsConfig` / `SaveFinalsConfig` / `PreviewFinalsConfig` — per-class config + dry-run preview
+- `GenerateFinalsStartList` — workflow-gated on at least one frozen class
+- `GetFinalsStartList` / `PublishFinalsStartList` — read + publish toggle
+
+**Key files:**
+- `CompetitionTypes/Precision/Services/PrecisionFinalsQualificationService.cs` (extended with `BuildFullClassRankings`, public `CalculateQualificationCutoff`, static `ChampionshipClasses`)
+- `CompetitionTypes/Precision/Services/PrecisionQualifyingResultsService.cs` (new) — per-class freeze/unfreeze/staleness
+- `CompetitionTypes/Precision/Services/PrecisionFinalsStartListBuilder.cs` (new) — skjutlag-assignment + block-of-positions builder
+- `CompetitionTypes/Precision/Models/PrecisionFinalsStartList.cs` — POCOs `QualifyingResultsSnapshot` (dict), `ClassResultsSnapshot`, `FinalsClassConfig`, `FinalsStartListSettings`
+- `CompetitionTypes/Precision/Controllers/PrecisionStartListController.cs` — wizard endpoints + rewritten `GenerateFinalsStartList`
+- `Views/Partials/CompetitionFinalsStartListManagement.cshtml` — 4-step wizard with inline editor
+- `Views/PrecisionFinalsStartList.cshtml` — public `/finalsstartlista/` page
+- `Views/CompetitionManagement.cshtml` — partial wired in, gated on `numberOfFinalSeries > 0`
+- `Views/Competition.cshtml` — public "Visa finalsstartlista" button gated on `isOfficialFinalsStartList`
 
 ### Skjutlag / Patrull Label (2026-05-20)
 **What:** Freeform per-skjutlag/patrol label admins can type to disambiguate multi-day competitions (e.g. "Lördag fm", "Söndag 14 juni", "Final"). Replaces a backlog item that originally asked for a structured day-of-week + date field.

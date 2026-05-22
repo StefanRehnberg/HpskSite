@@ -470,6 +470,13 @@
     var hasOfficialStartList = officialStartList != null;
     var startListPageUrl = hasOfficialStartList ? officialStartList.Url() : "";
 
+    // 2b. Finals start list (championship competitions). Direct child of competition,
+    //     gated on isOfficialFinalsStartList. Shown alongside the qualifying button.
+    var officialFinalsStartList = competitionChildren.FirstOrDefault(c =>
+        c.ContentType.Alias == "finalsStartList" && c.Value<bool>("isOfficialFinalsStartList"));
+    var hasOfficialFinalsStartList = officialFinalsStartList != null;
+    var finalsStartListPageUrl = hasOfficialFinalsStartList ? officialFinalsStartList.Url() : "";
+
     // 3. Result page availability from published content
     var resultPageNode = competitionChildren.FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
     var hasResultPage = resultPageNode != null;
@@ -1197,6 +1204,13 @@
 								<p class="text-muted small mb-0">
 									<i class="bi bi-hourglass-split me-1"></i> Startlista har inte publicerats än.
 								</p>
+							}
+
+							@if (hasOfficialFinalsStartList)
+							{
+								<a href="@finalsStartListPageUrl" class="btn btn-warning w-100 mt-2" target="_blank" onclick="if (!currentUserIsLoggedIn) { event.preventDefault(); showLoginRequiredModal('finalsstartlistan'); }">
+									<i class="bi bi-trophy me-1"></i> Visa finalsstartlista
+								</a>
 							}
 						</div>
 

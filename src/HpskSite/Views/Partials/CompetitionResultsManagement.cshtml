@@ -29,6 +29,10 @@
     var qualificationSeriesCount = hasFinalsRound ? (numberOfSeriesOrStations.Value - numberOfFinalSeries.Value) : numberOfSeriesOrStations.Value;
     var isStationPage = ViewData["IsStationPage"] != null && (bool)ViewData["IsStationPage"];
     var presetTeamNumber = ViewData["PresetTeamNumber"] as int? ?? 0;
+    // Locked phase ("qualification" | "finals") set once by /station from ?phase=…
+    // Drives which start list loads + which series rows are visible. No runtime toggle.
+    var presetPhase = (ViewData["PresetPhase"] as string) == "finals" ? "finals" : "qualification";
+    var isFinalsPhase = presetPhase == "finals";
 
     // Debug output
     System.Diagnostics.Debug.WriteLine($"CompetitionResultsManagement - Competition: {competitionId}");
@@ -38,7 +42,7 @@
     System.Diagnostics.Debug.WriteLine($"  qualificationSeriesCount: {qualificationSeriesCount}");
 }
 
-<div class="competition-results-management" data-competition-id="@competitionId">
+<div class="competition-results-management" data-competition-id="@competitionId" data-preset-phase="@presetPhase">
     @if (!isStationPage)
     {
     <!-- Team Links — navigate to station page for result entry -->
@@ -51,6 +55,11 @@
         <div class="card-body py-2">
             <div class="d-flex flex-wrap gap-2" id="precisionTeamLinks">
                 <span class="text-muted small">Laddar skjutlag...</span>
+            </div>
+            <!-- Finals skjutlag buttons (only when a finals start list exists) -->
+            <div id="precisionFinalsTeamLinksWrapper" class="mt-3" style="display:none">
+                <div class="fw-bold small text-muted mb-1"><i class="bi bi-trophy text-warning me-1"></i>Finalsskjutlag</div>
+                <div class="d-flex flex-wrap gap-2" id="precisionFinalsTeamLinks"></div>
             </div>
         </div>
     </div>
@@ -95,6 +104,40 @@
             .catch(function() {
                 document.getElementById('precisionTeamLinks').innerHTML = '<span class="text-muted small">Kunde inte ladda skjutlag.</span>';
             });
+
+        // Finals skjutlag (only when a finals start list exists). Same shape as qualifying
+        // teams (Teams[].TeamNumber/Label/StartTime). The URL appends &phase=finals so the
+        // entry partial loads the finals shooter ordering instead of the qualifying one.
+        function escapeHtmlInline(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+        fetch('/umbraco/surface/PrecisionStartList/GetFinalsStartList?competitionId=' + cid)
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                var ok = data.Success || data.success;
+                var exists = data.Exists || data.exists;
+                if (!ok || !exists) return;
+                var sl = data.StartList || data.startList;
+                var teams = sl && (sl.Teams || sl.teams);
+                if (!teams || !teams.length) return;
+
+                var wrapper = document.getElementById('precisionFinalsTeamLinksWrapper');
+                var el = document.getElementById('precisionFinalsTeamLinks');
+                el.innerHTML = '';
+                teams.forEach(function(team) {
+                    var teamNum = team.teamNumber || team.TeamNumber;
+                    var startTime = team.startTime || team.StartTime || '';
+                    var label = team.label || team.Label || '';
+                    var a = document.createElement('a');
+                    a.href = '/station?c=' + cid + '&s=' + teamNum + '&phase=finals';
+                    a.className = 'btn btn-outline-warning btn-sm';
+                    a.target = '_blank';
+                    a.innerHTML = '<i class="bi bi-trophy me-1"></i>Final ' + teamNum
+                        + (label ? ' — ' + escapeHtmlInline(label) : '')
+                        + (startTime ? ' <small class="text-muted">(' + escapeHtmlInline(startTime) + ')</small>' : '');
+                    el.appendChild(a);
+                });
+                wrapper.style.display = '';
+            })
+            .catch(function() { /* finals are optional — fail silently */ });
     })();
     </script>
     }
@@ -104,7 +147,18 @@
         @if (isStationPage)
         {
             <div class="card-header">
-                <h5 class="mb-0"><i class="bi bi-bullseye me-2"></i>Registrera Resultat — <span id="presetTeamLabel">Lag @presetTeamNumber</span></h5>
+                <div class="d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="bi bi-bullseye me-2"></i>Registrera Resultat — <span id="presetTeamLabel">@(isFinalsPhase ? $"Final {presetTeamNumber}" : $"Lag {presetTeamNumber}")</span>
+                        @if (isFinalsPhase)
+                        {
+                            <span class="badge bg-warning text-dark ms-2"><i class="bi bi-trophy me-1"></i>Final</span>
+                        }
+                    </h5>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#resultEntrySettingsModal" title="Inställningar">
+                        <i class="bi bi-gear"></i>
+                    </button>
+                </div>
             </div>
         }
         else
@@ -115,65 +169,35 @@
                         <i class="bi bi-chevron-down me-2" id="resultsEntryChevron"></i>
                         <h5 class="mb-0"><i class="bi bi-bullseye me-2"></i>Registrera Resultat</h5>
                     </div>
-                    <div>
+                    <div class="d-flex align-items-center gap-2">
                         <span class="text-muted">
                             <small><i class="bi bi-keyboard me-1"></i>Använd tangentbordet eller klicka på knapparna</small>
                         </span>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#resultEntrySettingsModal" onclick="event.stopPropagation();" title="Inställningar">
+                            <i class="bi bi-gear"></i>
+                        </button>
                     </div>
                 </div>
             </div>
         }
         <div class="card-body" id="resultsEntryBody">
-            <!-- Controls Row: Entry Order, Phase Selector, and Traversal Mode -->
-            <div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-3">
-                <!-- Entry Order Selector -->
-                <div>
-                    <label for="entryOrderSelect" class="form-label mb-1 small">Ordning</label>
-                    <select class="form-select form-select-sm" id="entryOrderSelect" onchange="changeEntryOrder()">
-                        @if (isStationPage)
-                        {
-                            <option value="registration">Anmälningsordning (klass/namn)</option>
-                            <option value="startlist" selected>Startlisteordning (lag/tid)</option>
-                        }
-                        else
-                        {
-                            <option value="registration" selected>Anmälningsordning (klass/namn)</option>
-                            <option value="startlist">Startlisteordning (lag/tid)</option>
-                        }
-                    </select>
+            @if (hasFinalsRound)
+            {
+                <!-- Phase indicator banner — drives which series are visible in the scoresheet -->
+                <div class="alert @(isFinalsPhase ? "alert-warning" : "alert-primary") py-2 mb-3 small">
+                    @if (isFinalsPhase)
+                    {
+                        <span><i class="bi bi-trophy me-2"></i><strong>Final</strong> &mdash; Serie F1&ndash;F@(numberOfFinalSeries)</span>
+                    }
+                    else
+                    {
+                        <span><i class="bi bi-list-ol me-2"></i><strong>Grundomgång</strong> &mdash; Serie 1&ndash;@qualificationSeriesCount</span>
+                    }
                 </div>
+            }
 
-                <!-- Phase Selector (Qualification vs Finals) -->
-                @if (hasFinalsRound)
-                {
-                    <div>
-                        <label class="form-label mb-1 small">Fas</label>
-                        <div class="btn-group phase-selector" role="group" aria-label="Tävlingsfas">
-                            <input type="radio" class="btn-check" name="competitionPhase" id="phaseQualification" value="qualification" checked autocomplete="off">
-                            <label class="btn btn-sm btn-outline-primary" for="phaseQualification" id="phaseQualificationLabel">
-                                <i class="bi bi-list-ol me-1"></i>
-                                <span>Grundomgång (1-@qualificationSeriesCount)</span>
-                            </label>
-
-                            <input type="radio" class="btn-check" name="competitionPhase" id="phaseFinals" value="finals" autocomplete="off">
-                            <label class="btn btn-sm btn-outline-success" for="phaseFinals" id="phaseFinalsLabel">
-                                <i class="bi bi-trophy me-1"></i>
-                                <span>Final (F1-F@numberOfFinalSeries)</span>
-                            </label>
-                        </div>
-                    </div>
-                }
-
-                <!-- Traversal Mode Dropdown -->
-                <div>
-                    <label for="traversalModeSelect" class="form-label mb-1 small">Efter Enter flytta till</label>
-                    <select class="form-select form-select-sm" id="traversalModeSelect">
-                        <option value="nextShooter">Nästa Skytt</option>
-                        <option value="nextSeries">Nästa Serie</option>
-                        <option value="stay">Stanna kvar</option>
-                    </select>
-                </div>
-            </div>
+            <!-- The two settings dropdowns moved into #resultEntrySettingsModal (cog button in the card header).
+                 They keep their original ids/onchange so existing JS that reads their values still works. -->
 
             <div id="resultsEntryContainer">
                 <div class="text-center py-4">
@@ -408,6 +432,62 @@
                 <button type="button" class="btn btn-success" id="soModalSave" disabled>
                     <i class="bi bi-check-circle me-1"></i>Spara skott
                 </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Result entry settings modal — Ordning + traversal mode. Same select ids/onchange
+     as the inline controls they replace, so existing JS reading their values is unchanged. -->
+<div class="modal fade" id="resultEntrySettingsModal" tabindex="-1" aria-labelledby="resultEntrySettingsModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="resultEntrySettingsModalLabel">
+                    <i class="bi bi-gear me-2"></i>Inställningar
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label for="entryOrderSelect" class="form-label small">Ordning</label>
+                    <select class="form-select form-select-sm" id="entryOrderSelect" onchange="changeEntryOrder()">
+                        @if (isStationPage)
+                        {
+                            <option value="registration">Anmälningsordning (klass/namn)</option>
+                            <option value="startlist" selected>Startlisteordning (lag/tid)</option>
+                        }
+                        else
+                        {
+                            <option value="registration" selected>Anmälningsordning (klass/namn)</option>
+                            <option value="startlist">Startlisteordning (lag/tid)</option>
+                        }
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label for="traversalModeSelect" class="form-label small">Efter Enter flytta till</label>
+                    <select class="form-select form-select-sm" id="traversalModeSelect">
+                        <option value="nextShooter">Nästa Skytt</option>
+                        <option value="nextSeries">Nästa Serie</option>
+                        <option value="stay">Stanna kvar</option>
+                    </select>
+                </div>
+                <div class="mb-0">
+                    <label class="form-label small">Mitt intervall</label>
+                    <div class="input-group input-group-sm">
+                        <span class="input-group-text">Plats</span>
+                        <input type="number" min="1" class="form-control" id="officerRangeStart" placeholder="från">
+                        <span class="input-group-text">till</span>
+                        <input type="number" min="1" class="form-control" id="officerRangeEnd" placeholder="till">
+                        <button class="btn btn-outline-secondary" type="button" id="officerRangeClearBtn" title="Rensa intervall">
+                            <i class="bi bi-x-lg"></i>
+                        </button>
+                    </div>
+                    <small class="text-muted">Visa endast skyttar i detta platsintervall. Sparas i din webbläsare och gäller alla skjutlag i tävlingen.</small>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
             </div>
         </div>
     </div>
@@ -1533,10 +1613,55 @@ let presetTeamNumber = @presetTeamNumber; // 0 = no preset, >0 = filter to this 
 let currentSeries = 1;
 let currentUserId = null;    // Will be set when page loads
 
+// Per-officer position-range filter. Stored in localStorage so when the same browser
+// reopens any team in this competition, only shooters in officerRangeStart..officerRangeEnd
+// are visible. null = no filter (show whole team).
+let officerRangeStart = null;
+let officerRangeEnd = null;
+
 // Legacy support - keep startListData for some existing functions
 let startListData = null;
 let currentTeam = 1;
 let currentPosition = 1;
+
+// ----- Per-officer position range (localStorage) -----
+// Key includes phase so finals (which has its own teams + position numbering) gets its
+// own range. Team isn't in the key — officers handle the same physical positions across
+// all teams in a competition, so the same range applies to Lag 1, Lag 2, etc.
+function officerRangeStorageKey() {
+    var compId = competitionData.competitionId || $('.competition-results-management').data('competition-id') || '0';
+    var phase = (competitionData.currentPhase === 'finals') ? 'finals' : 'qualification';
+    return 'hpsk_officer_range_' + compId + '_' + phase;
+}
+function loadOfficerRangeFromStorage() {
+    try {
+        var raw = localStorage.getItem(officerRangeStorageKey());
+        if (!raw) { officerRangeStart = null; officerRangeEnd = null; return; }
+        var parsed = JSON.parse(raw);
+        officerRangeStart = (parsed && Number.isFinite(parsed.start)) ? parsed.start : null;
+        officerRangeEnd   = (parsed && Number.isFinite(parsed.end))   ? parsed.end   : null;
+    } catch (e) { officerRangeStart = null; officerRangeEnd = null; }
+}
+function saveOfficerRangeToStorage() {
+    try {
+        if (officerRangeStart != null && officerRangeEnd != null) {
+            localStorage.setItem(officerRangeStorageKey(),
+                JSON.stringify({ start: officerRangeStart, end: officerRangeEnd }));
+        } else {
+            localStorage.removeItem(officerRangeStorageKey());
+        }
+    } catch (e) { /* localStorage unavailable — silent */ }
+}
+// Filter shootersData in place to officer's range. Called after the team filter so it
+// applies on top of presetTeamNumber filtering. No-op if range isn't set/valid.
+function applyOfficerRange() {
+    if (officerRangeStart == null || officerRangeEnd == null) return;
+    if (officerRangeStart < 1 || officerRangeEnd < officerRangeStart) return;
+    shootersData = shootersData.filter(function(s) {
+        var p = s.position || 0;
+        return p >= officerRangeStart && p <= officerRangeEnd;
+    });
+}
 
 function loadCompetitionData() {
     const competitionId = $('.competition-results-management').data('competition-id');
@@ -1561,6 +1686,22 @@ function loadCompetitionData() {
     // Update competition data
     competitionData.competitionId = competitionId;
     competitionData.competitionType = 'Precision';
+
+    // Phase is locked at load by the URL (?phase=finals on the Finals skjutlag buttons).
+    // Read it now so we can skip the qualifying-shooter fetch when entering finals scores.
+    var rootEl = document.querySelector('.competition-results-management');
+    var presetPhase = (rootEl && rootEl.dataset && rootEl.dataset.presetPhase) || 'qualification';
+    competitionData.currentPhase = presetPhase === 'finals' ? 'finals' : 'qualification';
+
+    // Restore the officer's saved range filter (per competition+phase) — applied after the
+    // team filter in the loadShooters / loadFinalsStartList callbacks.
+    loadOfficerRangeFromStorage();
+
+    if (competitionData.currentPhase === 'finals') {
+        // initializePhaseSelector() (fires below) will call loadFinalsStartList() which
+        // populates shootersData from the finals start list directly.
+        return;
+    }
 
     // Load shooters from registrations (new approach - no start list required)
     loadShooters(currentEntryOrder);
@@ -1594,13 +1735,17 @@ function loadShooters(orderBy = 'registration') {
                     var teamShooters = shootersData.filter(function(s) { return s.teamNumber === presetTeamNumber; });
                     if (teamShooters.length > 0) {
                         shootersData = teamShooters;
-                        // Update header with team info
+                        // Update header with team info. Use "Final N" prefix when this entry
+                        // page was opened from a finals skjutlag button (?phase=finals).
                         var labelEl = document.getElementById('presetTeamLabel');
                         if (labelEl) {
                             var startTime = teamShooters[0].startTime || '';
-                            labelEl.textContent = 'Lag ' + presetTeamNumber + (startTime ? ' (' + startTime + ')' : '');
+                            var prefix = competitionData.currentPhase === 'finals' ? 'Final ' : 'Lag ';
+                            labelEl.textContent = prefix + presetTeamNumber + (startTime ? ' (' + startTime + ')' : '');
                         }
                     }
+                    // Officer range filter sits on top of the team filter.
+                    applyOfficerRange();
                     currentShooterIndex = 0;
                 }
                 else {
@@ -2049,9 +2194,6 @@ function generateShooterResultsEntryHtml(shooterData, seriesId, competitionId) {
                             <div class="d-inline-block me-3">
                                 <span class="fw-bold">X: </span><span class="shooter-overall-xcount fs-5 fw-bold">0</span>
                             </div>
-                            <button type="button" class="btn btn-outline-info btn-sm info-toggle-btn" title="Show/Hide Instructions">
-                                <i class="bi bi-info-circle"></i>
-                            </button>
                         </div>
                     </div>
                 </div>
@@ -2134,15 +2276,6 @@ function generateShooterResultsEntryHtml(shooterData, seriesId, competitionId) {
         </div>
     </div>
 
-                        <div class="col-md-4">
-                            <div class="alert alert-info info-section" style="display: none;">
-                                <h6><i class="bi bi-info-circle"></i> Snabbregistrering</h6>
-                                <p class="mb-1">• Klicka på knapparna eller använd tangentbordet (0-9, X)</p>
-                                <p class="mb-1">• Tryck ENTER när du är klar</p>
-                                <p class="mb-1">• Tryck ESC eller RENSA för att börja om</p>
-                                <p class="mb-0">• 5 skott per serie</p>
-                            </div>
-                        </div>
         </div>
                 </div>
             </div>
@@ -2219,14 +2352,6 @@ function generateShooterResultsEntryHtml(shooterData, seriesId, competitionId) {
             gap: 5px;
         }
         
-        .info-section {
-            transition: all 0.3s ease;
-        }
-        
-        .info-toggle-btn {
-            min-width: 32px;
-        }
-
         /* Mobile responsive styles */
         @@media (max-width: 575.98px) {
             /* Control row - stack dropdowns vertically */
@@ -2394,7 +2519,6 @@ function handleShooterClick(e) {
     const isOurButton = button.classList.contains('shot-btn') ||
                         button.classList.contains('enter-btn') ||
                         button.classList.contains('clear-btn') ||
-                        button.classList.contains('info-toggle-btn') ||
                         button.classList.contains('first-shooter-btn') ||
                         button.classList.contains('prev-shooter-btn') ||
                         button.classList.contains('next-shooter-btn') ||
@@ -2416,8 +2540,6 @@ function handleShooterClick(e) {
         handleEnter();
     } else if (button.classList.contains('clear-btn')) {
         clearShots();
-    } else if (button.classList.contains('info-toggle-btn')) {
-        toggleInfoSection();
     } else if (button.classList.contains('prev-team-btn')) {
         navigateToPreviousTeam();
     } else if (button.classList.contains('next-team-btn')) {
@@ -2982,13 +3104,64 @@ document.getElementById('traversalModeSelect').addEventListener('change', functi
     console.log('Traversal mode changed to:', mode);
 });
 
-// Info section toggle function
-function toggleInfoSection() {
-    const infoSection = document.querySelector('.info-section');
-    if (infoSection) {
-        infoSection.style.display = infoSection.style.display === 'none' ? 'block' : 'none';
+// Officer position-range filter (inside the settings modal). Range survives reload via
+// localStorage and applies on top of the team filter so officers handling positions 1-5
+// only see those 5 shooters when they open any team in the competition.
+(function() {
+    function reapplyOfficerRangeAndReload() {
+        // Re-run the shooter load so applyOfficerRange() filters with the new bounds.
+        // Same code path the page uses on initial mount.
+        if (competitionData.currentPhase === 'finals') {
+            loadFinalsStartList();
+        } else {
+            loadShooters(currentEntryOrder);
+        }
     }
-}
+    function onRangeInputChange() {
+        var startEl = document.getElementById('officerRangeStart');
+        var endEl = document.getElementById('officerRangeEnd');
+        var sVal = startEl.value.trim();
+        var eVal = endEl.value.trim();
+        var s = sVal === '' ? null : parseInt(sVal, 10);
+        var e = eVal === '' ? null : parseInt(eVal, 10);
+        // Only apply when both are valid and start <= end. Otherwise clear.
+        if (Number.isFinite(s) && Number.isFinite(e) && s >= 1 && e >= s) {
+            officerRangeStart = s;
+            officerRangeEnd = e;
+        } else {
+            officerRangeStart = null;
+            officerRangeEnd = null;
+        }
+        saveOfficerRangeToStorage();
+        reapplyOfficerRangeAndReload();
+    }
+    function onClearClick() {
+        officerRangeStart = null;
+        officerRangeEnd = null;
+        document.getElementById('officerRangeStart').value = '';
+        document.getElementById('officerRangeEnd').value = '';
+        saveOfficerRangeToStorage();
+        reapplyOfficerRangeAndReload();
+    }
+    // When the modal is shown, refresh the inputs from current state (covers the case
+    // where storage was modified in another tab or competition phase changed).
+    var modalEl = document.getElementById('resultEntrySettingsModal');
+    if (modalEl) {
+        modalEl.addEventListener('show.bs.modal', function() {
+            loadOfficerRangeFromStorage();
+            var sEl = document.getElementById('officerRangeStart');
+            var eEl = document.getElementById('officerRangeEnd');
+            if (sEl) sEl.value = officerRangeStart != null ? officerRangeStart : '';
+            if (eEl) eEl.value = officerRangeEnd != null ? officerRangeEnd : '';
+        });
+    }
+    var startEl = document.getElementById('officerRangeStart');
+    var endEl = document.getElementById('officerRangeEnd');
+    var clearBtn = document.getElementById('officerRangeClearBtn');
+    if (startEl) startEl.addEventListener('change', onRangeInputChange);
+    if (endEl) endEl.addEventListener('change', onRangeInputChange);
+    if (clearBtn) clearBtn.addEventListener('click', onClearClick);
+})();
 
 // Show warning when existing results are loaded
 function showExistingResultsWarning(existingResult) {
@@ -3188,53 +3361,29 @@ function navigateToNextSeries() {
 
 let finalsStartListData = null;
 
+// Phase is locked at page load by the URL (?phase=finals on the finals buttons in the
+// Resultatinmatning section, anything else defaults to qualification). The in-page radio
+// switcher was removed 2026-05-22; this function now just reads data-preset-phase and
+// initiates the correct start-list load. There is no runtime toggle anymore.
 function initializePhaseSelector() {
     if (!competitionData.hasFinalsRound) {
-        return; // No phase selector needed
+        return; // Nothing phase-specific to do when there's no finals round configured.
     }
 
-    // Update phase selector labels with correct values
-    const qualLabel = document.getElementById('phaseQualificationLabel');
-    const finalsLabel = document.getElementById('phaseFinalsLabel');
-    
-    if (qualLabel && qualLabel.querySelector('span')) {
-        qualLabel.querySelector('span').textContent = `Grundomgång (serie 1-${competitionData.qualificationSeriesCount})`;
-    }
+    var root = document.querySelector('.competition-results-management');
+    var preset = (root && root.dataset && root.dataset.presetPhase) || 'qualification';
+    competitionData.currentPhase = preset === 'finals' ? 'finals' : 'qualification';
 
-    if (finalsLabel && finalsLabel.querySelector('span')) {
-        finalsLabel.querySelector('span').textContent = `Final (serie F1-F${competitionData.numberOfFinalSeries})`;
-    }
+    // (populateSeriesDropdown / populateTeamsDropdown / populatePositionsDropdown
+    //  reference seriesSelect/teamSelect/positionSelect DOM elements that no longer
+    //  exist — they're orphaned from an older UI. Calling them throws a TypeError
+    //  on the missing element and breaks the rest of the init chain. Skipped here.)
 
-    // Add event listeners to phase selector radio buttons
-    const phaseRadios = document.querySelectorAll('input[name="competitionPhase"]');
-    phaseRadios.forEach(radio => {
-        radio.addEventListener('change', function() {
-            competitionData.currentPhase = this.value;
-            onPhaseChanged();
-        });
-    });
-
-    console.log('Phase selector initialized. Current phase:', competitionData.currentPhase);
-    console.log('Qualification series count:', competitionData.qualificationSeriesCount);
-    console.log('Number of final series:', competitionData.numberOfFinalSeries);
-}
-
-function onPhaseChanged() {
-    console.log('Phase changed to:', competitionData.currentPhase);
-
-    // Update series dropdown
-    populateSeriesDropdown();
-
-    // Load appropriate start list
     if (competitionData.currentPhase === 'finals') {
         loadFinalsStartList();
-    } else {
-        // Qualification start list is already loaded in startListData
-        currentSeries = 1; // Reset to first qual series
-        updateNavigationDisplays();
-        populateTeamsDropdown();
-        populatePositionsDropdown();
     }
+
+    console.log('Phase initialized (locked) to:', competitionData.currentPhase);
 }
 
 function loadFinalsStartList() {
@@ -3247,41 +3396,85 @@ function loadFinalsStartList() {
         .then(data => {
             console.log('Finals start list response:', data);
 
-            if (data.success && data.exists && data.startList) {
-                finalsStartListData = data.startList;
+            // GetFinalsStartList returns PascalCase property names (Success/Exists/StartList).
+            // Other endpoints in the same controller return camelCase — accept both so the
+            // function is robust to either casing convention.
+            var ok = data.Success || data.success;
+            var exists = data.Exists || data.exists;
+            var sl = data.StartList || data.startList;
+
+            if (ok && exists && sl) {
+                finalsStartListData = sl;
 
                 // Use finals start list as the current start list
-                startListData = data.startList;
+                startListData = sl;
 
                 // Reset to first finals series
                 currentSeries = competitionData.qualificationSeriesCount + 1;
                 currentTeam = 1;
                 currentPosition = 1;
 
-                // Update UI
+                // Synthesize shootersData from the finals start list teams. shape mirrors
+                // what /GetShootersForResultsEntry returns for qualifying — same field names
+                // so the rest of the entry UI (updateShooterDisplay, loadCurrentShooterByIndex,
+                // save/load flows) works unchanged.
+                var teams = sl.Teams || sl.teams || [];
+                var allShooters = [];
+                teams.forEach(function(t) {
+                    var teamNum = t.TeamNumber != null ? t.TeamNumber : t.teamNumber;
+                    var teamStart = t.StartTime || t.startTime || '';
+                    var shooters = t.Shooters || t.shooters || [];
+                    shooters.forEach(function(s) {
+                        allShooters.push({
+                            memberId: s.MemberId != null ? s.MemberId : s.memberId,
+                            name: s.Name || s.name || '',
+                            club: s.Club || s.club || '',
+                            weaponClass: s.WeaponClass || s.weaponClass || '',
+                            shootingClass: s.WeaponClass || s.weaponClass || '',
+                            position: s.Position != null ? s.Position : s.position,
+                            teamNumber: teamNum,
+                            startTime: teamStart
+                        });
+                    });
+                });
+
+                // Filter to the team the admin opened (presetTeamNumber comes from ?s=N).
+                if (presetTeamNumber > 0) {
+                    var filtered = allShooters.filter(function(s) { return s.teamNumber === presetTeamNumber; });
+                    shootersData = filtered.length > 0 ? filtered : allShooters;
+                } else {
+                    shootersData = allShooters;
+                }
+                // Officer range filter on top of the team filter.
+                applyOfficerRange();
+                hasStartList = true;
+                currentShooterIndex = 0;
+
+                // Update the header label to "Final N (HH:mm)".
+                if (shootersData.length > 0) {
+                    var labelEl = document.getElementById('presetTeamLabel');
+                    if (labelEl) {
+                        var st = shootersData[0].startTime || '';
+                        labelEl.textContent = 'Final ' + presetTeamNumber + (st ? ' (' + st + ')' : '');
+                    }
+                }
+
+                // Update UI — populateTeamsDropdown/populatePositionsDropdown skipped:
+                // they reference orphan select elements no longer in the markup.
                 updateNavigationDisplays();
-                populateTeamsDropdown();
-                populatePositionsDropdown();
-                loadCurrentShooter();
+                updateShooterDisplay();
+                loadCurrentShooterByIndex();
 
-                console.log('Finals start list loaded successfully');
+                console.log('Finals start list loaded successfully — ' + shootersData.length + ' shooters');
             } else {
-                alert('Ingen finalstartlista finns. Generera den först från Startlistor-sektionen.');
-
-                // Switch back to qualification
-                document.getElementById('phaseQualification').checked = true;
-                competitionData.currentPhase = 'qualification';
-                onPhaseChanged();
+                // The URL pinned us to finals but no finals start list exists. Tell the
+                // admin — no in-page toggle to flip back to.
+                alert('Ingen finalsstartlista finns. Skapa den först från Startlistor-fliken.');
             }
         })
         .catch(error => {
             console.error('Error loading finals start list:', error);
-            alert('Ett fel uppstod vid laddning av finalstartlistan: ' + error.message);
-
-            // Switch back to qualification
-            document.getElementById('phaseQualification').checked = true;
-            competitionData.currentPhase = 'qualification';
-            onPhaseChanged();
+            alert('Ett fel uppstod vid laddning av finalsstartlistan: ' + error.message);
         });
 }
 

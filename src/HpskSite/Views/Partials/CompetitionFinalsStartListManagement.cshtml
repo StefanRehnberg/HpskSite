@@ -1,0 +1,607 @@
+@*
+ * Competition Finals Start List Management
+ *
+ * Mirrors the visual pattern of CompetitionStartListManagement.cshtml:
+ *   - "Skapa ny finalsstartlista" button at the top (always visible)
+ *   - Official finals start list card with status badge, Publicera/Avpublicera, info row, Redigera, iframe
+ *   - Generation flow lives entirely inside #generateFinalsStartListModal (3-step wizard)
+ *   - Editing reuses the standard #startListEditorModal via window.openStartListEditor(finalsId) —
+ *     the shared editor is parameterized on window.currentStartListId so the same JS works for
+ *     both qualifying and finals lists. The controller's GetStartListForEditing branches on the
+ *     doctype alias for the isOfficial flag.
+ *
+ * Gated by CompetitionManagement.cshtml on `numberOfFinalSeries > 0`.
+*@
+@{
+    var competitionId = ViewData["CompetitionId"] is int cid ? cid : 0;
+}
+
+@Html.AntiForgeryToken()
+
+<style>
+    #finalsWizardRoot .wizard-progress {
+        display: flex;
+        gap: .5rem;
+        margin-bottom: 1rem;
+        flex-wrap: wrap;
+    }
+    #finalsWizardRoot .wizard-progress .step {
+        flex: 1 1 12rem;
+        padding: .5rem .75rem;
+        border-radius: .375rem;
+        background: var(--bs-tertiary-bg);
+        border: 1px solid var(--bs-border-color);
+        font-size: .85rem;
+        color: var(--bs-secondary-color);
+    }
+    #finalsWizardRoot .wizard-progress .step.active {
+        background: var(--bs-primary);
+        color: #fff;
+        border-color: var(--bs-primary);
+    }
+    #finalsWizardRoot .wizard-progress .step.done {
+        background: var(--bs-success-bg-subtle);
+        border-color: var(--bs-success);
+        color: var(--bs-success-text-emphasis);
+    }
+    #finalsWizardRoot .step-pane { display: none; }
+    #finalsWizardRoot .step-pane.active { display: block; }
+</style>
+
+<div class="competition-finals-start-list-management mt-4" data-competition-id="@competitionId">
+
+    <!-- Top action button — opens the wizard modal -->
+    <div class="mb-3">
+        <button type="button" class="btn btn-success" id="btnOpenFinalsWizard">
+            <i class="bi bi-trophy me-1"></i>Skapa ny finalsstartlista
+        </button>
+    </div>
+
+    <!-- Loading -->
+    <div id="finalsStartListLoading" class="text-center py-3 d-none">
+        <div class="spinner-border spinner-border-sm" role="status"></div>
+        <small class="ms-2 text-muted">Laddar finalsstartlista...</small>
+    </div>
+
+    <!-- No-list state -->
+    <div id="noFinalsStartListYet" class="alert alert-info d-none">
+        <h6><i class="bi bi-info-circle me-2"></i>Ingen finalsstartlista ännu</h6>
+        <p class="mb-0">Klicka "Skapa ny finalsstartlista" ovan för att starta guiden.</p>
+    </div>
+
+    <!-- Official finals start list card -->
+    <div class="card d-none" id="officialFinalsStartListSection">
+        <div class="card-header">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <h5 class="mb-0"><i class="bi bi-trophy me-2 text-warning"></i>Finalsstartlista</h5>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <span class="badge bg-warning fs-6 px-3 py-2" id="finalsStartListStatusBadge">
+                        <i class="bi bi-exclamation-triangle me-1"></i>Preliminär
+                    </span>
+                    <button class="btn btn-success btn-sm" id="btnPublishFinalsStartList">
+                        <i class="bi bi-check-circle me-1"></i>Publicera
+                    </button>
+                    <button class="btn btn-outline-warning btn-sm d-none" id="btnUnpublishFinalsStartList">
+                        <i class="bi bi-arrow-counterclockwise me-1"></i>Avpublicera
+                    </button>
+                    <span class="text-muted">
+                        <small><i class="bi bi-people me-1"></i><span id="finalsStartListFinalistCount">0</span> finalister</small>
+                        <small class="ms-2"><i class="bi bi-grid me-1"></i><span id="finalsStartListTeamCount">0</span> skjutlag</small>
+                    </span>
+                </div>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="alert alert-info mb-3">
+                <div class="row">
+                    <div class="col-md-6">
+                        <small class="text-muted">Format:</small>
+                        <strong>Championship Finals</strong>
+                    </div>
+                    <div class="col-md-3">
+                        <small class="text-muted">Genererad:</small>
+                        <strong id="finalsStartListGeneratedDate"></strong>
+                    </div>
+                    <div class="col-md-3">
+                        <small class="text-muted">Av:</small>
+                        <strong id="finalsStartListGeneratedBy"></strong>
+                    </div>
+                </div>
+            </div>
+            <div class="d-flex justify-content-end mb-3 flex-wrap gap-2">
+                <button class="btn btn-outline-info" id="btnEditFinalsStartList">
+                    <i class="bi bi-pencil-square me-1"></i>Redigera
+                </button>
+                <button class="btn btn-outline-primary" id="btnOpenFinalsStartListNewTab">
+                    <i class="bi bi-box-arrow-up-right me-1"></i>Öppna i ny flik
+                </button>
+            </div>
+            <iframe id="finalsStartListIframe" src="" class="border rounded" style="width: 100%; height: 800px; display: none;"></iframe>
+        </div>
+    </div>
+
+    <!-- =====================================================================
+         Wizard modal — Lås grupper → Konfigurera grupper → Generera
+         ===================================================================== -->
+    <div class="modal fade" id="generateFinalsStartListModal" tabindex="-1" aria-hidden="true" id-root="finalsWizardRoot">
+        <div class="modal-dialog modal-xl modal-fullscreen-md-down">
+            <div class="modal-content" id="finalsWizardRoot">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-trophy me-2 text-warning"></i>Skapa finalsstartlista</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+                </div>
+                <div class="modal-body">
+
+                    <div class="wizard-progress">
+                        <div class="step active" data-step="1">1. Lås grupper</div>
+                        <div class="step" data-step="2">2. Konfigurera grupper</div>
+                        <div class="step" data-step="3">3. Generera</div>
+                    </div>
+
+                    <!-- STEP 1 — Per-group lock -->
+                    <div class="step-pane active" data-step="1">
+                        <p class="text-muted small mb-3">
+                            Lås kvalresultatet för varje grupp i resultatlistan när dess kvalrundor är klara.
+                            Grupperna kommer från resultatlistan — om du har slagit ihop klasser där så ses de
+                            som <em>en</em> grupp här också. Du kan låsa grupperna i valfri ordning.
+                        </p>
+                        <div id="noResultListMsg" class="alert alert-warning small" style="display:none">
+                            <i class="bi bi-exclamation-triangle me-1"></i>
+                            <strong>Resultatlistan måste genereras först.</strong> Gå till fliken "Resultat",
+                            klicka "Uppdatera" för att skapa preliminärresultat (med eventuella klass-sammanslagningar),
+                            och kom sedan tillbaka hit för att låsa varje grupp inför finalen.
+                        </div>
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle">
+                                <thead>
+                                    <tr>
+                                        <th>Grupp</th>
+                                        <th>Skyttar</th>
+                                        <th>Låsstatus</th>
+                                        <th class="text-end">Åtgärd</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="freezeTableBody">
+                                    <tr><td colspan="4" class="text-muted text-center">Laddar...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- STEP 2 — Per-group config -->
+                    <div class="step-pane" data-step="2">
+                        <p class="text-muted small mb-3">
+                            För varje låst grupp: välj vilket skjutlag den ska ligga i, och om flera grupper
+                            delar ett skjutlag — vilken ordning. <strong>Skytten som leder en grupp hamnar
+                            alltid först i sitt gruppblock.</strong> Exempel: C (skjutlag 1, ordning 0) får
+                            positioner 1–10, C Vet Y (skjutlag 1, ordning 1) får 11–17.
+                        </p>
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle" id="configTable">
+                                <thead>
+                                    <tr>
+                                        <th>Grupp</th>
+                                        <th>Skjutlag #</th>
+                                        <th>Ordning i skjutlag</th>
+                                        <th>Antal finalister</th>
+                                        <th>Alla skjuter</th>
+                                        <th>Hoppa över</th>
+                                        <th>Förhandsvisning</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="configTableBody">
+                                    <tr><td colspan="7" class="text-muted text-center">Lås minst en grupp i Steg 1 först.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- STEP 3 — Generate settings -->
+                    <div class="step-pane" data-step="3">
+                        <p class="text-muted small mb-3">
+                            Generera finalsstartlistan från de låsta grupperna och din konfiguration.
+                        </p>
+                        <div class="row g-2 align-items-end mb-3">
+                            <div class="col-auto">
+                                <label class="form-label small mb-0">Första starttid</label>
+                                <input type="text" class="form-control form-control-sm" id="finalsFirstStartTime" value="10:00" style="max-width:120px">
+                            </div>
+                            <div class="col-auto">
+                                <label class="form-label small mb-0">Intervall (h:mm)</label>
+                                <input type="text" class="form-control form-control-sm" id="finalsStartInterval" value="1:45" style="max-width:100px">
+                            </div>
+                            <div class="col-auto">
+                                <label class="form-label small mb-0">Max skyttar/skjutlag</label>
+                                <input type="number" class="form-control form-control-sm" id="finalsMaxShootersPerTeam" value="20" min="1" max="60" style="max-width:100px">
+                            </div>
+                        </div>
+                        <div class="alert alert-warning small d-none" id="generateOverwriteWarning">
+                            <i class="bi bi-exclamation-triangle me-1"></i>
+                            En finalsstartlista finns redan. Generering skriver över eventuella manuella ändringar.
+                        </div>
+                    </div>
+
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary me-auto" data-bs-dismiss="modal">Avbryt</button>
+                    <button type="button" class="btn btn-outline-secondary" id="wizardBackBtn" disabled>
+                        <i class="bi bi-arrow-left me-1"></i>Tillbaka
+                    </button>
+                    <button type="button" class="btn btn-primary" id="wizardNextBtn">
+                        Nästa <i class="bi bi-arrow-right ms-1"></i>
+                    </button>
+                    <button type="button" class="btn btn-success d-none" id="wizardGenerateBtn">
+                        <i class="bi bi-lightning me-1"></i>Generera
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    const root = document.querySelector('.competition-finals-start-list-management');
+    if (!root) return;
+    const competitionId = parseInt(root.dataset.competitionId, 10);
+    if (!competitionId) return;
+
+    // ---- helpers ----
+    function token() { const el = document.querySelector('input[name="__RequestVerificationToken"]'); return el ? el.value : ''; }
+    function jpost(url, body) {
+        return fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token() },
+            body: JSON.stringify(body)
+        }).then(async r => {
+            if (!r.ok) {
+                const text = await r.text().catch(() => '');
+                console.error('[finals] POST failed', url, r.status, text);
+                alert(`Begäran misslyckades (${r.status}). Se konsollen för detaljer.`);
+                return { success: false, message: `HTTP ${r.status}` };
+            }
+            try { return await r.json(); } catch (e) {
+                console.error('[finals] response not JSON', url, e);
+                return { success: false, message: 'Ogiltigt svar.' };
+            }
+        }).catch(err => {
+            console.error('[finals] network error', url, err);
+            return { success: false, message: err.message };
+        });
+    }
+    function jget(url) {
+        return fetch(url).then(async r => {
+            if (!r.ok) { console.error('[finals] GET failed', url, r.status); return { success: false }; }
+            try { return await r.json(); } catch (e) { console.error('[finals] GET not JSON', url, e); return { success: false }; }
+        }).catch(err => { console.error('[finals] GET network error', url, err); return { success: false }; });
+    }
+
+    // ---- state ----
+    let finalsListInfo = null;   // last GetFinalsStartList response
+    let perClassState = [];      // last GetQualifyingSnapshot perClass array
+    let perClassConfig = {};     // last GetFinalsConfig config dict (mutated by Step 2)
+    let hasResultList = false;
+    let currentStep = 1;
+    let editorOpenForFinalsId = null;  // tracks when the shared editor is being used for finals
+
+    // ---- card load + render ----
+    async function loadFinalsStartList() {
+        showLoading();
+        const d = await jget(`/umbraco/surface/PrecisionStartList/GetFinalsStartList?competitionId=${competitionId}`);
+        const exists = d && (d.Exists || d.exists);
+        if (exists) {
+            finalsListInfo = d;
+            renderOfficialCard();
+        } else {
+            finalsListInfo = null;
+            renderEmpty();
+        }
+    }
+    function showLoading() {
+        document.getElementById('finalsStartListLoading').classList.remove('d-none');
+        document.getElementById('noFinalsStartListYet').classList.add('d-none');
+        document.getElementById('officialFinalsStartListSection').classList.add('d-none');
+    }
+    function renderEmpty() {
+        document.getElementById('finalsStartListLoading').classList.add('d-none');
+        document.getElementById('noFinalsStartListYet').classList.remove('d-none');
+        document.getElementById('officialFinalsStartListSection').classList.add('d-none');
+    }
+    function renderOfficialCard() {
+        document.getElementById('finalsStartListLoading').classList.add('d-none');
+        document.getElementById('noFinalsStartListYet').classList.add('d-none');
+        const card = document.getElementById('officialFinalsStartListSection');
+        card.classList.remove('d-none');
+
+        const id = finalsListInfo.FinalsStartListId || finalsListInfo.finalsStartListId;
+        const isOfficial = finalsListInfo.IsOfficial || finalsListInfo.isOfficial;
+        const total = finalsListInfo.TotalFinalists || finalsListInfo.totalFinalists || 0;
+        const gen = finalsListInfo.GeneratedDate || finalsListInfo.generatedDate;
+        const sl = finalsListInfo.StartList || finalsListInfo.startList;
+        const teams = (sl && (sl.Teams || sl.teams)) || [];
+
+        document.getElementById('finalsStartListFinalistCount').textContent = total;
+        document.getElementById('finalsStartListTeamCount').textContent = teams.length;
+        document.getElementById('finalsStartListGeneratedDate').textContent = gen ? new Date(gen).toLocaleString('sv-SE') : '';
+        // GeneratedBy isn't always present in the response; leave blank if absent.
+        document.getElementById('finalsStartListGeneratedBy').textContent = '';
+
+        const badge = document.getElementById('finalsStartListStatusBadge');
+        if (isOfficial) {
+            badge.className = 'badge bg-success fs-6 px-3 py-2';
+            badge.innerHTML = '<i class="bi bi-check-circle me-1"></i>Publicerad';
+        } else {
+            badge.className = 'badge bg-warning fs-6 px-3 py-2';
+            badge.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>Preliminär';
+        }
+        document.getElementById('btnPublishFinalsStartList').classList.toggle('d-none', isOfficial);
+        document.getElementById('btnUnpublishFinalsStartList').classList.toggle('d-none', !isOfficial);
+
+        const iframe = document.getElementById('finalsStartListIframe');
+        const ts = Date.now();
+        iframe.src = `/umbraco/Surface/PrecisionStartList/PreviewStartList?competitionId=${competitionId}&startListId=${id}&t=${ts}`;
+        iframe.style.display = 'block';
+    }
+
+    // ---- card actions ----
+    async function togglePublish(makeOfficial) {
+        if (!finalsListInfo) return;
+        const id = finalsListInfo.FinalsStartListId || finalsListInfo.finalsStartListId;
+        const verb = makeOfficial ? 'Publicera' : 'Avpublicera';
+        if (!confirm(`${verb} finalsstartlistan?`)) return;
+        const d = await jpost('/umbraco/surface/PrecisionStartList/PublishFinalsStartList',
+            { FinalsStartListId: id, IsPublished: makeOfficial });
+        if (!d.success) { alert(d.message || 'Kunde inte ändra status.'); return; }
+        await loadFinalsStartList();
+    }
+    function openInNewTab() {
+        if (!finalsListInfo) return;
+        const id = finalsListInfo.FinalsStartListId || finalsListInfo.finalsStartListId;
+        window.open(`/umbraco/Surface/PrecisionStartList/PreviewStartList?competitionId=${competitionId}&startListId=${id}`, '_blank');
+    }
+    function openFinalsEditor() {
+        if (!finalsListInfo) return;
+        const id = finalsListInfo.FinalsStartListId || finalsListInfo.finalsStartListId;
+        if (typeof window.openStartListEditor !== 'function') {
+            alert('Startlistredigeraren är inte tillgänglig. Den initialiseras när Startlistor-fliken läses in.');
+            return;
+        }
+        editorOpenForFinalsId = id;
+        window.openStartListEditor(id);
+    }
+
+    // Refresh the finals card after the shared editor closes — only if it was opened for finals.
+    function attachEditorCloseHook() {
+        const editorEl = document.getElementById('startListEditorModal');
+        if (!editorEl || editorEl.dataset.finalsHookAttached === '1') return;
+        editorEl.dataset.finalsHookAttached = '1';
+        editorEl.addEventListener('hidden.bs.modal', function () {
+            if (editorOpenForFinalsId) {
+                const closedForFinals = editorOpenForFinalsId;
+                editorOpenForFinalsId = null;
+                // Slight delay so the editor's own state writes settle first.
+                setTimeout(() => loadFinalsStartList(), 50);
+            }
+        });
+    }
+
+    // ---- wizard ----
+    function openWizard() {
+        currentStep = 1;
+        showStep(1);
+        Promise.all([loadFreezeState(), loadFinalsConfig()]).then(() => {
+            const m = bootstrap.Modal.getOrCreateInstance(document.getElementById('generateFinalsStartListModal'));
+            m.show();
+            updateGenerateWarning();
+        });
+    }
+    function showStep(step) {
+        currentStep = step;
+        document.querySelectorAll('#finalsWizardRoot .step-pane').forEach(p => {
+            p.classList.toggle('active', parseInt(p.dataset.step, 10) === step);
+        });
+        document.querySelectorAll('#finalsWizardRoot .wizard-progress .step').forEach(s => {
+            const n = parseInt(s.dataset.step, 10);
+            s.classList.toggle('active', n === step);
+            s.classList.toggle('done', n < step);
+        });
+        document.getElementById('wizardBackBtn').disabled = step === 1;
+        const nextBtn = document.getElementById('wizardNextBtn');
+        const genBtn = document.getElementById('wizardGenerateBtn');
+        if (step === 3) {
+            nextBtn.classList.add('d-none');
+            genBtn.classList.remove('d-none');
+        } else {
+            nextBtn.classList.remove('d-none');
+            genBtn.classList.add('d-none');
+        }
+    }
+
+    // ---- step 1: per-group freeze ----
+    async function loadFreezeState() {
+        const d = await jget(`/umbraco/surface/PrecisionStartList/GetQualifyingSnapshot?competitionId=${competitionId}`);
+        if (!d.success) return;
+        hasResultList = !!d.hasResultList;
+        perClassState = d.perClass || [];
+        renderFreezeTable();
+    }
+    function renderFreezeTable() {
+        const tbody = document.getElementById('freezeTableBody');
+        const noResultListMsg = document.getElementById('noResultListMsg');
+        noResultListMsg.style.display = (!hasResultList && perClassState.length === 0) ? '' : 'none';
+
+        if (!perClassState.length) {
+            tbody.innerHTML = '<tr><td colspan="4" class="text-muted text-center">Inga grupper hittades — generera resultatlistan först.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = '';
+        perClassState.forEach(s => {
+            const groupName = s.groupName || s.championshipClass;
+            const tr = document.createElement('tr');
+            let stateCell = '<span class="badge bg-secondary"><i class="bi bi-unlock me-1"></i>Inte låst</span>';
+            if (s.frozen) {
+                const lockedText = `${new Date(s.frozenAt).toLocaleString('sv-SE')} av ${s.frozenBy}`;
+                stateCell = `<span class="badge bg-success"><i class="bi bi-lock-fill me-1"></i>Låst</span> <small class="text-muted ms-2">${lockedText} • ${s.frozenShooterCount} skyttar</small>`;
+                if (s.stale) stateCell += ' <span class="badge bg-danger ms-2">Inaktuell — resultaten har ändrats</span>';
+            }
+            let actionCell;
+            if (!s.hasResults && !s.frozen) {
+                actionCell = '<span class="text-muted small">Inga resultat</span>';
+            } else if (s.frozen) {
+                actionCell = `<button class="btn btn-outline-warning btn-sm" data-action="unlock" data-cls="${groupName}"><i class="bi bi-unlock-fill me-1"></i>Lås upp</button>
+                              <button class="btn btn-outline-primary btn-sm ms-1" data-action="relock" data-cls="${groupName}"><i class="bi bi-arrow-clockwise me-1"></i>Uppdatera</button>`;
+            } else {
+                actionCell = `<button class="btn btn-primary btn-sm" data-action="lock" data-cls="${groupName}"><i class="bi bi-lock-fill me-1"></i>Lås</button>`;
+            }
+            tr.innerHTML = `<td><strong>${groupName}</strong></td>
+                            <td>${s.totalShooters}</td>
+                            <td>${stateCell}</td>
+                            <td class="text-end">${actionCell}</td>`;
+            tbody.appendChild(tr);
+        });
+        tbody.querySelectorAll('button[data-action]').forEach(b => b.addEventListener('click', onFreezeAction));
+    }
+    async function onFreezeAction(e) {
+        const btn = e.currentTarget;
+        const action = btn.dataset.action;
+        const cls = btn.dataset.cls;
+        if (action === 'unlock') {
+            if (!confirm(`Lås upp gruppen ${cls}?`)) return;
+            const d = await jpost('/umbraco/surface/PrecisionStartList/UnfreezeClassResults',
+                { CompetitionId: competitionId, ChampionshipClass: cls });
+            if (!d.success && d.message) alert(d.message);
+        } else {
+            // 'lock' and 'relock' both call the freeze endpoint (re-locks captures any new results).
+            const d = await jpost('/umbraco/surface/PrecisionStartList/FreezeClassResults',
+                { CompetitionId: competitionId, ChampionshipClass: cls });
+            if (!d.success && d.message) alert(d.message);
+        }
+        await loadFreezeState();
+    }
+
+    // ---- step 2: per-group config ----
+    async function loadFinalsConfig() {
+        const d = await jget(`/umbraco/surface/PrecisionStartList/GetFinalsConfig?competitionId=${competitionId}`);
+        if (d.success) perClassConfig = d.config || {};
+    }
+    function renderConfigTable() {
+        const tbody = document.getElementById('configTableBody');
+        const frozen = perClassState.filter(s => s.frozen);
+        if (!frozen.length) {
+            tbody.innerHTML = '<tr><td colspan="7" class="text-muted text-center">Lås minst en grupp i Steg 1 först.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = '';
+        let autoSkjutlag = 1;
+        frozen.forEach(s => {
+            const groupName = s.groupName || s.championshipClass;
+            const cfg = perClassConfig[groupName] || {};
+            const defaultSkjutlag = cfg.skjutlagNumber || autoSkjutlag++;
+            const tr = document.createElement('tr');
+            tr.dataset.cls = groupName;
+            tr.innerHTML = `
+                <td><strong>${groupName}</strong><br><small class="text-muted">${s.frozenShooterCount} skyttar</small></td>
+                <td><input type="number" min="1" max="20" class="form-control form-control-sm cfg-skjutlag" value="${defaultSkjutlag}" style="max-width:80px"></td>
+                <td><input type="number" min="0" max="20" class="form-control form-control-sm cfg-order" value="${cfg.orderInSkjutlag || 0}" style="max-width:80px"></td>
+                <td><input type="number" min="1" class="form-control form-control-sm cfg-count" placeholder="Auto" value="${cfg.finalistCountOverride != null ? cfg.finalistCountOverride : ''}" style="max-width:90px"></td>
+                <td class="text-center"><input type="checkbox" class="form-check-input cfg-all" ${cfg.includeAllShooters ? 'checked' : ''}></td>
+                <td class="text-center"><input type="checkbox" class="form-check-input cfg-skip" ${cfg.skip ? 'checked' : ''}></td>
+                <td class="preview-cell text-muted">-</td>`;
+            tbody.appendChild(tr);
+        });
+        tbody.querySelectorAll('input').forEach(el => el.addEventListener('change', onConfigChange));
+        readConfigFromTable();
+        previewBuckets();
+    }
+    function readConfigFromTable() {
+        document.querySelectorAll('#configTableBody tr[data-cls]').forEach(tr => {
+            const group = tr.dataset.cls;
+            const countStr = tr.querySelector('.cfg-count').value.trim();
+            perClassConfig[group] = {
+                skip: tr.querySelector('.cfg-skip').checked,
+                skjutlagNumber: parseInt(tr.querySelector('.cfg-skjutlag').value, 10) || 1,
+                orderInSkjutlag: parseInt(tr.querySelector('.cfg-order').value, 10) || 0,
+                finalistCountOverride: countStr === '' ? null : parseInt(countStr, 10),
+                includeAllShooters: tr.querySelector('.cfg-all').checked
+            };
+        });
+    }
+    function onConfigChange() { readConfigFromTable(); previewBuckets(); }
+    async function previewBuckets() {
+        const d = await jpost('/umbraco/surface/PrecisionStartList/PreviewFinalsConfig',
+            { CompetitionId: competitionId, Config: perClassConfig });
+        if (!d.success) return;
+        document.querySelectorAll('#configTableBody tr[data-cls]').forEach(tr => {
+            const group = tr.dataset.cls;
+            const cell = tr.querySelector('.preview-cell');
+            const info = d.perClass[group];
+            if (!info) { cell.textContent = '-'; return; }
+            if (info.skjutlag == null) { cell.innerHTML = '<span class="badge bg-secondary">Hoppas över</span>'; return; }
+            cell.innerHTML = `<span class="badge bg-info">Skjutlag ${info.skjutlag}</span> <span class="text-muted small">${info.finalistCount} av ${info.totalInClass}</span>`;
+        });
+    }
+
+    // ---- step 3: generate ----
+    function updateGenerateWarning() {
+        document.getElementById('generateOverwriteWarning').classList.toggle('d-none', !finalsListInfo);
+    }
+    async function doGenerate() {
+        const lockedCount = perClassState.filter(s => s.frozen).length;
+        if (lockedCount === 0) {
+            alert('Inga grupper är låsta. Gå tillbaka till Steg 1 och lås minst en grupp.');
+            return;
+        }
+        if (finalsListInfo && !confirm('En finalsstartlista finns redan. Generera om?\n\nManuella ändringar skrivs över.')) return;
+
+        // Save config (handles the case where Step 2 wasn't touched).
+        const saveResp = await jpost('/umbraco/surface/PrecisionStartList/SaveFinalsConfig',
+            { CompetitionId: competitionId, Config: perClassConfig });
+        if (!saveResp.success) { alert('Kunde inte spara konfigurationen: ' + (saveResp.message || '')); return; }
+
+        const body = {
+            CompetitionId: competitionId,
+            FirstStartTime: document.getElementById('finalsFirstStartTime').value,
+            StartInterval: document.getElementById('finalsStartInterval').value,
+            MaxShootersPerTeam: parseInt(document.getElementById('finalsMaxShootersPerTeam').value, 10) || 20
+        };
+        const genResp = await jpost('/umbraco/surface/PrecisionStartList/GenerateFinalsStartList', body);
+        const ok = genResp.Success ?? genResp.success;
+        const message = genResp.Message ?? genResp.message ?? (ok ? 'OK' : 'Okänt fel');
+        if (!ok) { alert(message); return; }
+
+        // Close modal, refresh card.
+        const modalInst = bootstrap.Modal.getInstance(document.getElementById('generateFinalsStartListModal'));
+        if (modalInst) modalInst.hide();
+        await loadFinalsStartList();
+    }
+
+    // ---- wiring ----
+    document.getElementById('btnOpenFinalsWizard').addEventListener('click', openWizard);
+    document.getElementById('btnPublishFinalsStartList').addEventListener('click', () => togglePublish(true));
+    document.getElementById('btnUnpublishFinalsStartList').addEventListener('click', () => togglePublish(false));
+    document.getElementById('btnEditFinalsStartList').addEventListener('click', openFinalsEditor);
+    document.getElementById('btnOpenFinalsStartListNewTab').addEventListener('click', openInNewTab);
+    document.getElementById('wizardBackBtn').addEventListener('click', () => { if (currentStep > 1) showStep(currentStep - 1); });
+    document.getElementById('wizardNextBtn').addEventListener('click', async () => {
+        if (currentStep === 1) {
+            showStep(2);
+            renderConfigTable();
+        } else if (currentStep === 2) {
+            const saveResp = await jpost('/umbraco/surface/PrecisionStartList/SaveFinalsConfig',
+                { CompetitionId: competitionId, Config: perClassConfig });
+            if (!saveResp.success) { alert(saveResp.message || 'Kunde inte spara.'); return; }
+            showStep(3);
+            updateGenerateWarning();
+        }
+    });
+    document.getElementById('wizardGenerateBtn').addEventListener('click', doGenerate);
+
+    // Hook editor close once the standard partial has loaded the editor modal.
+    attachEditorCloseHook();
+    // Retry once after a short delay in case the standard partial JS runs after us.
+    setTimeout(attachEditorCloseHook, 500);
+
+    // ---- init ----
+    loadFinalsStartList();
+})();
+</script>
