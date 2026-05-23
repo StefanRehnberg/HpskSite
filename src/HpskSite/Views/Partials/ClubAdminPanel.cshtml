@@ -201,6 +201,9 @@
                     <button class="btn btn-outline-success" onclick="showSkjutledareModal()">
                         <i class="bi bi-shield-check me-2"></i>Skjutledare
                     </button>
+                    <button class="btn btn-outline-warning" onclick="showClubAdminsModal()" title="Hantera vilka medlemmar som är klubbadmins">
+                        <i class="bi bi-person-gear me-2"></i>Klubbadmins
+                    </button>
                     <button class="btn btn-outline-primary" onclick="showBoardRolesModal()">
                         <i class="bi bi-award me-2"></i>Roller
                     </button>
@@ -697,6 +700,37 @@
                         <option value="">Välj medlem...</option>
                     </select>
                     <button class="btn btn-sm btn-success" onclick="assignSkjutledare()">
+                        <i class="bi bi-plus-circle me-1"></i>Lägg till
+                    </button>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Club Admins Management Modal -->
+<div class="modal fade" id="clubAdminsModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-warning">
+                <h5 class="modal-title"><i class="bi bi-person-gear me-2"></i>Klubbadmins</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small mb-3">Klubbadmins kan redigera klubbsidan, hantera medlemmar, evenemang och tävlingar. Minst en klubbadmin måste alltid finnas.</p>
+                <div id="clubAdminsList" class="mb-3">
+                    <div class="text-center text-muted py-3">Laddar...</div>
+                </div>
+                <hr>
+                <label class="form-label fw-semibold">Lägg till klubbadmin</label>
+                <div class="d-flex gap-2">
+                    <select id="clubAdminSelect" class="form-select form-select-sm">
+                        <option value="">Välj medlem...</option>
+                    </select>
+                    <button class="btn btn-sm btn-warning" onclick="assignClubAdmin()">
                         <i class="bi bi-plus-circle me-1"></i>Lägg till
                     </button>
                 </div>
@@ -3640,6 +3674,148 @@ async function removeSkjutledare(memberId, name) {
         }
     } catch (error) {
         console.error('Error removing skjutledare:', error);
+        alert('Ett fel uppstod');
+    }
+}
+
+// ========== KLUBBADMINS MANAGEMENT ==========
+// Mirrors the Skjutledare flow above. Distinct from skjutledare because the
+// underlying group is ClubAdmin_{clubId} rather than Skjutledare_{clubId} —
+// and because removing the *last* admin would orphan the club, so we guard
+// against that both client- and server-side.
+
+let clubAdminsCache = []; // last loaded admin list — used for the last-admin guard
+
+function showClubAdminsModal() {
+    const modalElement = document.getElementById('clubAdminsModal');
+    const modal = new bootstrap.Modal(modalElement);
+    modal.show();
+    loadClubAdmins();
+}
+
+async function loadClubAdmins() {
+    const listEl = document.getElementById('clubAdminsList');
+    try {
+        const res = await fetch(`/umbraco/surface/ClubAdmin/GetClubAdmins?clubId=${clubId}`);
+        const data = await res.json();
+        if (!data.success) {
+            listEl.innerHTML = '<div class="text-danger">Kunde inte ladda klubbadmins</div>';
+            return;
+        }
+        // GetClubAdmins returns { success, admins: [...] } — different shape from
+        // GetSkjutledare which uses { success, data: [...] }.
+        const admins = data.admins || [];
+        clubAdminsCache = admins;
+
+        if (admins.length === 0) {
+            listEl.innerHTML = '<div class="text-warning">Inga klubbadmins tilldelade — klubben kan inte hanteras förrän någon utses.</div>';
+        } else {
+            listEl.innerHTML = admins.map(a => {
+                // Disable the remove button when this is the last admin standing.
+                const isLast = admins.length === 1;
+                const removeBtn = isLast
+                    ? `<button class="btn btn-sm btn-outline-secondary py-0 px-2" disabled title="Minst en klubbadmin måste finnas — lägg till en annan först">
+                           <i class="bi bi-x-lg"></i>
+                       </button>`
+                    : `<button class="btn btn-sm btn-outline-danger py-0 px-2" onclick="removeClubAdmin(${a.id}, ${JSON.stringify(a.name)})">
+                           <i class="bi bi-x-lg"></i>
+                       </button>`;
+                return `
+                    <div class="d-flex align-items-center justify-content-between py-1 border-bottom">
+                        <div>
+                            <i class="bi bi-person-gear text-warning me-2"></i>
+                            <strong>${a.name}</strong>
+                            <span class="text-muted ms-2 small">${a.email}</span>
+                        </div>
+                        ${removeBtn}
+                    </div>
+                `;
+            }).join('');
+        }
+        loadClubAdminDropdown(admins.map(a => a.id));
+    } catch (error) {
+        console.error('Error loading club admins:', error);
+        listEl.innerHTML = '<div class="text-danger">Fel vid laddning</div>';
+    }
+}
+
+async function loadClubAdminDropdown(existingIds) {
+    const select = document.getElementById('clubAdminSelect');
+    try {
+        // Scope to current club's members only — same pattern as Skjutledare's
+        // GetClubMembers, but using the dedicated endpoint which also filters
+        // out members who are already admins of this club.
+        const res = await fetch(`/umbraco/surface/ClubAdmin/GetAvailableMembersForClubAdmin?clubId=${clubId}&filterClubId=${clubId}`);
+        const data = await res.json();
+        if (data.success && data.members) {
+            select.innerHTML = '<option value="">Välj medlem...</option>';
+            data.members.forEach(m => {
+                if (!existingIds.includes(m.id)) {
+                    const label = `${m.name || (m.firstName + ' ' + m.lastName)} (${m.email})`;
+                    select.innerHTML += `<option value="${m.id}">${label}</option>`;
+                }
+            });
+        }
+    } catch (error) {
+        console.error('Error loading members for club admin dropdown:', error);
+    }
+}
+
+async function assignClubAdmin() {
+    const select = document.getElementById('clubAdminSelect');
+    const memberId = select.value;
+    if (!memberId) {
+        alert('Välj en medlem först');
+        return;
+    }
+    try {
+        const formData = new FormData();
+        formData.append('memberId', memberId);
+        formData.append('clubId', clubId);
+        formData.append('__RequestVerificationToken', getAntiForgeryToken());
+
+        const res = await fetch('/umbraco/surface/ClubAdmin/AssignClubAdmin', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await res.json();
+        if (data.success) {
+            loadClubAdmins();
+        } else {
+            alert('Fel: ' + data.message);
+        }
+    } catch (error) {
+        console.error('Error assigning club admin:', error);
+        alert('Ett fel uppstod');
+    }
+}
+
+async function removeClubAdmin(memberId, name) {
+    // Client-side guard: can't remove the last admin. (Mirrored server-side
+    // for safety; this prompt just keeps the user honest before the round-trip.)
+    if (clubAdminsCache.length <= 1) {
+        alert('Minst en klubbadmin måste finnas — lägg till en annan först.');
+        return;
+    }
+    if (!confirm(`Ta bort ${name} som klubbadmin?`)) return;
+    try {
+        const formData = new FormData();
+        formData.append('memberId', memberId);
+        formData.append('clubId', clubId);
+        formData.append('__RequestVerificationToken', getAntiForgeryToken());
+
+        const res = await fetch('/umbraco/surface/ClubAdmin/RemoveClubAdmin', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await res.json();
+        if (data.success) {
+            loadClubAdmins();
+        } else {
+            alert('Fel: ' + data.message);
+        }
+    } catch (error) {
+        console.error('Error removing club admin:', error);
         alert('Ett fel uppstod');
     }
 }

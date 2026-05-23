@@ -1334,6 +1334,19 @@ namespace HpskSite.Controllers
 
                 if (currentRoles.Contains(groupName))
                 {
+                    // Last-admin guard: refuse if removing this member would leave the
+                    // club with zero admins (the claim-your-club flow can't recover from
+                    // an orphaned club without site-admin intervention). Mirrored client-
+                    // side in ClubAdminPanel.cshtml so the round-trip is usually avoided.
+                    var totalMembers = _memberService.GetAll(0, int.MaxValue, out _);
+                    var adminCount = totalMembers
+                        .Where(m => m.ContentType.Alias != ClubMemberTypeAlias)
+                        .Count(m => _memberService.GetAllRoles(m.Id).Contains(groupName));
+                    if (adminCount <= 1)
+                    {
+                        return Json(new { success = false, message = "Minst en klubbadmin måste finnas. Tilldela en annan medlem som klubbadmin innan du tar bort den sista." });
+                    }
+
                     _memberService.DissociateRole(member.Id, groupName);
                     return Json(new { success = true, message = "Club admin role removed" });
                 }
