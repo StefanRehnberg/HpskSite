@@ -607,6 +607,33 @@ Each is a separate `WeaponClass` enum value (`A_M`, `A_P`, `A_G`) with 3 compete
 
 **Per-competition opt-in**: the wizard/edit modal class checkboxes include the 9 new entries; competitions opt in by ticking them. Existing competitions are unaffected.
 
+### Competition URLs & Routing ✅ (2026-05-22)
+
+**Custom URL shapes** for competitions, replacing the default tree-derived `/competitions/{series-year}/{comp}/`. Rendered by `Routing/CompetitionUrlProvider.cs`, resolved back by `Routing/CompetitionUrlContentFinder.cs`, both registered in `Routing/CompetitionContentFinderComposer.cs`.
+
+**Shapes** (priority order — first non-null wins inside `BuildCompetitionUrl`):
+1. **SM** (`competitionScope == "Svenskt Mästerskap"`): `/competitions/{year}/sm/[{series}/]{comp}/`
+2. **Landsdel** (`competitionScope == "Landsdelsmästerskap"`, with resolvable `regionalPage.area`): `/competitions/{year}/{ssm|vsm|osm|nsm}/[{series}/]{comp}/`
+3. **Club-hosted** (`clubId > 0`): `/competitions/{year}/{region}/{club}/[{series}/]{comp}/` where region is the club's `regionalPage.UrlSegment`
+4. **Region-hosted** (`regionalFederation` set, no club): `/competitions/{year}/{region}/[{series}/]{comp}/` where region is the `regionalPage.UrlSegment` matched by `regionCode`
+5. Otherwise `null` → Umbraco default fallback
+
+**Child nodes** (`precisionStartList`, `competitionResult`, `finalsStartList`) inherit the parent competition URL + own segment.
+
+**Defensive scope read**: `ReadScopeValue` uses untyped `Value("competitionScope")` to avoid `FlexibleDropdownPropertyValueConverter` throwing on plain-string scope values stored from older codepaths. Same pattern as `Models/Competition.cs:31-62` `shootingClassIds`. **Don't use `Value<string>("competitionScope")`** — it crashes on legacy data.
+
+**"At-least-one host" guard**: enforced in four places to keep competitions out of the null-URL state:
+- `Views/Partials/CompetitionWizardModal.cshtml` — `submitWizard()` alerts + jumps back to Step 1
+- `Views/Partials/CompetitionEditModal.cshtml` — `saveCompetition()` shows inline `#editFormErrors`
+- `Controllers/CompetitionAdminController.cs` — `CreateCompetition` returns `{success:false,message:...}`
+- `Controllers/CompetitionEditController.cs` — `SaveCompetition` (uses `ReadFieldOrContentAsInt/String` so a partial-update client can't bypass via field omission)
+
+**`isClubOnly` requires a club**: the "Endast för vald klubb" checkbox auto-unchecks + disables when no club is selected (visibility filter `clubId == myClub` would hide the comp everywhere with `clubId=0`). `syncWizardClubOnlyAvailability` / `syncEditClubOnlyAvailability` run on every club/region change and once after the dropdowns finish loading. Cascades into the standard-medals BR-PS.1.3 interlock.
+
+**Composer order pitfall**: `builder.UrlProviders().InsertBefore<DefaultUrlProvider, CompetitionUrlProvider>()` throws at startup — `DefaultUrlProvider` isn't in the collection yet at composer time. Use `Insert<CompetitionUrlProvider>()` (defaults to index 0 — runs first).
+
+**Pretty URLs cover all three host states** (club / krets / national), so the warning text on the wizard's club-mismatch banner ("Du måste gå till den allmänna administrationssidan…") is **honest today** but reflects a missing capability — there is no Competitions section on `RegionalAdminPanel` yet. Backlog item to add one.
+
 ### CompetitionController (Public + Admin endpoints)
 **Location:** `Controllers/CompetitionController.cs`
 
@@ -1128,6 +1155,7 @@ The `/Migrations` folder contains disabled database schemas for direct competiti
 ## Implementation Status
 
 ### Completed ✅
+- **Competition URLs & Routing (2026-05-22)** - Custom URL provider + content finder for club-hosted, region-hosted, SM, and Landsdel competition URL shapes (see "Competition URLs & Routing" section above). Includes at-least-one-host guard across wizard/edit modal + their backends, and isClubOnly auto-disable when no club is selected.
 - **Controller Refactoring (2025-10-28)** - AdminController split into specialized controllers with AdminAuthorizationService
 - **Authorization Security Fixes (2025-11-02)** - Comprehensive security audit and fixes across 6 areas (see [Documentation](Documentation/AUTHORIZATION_SECURITY_AUDIT.md))
 - **Login & Registration System (2025-11-02)** - Complete overhaul with email notifications, smart redirects, approval workflow (see [Documentation](Documentation/LOGIN_REGISTRATION_SYSTEM.md))
