@@ -39,6 +39,9 @@
             <button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#fkEditorMetaPanel" aria-expanded="true">
                 <i class="bi bi-sliders me-1"></i>Detaljer
             </button>
+            <button class="btn btn-outline-primary btn-sm" onclick="fkImportOpen()" title="Importera en station från en annan konfiguration">
+                <i class="bi bi-box-arrow-in-down me-1"></i>Importera station…
+            </button>
             <button class="btn btn-success btn-sm" onclick="fkEditorSaveAll()">
                 <i class="bi bi-check-lg me-1"></i>Spara allt
             </button>
@@ -161,6 +164,63 @@
 
             <!-- Tab content -->
             <div class="tab-content" id="faltCfgTabContent"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Import-station modal -->
+<div class="modal fade" id="fkImportModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-box-arrow-in-down me-2"></i>Importera station från annan konfiguration</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label small fw-bold">Källkonfiguration</label>
+                    <select class="form-select" id="fkImportSourceSelect" onchange="fkImportSourceChanged()">
+                        <option value="">Välj konfiguration...</option>
+                    </select>
+                </div>
+                <div id="fkImportStationPicker" style="display:none">
+                    <label class="form-label small fw-bold">Station att importera</label>
+                    <div id="fkImportStationList" class="row g-2 mb-3"></div>
+                </div>
+                <div id="fkImportDestPicker" style="display:none">
+                    <div class="row g-2 align-items-end">
+                        <div class="col-md-4">
+                            <label class="form-label small fw-bold">Destinationsstation</label>
+                            <select class="form-select" id="fkImportDestSelect"></select>
+                            <div class="form-text small">Befintliga data på destinationen skrivs över.</div>
+                        </div>
+                        <div class="col-md-8">
+                            <label class="form-label small fw-bold">Importtyp</label>
+                            <div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="fkImportType" id="fkImportType_copy" value="copy" checked>
+                                    <label class="form-check-label" for="fkImportType_copy">
+                                        <strong>Kopiera</strong> &mdash; data klonas. Framtida ändringar i källan påverkar inte den här konfigurationen.
+                                    </label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="fkImportType" id="fkImportType_link" value="link">
+                                    <label class="form-check-label" for="fkImportType_link">
+                                        <strong>Länka</strong> &mdash; stationen visas som länkad. Om källan ändras kan du ladda om den. Bra för samarbeten.
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div id="fkImportSummary" class="alert alert-info mt-3 small" style="display:none"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="fkImportApplyBtn" onclick="fkImportApply()" disabled>
+                    <i class="bi bi-check-lg me-1"></i>Importera
+                </button>
+            </div>
         </div>
     </div>
 </div>
@@ -482,6 +542,230 @@ function fkEditorApplyWeaponClasses() {
         if (bsm) bsm.hide();
     }
     faltCfgMarkDirty(picked[0], 1); // surface a dirty indicator on station 1
+}
+
+// ─── Import station from another configuration ──────────────────────
+
+var fkImportSourceConfig = null;     // full Get response of the picked source config
+var fkImportSelectedStation = null;  // station number in source
+
+async function fkImportOpen() {
+    document.getElementById('fkImportSourceSelect').innerHTML = '<option value="">Laddar...</option>';
+    document.getElementById('fkImportStationPicker').style.display = 'none';
+    document.getElementById('fkImportDestPicker').style.display = 'none';
+    document.getElementById('fkImportSummary').style.display = 'none';
+    document.getElementById('fkImportApplyBtn').disabled = true;
+    fkImportSourceConfig = null;
+    fkImportSelectedStation = null;
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('fkImportModal')).show();
+
+    try {
+        var resp = await fetch('/umbraco/surface/FaltskytteConfiguration/ListAccessible');
+        var data = await resp.json();
+        if (!data.success) {
+            document.getElementById('fkImportSourceSelect').innerHTML = '<option value="">' + (data.message || 'Fel') + '</option>';
+            return;
+        }
+        var sel = document.getElementById('fkImportSourceSelect');
+        sel.innerHTML = '<option value="">Välj konfiguration...</option>';
+        data.configurations.forEach(function(c) {
+            if (c.id === fkEditorConfig.id) return; // can't import from self
+            var label = c.name + ' (' + c.stationCount + ' stationer, ' + c.ownerMemberName + ')';
+            sel.innerHTML += '<option value="' + c.id + '">' + escapeHtml(label) + '</option>';
+        });
+    } catch (e) { console.error(e); }
+}
+
+async function fkImportSourceChanged() {
+    var id = parseInt(document.getElementById('fkImportSourceSelect').value);
+    fkImportSourceConfig = null;
+    fkImportSelectedStation = null;
+    document.getElementById('fkImportStationPicker').style.display = 'none';
+    document.getElementById('fkImportDestPicker').style.display = 'none';
+    document.getElementById('fkImportSummary').style.display = 'none';
+    document.getElementById('fkImportApplyBtn').disabled = true;
+    if (!id) return;
+
+    try {
+        var resp = await fetch('/umbraco/surface/FaltskytteConfiguration/GetStationsForImport?id=' + id);
+        var data = await resp.json();
+        if (!data.success) { alert('Kunde inte ladda: ' + (data.message || 'Fel')); return; }
+
+        var srcBlob = {};
+        try { srcBlob = data.jsonBlob ? JSON.parse(data.jsonBlob) : {}; } catch(e) { srcBlob = {}; }
+        fkImportSourceConfig = { id: data.id, name: data.name, blob: srcBlob };
+
+        // Detect source's stations from the first non-meta weapon class.
+        var srcStations = fkImportStationsFromBlob(srcBlob);
+        var list = document.getElementById('fkImportStationList');
+        if (srcStations.length === 0) {
+            list.innerHTML = '<div class="col-12 text-muted small">Källan saknar konfigurerade stationer.</div>';
+        } else {
+            list.innerHTML = srcStations.map(function(st) {
+                var summary = fkImportStationSummary(srcBlob, st.station);
+                return '<div class="col-md-6"><button type="button" class="btn btn-outline-secondary w-100 text-start" onclick="fkImportPickStation(' + st.station + ')">' +
+                    '<div class="d-flex justify-content-between"><span class="fw-bold">Station ' + st.station + '</span><small class="text-muted">' + summary.classes + ' klass(er), ' + summary.targetGroups + ' målgr.</small></div>' +
+                    '<div class="small text-muted">' + escapeHtml(summary.preview) + '</div>' +
+                '</button></div>';
+            }).join('');
+        }
+        document.getElementById('fkImportStationPicker').style.display = '';
+    } catch (e) { console.error(e); alert('Nätverksfel.'); }
+}
+
+// Pull station numbers from the first weapon class in the blob (all classes share station numbers).
+function fkImportStationsFromBlob(blob) {
+    var classes = Object.keys(blob).filter(function(k) { return !k.startsWith('_'); });
+    for (var i = 0; i < classes.length; i++) {
+        var st = (blob[classes[i]] && (blob[classes[i]].stations || blob[classes[i]].Stations)) || [];
+        if (st.length > 0) return st;
+    }
+    return [];
+}
+
+function fkImportStationSummary(blob, stationNum) {
+    var classes = Object.keys(blob).filter(function(k) { return !k.startsWith('_'); });
+    var firstStation = null;
+    for (var i = 0; i < classes.length; i++) {
+        var stations = (blob[classes[i]].stations || blob[classes[i]].Stations) || [];
+        var st = stations.find(function(s) { return s.station === stationNum || s.Station === stationNum; });
+        if (st) { firstStation = st; break; }
+    }
+    if (!firstStation) return { classes: classes.length, targetGroups: 0, preview: '' };
+    var tgs = firstStation.targetGroups || firstStation.TargetGroups || [];
+    var figNames = [];
+    tgs.forEach(function(tg) {
+        (tg.figures || tg.Figures || []).forEach(function(f) {
+            if (f.targetName || f.TargetName) figNames.push(f.targetName || f.TargetName);
+        });
+    });
+    return {
+        classes: classes.length,
+        targetGroups: tgs.length,
+        preview: figNames.length ? figNames.slice(0, 4).join(', ') + (figNames.length > 4 ? '...' : '') : '(inga figurer valda)'
+    };
+}
+
+function fkImportPickStation(stationNum) {
+    fkImportSelectedStation = stationNum;
+
+    // Highlight pick.
+    document.querySelectorAll('#fkImportStationList button').forEach(function(b) { b.classList.remove('btn-primary'); b.classList.add('btn-outline-secondary'); });
+    var pickedBtn = document.querySelector('#fkImportStationList button[onclick*="fkImportPickStation(' + stationNum + ')"]');
+    if (pickedBtn) { pickedBtn.classList.remove('btn-outline-secondary'); pickedBtn.classList.add('btn-primary'); }
+
+    // Populate destination select with this config's station numbers.
+    var destSel = document.getElementById('fkImportDestSelect');
+    destSel.innerHTML = '';
+    var destStations = (faltCfgData[faltCfgWeaponClasses[0]] && faltCfgData[faltCfgWeaponClasses[0]].stations) || [];
+    destStations.forEach(function(s) {
+        destSel.innerHTML += '<option value="' + s.station + '">Station ' + s.station + '</option>';
+    });
+    document.getElementById('fkImportDestPicker').style.display = '';
+
+    fkImportRefreshSummary();
+    document.getElementById('fkImportApplyBtn').disabled = false;
+}
+
+function fkImportRefreshSummary() {
+    if (!fkImportSourceConfig || fkImportSelectedStation == null) return;
+    var srcClasses = Object.keys(fkImportSourceConfig.blob).filter(function(k) { return !k.startsWith('_'); });
+    var destClasses = faltCfgWeaponClasses;
+    var overlap = srcClasses.filter(function(c) { return destClasses.indexOf(c) >= 0; });
+    var missingInDest = srcClasses.filter(function(c) { return destClasses.indexOf(c) < 0; });
+    var missingInSrc = destClasses.filter(function(c) { return srcClasses.indexOf(c) < 0; });
+
+    var lines = [];
+    lines.push('<strong>Importerar:</strong> Station ' + fkImportSelectedStation + ' från "' + escapeHtml(fkImportSourceConfig.name) + '"');
+    lines.push('Klasser som kommer kopieras: ' + (overlap.length ? overlap.join(', ') : '<em>inga</em>'));
+    if (missingInDest.length) lines.push('<span class="text-warning">Källan har klasser som inte finns här: ' + missingInDest.join(', ') + ' (hoppas över)</span>');
+    if (missingInSrc.length) lines.push('<span class="text-muted">Den här konfigurationen har klasser som källan saknar: ' + missingInSrc.join(', ') + ' (lämnas orörda)</span>');
+
+    var box = document.getElementById('fkImportSummary');
+    box.innerHTML = lines.join('<br>');
+    box.style.display = '';
+}
+
+async function fkImportApply() {
+    if (!fkImportSourceConfig || fkImportSelectedStation == null) return;
+    var destStationNum = parseInt(document.getElementById('fkImportDestSelect').value);
+    var importType = document.querySelector('input[name="fkImportType"]:checked').value;
+
+    var srcBlob = fkImportSourceConfig.blob;
+    var srcClasses = Object.keys(srcBlob).filter(function(k) { return !k.startsWith('_'); });
+    var copied = 0;
+
+    for (var i = 0; i < faltCfgWeaponClasses.length; i++) {
+        var wc = faltCfgWeaponClasses[i];
+        if (srcClasses.indexOf(wc) < 0) continue;
+        var srcStations = srcBlob[wc].stations || srcBlob[wc].Stations || [];
+        var srcSt = srcStations.find(function(s) { return (s.station || s.Station) === fkImportSelectedStation; });
+        if (!srcSt) continue;
+        var destStations = faltCfgData[wc].stations || [];
+        var destSt = destStations.find(function(s) { return s.station === destStationNum; });
+        if (!destSt) continue;
+
+        // Deep-clone source so subsequent edits don't bleed back into the source blob.
+        var copy = JSON.parse(JSON.stringify(srcSt));
+        copy.station = destStationNum;
+        // Carry the existing isShootOffOnly flag — that's a destination-side decision.
+        copy.isShootOffOnly = destSt.isShootOffOnly;
+
+        // Strip any leftover linked-from meta from a chain of links; we set fresh
+        // values below for the link case.
+        delete copy._linkedFromConfigId;
+        delete copy._linkedFromStationNumber;
+        delete copy._linkedFromChecksum;
+
+        if (importType === 'link') {
+            copy._linkedFromConfigId = fkImportSourceConfig.id;
+            copy._linkedFromStationNumber = fkImportSelectedStation;
+            copy._linkedFromChecksum = fkImportComputeChecksum(srcSt);
+        }
+
+        var idx = destStations.indexOf(destSt);
+        destStations[idx] = copy;
+        copied++;
+    }
+
+    if (copied === 0) {
+        alert('Inga vapenklasser matchade mellan käll- och destinationskonfigurationen. Inget kopierat.');
+        return;
+    }
+
+    // Mark every affected class's station dirty + re-render.
+    faltCfgWeaponClasses.forEach(function(c) { faltCfgDirtyStations.add(c + '_' + destStationNum); });
+    var anyClass = faltCfgWeaponClasses[0];
+    faltCfgMarkDirty(anyClass, destStationNum);
+    renderActiveTab();
+
+    bootstrap.Modal.getInstance(document.getElementById('fkImportModal')).hide();
+}
+
+// Stable checksum over the meaningful station fields, ignoring _linkedFrom* keys
+// so a checksum can be compared against the live source after the dest's own
+// link meta is stripped off. Cyrb53-style fast non-crypto hash.
+function fkImportComputeChecksum(station) {
+    var snapshot = JSON.parse(JSON.stringify(station));
+    delete snapshot._linkedFromConfigId;
+    delete snapshot._linkedFromStationNumber;
+    delete snapshot._linkedFromChecksum;
+    var canonical = JSON.stringify(snapshot, Object.keys(snapshot).sort());
+    return fkSimpleHash(canonical);
+}
+
+function fkSimpleHash(str) {
+    var h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+    for (var i = 0; i < str.length; i++) {
+        var ch = str.charCodeAt(i);
+        h1 = Math.imul(h1 ^ ch, 2654435761);
+        h2 = Math.imul(h2 ^ ch, 1597334677);
+    }
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507);
+    h1 ^= Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507);
+    h2 ^= Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16);
 }
 
 @* Make sure HpskShootingClasses is available for the weapon-class picker. *@
