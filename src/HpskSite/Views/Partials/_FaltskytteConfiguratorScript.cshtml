@@ -127,6 +127,7 @@ function faltCfgRenderModeChrome() {
     var tabsEl = document.getElementById('faltCfgWeaponTabs');
     var linkCopyEl = document.getElementById('faltCfgLinkAndCopyControls');
     var simpleNote = document.getElementById('faltCfgSimpleNote');
+    var advancedNote = document.getElementById('faltCfgAdvancedNote');
     var simpleLinkBtn = document.getElementById('faltCfgSimpleLinkButton');
     var simpleRadio = document.getElementById('faltCfgMode_simple');
     var advancedRadio = document.getElementById('faltCfgMode_advanced');
@@ -135,12 +136,14 @@ function faltCfgRenderModeChrome() {
         if (tabsEl) tabsEl.style.display = 'none';
         if (linkCopyEl) linkCopyEl.style.display = 'none';
         if (simpleNote) simpleNote.style.display = '';
+        if (advancedNote) advancedNote.style.display = 'none';
         if (simpleLinkBtn) simpleLinkBtn.style.display = '';
         if (simpleRadio) simpleRadio.checked = true;
     } else {
         if (tabsEl) tabsEl.style.display = '';
         if (linkCopyEl) linkCopyEl.style.display = '';
         if (simpleNote) simpleNote.style.display = 'none';
+        if (advancedNote) advancedNote.style.display = '';
         if (simpleLinkBtn) simpleLinkBtn.style.display = 'none';
         if (advancedRadio) advancedRadio.checked = true;
     }
@@ -261,7 +264,11 @@ function faltSuggestShootingTime(station, wc, morker) {
     // Informational per-målgrupp lines + global max per-shot scan.
     station.targetGroups.forEach(function(tg, gi) {
         var letter = String.fromCharCode(65 + gi); // A, B, C, ...
-        var distance = tg.distance;
+        // Effective distance = stored value if set, otherwise the slider's default
+        // (tightest figure max). Same fallback the UI shows, so the breakdown agrees
+        // with the slider position before the operator touches it.
+        var bounds = faltTargetGroupBounds(tg, wc);
+        var effectiveDistance = tg.distance != null ? tg.distance : (bounds ? bounds.max : null);
         var groupPerShot = 0;
         var groupLimitingFig = '';
         (tg.figures || []).forEach(function(f) {
@@ -269,7 +276,7 @@ function faltSuggestShootingTime(station, wc, morker) {
             var maxD = faltFigureMaxDistance(f.sizeGroup, wc);
             if (!maxD) return;
             anyApplicable = true;
-            var d = distance != null ? distance : maxD;
+            var d = effectiveDistance != null ? effectiveDistance : maxD;
             var t = (d / maxD) * maxTime;
             if (t > groupPerShot) { groupPerShot = t; groupLimitingFig = 'storleksgrupp ' + f.sizeGroup; }
             if (t > worstPerShot) { worstPerShot = t; worstLabel = 'Målgrupp ' + letter + ', storleksgrupp ' + f.sizeGroup + ' @@ ' + d + ' m'; }
@@ -278,7 +285,7 @@ function faltSuggestShootingTime(station, wc, morker) {
             lines.push({ label: 'Målgrupp ' + letter + ' — storleksgrupp saknas', sec: 0 });
         } else {
             lines.push({
-                label: 'Målgrupp ' + letter + ' (' + (distance != null ? distance : '?') + ' m, ' + groupLimitingFig + ')',
+                label: 'Målgrupp ' + letter + ' (' + (effectiveDistance != null ? effectiveDistance : '?') + ' m, ' + groupLimitingFig + ')',
                 sec: 0,
                 info: groupPerShot.toFixed(2).replace('.', ',') + ' sek/skott (info)'
             });
