@@ -300,14 +300,8 @@ async function fkEditorLoad() {
         if (weaponClasses.length === 0) weaponClasses = FALT_DEFAULT_WEAPON_CLASSES.slice();
 
         // Initialize the configurator. After this the shared JS owns rendering.
+        // faltCfgOpen skips its legacy modal show() when the element is absent.
         faltCfgOpen(weaponClasses, blob);
-
-        // Hide the legacy modal — faltCfgOpen tries to show it; we don't want that here.
-        var legacyModal = document.getElementById('faltStationConfigModal');
-        if (legacyModal) {
-            var bsm = bootstrap.Modal.getInstance(legacyModal);
-            if (bsm) bsm.hide();
-        }
 
         document.getElementById('fkEditorRoot').style.display = '';
     } catch (e) {
@@ -537,11 +531,6 @@ function fkEditorApplyWeaponClasses() {
         if (picked.indexOf(k) < 0) delete blob[k];
     });
     faltCfgOpen(picked, blob);
-    var legacyModal = document.getElementById('faltStationConfigModal');
-    if (legacyModal) {
-        var bsm = bootstrap.Modal.getInstance(legacyModal);
-        if (bsm) bsm.hide();
-    }
     faltCfgMarkDirty(picked[0], 1); // surface a dirty indicator on station 1
 }
 

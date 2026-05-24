@@ -446,7 +446,11 @@ function faltCfgOpen(weaponClasses, existingConfig) {
     faltCfgRenderModeChrome();
     renderActiveTab();
 
-    bootstrap.Modal.getOrCreateInstance(document.getElementById('faltStationConfigModal')).show();
+    // Only the legacy in-competition surface mounts faltStationConfigModal.
+    // The standalone /faltkonfig editor renders the configurator inline, so the
+    // element is absent — skip the show() call to avoid a Bootstrap NRE.
+    var legacyModalEl = document.getElementById('faltStationConfigModal');
+    if (legacyModalEl) bootstrap.Modal.getOrCreateInstance(legacyModalEl).show();
 }
 
 // Returns the list of "visible" tab weapon classes (one per linked group, plus unlinked)
