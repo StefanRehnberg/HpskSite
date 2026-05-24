@@ -1,0 +1,28 @@
+@*
+ * Föreslaget skjuttid — breakdown modal. Shared between the legacy in-competition
+ * configurator modal (FaltskytteStationConfigModal.cshtml) and the standalone
+ * /faltkonfig/{id}/redigera editor.
+ *@
+<div class="modal fade" id="faltCfgSuggDetailsModal" tabindex="-1" style="z-index:1080">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h6 class="modal-title"><i class="bi bi-info-circle me-2"></i>Föreslaget skjuttid &mdash; uppdelning</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <div id="faltCfgSuggDetailsContext" class="text-muted small mb-2"></div>
+                <table class="table table-sm align-middle mb-0">
+                    <tbody id="faltCfgSuggDetailsBody"></tbody>
+                    <tfoot id="faltCfgSuggDetailsFoot"></tfoot>
+                </table>
+                <div class="text-muted small mt-2">
+                    Per-skott-tider avrundas upp&aring;t till hela sekunder. St&ouml;dhand p&aring;verkar ej kalkylen (SHB rekommenderar i st&auml;llet justering av figurgrupp eller avst&aring;nd).
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">St&auml;ng</button>
+            </div>
+        </div>
+    </div>
+</div>

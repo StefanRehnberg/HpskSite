@@ -8,6 +8,7 @@ using Umbraco.Cms.Core.Services;
 using Umbraco.Cms.Core.Web;
 using Umbraco.Cms.Infrastructure.Persistence;
 using Umbraco.Cms.Web.Website.Controllers;
+using Umbraco.Extensions;
 
 namespace HpskSite.Controllers
 {
@@ -19,6 +20,8 @@ namespace HpskSite.Controllers
     public class FaltskytteConfigurationController : SurfaceController
     {
         private readonly FaltskytteConfigurationService _configService;
+        private readonly IMemberService _memberService;
+        private readonly ClubService _clubService;
         private readonly ILogger<FaltskytteConfigurationController> _logger;
 
         public FaltskytteConfigurationController(
@@ -29,10 +32,14 @@ namespace HpskSite.Controllers
             IProfilingLogger profilingLogger,
             IPublishedUrlProvider publishedUrlProvider,
             FaltskytteConfigurationService configService,
+            IMemberService memberService,
+            ClubService clubService,
             ILogger<FaltskytteConfigurationController> logger)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _configService = configService;
+            _memberService = memberService;
+            _clubService = clubService;
             _logger = logger;
         }
 
@@ -268,6 +275,60 @@ namespace HpskSite.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error removing collaborator from config {Id}", request.ConfigId);
+                return Json(new { success = false, message = "Fel: " + ex.Message });
+            }
+        }
+
+        // ── Member search (for the collaborator picker) ─────────────────
+
+        /// <summary>
+        /// Member search restricted to any logged-in user. Returns up to 20 matches.
+        /// Distinct from TrainingGroupController's SearchMembers (which is admin-gated)
+        /// because any user can need to add a collaborator to their own configuration.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> SearchMembers(string query)
+        {
+            try
+            {
+                var viewerId = await _configService.GetCurrentMemberIdAsync();
+                if (viewerId == null) return Json(new { success = false, message = "Inloggning krävs." });
+
+                if (string.IsNullOrWhiteSpace(query) || query.Length < 2)
+                    return Json(new { success = true, members = new List<object>() });
+
+                var all = _memberService.GetAll(0, int.MaxValue, out _);
+                var matches = all
+                    .Where(m => m.IsApproved
+                        && ((m.Name ?? "").Contains(query, StringComparison.OrdinalIgnoreCase)
+                            || (m.Email ?? "").Contains(query, StringComparison.OrdinalIgnoreCase)))
+                    .Take(20)
+                    .ToList();
+
+                var members = matches.Select(m =>
+                {
+                    string? clubName = null;
+                    var pcid = m.GetValue<string>("primaryClubId");
+                    if (!string.IsNullOrEmpty(pcid) && int.TryParse(pcid, out int clubId))
+                        clubName = _clubService.GetClubNameById(clubId);
+
+                    var first = m.GetValue<string>("firstName");
+                    var last = m.GetValue<string>("lastName");
+                    var displayName = string.IsNullOrWhiteSpace($"{first} {last}".Trim()) ? m.Name : $"{first} {last}".Trim();
+
+                    return new
+                    {
+                        memberId = m.Id,
+                        memberName = displayName,
+                        clubName
+                    };
+                }).ToList();
+
+                return Json(new { success = true, members });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error searching members for collaborator picker");
                 return Json(new { success = false, message = "Fel: " + ex.Message });
             }
         }

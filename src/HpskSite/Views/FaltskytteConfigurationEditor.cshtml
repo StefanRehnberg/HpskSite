@@ -1,0 +1,490 @@
+@using Umbraco.Cms.Core.Security
+@inject IMemberManager MemberManager
+@{
+    Layout = "Master.cshtml";
+    var configId = (int)ViewBag.ConfigurationId;
+    var configName = (string?)ViewBag.ConfigurationName ?? "";
+    ViewBag.Title = "Redigera " + configName;
+
+    var currentMember = await MemberManager.GetCurrentMemberAsync();
+    var isLoggedIn = currentMember != null;
+}
+
+@if (!isLoggedIn)
+{
+    <div class="container py-5 text-center">
+        <h4><i class="bi bi-lock me-2"></i>Inloggning krävs</h4>
+        <p class="text-muted">Du måste vara inloggad för att redigera Fältskytte-konfigurationer.</p>
+        <a class="btn btn-primary" href="/login-register"><i class="bi bi-box-arrow-in-right me-1"></i>Logga in</a>
+    </div>
+    return;
+}
+
+@* Figure picker + suggestion modal + the configurator JS — shared with the legacy modal. *@
+@await Html.PartialAsync("FaltskytteTargetPickerModal")
+@await Html.PartialAsync("_FaltskytteConfiguratorSuggestionModal")
+@Html.AntiForgeryToken()
+
+<div class="container-fluid faltkonfig-editor py-3" id="fkEditorRoot" style="display:none">
+    <!-- Header bar -->
+    <div class="d-flex flex-wrap gap-2 justify-content-between align-items-center mb-3 pb-2 border-bottom">
+        <div class="d-flex align-items-center gap-2">
+            <a href="/faltkonfig" class="btn btn-outline-secondary btn-sm" title="Tillbaka till listan"><i class="bi bi-arrow-left"></i></a>
+            <h5 class="mb-0"><i class="bi bi-gear me-2"></i><span id="fkEditorTitle">Redigera konfiguration</span></h5>
+            <span id="fkEditorSavedBadge" class="badge bg-success" style="display:none">Allt sparat</span>
+            <span id="fkEditorDirtyBadge" class="badge bg-warning text-dark" style="display:none">Osparade ändringar</span>
+            <span id="fkEditorSecretBadge" class="badge bg-warning text-dark" style="display:none" title=""><i class="bi bi-shield-lock me-1"></i>Hemlig</span>
+        </div>
+        <div class="d-flex gap-1">
+            <button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#fkEditorMetaPanel" aria-expanded="true">
+                <i class="bi bi-sliders me-1"></i>Detaljer
+            </button>
+            <button class="btn btn-success btn-sm" onclick="fkEditorSaveAll()">
+                <i class="bi bi-check-lg me-1"></i>Spara allt
+            </button>
+        </div>
+    </div>
+
+    <!-- Metadata panel -->
+    <div class="collapse show mb-3" id="fkEditorMetaPanel">
+        <div class="card">
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label class="form-label small fw-bold">Namn</label>
+                        <input type="text" class="form-control form-control-sm" id="fkEditorName" onblur="fkEditorSaveMeta()" autocomplete="off">
+                    </div>
+                    <div class="col-md-5">
+                        <label class="form-label small fw-bold">Beskrivning</label>
+                        <input type="text" class="form-control form-control-sm" id="fkEditorDesc" onblur="fkEditorSaveMeta()" autocomplete="off">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small fw-bold">Synlighet</label>
+                        <select class="form-select form-select-sm" id="fkEditorVis" onchange="fkEditorSaveMeta()">
+                            <option value="Private">Privat (du + medredigerare)</option>
+                            <option value="Club">Klubb</option>
+                            <option value="Region">Krets</option>
+                            <option value="Public">Publik</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small fw-bold">Hemlig fram till</label>
+                        <div class="input-group input-group-sm">
+                            <input type="text" class="form-control" id="fkEditorSecret" placeholder="ÅÅÅÅ-MM-DD HH:MM (valfri)">
+                            <button class="btn btn-outline-secondary" onclick="fkEditorClearSecret()" title="Rensa"><i class="bi bi-x"></i></button>
+                        </div>
+                        <div class="form-text small">Så länge datumet ligger i framtiden ser bara du och medredigerare konfigurationen, oavsett synlighet.</div>
+                    </div>
+                    <div class="col-md-8">
+                        <label class="form-label small fw-bold">Medredigerare</label>
+                        <div class="d-flex gap-2 align-items-start">
+                            <div class="position-relative flex-grow-1">
+                                <input type="text" class="form-control form-control-sm" id="fkEditorMemberSearch" placeholder="Sök medlem på namn eller e-post (minst 2 tecken)..." oninput="fkEditorMemberSearch()" autocomplete="off">
+                                <div id="fkEditorMemberResults" class="list-group position-absolute w-100 shadow-sm" style="z-index:1000;max-height:200px;overflow-y:auto;display:none"></div>
+                            </div>
+                        </div>
+                        <div id="fkEditorCollabList" class="d-flex flex-wrap gap-1 mt-2"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Configurator UI (same DOM IDs as the modal body so the shared script works) -->
+    <div class="card">
+        <div class="card-body">
+            <!-- Mode toggle + page-wide settings -->
+            <div class="d-flex flex-wrap gap-3 align-items-end mb-3">
+                <div>
+                    <label class="form-label small fw-bold mb-1 d-block">Konfigurationsläge</label>
+                    <div class="btn-group btn-group-sm" role="group" aria-label="Konfigurationsläge">
+                        <input type="radio" class="btn-check" name="faltCfgModeRadio" id="faltCfgMode_simple" value="simple" onchange="faltCfgRequestMode('simple')">
+                        <label class="btn btn-outline-primary" for="faltCfgMode_simple" title="Bygg stationen en gång; sätt skjuttid m.m. per klass">Enkelt läge</label>
+                        <input type="radio" class="btn-check" name="faltCfgModeRadio" id="faltCfgMode_advanced" value="advanced" checked onchange="faltCfgRequestMode('advanced')">
+                        <label class="btn btn-outline-primary" for="faltCfgMode_advanced" title="Per-klass-flikar med länkning">Avancerat läge</label>
+                    </div>
+                </div>
+                <div>
+                    <label class="form-label fw-bold mb-1">Antal stationer</label>
+                    <input type="number" class="form-control form-control-sm" id="faltCfg_stationCount" min="2" max="12" value="8" style="width:80px" onchange="faltCfgUpdateStations()">
+                </div>
+                <div>
+                    <label class="form-label fw-bold mb-1 d-block">Mörkerfältskjutning</label>
+                    <div class="form-check form-switch" title="Tävlingen genomförs i mörker. Lägger till 30 % i föreslagna skjuttider och bör kombineras med större figurgrupp eller kortare avstånd.">
+                        <input class="form-check-input" type="checkbox" role="switch" id="faltCfg_morker" onchange="faltCfgToggleMorker(this.checked)">
+                        <label class="form-check-label small" for="faltCfg_morker">Aktivera mörker-tillägg</label>
+                    </div>
+                </div>
+                <div>
+                    <label class="form-label small fw-bold mb-1 d-block">Vapenklasser</label>
+                    <button class="btn btn-outline-primary btn-sm" onclick="fkEditorOpenWeaponClassPicker()">
+                        <i class="bi bi-pencil me-1"></i>Välj…
+                    </button>
+                </div>
+                <div class="ms-auto">
+                    <span id="faltCfgSimpleNote" class="text-muted small fst-italic" style="display:none">
+                        <i class="bi bi-info-circle me-1"></i>Enkelt läge: bygg målgrupper en gång &mdash; skjuttid och övriga parametrar sätts per klass per station.
+                    </span>
+                </div>
+                <div id="faltCfgSimpleLinkButton" style="display:none">
+                    <button class="btn btn-outline-primary btn-sm" onclick="faltCfgLinkInSimpleMode()" title="Länka vapenklasser så de delar Skjuttid och övriga förutsättningar">
+                        <i class="bi bi-link-45deg me-1"></i>Länka klasser...
+                    </button>
+                </div>
+            </div>
+
+            <!-- Weapon class tabs (advanced mode only) -->
+            <ul class="nav nav-tabs mb-3" id="faltCfgWeaponTabs" role="tablist"></ul>
+
+            <!-- Link / Copy controls (advanced mode only) -->
+            <div class="mb-3 d-flex flex-wrap gap-3 align-items-end" id="faltCfgLinkAndCopyControls">
+                <div class="d-flex gap-2 align-items-center">
+                    <span class="text-muted small">Kopiera från:</span>
+                    <select class="form-select form-select-sm" id="faltCfg_copySource" style="width:auto">
+                        <option value="">Välj...</option>
+                    </select>
+                    <div class="input-group input-group-sm" style="width:auto">
+                        <span class="input-group-text" title="Tidsskillnad per station (sek)">&#916;sek</span>
+                        <input type="number" class="form-control form-control-sm" id="faltCfg_copyTimeOffset" value="0" style="width:60px" title="Tidsskillnad (sek). T.ex. +5 ger 5 sek längre skjuttid.">
+                    </div>
+                    <button class="btn btn-outline-secondary btn-sm" onclick="faltCfgCopyFrom()">Kopiera</button>
+                </div>
+                <div class="d-flex gap-2 align-items-center">
+                    <button class="btn btn-outline-primary btn-sm" onclick="faltCfgLinkTab()" id="faltCfg_linkBtn" title="Länka den aktiva fliken med en annan vapenklass">
+                        <i class="bi bi-link-45deg me-1"></i>Länka...
+                    </button>
+                    <button class="btn btn-outline-warning btn-sm" onclick="faltCfgUnlinkTab()" id="faltCfg_unlinkBtn" style="display:none" title="Avlänka den aktiva fliken">
+                        <i class="bi bi-x-circle me-1"></i>Avlänka
+                    </button>
+                </div>
+            </div>
+
+            <!-- Tab content -->
+            <div class="tab-content" id="faltCfgTabContent"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Weapon class picker modal -->
+<div class="modal fade" id="fkEditorWeaponClassModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h6 class="modal-title">Välj vapenklasser</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small">Välj de vapengrupper som stationerna ska konfigureras för. Du kan ändra detta senare.</p>
+                <div id="fkEditorWeaponClassChecks"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" onclick="fkEditorApplyWeaponClasses()">Tillämpa</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Flatpickr for the secrecy timestamp -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
+
+@* The shared configurator script must load AFTER the DOM nodes it queries. *@
+@await Html.PartialAsync("_FaltskytteConfiguratorScript")
+
+<script>
+// Standalone editor mode flag — the shared configurator script branches on this
+// to route saves to /FaltskytteConfiguration/Update instead of the legacy
+// per-competition save endpoint.
+window._faltCfgEditorMode = 'configuration';
+window._faltCfgConfigurationId = @configId;
+
+var fkEditorConfig = null;
+var fkEditorMetaSaveTimer = null;
+var fkEditorSecretFlatpickr = null;
+
+// SHB-aligned default list. Operator can prune via "Välj vapenklasser" modal.
+var FALT_DEFAULT_WEAPON_CLASSES = ['A', 'B', 'C', 'R'];
+
+document.addEventListener('DOMContentLoaded', async function() {
+    fkEditorSecretFlatpickr = flatpickr('#fkEditorSecret', {
+        locale: 'sv',
+        enableTime: true,
+        time_24hr: true,
+        dateFormat: 'Y-m-d H:i',
+        minDate: 'today'
+    });
+
+    await fkEditorLoad();
+});
+
+async function fkEditorLoad() {
+    try {
+        var resp = await fetch('/umbraco/surface/FaltskytteConfiguration/Get?id=@configId');
+        var data = await resp.json();
+        if (!data.success) {
+            alert('Kunde inte ladda konfigurationen: ' + (data.message || 'Okänt fel'));
+            window.location.href = '/faltkonfig';
+            return;
+        }
+        fkEditorConfig = data.configuration;
+        fkEditorRenderMeta();
+
+        var blob = {};
+        try { blob = fkEditorConfig.jsonBlob ? JSON.parse(fkEditorConfig.jsonBlob) : {}; } catch (e) { blob = {}; }
+
+        // Detect weapon classes from the loaded blob. New configs may be empty.
+        var weaponClasses = Object.keys(blob).filter(function(k) { return !k.startsWith('_'); });
+        if (weaponClasses.length === 0) weaponClasses = FALT_DEFAULT_WEAPON_CLASSES.slice();
+
+        // Initialize the configurator. After this the shared JS owns rendering.
+        faltCfgOpen(weaponClasses, blob);
+
+        // Hide the legacy modal — faltCfgOpen tries to show it; we don't want that here.
+        var legacyModal = document.getElementById('faltStationConfigModal');
+        if (legacyModal) {
+            var bsm = bootstrap.Modal.getInstance(legacyModal);
+            if (bsm) bsm.hide();
+        }
+
+        document.getElementById('fkEditorRoot').style.display = '';
+    } catch (e) {
+        console.error(e);
+        alert('Nätverksfel vid laddning.');
+    }
+}
+
+function fkEditorRenderMeta() {
+    if (!fkEditorConfig) return;
+    document.getElementById('fkEditorTitle').textContent = fkEditorConfig.name || 'Redigera konfiguration';
+    document.getElementById('fkEditorName').value = fkEditorConfig.name || '';
+    document.getElementById('fkEditorDesc').value = fkEditorConfig.description || '';
+    document.getElementById('fkEditorVis').value = fkEditorConfig.visibility || 'Private';
+    if (fkEditorSecretFlatpickr) {
+        if (fkEditorConfig.secretUntil) fkEditorSecretFlatpickr.setDate(fkEditorConfig.secretUntil, false);
+        else fkEditorSecretFlatpickr.clear();
+    }
+    var secretBadge = document.getElementById('fkEditorSecretBadge');
+    if (fkEditorConfig.isSecret) {
+        secretBadge.style.display = '';
+        secretBadge.title = 'Hemlig fram till ' + fkEditorConfig.secretUntil;
+    } else {
+        secretBadge.style.display = 'none';
+    }
+    fkEditorRenderCollaborators();
+}
+
+function fkEditorRenderCollaborators() {
+    var container = document.getElementById('fkEditorCollabList');
+    if (!fkEditorConfig.collaborators || fkEditorConfig.collaborators.length === 0) {
+        container.innerHTML = '<span class="text-muted small">Inga medredigerare ännu.</span>';
+        return;
+    }
+    container.innerHTML = fkEditorConfig.collaborators.map(function(c) {
+        return '<span class="badge bg-light text-dark border d-flex align-items-center gap-1">' +
+            '<i class="bi bi-person"></i>' + escapeHtml(c.memberName) +
+            '<button class="btn btn-link btn-sm text-danger p-0 ms-1" onclick="fkEditorRemoveCollaborator(' + c.memberId + ')" title="Ta bort"><i class="bi bi-x-circle-fill"></i></button>' +
+        '</span>';
+    }).join('');
+}
+
+function escapeHtml(s) {
+    if (s == null) return '';
+    return String(s).replace(/[&<>"']/g, function(c) {
+        return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c];
+    });
+}
+
+async function fkEditorSaveMeta() {
+    if (!fkEditorConfig) return;
+    var body = {
+        id: fkEditorConfig.id,
+        name: document.getElementById('fkEditorName').value || '',
+        description: document.getElementById('fkEditorDesc').value || '',
+        visibility: document.getElementById('fkEditorVis').value,
+        secretUntil: document.getElementById('fkEditorSecret').value || null,
+        clearSecretUntil: !document.getElementById('fkEditorSecret').value
+    };
+    try {
+        var resp = await fetch('/umbraco/surface/FaltskytteConfiguration/Update', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value
+            },
+            body: JSON.stringify(body)
+        });
+        var data = await resp.json();
+        if (!data.success) {
+            alert('Kunde inte spara: ' + (data.message || 'Okänt fel'));
+            return;
+        }
+        // Refresh server-side state (e.g. isSecret).
+        fkEditorConfig.name = body.name;
+        fkEditorConfig.description = body.description;
+        fkEditorConfig.visibility = body.visibility;
+        fkEditorConfig.secretUntil = body.secretUntil;
+        fkEditorConfig.isSecret = !!body.secretUntil && new Date(body.secretUntil) > new Date();
+        fkEditorRenderMeta();
+    } catch (e) {
+        console.error(e);
+        alert('Nätverksfel.');
+    }
+}
+
+function fkEditorClearSecret() {
+    if (fkEditorSecretFlatpickr) fkEditorSecretFlatpickr.clear();
+    fkEditorSaveMeta();
+}
+
+async function fkEditorSaveAll() {
+    // Persist metadata then the JSON blob.
+    await fkEditorSaveMeta();
+    await faltCfgSaveAll();
+    document.getElementById('fkEditorSavedBadge').style.display = '';
+    document.getElementById('fkEditorDirtyBadge').style.display = 'none';
+    setTimeout(function() { document.getElementById('fkEditorSavedBadge').style.display = 'none'; }, 3000);
+}
+
+// ─── Collaborators ───────────────────────────────────────────────────
+
+var fkEditorMemberSearchTimer = null;
+
+function fkEditorMemberSearch() {
+    if (fkEditorMemberSearchTimer) clearTimeout(fkEditorMemberSearchTimer);
+    var q = document.getElementById('fkEditorMemberSearch').value.trim();
+    if (q.length < 2) {
+        document.getElementById('fkEditorMemberResults').style.display = 'none';
+        return;
+    }
+    fkEditorMemberSearchTimer = setTimeout(function() { fkEditorMemberSearchDo(q); }, 250);
+}
+
+async function fkEditorMemberSearchDo(q) {
+    try {
+        var resp = await fetch('/umbraco/surface/FaltskytteConfiguration/SearchMembers?query=' + encodeURIComponent(q));
+        var data = await resp.json();
+        var container = document.getElementById('fkEditorMemberResults');
+        if (!data.success) {
+            container.innerHTML = '<div class="list-group-item text-danger small">' + (data.message || 'Fel') + '</div>';
+            container.style.display = '';
+            return;
+        }
+        if (!data.members || data.members.length === 0) {
+            container.innerHTML = '<div class="list-group-item text-muted small">Inga matchningar.</div>';
+            container.style.display = '';
+            return;
+        }
+        var existingIds = (fkEditorConfig.collaborators || []).map(function(c) { return c.memberId; });
+        container.innerHTML = data.members.map(function(m) {
+            var already = existingIds.indexOf(m.memberId) >= 0;
+            return '<button type="button" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center"' +
+                (already ? ' disabled' : ' onclick="fkEditorAddCollaborator(' + m.memberId + ')"') + '>' +
+                '<span><i class="bi bi-person me-1"></i>' + escapeHtml(m.memberName) +
+                    (m.clubName ? ' <small class="text-muted">(' + escapeHtml(m.clubName) + ')</small>' : '') + '</span>' +
+                (already ? '<span class="badge bg-secondary">Redan tillagd</span>' : '<i class="bi bi-plus"></i>') +
+            '</button>';
+        }).join('');
+        container.style.display = '';
+    } catch (e) {
+        console.error(e);
+    }
+}
+
+async function fkEditorAddCollaborator(memberId) {
+    try {
+        var resp = await fetch('/umbraco/surface/FaltskytteConfiguration/AddCollaborator', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value
+            },
+            body: JSON.stringify({ configId: fkEditorConfig.id, memberId: memberId })
+        });
+        var data = await resp.json();
+        if (!data.success) { alert('Kunde inte lägga till: ' + (data.message || 'Okänt fel')); return; }
+        // Reload the config to get fresh collaborator list.
+        await fkEditorReloadMeta();
+        document.getElementById('fkEditorMemberSearch').value = '';
+        document.getElementById('fkEditorMemberResults').style.display = 'none';
+    } catch (e) {
+        console.error(e);
+        alert('Nätverksfel.');
+    }
+}
+
+async function fkEditorRemoveCollaborator(memberId) {
+    if (!confirm('Ta bort medredigerare?')) return;
+    try {
+        var resp = await fetch('/umbraco/surface/FaltskytteConfiguration/RemoveCollaborator', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value
+            },
+            body: JSON.stringify({ configId: fkEditorConfig.id, memberId: memberId })
+        });
+        var data = await resp.json();
+        if (!data.success) { alert('Kunde inte ta bort: ' + (data.message || 'Okänt fel')); return; }
+        await fkEditorReloadMeta();
+    } catch (e) {
+        console.error(e);
+        alert('Nätverksfel.');
+    }
+}
+
+async function fkEditorReloadMeta() {
+    try {
+        var resp = await fetch('/umbraco/surface/FaltskytteConfiguration/Get?id=' + fkEditorConfig.id);
+        var data = await resp.json();
+        if (data.success) {
+            fkEditorConfig.collaborators = data.configuration.collaborators || [];
+            fkEditorRenderMeta();
+        }
+    } catch (e) { console.error(e); }
+}
+
+// ─── Weapon class picker ─────────────────────────────────────────────
+
+function fkEditorOpenWeaponClassPicker() {
+    var allClasses = (window.HpskShootingClasses || []).map(function(sc) { return sc.weapon; });
+    var unique = [...new Set(allClasses)].filter(function(w) { return w; });
+    // Group: A-family first, then R, B, C.
+    var ordered = ['A', 'A_Opt', 'A_M', 'A_P', 'A_G', 'R', 'B', 'C'].filter(function(w) { return unique.indexOf(w) >= 0; });
+    var currentSet = new Set(faltCfgWeaponClasses);
+    var container = document.getElementById('fkEditorWeaponClassChecks');
+    container.innerHTML = ordered.map(function(wc) {
+        var checked = currentSet.has(wc) ? 'checked' : '';
+        return '<div class="form-check"><input class="form-check-input" type="checkbox" value="' + wc + '" id="fkEditorWC_' + wc + '" ' + checked + '>' +
+               '<label class="form-check-label" for="fkEditorWC_' + wc + '">' + wc + '</label></div>';
+    }).join('');
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('fkEditorWeaponClassModal')).show();
+}
+
+function fkEditorApplyWeaponClasses() {
+    var picked = Array.from(document.querySelectorAll('#fkEditorWeaponClassChecks input[type=checkbox]:checked'))
+                      .map(function(el) { return el.value; });
+    if (picked.length === 0) { alert('Välj minst en vapenklass.'); return; }
+    bootstrap.Modal.getInstance(document.getElementById('fkEditorWeaponClassModal')).hide();
+
+    // Re-init configurator with the new class set; keep the existing JSON.
+    var blob = JSON.parse(JSON.stringify(faltCfgData));
+    // Remove unselected classes from the blob.
+    Object.keys(blob).forEach(function(k) {
+        if (k.startsWith('_')) return;
+        if (picked.indexOf(k) < 0) delete blob[k];
+    });
+    faltCfgOpen(picked, blob);
+    var legacyModal = document.getElementById('faltStationConfigModal');
+    if (legacyModal) {
+        var bsm = bootstrap.Modal.getInstance(legacyModal);
+        if (bsm) bsm.hide();
+    }
+    faltCfgMarkDirty(picked[0], 1); // surface a dirty indicator on station 1
+}
+
+@* Make sure HpskShootingClasses is available for the weapon-class picker. *@
+</script>
+
+@await Html.PartialAsync("_ShootingClassesBootstrap")
