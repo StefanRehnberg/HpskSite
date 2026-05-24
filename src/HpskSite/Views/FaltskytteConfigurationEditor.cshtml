@@ -544,6 +544,171 @@ function fkEditorApplyWeaponClasses() {
     faltCfgMarkDirty(picked[0], 1); // surface a dirty indicator on station 1
 }
 
+// ─── Linked-station reload UX ────────────────────────────────────────
+// After every renderActiveTab, scan station cards for _linkedFromConfigId
+// meta and inject a banner that shows the link state (in-sync, diverged,
+// or source-unavailable). Source configs are fetched once + cached.
+
+var fkLinkSourceCache = {}; // configId -> { blob, name } | null
+var fkLinkFetchInFlight = {}; // configId -> Promise (dedup concurrent fetches)
+var fkLinkFirstRender = true;
+
+async function fkLinkEnsureSource(configId) {
+    if (configId in fkLinkSourceCache) return fkLinkSourceCache[configId];
+    if (fkLinkFetchInFlight[configId]) return fkLinkFetchInFlight[configId];
+    fkLinkFetchInFlight[configId] = (async function() {
+        try {
+            var resp = await fetch('/umbraco/surface/FaltskytteConfiguration/GetStationsForImport?id=' + configId);
+            var data = await resp.json();
+            if (data.success) {
+                try {
+                    fkLinkSourceCache[configId] = { blob: JSON.parse(data.jsonBlob), name: data.name };
+                } catch (e) { fkLinkSourceCache[configId] = null; }
+            } else {
+                fkLinkSourceCache[configId] = null;
+            }
+        } catch (e) {
+            fkLinkSourceCache[configId] = null;
+        }
+        delete fkLinkFetchInFlight[configId];
+        return fkLinkSourceCache[configId];
+    })();
+    return fkLinkFetchInFlight[configId];
+}
+
+function fkLinkStationsWithMeta(stationNum) {
+    // Collect per-class link metadata for one station number. Empty when no class
+    // on this station has _linkedFromConfigId.
+    var entries = [];
+    faltCfgWeaponClasses.forEach(function(wc) {
+        var stations = (faltCfgData[wc] && faltCfgData[wc].stations) || [];
+        var st = stations.find(function(s) { return s.station === stationNum; });
+        if (st && st._linkedFromConfigId) {
+            entries.push({ wc: wc, station: st });
+        }
+    });
+    return entries;
+}
+
+async function fkLinkPostRender() {
+    var cards = document.querySelectorAll('.card[data-station]');
+    if (cards.length === 0) return;
+
+    // Collect distinct source ids needed; fetch them up front (parallel).
+    var ids = new Set();
+    cards.forEach(function(card) {
+        var stationNum = parseInt(card.dataset.station);
+        fkLinkStationsWithMeta(stationNum).forEach(function(e) { ids.add(e.station._linkedFromConfigId); });
+    });
+    await Promise.all([...ids].map(fkLinkEnsureSource));
+
+    cards.forEach(function(card) {
+        // Remove any prior banner to avoid duplicates on re-render.
+        var existing = card.querySelector('.fk-link-banner');
+        if (existing) existing.remove();
+
+        var stationNum = parseInt(card.dataset.station);
+        var entries = fkLinkStationsWithMeta(stationNum);
+        if (entries.length === 0) return;
+
+        // Aggregate: are all classes linked from the same source/station? Diverged anywhere?
+        var first = entries[0].station;
+        var srcId = first._linkedFromConfigId;
+        var srcStationNum = first._linkedFromStationNumber;
+        var source = fkLinkSourceCache[srcId];
+        var sourceName = source ? source.name : null;
+
+        var diverged = false;
+        var unavailable = !source;
+        if (!unavailable) {
+            // Find source's station in any class to compute current checksum.
+            var classes = Object.keys(source.blob).filter(function(k) { return !k.startsWith('_'); });
+            var srcSt = null;
+            for (var i = 0; i < classes.length && !srcSt; i++) {
+                var srcStations = source.blob[classes[i]].stations || source.blob[classes[i]].Stations || [];
+                srcSt = srcStations.find(function(s) { return (s.station || s.Station) === srcStationNum; });
+            }
+            if (!srcSt) {
+                unavailable = true;
+            } else {
+                var currentChecksum = fkImportComputeChecksum(srcSt);
+                diverged = currentChecksum !== first._linkedFromChecksum;
+            }
+        }
+
+        var banner = document.createElement('div');
+        banner.className = 'fk-link-banner';
+        if (unavailable) {
+            banner.className += ' alert alert-secondary py-1 px-2 small mb-2 mt-1';
+            banner.innerHTML = '<i class="bi bi-link-45deg me-1"></i>Länkad från en konfiguration som inte längre är åtkomlig. ' +
+                '<button class="btn btn-link btn-sm p-0 align-baseline text-danger" onclick="fkLinkUnlink(' + stationNum + ')">Avlänka</button>';
+        } else if (diverged) {
+            banner.className += ' alert alert-warning py-1 px-2 small mb-2 mt-1';
+            banner.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i><strong>Källan har ändrats</strong> &mdash; "' + escapeHtml(sourceName) + '" station ' + srcStationNum + '. ' +
+                '<button class="btn btn-link btn-sm p-0 align-baseline" onclick="fkLinkReload(' + stationNum + ')">Ladda om</button> &middot; ' +
+                '<button class="btn btn-link btn-sm p-0 align-baseline text-danger" onclick="fkLinkUnlink(' + stationNum + ')">Avlänka</button>';
+        } else {
+            banner.className += ' alert alert-info py-1 px-2 small mb-2 mt-1';
+            banner.innerHTML = '<i class="bi bi-link-45deg me-1"></i>Länkad från "' + escapeHtml(sourceName) + '" station ' + srcStationNum + ' (synkad). ' +
+                '<button class="btn btn-link btn-sm p-0 align-baseline text-danger" onclick="fkLinkUnlink(' + stationNum + ')">Avlänka</button>';
+        }
+
+        var cardBody = card.querySelector('.card-body');
+        if (cardBody) cardBody.insertBefore(banner, cardBody.firstChild);
+    });
+}
+
+function fkLinkReload(stationNum) {
+    faltCfgWeaponClasses.forEach(function(wc) {
+        var stations = (faltCfgData[wc] && faltCfgData[wc].stations) || [];
+        var st = stations.find(function(s) { return s.station === stationNum; });
+        if (!st || !st._linkedFromConfigId) return;
+        var source = fkLinkSourceCache[st._linkedFromConfigId];
+        if (!source || !source.blob) return;
+        var srcStations = (source.blob[wc] && source.blob[wc].stations) || [];
+        var srcSt = srcStations.find(function(s) { return s.station === st._linkedFromStationNumber; });
+        if (!srcSt) return;
+
+        var copy = JSON.parse(JSON.stringify(srcSt));
+        copy.station = stationNum;
+        copy.isShootOffOnly = st.isShootOffOnly;
+        copy._linkedFromConfigId = st._linkedFromConfigId;
+        copy._linkedFromStationNumber = st._linkedFromStationNumber;
+        copy._linkedFromChecksum = fkImportComputeChecksum(srcSt);
+
+        var idx = stations.indexOf(st);
+        stations[idx] = copy;
+    });
+    faltCfgMarkDirty(faltCfgWeaponClasses[0], stationNum);
+    renderActiveTab();
+}
+
+function fkLinkUnlink(stationNum) {
+    if (!confirm('Avlänka station ' + stationNum + '? Stationen blir en oberoende kopia.')) return;
+    faltCfgWeaponClasses.forEach(function(wc) {
+        var stations = (faltCfgData[wc] && faltCfgData[wc].stations) || [];
+        var st = stations.find(function(s) { return s.station === stationNum; });
+        if (!st) return;
+        delete st._linkedFromConfigId;
+        delete st._linkedFromStationNumber;
+        delete st._linkedFromChecksum;
+    });
+    faltCfgMarkDirty(faltCfgWeaponClasses[0], stationNum);
+    renderActiveTab();
+}
+
+// Hook the shared renderer so link banners are re-decorated on every render.
+(function() {
+    if (typeof renderActiveTab !== 'function') return; // shared script not loaded yet (shouldn't happen)
+    var orig = renderActiveTab;
+    window.renderActiveTab = function() {
+        var result = orig.apply(this, arguments);
+        // Fire-and-forget; cached source data makes this near-instant after first run.
+        fkLinkPostRender().catch(function(e) { console.error(e); });
+        return result;
+    };
+})();
+
 // ─── Import station from another configuration ──────────────────────
 
 var fkImportSourceConfig = null;     // full Get response of the picked source config
