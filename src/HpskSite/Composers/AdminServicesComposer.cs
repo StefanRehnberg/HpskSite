@@ -69,6 +69,9 @@ namespace HpskSite.Composers
             // uses a different result-entry shape (per-station hits/figures/poängmål)
             builder.Services.AddScoped<HpskSite.CompetitionTypes.Faltskytte.Services.FaltskytteShootOffService>();
 
+            // Standalone Fältskytte station configurations (CRUD + sharing + secrecy gate)
+            builder.Services.AddScoped<FaltskytteConfigurationService>();
+
             // Precision finals start list pipeline:
             //   QualificationService — ranks shooters and computes the 1/6+min10 cutoff (existed before, now DI-registered)
             //   QualifyingResultsService — snapshot the qualifying leaderboard before finals are built
