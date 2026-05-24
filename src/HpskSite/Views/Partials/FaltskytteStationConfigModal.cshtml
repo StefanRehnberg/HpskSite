@@ -33,6 +33,13 @@
                         <input type="number" class="form-control" id="faltCfg_stationCount" min="2" max="12" value="8" style="width:80px" onchange="faltCfgUpdateStations()">
                     </div>
                     <div class="col-auto">
+                        <label class="form-label fw-bold d-block">Mörkerfältskjutning</label>
+                        <div class="form-check form-switch" title="Tävlingen genomförs i mörker. Lägger till 30 % i föreslagna skjuttider och bör kombineras med större figurgrupp eller kortare avstånd.">
+                            <input class="form-check-input" type="checkbox" role="switch" id="faltCfg_morker" onchange="faltCfgToggleMorker(this.checked)">
+                            <label class="form-check-label small" for="faltCfg_morker">Aktivera mörker-tillägg</label>
+                        </div>
+                    </div>
+                    <div class="col-auto">
                         <span id="faltCfgSimpleNote" class="text-muted small fst-italic" style="display:none">
                             <i class="bi bi-info-circle me-1"></i>Enkelt läge: bygg målgrupper en gång &mdash; skjuttid och övriga parametrar sätts per klass per station.
                         </span>
@@ -84,6 +91,31 @@
     </div>
 </div>
 
+<!-- Suggestion-breakdown modal (sibling of the configurator so backdrop stacking is clean). -->
+<div class="modal fade" id="faltCfgSuggDetailsModal" tabindex="-1" style="z-index:1080">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h6 class="modal-title"><i class="bi bi-info-circle me-2"></i>Föreslaget skjuttid &mdash; uppdelning</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <div id="faltCfgSuggDetailsContext" class="text-muted small mb-2"></div>
+                <table class="table table-sm align-middle mb-0">
+                    <tbody id="faltCfgSuggDetailsBody"></tbody>
+                    <tfoot id="faltCfgSuggDetailsFoot"></tfoot>
+                </table>
+                <div class="text-muted small mt-2">
+                    Per-skott-tider avrundas upp&aring;t till hela sekunder. St&ouml;dhand p&aring;verkar ej kalkylen (SHB rekommenderar i st&auml;llet justering av figurgrupp eller avst&aring;nd).
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">St&auml;ng</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 // Station Configurator State
 let faltCfgData = {}; // { "C": { stations: [...] }, "A": { ... } }
@@ -94,12 +126,14 @@ let faltCfgExpandedStation = 1; // Track which station card is open
 let faltCfgDirtyStations = new Set(); // Stations with unsaved changes
 let faltCfgLinkedGroups = []; // e.g. [["A","R"], ["B","C"]] — linked weapon classes share configs
 let faltCfgMode = "advanced"; // "simple" | "advanced". Simple = shared shape + per-class param matrix.
+let faltCfgSimpleDistanceClass = null; // simple-mode picker: which class's distance the sliders edit
+let faltCfgMorker = false; // competition-level mörkerfältskjutning flag
 const faltCfgScoringMode = () => document.getElementById('wizard_scoringMode')?.value || 'Normal';
 
 // Reserved metadata keys stored in faltCfgData alongside weapon classes. When iterating
 // weapon-class entries, skip these. Add new keys here (with leading underscore) instead
 // of polluting the iteration sites.
-const FALT_CFG_META_KEYS = new Set(['_linkedGroups', '_mode']);
+const FALT_CFG_META_KEYS = new Set(['_linkedGroups', '_mode', '_morker']);
 function faltCfgIsMetaKey(k) { return FALT_CFG_META_KEYS.has(k); }
 
 // Scale a figure's four timing fields by `ratio`, in place. Same clamp
@@ -133,7 +167,13 @@ function faltCfgSyncShape(srcWc) {
         srcStations.forEach(function (srcSt, i) {
             var destSt = destStations[i];
             destSt.station = srcSt.station;
+            // Distance is a per-class param (like shootingTimeSec). Capture it
+            // before the shape overwrite so each class keeps its own slider value.
+            var savedDistances = (destSt.targetGroups || []).map(function(tg) { return tg.distance; });
             destSt.targetGroups = JSON.parse(JSON.stringify(srcSt.targetGroups || []));
+            destSt.targetGroups.forEach(function(tg, gi) {
+                if (gi < savedDistances.length && savedDistances[gi] != null) tg.distance = savedDistances[gi];
+            });
             // Scale timings into dest's shootingTimeSec budget. Skip the walk
             // when times match exactly to avoid pointless rounding drift.
             var srcTime = srcSt.shootingTimeSec || 30;
@@ -250,6 +290,146 @@ const WEAPON_POSITIONS = ["45 grader", "Riktning tillåten"];
 const SUPPORT_HAND = ["Ej stödhand", "Stödhand tillåten"];
 const TARGET_BEHAVIORS = ["Fast", "Framsvängande", "Bortsvängande", "Rörligt"];
 
+// ─── SHB shoot-time suggestion ──────────────────────────────────────
+// Max distance per (sizeGroup, SHB weapon-diagram). Lines in diagrams 1-3
+// (SHB 2026 pp. 120-122) all pass through origin; max distance corresponds
+// to the diagram's max time/shot (AR=2,0 s, B=1,75 s, C=1,5 s).
+// Values verified against SHB pp. 100-109 (Fältskyttefigurer).
+const SHB_MAX_DISTANCES = {
+    0:  { AR: 80, B: 90, C: 100 },
+    1:  { AR: 70, B: 80, C: 90 },
+    2:  { AR: 60, B: 65, C: 75 },
+    3:  { AR: 50, B: 55, C: 65 },
+    4:  { AR: 45, B: 50, C: 55 },
+    5:  { AR: 40, B: 45, C: 50 },
+    6:  { AR: 35, B: 40, C: 45 },
+    7:  { AR: 30, B: 35, C: 40 },
+    8:  { AR: 27, B: 32, C: 36 },
+    9:  { AR: 24, B: 27, C: 30 },
+    10: { AR: 20, B: 22, C: 25 },
+    11: { AR: 16, B: 18, C: 20 },
+    12: { AR: 14, B: 16, C: 18 },
+    13: { AR: 12, B: 14, C: 16 },
+    14: { AR: 7,  B: 8,  C: 9  }
+    // SizeGroup 15 is reserved (no SHB row); treated as "unset" → no bound.
+};
+const SHB_MAX_TIME_PER_SHOT = { AR: 2.0, B: 1.75, C: 1.5 };
+const SHB_TILLAGG_WEAPON_45 = 2;     // Vapenläge 45 grader → +2 sek
+const SHB_TILLAGG_OMRIKTNING = 2;    // per omriktning mellan målgrupper (n-1)
+const SHB_MORKER_MULTIPLIER = 1.30;  // Mörkerfältskjutning → +30 % på total
+const SLIDER_MIN_DISTANCE = 5;       // m — practical floor regardless of figurgrupp
+const FALT_STATION_SHOTS = 6;        // SHB-konvention: alltid 6 skott per fältskyttestation
+
+// Maps any weapon-class code (A, A_Opt, A_M, A_P, A_G, B, C, R) to the SHB
+// diagram bucket (AR / B / C). All A-family + R share Diagram 1.
+function faltShbBucket(wc) {
+    if (!wc) return 'AR';
+    if (wc === 'B') return 'B';
+    if (wc === 'C') return 'C';
+    return 'AR';
+}
+
+// Max shooting distance (m) for a figure given its sizeGroup + the weapon
+// class. Returns null when sizeGroup is unset (0 with no figure picked yet)
+// or outside the SHB table.
+function faltFigureMaxDistance(sizeGroup, wc) {
+    if (sizeGroup == null) return null;
+    var row = SHB_MAX_DISTANCES[sizeGroup];
+    if (!row) return null;
+    return row[faltShbBucket(wc)] || null;
+}
+
+// Distance bounds for a målgrupp = {min: 5, max: tightest figure max}.
+// Returns null when no figure has a usable sizeGroup yet.
+function faltTargetGroupBounds(tg, wc) {
+    var figs = (tg && tg.figures) || [];
+    var maxes = [];
+    for (var i = 0; i < figs.length; i++) {
+        // Skip figures with no picked target or sizeGroup 0 (treated as "not set").
+        var sg = figs[i].sizeGroup;
+        if (sg == null || sg === 0) continue;
+        var m = faltFigureMaxDistance(sg, wc);
+        if (m != null) maxes.push(m);
+    }
+    if (maxes.length === 0) return null;
+    return { min: SLIDER_MIN_DISTANCE, max: Math.min.apply(null, maxes) };
+}
+
+// Computes SHB-suggested skjuttid for a station for one weapon class.
+// SHB fältskytte = 6 skott per station, fördelas av skytten på målgrupper.
+// Värsta fall: alla 6 skott på den mest krävande figuren. Den figurens
+// per-skott-tid sätter därför skjuttidsgrunden:
+//
+//     grund = 6 × max över alla figurer av (D / maxD × maxTime)
+//
+// där D är respektive målgrupps avstånd och maxD beror på figurens
+// storleksgrupp + vapengrupp (SHB diagram 1–3, pp 120–122).
+//
+// Returns { totalSec, breakdown: [{label, sec, info?}] } or null when no
+// figure in any målgrupp has a usable sizeGroup (suggestion not applicable).
+function faltSuggestShootingTime(station, wc, morker) {
+    if (!station || !station.targetGroups || station.targetGroups.length === 0) return null;
+    var bucket = faltShbBucket(wc);
+    var maxTime = SHB_MAX_TIME_PER_SHOT[bucket];
+    var lines = [];
+    var anyApplicable = false;
+    var worstPerShot = 0;
+    var worstLabel = '';
+
+    // Informational per-målgrupp lines + global max per-shot scan.
+    station.targetGroups.forEach(function(tg, gi) {
+        var letter = String.fromCharCode(65 + gi); // A, B, C, ...
+        var distance = tg.distance;
+        var groupPerShot = 0;
+        var groupLimitingFig = '';
+        (tg.figures || []).forEach(function(f) {
+            if (!f.sizeGroup) return;
+            var maxD = faltFigureMaxDistance(f.sizeGroup, wc);
+            if (!maxD) return;
+            anyApplicable = true;
+            var d = distance != null ? distance : maxD;
+            var t = (d / maxD) * maxTime;
+            if (t > groupPerShot) { groupPerShot = t; groupLimitingFig = 'storleksgrupp ' + f.sizeGroup; }
+            if (t > worstPerShot) { worstPerShot = t; worstLabel = 'Målgrupp ' + letter + ', storleksgrupp ' + f.sizeGroup + ' @@ ' + d + ' m'; }
+        });
+        if (groupPerShot === 0) {
+            lines.push({ label: 'Målgrupp ' + letter + ' — storleksgrupp saknas', sec: 0 });
+        } else {
+            lines.push({
+                label: 'Målgrupp ' + letter + ' (' + (distance != null ? distance : '?') + ' m, ' + groupLimitingFig + ')',
+                sec: 0,
+                info: groupPerShot.toFixed(2).replace('.', ',') + ' sek/skott (info)'
+            });
+        }
+    });
+
+    if (!anyApplicable) return null;
+
+    var grund = Math.ceil(FALT_STATION_SHOTS * worstPerShot);
+    var sumSec = grund;
+    lines.push({
+        label: FALT_STATION_SHOTS + ' skott × ' + worstPerShot.toFixed(2).replace('.', ',') + ' sek/skott (' + worstLabel + ')',
+        sec: grund
+    });
+
+    if (station.weaponStartPosition === '45 grader') {
+        sumSec += SHB_TILLAGG_WEAPON_45;
+        lines.push({ label: 'Vapenläge 45 grader', sec: SHB_TILLAGG_WEAPON_45 });
+    }
+    var omriktningCount = Math.max(0, station.targetGroups.length - 1);
+    if (omriktningCount > 0) {
+        var omr = omriktningCount * SHB_TILLAGG_OMRIKTNING;
+        sumSec += omr;
+        lines.push({ label: 'Omriktning mellan målgrupper (×' + omriktningCount + ')', sec: omr });
+    }
+    if (morker) {
+        var morkerExtra = Math.ceil(sumSec * SHB_MORKER_MULTIPLIER) - sumSec;
+        sumSec += morkerExtra;
+        lines.push({ label: 'Mörker-tillägg (+30 %)', sec: morkerExtra });
+    }
+    return { totalSec: sumSec, breakdown: lines };
+}
+
 // ─── Model-update helpers ───────────────────────────────────────────
 // Every form control calls one of these on change. The model is always current.
 
@@ -317,6 +497,10 @@ function faltCfgUpdateStation(wc, stationNum, field, value) {
         });
     }
     faltCfgMarkDirty(wc, stationNum);
+    // weaponStartPosition feeds into the suggested-skjuttid calc (+2 sek for
+    // "45 grader"). Refresh the Föreslaget badge live so the operator sees the
+    // change without re-opening the station card.
+    if (field === 'weaponStartPosition') faltCfgRefreshSuggestion(stationNum);
 }
 
 function faltCfgUpdateGroup(wc, stationNum, tgIdx, field, value) {
@@ -342,14 +526,19 @@ function faltCfgOpen(weaponClasses, existingConfig) {
         var wc = faltCfgData.WeaponConfigs || faltCfgData.weaponConfigs;
         var linked = faltCfgData._linkedGroups;
         var mode = faltCfgData._mode;
+        var morker = faltCfgData._morker;
         faltCfgData = {};
         Object.keys(wc).forEach(function(k) { faltCfgData[k] = wc[k]; });
         if (linked) faltCfgData._linkedGroups = linked;
         if (mode) faltCfgData._mode = mode;
+        if (morker) faltCfgData._morker = morker;
     }
 
     faltCfgLinkedGroups = faltCfgData._linkedGroups || [];
     faltCfgMode = faltCfgData._mode === 'simple' ? 'simple' : 'advanced';
+    faltCfgMorker = !!faltCfgData._morker;
+    var morkerEl = document.getElementById('faltCfg_morker');
+    if (morkerEl) morkerEl.checked = faltCfgMorker;
     faltCfgStationCount = parseInt(document.getElementById('faltCfg_stationCount').value) || 8;
 
     // Detect station count from existing config (handle both camelCase and PascalCase)
@@ -424,7 +613,7 @@ function createDefaultStation(num) {
 }
 
 function createDefaultFigure(num) {
-    return { figureNumber: num, isPoangmal: false, behavior: "Fast" };
+    return { figureNumber: num, isPoangmal: false, behavior: "Fast", sizeGroup: 0 };
 }
 
 function faltCfgUpdateStations() {
@@ -568,6 +757,11 @@ function faltCfgSaveLinkedGroups() {
     } else {
         delete faltCfgData._mode;
     }
+    if (faltCfgMorker) {
+        faltCfgData._morker = true;
+    } else {
+        delete faltCfgData._morker;
+    }
 }
 
 function faltCfgCopyFrom() {
@@ -664,6 +858,14 @@ function renderActiveTab() {
                                 onchange="faltCfgUpdateStation('${wc}',${st.station},'shootingTimeSec',parseInt(this.value)||30)">
                         </div>
                         <div class="col-auto">
+                            <label class="form-label small mb-0">Föreslaget</label>
+                            <div class="d-flex gap-1 align-items-center" style="height:31px">
+                                <span class="badge bg-info text-dark" id="faltCfgSuggTime_${wc}_${st.station}">${(() => { var s = faltSuggestShootingTime(st, wc, faltCfgMorker); return s ? s.totalSec + ' sek' : '—'; })()}</span>
+                                <button type="button" class="btn btn-outline-info btn-sm py-0 px-1" onclick="faltCfgShowSuggestionDetails('${wc}',${st.station})" title="Visa uppdelning"><i class="bi bi-info-circle"></i></button>
+                                <button type="button" class="btn btn-outline-primary btn-sm py-0 px-1" id="faltCfgSuggApply_${wc}_${st.station}" onclick="faltCfgApplySuggestion('${wc}',${st.station})" title="Kopiera värdet till Skjuttid">Använd</button>
+                            </div>
+                        </div>
+                        <div class="col-auto">
                             <label class="form-label small mb-0">Utgångsläge</label>
                             <select class="form-select form-select-sm"
                                 onchange="faltCfgUpdateStation('${wc}',${st.station},'shooterStartPosition',this.value)">${SHOOTER_POSITIONS.map(p => `<option ${p === st.shooterStartPosition ? 'selected' : ''}>${p}</option>`).join('')}</select>
@@ -732,6 +934,104 @@ function renderActiveTab() {
     });
 }
 
+// Distance writer used by the målgrupp slider + numeric input. Marks dirty,
+// updates the inline displays (per-target-group spacing hint + station-level
+// Föreslaget skjuttid) without re-rendering the whole tab so the slider stays
+// smooth while dragging.
+function faltCfgSetDistance(wc, stationNum, tgIdx, value, opts) {
+    var v = parseInt(value, 10);
+    if (isNaN(v)) return;
+    if (v < SLIDER_MIN_DISTANCE) v = SLIDER_MIN_DISTANCE;
+    var station = faltCfgData[wc] && faltCfgData[wc].stations
+        ? faltCfgData[wc].stations.find(function(s) { return s.station === stationNum; }) : null;
+    if (!station || !station.targetGroups || !station.targetGroups[tgIdx]) return;
+    station.targetGroups[tgIdx].distance = v;
+
+    // Mirror to both controls (slider may have driven this; sync the number, or vice versa).
+    var slider = document.getElementById('faltCfgDistSlider_' + wc + '_' + stationNum + '_' + tgIdx);
+    var num = document.getElementById('faltCfgDistNum_' + wc + '_' + stationNum + '_' + tgIdx);
+    if (slider && slider.value !== String(v)) slider.value = v;
+    if (num && num.value !== String(v)) num.value = v;
+    var hint = document.getElementById('faltCfgSpacingHint_' + wc + '_' + stationNum + '_' + tgIdx);
+    if (hint) hint.textContent = faltSpacingHintText(v);
+
+    // Föreslaget skjuttid display: for advanced mode, one per (wc, station);
+    // for simple mode, one per class per station row in the params table.
+    faltCfgRefreshSuggestion(stationNum);
+
+    if (!opts || !opts.skipDirty) faltCfgMarkDirty(wc, stationNum);
+}
+
+function faltSpacingHintText(distanceM) {
+    var spacing = Math.round((distanceM - 5) / 2);
+    if (spacing < 5) return 'Rek. avstånd mellan figurer: minst 5 cm (regelminimum).';
+    if (spacing > 40) return 'Rek. avstånd mellan figurer: högst 40 cm (regelmaximum).';
+    return 'Rek. avstånd mellan figurer i målgruppen: ' + spacing + ' cm.';
+}
+
+// Re-render all Föreslaget-skjuttid badges for one station across every class.
+// Advanced mode renders one in the per-station header (current tab only).
+// Simple mode renders one per row in the per-class params table.
+function faltCfgRefreshSuggestion(stationNum) {
+    faltCfgWeaponClasses.forEach(function(wc) {
+        var station = faltCfgData[wc] && faltCfgData[wc].stations
+            ? faltCfgData[wc].stations.find(function(s) { return s.station === stationNum; }) : null;
+        if (!station) return;
+        var sugg = faltSuggestShootingTime(station, wc, faltCfgMorker);
+        var el = document.getElementById('faltCfgSuggTime_' + wc + '_' + stationNum);
+        if (el) el.textContent = sugg ? (sugg.totalSec + ' sek') : '—';
+        var applyBtn = document.getElementById('faltCfgSuggApply_' + wc + '_' + stationNum);
+        if (applyBtn) applyBtn.disabled = !sugg;
+    });
+}
+
+function faltCfgShowSuggestionDetails(wc, stationNum) {
+    var station = faltCfgData[wc] && faltCfgData[wc].stations
+        ? faltCfgData[wc].stations.find(function(s) { return s.station === stationNum; }) : null;
+    var sugg = station ? faltSuggestShootingTime(station, wc, faltCfgMorker) : null;
+    var ctxEl = document.getElementById('faltCfgSuggDetailsContext');
+    var bodyEl = document.getElementById('faltCfgSuggDetailsBody');
+    var footEl = document.getElementById('faltCfgSuggDetailsFoot');
+    if (!ctxEl || !bodyEl || !footEl) return;
+    ctxEl.textContent = 'Station ' + stationNum + ' — vapenklass ' + wc + ' (diagram ' + faltShbBucket(wc) + ', max ' + SHB_MAX_TIME_PER_SHOT[faltShbBucket(wc)] + ' sek/skott)';
+    if (!sugg) {
+        bodyEl.innerHTML = '<tr><td colspan="2" class="text-muted">Kalkyl saknas — ingen figur har en giltig storleksgrupp.</td></tr>';
+        footEl.innerHTML = '';
+    } else {
+        bodyEl.innerHTML = sugg.breakdown.map(function(b) {
+            if (b.info) {
+                // Informational row (per-målgrupp per-shot time, no sek contribution).
+                return '<tr class="text-muted small"><td>' + b.label + '</td><td class="text-end text-nowrap">' + b.info + '</td></tr>';
+            }
+            var prefix = b.sec > 0 ? '+' : '';
+            return '<tr><td>' + b.label + '</td><td class="text-end text-nowrap">' + prefix + b.sec + ' sek</td></tr>';
+        }).join('');
+        footEl.innerHTML = '<tr class="fw-bold"><td>Föreslaget skjuttid</td><td class="text-end">' + sugg.totalSec + ' sek</td></tr>';
+    }
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('faltCfgSuggDetailsModal')).show();
+}
+
+function faltCfgApplySuggestion(wc, stationNum) {
+    var station = faltCfgData[wc] && faltCfgData[wc].stations
+        ? faltCfgData[wc].stations.find(function(s) { return s.station === stationNum; }) : null;
+    if (!station) return;
+    var sugg = faltSuggestShootingTime(station, wc, faltCfgMorker);
+    if (!sugg) return;
+    faltCfgUpdateStation(wc, stationNum, 'shootingTimeSec', sugg.totalSec);
+    renderActiveTab();
+}
+
+// Returns the weapon class used for slider bounds + distance read/write in
+// the current render context. Advanced: the tab's wc. Simple: the picker's
+// chosen class, defaulting to canonical.
+function faltCfgEffectiveDistanceClass(wc) {
+    if (faltCfgMode !== 'simple') return wc;
+    if (faltCfgSimpleDistanceClass && faltCfgWeaponClasses.indexOf(faltCfgSimpleDistanceClass) >= 0) {
+        return faltCfgSimpleDistanceClass;
+    }
+    return faltCfgGetCanonicalClass();
+}
+
 function renderTargetGroup(tg, tgIdx, stationNum, wc, isPoang, isLastGroup) {
     var figures = tg.figures || [];
     var figuresHtml = '';
@@ -794,6 +1094,45 @@ function renderTargetGroup(tg, tgIdx, stationNum, wc, isPoang, isLastGroup) {
 
     var descVal = (tg.description || '').replace(/"/g, '&quot;').replace(/\n/g, '&#10;');
 
+    // Distance slider \u2014 bounds derived from figures' sizeGroups for the active
+    // distance class (advanced: wc; simple: faltCfgSimpleDistanceClass / canonical).
+    var distWc = faltCfgEffectiveDistanceClass(wc);
+    var distTg = (faltCfgMode === 'simple' && distWc !== wc)
+        ? (faltCfgData[distWc] && faltCfgData[distWc].stations
+            ? (faltCfgData[distWc].stations.find(function(s) { return s.station === stationNum; }) || {}).targetGroups
+            : null)
+        : null;
+    var distSourceTg = distTg ? distTg[tgIdx] : tg;
+    var bounds = faltTargetGroupBounds(tg, distWc);
+    var currentDist = distSourceTg && distSourceTg.distance != null ? distSourceTg.distance : (bounds ? bounds.max : SLIDER_MIN_DISTANCE);
+    if (bounds && currentDist > bounds.max) currentDist = bounds.max;
+    if (currentDist < SLIDER_MIN_DISTANCE) currentDist = SLIDER_MIN_DISTANCE;
+
+    var idBase = distWc + '_' + stationNum + '_' + tgIdx;
+    var sliderHtml;
+    if (!bounds) {
+        sliderHtml = '<div class="form-text small text-muted">' +
+            'V\u00e4lj figurer ur Figurkatalogen (med Storleksgrupp) f\u00f6r att aktivera avst\u00e5ndsf\u00f6rslag.' +
+            '<\/div>';
+    } else {
+        var distLabel = faltCfgMode === 'simple' ? ('Avst\u00e5nd (vapenklass ' + distWc + ')') : 'Avst\u00e5nd';
+        sliderHtml =
+            '<div class="d-flex gap-2 align-items-center mt-2">' +
+                '<label class="form-label small mb-0 text-nowrap fw-bold">' + distLabel + '<\/label>' +
+                '<span class="text-muted small">' + bounds.min + ' m<\/span>' +
+                '<input type="range" class="form-range" id="faltCfgDistSlider_' + idBase + '"' +
+                    ' min="' + bounds.min + '" max="' + bounds.max + '" value="' + currentDist + '"' +
+                    ' oninput="faltCfgSetDistance(\'' + distWc + '\',' + stationNum + ',' + tgIdx + ',this.value,{skipDirty:true})"' +
+                    ' onchange="faltCfgSetDistance(\'' + distWc + '\',' + stationNum + ',' + tgIdx + ',this.value)">' +
+                '<span class="text-muted small">' + bounds.max + ' m<\/span>' +
+                '<input type="number" class="form-control form-control-sm" id="faltCfgDistNum_' + idBase + '"' +
+                    ' min="' + bounds.min + '" max="' + bounds.max + '" value="' + currentDist + '" style="width:75px"' +
+                    ' onchange="faltCfgSetDistance(\'' + distWc + '\',' + stationNum + ',' + tgIdx + ',this.value)">' +
+                '<span class="text-muted small">m<\/span>' +
+            '<\/div>' +
+            '<div class="form-text small" id="faltCfgSpacingHint_' + idBase + '">' + faltSpacingHintText(currentDist) + '<\/div>';
+    }
+
     return '<div class="border rounded p-2 mb-2 bg-body-tertiary tg-row" data-tg="' + tgIdx + '">' +
         '<div class="d-flex justify-content-between align-items-center mb-1">' +
             '<span class="fw-bold small">M\u00e5lgrupp ' + tgLetter + '<\/span>' +
@@ -806,6 +1145,7 @@ function renderTargetGroup(tg, tgIdx, stationNum, wc, isPoang, isLastGroup) {
             '<\/div>' +
             '<div class="flex-shrink-0" style="width:140px">' + groupImgHtml + '<\/div>' +
         '<\/div>' +
+        sliderHtml +
         '<div class="d-flex gap-1 mt-2 align-items-start">' +
             '<textarea class="form-control form-control-sm" rows="3" placeholder="Beskrivning av m\u00e5lgruppen..." autocomplete="off" data-1p-ignore="true"' +
                 ' oninput="faltCfgUpdateGroup(' + "'" + wc + "'" + ',' + stationNum + ',' + tgIdx + ',' + "'description'" + ',this.value)">' + descVal + '<\/textarea>' +
@@ -885,6 +1225,9 @@ function faltCfgPickTarget(stationNum, wc, tgIdx, fIdx) {
             fig.targetName = result.targetName;
             fig.targetColor = result.targetColor;
             if (result.targetsPerFigure > 1) fig.targetsPerFigure = result.targetsPerFigure;
+            // Carry the catalog's SizeGroup onto the figure so distance-slider bounds
+            // and the suggested-time formula can read it without re-fetching the catalog.
+            fig.sizeGroup = result.sizeGroup || 0;
         }
         faltCfgMarkDirty(wc, stationNum);
         renderActiveTab();
@@ -1028,6 +1371,57 @@ function faltCfgGetCanonicalClass() {
     return faltCfgWeaponClasses[0] || 'C';
 }
 
+function faltCfgPickDistanceClass(wc) {
+    faltCfgSimpleDistanceClass = wc;
+    renderActiveTab();
+}
+
+// Returns true if any station in any weapon class has at least one figure
+// with picked content (sizeGroup, image, or name). Used to decide whether
+// the mörker toggle has anything worth persisting.
+function faltCfgHasAnyConfiguredStation() {
+    var classes = Object.keys(faltCfgData).filter(function(k) { return !faltCfgIsMetaKey(k); });
+    for (var i = 0; i < classes.length; i++) {
+        var stations = (faltCfgData[classes[i]] && faltCfgData[classes[i]].stations) || [];
+        for (var s = 0; s < stations.length; s++) {
+            var tgs = stations[s].targetGroups || [];
+            for (var g = 0; g < tgs.length; g++) {
+                var figs = tgs[g].figures || [];
+                for (var f = 0; f < figs.length; f++) {
+                    var fig = figs[f];
+                    if ((fig.sizeGroup && fig.sizeGroup > 0) || fig.imageUrl || fig.targetName) return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+// Competition-level mörker flag. Affects suggested-time calculations across
+// every station + class. Stored on faltCfgData._morker so it round-trips with
+// the config blob — needs the whole blob to be saved to actually persist.
+//
+// If any station has configuration, confirm save-all; on confirm, faltCfgSaveAll
+// writes everything (mörker + all stations) in one call. If no station is
+// configured yet there's nothing to save and we silently update the in-memory
+// flag — it'll piggyback on the operator's first real station save.
+async function faltCfgToggleMorker(checked) {
+    faltCfgMorker = !!checked;
+    faltCfgSaveLinkedGroups();
+    renderActiveTab();
+
+    if (!faltCfgHasAnyConfiguredStation()) return;
+
+    var msg = 'Mörkerfältskjutning är nu ' + (faltCfgMorker ? 'PÅ' : 'AV') + '.\n\n' +
+              'Inställningen sparas tillsammans med stationskonfigurationen och ' +
+              'påverkar föreslagen skjuttid för alla stationer.\n\n' +
+              'Spara alla stationer nu?\n' +
+              '(Klicka Avbryt för att spara senare via valfri station.)';
+    if (!confirm(msg)) return;
+    await faltCfgSaveAll();
+    renderActiveTab();
+}
+
 function faltCfgRenderSimpleMode() {
     var container = document.getElementById('faltCfgTabContent');
     var canonical = faltCfgGetCanonicalClass();
@@ -1052,11 +1446,17 @@ function faltCfgRenderSimpleMode() {
             var unlinkBtn = grp
                 ? ' <button class="btn btn-outline-warning btn-sm py-0 px-1 ms-1" onclick="faltCfgUnlinkInSimpleMode(\'' + wc + '\')" title="Avlänka"><i class="bi bi-x-circle"></i></button>'
                 : '';
+            var sugg = faltSuggestShootingTime(wst, wc, faltCfgMorker);
             matrixRows +=
                 '<tr>' +
                   '<td class="fw-bold">' + label + unlinkBtn + '</td>' +
                   '<td><input type="number" class="form-control form-control-sm" min="5" max="120" value="' + wst.shootingTimeSec + '" style="width:80px"' +
                     " onchange=\"faltCfgUpdateStation('" + wc + "'," + st.station + ",'shootingTimeSec',parseInt(this.value)||30)\"></td>" +
+                  '<td><div class="d-flex gap-1 align-items-center">' +
+                    '<span class="badge bg-info text-dark" id="faltCfgSuggTime_' + wc + '_' + st.station + '">' + (sugg ? sugg.totalSec + ' sek' : '—') + '</span>' +
+                    '<button type="button" class="btn btn-outline-info btn-sm py-0 px-1" onclick="faltCfgShowSuggestionDetails(\'' + wc + '\',' + st.station + ')" title="Visa uppdelning"><i class="bi bi-info-circle"></i></button>' +
+                    '<button type="button" class="btn btn-outline-primary btn-sm py-0 px-1" id="faltCfgSuggApply_' + wc + '_' + st.station + '"' + (sugg ? '' : ' disabled') + ' onclick="faltCfgApplySuggestion(\'' + wc + '\',' + st.station + ')" title="Kopiera värdet till Skjuttid">Använd</button>' +
+                  '</div></td>' +
                   '<td><select class="form-select form-select-sm"' +
                     " onchange=\"faltCfgUpdateStation('" + wc + "'," + st.station + ",'shooterStartPosition',this.value)\">" +
                     SHOOTER_POSITIONS.map(function (p) { return '<option' + (p === wst.shooterStartPosition ? ' selected' : '') + '>' + p + '</option>'; }).join('') +
@@ -1076,7 +1476,27 @@ function faltCfgRenderSimpleMode() {
 
         // Target groups — rendered once against the canonical class. Edits flow
         // through faltCfgMarkDirty → faltCfgSyncShape which mirrors them to all
-        // other classes before the next render.
+        // other classes before the next render. Distance sliders are scoped to
+        // the picked class via faltCfgSimpleDistanceClass (defaults to canonical).
+        var visibleClasses = faltCfgGetVisibleTabs();
+        var pickedDistClass = faltCfgEffectiveDistanceClass(canonical);
+        var distancePicker = '';
+        if (visibleClasses.length > 1) {
+            distancePicker =
+                '<div class="d-flex align-items-center gap-2 mb-2">' +
+                  '<span class="small text-muted">Visa avstånd för:</span>' +
+                  '<div class="btn-group btn-group-sm" role="group">' +
+                    visibleClasses.map(function(c) {
+                        var label = faltCfgGetLinkedGroup(c) ? faltCfgGetLinkedGroup(c).join(',') : c;
+                        var checked = c === pickedDistClass ? 'checked' : '';
+                        var id = 'faltCfgDistPick_' + st.station + '_' + c;
+                        return '<input type="radio" class="btn-check" name="faltCfgDistPick_' + st.station + '" id="' + id + '" autocomplete="off" ' + checked +
+                               ' onchange="faltCfgPickDistanceClass(\'' + c + '\')">' +
+                               '<label class="btn btn-outline-primary" for="' + id + '">' + label + '</label>';
+                    }).join('') +
+                  '</div>' +
+                '</div>';
+        }
         var tgsHtml = '';
         (st.targetGroups || []).forEach(function (tg, tgIdx) {
             var isLastGroup = (st.targetGroups || []).length <= 1;
@@ -1110,6 +1530,7 @@ function faltCfgRenderSimpleMode() {
                       '<thead><tr>' +
                         '<th>Vapenklass</th>' +
                         '<th>Skjuttid (sek)</th>' +
+                        '<th>Föreslaget</th>' +
                         '<th>Utgångsläge</th>' +
                         '<th>Vapenläge</th>' +
                         '<th>Stödhand</th>' +
@@ -1119,6 +1540,7 @@ function faltCfgRenderSimpleMode() {
                     '</table>' +
                   '</div>' +
                   '<label class="form-label small fw-bold mb-1">Målgrupper (delas mellan alla vapenklasser)</label>' +
+                  distancePicker +
                   '<div class="tg-container">' + tgsHtml + '</div>' +
                   '<button class="btn btn-outline-secondary btn-sm mt-2" onclick="faltCfgAddTargetGroup(' + st.station + ',\'' + canonical + '\')">' +
                     '<i class="bi bi-plus-lg me-1"></i>Lägg till målgrupp' +
