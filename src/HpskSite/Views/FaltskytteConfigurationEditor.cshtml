@@ -1,5 +1,6 @@
 @using Umbraco.Cms.Core.Security
 @inject IMemberManager MemberManager
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
     Layout = "Master.cshtml";
     var configId = (int)ViewBag.ConfigurationId;

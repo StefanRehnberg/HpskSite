@@ -1,5 +1,7 @@
 using HpskSite.Services;
 using Microsoft.AspNetCore.Mvc;
+using Umbraco.Cms.Core.Web;
+using Umbraco.Extensions;
 
 namespace HpskSite.Controllers
 {
@@ -12,10 +14,14 @@ namespace HpskSite.Controllers
     public class FaltskytteConfigurationEditorController : Controller
     {
         private readonly FaltskytteConfigurationService _configService;
+        private readonly IUmbracoContextAccessor _umbracoContextAccessor;
 
-        public FaltskytteConfigurationEditorController(FaltskytteConfigurationService configService)
+        public FaltskytteConfigurationEditorController(
+            FaltskytteConfigurationService configService,
+            IUmbracoContextAccessor umbracoContextAccessor)
         {
             _configService = configService;
+            _umbracoContextAccessor = umbracoContextAccessor;
         }
 
         [HttpGet("")]
@@ -24,13 +30,25 @@ namespace HpskSite.Controllers
             var config = await _configService.GetByIdAsync(id);
             if (config == null) return NotFound();
 
-            // Browse-level auth is handled by the view (login gate + CanView check
-            // via JS API call). We still set a basic Found gate here so a deleted
-            // id surfaces a clean 404 rather than an empty editor.
+            // Master.cshtml inherits UmbracoViewPage and calls Model.Root() / .Url()
+            // / .Children — all of which require an IPublishedContent Model.
+            // Locate the /faltkonfig hub node and pass it through so the layout works.
+            if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null)
+                return StatusCode(500, "Umbraco context unavailable.");
+
+            var hubNode = ctx.Content.GetAtRoot()
+                .SelectMany(r => r.DescendantsOrSelf())
+                .FirstOrDefault(c => c.ContentType.Alias == "faltskytteConfigurationHub");
+
+            if (hubNode == null)
+            {
+                return StatusCode(500,
+                    "Hub-noden saknas. Skapa en publicerad innehållssida med doctype 'faltskytteConfigurationHub' under Home.");
+            }
 
             ViewBag.ConfigurationId = id;
             ViewBag.ConfigurationName = config.Name;
-            return View("FaltskytteConfigurationEditor");
+            return View("FaltskytteConfigurationEditor", hubNode);
         }
     }
 }
