@@ -1,0 +1,307 @@
+@using Umbraco.Cms.Core.Security
+@inject IMemberManager MemberManager
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+    ViewBag.Title = "Fältskytte-konfigurationer";
+
+    var currentMember = await MemberManager.GetCurrentMemberAsync();
+    var isLoggedIn = currentMember != null;
+}
+
+@if (!isLoggedIn)
+{
+    <div class="container py-5 text-center">
+        <h4><i class="bi bi-lock me-2"></i>Inloggning krävs</h4>
+        <p class="text-muted">Du måste vara inloggad för att se och bygga Fältskytte-konfigurationer.</p>
+        <a class="btn btn-primary" href="/login-register"><i class="bi bi-box-arrow-in-right me-1"></i>Logga in</a>
+    </div>
+    return;
+}
+
+<div class="container-fluid faltkonfig-hub py-3">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h4 class="mb-1"><i class="bi bi-bullseye me-2"></i>Fältskytte-konfigurationer</h4>
+            <p class="text-muted small mb-0">
+                Bygg och dela uppsättningar av Fältskytte-stationer. En tävling använder en konfiguration genom
+                att kopiera in den eller länka enstaka stationer.
+            </p>
+        </div>
+        <button class="btn btn-success" onclick="fkHubOpenCreate()">
+            <i class="bi bi-plus-lg me-1"></i>Skapa ny
+        </button>
+    </div>
+
+    <!-- Filter row -->
+    <div class="row g-2 mb-3 align-items-center">
+        <div class="col-md-4">
+            <input type="text" class="form-control" id="fkHubSearch" placeholder="Sök på namn, ägare eller klubb..." oninput="fkHubRender()">
+        </div>
+        <div class="col-md-auto">
+            <div class="btn-group btn-group-sm" role="group" id="fkHubFilterButtons">
+                <input type="radio" class="btn-check" name="fkHubFilter" id="fkHubFilter_all" value="all" checked onchange="fkHubRender()">
+                <label class="btn btn-outline-primary" for="fkHubFilter_all">Alla</label>
+
+                <input type="radio" class="btn-check" name="fkHubFilter" id="fkHubFilter_mine" value="mine" onchange="fkHubRender()">
+                <label class="btn btn-outline-primary" for="fkHubFilter_mine">Mina</label>
+
+                <input type="radio" class="btn-check" name="fkHubFilter" id="fkHubFilter_collab" value="collab" onchange="fkHubRender()">
+                <label class="btn btn-outline-primary" for="fkHubFilter_collab">Delade med mig</label>
+
+                <input type="radio" class="btn-check" name="fkHubFilter" id="fkHubFilter_public" value="public" onchange="fkHubRender()">
+                <label class="btn btn-outline-primary" for="fkHubFilter_public">Publika</label>
+            </div>
+        </div>
+        <div class="col-md-auto ms-auto">
+            <small class="text-muted" id="fkHubCount"></small>
+        </div>
+    </div>
+
+    <div id="fkHubList" class="row g-3"></div>
+    <div id="fkHubEmpty" class="text-center py-5 text-muted" style="display:none">
+        <i class="bi bi-folder2-open" style="font-size:2rem"></i>
+        <p class="mt-2 mb-0">Inga konfigurationer matchar filtret.</p>
+    </div>
+</div>
+
+<!-- Create modal -->
+<div class="modal fade" id="fkHubCreateModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-plus-lg me-2"></i>Skapa ny konfiguration</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-2">
+                    <label class="form-label small fw-bold">Namn *</label>
+                    <input type="text" class="form-control" id="fkHubNewName" placeholder="t.ex. Vintercupen 2026" autocomplete="off">
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small fw-bold">Beskrivning</label>
+                    <textarea class="form-control" id="fkHubNewDesc" rows="2" placeholder="Valfri kort beskrivning..."></textarea>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small fw-bold">Synlighet</label>
+                    <select class="form-select" id="fkHubNewVis">
+                        <option value="Private" selected>Privat (du + medredigerare)</option>
+                        <option value="Club">Klubb (klubbadmins och Skjutledare i din klubb)</option>
+                        <option value="Region">Krets (kretsadministratörer i din krets)</option>
+                        <option value="Public">Publik (alla inloggade)</option>
+                    </select>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small fw-bold">Hemlig fram till</label>
+                    <input type="text" class="form-control" id="fkHubNewSecretUntil" placeholder="ÅÅÅÅ-MM-DD HH:MM (valfri)">
+                    <div class="form-text small">Så länge datumet ligger i framtiden ser bara du och medredigerare konfigurationen, oavsett synlighet. Använd för att hålla en pågående tävling hemlig.</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" onclick="fkHubSubmitCreate()">
+                    <i class="bi bi-check-lg me-1"></i>Skapa
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@Html.AntiForgeryToken()
+
+<!-- Flatpickr for the secrecy timestamp -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
+
+<script>
+var fkHubConfigs = [];
+
+document.addEventListener('DOMContentLoaded', function() {
+    flatpickr('#fkHubNewSecretUntil', {
+        locale: 'sv',
+        enableTime: true,
+        time_24hr: true,
+        dateFormat: 'Y-m-d H:i',
+        minDate: 'today'
+    });
+    fkHubLoad();
+});
+
+async function fkHubLoad() {
+    try {
+        var resp = await fetch('/umbraco/surface/FaltskytteConfiguration/ListAccessible');
+        var data = await resp.json();
+        if (!data.success) {
+            alert('Kunde inte ladda konfigurationer: ' + (data.message || 'Okänt fel'));
+            return;
+        }
+        fkHubConfigs = data.configurations || [];
+        fkHubRender();
+    } catch (e) {
+        console.error(e);
+        alert('Nätverksfel vid laddning.');
+    }
+}
+
+function fkHubFilteredConfigs() {
+    var q = (document.getElementById('fkHubSearch').value || '').trim().toLowerCase();
+    var filter = document.querySelector('input[name="fkHubFilter"]:checked').value;
+    return fkHubConfigs.filter(function(c) {
+        // Filter by tab.
+        if (filter === 'mine' && !c.canDelete) return false;            // owner-only proxy
+        if (filter === 'collab' && c.canEdit && c.canDelete) return false; // mine = owner; collab = can-edit but not owner
+        if (filter === 'public' && c.visibility !== 'Public') return false;
+        if (!q) return true;
+        return (c.name + ' ' + (c.ownerMemberName || '') + ' ' + (c.ownerClubName || '')).toLowerCase().indexOf(q) >= 0;
+    });
+}
+
+function fkHubRender() {
+    var list = fkHubFilteredConfigs();
+    var container = document.getElementById('fkHubList');
+    var empty = document.getElementById('fkHubEmpty');
+    var count = document.getElementById('fkHubCount');
+    count.textContent = list.length + ' av ' + fkHubConfigs.length + ' konfigurationer';
+    if (list.length === 0) {
+        container.innerHTML = '';
+        empty.style.display = '';
+        return;
+    }
+    empty.style.display = 'none';
+
+    container.innerHTML = list.map(function(c) {
+        var visBadge = visibilityBadge(c);
+        var secretBadge = c.isSecret
+            ? '<span class="badge bg-warning text-dark" title="Hemlig fram till ' + formatDate(c.secretUntil) + '"><i class="bi bi-shield-lock me-1"></i>Hemlig</span>'
+            : '';
+        var deleteBtn = c.canDelete
+            ? '<button class="btn btn-outline-danger btn-sm" onclick="fkHubDelete(' + c.id + ')" title="Ta bort"><i class="bi bi-trash"></i></button>'
+            : '';
+        return '<div class="col-md-6 col-lg-4">' +
+            '<div class="card h-100">' +
+                '<div class="card-body">' +
+                    '<div class="d-flex justify-content-between align-items-start mb-2">' +
+                        '<h6 class="card-title mb-0 text-truncate" title="' + escapeHtml(c.name) + '">' + escapeHtml(c.name) + '</h6>' +
+                        '<div class="d-flex gap-1 align-items-center">' + visBadge + secretBadge + '</div>' +
+                    '</div>' +
+                    (c.description ? '<p class="card-text small text-muted mb-2">' + escapeHtml(c.description) + '</p>' : '') +
+                    '<div class="small text-muted mb-1"><i class="bi bi-person me-1"></i>' + escapeHtml(c.ownerMemberName) +
+                        (c.ownerClubName ? ' &middot; <i class="bi bi-building me-1"></i>' + escapeHtml(c.ownerClubName) : '') +
+                    '</div>' +
+                    '<div class="small text-muted mb-1"><i class="bi bi-list-ol me-1"></i>' + c.stationCount + ' stationer</div>' +
+                    '<div class="small text-muted mb-3"><i class="bi bi-clock me-1"></i>Ändrad ' + formatDate(c.modifiedDate) + '</div>' +
+                    '<div class="d-flex gap-1">' +
+                        (c.canEdit
+                            ? '<a class="btn btn-primary btn-sm flex-grow-1" href="/faltkonfig/' + c.id + '/redigera"><i class="bi bi-pencil me-1"></i>Redigera</a>'
+                            : '<a class="btn btn-outline-secondary btn-sm flex-grow-1" href="/faltkonfig/' + c.id + '/redigera"><i class="bi bi-eye me-1"></i>Visa</a>') +
+                        '<button class="btn btn-outline-secondary btn-sm" onclick="fkHubDuplicate(' + c.id + ')" title="Duplicera"><i class="bi bi-copy"></i></button>' +
+                        deleteBtn +
+                    '</div>' +
+                '</div>' +
+            '</div>' +
+        '</div>';
+    }).join('');
+}
+
+function visibilityBadge(c) {
+    switch (c.visibility) {
+        case 'Public':  return '<span class="badge bg-success">Publik</span>';
+        case 'Region':  return '<span class="badge bg-primary">Krets</span>';
+        case 'Club':    return '<span class="badge bg-info text-dark">Klubb</span>';
+        default:        return '<span class="badge bg-secondary">Privat</span>';
+    }
+}
+
+function formatDate(iso) {
+    if (!iso) return '';
+    var d = new Date(iso);
+    return d.toLocaleDateString('sv-SE', { year: 'numeric', month: '2-digit', day: '2-digit' });
+}
+
+function escapeHtml(s) {
+    if (s == null) return '';
+    return String(s).replace(/[&<>"']/g, function(c) {
+        return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c];
+    });
+}
+
+function fkHubOpenCreate() {
+    document.getElementById('fkHubNewName').value = '';
+    document.getElementById('fkHubNewDesc').value = '';
+    document.getElementById('fkHubNewVis').value = 'Private';
+    document.getElementById('fkHubNewSecretUntil').value = '';
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('fkHubCreateModal')).show();
+}
+
+async function fkHubSubmitCreate() {
+    var name = document.getElementById('fkHubNewName').value.trim();
+    if (!name) { alert('Namn krävs.'); return; }
+    var body = {
+        name: name,
+        description: document.getElementById('fkHubNewDesc').value || null,
+        visibility: document.getElementById('fkHubNewVis').value,
+        secretUntil: document.getElementById('fkHubNewSecretUntil').value || null
+    };
+    try {
+        var resp = await fetch('/umbraco/surface/FaltskytteConfiguration/Create', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value
+            },
+            body: JSON.stringify(body)
+        });
+        var data = await resp.json();
+        if (!data.success) {
+            alert('Kunde inte skapa: ' + (data.message || 'Okänt fel'));
+            return;
+        }
+        bootstrap.Modal.getInstance(document.getElementById('fkHubCreateModal')).hide();
+        // Jump straight into the editor for the new config.
+        window.location.href = '/faltkonfig/' + data.configurationId + '/redigera';
+    } catch (e) {
+        console.error(e);
+        alert('Nätverksfel.');
+    }
+}
+
+async function fkHubDuplicate(id) {
+    var newName = prompt('Namn på kopian:');
+    if (newName == null) return;
+    try {
+        var resp = await fetch('/umbraco/surface/FaltskytteConfiguration/Duplicate?id=' + id + (newName ? '&newName=' + encodeURIComponent(newName) : ''), {
+            method: 'POST',
+            headers: {
+                'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value
+            }
+        });
+        var data = await resp.json();
+        if (!data.success) { alert('Kunde inte duplicera: ' + (data.message || 'Okänt fel')); return; }
+        fkHubLoad();
+    } catch (e) {
+        console.error(e);
+        alert('Nätverksfel.');
+    }
+}
+
+async function fkHubDelete(id) {
+    var cfg = fkHubConfigs.find(function(c) { return c.id === id; });
+    if (!cfg) return;
+    if (!confirm('Ta bort konfigurationen "' + cfg.name + '"?\n\nMedredigerare-listan tas också bort. Tävlingar som har kopierat eller länkat stationer från denna konfiguration påverkas inte direkt, men länkade stationer kommer inte längre kunna laddas om.')) return;
+    try {
+        var resp = await fetch('/umbraco/surface/FaltskytteConfiguration/Delete?id=' + id, {
+            method: 'POST',
+            headers: {
+                'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value
+            }
+        });
+        var data = await resp.json();
+        if (!data.success) { alert('Kunde inte ta bort: ' + (data.message || 'Okänt fel')); return; }
+        fkHubLoad();
+    } catch (e) {
+        console.error(e);
+        alert('Nätverksfel.');
+    }
+}
+</script>
