@@ -122,7 +122,10 @@
             var hasInline = fld && fld.value && fld.value.length > 2;
             status.innerHTML = hasInline
                 ? '<span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle me-1"></i>Inline-konfiguration</span> ' +
-                  '<span class="text-muted">Konvertera till en sparad konfiguration för att kunna dela och samarbeta.</span>'
+                  '<span class="text-muted">Den fungerar fortfarande, men kan inte delas. </span>' +
+                  '<button type="button" class="btn btn-link btn-sm p-0 align-baseline" onclick="faltPickerConvertInline(\'' + prefix + '\')">' +
+                    '<i class="bi bi-arrow-up-circle me-1"></i>Konvertera till sparad konfiguration' +
+                  '</button>'
                 : '<span class="text-muted">Ingen konfiguration ansluten.</span>';
             return;
         }
@@ -133,6 +136,69 @@
             '<strong>' + (cfg.name || '').replace(/</g, '&lt;') + '</strong>' + secretBadge +
             ' &middot; <span class="text-muted">' + cfg.stationCount + ' stationer</span>' +
             ' &middot; <a href="/faltkonfig/' + cfg.id + '/redigera" target="_blank">Redigera <i class="bi bi-box-arrow-up-right"></i></a>';
+    };
+
+    // Convert the inline JSON on the current competition into a new saved
+    // configuration. Doesn't touch the server-side competition record — the
+    // operator still needs to click "Spara" on the edit modal afterwards so
+    // the updated _attachedConfigId meta key lands in stationConfig.
+    window.faltPickerConvertInline = async function(prefix) {
+        var fld = document.getElementById(prefix + 'faltStationConfigJson');
+        if (!fld || !fld.value || fld.value.length < 3) {
+            alert('Det finns ingen inline-konfiguration att konvertera.');
+            return;
+        }
+        var inlineJson = fld.value;
+
+        var name = prompt('Namn på den nya konfigurationen:', '');
+        if (!name) return;
+        name = name.trim();
+        if (!name) { alert('Namn krävs.'); return; }
+
+        try {
+            // Strip _attachedConfigId from the inline blob before creating — defensive
+            // (shouldn't be set if we got here, but if it somehow is, we want a clean copy).
+            var blob = JSON.parse(inlineJson);
+            if (typeof blob === 'object' && blob !== null) {
+                delete blob._attachedConfigId;
+                inlineJson = JSON.stringify(blob);
+            }
+        } catch (e) { /* keep as-is */ }
+
+        try {
+            var token = document.querySelector('input[name="__RequestVerificationToken"]').value;
+            var resp = await fetch('/umbraco/surface/FaltskytteConfiguration/Create', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+                body: JSON.stringify({ name: name, visibility: 'Private', jsonBlob: inlineJson })
+            });
+            var data = await resp.json();
+            if (!data.success) {
+                alert('Kunde inte konvertera: ' + (data.message || 'Okänt fel'));
+                return;
+            }
+            var newId = data.configurationId;
+
+            // Embed _attachedConfigId in the live hidden field so subsequent loads
+            // restore the picker selection. Force a cache invalidation so the
+            // new config appears in the dropdown immediately.
+            window._faltPickerCache = null;
+            try {
+                var blobObj = JSON.parse(fld.value);
+                if (typeof blobObj === 'object' && blobObj !== null) {
+                    blobObj._attachedConfigId = newId;
+                    fld.value = JSON.stringify(blobObj);
+                }
+            } catch (e) { /* ignore */ }
+            var idFld = document.getElementById(prefix + 'faltAttachedConfigId');
+            if (idFld) idFld.value = newId;
+
+            await faltPickerInit(prefix);
+            alert('Konfigurationen "' + name + '" skapades. Glöm inte att spara tävlingen så att kopplingen behålls.');
+        } catch (e) {
+            console.error(e);
+            alert('Nätverksfel.');
+        }
     };
 
     // When the picker is rendered (on modal show), restore status if an id was preserved.
