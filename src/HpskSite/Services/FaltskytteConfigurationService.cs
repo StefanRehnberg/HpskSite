@@ -116,6 +116,17 @@ namespace HpskSite.Services
             return await _authService.IsCurrentUserAdminAsync();
         }
 
+        // Accepts both strict ISO 8601 ("YYYY-MM-DDTHH:mm:ss") and the Flatpickr
+        // "Y-m-d H:i" shape that the UI emits. Empty / unparseable → null.
+        private static DateTime? ParseSecretUntil(string? input)
+        {
+            if (string.IsNullOrWhiteSpace(input)) return null;
+            if (DateTime.TryParse(input, System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None, out var dt))
+                return dt;
+            return null;
+        }
+
         private async Task<bool> IsRegionalAdminForOwnerClubAsync(int? ownerClubId)
         {
             if (!ownerClubId.HasValue) return false;
@@ -192,7 +203,7 @@ namespace HpskSite.Services
                 OwnerMemberId = ownerMemberId,
                 OwnerClubId = request.OwnerClubId,
                 Visibility = request.Visibility ?? VisibilityPrivate,
-                SecretUntil = request.SecretUntil,
+                SecretUntil = ParseSecretUntil(request.SecretUntil),
                 JsonBlob = string.IsNullOrWhiteSpace(request.JsonBlob) ? "{}" : request.JsonBlob,
                 CreatedDate = now,
                 ModifiedDate = now
@@ -220,7 +231,11 @@ namespace HpskSite.Services
                 config.Visibility = request.Visibility;
             }
             if (request.ClearSecretUntil) config.SecretUntil = null;
-            else if (request.SecretUntil.HasValue) config.SecretUntil = request.SecretUntil.Value;
+            else if (!string.IsNullOrWhiteSpace(request.SecretUntil))
+            {
+                var parsed = ParseSecretUntil(request.SecretUntil);
+                if (parsed != null) config.SecretUntil = parsed;
+            }
             if (request.JsonBlob != null) config.JsonBlob = request.JsonBlob;
 
             config.ModifiedDate = DateTime.Now;

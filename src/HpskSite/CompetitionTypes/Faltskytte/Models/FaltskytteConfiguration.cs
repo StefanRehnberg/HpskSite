@@ -79,7 +79,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public string? Description { get; set; }
         public int? OwnerClubId { get; set; }
         public string Visibility { get; set; } = "Private";
-        public DateTime? SecretUntil { get; set; }
+        /// <summary>String to avoid System.Text.Json's strict ISO 8601 binding (Flatpickr sends "Y-m-d H:i").</summary>
+        public string? SecretUntil { get; set; }
         /// <summary>Optional starting JSON. If null, an empty default is generated.</summary>
         public string? JsonBlob { get; set; }
     }
@@ -91,7 +92,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public string? Description { get; set; }
         public int? OwnerClubId { get; set; }
         public string? Visibility { get; set; }
-        public DateTime? SecretUntil { get; set; }
+        /// <summary>String — see CreateFaltskytteConfigurationRequest.SecretUntil for the rationale.</summary>
+        public string? SecretUntil { get; set; }
         public bool ClearSecretUntil { get; set; }
         public string? JsonBlob { get; set; }
     }
