@@ -489,12 +489,7 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                                 låses så fort patrullen skannar QR-koden vid nästa station.
                             </div>
                         </div>
-                        <div class="mb-3">
-                            <button type="button" class="btn btn-outline-primary btn-sm" onclick="openEditFaltStationConfigurator()">
-                                <i class="bi bi-gear me-1"></i>Konfigurera stationer
-                            </button>
-                            <input type="hidden" id="edit_faltStationConfigJson" name="stationConfig" value="">
-                        </div>
+                        @await Html.PartialAsync("_FaltskytteCompetitionPicker", "edit_")
                     </div>
 
                     <!-- Organizer Section: Club OR Region -->
@@ -1039,15 +1034,16 @@ window.populateEditModal = function(competition) {
         var ssEl = document.getElementById('edit_faltskytteSelfServiceResults');
         if (ssEl) ssEl.checked = !!competition.faltskytteSelfServiceResults;
         document.getElementById('edit_faltStationConfigJson').value = competition.stationConfig || '';
-        var cfgSummary = document.getElementById('edit_faltConfigSummary');
-        if (cfgSummary && competition.stationConfig) {
-            try {
-                var cfg = JSON.parse(competition.stationConfig);
-                var wcCount = Object.keys(cfg).length;
-                var stCount = Object.values(cfg)[0]?.stations?.length || 0;
-                cfgSummary.textContent = wcCount + ' vapenklass(er), ' + stCount + ' stationer';
-            } catch(e) { cfgSummary.textContent = 'Konfigurerad'; }
-        }
+        // Restore the attached-config-id from the JSON's _attachedConfigId meta key,
+        // if present (it's set when the operator clicks Anslut in the picker).
+        try {
+            var cfg = competition.stationConfig ? JSON.parse(competition.stationConfig) : null;
+            var attachedId = cfg && cfg._attachedConfigId ? cfg._attachedConfigId : '';
+            var idFld = document.getElementById('edit_faltAttachedConfigId');
+            if (idFld) idFld.value = attachedId || '';
+        } catch(e) {}
+        // Kick the picker so the dropdown + status reflect the loaded value.
+        if (typeof faltPickerInit === 'function') faltPickerInit('edit_');
     }
 
     // Egenbokning section (only for precision-family types)

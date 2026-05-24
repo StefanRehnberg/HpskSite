@@ -355,13 +355,7 @@
                                 </div>
                             </div>
 
-                            <div class="mb-3">
-                                <button type="button" class="btn btn-outline-primary" onclick="openFaltStationConfigurator()">
-                                    <i class="bi bi-gear me-1"></i>Konfigurera stationer
-                                </button>
-                                <span class="text-muted small ms-2" id="wizard_faltConfigSummary">Ej konfigurerad</span>
-                                <input type="hidden" id="wizard_faltStationConfigJson" value="">
-                            </div>
+                            @await Html.PartialAsync("_FaltskytteCompetitionPicker", "wizard_")
                         </div>
 
                         <hr class="my-4">
@@ -1231,6 +1225,9 @@ document.getElementById('competitionWizardModal').addEventListener('show.bs.moda
     document.querySelectorAll('#competitionWizardModal [data-bs-toggle="tooltip"]').forEach(el => {
         bootstrap.Tooltip.getOrCreateInstance(el);
     });
+
+    // Hydrate the Fältskytte saved-configuration picker (no-op if not visible).
+    if (typeof faltPickerInit === 'function') faltPickerInit('wizard_');
 });
 
 // Detect if we're on a club page or admin page

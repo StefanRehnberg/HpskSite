@@ -1,0 +1,152 @@
+@model string
+@{
+    // Model = the field-id prefix. Pass "wizard_" or "edit_" to scope IDs.
+    var prefix = (Model ?? "").ToString();
+}
+@*
+ * Saved-configuration picker for the competition wizard + edit modal.
+ * Replaces the legacy inline configurator launcher. Operator either picks an
+ * existing saved configuration or sees a CTA to build one on /faltkonfig.
+ *
+ * The hidden input ${prefix}faltStationConfigJson still holds the resolved
+ * JSON blob so all downstream serialization keeps working unchanged.
+ *@
+<div class="card mb-3 bg-body-tertiary" id="@(prefix)faltConfigPicker">
+    <div class="card-body py-2">
+        <label class="form-label small fw-bold mb-1"><i class="bi bi-gear me-1"></i>Stationskonfiguration</label>
+        <div class="d-flex flex-wrap gap-2 align-items-end">
+            <div class="flex-grow-1">
+                <select class="form-select form-select-sm" id="@(prefix)faltConfigSelect" onchange="faltPickerSelectionChanged('@prefix')">
+                    <option value="">Välj sparad konfiguration...</option>
+                </select>
+            </div>
+            <button type="button" class="btn btn-primary btn-sm" id="@(prefix)faltConfigAttachBtn" onclick="faltPickerAttach('@prefix')" disabled>
+                <i class="bi bi-link me-1"></i>Anslut
+            </button>
+            <a href="/faltkonfig" target="_blank" class="btn btn-outline-secondary btn-sm" title="Öppna konfiguratorn i ny flik">
+                <i class="bi bi-box-arrow-up-right me-1"></i>Öppna konfiguratorn
+            </a>
+        </div>
+        <div id="@(prefix)faltConfigStatus" class="mt-2 small">
+            <span class="text-muted">Ingen konfiguration ansluten.</span>
+        </div>
+        <div class="form-text small mt-1">
+            Konfigurationer byggs på <a href="/faltkonfig" target="_blank">/faltkonfig</a>.
+            En ansluten konfiguration kopieras in i tävlingens stationsdata och kan inte ändras härifrån.
+        </div>
+        <input type="hidden" id="@(prefix)faltStationConfigJson" name="@(prefix == "" ? "stationConfig" : (prefix == "edit_" ? "stationConfig" : ""))" value="" />
+        <input type="hidden" id="@(prefix)faltAttachedConfigId" value="" />
+    </div>
+</div>
+
+<script>
+// Idempotent — both wizard + edit-modal partials include this. Subsequent runs no-op.
+(function() {
+    if (window.faltPickerScriptLoaded) return;
+    window.faltPickerScriptLoaded = true;
+
+    window._faltPickerCache = null; // cached ListAccessible result
+
+    window.faltPickerLoadConfigs = async function(prefix, preserveSelection) {
+        var sel = document.getElementById(prefix + 'faltConfigSelect');
+        if (!sel) return;
+        if (!window._faltPickerCache) {
+            try {
+                var resp = await fetch('/umbraco/surface/FaltskytteConfiguration/ListAccessible');
+                var data = await resp.json();
+                if (!data.success) {
+                    sel.innerHTML = '<option value="">' + (data.message || 'Kunde inte ladda') + '</option>';
+                    return;
+                }
+                window._faltPickerCache = data.configurations || [];
+            } catch (e) {
+                sel.innerHTML = '<option value="">Nätverksfel</option>';
+                return;
+            }
+        }
+        var prev = preserveSelection ? sel.value : '';
+        sel.innerHTML = '<option value="">Välj sparad konfiguration...</option>';
+        window._faltPickerCache.forEach(function(c) {
+            var label = c.name + ' (' + c.stationCount + ' stationer, ' + c.ownerMemberName + ')';
+            sel.innerHTML += '<option value="' + c.id + '">' + label.replace(/"/g, '&quot;') + '</option>';
+        });
+        if (prev) sel.value = prev;
+        faltPickerSelectionChanged(prefix);
+    };
+
+    window.faltPickerSelectionChanged = function(prefix) {
+        var sel = document.getElementById(prefix + 'faltConfigSelect');
+        var btn = document.getElementById(prefix + 'faltConfigAttachBtn');
+        if (!sel || !btn) return;
+        btn.disabled = !sel.value;
+    };
+
+    window.faltPickerAttach = async function(prefix) {
+        var sel = document.getElementById(prefix + 'faltConfigSelect');
+        if (!sel || !sel.value) return;
+        var configId = parseInt(sel.value);
+        var cfg = (window._faltPickerCache || []).find(function(c) { return c.id === configId; });
+        if (!cfg) return;
+        if (!confirm('Anslut konfigurationen "' + cfg.name + '"?\n\nDe befintliga stationsdata för denna tävling skrivs över.')) return;
+
+        try {
+            var resp = await fetch('/umbraco/surface/FaltskytteConfiguration/Get?id=' + configId);
+            var data = await resp.json();
+            if (!data.success) { alert('Kunde inte hämta konfigurationen: ' + (data.message || 'Fel')); return; }
+            var fld = document.getElementById(prefix + 'faltStationConfigJson');
+            var idFld = document.getElementById(prefix + 'faltAttachedConfigId');
+            // Inject the attached-config-id into the JSON so the edit modal can
+            // restore the selection next time without a separate doctype property.
+            var jsonBlob = data.configuration.jsonBlob || '{}';
+            try {
+                var blobObj = JSON.parse(jsonBlob);
+                if (typeof blobObj === 'object' && blobObj !== null) {
+                    blobObj._attachedConfigId = configId;
+                    jsonBlob = JSON.stringify(blobObj);
+                }
+            } catch (e) { /* malformed source — keep as-is */ }
+            if (fld) fld.value = jsonBlob;
+            if (idFld) idFld.value = configId;
+            faltPickerRenderStatus(prefix, cfg);
+        } catch (e) {
+            console.error(e);
+            alert('Nätverksfel.');
+        }
+    };
+
+    window.faltPickerRenderStatus = function(prefix, cfg) {
+        var status = document.getElementById(prefix + 'faltConfigStatus');
+        if (!status) return;
+        if (!cfg) {
+            var fld = document.getElementById(prefix + 'faltStationConfigJson');
+            var hasInline = fld && fld.value && fld.value.length > 2;
+            status.innerHTML = hasInline
+                ? '<span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle me-1"></i>Inline-konfiguration</span> ' +
+                  '<span class="text-muted">Konvertera till en sparad konfiguration för att kunna dela och samarbeta.</span>'
+                : '<span class="text-muted">Ingen konfiguration ansluten.</span>';
+            return;
+        }
+        var secretBadge = cfg.isSecret
+            ? ' <span class="badge bg-warning text-dark" title="Hemlig fram till ' + cfg.secretUntil + '"><i class="bi bi-shield-lock me-1"></i>Hemlig</span>'
+            : '';
+        status.innerHTML = '<span class="badge bg-success"><i class="bi bi-check2-circle me-1"></i>Ansluten</span> ' +
+            '<strong>' + (cfg.name || '').replace(/</g, '&lt;') + '</strong>' + secretBadge +
+            ' &middot; <span class="text-muted">' + cfg.stationCount + ' stationer</span>' +
+            ' &middot; <a href="/faltkonfig/' + cfg.id + '/redigera" target="_blank">Redigera <i class="bi bi-box-arrow-up-right"></i></a>';
+    };
+
+    // When the picker is rendered (on modal show), restore status if an id was preserved.
+    window.faltPickerInit = async function(prefix) {
+        await faltPickerLoadConfigs(prefix, true);
+        var idFld = document.getElementById(prefix + 'faltAttachedConfigId');
+        var attachedId = idFld && idFld.value ? parseInt(idFld.value) : null;
+        var cfg = attachedId && window._faltPickerCache
+            ? window._faltPickerCache.find(function(c) { return c.id === attachedId; })
+            : null;
+        var sel = document.getElementById(prefix + 'faltConfigSelect');
+        if (sel && attachedId) sel.value = String(attachedId);
+        faltPickerSelectionChanged(prefix);
+        faltPickerRenderStatus(prefix, cfg);
+    };
+})();
+</script>

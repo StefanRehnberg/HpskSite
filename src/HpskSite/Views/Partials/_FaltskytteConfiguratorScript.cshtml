@@ -15,7 +15,7 @@ const faltCfgScoringMode = () => document.getElementById('wizard_scoringMode')?.
 // Reserved metadata keys stored in faltCfgData alongside weapon classes. When iterating
 // weapon-class entries, skip these. Add new keys here (with leading underscore) instead
 // of polluting the iteration sites.
-const FALT_CFG_META_KEYS = new Set(['_linkedGroups', '_mode', '_morker']);
+const FALT_CFG_META_KEYS = new Set(['_linkedGroups', '_mode', '_morker', '_attachedConfigId']);
 function faltCfgIsMetaKey(k) { return FALT_CFG_META_KEYS.has(k); }
 
 // Scale a figure's four timing fields by `ratio`, in place. Same clamp
