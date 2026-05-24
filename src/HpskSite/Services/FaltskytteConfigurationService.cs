@@ -178,6 +178,7 @@ namespace HpskSite.Services
         public async Task<(bool Success, string? Message, FaltskytteConfiguration? Created)> CreateAsync(
             CreateFaltskytteConfigurationRequest request, int ownerMemberId)
         {
+            if (request == null) return (false, "Ogiltig förfrågan (saknar body).", null);
             if (string.IsNullOrWhiteSpace(request.Name))
                 return (false, "Namn krävs.", null);
             if (!ValidVisibilities.Contains(request.Visibility ?? ""))
@@ -204,6 +205,7 @@ namespace HpskSite.Services
 
         public async Task<(bool Success, string? Message)> UpdateAsync(UpdateFaltskytteConfigurationRequest request)
         {
+            if (request == null) return (false, "Ogiltig förfrågan (saknar body).");
             using var db = _databaseFactory.CreateDatabase();
             var config = await db.SingleOrDefaultAsync<FaltskytteConfiguration>("WHERE Id = @0", request.Id);
             if (config == null) return (false, "Konfigurationen hittades inte.");
