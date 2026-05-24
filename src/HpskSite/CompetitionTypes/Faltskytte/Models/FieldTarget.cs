@@ -14,6 +14,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public int? MaxDistanceR { get; set; }
         /// <summary>Number of individual targets on this figure. Default 1.</summary>
         public int TargetsPerFigure { get; set; } = 1;
+        /// <summary>Size group 0-15, used to derive the max distance bucket for automatic shoot-time suggestions per SHB.</summary>
+        public int SizeGroup { get; set; } = 0;
     }
 
     [TableName("FieldTargetVariant")]
@@ -37,6 +39,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public int? MaxDistanceA { get; set; }
         public int? MaxDistanceR { get; set; }
         public int TargetsPerFigure { get; set; } = 1;
+        public int SizeGroup { get; set; } = 0;
         public List<FieldTargetVariantView> Variants { get; set; } = new();
     }
 
@@ -67,6 +70,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public int? MaxDistanceA { get; set; }
         public int? MaxDistanceR { get; set; }
         public int? TargetsPerFigure { get; set; }
+        public int? SizeGroup { get; set; }
         public List<UpdateVariantRequest>? Variants { get; set; }
     }
 
@@ -85,6 +89,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public int? MaxDistanceA { get; set; }
         public int? MaxDistanceR { get; set; }
         public int TargetsPerFigure { get; set; } = 1;
+        public int SizeGroup { get; set; } = 0;
         public List<CreateVariantRequest>? Variants { get; set; }
     }
 

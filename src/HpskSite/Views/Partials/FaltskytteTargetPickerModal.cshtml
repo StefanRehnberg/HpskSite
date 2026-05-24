@@ -65,10 +65,17 @@
                                     <div class="col-3"><label class="form-label small mb-0">B (m)</label><input type="number" class="form-control form-control-sm" id="faltPickerEditDistB" min="0" max="500"></div>
                                     <div class="col-3"><label class="form-label small mb-0">C (m)</label><input type="number" class="form-control form-control-sm" id="faltPickerEditDistC" min="0" max="500"></div>
                                 </div>
-                                <div class="mb-2">
-                                    <label class="form-label small mb-1 fw-bold">Antal m&aring;l i figuren</label>
-                                    <input type="number" class="form-control form-control-sm" id="faltPickerEditTargetsPerFig" min="1" max="6" value="1" style="width:80px">
-                                    <div class="form-text small">Flerm&aring;lsfigurer (ex. Ballongmål) har fler &auml;n 1.</div>
+                                <div class="row g-2 mb-2">
+                                    <div class="col-7">
+                                        <label class="form-label small mb-1 fw-bold">Antal m&aring;l i figuren</label>
+                                        <input type="number" class="form-control form-control-sm" id="faltPickerEditTargetsPerFig" min="1" max="6" value="1" style="width:80px">
+                                        <div class="form-text small">Flerm&aring;lsfigurer (ex. Ballongmål) har fler &auml;n 1.</div>
+                                    </div>
+                                    <div class="col-5 text-end">
+                                        <label class="form-label small mb-1 fw-bold">Storleksgrupp</label>
+                                        <input type="number" class="form-control form-control-sm ms-auto text-end" id="faltPickerEditSizeGroup" min="0" max="15" value="0" style="width:80px;margin-left:auto">
+                                        <div class="form-text small">0&ndash;15. Styr max avst&aring;nd f&ouml;r tidsber&auml;kning.</div>
+                                    </div>
                                 </div>
                                 <!-- Variant editing -->
                                 <div id="faltPickerVariantEdits" class="mb-2"></div>
@@ -212,6 +219,7 @@ function faltPickerSelectTarget(targetId) {
         document.getElementById('faltPickerEditDistA').value = _faltPickerSelected.maxDistanceA || '';
         document.getElementById('faltPickerEditDistR').value = _faltPickerSelected.maxDistanceR || '';
         document.getElementById('faltPickerEditTargetsPerFig').value = _faltPickerSelected.targetsPerFigure || 1;
+        document.getElementById('faltPickerEditSizeGroup').value = _faltPickerSelected.sizeGroup || 0;
 
         // Variant edits with image upload
         var varEdits = document.getElementById('faltPickerVariantEdits');
@@ -276,6 +284,7 @@ async function faltPickerSaveTarget() {
         maxDistanceA: parseInt(document.getElementById('faltPickerEditDistA').value) || null,
         maxDistanceR: parseInt(document.getElementById('faltPickerEditDistR').value) || null,
         targetsPerFigure: parseInt(document.getElementById('faltPickerEditTargetsPerFig').value) || 1,
+        sizeGroup: Math.max(0, Math.min(15, parseInt(document.getElementById('faltPickerEditSizeGroup').value) || 0)),
         variants: variants
     };
 
@@ -296,6 +305,7 @@ async function faltPickerSaveTarget() {
         _faltPickerSelected.maxDistanceA = body.maxDistanceA;
         _faltPickerSelected.maxDistanceR = body.maxDistanceR;
         _faltPickerSelected.targetsPerFigure = body.targetsPerFigure;
+        _faltPickerSelected.sizeGroup = body.sizeGroup;
         variants.forEach(function(vReq) {
             var v = _faltPickerSelected.variants.find(function(x) { return x.id === vReq.id; });
             if (v) { v.fullName = vReq.fullName; v.color = vReq.color; }
@@ -332,7 +342,7 @@ async function faltPickerCreateNew() {
     var data = await resp.json();
     if (data.success) {
         // Add to local cache and select it
-        var newTarget = { id: data.targetId, name: name, variants: [], maxDistanceC: null, maxDistanceB: null, maxDistanceA: null, maxDistanceR: null, targetsPerFigure: 1 };
+        var newTarget = { id: data.targetId, name: name, variants: [], maxDistanceC: null, maxDistanceB: null, maxDistanceA: null, maxDistanceR: null, targetsPerFigure: 1, sizeGroup: 0 };
         _faltPickerCatalog.push(newTarget);
         _faltPickerCatalog.sort(function(a, b) { return a.name.localeCompare(b.name); });
         faltPickerRenderGrid(_faltPickerCatalog);
