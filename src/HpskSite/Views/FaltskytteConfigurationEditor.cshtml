@@ -37,7 +37,7 @@
             <span id="fkEditorSecretBadge" class="badge bg-warning text-dark" style="display:none" title=""><i class="bi bi-shield-lock me-1"></i>Hemlig</span>
         </div>
         <div class="d-flex gap-1">
-            <button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#fkEditorMetaPanel" aria-expanded="true">
+            <button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#fkEditorMetaPanel" aria-expanded="false">
                 <i class="bi bi-sliders me-1"></i>Detaljer
             </button>
             <button class="btn btn-outline-primary btn-sm" onclick="fkImportOpen()" title="Importera en station från en annan konfiguration">
@@ -49,8 +49,8 @@
         </div>
     </div>
 
-    <!-- Metadata panel -->
-    <div class="collapse show mb-3" id="fkEditorMetaPanel">
+    <!-- Metadata panel — collapsed by default so first-time visitors aren't overloaded. -->
+    <div class="collapse mb-3" id="fkEditorMetaPanel">
         <div class="card">
             <div class="card-body">
                 <div class="row g-3">

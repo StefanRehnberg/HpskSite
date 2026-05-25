@@ -4,7 +4,7 @@ let faltCfgData = {}; // { "C": { stations: [...] }, "A": { ... } }
 let faltCfgWeaponClasses = ["C"]; // Active weapon classes
 let faltCfgActiveTab = "C";
 let faltCfgStationCount = 8;
-let faltCfgExpandedStation = 1; // Track which station card is open
+let faltCfgExpandedStation = null; // Track which station card is open. Null = all collapsed initially.
 let faltCfgDirtyStations = new Set(); // Stations with unsaved changes
 let faltCfgLinkedGroups = []; // e.g. [["A","R"], ["B","C"]] — linked weapon classes share configs
 let faltCfgMode = "advanced"; // "simple" | "advanced". Simple = shared shape + per-class param matrix.
