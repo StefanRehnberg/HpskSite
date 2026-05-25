@@ -1405,7 +1405,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 target.MaxDistanceA = request.MaxDistanceA;
                 target.MaxDistanceR = request.MaxDistanceR;
                 if (request.TargetsPerFigure.HasValue) target.TargetsPerFigure = request.TargetsPerFigure.Value;
-                if (request.SizeGroup.HasValue) target.SizeGroup = Math.Clamp(request.SizeGroup.Value, 0, 15);
+                if (request.SizeGroup.HasValue) target.SizeGroup = Math.Clamp(request.SizeGroup.Value, 1, 15);
                 await db.UpdateAsync(target);
 
                 if (request.Variants != null)
@@ -1451,7 +1451,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                     MaxDistanceA = request.MaxDistanceA,
                     MaxDistanceR = request.MaxDistanceR,
                     TargetsPerFigure = request.TargetsPerFigure,
-                    SizeGroup = Math.Clamp(request.SizeGroup, 0, 15)
+                    SizeGroup = Math.Clamp(request.SizeGroup, 1, 15)
                 };
                 await db.InsertAsync(target);
 

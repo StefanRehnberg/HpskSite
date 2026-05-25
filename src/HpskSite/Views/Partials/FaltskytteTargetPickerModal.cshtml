@@ -97,8 +97,8 @@
                                     </div>
                                     <div class="col-5 text-end">
                                         <label class="form-label small mb-1 fw-bold">Storleksgrupp</label>
-                                        <input type="number" class="form-control form-control-sm ms-auto text-end" id="faltPickerEditSizeGroup" min="0" max="15" value="0" style="width:80px;margin-left:auto">
-                                        <div class="form-text small">0&ndash;15. Styr max avst&aring;nd f&ouml;r tidsber&auml;kning.</div>
+                                        <input type="number" class="form-control form-control-sm ms-auto text-end" id="faltPickerEditSizeGroup" min="1" max="15" value="15" style="width:80px;margin-left:auto">
+                                        <div class="form-text small">1&ndash;14 styr max avst&aring;nd. 15 = ej grupperad.</div>
                                     </div>
                                 </div>
                                 <!-- Variant editing -->
@@ -136,7 +136,6 @@ var _faltPickerIsAdmin = false;
 // formatted for the section-header label. Group 15 is the "ej grupperad"
 // bucket — figures whose admin hasn't bucketed them yet.
 var FALT_PICKER_GROUP_LABELS = {
-    0:  'A&R 80 m · B 90 m · C 100 m',
     1:  'A&R 70 m · B 80 m · C 90 m',
     2:  'A&R 60 m · B 65 m · C 75 m',
     3:  'A&R 50 m · B 55 m · C 65 m',
@@ -156,9 +155,12 @@ var FALT_PICKER_GROUP_LABELS = {
 var FALT_PICKER_STORAGE_KEY = 'faltPickerVisibleGroups';
 var _faltPickerVisibleGroups = null;
 
+// 0 is a phantom SHB calculation reference (stödhand offset), not a real
+// catalog bucket. Any legacy row that still has SizeGroup=0 is normalized
+// to 15 ("Ej grupperad") for filter + section purposes.
 function faltPickerNormGroup(g) {
     var n = parseInt(g, 10);
-    if (isNaN(n) || n < 0 || n > 15) return 15;
+    if (isNaN(n) || n < 1 || n > 15) return 15;
     return n;
 }
 
@@ -167,7 +169,7 @@ function faltPickerLoadVisibleGroups() {
         var stored = sessionStorage.getItem(FALT_PICKER_STORAGE_KEY);
         if (stored) { _faltPickerVisibleGroups = new Set(JSON.parse(stored)); return; }
     } catch (e) { /* fall through */ }
-    var all = []; for (var i = 0; i <= 15; i++) all.push(i);
+    var all = []; for (var i = 1; i <= 15; i++) all.push(i);
     _faltPickerVisibleGroups = new Set(all);
 }
 
@@ -185,7 +187,7 @@ function faltPickerToggleGroup(g) {
 
 function faltPickerFilterAll(on) {
     _faltPickerVisibleGroups = new Set();
-    if (on) for (var i = 0; i <= 15; i++) _faltPickerVisibleGroups.add(i);
+    if (on) for (var i = 1; i <= 15; i++) _faltPickerVisibleGroups.add(i);
     faltPickerSaveVisibleGroups();
     faltPickerRenderFilterChips();
     faltPickerFilter();
@@ -195,7 +197,7 @@ function faltPickerRenderFilterChips() {
     var c = document.getElementById('faltPickerGroupChips');
     if (!c) return;
     var html = '';
-    for (var g = 0; g <= 15; g++) {
+    for (var g = 1; g <= 15; g++) {
         var on = _faltPickerVisibleGroups.has(g);
         var label = g === 15 ? 'Ej' : g;
         var title = g === 15
@@ -338,7 +340,7 @@ function faltPickerSelectTarget(targetId) {
         document.getElementById('faltPickerEditDistA').value = _faltPickerSelected.maxDistanceA || '';
         document.getElementById('faltPickerEditDistR').value = _faltPickerSelected.maxDistanceR || '';
         document.getElementById('faltPickerEditTargetsPerFig').value = _faltPickerSelected.targetsPerFigure || 1;
-        document.getElementById('faltPickerEditSizeGroup').value = _faltPickerSelected.sizeGroup || 0;
+        document.getElementById('faltPickerEditSizeGroup').value = faltPickerNormGroup(_faltPickerSelected.sizeGroup);
 
         // Variant edits with image upload
         var varEdits = document.getElementById('faltPickerVariantEdits');
@@ -399,7 +401,7 @@ async function faltPickerSaveTarget() {
         maxDistanceA: parseInt(document.getElementById('faltPickerEditDistA').value) || null,
         maxDistanceR: parseInt(document.getElementById('faltPickerEditDistR').value) || null,
         targetsPerFigure: parseInt(document.getElementById('faltPickerEditTargetsPerFig').value) || 1,
-        sizeGroup: Math.max(0, Math.min(15, parseInt(document.getElementById('faltPickerEditSizeGroup').value) || 0)),
+        sizeGroup: Math.max(1, Math.min(15, parseInt(document.getElementById('faltPickerEditSizeGroup').value) || 15)),
         variants: variants
     };
 
@@ -440,7 +442,7 @@ function faltPickerSelect() {
             targetName: _faltPickerSelected.name,
             targetColor: _faltPickerSelectedVariant.color,
             targetsPerFigure: _faltPickerSelected.targetsPerFigure || 1,
-            sizeGroup: _faltPickerSelected.sizeGroup || 0
+            sizeGroup: faltPickerNormGroup(_faltPickerSelected.sizeGroup)
         });
     }
     faltPickerClose();
@@ -458,7 +460,7 @@ async function faltPickerCreateNew() {
     var data = await resp.json();
     if (data.success) {
         // Add to local cache and select it
-        var newTarget = { id: data.targetId, name: name, variants: [], maxDistanceC: null, maxDistanceB: null, maxDistanceA: null, maxDistanceR: null, targetsPerFigure: 1, sizeGroup: 0 };
+        var newTarget = { id: data.targetId, name: name, variants: [], maxDistanceC: null, maxDistanceB: null, maxDistanceA: null, maxDistanceR: null, targetsPerFigure: 1, sizeGroup: 15 };
         _faltPickerCatalog.push(newTarget);
         _faltPickerCatalog.sort(function(a, b) { return a.name.localeCompare(b.name); });
         faltPickerFilter();
