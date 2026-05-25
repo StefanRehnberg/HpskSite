@@ -284,19 +284,38 @@ namespace HpskSite.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> RequestApproval([FromBody] ApprovalActionRequest request)
+        public async Task<IActionResult> RequestApproval([FromBody] RequestApprovalRequest request)
         {
             try
             {
                 if (request == null) return Json(new { success = false, message = "Ogiltig förfrågan." });
                 var viewerId = await _configService.GetCurrentMemberIdAsync();
                 if (viewerId == null) return Json(new { success = false, message = "Inloggning krävs." });
-                var (success, message) = await _configService.RequestApprovalAsync(request.ConfigId, viewerId.Value);
+                var (success, message) = await _configService.RequestApprovalAsync(
+                    request.ConfigId, viewerId.Value, request.RequestedApproverMemberId);
                 return Json(new { success, message });
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error requesting approval for config {Id}", request?.ConfigId);
+                return Json(new { success = false, message = "Fel: " + ex.Message });
+            }
+        }
+
+        /// <summary>Returns every active Banläggare cert holder (name + club) for the request-approval picker.</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetBanlaggareCandidates()
+        {
+            try
+            {
+                var viewerId = await _configService.GetCurrentMemberIdAsync();
+                if (viewerId == null) return Json(new { success = false, message = "Inloggning krävs." });
+                var candidates = await _configService.GetBanlaggareCandidatesAsync();
+                return Json(new { success = true, candidates });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error loading Banläggare candidates");
                 return Json(new { success = false, message = "Fel: " + ex.Message });
             }
         }

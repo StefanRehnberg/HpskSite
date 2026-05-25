@@ -229,7 +229,10 @@ function approvalBadgeFor(c) {
         return '<span class="badge bg-success" title="' + title.replace(/"/g, '&quot;') + '"><i class="bi bi-shield-check me-1"></i>Godkänd</span>';
     }
     if (c.approvalStatus === 'PendingApproval') {
-        return '<span class="badge bg-warning text-dark" title="Väntar på godkännande av Banläggare"><i class="bi bi-hourglass-split me-1"></i>Väntar</span>';
+        var pendTitle = c.requestedApproverName
+            ? 'Väntar på godkännande från ' + c.requestedApproverName
+            : 'Väntar på godkännande av Banläggare';
+        return '<span class="badge bg-warning text-dark" title="' + pendTitle.replace(/"/g, '&quot;') + '"><i class="bi bi-hourglass-split me-1"></i>Väntar</span>';
     }
     return '';
 }

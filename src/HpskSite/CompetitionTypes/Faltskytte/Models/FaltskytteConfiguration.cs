@@ -24,7 +24,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public string JsonBlob { get; set; } = "";
         /// <summary>Draft | PendingApproval | Approved. Null treated as Draft for legacy rows.</summary>
         public string? ApprovalStatus { get; set; }
-        /// <summary>The Banläggare cert holder who approved. Populated only when ApprovalStatus = Approved.</summary>
+        /// <summary>The Banläggare the owner picked to ask. Populated when ApprovalStatus = PendingApproval; cleared on Unapprove.</summary>
+        public int? RequestedApproverMemberId { get; set; }
+        /// <summary>The Banläggare cert holder who actually approved. Populated only when ApprovalStatus = Approved.</summary>
         public int? ApprovedByMemberId { get; set; }
         public DateTime? ApprovedDate { get; set; }
         public DateTime CreatedDate { get; set; } = DateTime.Now;
@@ -67,11 +69,15 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public bool CanDelete { get; set; }
         public bool CanApprove { get; set; }
         public string ApprovalStatus { get; set; } = "Draft";
+        public int? RequestedApproverMemberId { get; set; }
+        public string? RequestedApproverName { get; set; }
         public int? ApprovedByMemberId { get; set; }
         public string? ApprovedByName { get; set; }
         public DateTime? ApprovedDate { get; set; }
         /// <summary>True when ApprovalStatus == Approved — config-data edits are forbidden.</summary>
         public bool IsLocked { get; set; }
+        /// <summary>True when ApprovalStatus = PendingApproval and viewer is the requested approver (or site admin).</summary>
+        public bool IsRequestedApprover { get; set; }
         /// <summary>JSON included only when caller has view rights and is on the editor page.</summary>
         public string? JsonBlob { get; set; }
     }
@@ -122,9 +128,26 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public int MemberId { get; set; }
     }
 
-    /// <summary>Shared body shape for RequestApproval / Approve / Unapprove endpoints.</summary>
+    /// <summary>Body for Approve / Unapprove — no extra payload beyond the config id.</summary>
     public class ApprovalActionRequest
     {
         public int ConfigId { get; set; }
+    }
+
+    /// <summary>
+    /// RequestApproval body — owner picks a specific Banläggare to ask.
+    /// RequestedApproverMemberId = 0 (or omitted) means owner self-approval (only valid when owner has Banläggare cert).
+    /// </summary>
+    public class RequestApprovalRequest
+    {
+        public int ConfigId { get; set; }
+        public int RequestedApproverMemberId { get; set; }
+    }
+
+    public class BanlaggareCandidateView
+    {
+        public int MemberId { get; set; }
+        public string MemberName { get; set; } = "";
+        public string? ClubName { get; set; }
     }
 }

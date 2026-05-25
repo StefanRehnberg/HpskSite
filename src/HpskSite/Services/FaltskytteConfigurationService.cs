@@ -32,6 +32,7 @@ namespace HpskSite.Services
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
         private readonly ClubService _clubService;
         private readonly CertificationService _certificationService;
+        private readonly EmailService _emailService;
 
         public FaltskytteConfigurationService(
             IUmbracoDatabaseFactory databaseFactory,
@@ -41,7 +42,8 @@ namespace HpskSite.Services
             IMemberService memberService,
             IUmbracoContextAccessor umbracoContextAccessor,
             ClubService clubService,
-            CertificationService certificationService)
+            CertificationService certificationService,
+            EmailService emailService)
         {
             _databaseFactory = databaseFactory;
             _logger = logger;
@@ -51,6 +53,7 @@ namespace HpskSite.Services
             _umbracoContextAccessor = umbracoContextAccessor;
             _clubService = clubService;
             _certificationService = certificationService;
+            _emailService = emailService;
         }
 
         // ── Visibility constants ─────────────────────────────────────────
@@ -291,7 +294,13 @@ namespace HpskSite.Services
 
         // ── Approval workflow ───────────────────────────────────────────
 
-        public async Task<(bool Success, string? Message)> RequestApprovalAsync(int configId, int viewerMemberId)
+        /// <summary>
+        /// Owner picks a specific Banläggare to ask. requestedApproverMemberId must be a member
+        /// with the active Banläggare cert. An email is sent to the picked Banläggare with a
+        /// link to the editor.
+        /// </summary>
+        public async Task<(bool Success, string? Message)> RequestApprovalAsync(
+            int configId, int viewerMemberId, int requestedApproverMemberId)
         {
             using var db = _databaseFactory.CreateDatabase();
             var config = await db.SingleOrDefaultAsync<FaltskytteConfiguration>("WHERE Id = @0", configId);
@@ -300,13 +309,50 @@ namespace HpskSite.Services
                 return (false, "Endast ägare, medredigerare eller administratör kan begära godkännande.");
             if (NormalizeStatus(config.ApprovalStatus) == StatusApproved)
                 return (false, "Konfigurationen är redan godkänd.");
+            if (requestedApproverMemberId <= 0)
+                return (false, "Välj en Banläggare att skicka begäran till.");
+
+            // The picked person must currently hold the Banläggare cert.
+            var pickedHasCert = await _certificationService.HasActiveCertAsync(
+                requestedApproverMemberId, CertificationTypes.Banlaggare);
+            if (!pickedHasCert)
+                return (false, "Vald medlem saknar aktiv Banläggare-certifiering.");
 
             config.ApprovalStatus = StatusPendingApproval;
+            config.RequestedApproverMemberId = requestedApproverMemberId;
             config.ModifiedDate = DateTime.Now;
             await db.UpdateAsync(config);
+
+            // Best-effort email — request still persists if SMTP is down.
+            try
+            {
+                var picked = _memberService.GetById(requestedApproverMemberId);
+                var requester = _memberService.GetById(viewerMemberId);
+                if (picked != null && !string.IsNullOrWhiteSpace(picked.Email))
+                {
+                    var pickedName = ResolveMemberName(requestedApproverMemberId)
+                        ?? picked.Name ?? "Banläggare";
+                    var requesterName = ResolveMemberName(viewerMemberId)
+                        ?? requester?.Name ?? "En användare";
+                    await _emailService.SendFaltkonfigApprovalRequestAsync(
+                        picked.Email, pickedName, requesterName, config.Name, config.Description, config.Id);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to send approval-request email for config {Id} to member {MemberId}",
+                    configId, requestedApproverMemberId);
+            }
+
             return (true, null);
         }
 
+        /// <summary>
+        /// Only the requested approver may approve, with two exceptions:
+        ///  - site admin may approve anything (ultimate override),
+        ///  - owner-Banläggare may self-approve in any state (the "I trust myself" shortcut),
+        ///    which doubles as the fallback when the owner is the only Banläggare around.
+        /// </summary>
         public async Task<(bool Success, string? Message)> ApproveAsync(int configId, int viewerMemberId)
         {
             using var db = _databaseFactory.CreateDatabase();
@@ -314,18 +360,31 @@ namespace HpskSite.Services
             if (config == null) return (false, "Konfigurationen hittades inte.");
             if (!await CanViewAsync(config, viewerMemberId))
                 return (false, "Du har inte rättighet att se konfigurationen.");
+            if (NormalizeStatus(config.ApprovalStatus) == StatusApproved)
+                return (false, "Konfigurationen är redan godkänd.");
 
             var isSiteAdmin = await _authService.IsCurrentUserAdminAsync();
             var hasBanlaggareCert = await _certificationService.HasActiveCertAsync(viewerMemberId, CertificationTypes.Banlaggare);
-            if (!hasBanlaggareCert && !isSiteAdmin)
-                return (false, "Endast certifierade Banläggare (eller sajtadmin) kan godkänna en konfiguration.");
+            var isOwner = config.OwnerMemberId == viewerMemberId;
+            var isRequestedApprover = config.RequestedApproverMemberId == viewerMemberId;
 
-            if (NormalizeStatus(config.ApprovalStatus) == StatusApproved)
-                return (false, "Konfigurationen är redan godkänd.");
+            // Site admin: always allowed.
+            // Owner with Banläggare cert: shortcut — self-approve.
+            // Otherwise: must hold cert AND have been the requested approver.
+            var allowed = isSiteAdmin
+                          || (isOwner && hasBanlaggareCert)
+                          || (isRequestedApprover && hasBanlaggareCert);
+            if (!allowed)
+            {
+                if (!hasBanlaggareCert)
+                    return (false, "Endast certifierade Banläggare kan godkänna.");
+                return (false, "Du är inte den Banläggare som ägaren har bett om godkännande.");
+            }
 
             config.ApprovalStatus = StatusApproved;
             config.ApprovedByMemberId = viewerMemberId;
             config.ApprovedDate = DateTime.Now;
+            config.RequestedApproverMemberId = null;
             config.ModifiedDate = DateTime.Now;
             await db.UpdateAsync(config);
             return (true, null);
@@ -345,9 +404,37 @@ namespace HpskSite.Services
             config.ApprovalStatus = StatusDraft;
             config.ApprovedByMemberId = null;
             config.ApprovedDate = null;
+            config.RequestedApproverMemberId = null;
             config.ModifiedDate = DateTime.Now;
             await db.UpdateAsync(config);
             return (true, null);
+        }
+
+        /// <summary>
+        /// Returns every member who currently holds the active Banläggare cert, sorted by name.
+        /// Used to populate the request-approval picker.
+        /// </summary>
+        public async Task<List<BanlaggareCandidateView>> GetBanlaggareCandidatesAsync()
+        {
+            var active = await _certificationService.GetActiveByTypeAsync(CertificationTypes.Banlaggare);
+            var memberIds = active.Select(c => c.MemberId).Distinct().ToList();
+            var list = new List<BanlaggareCandidateView>();
+            foreach (var id in memberIds)
+            {
+                var m = _memberService.GetById(id);
+                if (m == null || !m.IsApproved) continue;
+                string? clubName = null;
+                var pcid = m.GetValue<string>("primaryClubId");
+                if (!string.IsNullOrEmpty(pcid) && int.TryParse(pcid, out int clubId))
+                    clubName = _clubService.GetClubNameById(clubId);
+                list.Add(new BanlaggareCandidateView
+                {
+                    MemberId = id,
+                    MemberName = ResolveMemberName(id) ?? m.Name ?? $"Medlem {id}",
+                    ClubName = clubName
+                });
+            }
+            return list.OrderBy(b => b.MemberName, StringComparer.Create(new System.Globalization.CultureInfo("sv-SE"), false)).ToList();
         }
 
         public async Task<(bool Success, string? Message)> DeleteAsync(int id)
@@ -476,12 +563,18 @@ namespace HpskSite.Services
                 CanDelete = await CanDeleteAsync(config, viewerMemberId),
                 CanApprove = await CanApproveAsync(viewerMemberId),
                 ApprovalStatus = NormalizeStatus(config.ApprovalStatus),
+                RequestedApproverMemberId = config.RequestedApproverMemberId,
+                RequestedApproverName = config.RequestedApproverMemberId.HasValue
+                    ? (ResolveMemberName(config.RequestedApproverMemberId.Value) ?? $"Medlem {config.RequestedApproverMemberId.Value}")
+                    : null,
                 ApprovedByMemberId = config.ApprovedByMemberId,
                 ApprovedByName = config.ApprovedByMemberId.HasValue
                     ? (ResolveMemberName(config.ApprovedByMemberId.Value) ?? $"Medlem {config.ApprovedByMemberId.Value}")
                     : null,
                 ApprovedDate = config.ApprovedDate,
                 IsLocked = IsApproved(config),
+                IsRequestedApprover = viewerMemberId.HasValue
+                    && config.RequestedApproverMemberId == viewerMemberId.Value,
                 JsonBlob = includeJson ? config.JsonBlob : null
             };
         }

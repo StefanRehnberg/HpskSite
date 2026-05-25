@@ -247,6 +247,41 @@
     </div>
 </div>
 
+<!-- Request-approval picker modal — owner chooses a specific Banläggare to ask. -->
+<div class="modal fade" id="fkRequestApprovalModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-shield-check me-2"></i>Begär godkännande</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small">
+                    Välj en certifierad Banläggare som ska granska och godkänna konfigurationen. Hen får ett e-postmeddelande med länk till konfigurationen.
+                </p>
+                <div class="mb-3">
+                    <label class="form-label small fw-bold">Banläggare</label>
+                    <select class="form-select" id="fkRequestApproverSelect">
+                        <option value="">Laddar...</option>
+                    </select>
+                </div>
+                <div id="fkRequestSelfApproveRow" class="border-top pt-3 mt-3" style="display:none">
+                    <p class="text-muted small mb-2">Du har själv aktiv Banläggare-certifiering och kan välja att godkänna konfigurationen direkt utan att be någon annan:</p>
+                    <button type="button" class="btn btn-outline-success btn-sm" onclick="fkRequestSelfApprove()">
+                        <i class="bi bi-shield-check me-1"></i>Godkänn själv
+                    </button>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="fkRequestSubmitBtn" onclick="fkRequestSubmit()" disabled>
+                    <i class="bi bi-envelope me-1"></i>Skicka begäran
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Weapon class picker modal -->
 <div class="modal fade" id="fkEditorWeaponClassModal" tabindex="-1">
     <div class="modal-dialog">
@@ -387,6 +422,7 @@ function fkEditorRenderApprovalBanner() {
     // Banner content + actions per status.
     var text = '';
     var actions = [];
+    var isRequestedApprover = !!fkEditorConfig.isRequestedApprover;
     if (status === 'Approved') {
         banner.className = 'alert alert-success mb-3';
         var approvedDateStr = fkEditorConfig.approvedDate
@@ -403,8 +439,13 @@ function fkEditorRenderApprovalBanner() {
         }
     } else if (status === 'PendingApproval') {
         banner.className = 'alert alert-warning mb-3';
-        text = '<i class="bi bi-hourglass-split me-1"></i><strong>Väntar på godkännande</strong>. En certifierad Banläggare granskar konfigurationen innan den kan användas som godkänd mall.';
-        if (canApprove) {
+        var awaiting = fkEditorConfig.requestedApproverName
+            ? ' från <strong>' + escapeHtml(fkEditorConfig.requestedApproverName) + '</strong>'
+            : '';
+        text = '<i class="bi bi-hourglass-split me-1"></i><strong>Väntar på godkännande</strong>' + awaiting + '.';
+        // Only the requested approver (or site admin) sees the Godkänn button.
+        // canApprove === true alone isn't enough anymore — we want directed flow.
+        if (isRequestedApprover) {
             actions.push('<button class="btn btn-success btn-sm" onclick="fkApprovalApprove()"><i class="bi bi-shield-check me-1"></i>Godkänn</button>');
         }
         if (canEdit) {
@@ -415,12 +456,7 @@ function fkEditorRenderApprovalBanner() {
         if (canEdit) {
             banner.className = 'alert alert-light border mb-3';
             text = 'Konfigurationen är ett utkast. När du är klar kan du begära godkännande av en Banläggare.';
-            actions.push('<button class="btn btn-primary btn-sm" onclick="fkApprovalRequest()"><i class="bi bi-shield-check me-1"></i>Begär godkännande</button>');
-        } else if (canApprove) {
-            // Banläggare browsing someone else's draft — offer direct approval too.
-            banner.className = 'alert alert-light border mb-3';
-            text = 'Konfigurationen är ett utkast.';
-            actions.push('<button class="btn btn-success btn-sm" onclick="fkApprovalApprove()"><i class="bi bi-shield-check me-1"></i>Godkänn</button>');
+            actions.push('<button class="btn btn-primary btn-sm" onclick="fkRequestApprovalOpen()"><i class="bi bi-shield-check me-1"></i>Begär godkännande…</button>');
         } else {
             banner.style.display = 'none';
             return;
@@ -431,9 +467,77 @@ function fkEditorRenderApprovalBanner() {
     banner.style.display = '';
 }
 
-async function fkApprovalRequest() {
-    await fkApprovalCall('/umbraco/surface/FaltskytteConfiguration/RequestApproval');
+// ─── Request-approval flow ──────────────────────────────────────────
+
+async function fkRequestApprovalOpen() {
+    var sel = document.getElementById('fkRequestApproverSelect');
+    var btn = document.getElementById('fkRequestSubmitBtn');
+    var selfRow = document.getElementById('fkRequestSelfApproveRow');
+    sel.innerHTML = '<option value="">Laddar...</option>';
+    btn.disabled = true;
+    selfRow.style.display = 'none';
+    sel.onchange = function() { btn.disabled = !sel.value; };
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('fkRequestApprovalModal')).show();
+
+    try {
+        var resp = await fetch('/umbraco/surface/FaltskytteConfiguration/GetBanlaggareCandidates');
+        var data = await resp.json();
+        if (!data.success) {
+            sel.innerHTML = '<option value="">' + (data.message || 'Kunde inte ladda') + '</option>';
+            return;
+        }
+        var ownerId = fkEditorConfig.ownerMemberId;
+        var viewerIsOwner = !!fkEditorConfig.canDelete; // owner-only proxy
+        var hasSelf = false;
+        sel.innerHTML = '<option value="">Välj Banläggare...</option>';
+        (data.candidates || []).forEach(function(c) {
+            var label = c.memberName + (c.clubName ? ' (' + c.clubName + ')' : '');
+            if (viewerIsOwner && c.memberId === ownerId) { hasSelf = true; return; } // hide self from picker
+            sel.innerHTML += '<option value="' + c.memberId + '">' + label.replace(/"/g, '&quot;') + '</option>';
+        });
+        // Surface a self-approve shortcut when the owner is themselves a Banläggare.
+        if (hasSelf && viewerIsOwner) selfRow.style.display = '';
+    } catch (e) { console.error(e); sel.innerHTML = '<option value="">Nätverksfel</option>'; }
 }
+
+async function fkRequestSubmit() {
+    var sel = document.getElementById('fkRequestApproverSelect');
+    if (!sel || !sel.value) return;
+    var memberId = parseInt(sel.value);
+    try {
+        var resp = await fetch('/umbraco/surface/FaltskytteConfiguration/RequestApproval', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value
+            },
+            body: JSON.stringify({ configId: fkEditorConfig.id, requestedApproverMemberId: memberId })
+        });
+        var data = await resp.json();
+        if (!data.success) { alert('Fel: ' + (data.message || 'Okänt fel')); return; }
+        bootstrap.Modal.getInstance(document.getElementById('fkRequestApprovalModal')).hide();
+        await fkEditorReloadMeta();
+    } catch (e) { console.error(e); alert('Nätverksfel.'); }
+}
+
+async function fkRequestSelfApprove() {
+    if (!confirm('Godkänn konfigurationen "' + (fkEditorConfig.name || '') + '" direkt? Konfigurationsdata låses tills godkännandet återkallas.')) return;
+    try {
+        var resp = await fetch('/umbraco/surface/FaltskytteConfiguration/Approve', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value
+            },
+            body: JSON.stringify({ configId: fkEditorConfig.id })
+        });
+        var data = await resp.json();
+        if (!data.success) { alert('Fel: ' + (data.message || 'Okänt fel')); return; }
+        bootstrap.Modal.getInstance(document.getElementById('fkRequestApprovalModal')).hide();
+        await fkEditorReloadMeta();
+    } catch (e) { console.error(e); alert('Nätverksfel.'); }
+}
+
 async function fkApprovalApprove() {
     if (!confirm('Godkänn konfigurationen "' + (fkEditorConfig.name || '') + '"? Konfigurationsdata låses tills godkännandet återkallas.')) return;
     await fkApprovalCall('/umbraco/surface/FaltskytteConfiguration/Approve');
@@ -638,6 +742,9 @@ async function fkEditorReloadMeta() {
             fkEditorConfig.approvedByMemberId = srv.approvedByMemberId;
             fkEditorConfig.approvedByName = srv.approvedByName;
             fkEditorConfig.approvedDate = srv.approvedDate;
+            fkEditorConfig.requestedApproverMemberId = srv.requestedApproverMemberId;
+            fkEditorConfig.requestedApproverName = srv.requestedApproverName;
+            fkEditorConfig.isRequestedApprover = srv.isRequestedApprover;
             fkEditorConfig.isLocked = srv.isLocked;
             fkEditorConfig.canEdit = srv.canEdit;
             fkEditorConfig.canDelete = srv.canDelete;

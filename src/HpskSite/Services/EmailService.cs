@@ -656,6 +656,69 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// Notifies a Banläggare that a specific operator has requested their approval of a
+        /// Fältskytte-konfiguration. The link goes straight into the editor — the Banläggare
+        /// can then read the configuration and either approve or reject.
+        /// </summary>
+        public async Task SendFaltkonfigApprovalRequestAsync(
+            string toEmail, string toName, string requestedByName, string configName,
+            string? configDescription, int configId)
+        {
+            if (string.IsNullOrWhiteSpace(toEmail))
+            {
+                _logger.LogWarning("SendFaltkonfigApprovalRequestAsync skipped — no email address for Banläggare {Name}", toName);
+                return;
+            }
+
+            var siteUrl = _configuration["SiteUrl"] ?? "https://pistol.nu";
+            var url = $"{siteUrl}/faltkonfig/{configId}/redigera";
+            var subject = $"Begäran om godkännande: {configName}";
+
+            var safeName = System.Web.HttpUtility.HtmlEncode(toName);
+            var safeRequester = System.Web.HttpUtility.HtmlEncode(requestedByName);
+            var safeConfigName = System.Web.HttpUtility.HtmlEncode(configName);
+            var safeDescription = string.IsNullOrWhiteSpace(configDescription)
+                ? ""
+                : $"<blockquote style=\"border-left:3px solid #ccc; margin:10px 0; padding:5px 10px; color:#555;\">{System.Web.HttpUtility.HtmlEncode(configDescription)}</blockquote>";
+
+            var body = $@"
+<html>
+<head>
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+        .button {{
+            display: inline-block;
+            background-color: #198754;
+            color: white !important;
+            padding: 14px 30px;
+            text-decoration: none;
+            border-radius: 5px;
+            font-weight: bold;
+            font-size: 16px;
+        }}
+        .button:hover {{ background-color: #146c43; }}
+        .notice {{ color: #666; font-size: 13px; margin-top: 10px; }}
+    </style>
+</head>
+<body>
+    <h2>Hej {safeName},</h2>
+    <p><strong>{safeRequester}</strong> har bett dig att granska och godkänna en Fältskytte-konfiguration på pistol.nu:</p>
+    <p><strong>{safeConfigName}</strong></p>
+    {safeDescription}
+    <p style=""text-align: center; margin: 30px 0;"">
+        <a href=""{url}"" class=""button"">Öppna konfigurationen</a>
+    </p>
+    <p class=""notice"">
+        Som certifierad Banläggare har du rätt att godkänna eller avslå begäran. När du godkänner låses konfigurationsdatan och ditt namn visas på konfigurationen som godkännare.
+    </p>
+    <p>Med vänliga hälsningar,<br/>Pistol.nu</p>
+</body>
+</html>";
+
+            await SendEmailAsync(toEmail, subject, body);
+        }
+
+        /// <summary>
         /// Core method to send an email
         /// </summary>
         private async Task SendEmailAsync(string toEmail, string subject, string htmlBody)
