@@ -509,6 +509,11 @@
                                 {
                                     <li><a class="dropdown-item" href="@seriesPage.Url()">Hallandsserien</a></li>
                                 }
+                                @if (isLoggedIn)
+                                {
+                                    <li><hr class="dropdown-divider"></li>
+                                    <li><a class="dropdown-item" href="/faltkonfig">Fältkonfig</a></li>
+                                }
                             </ul>
                         </li>
                         
