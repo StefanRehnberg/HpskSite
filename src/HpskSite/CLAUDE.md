@@ -981,6 +981,7 @@ Keep form helper text subtle:
 10. **competitionType** - Competition format
 11. **registrationInvoicesHub** - Payment invoice container (child of competition)
 12. **registrationInvoice** - Individual payment invoice (see Swish Payment System section for properties)
+13. **faltskytteConfigurationHub** - Hub for standalone Fältskytte configurations (no properties; allow under Home). Published as URL alias `faltkonfig`. Without this content node the editor route returns 500.
 
 ### Content Pages to Create
 Create content nodes using above document types and publish them under Home page.
@@ -1099,6 +1100,76 @@ The legacy `#finalsStartListSection` markup + `checkFinalsEligibility` / `displa
 
 **Manual operator steps:** Run `Migrations/create-faltskytte-shootoff-entry-table.sql` in SSMS and add the two new `competitionResult` Textarea properties listed above.
 
+### Fältskytte Standalone Configurations (2026-05-24 → 25)
+
+**What:** Station configurations decoupled from individual competitions. Built at `/faltkonfig` (Tävling nav → Fältkonfig), reused by N competitions via a saved-config picker. Replaces the legacy in-competition `FaltskytteStationConfigModal`.
+
+**Data model:**
+- `FaltskytteConfiguration` table — Id, Name, Description, OwnerMemberId, OwnerClubId, Visibility (`Private`/`Club`/`Region`/`Public`), SecretUntil, JsonBlob, CreatedDate, ModifiedDate.
+- `FaltskytteConfigurationCollaborator` table — composite PK `(ConfigId, MemberId)`, CASCADE on Config.
+- The competition's existing `stationConfig` property is unchanged — Anslut copies JsonBlob into it. A `_attachedConfigId` meta key inside the blob lets the picker restore selection on next edit-modal open. Other meta keys: `_linkedGroups`, `_mode`, `_morker`, `_attachedConfigId`.
+
+**Authorization** (`FaltskytteConfigurationService`): owner / collaborator / site-admin tiers + a SecretUntil gate that overrides Visibility while in force (only owner + collaborators see it). Visibility tiers: Private (owner only), Club (club admins + Skjutledare in OwnerClubId), Region (regional admins in OwnerClubId's region via clubNode.regionalFederation), Public (any authenticated member).
+
+**Surfaces:**
+- `Views/FaltskytteConfigurationHub.cshtml` — listing at `/faltkonfig` (Umbraco doctype `faltskytteConfigurationHub`). Login gate, Skapa ny modal, filter tabs (Alla / Mina / Delade med mig / Publika), card grid with Redigera / Duplicera / Ta bort.
+- `Views/FaltskytteConfigurationEditor.cshtml` + `Controllers/FaltskytteConfigurationEditorController.cs` — editor at `/faltkonfig/{id}/redigera`. MVC route (Surface Controllers can't host parameterized URLs). Controller looks up the `/faltkonfig` hub node and passes it as the IPublishedContent Model so Master.cshtml's `Model.Root()` / `Url()` calls don't NRE. Returns 500 with a setup hint when the hub node is missing.
+- `Views/Partials/_FaltskytteCompetitionPicker.cshtml` — the saved-config picker. Mounted in `CompetitionWizardModal` (prefix `wizard_`) and `CompetitionEditModal` (prefix `edit_`) via shared partial. JS guarded by `window.faltPickerScriptLoaded` so dual-include doesn't double-define functions. Attaches by POST-fetching the chosen config + writing `JsonBlob` into the existing `{prefix}faltStationConfigJson` hidden field; wizard's `{prefix}numberOfSeries` auto-syncs to station count when present.
+
+**Refactored partials shared between editor + legacy surfaces:**
+- `_FaltskytteConfiguratorScript.cshtml` — the entire JS body (extracted from the old modal, ~1900 lines).
+- `_FaltskytteConfiguratorSuggestionModal.cshtml` — föreslaget-skjuttid breakdown modal.
+- The old `FaltskytteStationConfigModal.cshtml` partial is deleted. The legacy `openFaltStationConfigurator()` / `openEditFaltStationConfigurator()` and the wizard's `faltCfgObserver` MutationObserver are also gone.
+
+**Standalone-editor mode in the configurator script:** `window._faltCfgEditorMode = 'configuration'` makes `faltCfgIsStandaloneEditor()` true; `faltCfgSaveToServer` then POSTs to `FaltskytteConfiguration/Update` (`{id, jsonBlob}`) instead of the legacy per-competition save endpoint. `faltCfgIsEditMode()` short-circuits true in this mode. Hidden-field writes are guarded so they no-op when the wizard's hidden field is absent.
+
+**Import station from another config** (in the editor): dropdown of accessible configs → pick source station → pick destination station number → choose Kopiera or Länka. Link writes `_linkedFromConfigId` + `_linkedFromStationNumber` + `_linkedFromChecksum` on each weapon-class station. Checksum is a stable Cyrb53 hash over the canonical station JSON minus the `_linkedFrom*` keys, so chain-of-links doesn't accumulate stored state.
+
+**Linked-station reload UX** (in the editor): a `renderActiveTab` wrapper triggers `fkLinkPostRender()` after every render. Source configs are fetched lazily once + cached. Each station card gets a banner: synkad (gray), diverged (yellow "Källan har ändrats" + Ladda om + Avlänka), or unavailable (gray). Ladda om copies fresh source data into the dest's station + recomputes the checksum.
+
+**Endpoints** (`FaltskytteConfigurationController`):
+- `GET ListAccessible` / `GET Get` / `GET GetStationsForImport` / `GET SearchMembers` (collaborator picker, any logged-in user)
+- `POST Create` / `POST Update` / `POST Delete` / `POST Duplicate`
+- `POST AddCollaborator` / `POST RemoveCollaborator`
+
+`SecretUntil` in the DTOs is **`string?`** (not `DateTime?`) so System.Text.Json doesn't reject Flatpickr's `"Y-m-d H:i"` format. Service parses defensively via `ParseSecretUntil` accepting both ISO and Flatpickr shapes.
+
+**Manual operator steps:**
+- Run `Migrations/create-faltskytte-configuration-tables.sql` in SSMS.
+- Create doctype `faltskytteConfigurationHub` (no properties, allowed under Home).
+- Publish a content node of that type under Home, URL alias `faltkonfig`.
+
+**Backward compat:** existing competitions keep their inline `stationConfig` JSON. The picker shows a **Konvertera till sparad konfiguration** link when it sees inline data without `_attachedConfigId`. Click → prompts for a name → POSTs `Create` with the inline JSON as starting blob → embeds `_attachedConfigId` in the live hidden field. Operator still needs to Save the competition to persist the link.
+
+### Fältskytte SHB Shoot-Time Suggestion (2026-05-24)
+
+**What:** The configurator surfaces a SHB-derived suggested skjuttid per station per weapon class, with a live breakdown modal and an "Använd" button that copies it to the Skjuttid field.
+
+**Formula:**
+- 6 skott per station (SHB convention).
+- Per-shot time = `D / maxD(SizeGroup, weaponGroup) × maxTime(weaponGroup)`. maxTime: A&R 2.0 s, B 1.75 s, C 1.5 s.
+- Station's per-shot floor = max across all figures (the most demanding figure sets the per-shot allowance).
+- Base = ceil(6 × per-shot floor).
+- Tillägg: +2 s when `weaponStartPosition === '45 grader'`; +2 s × (n_målgrupper − 1) for omriktning; ×1.30 multiplier when competition-level Mörkerfältskjutning checkbox is on.
+
+**SHB tables baked into JS** (`SHB_MAX_DISTANCES` const in `_FaltskytteConfiguratorScript.cshtml`): per SizeGroup (1–14) → `{AR, B, C}` max distance, sourced from SHB 2026 pp. 100-122. SizeGroup 15 is the "Ej grupperad" bucket (no SHB row, returns null → no bound).
+
+**FieldTarget table changes:**
+- New `SizeGroup INT NOT NULL DEFAULT 15` column (`Migrations/add-sizegroup-to-fieldtarget.sql` + `update-fieldtarget-sizegroup-default.sql` which bumped the default from 0 → 15).
+- Dropped the per-figure `MaxDistance{A,R,B,C}` columns (`Migrations/drop-fieldtarget-maxdistance-columns.sql`) — SizeGroup now drives every max-distance lookup; the columns were duplicated SHB table values that nothing read.
+
+**Distance slider** (per målgrupp): bounds derived from `min(figure.SizeGroup → maxDistance for active weapon class)` / 5 m floor. Lives in advanced mode's per-class tab; in simple mode there's a small weapon-class picker above the målgrupper since distance can differ per class. Per-class distance survives the simple-mode shape sync via the saved-distances preserve step in `faltCfgSyncShape`.
+
+**Mörker toggle** at the top of the configurator. Stored as `_morker` meta key on the JSON blob. Toggling shows a confirmation dialog if any station has configured figures — confirming triggers `faltCfgSaveAll()` so the flag persists; otherwise it stays in memory until the next station save.
+
+**Figurkatalog (`FaltskytteTargetPickerModal.cshtml`):**
+- Grid groups by SizeGroup with section headers showing the SHB max-distance hint.
+- Chip-row filter above the grid (1–14 + 15/Ej grupperad). Selection persists in `sessionStorage`.
+- Distance badge under each card removed (the section header carries it).
+- Modal goes fullscreen on viewports below `md` (768 px) via `modal-fullscreen-md-down`; inner d-flex stacks vertically below md so the picker is usable on a phone or pad in the field.
+
+**Controller clamps:** `FaltskytteController.CreateTarget` / `UpdateTarget` clamp SizeGroup to 1–15. The legacy `UpdateTargetDistances` endpoint was deleted.
+
 ## Common Patterns
 
 ### Model Usage
@@ -1155,6 +1226,7 @@ The `/Migrations` folder contains disabled database schemas for direct competiti
 ## Implementation Status
 
 ### Completed ✅
+- **Fältskytte Standalone Configurations + SHB Shoot-Time Suggestion (2026-05-24 → 25)** - New `/faltkonfig` listing + `/faltkonfig/{id}/redigera` editor for fristående station configurations with visibility tiers, collaborators, SecretUntil sekretessgrind, link-or-copy station import + linked-station reload UX. Replaces the legacy in-competition `FaltskytteStationConfigModal`. Adds a saved-config picker on the wizard / edit modal + a Konvertera-button for legacy inline configs. SHB-derived suggested skjuttid per station/class (6 skott × per-shot floor + tillägg, mörker ×1.30), per-målgrupp distance slider, Mörkerfältskjutning toggle, Figurkatalog grouped + filtered by SizeGroup, mobile-responsive picker modal. See "Fältskytte Standalone Configurations" + "Fältskytte SHB Shoot-Time Suggestion" sections.
 - **Competition URLs & Routing (2026-05-22)** - Custom URL provider + content finder for club-hosted, region-hosted, SM, and Landsdel competition URL shapes (see "Competition URLs & Routing" section above). Includes at-least-one-host guard across wizard/edit modal + their backends, and isClubOnly auto-disable when no club is selected.
 - **Controller Refactoring (2025-10-28)** - AdminController split into specialized controllers with AdminAuthorizationService
 - **Authorization Security Fixes (2025-11-02)** - Comprehensive security audit and fixes across 6 areas (see [Documentation](Documentation/AUTHORIZATION_SECURITY_AUDIT.md))
