@@ -105,7 +105,16 @@ namespace HpskSite.Services
             // Collaborator — always yes (overrides secrecy + visibility tier).
             if (await IsCollaboratorAsync(config.Id, viewerMemberId.Value)) return true;
 
-            // Secrecy gate — while active, only owner + collaborators (handled above).
+            // Currently-requested approver gets view rights even if the config is
+            // Private / sekretessbelagd — otherwise the email link is unusable.
+            if (config.RequestedApproverMemberId == viewerMemberId.Value) return true;
+
+            // Past approver keeps view rights so they can come back and re-review
+            // what they approved. Persists until the config is unapproved
+            // (ApprovedByMemberId gets cleared on Unapprove).
+            if (config.ApprovedByMemberId == viewerMemberId.Value) return true;
+
+            // Secrecy gate — while active, only owner + collaborators + approver(s) (handled above).
             if (config.SecretUntil.HasValue && config.SecretUntil.Value > DateTime.Now) return false;
 
             // Visibility tier.
