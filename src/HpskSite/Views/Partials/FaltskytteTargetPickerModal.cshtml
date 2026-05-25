@@ -36,7 +36,14 @@
                             <input type="text" class="form-control form-control-sm" id="faltPickerSearch" placeholder="Sök figur..." oninput="faltPickerFilter()">
                             <button class="btn btn-primary btn-sm text-nowrap" onclick="faltPickerCreateNew()"><i class="bi bi-plus-lg me-1"></i>Ny figur</button>
                         </div>
-                        <div id="faltPickerGrid" class="row g-2"></div>
+                        <div class="d-flex flex-wrap gap-1 mb-2 align-items-center small">
+                            <span class="text-muted me-1">Storleksgrupp:</span>
+                            <button class="btn btn-link btn-sm py-0 px-1" onclick="faltPickerFilterAll(true)">Alla</button>
+                            <button class="btn btn-link btn-sm py-0 px-1" onclick="faltPickerFilterAll(false)">Inga</button>
+                            <span class="vr mx-1"></span>
+                            <div id="faltPickerGroupChips" class="d-flex flex-wrap gap-1"></div>
+                        </div>
+                        <div id="faltPickerGrid"></div>
                     </div>
                     <!-- Right: detail panel -->
                     <div id="faltPickerDetailPanel" class="border-start bg-body-tertiary overflow-auto p-3" style="width:340px;flex-shrink:0">
@@ -125,6 +132,80 @@ var _faltPickerCallback = null;
 var _faltPickerWeaponClass = 'C';
 var _faltPickerIsAdmin = false;
 
+// SHB diagram 1-3 max distances per storleksgrupp (SHB 2026 pp 100-122),
+// formatted for the section-header label. Group 15 is the "ej grupperad"
+// bucket — figures whose admin hasn't bucketed them yet.
+var FALT_PICKER_GROUP_LABELS = {
+    0:  'A&R 80 m · B 90 m · C 100 m',
+    1:  'A&R 70 m · B 80 m · C 90 m',
+    2:  'A&R 60 m · B 65 m · C 75 m',
+    3:  'A&R 50 m · B 55 m · C 65 m',
+    4:  'A&R 45 m · B 50 m · C 55 m',
+    5:  'A&R 40 m · B 45 m · C 50 m',
+    6:  'A&R 35 m · B 40 m · C 45 m',
+    7:  'A&R 30 m · B 35 m · C 40 m',
+    8:  'A&R 27 m · B 32 m · C 36 m',
+    9:  'A&R 24 m · B 27 m · C 30 m',
+    10: 'A&R 20 m · B 22 m · C 25 m',
+    11: 'A&R 16 m · B 18 m · C 20 m',
+    12: 'A&R 14 m · B 16 m · C 18 m',
+    13: 'A&R 12 m · B 14 m · C 16 m',
+    14: 'A&R 7 m · B 8 m · C 9 m',
+    15: ''
+};
+var FALT_PICKER_STORAGE_KEY = 'faltPickerVisibleGroups';
+var _faltPickerVisibleGroups = null;
+
+function faltPickerNormGroup(g) {
+    var n = parseInt(g, 10);
+    if (isNaN(n) || n < 0 || n > 15) return 15;
+    return n;
+}
+
+function faltPickerLoadVisibleGroups() {
+    try {
+        var stored = sessionStorage.getItem(FALT_PICKER_STORAGE_KEY);
+        if (stored) { _faltPickerVisibleGroups = new Set(JSON.parse(stored)); return; }
+    } catch (e) { /* fall through */ }
+    var all = []; for (var i = 0; i <= 15; i++) all.push(i);
+    _faltPickerVisibleGroups = new Set(all);
+}
+
+function faltPickerSaveVisibleGroups() {
+    try { sessionStorage.setItem(FALT_PICKER_STORAGE_KEY, JSON.stringify([..._faltPickerVisibleGroups])); } catch (e) {}
+}
+
+function faltPickerToggleGroup(g) {
+    if (_faltPickerVisibleGroups.has(g)) _faltPickerVisibleGroups.delete(g);
+    else _faltPickerVisibleGroups.add(g);
+    faltPickerSaveVisibleGroups();
+    faltPickerRenderFilterChips();
+    faltPickerFilter();
+}
+
+function faltPickerFilterAll(on) {
+    _faltPickerVisibleGroups = new Set();
+    if (on) for (var i = 0; i <= 15; i++) _faltPickerVisibleGroups.add(i);
+    faltPickerSaveVisibleGroups();
+    faltPickerRenderFilterChips();
+    faltPickerFilter();
+}
+
+function faltPickerRenderFilterChips() {
+    var c = document.getElementById('faltPickerGroupChips');
+    if (!c) return;
+    var html = '';
+    for (var g = 0; g <= 15; g++) {
+        var on = _faltPickerVisibleGroups.has(g);
+        var label = g === 15 ? 'Ej' : g;
+        var title = g === 15
+            ? 'Ej grupperad'
+            : ('Storleksgrupp ' + g + (FALT_PICKER_GROUP_LABELS[g] ? ' — ' + FALT_PICKER_GROUP_LABELS[g] : ''));
+        html += '<button type="button" class="btn btn-sm py-0 px-2 ' + (on ? 'btn-primary' : 'btn-outline-secondary') + '" onclick="faltPickerToggleGroup(' + g + ')" title="' + title + '">' + label + '</button>';
+    }
+    c.innerHTML = html;
+}
+
 async function faltPickerOpen(weaponClass, callback) {
     _faltPickerWeaponClass = weaponClass || 'C';
     _faltPickerCallback = callback;
@@ -145,7 +226,9 @@ async function faltPickerOpen(weaponClass, callback) {
         if (data.success) _faltPickerCatalog = data.targets;
     }
 
-    faltPickerRenderGrid(_faltPickerCatalog);
+    faltPickerLoadVisibleGroups();
+    faltPickerRenderFilterChips();
+    faltPickerFilter(); // applies search + group filter to render
     bootstrap.Modal.getOrCreateInstance(document.getElementById('faltTargetPickerModal')).show();
 }
 
@@ -156,7 +239,8 @@ function faltPickerClose() {
 function faltPickerFilter() {
     var q = document.getElementById('faltPickerSearch').value.toLowerCase();
     var filtered = _faltPickerCatalog.filter(function(t) {
-        return t.name.toLowerCase().indexOf(q) >= 0;
+        if (!_faltPickerVisibleGroups.has(faltPickerNormGroup(t.sizeGroup))) return false;
+        return !q || t.name.toLowerCase().indexOf(q) >= 0;
     });
     faltPickerRenderGrid(filtered);
 }
@@ -164,32 +248,50 @@ function faltPickerFilter() {
 function faltPickerRenderGrid(targets) {
     var grid = document.getElementById('faltPickerGrid');
     grid.innerHTML = '';
-    var wc = _faltPickerWeaponClass;
-
-    targets.forEach(function(t) {
-        var firstVariant = t.variants && t.variants.length > 0 ? t.variants[0] : null;
-        var imgUrl = firstVariant ? firstVariant.imageUrl : '';
-        var dist = t['maxDistance' + wc];
-        var distText = dist ? wc + ':' + dist + 'm' : '';
-        var isSelected = _faltPickerSelected && _faltPickerSelected.id === t.id;
-
-        var col = document.createElement('div');
-        col.className = 'col-auto';
-        var card = document.createElement('div');
-        card.className = 'card text-center p-1';
-        card.style.cssText = 'width:100px;cursor:pointer' + (isSelected ? ';border-color:var(--bs-primary);border-width:2px' : '');
-        card.onclick = function() { faltPickerSelectTarget(t.id); };
-        card.innerHTML = (imgUrl ? '<img src="' + imgUrl + '" style="height:55px;object-fit:contain" alt="">' : '<div style="height:55px" class="bg-body-secondary rounded"></div>') +
-            '<div class="p-1"><div class="small text-truncate" style="font-size:0.7em" title="' + t.name + '">' + t.name + '</div>' +
-            (distText ? '<span class="badge bg-secondary" style="font-size:0.6em">' + distText + '</span>' : '') +
-            '</div>';
-        col.appendChild(card);
-        grid.appendChild(col);
-    });
-
     if (targets.length === 0) {
-        grid.innerHTML = '<div class="col-12 text-center text-muted py-4">Inga figurer hittades</div>';
+        grid.innerHTML = '<div class="text-center text-muted py-4">Inga figurer hittades</div>';
+        return;
     }
+
+    // Bucket by sizeGroup; sort by name within each bucket.
+    var buckets = {};
+    targets.forEach(function(t) {
+        var g = faltPickerNormGroup(t.sizeGroup);
+        if (!buckets[g]) buckets[g] = [];
+        buckets[g].push(t);
+    });
+    var groupNums = Object.keys(buckets).map(function(n) { return parseInt(n, 10); }).sort(function(a,b){ return a-b; });
+
+    groupNums.forEach(function(g) {
+        var labelText = g === 15 ? 'Ej grupperad' : 'Storleksgrupp ' + g;
+        var distText = FALT_PICKER_GROUP_LABELS[g] || '';
+        var header = '<div class="d-flex align-items-center gap-2 small text-muted mb-1 mt-2">' +
+            '<span class="fw-bold text-body">' + labelText + '</span>' +
+            (distText ? '<span>· ' + distText + '</span>' : '') +
+            '<hr class="flex-grow-1 my-0 opacity-25">' +
+        '</div>';
+
+        var cardsHtml = '<div class="d-flex flex-wrap gap-2">';
+        buckets[g]
+            .slice()
+            .sort(function(a,b) { return (a.name || '').localeCompare(b.name || '', 'sv'); })
+            .forEach(function(t) {
+                var firstVariant = t.variants && t.variants.length > 0 ? t.variants[0] : null;
+                var imgUrl = firstVariant ? firstVariant.imageUrl : '';
+                var isSelected = _faltPickerSelected && _faltPickerSelected.id === t.id;
+                var nameSafe = (t.name || '').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                cardsHtml += '<div class="card text-center p-1" style="width:100px;cursor:pointer' + (isSelected ? ';border-color:var(--bs-primary);border-width:2px' : '') + '" onclick="faltPickerSelectTarget(' + t.id + ')">' +
+                    (imgUrl ? '<img src="' + imgUrl + '" style="height:55px;object-fit:contain" alt="">' : '<div style="height:55px" class="bg-body-secondary rounded"></div>') +
+                    '<div class="p-1"><div class="small text-truncate" style="font-size:0.7em" title="' + nameSafe + '">' + nameSafe + '</div></div>' +
+                '</div>';
+            });
+        cardsHtml += '</div>';
+
+        var section = document.createElement('div');
+        section.className = 'mb-2';
+        section.innerHTML = header + cardsHtml;
+        grid.appendChild(section);
+    });
 }
 
 function faltPickerSelectTarget(targetId) {
@@ -260,12 +362,8 @@ function faltPickerSelectTarget(targetId) {
         distSection.style.display = '';
     }
 
-    // Highlight in grid
-    faltPickerRenderGrid(
-        document.getElementById('faltPickerSearch').value
-            ? _faltPickerCatalog.filter(function(t) { return t.name.toLowerCase().indexOf(document.getElementById('faltPickerSearch').value.toLowerCase()) >= 0; })
-            : _faltPickerCatalog
-    );
+    // Re-render through the filter so search + group toggles stay applied.
+    faltPickerFilter();
 }
 
 function faltPickerColorChanged() {
@@ -327,7 +425,7 @@ async function faltPickerSaveTarget() {
             var v = _faltPickerSelected.variants.find(function(x) { return x.id === vReq.id; });
             if (v) { v.fullName = vReq.fullName; v.color = vReq.color; }
         });
-        faltPickerRenderGrid(_faltPickerCatalog);
+        faltPickerFilter();
         faltPickerSelectTarget(_faltPickerSelected.id);
     } else {
         alert(data.message || 'Fel');
@@ -363,7 +461,7 @@ async function faltPickerCreateNew() {
         var newTarget = { id: data.targetId, name: name, variants: [], maxDistanceC: null, maxDistanceB: null, maxDistanceA: null, maxDistanceR: null, targetsPerFigure: 1, sizeGroup: 0 };
         _faltPickerCatalog.push(newTarget);
         _faltPickerCatalog.sort(function(a, b) { return a.name.localeCompare(b.name); });
-        faltPickerRenderGrid(_faltPickerCatalog);
+        faltPickerFilter();
         faltPickerSelectTarget(data.targetId);
     } else {
         alert(data.message || 'Fel');
@@ -386,7 +484,7 @@ async function faltPickerDeleteTarget() {
         _faltPickerSelectedVariant = null;
         document.getElementById('faltPickerDetail').style.display = 'none';
         document.getElementById('faltPickerNoSelection').style.display = '';
-        faltPickerRenderGrid(_faltPickerCatalog);
+        faltPickerFilter();
     } else {
         alert(data.message || 'Fel');
     }
@@ -490,7 +588,7 @@ async function faltPickerMoveVariant(variantId) {
                 return;
             }
         }
-        faltPickerRenderGrid(_faltPickerCatalog);
+        faltPickerFilter();
         faltPickerSelectTarget(_faltPickerSelected.id);
     } else {
         alert(data.message || 'Fel');
