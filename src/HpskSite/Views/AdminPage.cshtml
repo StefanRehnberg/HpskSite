@@ -167,6 +167,14 @@
     @await Html.PartialAsync("SeriesCopyModal")
     @await Html.PartialAsync("SeriesDeleteConfirmModal")
 
+    @* Figurkatalog tab launches this modal via faltPickerOpen(null, null).
+       Used to be pulled in transitively through the old configurator modal;
+       now included directly. *@
+    @if (isSiteAdmin || isRegionalAdmin)
+    {
+        @await Html.PartialAsync("FaltskytteTargetPickerModal")
+    }
+
     <!-- Tab content -->
     <div class="tab-content" id="adminTabContent">
         <div class="tab-pane fade show active" id="competitions" role="tabpanel" data-user-default-region="@userDefaultRegion" data-managed-regions="@managedRegionsJson" data-is-site-admin="@isSiteAdmin.ToString().ToLower()">
