@@ -1329,10 +1329,6 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 {
                     Id = t.Id,
                     Name = t.Name,
-                    MaxDistanceC = t.MaxDistanceC,
-                    MaxDistanceB = t.MaxDistanceB,
-                    MaxDistanceA = t.MaxDistanceA,
-                    MaxDistanceR = t.MaxDistanceR,
                     TargetsPerFigure = t.TargetsPerFigure,
                     SizeGroup = t.SizeGroup,
                     Variants = variantsByTarget.GetValueOrDefault(t.Id, new())
@@ -1354,37 +1350,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             }
         }
 
-        /// <summary>Updates max distances for a field target. Admin only.</summary>
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> UpdateTargetDistances([FromBody] UpdateTargetDistancesRequest request)
-        {
-            try
-            {
-                if (!await IsAuthorizedForCatalog())
-                    return Json(new { success = false, message = "Endast administratörer och kretsadministratörer." });
-
-                using var db = _umbracoDatabaseFactory.CreateDatabase();
-                var target = await db.FirstOrDefaultAsync<FieldTarget>("WHERE Id = @0", request.TargetId);
-                if (target == null)
-                    return Json(new { success = false, message = "Figuren hittades inte." });
-
-                target.MaxDistanceC = request.MaxDistanceC;
-                target.MaxDistanceB = request.MaxDistanceB;
-                target.MaxDistanceA = request.MaxDistanceA;
-                target.MaxDistanceR = request.MaxDistanceR;
-                await db.UpdateAsync(target);
-
-                return Json(new { success = true, message = "Avstånd uppdaterade." });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error updating target distances");
-                return Json(new { success = false, message = "Fel: " + ex.Message });
-            }
-        }
-
-        /// <summary>Updates a field target: name, distances, and variant names/colors. Admin only.</summary>
+        /// <summary>Updates a field target: name, size group, targets-per-figure, and variant names/colors. Admin only.</summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> UpdateTarget([FromBody] UpdateTargetRequest request)
@@ -1400,10 +1366,6 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                     return Json(new { success = false, message = "Figuren hittades inte." });
 
                 if (!string.IsNullOrEmpty(request.Name)) target.Name = request.Name;
-                target.MaxDistanceC = request.MaxDistanceC;
-                target.MaxDistanceB = request.MaxDistanceB;
-                target.MaxDistanceA = request.MaxDistanceA;
-                target.MaxDistanceR = request.MaxDistanceR;
                 if (request.TargetsPerFigure.HasValue) target.TargetsPerFigure = request.TargetsPerFigure.Value;
                 if (request.SizeGroup.HasValue) target.SizeGroup = Math.Clamp(request.SizeGroup.Value, 1, 15);
                 await db.UpdateAsync(target);
@@ -1446,10 +1408,6 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 var target = new FieldTarget
                 {
                     Name = request.Name,
-                    MaxDistanceC = request.MaxDistanceC,
-                    MaxDistanceB = request.MaxDistanceB,
-                    MaxDistanceA = request.MaxDistanceA,
-                    MaxDistanceR = request.MaxDistanceR,
                     TargetsPerFigure = request.TargetsPerFigure,
                     SizeGroup = Math.Clamp(request.SizeGroup, 1, 15)
                 };

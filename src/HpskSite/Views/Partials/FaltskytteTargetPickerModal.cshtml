@@ -70,24 +70,12 @@
                                 </button>
                             </div>
 
-                            <!-- Distances display (non-admin only, hidden in pick mode) -->
-                            <div class="mb-3" id="faltPickerDistancesSection">
-                                <label class="form-label small mb-1 fw-bold">Max avstånd (meter)</label>
-                                <div id="faltPickerDistances" class="d-flex gap-2"></div>
-                            </div>
-
                             <!-- Admin edit section (hidden in pick mode) -->
                             <div id="faltPickerAdminSection" style="display:none">
                                 <hr>
                                 <div class="mb-2">
                                     <label class="form-label small mb-1 fw-bold">Namn</label>
                                     <input type="text" class="form-control form-control-sm" id="faltPickerEditName" placeholder="Namn" autocomplete="off" data-1p-ignore="true">
-                                </div>
-                                <div class="row g-1 mb-2">
-                                    <div class="col-3"><label class="form-label small mb-0">A (m)</label><input type="number" class="form-control form-control-sm" id="faltPickerEditDistA" min="0" max="500"></div>
-                                    <div class="col-3"><label class="form-label small mb-0">R (m)</label><input type="number" class="form-control form-control-sm" id="faltPickerEditDistR" min="0" max="500"></div>
-                                    <div class="col-3"><label class="form-label small mb-0">B (m)</label><input type="number" class="form-control form-control-sm" id="faltPickerEditDistB" min="0" max="500"></div>
-                                    <div class="col-3"><label class="form-label small mb-0">C (m)</label><input type="number" class="form-control form-control-sm" id="faltPickerEditDistC" min="0" max="500"></div>
                                 </div>
                                 <div class="row g-2 mb-2">
                                     <div class="col-7">
@@ -315,30 +303,11 @@ function faltPickerSelectTarget(targetId) {
     });
     faltPickerColorChanged();
 
-    // Distances
-    var wc = _faltPickerWeaponClass;
-    var distEl = document.getElementById('faltPickerDistances');
-    distEl.innerHTML = '';
-    ['A', 'R', 'B', 'C'].forEach(function(w) {
-        var d = _faltPickerSelected['maxDistance' + w];
-        var isCurrent = w === wc;
-        var badge = document.createElement('span');
-        badge.className = 'badge ' + (isCurrent ? 'bg-primary' : 'bg-body-secondary text-body');
-        badge.textContent = w + ': ' + (d ? d + 'm' : '-');
-        distEl.appendChild(badge);
-    });
-
     // Admin section (hidden in pick mode)
     var adminSection = document.getElementById('faltPickerAdminSection');
-    var distSection = document.getElementById('faltPickerDistancesSection');
     if (_faltPickerIsAdmin && !_faltPickerIsPickMode) {
         adminSection.style.display = '';
-        distSection.style.display = 'none';
         document.getElementById('faltPickerEditName').value = _faltPickerSelected.name;
-        document.getElementById('faltPickerEditDistC').value = _faltPickerSelected.maxDistanceC || '';
-        document.getElementById('faltPickerEditDistB').value = _faltPickerSelected.maxDistanceB || '';
-        document.getElementById('faltPickerEditDistA').value = _faltPickerSelected.maxDistanceA || '';
-        document.getElementById('faltPickerEditDistR').value = _faltPickerSelected.maxDistanceR || '';
         document.getElementById('faltPickerEditTargetsPerFig').value = _faltPickerSelected.targetsPerFigure || 1;
         document.getElementById('faltPickerEditSizeGroup').value = faltPickerNormGroup(_faltPickerSelected.sizeGroup);
 
@@ -361,7 +330,6 @@ function faltPickerSelectTarget(targetId) {
         });
     } else {
         adminSection.style.display = 'none';
-        distSection.style.display = '';
     }
 
     // Re-render through the filter so search + group toggles stay applied.
@@ -396,10 +364,6 @@ async function faltPickerSaveTarget() {
     var body = {
         targetId: _faltPickerSelected.id,
         name: document.getElementById('faltPickerEditName').value,
-        maxDistanceC: parseInt(document.getElementById('faltPickerEditDistC').value) || null,
-        maxDistanceB: parseInt(document.getElementById('faltPickerEditDistB').value) || null,
-        maxDistanceA: parseInt(document.getElementById('faltPickerEditDistA').value) || null,
-        maxDistanceR: parseInt(document.getElementById('faltPickerEditDistR').value) || null,
         targetsPerFigure: parseInt(document.getElementById('faltPickerEditTargetsPerFig').value) || 1,
         sizeGroup: Math.max(1, Math.min(15, parseInt(document.getElementById('faltPickerEditSizeGroup').value) || 15)),
         variants: variants
@@ -417,10 +381,6 @@ async function faltPickerSaveTarget() {
     if (data.success) {
         // Update local cache
         _faltPickerSelected.name = body.name;
-        _faltPickerSelected.maxDistanceC = body.maxDistanceC;
-        _faltPickerSelected.maxDistanceB = body.maxDistanceB;
-        _faltPickerSelected.maxDistanceA = body.maxDistanceA;
-        _faltPickerSelected.maxDistanceR = body.maxDistanceR;
         _faltPickerSelected.targetsPerFigure = body.targetsPerFigure;
         _faltPickerSelected.sizeGroup = body.sizeGroup;
         variants.forEach(function(vReq) {
@@ -460,7 +420,7 @@ async function faltPickerCreateNew() {
     var data = await resp.json();
     if (data.success) {
         // Add to local cache and select it
-        var newTarget = { id: data.targetId, name: name, variants: [], maxDistanceC: null, maxDistanceB: null, maxDistanceA: null, maxDistanceR: null, targetsPerFigure: 1, sizeGroup: 15 };
+        var newTarget = { id: data.targetId, name: name, variants: [], targetsPerFigure: 1, sizeGroup: 15 };
         _faltPickerCatalog.push(newTarget);
         _faltPickerCatalog.sort(function(a, b) { return a.name.localeCompare(b.name); });
         faltPickerFilter();
