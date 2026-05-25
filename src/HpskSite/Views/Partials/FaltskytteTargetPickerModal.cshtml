@@ -4,15 +4,32 @@
  * Admins can edit target name, variant names/colors, and distances inline.
  *@
 
+<style>
+    /* Mobile / small-tablet layout: stack the picker vertically so the
+       340px detail panel doesn't crush the grid on narrow viewports.
+       modal-fullscreen-md-down (on the dialog below) gives us full
+       viewport space to stack into. */
+    @@media (max-width: 767.98px) {
+        #faltTargetPickerModal .faltPicker-body {
+            height: auto !important;
+            min-height: calc(100vh - 60px);
+        }
+        #faltTargetPickerModal #faltPickerDetailPanel {
+            width: 100% !important;
+            border-left: 0 !important;
+            border-top: 1px solid var(--bs-border-color);
+        }
+    }
+</style>
 <div class="modal fade" id="faltTargetPickerModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false" aria-hidden="true" style="z-index:1070">
-    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-dialog modal-xl modal-fullscreen-md-down modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title"><i class="bi bi-bullseye me-2"></i>Figurkatalog</h5>
                 <button type="button" class="btn-close" onclick="faltPickerClose()"></button>
             </div>
-            <div class="modal-body p-0" style="height:70vh">
-                <div class="d-flex h-100">
+            <div class="modal-body p-0 faltPicker-body" style="height:70vh">
+                <div class="d-flex flex-column flex-md-row h-100">
                     <!-- Left: search + grid -->
                     <div class="flex-grow-1 overflow-auto p-3" style="min-width:0">
                         <div class="d-flex gap-2 mb-2">
