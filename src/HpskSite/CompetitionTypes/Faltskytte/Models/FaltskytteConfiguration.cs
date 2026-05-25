@@ -22,6 +22,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         /// <summary>While &gt; UtcNow only owner + collaborators see the config, regardless of Visibility.</summary>
         public DateTime? SecretUntil { get; set; }
         public string JsonBlob { get; set; } = "";
+        /// <summary>Draft | PendingApproval | Approved. Null treated as Draft for legacy rows.</summary>
+        public string? ApprovalStatus { get; set; }
+        /// <summary>The Banläggare cert holder who approved. Populated only when ApprovalStatus = Approved.</summary>
+        public int? ApprovedByMemberId { get; set; }
+        public DateTime? ApprovedDate { get; set; }
         public DateTime CreatedDate { get; set; } = DateTime.Now;
         public DateTime ModifiedDate { get; set; } = DateTime.Now;
     }
@@ -60,6 +65,13 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public List<CollaboratorView> Collaborators { get; set; } = new();
         public bool CanEdit { get; set; }
         public bool CanDelete { get; set; }
+        public bool CanApprove { get; set; }
+        public string ApprovalStatus { get; set; } = "Draft";
+        public int? ApprovedByMemberId { get; set; }
+        public string? ApprovedByName { get; set; }
+        public DateTime? ApprovedDate { get; set; }
+        /// <summary>True when ApprovalStatus == Approved — config-data edits are forbidden.</summary>
+        public bool IsLocked { get; set; }
         /// <summary>JSON included only when caller has view rights and is on the editor page.</summary>
         public string? JsonBlob { get; set; }
     }
@@ -108,5 +120,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
     {
         public int ConfigId { get; set; }
         public int MemberId { get; set; }
+    }
+
+    /// <summary>Shared body shape for RequestApproval / Approve / Unapprove endpoints.</summary>
+    public class ApprovalActionRequest
+    {
+        public int ConfigId { get; set; }
     }
 }

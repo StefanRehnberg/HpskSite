@@ -279,6 +279,65 @@ namespace HpskSite.Controllers
             }
         }
 
+        // ── Approval workflow ───────────────────────────────────────────
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> RequestApproval([FromBody] ApprovalActionRequest request)
+        {
+            try
+            {
+                if (request == null) return Json(new { success = false, message = "Ogiltig förfrågan." });
+                var viewerId = await _configService.GetCurrentMemberIdAsync();
+                if (viewerId == null) return Json(new { success = false, message = "Inloggning krävs." });
+                var (success, message) = await _configService.RequestApprovalAsync(request.ConfigId, viewerId.Value);
+                return Json(new { success, message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error requesting approval for config {Id}", request?.ConfigId);
+                return Json(new { success = false, message = "Fel: " + ex.Message });
+            }
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Approve([FromBody] ApprovalActionRequest request)
+        {
+            try
+            {
+                if (request == null) return Json(new { success = false, message = "Ogiltig förfrågan." });
+                var viewerId = await _configService.GetCurrentMemberIdAsync();
+                if (viewerId == null) return Json(new { success = false, message = "Inloggning krävs." });
+                var (success, message) = await _configService.ApproveAsync(request.ConfigId, viewerId.Value);
+                return Json(new { success, message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error approving config {Id}", request?.ConfigId);
+                return Json(new { success = false, message = "Fel: " + ex.Message });
+            }
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Unapprove([FromBody] ApprovalActionRequest request)
+        {
+            try
+            {
+                if (request == null) return Json(new { success = false, message = "Ogiltig förfrågan." });
+                var viewerId = await _configService.GetCurrentMemberIdAsync();
+                if (viewerId == null) return Json(new { success = false, message = "Inloggning krävs." });
+                var (success, message) = await _configService.UnapproveAsync(request.ConfigId, viewerId.Value);
+                return Json(new { success, message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error unapproving config {Id}", request?.ConfigId);
+                return Json(new { success = false, message = "Fel: " + ex.Message });
+            }
+        }
+
         // ── Member search (for the collaborator picker) ─────────────────
 
         /// <summary>

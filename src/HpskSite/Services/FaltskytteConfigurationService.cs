@@ -1,4 +1,5 @@
 using HpskSite.CompetitionTypes.Faltskytte.Models;
+using HpskSite.Models;
 using Umbraco.Cms.Core.Models.PublishedContent;
 using Umbraco.Cms.Core.Security;
 using Umbraco.Cms.Core.Services;
@@ -30,6 +31,7 @@ namespace HpskSite.Services
         private readonly IMemberService _memberService;
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
         private readonly ClubService _clubService;
+        private readonly CertificationService _certificationService;
 
         public FaltskytteConfigurationService(
             IUmbracoDatabaseFactory databaseFactory,
@@ -38,7 +40,8 @@ namespace HpskSite.Services
             IMemberManager memberManager,
             IMemberService memberService,
             IUmbracoContextAccessor umbracoContextAccessor,
-            ClubService clubService)
+            ClubService clubService,
+            CertificationService certificationService)
         {
             _databaseFactory = databaseFactory;
             _logger = logger;
@@ -47,6 +50,7 @@ namespace HpskSite.Services
             _memberService = memberService;
             _umbracoContextAccessor = umbracoContextAccessor;
             _clubService = clubService;
+            _certificationService = certificationService;
         }
 
         // ── Visibility constants ─────────────────────────────────────────
@@ -58,6 +62,18 @@ namespace HpskSite.Services
 
         private static readonly HashSet<string> ValidVisibilities = new(StringComparer.OrdinalIgnoreCase)
         { VisibilityPrivate, VisibilityClub, VisibilityRegion, VisibilityPublic };
+
+        // ── Approval status constants ────────────────────────────────────
+
+        public const string StatusDraft = "Draft";
+        public const string StatusPendingApproval = "PendingApproval";
+        public const string StatusApproved = "Approved";
+
+        public static string NormalizeStatus(string? raw) =>
+            string.IsNullOrEmpty(raw) ? StatusDraft : raw;
+
+        public static bool IsApproved(FaltskytteConfiguration config) =>
+            NormalizeStatus(config?.ApprovalStatus) == StatusApproved;
 
         // ── Current-member helper ────────────────────────────────────────
 
@@ -221,6 +237,14 @@ namespace HpskSite.Services
             var config = await db.SingleOrDefaultAsync<FaltskytteConfiguration>("WHERE Id = @0", request.Id);
             if (config == null) return (false, "Konfigurationen hittades inte.");
 
+            // JsonBlob (the configuration data) is locked when Approved. Metadata stays editable.
+            // The check is content-aware: an Update where the supplied JsonBlob normalizes to the
+            // existing one is a no-op, so we don't refuse it (lets the editor "save" without changes).
+            if (request.JsonBlob != null && IsApproved(config) && !JsonBlobsEqual(config.JsonBlob, request.JsonBlob))
+            {
+                return (false, "Konfigurationen är godkänd och kan inte ändras. Begär ändring först.");
+            }
+
             if (request.Name != null) config.Name = request.Name.Trim();
             if (request.Description != null) config.Description = request.Description;
             if (request.OwnerClubId.HasValue) config.OwnerClubId = request.OwnerClubId.Value;
@@ -238,6 +262,89 @@ namespace HpskSite.Services
             }
             if (request.JsonBlob != null) config.JsonBlob = request.JsonBlob;
 
+            config.ModifiedDate = DateTime.Now;
+            await db.UpdateAsync(config);
+            return (true, null);
+        }
+
+        /// <summary>
+        /// Normalizes two JSON blobs (sorted keys, ignored whitespace) and compares them.
+        /// Used to decide whether an Update that includes JsonBlob is actually a content change
+        /// vs. an idempotent resave of the existing data.
+        /// </summary>
+        private static bool JsonBlobsEqual(string? a, string? b)
+        {
+            if (string.Equals(a, b, StringComparison.Ordinal)) return true;
+            try
+            {
+                var ta = string.IsNullOrWhiteSpace(a) ? null : Newtonsoft.Json.Linq.JToken.Parse(a);
+                var tb = string.IsNullOrWhiteSpace(b) ? null : Newtonsoft.Json.Linq.JToken.Parse(b);
+                if (ReferenceEquals(ta, tb)) return true;
+                if (ta == null || tb == null) return false;
+                return Newtonsoft.Json.Linq.JToken.DeepEquals(ta, tb);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        // ── Approval workflow ───────────────────────────────────────────
+
+        public async Task<(bool Success, string? Message)> RequestApprovalAsync(int configId, int viewerMemberId)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            var config = await db.SingleOrDefaultAsync<FaltskytteConfiguration>("WHERE Id = @0", configId);
+            if (config == null) return (false, "Konfigurationen hittades inte.");
+            if (!await CanEditAsync(config, viewerMemberId))
+                return (false, "Endast ägare, medredigerare eller administratör kan begära godkännande.");
+            if (NormalizeStatus(config.ApprovalStatus) == StatusApproved)
+                return (false, "Konfigurationen är redan godkänd.");
+
+            config.ApprovalStatus = StatusPendingApproval;
+            config.ModifiedDate = DateTime.Now;
+            await db.UpdateAsync(config);
+            return (true, null);
+        }
+
+        public async Task<(bool Success, string? Message)> ApproveAsync(int configId, int viewerMemberId)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            var config = await db.SingleOrDefaultAsync<FaltskytteConfiguration>("WHERE Id = @0", configId);
+            if (config == null) return (false, "Konfigurationen hittades inte.");
+            if (!await CanViewAsync(config, viewerMemberId))
+                return (false, "Du har inte rättighet att se konfigurationen.");
+
+            var isSiteAdmin = await _authService.IsCurrentUserAdminAsync();
+            var hasBanlaggareCert = await _certificationService.HasActiveCertAsync(viewerMemberId, CertificationTypes.Banlaggare);
+            if (!hasBanlaggareCert && !isSiteAdmin)
+                return (false, "Endast certifierade Banläggare (eller sajtadmin) kan godkänna en konfiguration.");
+
+            if (NormalizeStatus(config.ApprovalStatus) == StatusApproved)
+                return (false, "Konfigurationen är redan godkänd.");
+
+            config.ApprovalStatus = StatusApproved;
+            config.ApprovedByMemberId = viewerMemberId;
+            config.ApprovedDate = DateTime.Now;
+            config.ModifiedDate = DateTime.Now;
+            await db.UpdateAsync(config);
+            return (true, null);
+        }
+
+        public async Task<(bool Success, string? Message)> UnapproveAsync(int configId, int viewerMemberId)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            var config = await db.SingleOrDefaultAsync<FaltskytteConfiguration>("WHERE Id = @0", configId);
+            if (config == null) return (false, "Konfigurationen hittades inte.");
+
+            var canEdit = await CanEditAsync(config, viewerMemberId);
+            var hasBanlaggareCert = await _certificationService.HasActiveCertAsync(viewerMemberId, CertificationTypes.Banlaggare);
+            if (!canEdit && !hasBanlaggareCert)
+                return (false, "Endast ägare, medredigerare, Banläggare eller sajtadmin kan ändra godkännandestatus.");
+
+            config.ApprovalStatus = StatusDraft;
+            config.ApprovedByMemberId = null;
+            config.ApprovedDate = null;
             config.ModifiedDate = DateTime.Now;
             await db.UpdateAsync(config);
             return (true, null);
@@ -367,8 +474,24 @@ namespace HpskSite.Services
                 }).ToList(),
                 CanEdit = await CanEditAsync(config, viewerMemberId),
                 CanDelete = await CanDeleteAsync(config, viewerMemberId),
+                CanApprove = await CanApproveAsync(viewerMemberId),
+                ApprovalStatus = NormalizeStatus(config.ApprovalStatus),
+                ApprovedByMemberId = config.ApprovedByMemberId,
+                ApprovedByName = config.ApprovedByMemberId.HasValue
+                    ? (ResolveMemberName(config.ApprovedByMemberId.Value) ?? $"Medlem {config.ApprovedByMemberId.Value}")
+                    : null,
+                ApprovedDate = config.ApprovedDate,
+                IsLocked = IsApproved(config),
                 JsonBlob = includeJson ? config.JsonBlob : null
             };
+        }
+
+        /// <summary>True if the viewer holds the active Banläggare cert (or is site admin).</summary>
+        public async Task<bool> CanApproveAsync(int? viewerMemberId)
+        {
+            if (viewerMemberId == null) return false;
+            if (await _authService.IsCurrentUserAdminAsync()) return true;
+            return await _certificationService.HasActiveCertAsync(viewerMemberId.Value, CertificationTypes.Banlaggare);
         }
 
         private string? ResolveMemberName(int memberId)
