@@ -1787,51 +1787,6 @@ window.populateEditModal = function(competition) {
     }
 }
 
-function openEditFaltStationConfigurator() {
-    // Get weapon classes from currently checked shooting class checkboxes in the edit modal
-    var weaponClasses = ['C'];
-    var checkedIds = [];
-    document.querySelectorAll('#shootingClassesContainer input[type="checkbox"]:checked').forEach(function(cb) {
-        checkedIds.push(cb.value);
-    });
-    // Fallback: read from hidden field
-    if (checkedIds.length === 0) {
-        var hiddenVal = document.getElementById('shootingClassIds')?.value || '';
-        checkedIds = hiddenVal.split(',').map(function(s) { return s.trim(); }).filter(function(s) { return s; });
-    }
-    // Fallback: read from server data
-    if (checkedIds.length === 0 && window.currentCompetitionData?.shootingClassIds) {
-        var raw = window.currentCompetitionData.shootingClassIds;
-        try {
-            checkedIds = typeof raw === 'string' && raw.startsWith('[') ? JSON.parse(raw) : raw.split(',');
-        } catch(e) { checkedIds = raw.split(','); }
-    }
-    // Use the registry helper so A_opt_X classes resolve to "A_Opt" (their own group), not "A".
-    var allowedGroups = ['A','A_Opt','A_M','A_P','A_G','B','C','R','M'];
-    var wcs = [...new Set(checkedIds.map(function(c) { return window.getWeaponClassCode(c); }))]
-        .filter(function(w) { return allowedGroups.indexOf(w) >= 0; });
-    if (wcs.length > 0) weaponClasses = wcs;
-
-    var existingJson = document.getElementById('edit_faltStationConfigJson').value;
-    var existingConfig = {};
-    if (existingJson) {
-        try {
-            var parsed = JSON.parse(existingJson);
-            // Handle double-encoded JSON (string instead of object)
-            if (typeof parsed === 'string') parsed = JSON.parse(parsed);
-            if (typeof parsed === 'object' && parsed !== null) existingConfig = parsed;
-        } catch(e) {}
-    }
-
-    // Set the hidden field ID that the configurator should write to
-    window._faltCfgTargetField = 'edit_faltStationConfigJson';
-    window._faltCfgSummaryField = 'edit_faltConfigSummary';
-
-    // Open configurator on top of edit modal (no hide/show needed)
-    window._faltCfgReturnToEditModal = true;
-    faltCfgOpen(weaponClasses, existingConfig);
-}
-
 // ============================================================================
 // Direktplacering - Edit Modal
 // ============================================================================

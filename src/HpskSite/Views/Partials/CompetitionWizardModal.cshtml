@@ -830,8 +830,6 @@
     </div>
 </div>
 
-@await Html.PartialAsync("FaltskytteStationConfigModal")
-
 <style>
 /* Wizard Progress Indicator */
 .wizard-progress {
@@ -1152,54 +1150,6 @@ function springSeriesChanged() {
     const seriesInput = document.getElementById('wizard_numberOfSeries');
     seriesInput.value = document.getElementById('wizard_springskytteClassASeries').value;
 }
-
-function openFaltStationConfigurator() {
-    // Determine weapon classes from selected shooting classes via the registry helper,
-    // so A_opt_X classes group as their own weapon class instead of being lumped into A.
-    const checkedClasses = Array.from(document.querySelectorAll('.class-checkbox:checked')).map(cb => cb.value);
-    const allowedGroups = ['A', 'A_Opt', 'A_M', 'A_P', 'A_G', 'B', 'C', 'R', 'M'];
-    let weaponClasses = [...new Set(checkedClasses.map(c => window.getWeaponClassCode(c)))].filter(w => allowedGroups.includes(w));
-    if (weaponClasses.length === 0) weaponClasses = ['C'];
-
-    // Load existing config if any
-    const existingJson = document.getElementById('wizard_faltStationConfigJson').value;
-    let existingConfig = {};
-    if (existingJson) {
-        try { existingConfig = JSON.parse(existingJson); } catch(e) {}
-    }
-
-    // Hide wizard modal first, then open configurator after it's fully hidden
-    const wizardEl = document.getElementById('competitionWizardModal');
-    const wizardModal = bootstrap.Modal.getInstance(wizardEl);
-
-    function onWizardHidden() {
-        wizardEl.removeEventListener('hidden.bs.modal', onWizardHidden);
-        faltCfgOpen(weaponClasses, existingConfig);
-    }
-
-    wizardEl.addEventListener('hidden.bs.modal', onWizardHidden);
-    wizardModal?.hide();
-}
-
-// Update summary text when config modal saves
-const faltCfgObserver = new MutationObserver(() => {
-    const json = document.getElementById('wizard_faltStationConfigJson')?.value;
-    const summary = document.getElementById('wizard_faltConfigSummary');
-    if (json && summary) {
-        try {
-            const cfg = JSON.parse(json);
-            const wcCount = Object.keys(cfg).length;
-            const stCount = Object.values(cfg)[0]?.stations?.length || 0;
-            summary.textContent = `${wcCount} vapenklass(er), ${stCount} stationer`;
-            summary.classList.remove('text-muted');
-            summary.classList.add('text-success');
-            // Update series count
-            document.getElementById('wizard_numberOfSeries').value = stCount;
-        } catch(e) {}
-    }
-});
-const faltCfgHidden = document.getElementById('wizard_faltStationConfigJson');
-if (faltCfgHidden) faltCfgObserver.observe(faltCfgHidden, { attributes: true, attributeFilter: ['value'] });
 
 // Initialize wizard when modal opens
 document.getElementById('competitionWizardModal').addEventListener('show.bs.modal', function() {

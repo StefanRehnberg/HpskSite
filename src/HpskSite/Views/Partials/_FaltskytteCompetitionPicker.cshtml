@@ -107,6 +107,11 @@
             } catch (e) { /* malformed source — keep as-is */ }
             if (fld) fld.value = jsonBlob;
             if (idFld) idFld.value = configId;
+            // Auto-sync ${prefix}numberOfSeries to the attached config's station count.
+            // Only the wizard exposes this field; the edit modal doesn't (numberOfSeries
+            // there was set at competition creation and shouldn't shift on re-attach).
+            var seriesFld = document.getElementById(prefix + 'numberOfSeries');
+            if (seriesFld && cfg.stationCount) seriesFld.value = cfg.stationCount;
             faltPickerRenderStatus(prefix, cfg);
         } catch (e) {
             console.error(e);
