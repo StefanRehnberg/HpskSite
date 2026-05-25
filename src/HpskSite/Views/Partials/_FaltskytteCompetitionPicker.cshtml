@@ -66,8 +66,16 @@
         }
         var prev = preserveSelection ? sel.value : '';
         sel.innerHTML = '<option value="">Välj sparad konfiguration...</option>';
-        window._faltPickerCache.forEach(function(c) {
-            var label = c.name + ' (' + c.stationCount + ' stationer, ' + c.ownerMemberName + ')';
+        // Sort Approved configs to the top — they're the safer pick for a competition.
+        var sorted = window._faltPickerCache.slice().sort(function(a, b) {
+            var sa = a.approvalStatus === 'Approved' ? 0 : 1;
+            var sb = b.approvalStatus === 'Approved' ? 0 : 1;
+            if (sa !== sb) return sa - sb;
+            return (a.name || '').localeCompare(b.name || '', 'sv');
+        });
+        sorted.forEach(function(c) {
+            var prefix2 = c.approvalStatus === 'Approved' ? '✓ ' : (c.approvalStatus === 'PendingApproval' ? '⏳ ' : '');
+            var label = prefix2 + c.name + ' (' + c.stationCount + ' stationer, ' + c.ownerMemberName + ')';
             sel.innerHTML += '<option value="' + c.id + '">' + label.replace(/"/g, '&quot;') + '</option>';
         });
         if (prev) sel.value = prev;
@@ -137,8 +145,15 @@
         var secretBadge = cfg.isSecret
             ? ' <span class="badge bg-warning text-dark" title="Hemlig fram till ' + cfg.secretUntil + '"><i class="bi bi-shield-lock me-1"></i>Hemlig</span>'
             : '';
+        var approvalBadge = '';
+        if (cfg.approvalStatus === 'Approved') {
+            var aTitle = 'Godkänd' + (cfg.approvedByName ? ' av ' + cfg.approvedByName : '');
+            approvalBadge = ' <span class="badge bg-success" title="' + aTitle.replace(/"/g, '&quot;') + '"><i class="bi bi-shield-check me-1"></i>Godkänd</span>';
+        } else if (cfg.approvalStatus === 'PendingApproval') {
+            approvalBadge = ' <span class="badge bg-warning text-dark" title="Väntar på godkännande"><i class="bi bi-hourglass-split me-1"></i>Väntar</span>';
+        }
         status.innerHTML = '<span class="badge bg-success"><i class="bi bi-check2-circle me-1"></i>Ansluten</span> ' +
-            '<strong>' + (cfg.name || '').replace(/</g, '&lt;') + '</strong>' + secretBadge +
+            '<strong>' + (cfg.name || '').replace(/</g, '&lt;') + '</strong>' + secretBadge + approvalBadge +
             ' &middot; <span class="text-muted">' + cfg.stationCount + ' stationer</span>' +
             ' &middot; <a href="/faltkonfig/' + cfg.id + '/redigera" target="_blank">Redigera <i class="bi bi-box-arrow-up-right"></i></a>';
     };
