@@ -729,7 +729,7 @@ function renderActiveTab() {
                         <span id="faltCfgDirty_${wc}_${st.station}" class="badge bg-warning text-dark ms-2" style="display:none">Osparad</span>
                     </span>
                     <span class="d-flex align-items-center gap-2">
-                        <span class="text-muted small">${st.shootingTimeSec}s | ${st.shooterStartPosition} | ${st.targetGroups.length} målgr.</span>
+                        <span class="text-muted small">${st.shootingTimeSec}s | ${st.shooterStartPosition}${st.weaponStartPosition === '45 grader' ? ' | 45 grader' : ''} | ${st.targetGroups.length} målgr.</span>
                         <button class="btn btn-success btn-sm" onclick="event.stopPropagation(); faltCfgSaveStation(${st.station}, '${wc}')">
                             <i class="bi bi-check-lg me-1"></i>Spara stationen
                         </button>
