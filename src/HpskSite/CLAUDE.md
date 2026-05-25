@@ -1141,6 +1141,45 @@ The legacy `#finalsStartListSection` markup + `checkFinalsEligibility` / `displa
 
 **Backward compat:** existing competitions keep their inline `stationConfig` JSON. The picker shows a **Konvertera till sparad konfiguration** link when it sees inline data without `_attachedConfigId`. Click → prompts for a name → POSTs `Create` with the inline JSON as starting blob → embeds `_attachedConfigId` in the live hidden field. Operator still needs to Save the competition to persist the link.
 
+### Fältkonfigurator Approval Workflow (2026-05-25)
+
+**What:** Banläggare-gated approval lifecycle for saved configurations. Owners pick a specific Banläggare to ask, that person gets an email + deep-link, and only they can approve. Approved configs are locked from JsonBlob edits (metadata stays editable).
+
+**State machine:**
+```
+Draft  ──RequestApproval(picksApprover)──▶  PendingApproval  ──Approve──▶  Approved
+   ▲                                                              │
+   └─────────────────────────────  Unapprove  ────────────────────┘
+```
+
+**DB columns on FaltskytteConfiguration:**
+- `ApprovalStatus NVARCHAR(20) NULL` — `Draft` / `PendingApproval` / `Approved`. Null treated as Draft for legacy rows.
+- `RequestedApproverMemberId INT NULL` — who the owner asked. Populated while PendingApproval; cleared on Approve + Unapprove.
+- `ApprovedByMemberId INT NULL` + `ApprovedDate DATETIME NULL` — who actually approved. Populated only when Approved.
+
+Two SQL migrations: `add-approval-to-faltskytte-configuration.sql` (status + approved-by columns) and `add-requestedapprover-to-faltskytte-configuration.sql` (directed-request column). Run both on prod.
+
+**Authorization:** `ApproveAsync` permits site admin OR (viewer is owner AND has Banläggare cert) OR (viewer is the RequestedApproverMemberId AND has Banläggare cert). Anyone else gets `403`-equivalent with a friendly message.
+
+**Edit gate:** `UpdateAsync` rejects JsonBlob changes when ApprovalStatus = Approved. Idempotent JsonBlob saves (same content, normalized via `JToken.DeepEquals`) pass through to support "Spara allt" no-op flows. Metadata fields (Name / Description / Visibility / SecretUntil / Collaborators) are always editable.
+
+**Email:** `EmailService.SendFaltkonfigApprovalRequestAsync` sends an HTML mail to the picked Banläggare with the deep-link `/faltkonfig/{id}/redigera`. Best-effort — request persists even if SMTP fails.
+
+**Endpoints** (`FaltskytteConfigurationController`):
+- `POST RequestApproval` `{configId, requestedApproverMemberId}` — owner picks who to ask.
+- `POST Approve` `{configId}` — gated per ApproveAsync rules.
+- `POST Unapprove` `{configId}` — owner / collaborator / Banläggare / admin.
+- `GET GetBanlaggareCandidates` — every active Banläggare cert holder (name + primary-club name), sv-SE alphabetical.
+
+**UI:**
+- Editor: approval banner above the configurator card with status-aware actions (Begär godkännande modal opens a Banläggare picker; PendingApproval banner names the awaitee + Godkänn button only renders to the requested approver; Approved banner names the approver + Begär ändring / Återkalla actions). `#fkEditorConfigurator.fk-locked` CSS dims + disables pointer events when Approved.
+- Listing: per-card approval badge (Godkänd / Väntar); new "Väntar på godkännande" filter chip visible only to Banläggare (via `viewerCanApprove` in the ListAccessible response).
+- Competition picker dropdown sorts Approved-first with `✓` prefix; the attached-config status line shows the badge.
+
+**View-model derived fields** (`FaltskytteConfigurationView`): `RequestedApproverMemberId/Name`, `ApprovedByMemberId/Name`, `ApprovedDate`, `ApprovalStatus`, `CanApprove` (viewer holds Banläggare cert), `IsLocked` (Approved), `IsRequestedApprover` (viewer == RequestedApproverMemberId).
+
+**Banläggare cert check** uses the existing `CertificationService.HasActiveCertAsync(memberId, CertificationTypes.Banlaggare)` — no new role plumbing.
+
 ### Fältskytte SHB Shoot-Time Suggestion (2026-05-24)
 
 **What:** The configurator surfaces a SHB-derived suggested skjuttid per station per weapon class, with a live breakdown modal and an "Använd" button that copies it to the Skjuttid field.
@@ -1226,6 +1265,7 @@ The `/Migrations` folder contains disabled database schemas for direct competiti
 ## Implementation Status
 
 ### Completed ✅
+- **Fältkonfigurator Approval Workflow (2026-05-25)** - Banläggare-gated approval lifecycle (Draft → PendingApproval → Approved). Owners pick a specific Banläggare via dropdown; email notification sent with deep-link; only that Banläggare can approve. Approved configs lock JsonBlob (metadata stays editable). Listing + competition picker show Godkänd / Väntar badges; "Väntar på godkännande" filter visible to Banläggare only. See "Fältkonfigurator Approval Workflow" section.
 - **Fältskytte Standalone Configurations + SHB Shoot-Time Suggestion (2026-05-24 → 25)** - New `/faltkonfig` listing + `/faltkonfig/{id}/redigera` editor for fristående station configurations with visibility tiers, collaborators, SecretUntil sekretessgrind, link-or-copy station import + linked-station reload UX. Replaces the legacy in-competition `FaltskytteStationConfigModal`. Adds a saved-config picker on the wizard / edit modal + a Konvertera-button for legacy inline configs. SHB-derived suggested skjuttid per station/class (6 skott × per-shot floor + tillägg, mörker ×1.30), per-målgrupp distance slider, Mörkerfältskjutning toggle, Figurkatalog grouped + filtered by SizeGroup, mobile-responsive picker modal. See "Fältskytte Standalone Configurations" + "Fältskytte SHB Shoot-Time Suggestion" sections.
 - **Competition URLs & Routing (2026-05-22)** - Custom URL provider + content finder for club-hosted, region-hosted, SM, and Landsdel competition URL shapes (see "Competition URLs & Routing" section above). Includes at-least-one-host guard across wizard/edit modal + their backends, and isClubOnly auto-disable when no club is selected.
 - **Controller Refactoring (2025-10-28)** - AdminController split into specialized controllers with AdminAuthorizationService
