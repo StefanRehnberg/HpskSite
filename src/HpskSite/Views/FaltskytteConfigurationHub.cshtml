@@ -51,6 +51,9 @@
 
                 <input type="radio" class="btn-check" name="fkHubFilter" id="fkHubFilter_public" value="public" onchange="fkHubRender()">
                 <label class="btn btn-outline-primary" for="fkHubFilter_public">Publika</label>
+
+                <input type="radio" class="btn-check" name="fkHubFilter" id="fkHubFilter_pending" value="pending" onchange="fkHubRender()">
+                <label class="btn btn-outline-warning" for="fkHubFilter_pending" id="fkHubFilter_pendingLabel" style="display:none">Väntar på godkännande</label>
             </div>
         </div>
         <div class="col-md-auto ms-auto">
@@ -137,6 +140,9 @@ async function fkHubLoad() {
             return;
         }
         fkHubConfigs = data.configurations || [];
+        // "Väntar på godkännande"-fliken visas bara för Banläggare (eller sajtadmin).
+        var pendingLabel = document.getElementById('fkHubFilter_pendingLabel');
+        if (pendingLabel) pendingLabel.style.display = data.viewerCanApprove ? '' : 'none';
         fkHubRender();
     } catch (e) {
         console.error(e);
@@ -152,6 +158,7 @@ function fkHubFilteredConfigs() {
         if (filter === 'mine' && !c.canDelete) return false;            // owner-only proxy
         if (filter === 'collab' && c.canEdit && c.canDelete) return false; // mine = owner; collab = can-edit but not owner
         if (filter === 'public' && c.visibility !== 'Public') return false;
+        if (filter === 'pending' && c.approvalStatus !== 'PendingApproval') return false;
         if (!q) return true;
         return (c.name + ' ' + (c.ownerMemberName || '') + ' ' + (c.ownerClubName || '')).toLowerCase().indexOf(q) >= 0;
     });
@@ -175,6 +182,7 @@ function fkHubRender() {
         var secretBadge = c.isSecret
             ? '<span class="badge bg-warning text-dark" title="Hemlig fram till ' + formatDate(c.secretUntil) + '"><i class="bi bi-shield-lock me-1"></i>Hemlig</span>'
             : '';
+        var approvalBadge = approvalBadgeFor(c);
         var deleteBtn = c.canDelete
             ? '<button class="btn btn-outline-danger btn-sm" onclick="fkHubDelete(' + c.id + ')" title="Ta bort"><i class="bi bi-trash"></i></button>'
             : '';
@@ -183,7 +191,7 @@ function fkHubRender() {
                 '<div class="card-body">' +
                     '<div class="d-flex justify-content-between align-items-start mb-2">' +
                         '<h6 class="card-title mb-0 text-truncate" title="' + escapeHtml(c.name) + '">' + escapeHtml(c.name) + '</h6>' +
-                        '<div class="d-flex gap-1 align-items-center">' + visBadge + secretBadge + '</div>' +
+                        '<div class="d-flex gap-1 align-items-center flex-wrap">' + visBadge + secretBadge + approvalBadge + '</div>' +
                     '</div>' +
                     (c.description ? '<p class="card-text small text-muted mb-2">' + escapeHtml(c.description) + '</p>' : '') +
                     '<div class="small text-muted mb-1"><i class="bi bi-person me-1"></i>' + escapeHtml(c.ownerMemberName) +
@@ -211,6 +219,19 @@ function visibilityBadge(c) {
         case 'Club':    return '<span class="badge bg-info text-dark">Klubb</span>';
         default:        return '<span class="badge bg-secondary">Privat</span>';
     }
+}
+
+function approvalBadgeFor(c) {
+    if (c.approvalStatus === 'Approved') {
+        var title = 'Godkänd' +
+            (c.approvedByName ? ' av ' + c.approvedByName : '') +
+            (c.approvedDate ? ' den ' + formatDate(c.approvedDate) : '');
+        return '<span class="badge bg-success" title="' + title.replace(/"/g, '&quot;') + '"><i class="bi bi-shield-check me-1"></i>Godkänd</span>';
+    }
+    if (c.approvalStatus === 'PendingApproval') {
+        return '<span class="badge bg-warning text-dark" title="Väntar på godkännande av Banläggare"><i class="bi bi-hourglass-split me-1"></i>Väntar</span>';
+    }
+    return '';
 }
 
 function formatDate(iso) {

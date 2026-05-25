@@ -60,7 +60,8 @@ namespace HpskSite.Controllers
                 {
                     views.Add(await _configService.BuildViewAsync(cfg, viewerId, includeJson: false));
                 }
-                return Json(new { success = true, configurations = views });
+                var viewerCanApprove = await _configService.CanApproveAsync(viewerId);
+                return Json(new { success = true, configurations = views, viewerCanApprove });
             }
             catch (Exception ex)
             {

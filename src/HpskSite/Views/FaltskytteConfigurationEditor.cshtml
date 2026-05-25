@@ -23,15 +23,23 @@
 
 @* Figure picker + suggestion modal + the configurator JS — shared with the legacy modal. *@
 @await Html.PartialAsync("FaltskytteTargetPickerModal")
+<style>
+    /* When a configuration is Godkänd, the configurator UI is read-only.
+       Pointer-events disable click/focus/scroll-on-inputs; the opacity dims
+       to signal locked state. Buttons in the approval banner stay outside
+       this wrapper so they remain clickable. */
+    #fkEditorConfigurator.fk-locked { pointer-events: none; opacity: 0.65; user-select: text; }
+</style>
 @await Html.PartialAsync("_FaltskytteConfiguratorSuggestionModal")
 @Html.AntiForgeryToken()
 
 <div class="container-fluid faltkonfig-editor py-3" id="fkEditorRoot" style="display:none">
     <!-- Header bar -->
     <div class="d-flex flex-wrap gap-2 justify-content-between align-items-center mb-3 pb-2 border-bottom">
-        <div class="d-flex align-items-center gap-2">
+        <div class="d-flex align-items-center gap-2 flex-wrap">
             <a href="/faltkonfig" class="btn btn-outline-secondary btn-sm" title="Tillbaka till listan"><i class="bi bi-arrow-left"></i></a>
             <h5 class="mb-0"><i class="bi bi-gear me-2"></i><span id="fkEditorTitle">Redigera konfiguration</span></h5>
+            <span id="fkEditorStatusBadge" class="badge"></span>
             <span id="fkEditorSavedBadge" class="badge bg-success" style="display:none">Allt sparat</span>
             <span id="fkEditorDirtyBadge" class="badge bg-warning text-dark" style="display:none">Osparade ändringar</span>
             <span id="fkEditorSecretBadge" class="badge bg-warning text-dark" style="display:none" title=""><i class="bi bi-shield-lock me-1"></i>Hemlig</span>
@@ -94,8 +102,18 @@
         </div>
     </div>
 
-    <!-- Configurator UI (same DOM IDs as the modal body so the shared script works) -->
-    <div class="card">
+    <!-- Approval banner: status badge + action buttons. JS toggles content + .show on this. -->
+    <div id="fkEditorApprovalBanner" class="alert mb-3" style="display:none">
+        <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between">
+            <div id="fkEditorApprovalText" class="small"></div>
+            <div id="fkEditorApprovalActions" class="d-flex gap-1"></div>
+        </div>
+    </div>
+
+    <!-- Configurator UI (same DOM IDs as the modal body so the shared script works).
+         Wrapped in #fkEditorConfigurator so JS can toggle the locked state without touching
+         the metadata panel above (metadata stays editable on Approved configs). -->
+    <div class="card" id="fkEditorConfigurator">
         <div class="card-body">
             <!-- Mode toggle + page-wide settings -->
             <div class="d-flex flex-wrap gap-3 align-items-end mb-3">
@@ -331,6 +349,120 @@ function fkEditorRenderMeta() {
         secretBadge.style.display = 'none';
     }
     fkEditorRenderCollaborators();
+    fkEditorRenderApprovalBanner();
+}
+
+function fkEditorRenderApprovalBanner() {
+    var banner = document.getElementById('fkEditorApprovalBanner');
+    var textEl = document.getElementById('fkEditorApprovalText');
+    var actionsEl = document.getElementById('fkEditorApprovalActions');
+    var statusBadge = document.getElementById('fkEditorStatusBadge');
+    var cfg = document.getElementById('fkEditorConfigurator');
+    if (!fkEditorConfig) { banner.style.display = 'none'; return; }
+
+    var status = fkEditorConfig.approvalStatus || 'Draft';
+    var canEdit = !!fkEditorConfig.canEdit;
+    var canApprove = !!fkEditorConfig.canApprove;
+
+    // Status pill in the header.
+    statusBadge.classList.remove('bg-secondary', 'bg-warning', 'bg-success', 'text-dark');
+    if (status === 'Approved') {
+        statusBadge.classList.add('bg-success');
+        statusBadge.innerHTML = '<i class="bi bi-shield-check me-1"></i>Godkänd';
+    } else if (status === 'PendingApproval') {
+        statusBadge.classList.add('bg-warning', 'text-dark');
+        statusBadge.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Väntar på godkännande';
+    } else {
+        statusBadge.classList.add('bg-secondary');
+        statusBadge.innerHTML = 'Utkast';
+    }
+
+    // Lock state for the configurator wrapper (NOT for the metadata panel).
+    if (status === 'Approved') {
+        cfg.classList.add('fk-locked');
+    } else {
+        cfg.classList.remove('fk-locked');
+    }
+
+    // Banner content + actions per status.
+    var text = '';
+    var actions = [];
+    if (status === 'Approved') {
+        banner.className = 'alert alert-success mb-3';
+        var approvedDateStr = fkEditorConfig.approvedDate
+            ? new Date(fkEditorConfig.approvedDate).toLocaleDateString('sv-SE')
+            : '';
+        text = '<i class="bi bi-shield-check me-1"></i><strong>Godkänd</strong>' +
+               (fkEditorConfig.approvedByName ? ' av <strong>' + escapeHtml(fkEditorConfig.approvedByName) + '</strong>' : '') +
+               (approvedDateStr ? ' den ' + approvedDateStr : '') +
+               '. Konfigurationsdata är låst tills godkännandet återkallas.';
+        if (canEdit) {
+            actions.push('<button class="btn btn-outline-secondary btn-sm" onclick="fkApprovalUnapprove(true)">Begär ändring</button>');
+        } else if (canApprove) {
+            actions.push('<button class="btn btn-outline-secondary btn-sm" onclick="fkApprovalUnapprove(false)">Återkalla godkännande</button>');
+        }
+    } else if (status === 'PendingApproval') {
+        banner.className = 'alert alert-warning mb-3';
+        text = '<i class="bi bi-hourglass-split me-1"></i><strong>Väntar på godkännande</strong>. En certifierad Banläggare granskar konfigurationen innan den kan användas som godkänd mall.';
+        if (canApprove) {
+            actions.push('<button class="btn btn-success btn-sm" onclick="fkApprovalApprove()"><i class="bi bi-shield-check me-1"></i>Godkänn</button>');
+        }
+        if (canEdit) {
+            actions.push('<button class="btn btn-outline-secondary btn-sm" onclick="fkApprovalUnapprove(true)">Avbryt begäran</button>');
+        }
+    } else {
+        // Draft. Only surface the banner when the viewer can request approval.
+        if (canEdit) {
+            banner.className = 'alert alert-light border mb-3';
+            text = 'Konfigurationen är ett utkast. När du är klar kan du begära godkännande av en Banläggare.';
+            actions.push('<button class="btn btn-primary btn-sm" onclick="fkApprovalRequest()"><i class="bi bi-shield-check me-1"></i>Begär godkännande</button>');
+        } else if (canApprove) {
+            // Banläggare browsing someone else's draft — offer direct approval too.
+            banner.className = 'alert alert-light border mb-3';
+            text = 'Konfigurationen är ett utkast.';
+            actions.push('<button class="btn btn-success btn-sm" onclick="fkApprovalApprove()"><i class="bi bi-shield-check me-1"></i>Godkänn</button>');
+        } else {
+            banner.style.display = 'none';
+            return;
+        }
+    }
+    textEl.innerHTML = text;
+    actionsEl.innerHTML = actions.join('');
+    banner.style.display = '';
+}
+
+async function fkApprovalRequest() {
+    await fkApprovalCall('/umbraco/surface/FaltskytteConfiguration/RequestApproval');
+}
+async function fkApprovalApprove() {
+    if (!confirm('Godkänn konfigurationen "' + (fkEditorConfig.name || '') + '"? Konfigurationsdata låses tills godkännandet återkallas.')) return;
+    await fkApprovalCall('/umbraco/surface/FaltskytteConfiguration/Approve');
+}
+async function fkApprovalUnapprove(asOwner) {
+    var prompt = asOwner
+        ? 'Begär ändring? Befintligt godkännande tas bort och konfigurationen återgår till utkast.'
+        : 'Återkalla godkännandet? Konfigurationen återgår till utkast.';
+    if (!confirm(prompt)) return;
+    await fkApprovalCall('/umbraco/surface/FaltskytteConfiguration/Unapprove');
+}
+
+async function fkApprovalCall(url) {
+    try {
+        var resp = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value
+            },
+            body: JSON.stringify({ configId: fkEditorConfig.id })
+        });
+        var data = await resp.json();
+        if (!data.success) { alert('Fel: ' + (data.message || 'Okänt fel')); return; }
+        await fkEditorReloadMeta();
+    } catch (e) {
+        console.error(e);
+        alert('Nätverksfel.');
+    }
 }
 
 function fkEditorRenderCollaborators() {
@@ -497,7 +629,19 @@ async function fkEditorReloadMeta() {
         var resp = await fetch('/umbraco/surface/FaltskytteConfiguration/Get?id=' + fkEditorConfig.id);
         var data = await resp.json();
         if (data.success) {
-            fkEditorConfig.collaborators = data.configuration.collaborators || [];
+            // Refresh every field the meta + approval renderers consume — collaborators,
+            // approval state, and the derived flags. Keep the in-memory JSON blob though
+            // (we don't want to clobber unsaved configurator edits with the server's copy).
+            var srv = data.configuration;
+            fkEditorConfig.collaborators = srv.collaborators || [];
+            fkEditorConfig.approvalStatus = srv.approvalStatus;
+            fkEditorConfig.approvedByMemberId = srv.approvedByMemberId;
+            fkEditorConfig.approvedByName = srv.approvedByName;
+            fkEditorConfig.approvedDate = srv.approvedDate;
+            fkEditorConfig.isLocked = srv.isLocked;
+            fkEditorConfig.canEdit = srv.canEdit;
+            fkEditorConfig.canDelete = srv.canDelete;
+            fkEditorConfig.canApprove = srv.canApprove;
             fkEditorRenderMeta();
         }
     } catch (e) { console.error(e); }
