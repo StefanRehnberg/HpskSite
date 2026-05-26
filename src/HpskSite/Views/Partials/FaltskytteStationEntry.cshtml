@@ -21,6 +21,21 @@
     #fseKeypad .kp-body { background:var(--bs-body-bg); border-radius:12px; padding:20px; max-width:300px; width:90%; box-shadow:0 8px 32px rgba(0,0,0,0.3); }
     #fseKeypad .kp-display { font-size:2.5em; font-weight:bold; text-align:center; min-height:60px; line-height:60px; border-bottom:2px solid var(--bs-border-color); margin-bottom:12px; }
     #fseKeypad .kp-btn { width:70px; height:60px; font-size:1.5em; font-weight:bold; border-radius:8px; }
+
+    /* Tidur (stationschef timer) */
+    .fse-tmr-display { font-size:3em; line-height:1; font-variant-numeric:tabular-nums; }
+    .fse-tmr-display.is-prefire { color:var(--bs-warning); }
+    .fse-tmr-display.is-firing { color:var(--bs-success); }
+    .fse-tmr-display.is-ceasefire { color:var(--bs-danger); }
+    .fse-tmr-figrow { display:flex; align-items:center; gap:8px; margin-bottom:4px; }
+    .fse-tmr-figlabel { width:140px; flex-shrink:0; font-size:0.85em; line-height:1.1; }
+    .fse-tmr-figtimeline { flex-grow:1; position:relative; height:18px; background:var(--bs-secondary-bg); border-radius:3px; overflow:hidden; }
+    .fse-tmr-figband { position:absolute; top:0; bottom:0; background:var(--bs-success); }
+    .fse-tmr-figstate { width:64px; flex-shrink:0; font-weight:bold; font-size:0.85em; text-align:right; }
+    .fse-tmr-figrow.flash .fse-tmr-figtimeline { box-shadow:0 0 0 3px var(--bs-warning); transition:box-shadow 0.4s ease-out; }
+    .fse-tmr-cursor { position:absolute; top:-2px; bottom:-2px; width:2px; background:var(--bs-body-color); pointer-events:none; }
+    .fse-tmr-progbar-wrap { position:relative; height:28px; background:var(--bs-secondary-bg); border-radius:4px; overflow:visible; }
+    .fse-tmr-progbar-fill { position:absolute; top:0; bottom:0; left:0; background:var(--bs-success); border-radius:4px; transition:width 0.1s linear; }
 </style>
 
 @{
@@ -96,6 +111,38 @@
                 <span class="small text-muted ms-2" id="fseRcCount"></span>
             </div>
             <div class="card-body p-0" id="fseRcList"></div>
+        </div>
+
+        <!-- Tidur: röstkommando-sekvens + visuell skjuttid med vänd-indikatorer per figur -->
+        <div class="card mb-3" id="fseTimerCard" style="display:none">
+            <div class="card-header py-2 d-flex justify-content-between align-items-center">
+                <span class="fw-bold small"><i class="bi bi-stopwatch me-1"></i>Tidur</span>
+                <div class="d-flex gap-1">
+                    <button class="btn btn-outline-secondary btn-sm" id="fseTimerTestBtn" onclick="fseTimerTestVoice()" title="Test r&ouml;st">
+                        <i class="bi bi-volume-up"></i>
+                    </button>
+                    <button class="btn btn-success btn-sm" id="fseTimerStartBtn" onclick="fseTimerStart()">
+                        <i class="bi bi-play-fill me-1"></i>Starta
+                    </button>
+                    <button class="btn btn-outline-secondary btn-sm" id="fseTimerResetBtn" onclick="fseTimerReset()" style="display:none">
+                        <i class="bi bi-arrow-counterclockwise me-1"></i>&Aring;terst&auml;ll
+                    </button>
+                </div>
+            </div>
+            <div class="card-body py-2">
+                <div class="alert alert-warning small mb-2 py-1" id="fseTimerVoiceBanner" style="display:none"></div>
+                <div class="text-center fw-bold fse-tmr-display" id="fseTimerDisplay">&mdash;</div>
+                <div class="d-flex align-items-center gap-2 mt-2 mb-1">
+                    <div class="fse-tmr-figlabel fw-bold">Skjuttid</div>
+                    <div class="fse-tmr-progbar-wrap" style="flex-grow:1">
+                        <div class="fse-tmr-progbar-fill" id="fseTimerBar" style="width:0%"></div>
+                        <div class="fse-tmr-cursor" id="fseTimerCursor" style="left:0%;display:none"></div>
+                    </div>
+                    <div class="fse-tmr-figstate">&nbsp;</div>
+                </div>
+                <div class="small text-muted mb-2" id="fseTimerStatus">Tryck Starta f&ouml;r att inleda kommandosekvensen (10 s upprop &rarr; ELD &rarr; skjuttid &rarr; ELD UPPH&Ouml;R).</div>
+                <div id="fseTimerFigures"></div>
+            </div>
         </div>
 
         <button class="btn btn-primary w-100 fse-save-btn" onclick="fseStartEntry()">
@@ -306,6 +353,9 @@
             document.getElementById('fseRcFpBody').innerHTML = fpHtml;
         }
 
+        // Tidur: build timeline for the patrol's weapon class.
+        fseTimerInit(wcCfg);
+
         // Render roll call list
         presentMembers = new Set();
         var rcHtml = '';
@@ -338,6 +388,7 @@
 
     window.fseStartEntry = function() {
         if (presentMembers.size === 0) { alert('Minst en skytt m\u00e5ste vara n\u00e4rvarande.'); return; }
+        fseTimerCancel();
         currentShooterIdx = 0;
         // Find first present member
         var members = currentPatrol.members || [];
@@ -389,6 +440,7 @@
     };
 
     window.fseBackFromRollCall = function() {
+        fseTimerCancel();
         document.getElementById('fseRollCallScreen').style.display = 'none';
         document.getElementById('fseSelectScreen').style.display = '';
         fseLoadStation(); // Refresh patrol data (updates green checkmarks)
@@ -868,6 +920,355 @@
         document.getElementById('fseEntryScreen').style.display = 'none';
         document.getElementById('fseSelectScreen').style.display = '';
         fseLoadStation();
+    };
+
+    // ─── Tidur (Stationschef timer + röstkommandon) ──────────────────────
+    //
+    // Sequence: tap Starta → "10 SEKUNDER KVAR!" (rate 1.0) → +7s → "FÄRDIGA!" → +3s
+    // → "ELD!" + shooting bar starts → at T-3 of shooting time → "EEELD UPPHÖÖR!"
+    // (rate 0.55) → T+shootingTime → idle.
+    //
+    // Voice uses the Web Speech API. iOS requires the first speak() to come from a
+    // user gesture, which the Starta button provides. Wake Lock keeps the screen on
+    // for the full ~30-50s cycle.
+
+    var TMR_PREFIRE_SEC = 10;   // T-10 → T+0 (warm-up phase)
+    var TMR_FARDIG_SEC = 3;     // when in prefire phase "FÄRDIGA!" fires (T-3)
+    var TMR_CEASEFIRE_SEC = 3;  // "EEELD UPPHÖÖR!" starts this many sec before end
+
+    var tmrShootingTimeSec = 0;
+    var tmrFigures = [];        // [{key, label, behavior, bands:[{from,to}], visibleNow:bool}]
+    var tmrRunning = false;
+    var tmrStartMs = 0;         // performance.now() at T=0 (start of shooting time)
+    var tmrFrameHandle = 0;
+    var tmrSpoken = {};         // flags: {prefire:true, fardig:true, eld:true, upphor:true}
+    var tmrWakeLock = null;
+    var tmrSvVoice = null;
+    var tmrVoiceState = 'pending';  // 'pending' | 'ok' | 'missing'
+
+    function tmrLoadVoices() {
+        if (!window.speechSynthesis) { tmrVoiceState = 'missing'; return; }
+        var voices = window.speechSynthesis.getVoices ? window.speechSynthesis.getVoices() : [];
+        if (!voices || voices.length === 0) { tmrVoiceState = 'pending'; return; }
+        // First: any sv-* voice (strict — we refuse to let an English voice mangle Swedish).
+        var sv = voices.find(function(x) { return x.lang && x.lang.toLowerCase().indexOf('sv') === 0; });
+        if (sv) {
+            // Prefer named iOS / Google Swedish voices when multiple sv-* are present.
+            var preferred = ['Alva', 'Klara', 'Oskar', 'Google svenska', 'Google Svenska'];
+            for (var i = 0; i < preferred.length; i++) {
+                var named = voices.find(function(x) {
+                    return x.lang && x.lang.toLowerCase().indexOf('sv') === 0
+                        && x.name && x.name.indexOf(preferred[i]) !== -1;
+                });
+                if (named) { sv = named; break; }
+            }
+            tmrSvVoice = sv;
+            tmrVoiceState = 'ok';
+        } else {
+            tmrSvVoice = null;
+            tmrVoiceState = 'missing';
+        }
+        // Refresh the status banner if the card is currently rendered.
+        tmrUpdateVoiceBanner();
+    }
+    if (window.speechSynthesis) {
+        // Voices populate async on Chrome / Android — listen + warm-load.
+        tmrLoadVoices();
+        if ('onvoiceschanged' in window.speechSynthesis) {
+            window.speechSynthesis.addEventListener('voiceschanged', tmrLoadVoices);
+        }
+    }
+
+    function tmrUpdateVoiceBanner() {
+        var banner = document.getElementById('fseTimerVoiceBanner');
+        if (!banner) return;
+        if (tmrVoiceState === 'missing') {
+            banner.style.display = '';
+            banner.innerHTML = '<i class="bi bi-volume-mute me-1"></i>Ingen svensk r&ouml;st finns p&aring; enheten &mdash; tiduret k&ouml;rs utan r&ouml;stkommandon. Installera svensk r&ouml;st i operativsystemets r&ouml;stinst&auml;llningar f&ouml;r att aktivera.';
+        } else if (tmrVoiceState === 'pending') {
+            banner.style.display = '';
+            banner.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>S&ouml;ker svensk r&ouml;st p&aring; enheten&hellip;';
+        } else {
+            banner.style.display = 'none';
+            banner.innerHTML = '';
+        }
+    }
+
+    function tmrSpeak(text, rate) {
+        if (!window.speechSynthesis || !window.SpeechSynthesisUtterance) return;
+        if (tmrVoiceState !== 'ok' || !tmrSvVoice) return;  // Refuse to speak with an English voice.
+        try { window.speechSynthesis.cancel(); } catch (e) {}
+        var u = new SpeechSynthesisUtterance(text);
+        u.lang = tmrSvVoice.lang || 'sv-SE';
+        u.voice = tmrSvVoice;
+        u.rate = rate || 1.0;
+        u.pitch = 1.0;
+        u.volume = 1.0;
+        try { window.speechSynthesis.speak(u); } catch (e) {}
+    }
+
+    window.fseTimerTestVoice = function() {
+        tmrLoadVoices();
+        if (tmrVoiceState === 'ok') tmrSpeak('Eld!', 1.0);
+        else tmrUpdateVoiceBanner();
+    };
+
+    // Case-insensitive lookup with sane fallbacks. The JSON blob may come back
+    // either camelCase (System.Text.Json default in ASP.NET Core) or PascalCase
+    // (older Newtonsoft-serialized snapshots), and we want either to work.
+    function tmrPick(obj, names) {
+        if (!obj) return undefined;
+        for (var i = 0; i < names.length; i++) {
+            if (obj[names[i]] != null) return obj[names[i]];
+        }
+        // Case-insensitive fallback — find a key matching any name regardless of casing.
+        var lower = names.map(function(n) { return n.toLowerCase(); });
+        for (var k in obj) {
+            if (Object.prototype.hasOwnProperty.call(obj, k) && lower.indexOf(k.toLowerCase()) !== -1) {
+                if (obj[k] != null) return obj[k];
+            }
+        }
+        return undefined;
+    }
+
+    function tmrFigBands(fig, shootSec) {
+        // Returns array of {from,to} visible windows within [0, shootSec].
+        var behavior = tmrPick(fig, ['behavior', 'Behavior']) || 'Fast';
+        // Compare via unicode escapes to dodge encoding mismatch between this
+        // source file and the JSON response (other configurator code does the same).
+        var isFram = behavior === 'Framsvängande';
+        var isBort = behavior === 'Bortsvängande';
+        if (isFram) {
+            // Fall back to the same UI defaults the configurator's input fields
+            // display (delay 0, syns 8) when the underlying data hasn't been
+            // explicitly set — otherwise the timer would show an empty stripe
+            // for figures where the user accepted the default without touching it.
+            var d = tmrPick(fig, ['delayBeforeShowSec', 'DelayBeforeShowSec']);
+            var s = tmrPick(fig, ['showTimeSec', 'ShowTimeSec']);
+            var delay = d != null ? (parseInt(d) || 0) : 0;
+            var dur   = s != null ? (parseInt(s) || 0) : 8;
+            if (dur <= 0) return [];
+            var from = Math.max(0, Math.min(shootSec, delay));
+            var to = Math.max(from, Math.min(shootSec, delay + dur));
+            return from < to ? [{ from: from, to: to }] : [];
+        }
+        if (isBort) {
+            var h = tmrPick(fig, ['hideAfterSec', 'HideAfterSec']);
+            var r = tmrPick(fig, ['reappearSec', 'ReappearSec']);
+            var hideAt   = h != null ? (parseInt(h) || 0) : 8;
+            var reappear = r != null ? (parseInt(r) || 0) : 0;
+            var bands = [];
+            if (hideAt > 0) bands.push({ from: 0, to: Math.min(shootSec, hideAt) });
+            if (reappear > 0 && reappear < shootSec) bands.push({ from: reappear, to: shootSec });
+            return bands;
+        }
+        // Fast / Rörligt / anything else → visible whole shooting time.
+        return [{ from: 0, to: shootSec }];
+    }
+
+    function tmrIsVisibleAt(bands, tSec) {
+        for (var i = 0; i < bands.length; i++) {
+            if (tSec >= bands[i].from && tSec < bands[i].to) return true;
+        }
+        return false;
+    }
+
+    function tmrLetter(group) { return String.fromCharCode(64 + (group || 1)); }
+
+    window.fseTimerInit = function(wcCfg) {
+        fseTimerCancel();
+        var card = document.getElementById('fseTimerCard');
+        var figsHost = document.getElementById('fseTimerFigures');
+        if (!card || !figsHost) return;
+        var shootSec = parseInt(wcCfg && (wcCfg.shootingTimeSec != null ? wcCfg.shootingTimeSec : wcCfg.ShootingTimeSec)) || 0;
+        if (!wcCfg || shootSec <= 0) {
+            card.style.display = '';
+            figsHost.innerHTML = '<div class="alert alert-warning small mb-0 mt-2">Inget skjuttid konfigurerat för vapenklass ' + (currentPatrolWc || '?') + '. Tiduret kan inte köras.</div>';
+            document.getElementById('fseTimerStartBtn').disabled = true;
+            return;
+        }
+        document.getElementById('fseTimerStartBtn').disabled = false;
+        tmrShootingTimeSec = shootSec;
+        tmrFigures = [];
+        (tmrPick(wcCfg, ['targetGroups', 'TargetGroups']) || []).forEach(function(tg) {
+            var group = tmrPick(tg, ['group', 'Group']);
+            (tmrPick(tg, ['figures', 'Figures']) || []).forEach(function(fig, fIdx) {
+                var behavior = tmrPick(fig, ['behavior', 'Behavior']) || 'Fast';
+                var bands = tmrFigBands(fig, shootSec);
+                var figNo = tmrPick(fig, ['figureNumber', 'FigureNumber']) || (fIdx + 1);
+                // Surface the effective timing (with the same defaults the
+                // configurator's input fields use) right under the figure label.
+                var timing = '';
+                if (behavior === 'Framsvängande') {
+                    var d = tmrPick(fig, ['delayBeforeShowSec', 'DelayBeforeShowSec']);
+                    var s = tmrPick(fig, ['showTimeSec', 'ShowTimeSec']);
+                    var delayEff = d != null ? d : 0;
+                    var showEff = s != null ? s : 8;
+                    timing = ' (fram ' + delayEff + ' s, syns ' + showEff + ' s)';
+                } else if (behavior === 'Bortsvängande') {
+                    var h = tmrPick(fig, ['hideAfterSec', 'HideAfterSec']);
+                    var r = tmrPick(fig, ['reappearSec', 'ReappearSec']);
+                    var hideEff = h != null ? h : 8;
+                    timing = ' (ut ' + hideEff + ' s' + (r ? ', åter ' + r + ' s' : '') + ')';
+                }
+                tmrFigures.push({
+                    key: 'tmrf_' + group + '_' + fIdx,
+                    label: 'Målgrupp ' + tmrLetter(group) + ' · Fig ' + figNo,
+                    behaviorLine: behavior + timing,
+                    bands: bands,
+                    visibleNow: false
+                });
+            });
+        });
+
+        var rowsHtml = tmrFigures.map(function(f) {
+            var bandsHtml = f.bands.map(function(b) {
+                var leftPct = (b.from / shootSec) * 100;
+                var widthPct = ((b.to - b.from) / shootSec) * 100;
+                return '<div class="fse-tmr-figband" style="left:' + leftPct + '%;width:' + widthPct + '%"></div>';
+            }).join('');
+            return '<div class="fse-tmr-figrow" id="' + f.key + '">' +
+                '<div class="fse-tmr-figlabel">' + f.label + '<div class="text-muted" style="font-size:0.85em">' + f.behaviorLine + '</div></div>' +
+                '<div class="fse-tmr-figtimeline">' + bandsHtml + '</div>' +
+                '<div class="fse-tmr-figstate" data-key="' + f.key + '">—</div>' +
+                '</div>';
+        }).join('');
+        figsHost.innerHTML = rowsHtml || '<div class="text-muted small">Inga figurer.</div>';
+
+        card.style.display = '';
+        tmrResetDisplay();
+    };
+
+    function tmrResetDisplay() {
+        var disp = document.getElementById('fseTimerDisplay');
+        if (disp) { disp.textContent = tmrShootingTimeSec ? tmrShootingTimeSec + ' s' : '—'; disp.className = 'text-center fw-bold fse-tmr-display'; }
+        document.getElementById('fseTimerBar').style.width = '0%';
+        var cur = document.getElementById('fseTimerCursor'); if (cur) { cur.style.display = 'none'; cur.style.left = '0%'; }
+        document.getElementById('fseTimerStatus').textContent = 'Skjuttid ' + tmrShootingTimeSec + ' s (vapenklass ' + (currentPatrolWc || '?') + '). Tryck Starta för att inleda kommandosekvensen.';
+        document.getElementById('fseTimerStartBtn').style.display = '';
+        document.getElementById('fseTimerResetBtn').style.display = 'none';
+        tmrUpdateVoiceBanner();
+        // Reset state badges + flash classes
+        tmrFigures.forEach(function(f) {
+            f.visibleNow = false;
+            var rowEl = document.getElementById(f.key);
+            if (rowEl) rowEl.classList.remove('flash');
+            var stateEl = rowEl && rowEl.querySelector('.fse-tmr-figstate');
+            if (stateEl) { stateEl.textContent = '—'; stateEl.style.color = ''; }
+        });
+    }
+
+    async function tmrAcquireWakeLock() {
+        if (!('wakeLock' in navigator)) return;
+        try {
+            tmrWakeLock = await navigator.wakeLock.request('screen');
+            tmrWakeLock.addEventListener('release', function() { tmrWakeLock = null; });
+        } catch (e) { /* best-effort */ }
+    }
+    function tmrReleaseWakeLock() {
+        if (tmrWakeLock) { try { tmrWakeLock.release(); } catch (e) {} tmrWakeLock = null; }
+    }
+    document.addEventListener('visibilitychange', function() {
+        if (tmrRunning && document.visibilityState === 'visible' && !tmrWakeLock) tmrAcquireWakeLock();
+    });
+
+    window.fseTimerStart = function() {
+        if (tmrRunning || tmrShootingTimeSec <= 0) return;
+        tmrRunning = true;
+        tmrSpoken = {};
+        tmrStartMs = performance.now() + (TMR_PREFIRE_SEC * 1000);
+        document.getElementById('fseTimerStartBtn').style.display = 'none';
+        document.getElementById('fseTimerResetBtn').style.display = '';
+        document.getElementById('fseTimerCursor').style.display = '';
+        tmrAcquireWakeLock();
+        // Fire the first command immediately on the user gesture so iOS unlocks TTS.
+        tmrSpeak('10 sekunder kvar!', 1.0);
+        tmrSpoken.prefire = true;
+        tmrTick();
+    };
+
+    function tmrTick() {
+        if (!tmrRunning) return;
+        var now = performance.now();
+        var tSec = (now - tmrStartMs) / 1000;  // negative during prefire, 0..shoot during firing
+        var disp = document.getElementById('fseTimerDisplay');
+        var bar = document.getElementById('fseTimerBar');
+        var cur = document.getElementById('fseTimerCursor');
+        var status = document.getElementById('fseTimerStatus');
+
+        if (tSec < 0) {
+            // Prefire phase
+            var rem = Math.max(0, Math.ceil(-tSec));
+            disp.textContent = rem + ' s';
+            disp.className = 'text-center fw-bold fse-tmr-display is-prefire';
+            bar.style.width = '0%';
+            cur.style.left = '0%';
+            status.textContent = 'Upprop: ' + rem + ' s kvar till ELD';
+            if (!tmrSpoken.fardig && tSec >= -TMR_FARDIG_SEC) { tmrSpeak('Färdiga!', 1.0); tmrSpoken.fardig = true; }
+        } else if (tSec < tmrShootingTimeSec) {
+            // Firing phase
+            if (!tmrSpoken.eld) { tmrSpeak('Eld!', 1.0); tmrSpoken.eld = true; }
+            var rem = Math.max(0, Math.ceil(tmrShootingTimeSec - tSec));
+            disp.textContent = rem + ' s';
+            disp.className = 'text-center fw-bold fse-tmr-display is-firing';
+            var pct = (tSec / tmrShootingTimeSec) * 100;
+            bar.style.width = pct + '%';
+            cur.style.left = pct + '%';
+            status.textContent = 'Skjuttid: ' + rem + ' s kvar';
+            // Cease-fire warning
+            if (!tmrSpoken.upphor && tSec >= (tmrShootingTimeSec - TMR_CEASEFIRE_SEC)) {
+                tmrSpeak('Eeeld upphööör!', 0.55);
+                tmrSpoken.upphor = true;
+                disp.className = 'text-center fw-bold fse-tmr-display is-ceasefire';
+            }
+            // Update per-figure visibility + flash on transitions
+            tmrFigures.forEach(function(f) {
+                var nowVisible = tmrIsVisibleAt(f.bands, tSec);
+                if (nowVisible !== f.visibleNow) {
+                    f.visibleNow = nowVisible;
+                    var rowEl = document.getElementById(f.key);
+                    if (rowEl) {
+                        rowEl.classList.remove('flash');
+                        // re-trigger animation by forcing reflow
+                        void rowEl.offsetWidth;
+                        rowEl.classList.add('flash');
+                    }
+                    var stateEl = rowEl && rowEl.querySelector('.fse-tmr-figstate');
+                    if (stateEl) {
+                        stateEl.textContent = nowVisible ? 'FRAM' : 'UT';
+                        stateEl.style.color = nowVisible ? 'var(--bs-success)' : 'var(--bs-secondary-color)';
+                    }
+                }
+            });
+        } else {
+            // Done
+            disp.textContent = 'Eld upphör';
+            disp.className = 'text-center fw-bold fse-tmr-display is-ceasefire';
+            bar.style.width = '100%';
+            cur.style.left = '100%';
+            status.textContent = 'Skjuttiden är slut. Tryck Återställ för ny patrull.';
+            tmrFigures.forEach(function(f) {
+                var stateEl = document.getElementById(f.key)?.querySelector('.fse-tmr-figstate');
+                if (stateEl) { stateEl.textContent = '—'; stateEl.style.color = ''; }
+                f.visibleNow = false;
+            });
+            tmrRunning = false;
+            tmrReleaseWakeLock();
+            return;
+        }
+        tmrFrameHandle = requestAnimationFrame(tmrTick);
+    }
+
+    window.fseTimerReset = function() {
+        fseTimerCancel();
+        tmrResetDisplay();
+    };
+
+    window.fseTimerCancel = function() {
+        if (tmrFrameHandle) { cancelAnimationFrame(tmrFrameHandle); tmrFrameHandle = 0; }
+        tmrRunning = false;
+        try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch (e) {}
+        tmrReleaseWakeLock();
     };
 })();
 </script>
