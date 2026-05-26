@@ -984,7 +984,19 @@
         if (!banner) return;
         if (tmrVoiceState === 'missing') {
             banner.style.display = '';
-            banner.innerHTML = '<i class="bi bi-volume-mute me-1"></i>Ingen svensk r&ouml;st finns p&aring; enheten &mdash; tiduret k&ouml;rs utan r&ouml;stkommandon. Installera svensk r&ouml;st i operativsystemets r&ouml;stinst&auml;llningar f&ouml;r att aktivera.';
+            // Chrome on Windows only enumerates SAPI-5 voices; the Microsoft
+            // Bengt/Hedvig OneCore voices Windows ships are invisible to it,
+            // so the generic "install a Swedish voice" hint won't help. Steer
+            // those users to Edge (which sees the OneCore voices natively).
+            var ua = navigator.userAgent || '';
+            var isWin = ua.indexOf('Windows') !== -1;
+            var isChromeNotEdge = ua.indexOf('Chrome/') !== -1
+                && ua.indexOf('Edg/') === -1
+                && ua.indexOf('OPR/') === -1;
+            var tip = (isWin && isChromeNotEdge)
+                ? ' <strong>Tips:</strong> Edge har Microsoft-svenska inbyggd. Chrome p&aring; Windows kr&auml;ver en SAPI-5-svensk r&ouml;st (t.ex. Ivona) som inte ing&aring;r i Windows.'
+                : '';
+            banner.innerHTML = '<i class="bi bi-volume-mute me-1"></i>Ingen svensk r&ouml;st finns p&aring; enheten &mdash; tiduret k&ouml;rs utan r&ouml;stkommandon. Installera svensk r&ouml;st i operativsystemets r&ouml;stinst&auml;llningar f&ouml;r att aktivera.' + tip;
         } else if (tmrVoiceState === 'pending') {
             banner.style.display = '';
             banner.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>S&ouml;ker svensk r&ouml;st p&aring; enheten&hellip;';
@@ -994,7 +1006,7 @@
         }
     }
 
-    function tmrSpeak(text, rate) {
+    function tmrSpeak(text, rate, pitch) {
         if (!window.speechSynthesis || !window.SpeechSynthesisUtterance) return;
         if (tmrVoiceState !== 'ok' || !tmrSvVoice) return;  // Refuse to speak with an English voice.
         try { window.speechSynthesis.cancel(); } catch (e) {}
@@ -1002,7 +1014,7 @@
         u.lang = tmrSvVoice.lang || 'sv-SE';
         u.voice = tmrSvVoice;
         u.rate = rate || 1.0;
-        u.pitch = 1.0;
+        u.pitch = pitch || 1.0;
         u.volume = 1.0;
         try { window.speechSynthesis.speak(u); } catch (e) {}
     }
@@ -1215,9 +1227,11 @@
             bar.style.width = pct + '%';
             cur.style.left = pct + '%';
             status.textContent = 'Skjuttid: ' + rem + ' s kvar';
-            // Cease-fire warning
+            // Cease-fire warning — drawn out by low rate + slightly raised pitch.
+            // Edge + Microsoft Bengt/Hedvig SAPI voice tested as the reference;
+            // adjusted from the original rate-0.55 (~1 s) to land closer to 3 s.
             if (!tmrSpoken.upphor && tSec >= (tmrShootingTimeSec - TMR_CEASEFIRE_SEC)) {
-                tmrSpeak('Eeeld upphööör!', 0.55);
+                tmrSpeak('Eld upphöör!', 0.3, 1.2);
                 tmrSpoken.upphor = true;
                 disp.className = 'text-center fw-bold fse-tmr-display is-ceasefire';
             }
