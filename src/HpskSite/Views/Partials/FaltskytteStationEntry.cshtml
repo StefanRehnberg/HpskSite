@@ -116,21 +116,23 @@
         </div>
 
         <!-- Navigation bar -->
-        <div class="d-flex align-items-center mb-2 bg-body-tertiary rounded p-2">
-            <button class="btn btn-outline-secondary fse-nav-btn flex-shrink-0" onclick="fseNavPrev()" id="fsePrevBtn">
-                <i class="bi bi-chevron-left"></i>
-            </button>
-            <span id="fseShooterPosition" class="fw-bold mx-2 flex-shrink-0" style="font-size:2.5em;line-height:1;min-width:40px;text-align:center"></span>
-            <div class="text-truncate" style="min-width:0">
-                <div class="fw-bold fs-5 text-truncate" id="fseShooterName"></div>
-                <div class="small text-muted" id="fseShooterInfo"></div>
+        <div class="mb-2 bg-body-tertiary rounded p-2">
+            <div class="mb-2">
+                <div class="fw-bold fs-5" id="fseShooterName" style="word-break:break-word"></div>
+                <div class="small text-muted" id="fseShooterInfo" style="word-break:break-word"></div>
             </div>
-            <span id="fseRunningTotal" class="fw-bold text-nowrap mx-auto" style="font-size:2.5em;line-height:1">0/0</span>
-            <span id="fseShooterSavedBadge" class="badge bg-success flex-shrink-0 me-2" style="display:none">Sparad</span>
-            <span id="fseShooterDirtyBadge" class="badge bg-warning text-dark flex-shrink-0 me-2" style="display:none">Osparad</span>
-            <button class="btn btn-outline-secondary fse-nav-btn flex-shrink-0" onclick="fseNavNext()" id="fseNextBtn">
-                <i class="bi bi-chevron-right"></i>
-            </button>
+            <div class="d-flex align-items-center">
+                <button class="btn btn-outline-secondary fse-nav-btn flex-shrink-0" onclick="fseNavPrev()" id="fsePrevBtn">
+                    <i class="bi bi-chevron-left"></i>
+                </button>
+                <span id="fseShooterPosition" class="fw-bold mx-2 flex-shrink-0" style="font-size:2.5em;line-height:1;min-width:40px;text-align:center"></span>
+                <span id="fseRunningTotal" class="fw-bold text-nowrap mx-auto" style="font-size:2.5em;line-height:1">0/0</span>
+                <span id="fseShooterSavedBadge" class="badge bg-success flex-shrink-0 me-2" style="display:none">Sparad</span>
+                <span id="fseShooterDirtyBadge" class="badge bg-warning text-dark flex-shrink-0 me-2" style="display:none">Osparad</span>
+                <button class="btn btn-outline-secondary fse-nav-btn flex-shrink-0" onclick="fseNavNext()" id="fseNextBtn">
+                    <i class="bi bi-chevron-right"></i>
+                </button>
+            </div>
         </div>
 
         <!-- Figure entry area -->
