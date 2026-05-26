@@ -127,6 +127,10 @@
             html += '<div><strong>Utg\u00e5ngsl\u00e4ge:</strong> ' + (station.shooterStartPosition || station.ShooterStartPosition || '') + '</div>';
             html += '<div><strong>Vapenl\u00e4ge:</strong> ' + (station.weaponStartPosition || station.WeaponStartPosition || '') + '</div>';
             html += '<div><strong>' + (station.supportHand || station.SupportHand || '') + '</strong></div>';
+            var stMin = station.minShotsPerFigure != null ? station.minShotsPerFigure : (station.MinShotsPerFigure != null ? station.MinShotsPerFigure : 0);
+            var stMax = station.maxShotsPerFigure != null ? station.maxShotsPerFigure : (station.MaxShotsPerFigure != null ? station.MaxShotsPerFigure : 6);
+            if (stMin > 0) html += '<div><strong>Min tr\u00e4ff/figur:</strong> ' + stMin + '</div>';
+            if (stMax < 6) html += '<div><strong>Max tr\u00e4ff/figur:</strong> ' + stMax + '</div>';
             html += '</div>';
 
             // Target groups
@@ -174,10 +178,6 @@
                         if (reappear > 0) html += ', visar igen efter ' + reappear + ' sek';
                     }
                     if (isPoangmal) html += ' <span class="badge bg-warning text-dark">Po\u00e4ngr\u00e4kning</span>';
-                    var minSh = fig.minShotsPerFigure != null ? fig.minShotsPerFigure : (fig.MinShotsPerFigure != null ? fig.MinShotsPerFigure : null);
-                    var maxSh = fig.maxShotsPerFigure != null ? fig.maxShotsPerFigure : (fig.MaxShotsPerFigure != null ? fig.MaxShotsPerFigure : null);
-                    if (minSh != null && minSh > 0) html += ', minst ' + minSh + ' tr\u00e4ff';
-                    if (maxSh != null) html += ', h\u00f6gst ' + maxSh + ' tr\u00e4ff';
                     html += '</div></div>';
                 });
 

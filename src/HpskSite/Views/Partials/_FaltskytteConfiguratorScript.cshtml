@@ -279,8 +279,10 @@ function faltSuggestShootingTime(station, wc, morker) {
 
     // Per-figure entries collected during the målgrupp walk — used by the
     // Normal-mode greedy allocator and the Poäng min+easiest-extras allocator.
+    // Min/max are station-wide settings that mirror to each figure.
     var figureEntries = []; // { perShot, slotCount, minShots, maxShots, label }
-    var stationDefaultMax = station.maxShotsPerFigure || 6;
+    var stationMax = station.maxShotsPerFigure || 6;
+    var stationMin = Math.max(0, station.minShotsPerFigure || 0);
 
     // Informational per-målgrupp lines + per-figure data collection.
     station.targetGroups.forEach(function(tg, gi) {
@@ -299,13 +301,12 @@ function faltSuggestShootingTime(station, wc, morker) {
             var d = effectiveDistance != null ? effectiveDistance : maxD;
             var t = (d / maxD) * maxTime;
             if (t > groupPerShot) { groupPerShot = t; groupLimitingFig = 'storleksgrupp ' + f.sizeGroup + (stodhandEasing ? ' (stödhand → grupp ' + lookupGroup + ')' : ''); }
-            var figMax = f.maxShotsPerFigure != null ? f.maxShotsPerFigure : stationDefaultMax;
-            var figMin = f.minShotsPerFigure != null ? f.minShotsPerFigure : 0;
+            var targets = f.targetsPerFigure || 1;
             figureEntries.push({
                 perShot: t,
-                slotCount: (f.targetsPerFigure || 1) * figMax,
-                minShots: Math.max(0, (f.targetsPerFigure || 1) * figMin),
-                maxShots: (f.targetsPerFigure || 1) * figMax,
+                slotCount: targets * stationMax,
+                minShots: targets * stationMin,
+                maxShots: targets * stationMax,
                 label: 'Målgrupp ' + letter + ', figur ' + (fi + 1) + ' (storleksgrupp ' + f.sizeGroup + ')'
             });
         });
@@ -488,7 +489,9 @@ function faltCfgUpdateStation(wc, stationNum, field, value) {
     //   weaponStartPosition → +2 sek tillägg for 45 grader
     //   shootingTimeSec     → svårighet denominator
     //   maxShotsPerFigure   → Normal-mode slot count (allocator input)
-    if (field === 'weaponStartPosition' || field === 'shootingTimeSec' || field === 'maxShotsPerFigure') {
+    //   minShotsPerFigure   → floor for both modes (allocator input)
+    //   supportHand         → +1 SizeGroup easing when "Stödhand tillåten"
+    if (field === 'weaponStartPosition' || field === 'shootingTimeSec' || field === 'maxShotsPerFigure' || field === 'minShotsPerFigure' || field === 'supportHand') {
         faltCfgRefreshSuggestion(stationNum);
     }
 }
@@ -885,6 +888,11 @@ function renderActiveTab() {
                             <select class="form-select form-select-sm"
                                 onchange="faltCfgUpdateStation('${wc}',${st.station},'supportHand',this.value)">${SUPPORT_HAND.map(p => `<option ${p === st.supportHand ? 'selected' : ''}>${p}</option>`).join('')}</select>
                         </div>
+                        <div class="col-auto">
+                            <label class="form-label small mb-0">Min träff/fig</label>
+                            <input type="number" class="form-control form-control-sm" min="0" max="6" value="${st.minShotsPerFigure || 0}" style="width:65px" title="Minsta antal träff per figur (SHB D.10.3). 0 = inget krav."
+                                onchange="faltCfgUpdateStation('${wc}',${st.station},'minShotsPerFigure',parseInt(this.value)||0)">
+                        </div>
                         ${!isPoang ? `<div class="col-auto">
                             <label class="form-label small mb-0">Max träff/fig</label>
                             <input type="number" class="form-control form-control-sm" min="1" max="6" value="${st.maxShotsPerFigure || 6}" style="width:65px"
@@ -1089,14 +1097,6 @@ function renderTargetGroup(tg, tgIdx, stationNum, wc, isPoang, isLastGroup) {
                 '<label class="small text-muted text-nowrap mb-0">M\u00e5l<\/label>' +
                 '<input type="number" class="form-control form-control-sm" min="1" max="6" value="' + (fig.targetsPerFigure || 1) + '" style="width:45px"' +
                     ' onchange="faltCfgUpdateFigure(' + "'" + wc + "'" + ',' + stationNum + ',' + tgIdx + ',' + fIdx + ',' + "'targetsPerFigure'" + ',parseInt(this.value)||1)" title="Antal m\u00e5l i figuren"><\/div>' +
-            '<div class="d-flex align-items-center gap-1" title="Minsta antal tr\u00e4ff p\u00e5 figuren (SHB D.10.3, tomt = inget krav)">' +
-                '<label class="small text-muted text-nowrap mb-0">Min<\/label>' +
-                '<input type="number" class="form-control form-control-sm" min="0" max="6" value="' + (fig.minShotsPerFigure != null ? fig.minShotsPerFigure : '') + '" placeholder="\u2013" style="width:45px"' +
-                    ' onchange="faltCfgUpdateFigure(' + "'" + wc + "'" + ',' + stationNum + ',' + tgIdx + ',' + fIdx + ',' + "'minShotsPerFigure'" + ',this.value === \'\' ? null : (parseInt(this.value)||0))"><\/div>' +
-            '<div class="d-flex align-items-center gap-1" title="H\u00f6gsta antal tr\u00e4ff p\u00e5 figuren (SHB D.10.3, tomt = station-default)">' +
-                '<label class="small text-muted text-nowrap mb-0">Max<\/label>' +
-                '<input type="number" class="form-control form-control-sm" min="1" max="6" value="' + (fig.maxShotsPerFigure != null ? fig.maxShotsPerFigure : '') + '" placeholder="\u2013" style="width:45px"' +
-                    ' onchange="faltCfgUpdateFigure(' + "'" + wc + "'" + ',' + stationNum + ',' + tgIdx + ',' + fIdx + ',' + "'maxShotsPerFigure'" + ',this.value === \'\' ? null : (parseInt(this.value)||1))"><\/div>' +
             '<select class="form-select form-select-sm" style="width:auto"' +
                 ' onchange="faltCfgUpdateFigure(' + "'" + wc + "'" + ',' + stationNum + ',' + tgIdx + ',' + fIdx + ',' + "'behavior'" + ',this.value); faltCfgToggleFigBehavior(this)">' +
                 TARGET_BEHAVIORS.map(function(b) { return '<option' + (b === fig.behavior ? ' selected' : '') + '>' + b + '<\/option>'; }).join('') +
@@ -1341,8 +1341,6 @@ function faltCfgAutoDescription(stationNum, wc, tgIdx) {
             if (fig.reappearSec) desc += ', visar igen efter ' + fig.reappearSec + ' sek';
         }
         if (fig.isPoangmal) desc += ', po\u00e4ngr\u00e4kning';
-        if (fig.minShotsPerFigure != null && fig.minShotsPerFigure > 0) desc += ', minst ' + fig.minShotsPerFigure + ' tr\u00e4ff';
-        if (fig.maxShotsPerFigure != null) desc += ', h\u00f6gst ' + fig.maxShotsPerFigure + ' tr\u00e4ff';
         desc += '. ';
     });
     tg.description = desc.trim();
@@ -1519,6 +1517,8 @@ function faltCfgRenderSimpleMode() {
                     " onchange=\"faltCfgUpdateStation('" + wc + "'," + st.station + ",'supportHand',this.value)\">" +
                     SUPPORT_HAND.map(function (p) { return '<option' + (p === wst.supportHand ? ' selected' : '') + '>' + p + '</option>'; }).join('') +
                   '</select></td>' +
+                  '<td><input type="number" class="form-control form-control-sm" min="0" max="6" value="' + (wst.minShotsPerFigure || 0) + '" style="width:65px" title="Minsta antal träff per figur (SHB D.10.3). 0 = inget krav."' +
+                    " onchange=\"faltCfgUpdateStation('" + wc + "'," + st.station + ",'minShotsPerFigure',parseInt(this.value)||0)\"></td>" +
                   (!isPoang ? '<td><input type="number" class="form-control form-control-sm" min="1" max="6" value="' + (wst.maxShotsPerFigure || 6) + '" style="width:65px"' +
                     " onchange=\"faltCfgUpdateStation('" + wc + "'," + st.station + ",'maxShotsPerFigure',parseInt(this.value)||6)\"></td>" : '') +
                 '</tr>';
@@ -1585,6 +1585,7 @@ function faltCfgRenderSimpleMode() {
                         '<th>Utgångsläge</th>' +
                         '<th>Vapenläge</th>' +
                         '<th>Stödhand</th>' +
+                        '<th>Min träff/fig</th>' +
                         (!isPoang ? '<th>Max träff/fig</th>' : '') +
                       '</tr></thead>' +
                       '<tbody>' + matrixRows + '</tbody>' +
@@ -1902,6 +1903,7 @@ function faltCfgStationsStructurallyEqual(a, b) {
     if (a.weaponStartPosition !== b.weaponStartPosition) return false;
     if (a.supportHand !== b.supportHand) return false;
     if (a.maxShotsPerFigure !== b.maxShotsPerFigure) return false;
+    if ((a.minShotsPerFigure || 0) !== (b.minShotsPerFigure || 0)) return false;
     if ((a.targetGroups||[]).length !== (b.targetGroups||[]).length) return false;
     for (var g = 0; g < a.targetGroups.length; g++) {
         var ga = a.targetGroups[g], gb = b.targetGroups[g];
@@ -1995,6 +1997,12 @@ function faltCfgPrintStation(stationNum, wc) {
             { key: 'weaponStartPosition', label: 'Vapenl\u00e4ge' },
             { key: 'supportHand', label: 'St\u00f6dhand', descriptive: true }
         ];
+        // Min skott column only when any class actually has a minimum (> 0).
+        var anyMinSet = classKeys.some(function (c) {
+            var v = combinedClasses[c].minShotsPerFigure;
+            return v && v > 0;
+        });
+        if (anyMinSet) fields.push({ key: 'minShotsPerFigure', label: 'Min träff/fig' });
         // Max skott column only when any class actually limits it (< 6).
         var anyMaxLimited = classKeys.some(function (c) {
             var v = combinedClasses[c].maxShotsPerFigure;
@@ -2047,7 +2055,8 @@ function faltCfgPrintStation(stationNum, wc) {
         w.document.write(' &nbsp;|&nbsp; <strong>Utg\u00e5ngsl\u00e4ge:<' + '/strong> ' + station.shooterStartPosition);
         w.document.write(' &nbsp;|&nbsp; <strong>Vapenl\u00e4ge:<' + '/strong> ' + station.weaponStartPosition);
         w.document.write(' &nbsp;|&nbsp; <strong>' + station.supportHand + '<' + '/strong>');
-        if (station.maxShotsPerFigure && station.maxShotsPerFigure < 6) w.document.write('<br><strong>Max träff/fig:<' + '/strong> ' + station.maxShotsPerFigure);
+        if (station.minShotsPerFigure && station.minShotsPerFigure > 0) w.document.write('<br><strong>Min träff/fig:<' + '/strong> ' + station.minShotsPerFigure);
+        if (station.maxShotsPerFigure && station.maxShotsPerFigure < 6) w.document.write(' &nbsp;|&nbsp; <strong>Max träff/fig:<' + '/strong> ' + station.maxShotsPerFigure);
     }
     w.document.write('<' + '/div>');
 
