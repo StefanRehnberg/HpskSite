@@ -120,6 +120,19 @@
             // there was set at competition creation and shouldn't shift on re-attach).
             var seriesFld = document.getElementById(prefix + 'numberOfSeries');
             if (seriesFld && cfg.stationCount) seriesFld.value = cfg.stationCount;
+            // Propagate _scoringMode from the config into the wizard/edit scoringMode
+            // dropdown so the competition picks it up on save. The config is the source
+            // of truth; the dropdown becomes a derived display. (Phase 2 will hide it
+            // entirely; for now it stays for legacy back-compat.)
+            try {
+                var blobForMode = JSON.parse(jsonBlob);
+                var scoringMode = (blobForMode && blobForMode._scoringMode) || 'Normal';
+                var smEl = document.getElementById(prefix + 'scoringMode');
+                if (smEl) {
+                    smEl.value = scoringMode;
+                    smEl.dispatchEvent(new Event('change'));
+                }
+            } catch (e) { /* keep current dropdown value */ }
             faltPickerRenderStatus(prefix, cfg);
         } catch (e) {
             console.error(e);
@@ -178,9 +191,14 @@
         try {
             // Strip _attachedConfigId from the inline blob before creating — defensive
             // (shouldn't be set if we got here, but if it somehow is, we want a clean copy).
+            // Also seed _scoringMode from the competition's existing scoringMode element
+            // so the converted config keeps the Normal/Poang choice instead of defaulting
+            // to Normal.
             var blob = JSON.parse(inlineJson);
             if (typeof blob === 'object' && blob !== null) {
                 delete blob._attachedConfigId;
+                var smEl = document.getElementById(prefix + 'scoringMode');
+                if (smEl && smEl.value) blob._scoringMode = smEl.value;
                 inlineJson = JSON.stringify(blob);
             }
         } catch (e) { /* keep as-is */ }

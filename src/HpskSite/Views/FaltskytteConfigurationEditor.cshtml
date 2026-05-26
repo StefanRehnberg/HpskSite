@@ -131,6 +131,13 @@
                     <input type="number" class="form-control form-control-sm" id="faltCfg_stationCount" min="1" max="12" value="8" style="width:80px" onchange="faltCfgUpdateStations()">
                 </div>
                 <div>
+                    <label class="form-label fw-bold mb-1 d-block">Tävlingstyp</label>
+                    <select class="form-select form-select-sm" id="faltCfg_scoringMode" onchange="faltCfgSetScoringMode(this.value)" title="Normal = träff/figur-räkning. Poängfält = poängräkning. Påverkar hur föreslaget skjuttid och svårighetsgrad räknas ut.">
+                        <option value="Normal">Normal</option>
+                        <option value="Poang">Poängfält</option>
+                    </select>
+                </div>
+                <div>
                     <label class="form-label fw-bold mb-1 d-block">Mörkerfältskjutning</label>
                     <div class="form-check form-switch" title="Tävlingen genomförs i mörker. Lägger till 30 % i föreslagna skjuttider och bör kombineras med större figurgrupp eller kortare avstånd.">
                         <input class="form-check-input" type="checkbox" role="switch" id="faltCfg_morker" onchange="faltCfgToggleMorker(this.checked)">

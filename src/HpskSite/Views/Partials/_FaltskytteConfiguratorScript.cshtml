@@ -10,12 +10,23 @@ let faltCfgLinkedGroups = []; // e.g. [["A","R"], ["B","C"]] — linked weapon c
 let faltCfgMode = "advanced"; // "simple" | "advanced". Simple = shared shape + per-class param matrix.
 let faltCfgSimpleDistanceClass = null; // simple-mode picker: which class's distance the sliders edit
 let faltCfgMorker = false; // competition-level mörkerfältskjutning flag
-const faltCfgScoringMode = () => document.getElementById('wizard_scoringMode')?.value || 'Normal';
+// Resolves the current scoring mode (Normal / Poang). Priority:
+//  1. The configuration's own _scoringMode meta key (set by the Tävlingstyp picker in
+//     the standalone /faltkonfig editor) — this is the source of truth going forward.
+//  2. The wizard / edit-modal DOM element if present (legacy back-compat for the
+//     competition-page surfaces that still own the dropdown).
+//  3. 'Normal' as ultimate fallback.
+const faltCfgScoringMode = () => {
+    if (typeof faltCfgData === 'object' && faltCfgData && faltCfgData._scoringMode) return faltCfgData._scoringMode;
+    return document.getElementById('wizard_scoringMode')?.value
+        || document.getElementById('edit_scoringMode')?.value
+        || 'Normal';
+};
 
 // Reserved metadata keys stored in faltCfgData alongside weapon classes. When iterating
 // weapon-class entries, skip these. Add new keys here (with leading underscore) instead
 // of polluting the iteration sites.
-const FALT_CFG_META_KEYS = new Set(['_linkedGroups', '_mode', '_morker', '_attachedConfigId']);
+const FALT_CFG_META_KEYS = new Set(['_linkedGroups', '_mode', '_morker', '_attachedConfigId', '_scoringMode']);
 function faltCfgIsMetaKey(k) { return FALT_CFG_META_KEYS.has(k); }
 
 // Scale a figure's four timing fields by `ratio`, in place. Same clamp
@@ -241,11 +252,26 @@ function faltTargetGroupBounds(tg, wc) {
 }
 
 // Computes SHB-suggested skjuttid for a station for one weapon class.
-// SHB fältskytte = 6 skott per station, fördelas av skytten på målgrupper.
-// Värsta fall: alla 6 skott på den mest krävande figuren. Den figurens
-// per-skott-tid sätter därför skjuttidsgrunden:
+// SHB fältskytte = max 6 skott per station, fördelas av skytten på målgrupper
+// och figurer.
 //
-//     grund = 6 × max över alla figurer av (D / maxD × maxTime)
+// Two scoring-mode models — branched on faltCfgScoringMode():
+//
+// **Poangfält:** worst-case — alla 6 skott på den mest krävande figuren. Den
+//   figurens per-skott-tid sätter därför skjuttidsgrunden:
+//       grund = 6 × max över alla figurer av (D / maxD × maxTime)
+//
+// **Normal:** per-figure greedy fill — varje figur har högst
+//       slot_i = targetsPerFigure_i × maxShotsPerFigure
+//   tillgängliga "skott-platser". Skytten har 6 skott totalt. Värsta-fall-
+//   fördelning: sortera figurerna på per-skott-tid fallande, fyll upp till
+//   6 skott:
+//       grund = Σ_figurer (skott_tagna_på_figuren × perShot_i)
+//   där skott_tagna ≤ min(slot_i, kvarvarande_skott). Om totalslot < 6
+//   används alla tillgängliga (skytten kan fysiskt inte skjuta 6).
+//
+// Tillägg (45° vapenläge, omriktning, mörker ×1.30) appliceras likadant i
+// båda modellerna.
 //
 // där D är respektive målgrupps avstånd och maxD beror på figurens
 // storleksgrupp + vapengrupp (SHB diagram 1–3, pp 120–122).
@@ -256,22 +282,25 @@ function faltSuggestShootingTime(station, wc, morker) {
     if (!station || !station.targetGroups || station.targetGroups.length === 0) return null;
     var bucket = faltShbBucket(wc);
     var maxTime = SHB_MAX_TIME_PER_SHOT[bucket];
+    var mode = faltCfgScoringMode();
     var lines = [];
     var anyApplicable = false;
+
+    // Per-figure entries collected during the målgrupp walk — used by the
+    // Normal-mode greedy allocator after the loop.
+    var figureEntries = []; // { perShot, slotCount, label }
+
     var worstPerShot = 0;
     var worstLabel = '';
 
-    // Informational per-målgrupp lines + global max per-shot scan.
+    // Informational per-målgrupp lines + per-figure data collection.
     station.targetGroups.forEach(function(tg, gi) {
         var letter = String.fromCharCode(65 + gi); // A, B, C, ...
-        // Effective distance = stored value if set, otherwise the slider's default
-        // (tightest figure max). Same fallback the UI shows, so the breakdown agrees
-        // with the slider position before the operator touches it.
         var bounds = faltTargetGroupBounds(tg, wc);
         var effectiveDistance = tg.distance != null ? tg.distance : (bounds ? bounds.max : null);
         var groupPerShot = 0;
         var groupLimitingFig = '';
-        (tg.figures || []).forEach(function(f) {
+        (tg.figures || []).forEach(function(f, fi) {
             if (!f.sizeGroup) return;
             var maxD = faltFigureMaxDistance(f.sizeGroup, wc);
             if (!maxD) return;
@@ -280,6 +309,11 @@ function faltSuggestShootingTime(station, wc, morker) {
             var t = (d / maxD) * maxTime;
             if (t > groupPerShot) { groupPerShot = t; groupLimitingFig = 'storleksgrupp ' + f.sizeGroup; }
             if (t > worstPerShot) { worstPerShot = t; worstLabel = 'Målgrupp ' + letter + ', storleksgrupp ' + f.sizeGroup + ' @@ ' + d + ' m'; }
+            figureEntries.push({
+                perShot: t,
+                slotCount: (f.targetsPerFigure || 1) * (station.maxShotsPerFigure || 6),
+                label: 'Målgrupp ' + letter + ', figur ' + (fi + 1) + ' (storleksgrupp ' + f.sizeGroup + ')'
+            });
         });
         if (groupPerShot === 0) {
             lines.push({ label: 'Målgrupp ' + letter + ' — storleksgrupp saknas', sec: 0 });
@@ -294,12 +328,39 @@ function faltSuggestShootingTime(station, wc, morker) {
 
     if (!anyApplicable) return null;
 
-    var grund = Math.ceil(FALT_STATION_SHOTS * worstPerShot);
+    // ── Compute "grund" per scoring mode ─────────────────────────────────
+    var grund;
+    if (mode === 'Poang') {
+        grund = Math.ceil(FALT_STATION_SHOTS * worstPerShot);
+        lines.push({
+            label: 'Poängfält: ' + FALT_STATION_SHOTS + ' skott × ' + worstPerShot.toFixed(2).replace('.', ',') + ' sek/skott (' + worstLabel + ')',
+            sec: grund
+        });
+    } else {
+        // Normal — greedy: sort figures by perShot desc, take up to 6 shots,
+        // honoring per-figure slot caps.
+        var sortedEntries = figureEntries.slice().sort(function(a, b) { return b.perShot - a.perShot; });
+        var remaining = FALT_STATION_SHOTS;
+        var rawGrund = 0;
+        var allocBreakdown = [];
+        for (var i = 0; i < sortedEntries.length && remaining > 0; i++) {
+            var e = sortedEntries[i];
+            var n = Math.min(e.slotCount, remaining);
+            if (n <= 0) continue;
+            rawGrund += n * e.perShot;
+            remaining -= n;
+            allocBreakdown.push(n + ' × ' + e.perShot.toFixed(2).replace('.', ',') + ' sek (' + e.label + ')');
+        }
+        grund = Math.ceil(rawGrund);
+        var totalSlotsUsed = FALT_STATION_SHOTS - remaining;
+        var capped = (figureEntries.reduce(function(s, e) { return s + e.slotCount; }, 0) > FALT_STATION_SHOTS);
+        lines.push({
+            label: 'Normal-läge: ' + totalSlotsUsed + ' skott — ' + (capped ? 'värsta möjliga fördelning' : 'alla tillgängliga skott-platser'),
+            sec: grund,
+            info: allocBreakdown.length ? allocBreakdown.join(' + ') : null
+        });
+    }
     var sumSec = grund;
-    lines.push({
-        label: FALT_STATION_SHOTS + ' skott × ' + worstPerShot.toFixed(2).replace('.', ',') + ' sek/skott (' + worstLabel + ')',
-        sec: grund
-    });
 
     if (station.weaponStartPosition === '45 grader') {
         sumSec += SHB_TILLAGG_WEAPON_45;
@@ -317,6 +378,18 @@ function faltSuggestShootingTime(station, wc, morker) {
         lines.push({ label: 'Mörker-tillägg (+30 %)', sec: morkerExtra });
     }
     return { totalSec: sumSec, breakdown: lines };
+}
+
+// Difficulty % per the experienced-Banläggare convention (Pokalen Excel):
+//   svårighet = round(100 × SHB-min-tid / vald-skjuttid)
+// 100 % = exactly at SHB minimum. <100 % = easier (more time than min).
+// >100 % = below SHB minimum (designer over-tight; mathematically valid
+// but practically invalid per regelverk).
+// Returns null when no SHB-min can be computed or skjuttid is missing.
+function faltDifficultyPercent(station, wc, morker) {
+    var sugg = faltSuggestShootingTime(station, wc, morker);
+    if (!sugg || !station || !station.shootingTimeSec || station.shootingTimeSec <= 0) return null;
+    return Math.round(100 * sugg.totalSec / station.shootingTimeSec);
 }
 
 // ─── Model-update helpers ───────────────────────────────────────────
@@ -386,10 +459,15 @@ function faltCfgUpdateStation(wc, stationNum, field, value) {
         });
     }
     faltCfgMarkDirty(wc, stationNum);
-    // weaponStartPosition feeds into the suggested-skjuttid calc (+2 sek for
-    // "45 grader"). Refresh the Föreslaget badge live so the operator sees the
-    // change without re-opening the station card.
-    if (field === 'weaponStartPosition') faltCfgRefreshSuggestion(stationNum);
+    // Fields that feed into the suggested-skjuttid or svårighetsgrad calc.
+    // Refresh the badges live so the operator sees the change without
+    // re-opening the station card.
+    //   weaponStartPosition → +2 sek tillägg for 45 grader
+    //   shootingTimeSec     → svårighet denominator
+    //   maxShotsPerFigure   → Normal-mode slot count (allocator input)
+    if (field === 'weaponStartPosition' || field === 'shootingTimeSec' || field === 'maxShotsPerFigure') {
+        faltCfgRefreshSuggestion(stationNum);
+    }
 }
 
 function faltCfgUpdateGroup(wc, stationNum, tgIdx, field, value) {
@@ -416,11 +494,13 @@ function faltCfgOpen(weaponClasses, existingConfig) {
         var linked = faltCfgData._linkedGroups;
         var mode = faltCfgData._mode;
         var morker = faltCfgData._morker;
+        var scoringModeMeta = faltCfgData._scoringMode;
         faltCfgData = {};
         Object.keys(wc).forEach(function(k) { faltCfgData[k] = wc[k]; });
         if (linked) faltCfgData._linkedGroups = linked;
         if (mode) faltCfgData._mode = mode;
         if (morker) faltCfgData._morker = morker;
+        if (scoringModeMeta) faltCfgData._scoringMode = scoringModeMeta;
     }
 
     faltCfgLinkedGroups = faltCfgData._linkedGroups || [];
@@ -428,6 +508,9 @@ function faltCfgOpen(weaponClasses, existingConfig) {
     faltCfgMorker = !!faltCfgData._morker;
     var morkerEl = document.getElementById('faltCfg_morker');
     if (morkerEl) morkerEl.checked = faltCfgMorker;
+    // Sync the Tävlingstyp picker (standalone editor) with the loaded _scoringMode.
+    var scoringModeEl = document.getElementById('faltCfg_scoringMode');
+    if (scoringModeEl) scoringModeEl.value = faltCfgData._scoringMode || 'Normal';
     faltCfgStationCount = parseInt(document.getElementById('faltCfg_stationCount').value) || 8;
 
     // Detect station count from existing config (handle both camelCase and PascalCase)
@@ -759,6 +842,12 @@ function renderActiveTab() {
                             </div>
                         </div>
                         <div class="col-auto">
+                            <label class="form-label small mb-0">Svårighet</label>
+                            <div class="d-flex gap-1 align-items-center" style="height:31px" title="100 % = exakt SHB-minimum. Lägre = enklare. Högre = under SHB-min.">
+                                <span class="badge bg-light text-dark border" id="faltCfgDifficulty_${wc}_${st.station}">${(() => { var p = faltDifficultyPercent(st, wc, faltCfgMorker); return p == null ? '—' : p + ' %'; })()}</span>
+                            </div>
+                        </div>
+                        <div class="col-auto">
                             <label class="form-label small mb-0">Utgångsläge</label>
                             <select class="form-select form-select-sm"
                                 onchange="faltCfgUpdateStation('${wc}',${st.station},'shooterStartPosition',this.value)">${SHOOTER_POSITIONS.map(p => `<option ${p === st.shooterStartPosition ? 'selected' : ''}>${p}</option>`).join('')}</select>
@@ -862,9 +951,9 @@ function faltSpacingHintText(distanceM) {
     return 'Rek. avstånd mellan figurer i målgruppen: ' + spacing + ' cm.';
 }
 
-// Re-render all Föreslaget-skjuttid badges for one station across every class.
-// Advanced mode renders one in the per-station header (current tab only).
-// Simple mode renders one per row in the per-class params table.
+// Re-render Föreslaget-skjuttid + Svårighet badges for one station across every class.
+// Advanced mode renders one set in the per-station header (current tab only).
+// Simple mode renders one set per row in the per-class params table.
 function faltCfgRefreshSuggestion(stationNum) {
     faltCfgWeaponClasses.forEach(function(wc) {
         var station = faltCfgData[wc] && faltCfgData[wc].stations
@@ -875,6 +964,11 @@ function faltCfgRefreshSuggestion(stationNum) {
         if (el) el.textContent = sugg ? (sugg.totalSec + ' sek') : '—';
         var applyBtn = document.getElementById('faltCfgSuggApply_' + wc + '_' + stationNum);
         if (applyBtn) applyBtn.disabled = !sugg;
+        var diffEl = document.getElementById('faltCfgDifficulty_' + wc + '_' + stationNum);
+        if (diffEl) {
+            var p = faltDifficultyPercent(station, wc, faltCfgMorker);
+            diffEl.textContent = p == null ? '—' : p + ' %';
+        }
     });
 }
 
@@ -899,7 +993,14 @@ function faltCfgShowSuggestionDetails(wc, stationNum) {
             var prefix = b.sec > 0 ? '+' : '';
             return '<tr><td>' + b.label + '</td><td class="text-end text-nowrap">' + prefix + b.sec + ' sek</td></tr>';
         }).join('');
-        footEl.innerHTML = '<tr class="fw-bold"><td>Föreslaget skjuttid</td><td class="text-end">' + sugg.totalSec + ' sek</td></tr>';
+        var foot = '<tr class="fw-bold"><td>Föreslaget skjuttid</td><td class="text-end">' + sugg.totalSec + ' sek</td></tr>';
+        // Svårighetsgrad — only meaningful when station has a vald skjuttid set.
+        if (station && station.shootingTimeSec) {
+            foot += '<tr class="text-muted small"><td>Vald skjuttid</td><td class="text-end">' + station.shootingTimeSec + ' sek</td></tr>';
+            var pct = Math.round(100 * sugg.totalSec / station.shootingTimeSec);
+            foot += '<tr class="fw-bold"><td>Svårighetsgrad</td><td class="text-end">' + pct + ' %</td></tr>';
+        }
+        footEl.innerHTML = foot;
     }
     bootstrap.Modal.getOrCreateInstance(document.getElementById('faltCfgSuggDetailsModal')).show();
 }
@@ -1315,6 +1416,18 @@ async function faltCfgToggleMorker(checked) {
     renderActiveTab();
 }
 
+// Tävlingstyp toggle (standalone /faltkonfig editor). Writes the choice into
+// the config's _scoringMode meta key. Since the helper faltCfgScoringMode()
+// reads from that key first, all suggested-skjuttid + svårighet computations
+// switch model immediately. Both Normal and Poangfält branches use the same
+// inputs; only the math differs — no per-station data invalidation needed.
+function faltCfgSetScoringMode(value) {
+    var normalized = (value === 'Poang') ? 'Poang' : 'Normal';
+    if (!faltCfgData || typeof faltCfgData !== 'object') return;
+    faltCfgData._scoringMode = normalized;
+    renderActiveTab();
+}
+
 function faltCfgRenderSimpleMode() {
     var container = document.getElementById('faltCfgTabContent');
     var canonical = faltCfgGetCanonicalClass();
@@ -1340,6 +1453,7 @@ function faltCfgRenderSimpleMode() {
                 ? ' <button class="btn btn-outline-warning btn-sm py-0 px-1 ms-1" onclick="faltCfgUnlinkInSimpleMode(\'' + wc + '\')" title="Avlänka"><i class="bi bi-x-circle"></i></button>'
                 : '';
             var sugg = faltSuggestShootingTime(wst, wc, faltCfgMorker);
+            var diffPct = faltDifficultyPercent(wst, wc, faltCfgMorker);
             matrixRows +=
                 '<tr>' +
                   '<td class="fw-bold">' + label + unlinkBtn + '</td>' +
@@ -1350,6 +1464,7 @@ function faltCfgRenderSimpleMode() {
                     '<button type="button" class="btn btn-outline-info btn-sm py-0 px-1" onclick="faltCfgShowSuggestionDetails(\'' + wc + '\',' + st.station + ')" title="Visa uppdelning"><i class="bi bi-info-circle"></i></button>' +
                     '<button type="button" class="btn btn-outline-primary btn-sm py-0 px-1" id="faltCfgSuggApply_' + wc + '_' + st.station + '"' + (sugg ? '' : ' disabled') + ' onclick="faltCfgApplySuggestion(\'' + wc + '\',' + st.station + ')" title="Kopiera värdet till Skjuttid">Använd</button>' +
                   '</div></td>' +
+                  '<td title="100 % = exakt SHB-minimum. Lägre = enklare. Högre = under SHB-min."><span class="badge bg-light text-dark border" id="faltCfgDifficulty_' + wc + '_' + st.station + '">' + (diffPct == null ? '—' : diffPct + ' %') + '</span></td>' +
                   '<td><select class="form-select form-select-sm"' +
                     " onchange=\"faltCfgUpdateStation('" + wc + "'," + st.station + ",'shooterStartPosition',this.value)\">" +
                     SHOOTER_POSITIONS.map(function (p) { return '<option' + (p === wst.shooterStartPosition ? ' selected' : '') + '>' + p + '</option>'; }).join('') +
@@ -1424,6 +1539,7 @@ function faltCfgRenderSimpleMode() {
                         '<th>Vapenklass</th>' +
                         '<th>Skjuttid (sek)</th>' +
                         '<th>Föreslaget</th>' +
+                        '<th>Svårighet</th>' +
                         '<th>Utgångsläge</th>' +
                         '<th>Vapenläge</th>' +
                         '<th>Stödhand</th>' +
