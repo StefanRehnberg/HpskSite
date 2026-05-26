@@ -29,16 +29,6 @@ const faltCfgScoringMode = () => {
 const FALT_CFG_META_KEYS = new Set(['_linkedGroups', '_mode', '_morker', '_attachedConfigId', '_scoringMode']);
 function faltCfgIsMetaKey(k) { return FALT_CFG_META_KEYS.has(k); }
 
-// Scale a figure's four timing fields by `ratio`, in place. Same clamp
-// pattern the advanced-mode "Kopiera från … Δsek" copy uses.
-function faltCfgScaleFigureTimings(fig, ratio) {
-    if (!fig || ratio === 1) return;
-    if (fig.delayBeforeShowSec) fig.delayBeforeShowSec = Math.max(0, Math.round(fig.delayBeforeShowSec * ratio));
-    if (fig.showTimeSec)        fig.showTimeSec        = Math.max(1, Math.round(fig.showTimeSec        * ratio));
-    if (fig.hideAfterSec)       fig.hideAfterSec       = Math.max(1, Math.round(fig.hideAfterSec       * ratio));
-    if (fig.reappearSec)        fig.reappearSec        = Math.max(0, Math.round(fig.reappearSec        * ratio));
-}
-
 // Mirror SHAPE (target groups + figures, including images / descriptions /
 // behavior) from srcWc to all other weapon classes. Timing fields scale
 // proportionally to each destination class's shootingTimeSec relative to
@@ -67,18 +57,13 @@ function faltCfgSyncShape(srcWc) {
             destSt.targetGroups.forEach(function(tg, gi) {
                 if (gi < savedDistances.length && savedDistances[gi] != null) tg.distance = savedDistances[gi];
             });
-            // Scale timings into dest's shootingTimeSec budget. Skip the walk
-            // when times match exactly to avoid pointless rounding drift.
-            var srcTime = srcSt.shootingTimeSec || 30;
-            var destTime = destSt.shootingTimeSec || srcTime;
-            if (srcTime > 0 && destTime > 0 && srcTime !== destTime) {
-                var ratio = destTime / srcTime;
-                destSt.targetGroups.forEach(function (tg) {
-                    (tg.figures || []).forEach(function (fig) {
-                        faltCfgScaleFigureTimings(fig, ratio);
-                    });
-                });
-            }
+            // Figure timings (delayBeforeShowSec / showTimeSec / hideAfterSec /
+            // reappearSec) mirror across classes verbatim — what the Banläggare
+            // typed is what's stored. Earlier behavior auto-scaled them to each
+            // class's shootingTimeSec budget; that silently rewrote values and
+            // was invisible in Simple mode (only revealed by switching to
+            // Advanced). If a tight-budget class can't fit a figure's cycle,
+            // override it explicitly in Advanced mode.
         });
         if (destStations.length > srcStations.length) destStations.length = srcStations.length;
         faltCfgData[wc].stations = destStations;
@@ -429,23 +414,12 @@ function faltCfgMarkDirty(wc, stationNum) {
 function faltCfgUpdateStation(wc, stationNum, field, value) {
     var station = faltCfgData[wc]?.stations?.find(function(s) { return s.station === stationNum; });
     if (!station) return;
-    // Simple mode: editing this class's shootingTimeSec re-fits its moving-
-    // figure timings to the new total. Without it, dropping a class from 25 →
-    // 20 sek would leave 8s show windows in a 20s budget. Advanced mode skips
-    // this — the operator has the explicit "Kopiera från … Δsek" button when
-    // they want proportional scaling.
-    if (field === 'shootingTimeSec' && faltCfgMode === 'simple') {
-        var oldVal = station.shootingTimeSec || 0;
-        var newVal = value || 0;
-        if (oldVal > 0 && newVal > 0 && oldVal !== newVal) {
-            var ratio = newVal / oldVal;
-            (station.targetGroups || []).forEach(function (tg) {
-                (tg.figures || []).forEach(function (fig) {
-                    faltCfgScaleFigureTimings(fig, ratio);
-                });
-            });
-        }
-    }
+    // Figure timings (delayBeforeShowSec / showTimeSec / hideAfterSec /
+    // reappearSec) are not auto-rescaled when shootingTimeSec changes — what
+    // the Banläggare typed is what's stored. Earlier behavior re-fit timings
+    // to the new shoot-time budget, but that silently rewrote values and
+    // surprised operators. The Advanced mode "Kopiera från … Δsek" copy is
+    // still available when explicit proportional scaling is wanted.
     station[field] = value;
     // "IsShootOffOnly" is a station-level decision (the same station number is
     // either a regular station or shoot-off-only for everyone). Propagate the
