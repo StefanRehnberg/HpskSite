@@ -271,12 +271,16 @@ function faltSuggestShootingTime(station, wc, morker) {
     var lines = [];
     var anyApplicable = false;
 
-    // Per-figure entries collected during the målgrupp walk — used by the
-    // Normal-mode greedy allocator after the loop.
-    var figureEntries = []; // { perShot, slotCount, label }
+    // Stödhand: per SHB D.10.6.1, stödhand makes the station effectively one
+    // SizeGroup easier (or one distance step shorter) — both equivalent. We
+    // implement by shifting the figure's SizeGroup down by 1 for max-distance
+    // lookup, which lowers per-shot-time. Clamped at SizeGroup 1 (largest).
+    var stodhandEasing = station.supportHand === 'Stödhand tillåten';
 
-    var worstPerShot = 0;
-    var worstLabel = '';
+    // Per-figure entries collected during the målgrupp walk — used by the
+    // Normal-mode greedy allocator and the Poäng min+easiest-extras allocator.
+    var figureEntries = []; // { perShot, slotCount, minShots, maxShots, label }
+    var stationDefaultMax = station.maxShotsPerFigure || 6;
 
     // Informational per-målgrupp lines + per-figure data collection.
     station.targetGroups.forEach(function(tg, gi) {
@@ -287,16 +291,21 @@ function faltSuggestShootingTime(station, wc, morker) {
         var groupLimitingFig = '';
         (tg.figures || []).forEach(function(f, fi) {
             if (!f.sizeGroup) return;
-            var maxD = faltFigureMaxDistance(f.sizeGroup, wc);
+            // Stödhand: look up max distance for one easier size group.
+            var lookupGroup = stodhandEasing ? Math.max(1, f.sizeGroup - 1) : f.sizeGroup;
+            var maxD = faltFigureMaxDistance(lookupGroup, wc);
             if (!maxD) return;
             anyApplicable = true;
             var d = effectiveDistance != null ? effectiveDistance : maxD;
             var t = (d / maxD) * maxTime;
-            if (t > groupPerShot) { groupPerShot = t; groupLimitingFig = 'storleksgrupp ' + f.sizeGroup; }
-            if (t > worstPerShot) { worstPerShot = t; worstLabel = 'Målgrupp ' + letter + ', storleksgrupp ' + f.sizeGroup + ' @@ ' + d + ' m'; }
+            if (t > groupPerShot) { groupPerShot = t; groupLimitingFig = 'storleksgrupp ' + f.sizeGroup + (stodhandEasing ? ' (stödhand → grupp ' + lookupGroup + ')' : ''); }
+            var figMax = f.maxShotsPerFigure != null ? f.maxShotsPerFigure : stationDefaultMax;
+            var figMin = f.minShotsPerFigure != null ? f.minShotsPerFigure : 0;
             figureEntries.push({
                 perShot: t,
-                slotCount: (f.targetsPerFigure || 1) * (station.maxShotsPerFigure || 6),
+                slotCount: (f.targetsPerFigure || 1) * figMax,
+                minShots: Math.max(0, (f.targetsPerFigure || 1) * figMin),
+                maxShots: (f.targetsPerFigure || 1) * figMax,
                 label: 'Målgrupp ' + letter + ', figur ' + (fi + 1) + ' (storleksgrupp ' + f.sizeGroup + ')'
             });
         });
@@ -316,29 +325,69 @@ function faltSuggestShootingTime(station, wc, morker) {
     // ── Compute "grund" per scoring mode ─────────────────────────────────
     var grund;
     if (mode === 'Poang') {
-        grund = Math.ceil(FALT_STATION_SHOTS * worstPerShot);
+        // Poäng-strategi: skytten har 6 skott och vill träffa minst 1 i varje
+        // figur (för att inte tappa poäng). Snabbaste lagliga fördelning:
+        //   1) Placera figur.minShots (default 1) i varje figur
+        //   2) Placera överskott på den enklaste (lägsta per-skott-tiden), upp
+        //      till figurens max — annars nästa enklaste osv.
+        var poangAllocs = figureEntries.map(function(e) {
+            return {
+                perShot: e.perShot, label: e.label,
+                count: Math.max(1, e.minShots || 1),
+                maxShots: e.maxShots
+            };
+        });
+        // Clamp each count to its max (in case min > max for a misconfigured figure).
+        poangAllocs.forEach(function(a) { if (a.count > a.maxShots) a.count = a.maxShots; });
+        var poangTotal = poangAllocs.reduce(function(s, a) { return s + a.count; }, 0);
+        // Distribute remaining shots on the easiest figures with capacity left.
+        var poangRemaining = FALT_STATION_SHOTS - poangTotal;
+        if (poangRemaining > 0) {
+            var sortedAsc = poangAllocs.slice().sort(function(a, b) { return a.perShot - b.perShot; });
+            for (var ai = 0; ai < sortedAsc.length && poangRemaining > 0; ai++) {
+                var aa = sortedAsc[ai];
+                var headroom = aa.maxShots - aa.count;
+                var take = Math.min(headroom, poangRemaining);
+                if (take > 0) { aa.count += take; poangRemaining -= take; }
+            }
+        }
+        var rawPoangGrund = poangAllocs.reduce(function(s, a) { return s + a.count * a.perShot; }, 0);
+        grund = Math.ceil(rawPoangGrund);
+        var poangBreakdown = poangAllocs
+            .filter(function(a) { return a.count > 0; })
+            .map(function(a) { return a.count + ' × ' + a.perShot.toFixed(2).replace('.', ',') + ' sek (' + a.label + ')'; });
+        var poangSlotsUsed = poangAllocs.reduce(function(s, a) { return s + a.count; }, 0);
         lines.push({
-            label: 'Poängfält: ' + FALT_STATION_SHOTS + ' skott × ' + worstPerShot.toFixed(2).replace('.', ',') + ' sek/skott (' + worstLabel + ')',
-            sec: grund
+            label: 'Poängfält: ' + poangSlotsUsed + ' skott — min 1/figur, överskott på enklaste',
+            sec: grund,
+            info: poangBreakdown.length ? poangBreakdown.join(' + ') : null
         });
     } else {
         // Normal — greedy: sort figures by perShot desc, take up to 6 shots,
-        // honoring per-figure slot caps.
-        var sortedEntries = figureEntries.slice().sort(function(a, b) { return b.perShot - a.perShot; });
-        var remaining = FALT_STATION_SHOTS;
-        var rawGrund = 0;
-        var allocBreakdown = [];
-        for (var i = 0; i < sortedEntries.length && remaining > 0; i++) {
-            var e = sortedEntries[i];
-            var n = Math.min(e.slotCount, remaining);
-            if (n <= 0) continue;
-            rawGrund += n * e.perShot;
-            remaining -= n;
-            allocBreakdown.push(n + ' × ' + e.perShot.toFixed(2).replace('.', ',') + ' sek (' + e.label + ')');
+        // honoring per-figure slot caps. Per-figure minimums (if set) are
+        // pre-allocated before the greedy phase.
+        var normalAllocs = figureEntries.map(function(e) {
+            return { perShot: e.perShot, label: e.label, count: Math.max(0, e.minShots || 0), maxShots: e.maxShots };
+        });
+        normalAllocs.forEach(function(a) { if (a.count > a.maxShots) a.count = a.maxShots; });
+        var minTotal = normalAllocs.reduce(function(s, a) { return s + a.count; }, 0);
+        var remaining = FALT_STATION_SHOTS - minTotal;
+        if (remaining > 0) {
+            var sortedDesc = normalAllocs.slice().sort(function(a, b) { return b.perShot - a.perShot; });
+            for (var ni = 0; ni < sortedDesc.length && remaining > 0; ni++) {
+                var na = sortedDesc[ni];
+                var nh = na.maxShots - na.count;
+                var nt = Math.min(nh, remaining);
+                if (nt > 0) { na.count += nt; remaining -= nt; }
+            }
         }
+        var rawGrund = normalAllocs.reduce(function(s, a) { return s + a.count * a.perShot; }, 0);
         grund = Math.ceil(rawGrund);
-        var totalSlotsUsed = FALT_STATION_SHOTS - remaining;
+        var totalSlotsUsed = normalAllocs.reduce(function(s, a) { return s + a.count; }, 0);
         var capped = (figureEntries.reduce(function(s, e) { return s + e.slotCount; }, 0) > FALT_STATION_SHOTS);
+        var allocBreakdown = normalAllocs
+            .filter(function(a) { return a.count > 0; })
+            .map(function(a) { return a.count + ' × ' + a.perShot.toFixed(2).replace('.', ',') + ' sek (' + a.label + ')'; });
         lines.push({
             label: 'Normal-läge: ' + totalSlotsUsed + ' skott — ' + (capped ? 'värsta möjliga fördelning' : 'alla tillgängliga skott-platser'),
             sec: grund,
@@ -1040,6 +1089,14 @@ function renderTargetGroup(tg, tgIdx, stationNum, wc, isPoang, isLastGroup) {
                 '<label class="small text-muted text-nowrap mb-0">M\u00e5l<\/label>' +
                 '<input type="number" class="form-control form-control-sm" min="1" max="6" value="' + (fig.targetsPerFigure || 1) + '" style="width:45px"' +
                     ' onchange="faltCfgUpdateFigure(' + "'" + wc + "'" + ',' + stationNum + ',' + tgIdx + ',' + fIdx + ',' + "'targetsPerFigure'" + ',parseInt(this.value)||1)" title="Antal m\u00e5l i figuren"><\/div>' +
+            '<div class="d-flex align-items-center gap-1" title="Minsta antal tr\u00e4ff p\u00e5 figuren (SHB D.10.3, tomt = inget krav)">' +
+                '<label class="small text-muted text-nowrap mb-0">Min<\/label>' +
+                '<input type="number" class="form-control form-control-sm" min="0" max="6" value="' + (fig.minShotsPerFigure != null ? fig.minShotsPerFigure : '') + '" placeholder="\u2013" style="width:45px"' +
+                    ' onchange="faltCfgUpdateFigure(' + "'" + wc + "'" + ',' + stationNum + ',' + tgIdx + ',' + fIdx + ',' + "'minShotsPerFigure'" + ',this.value === \'\' ? null : (parseInt(this.value)||0))"><\/div>' +
+            '<div class="d-flex align-items-center gap-1" title="H\u00f6gsta antal tr\u00e4ff p\u00e5 figuren (SHB D.10.3, tomt = station-default)">' +
+                '<label class="small text-muted text-nowrap mb-0">Max<\/label>' +
+                '<input type="number" class="form-control form-control-sm" min="1" max="6" value="' + (fig.maxShotsPerFigure != null ? fig.maxShotsPerFigure : '') + '" placeholder="\u2013" style="width:45px"' +
+                    ' onchange="faltCfgUpdateFigure(' + "'" + wc + "'" + ',' + stationNum + ',' + tgIdx + ',' + fIdx + ',' + "'maxShotsPerFigure'" + ',this.value === \'\' ? null : (parseInt(this.value)||1))"><\/div>' +
             '<select class="form-select form-select-sm" style="width:auto"' +
                 ' onchange="faltCfgUpdateFigure(' + "'" + wc + "'" + ',' + stationNum + ',' + tgIdx + ',' + fIdx + ',' + "'behavior'" + ',this.value); faltCfgToggleFigBehavior(this)">' +
                 TARGET_BEHAVIORS.map(function(b) { return '<option' + (b === fig.behavior ? ' selected' : '') + '>' + b + '<\/option>'; }).join('') +
@@ -1284,6 +1341,8 @@ function faltCfgAutoDescription(stationNum, wc, tgIdx) {
             if (fig.reappearSec) desc += ', visar igen efter ' + fig.reappearSec + ' sek';
         }
         if (fig.isPoangmal) desc += ', po\u00e4ngr\u00e4kning';
+        if (fig.minShotsPerFigure != null && fig.minShotsPerFigure > 0) desc += ', minst ' + fig.minShotsPerFigure + ' tr\u00e4ff';
+        if (fig.maxShotsPerFigure != null) desc += ', h\u00f6gst ' + fig.maxShotsPerFigure + ' tr\u00e4ff';
         desc += '. ';
     });
     tg.description = desc.trim();

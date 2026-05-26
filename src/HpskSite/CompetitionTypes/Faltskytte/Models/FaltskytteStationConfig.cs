@@ -112,6 +112,13 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public int? ShowTimeSec { get; set; }
         public int? HideAfterSec { get; set; }
         public int? ReappearSec { get; set; }
+        /// <summary>Minimum required shots at this figure to score full points
+        /// (per SHB D.10.3 — "minsta antal träff skall anges"). Null = no minimum.</summary>
+        public int? MinShotsPerFigure { get; set; }
+        /// <summary>Maximum allowed shots at this figure (per SHB D.10.3 — "högsta
+        /// antal träff skall anges"). Null = falls back to station-level
+        /// MaxShotsPerFigure.</summary>
+        public int? MaxShotsPerFigure { get; set; }
         public string? ImageUrl { get; set; }
         /// <summary>Optional reference to a catalog target name</summary>
         public string? TargetName { get; set; }
