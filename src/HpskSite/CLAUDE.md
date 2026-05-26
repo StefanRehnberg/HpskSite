@@ -1180,16 +1180,24 @@ Two SQL migrations: `add-approval-to-faltskytte-configuration.sql` (status + app
 
 **Banläggare cert check** uses the existing `CertificationService.HasActiveCertAsync(memberId, CertificationTypes.Banlaggare)` — no new role plumbing.
 
-### Fältskytte SHB Shoot-Time Suggestion (2026-05-24)
+### Fältskytte SHB Shoot-Time Suggestion + Svårighetsgrad (2026-05-24 → 26)
 
-**What:** The configurator surfaces a SHB-derived suggested skjuttid per station per weapon class, with a live breakdown modal and an "Använd" button that copies it to the Skjuttid field.
+**What:** The configurator surfaces a SHB-derived suggested skjuttid per station per weapon class, a live breakdown modal, an "Använd" button that copies it to the Skjuttid field, and a **Svårighetsgrad %** badge that scores the chosen Skjuttid against the SHB minimum.
 
-**Formula:**
-- 6 skott per station (SHB convention).
+**Formula (depends on Tävlingstyp / `_scoringMode`):**
+- 6 skott per station (SHB convention) — the cap is the same in both modes.
 - Per-shot time = `D / maxD(SizeGroup, weaponGroup) × maxTime(weaponGroup)`. maxTime: A&R 2.0 s, B 1.75 s, C 1.5 s.
-- Station's per-shot floor = max across all figures (the most demanding figure sets the per-shot allowance).
-- Base = ceil(6 × per-shot floor).
-- Tillägg: +2 s when `weaponStartPosition === '45 grader'`; +2 s × (n_målgrupper − 1) for omriktning; ×1.30 multiplier when competition-level Mörkerfältskjutning checkbox is on.
+- **Poangfält:** station's per-shot floor = max across all figures (one figure can absorb all 6 shots) → base = `ceil(6 × per-shot floor)`. Worst-case model.
+- **Normal:** per-figure greedy 6-shot allocation. For each figure compute `slotCount = targetsPerFigure × maxShotsPerFigure`; sort figures by perShot desc; greedily take `min(slotCount, remaining)` shots from each until 6 are filled (or all slots exhausted if station < 6 slots). Sum `shotsAtFig × perShot` → base. Shooter chooses what to skip when slots > 6.
+- Tillägg (both modes): +2 s when `weaponStartPosition === '45 grader'`; +2 s × (n_målgrupper − 1) for omriktning; ×1.30 multiplier when Mörkerfältskjutning toggle is on.
+
+**Svårighetsgrad badge:** `round(100 × SHB-min-tid / station.shootingTimeSec)`. 100 % = exactly at SHB minimum; <100 % = generous; >100 % = below SHB minimum (impossible per regelverk but mathematically valid). Plain badge — no threshold colors per Banläggare feedback. Sourced from the same Excel formula HPSK Banläggare have used historically ("Pokalen 2 tidutrakning.xls", VBA dump).
+
+**Tävlingstyp moved into the configurator (2026-05-26):** the Poängberäkning / scoringMode dropdown — formerly per-competition on the wizard + edit modal — is now part of the configuration. Picker lives in `Views/FaltskytteConfigurationEditor.cshtml` next to the Mörker toggle and writes `_scoringMode` into the JSON blob meta keys.
+- **Phase 1:** picker added; `_FaltskytteCompetitionPicker.cshtml` propagates `_scoringMode` → competition `scoringMode` doctype property on Anslut + Konvertera, so all 7+ downstream read sites (FaltskytteController, FaltskytteStandardMedalService, FaltskytteShootOffService, FaltskytteStatsService, FaltskytteStationEntry.cshtml, FaltskytteResultsManagement.cshtml, CompetitionResult.cshtml) keep reading the competition property unchanged.
+- **Phase 2:** wizard + edit modal dropdowns replaced with a hidden input + read-only `<span id="{prefix}scoringMode_display">` badge ("Normal" / "Poängfält"). `faltUpdateScoringModeDisplay(prefix)` is invoked on modal open and on picker attach to keep the label in sync.
+
+**Suggestion-details modal:** `_FaltskytteConfiguratorSuggestionModal.cshtml` is `modal-lg` with `table-layout:fixed` + colgroup. In Normal mode the breakdown renders the per-figure greedy allocation as a small italic sub-row spanning both columns (under the per-målgrupp sec row) so allocator detail doesn't push the modal sideways. Appended footer rows: Föreslaget, Vald skjuttid, Svårighetsgrad.
 
 **SHB tables baked into JS** (`SHB_MAX_DISTANCES` const in `_FaltskytteConfiguratorScript.cshtml`): per SizeGroup (1–14) → `{AR, B, C}` max distance, sourced from SHB 2026 pp. 100-122. SizeGroup 15 is the "Ej grupperad" bucket (no SHB row, returns null → no bound).
 
@@ -1266,7 +1274,7 @@ The `/Migrations` folder contains disabled database schemas for direct competiti
 
 ### Completed ✅
 - **Fältkonfigurator Approval Workflow (2026-05-25)** - Banläggare-gated approval lifecycle (Draft → PendingApproval → Approved). Owners pick a specific Banläggare via dropdown; email notification sent with deep-link; only that Banläggare can approve. Approved configs lock JsonBlob (metadata stays editable). Listing + competition picker show Godkänd / Väntar badges; "Väntar på godkännande" filter visible to Banläggare only. See "Fältkonfigurator Approval Workflow" section.
-- **Fältskytte Standalone Configurations + SHB Shoot-Time Suggestion (2026-05-24 → 25)** - New `/faltkonfig` listing + `/faltkonfig/{id}/redigera` editor for fristående station configurations with visibility tiers, collaborators, SecretUntil sekretessgrind, link-or-copy station import + linked-station reload UX. Replaces the legacy in-competition `FaltskytteStationConfigModal`. Adds a saved-config picker on the wizard / edit modal + a Konvertera-button for legacy inline configs. SHB-derived suggested skjuttid per station/class (6 skott × per-shot floor + tillägg, mörker ×1.30), per-målgrupp distance slider, Mörkerfältskjutning toggle, Figurkatalog grouped + filtered by SizeGroup, mobile-responsive picker modal. See "Fältskytte Standalone Configurations" + "Fältskytte SHB Shoot-Time Suggestion" sections.
+- **Fältskytte Standalone Configurations + SHB Shoot-Time Suggestion + Svårighetsgrad (2026-05-24 → 26)** - New `/faltkonfig` listing + `/faltkonfig/{id}/redigera` editor for fristående station configurations with visibility tiers, collaborators, SecretUntil sekretessgrind, link-or-copy station import + linked-station reload UX. Replaces the legacy in-competition `FaltskytteStationConfigModal`. Adds a saved-config picker on the wizard / edit modal + a Konvertera-button for legacy inline configs. SHB-derived suggested skjuttid per station/class (6 skott × per-shot floor + tillägg, mörker ×1.30; **Normal** mode uses per-figure greedy 6-shot allocation, **Poangfält** uses worst-case 6 × max-per-shot), Svårighetsgrad % badge per station (100 % = SHB minimum), per-målgrupp distance slider, Mörkerfältskjutning toggle, Figurkatalog grouped + filtered by SizeGroup, mobile-responsive picker modal. **Tävlingstyp** dropdown moved from the competition wizard/editor into the configurator (source of truth); wizard + edit modal show a read-only badge. See "Fältskytte Standalone Configurations" + "Fältskytte SHB Shoot-Time Suggestion + Svårighetsgrad" sections.
 - **Competition URLs & Routing (2026-05-22)** - Custom URL provider + content finder for club-hosted, region-hosted, SM, and Landsdel competition URL shapes (see "Competition URLs & Routing" section above). Includes at-least-one-host guard across wizard/edit modal + their backends, and isClubOnly auto-disable when no club is selected.
 - **Controller Refactoring (2025-10-28)** - AdminController split into specialized controllers with AdminAuthorizationService
 - **Authorization Security Fixes (2025-11-02)** - Comprehensive security audit and fixes across 6 areas (see [Documentation](Documentation/AUTHORIZATION_SECURITY_AUDIT.md))
