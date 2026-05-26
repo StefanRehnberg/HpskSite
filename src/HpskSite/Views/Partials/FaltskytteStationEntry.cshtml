@@ -118,11 +118,8 @@
             <div class="card-header py-2 d-flex justify-content-between align-items-center">
                 <span class="fw-bold small"><i class="bi bi-stopwatch me-1"></i>Tidur</span>
                 <div class="d-flex gap-1">
-                    <button class="btn btn-outline-secondary btn-sm" id="fseTimerTestBtn" onclick="fseTimerTestVoice()" title="Test r&ouml;st">
+                    <button class="btn btn-outline-secondary btn-sm" id="fseTimerTestBtn" onclick="fseTimerTestVoice()" title="Test r&ouml;st (spelar Eld upph&ouml;r)">
                         <i class="bi bi-volume-up"></i>
-                    </button>
-                    <button class="btn btn-success btn-sm" id="fseTimerStartBtn" onclick="fseTimerStart()">
-                        <i class="bi bi-play-fill me-1"></i>Starta
                     </button>
                     <button class="btn btn-outline-secondary btn-sm" id="fseTimerResetBtn" onclick="fseTimerReset()" style="display:none">
                         <i class="bi bi-arrow-counterclockwise me-1"></i>&Aring;terst&auml;ll
@@ -131,6 +128,23 @@
             </div>
             <div class="card-body py-2">
                 <div class="alert alert-warning small mb-2 py-1" id="fseTimerVoiceBanner" style="display:none"></div>
+
+                <!-- Pre-fire commands: Ladda + Alla klara (tappable any time) -->
+                <div class="d-flex gap-2 mb-2">
+                    <button class="btn btn-outline-primary flex-fill py-2" onclick="fseTimerCmd('ladda')">
+                        <i class="bi bi-megaphone me-1"></i>Ladda
+                    </button>
+                    <button class="btn btn-outline-primary flex-fill py-2" onclick="fseTimerCmd('alla-klara')">
+                        <i class="bi bi-megaphone me-1"></i>Alla klara
+                    </button>
+                </div>
+
+                <!-- Big Starta button (becomes hidden while the auto-sequence runs) -->
+                <button class="btn btn-success w-100 mb-2 py-3" id="fseTimerStartBtn" onclick="fseTimerStart()" style="font-size:1.1em;font-weight:bold">
+                    <i class="bi bi-play-fill me-1"></i>STARTA SKJUTSEKVENS
+                </button>
+
+                <!-- Auto-sequence display (countdown / bar / figures) — visible at all times so chief can see what's coming -->
                 <div class="text-center fw-bold fse-tmr-display" id="fseTimerDisplay">&mdash;</div>
                 <div class="d-flex align-items-center gap-2 mt-2 mb-1">
                     <div class="fse-tmr-figlabel fw-bold">Skjuttid</div>
@@ -140,8 +154,18 @@
                     </div>
                     <div class="fse-tmr-figstate">&nbsp;</div>
                 </div>
-                <div class="small text-muted mb-2" id="fseTimerStatus">Tryck Starta f&ouml;r att inleda kommandosekvensen (10 s upprop &rarr; ELD &rarr; skjuttid &rarr; ELD UPPH&Ouml;R).</div>
+                <div class="small text-muted mb-2" id="fseTimerStatus">Tryck Starta f&ouml;r att inleda skjutsekvensen (10 s upprop &rarr; Eld &rarr; skjuttid &rarr; Eld upph&ouml;r).</div>
                 <div id="fseTimerFigures"></div>
+
+                <!-- Post-fire commands: Patron ur + Visitation (tappable any time) -->
+                <div class="d-flex gap-2 mt-2">
+                    <button class="btn btn-outline-primary flex-fill py-2" onclick="fseTimerCmd('patron-ur')" style="font-size:0.95em">
+                        <i class="bi bi-megaphone me-1"></i>Patron ur,<br/>proppa vapen
+                    </button>
+                    <button class="btn btn-outline-primary flex-fill py-2" onclick="fseTimerCmd('visitation')">
+                        <i class="bi bi-megaphone me-1"></i>Visitation
+                    </button>
+                </div>
             </div>
         </div>
 
@@ -939,10 +963,15 @@
     var TMR_CEASEFIRE_SEC = 3;      // "Eld upphör!" starts this many sec before end
     var TMR_SOUND_BASE = '/sounds/kommandon/';
     var TMR_SOUND_FILES = {
-        prefire: '10-sek-kvar.mp3',
-        fardig:  'fardiga.mp3',
-        eld:     'eld.mp3',
-        upphor:  'eld-upphor.mp3'
+        prefire:        '10-sek-kvar.mp3',
+        fardig:         'fardiga.mp3',
+        eld:            'eld.mp3',
+        upphor:         'eld-upphor.mp3',
+        // Manual commands surfaced as buttons (no auto-firing).
+        'ladda':        'ladda.mp3',
+        'alla-klara':   'alla-klara.mp3',
+        'patron-ur':    'patron-ur-proppa-vapen.mp3',
+        'visitation':   'visitation.mp3'
     };
 
     var tmrShootingTimeSec = 0;
@@ -1001,6 +1030,13 @@
         // Play the longest/most distinctive clip so the operator hears that
         // audio works AND gets a real feel for the cease-fire on this device.
         tmrPlay('upphor');
+    };
+
+    // Trigger for the four manual command buttons (Ladda / Alla klara /
+    // Patron ur / Visitation). No state machine — chief can tap any of them
+    // any time, including repeating Alla klara if shooters answer "nej".
+    window.fseTimerCmd = function(key) {
+        tmrPlay(key);
     };
 
     // Case-insensitive lookup with sane fallbacks. The JSON blob may come back

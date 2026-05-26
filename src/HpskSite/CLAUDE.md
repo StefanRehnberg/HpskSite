@@ -1182,24 +1182,37 @@ Two SQL migrations: `add-approval-to-faltskytte-configuration.sql` (status + app
 
 ### Stationschef Tidur (2026-05-26)
 
-**What:** Voice-driven shooting-time clock on the station entry page (`FaltskytteStationEntry.cshtml`), sitting between Upprop and "Starta resultatinmatning" on the roll-call screen. Reads the patrol's weapon-class `shootingTimeSec` from the loaded station config and runs a 10 s upprop → ELD → skjuttid → EELD UPPHÖR sequence with per-figure visibility timelines.
+**What:** Audio-driven shooting-time clock on the station entry page (`FaltskytteStationEntry.cshtml`), sitting between Upprop and "Starta resultatinmatning" on the roll-call screen. Reads the patrol's weapon-class `shootingTimeSec` from the loaded station config and runs a 10 s upprop → ELD → skjuttid → Eld upphör auto-sequence with per-figure visibility timelines. Four extra manual command buttons (Ladda / Alla klara pre-fire, Patron ur / Visitation post-fire) round out the full Fältskytte cycle.
+
+**Audio playback (NOT Web Speech API):** Initial implementation used `speechSynthesis` but the cease-fire elongation sounded robotic on every device and Chrome-on-Windows couldn't see the Microsoft OneCore voices. Replaced with 8 pre-recorded Swedish MP3 clips generated via OpenAI's `gpt-4o-mini-tts` (instruction-controllable, military shout style):
+- `10-sek-kvar.mp3`, `fardiga.mp3`, `eld.mp3`, `eld-upphor.mp3` — fired automatically by the timer
+- `ladda.mp3`, `alla-klara.mp3`, `patron-ur-proppa-vapen.mp3`, `visitation.mp3` — surfaced as manual buttons
+All live in `/wwwroot/sounds/kommandon/`. ~243 KB total. `<Audio>` elements preloaded at script-load time. `tmrPlay(key)` plays a clip; if the browser rejects `.play()` (audio not yet unlocked by a user gesture), an `tmrAudioBlocked` banner prompts the operator to tap the 🔊 Test-röst button once. Subsequent plays during the auto-sequence (fired from inside the `requestAnimationFrame` loop via `setTimeout`-equivalent flags) work unblocked after the first gesture.
 
 **Sequence (anchored on `performance.now()` + scheduled via `requestAnimationFrame`, no chained setTimeouts):**
-- T-10 s on tap of Starta: "10 SEKUNDER KVAR!" (rate 1.0)
-- T-3 s: "FÄRDIGA!"
-- T+0: "ELD!", shooting bar starts moving
-- T+(shoot − 3): "Eld upphöör!" at rate 0.3 / pitch 1.2 (drawn out to ~3 s; reference voice Microsoft Bengt/Hedvig in Edge)
+- T-10 s on tap of Starta: plays `10-sek-kvar.mp3` (this is also the user-gesture audio unlock)
+- T-3 s: plays `fardiga.mp3`
+- T+0: plays `eld.mp3`, shooting bar starts moving
+- T+(shoot − 3): plays `eld-upphor.mp3` (~3 s long, lands near T+shoot)
 - T+shoot: bar full, display switches to "Eld upphör" in red, Återställ button shown
 
-**Voice:** Web Speech API, **strict sv-* lang requirement** (refuses to let an English voice mangle Swedish). Preferred voices: Alva / Klara / Oskar (iOS) → Google Svenska (Android) → any other sv-*. If no Swedish voice is installed, speech is silently skipped and a yellow banner explains how to install one. On **Chrome on Windows** the banner also appends an Edge-tip — Chrome only enumerates SAPI-5 voices on Windows, so the Microsoft Bengt/Hedvig OneCore voices that ship with the language pack are invisible to it (Edge sees them natively). UA test excludes `Edg/` and `OPR/` so only true Chrome shows the tip. Voices populate async on Chrome / Android via `voiceschanged`; a 🔊 "Test röst" button next to Starta lets the operator verify TTS works on the device before the first patrol. Screen Wake Lock acquired on Starta (re-acquired on `visibilitychange`).
+**Layout (two button rows + center auto-sequence):**
+```
+[Header: Tidur + 🔊 Test röst + ⟲ Återställ]
+[Pre-fire row:  Ladda  |  Alla klara]
+[STARTA SKJUTSEKVENS — full-width prominent button]
+[Countdown · Skjuttid bar · figure rows]
+[Post-fire row:  Patron ur, proppa vapen  |  Visitation]
+```
+No state machine — every command button is tappable any time so the chief can repeat Alla klara on "nej", or skip ahead.
 
-**Per-figure timeline:** each Framsvängande / Bortsvängande figure gets its own row with the configured behavior + effective times displayed ("fram 8 s, syns 8 s"). Visible windows render as green bands; the now-line scans across, and on a visibility transition the row flashes yellow + a FRAM / UT state badge flips. Fast figures show one full-width green band. Defensive camelCase/PascalCase reads via `tmrPick`, and missing `showTimeSec` / `hideAfterSec` fall back to the configurator's UI defaults (8 / 8) so figures don't render as empty stripes when the user never touched the input field.
-
-**Layout:** the main shooting-time bar sits in the same flex row structure as figure rows (140 px "Skjuttid" label + flex-grow bar + 64 px spacer), so the main bar end aligns vertically with figure timeline ends.
+**Per-figure timeline:** each Framsvängande / Bortsvängande figure gets its own row with the configured behavior + effective times displayed ("fram 8 s, syns 8 s"). Visible windows render as green bands; the now-line scans across, and on a visibility transition the row flashes yellow + a FRAM / UT state badge flips. Fast figures show one full-width green band. Defensive camelCase/PascalCase reads via `tmrPick`, and missing `showTimeSec` / `hideAfterSec` fall back to the configurator's UI defaults (8 / 8) so figures don't render as empty stripes when the user never touched the input field. The main shooting-time bar sits in the same flex row structure as figure rows (140 px label + flex-grow bar + 64 px spacer) for vertical alignment.
 
 **Status line:** shows the read shooting time and weapon class — `"Skjuttid 16 s (vapenklass A). Tryck Starta…"` — which surfaces config drift if the read value doesn't match expectations.
 
-**Lifecycle:** `fseTimerCancel()` runs when leaving the roll-call screen (in `fseStartEntry` and `fseBackFromRollCall`) so the timer never bleeds into result entry or back to the patrol picker.
+**Lifecycle:** `fseTimerCancel()` runs when leaving the roll-call screen (in `fseStartEntry` and `fseBackFromRollCall`) so the timer never bleeds into result entry or back to the patrol picker. Cancel also pauses + rewinds any in-flight audio (e.g. mid-cease-fire). Screen Wake Lock acquired on Starta (re-acquired on `visibilitychange`).
+
+**Test röst** plays `eld-upphor.mp3` (the longest + most distinctive clip) — verifies playback works AND gives the operator a feel for the cease-fire on this device.
 
 ### Fältkonfigurator: figure timings no longer auto-scaled to shootingTimeSec (2026-05-26)
 
