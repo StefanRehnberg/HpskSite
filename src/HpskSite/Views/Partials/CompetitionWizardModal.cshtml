@@ -321,11 +321,12 @@
                         <!-- Fältskytte station config section -->
                         <div id="wizard_faltskytteSection" style="display: none;">
                             <div class="mb-3">
-                                <label for="wizard_scoringMode" class="form-label fw-bold">Poängberäkning</label>
-                                <select class="form-select" id="wizard_scoringMode" style="max-width: 200px;">
-                                    <option value="Normal" selected>Normal (träff/figurer)</option>
-                                    <option value="Poang">Poängfält (träff + figurer)</option>
-                                </select>
+                                <label class="form-label fw-bold">Tävlingstyp</label>
+                                <div class="d-flex align-items-center gap-2">
+                                    <input type="hidden" id="wizard_scoringMode" value="Normal" onchange="faltUpdateScoringModeDisplay('wizard_')">
+                                    <span id="wizard_scoringMode_display" class="badge bg-info text-dark fs-6">Normal</span>
+                                </div>
+                                <div class="form-text small">Sätts från den anslutna stationskonfigurationen. Ändra via <em>Fältkonfiguratorn</em> på den aktuella konfigurationen.</div>
                             </div>
 
                             <div class="row mb-3">
@@ -1178,6 +1179,8 @@ document.getElementById('competitionWizardModal').addEventListener('show.bs.moda
 
     // Hydrate the Fältskytte saved-configuration picker (no-op if not visible).
     if (typeof faltPickerInit === 'function') faltPickerInit('wizard_');
+    // Sync the Tävlingstyp display with the (default-or-attached) hidden value.
+    if (typeof faltUpdateScoringModeDisplay === 'function') faltUpdateScoringModeDisplay('wizard_');
 });
 
 // Detect if we're on a club page or admin page

@@ -47,6 +47,26 @@
 
     window._faltPickerCache = null; // cached ListAccessible result
 
+    // Updates the visual "Tävlingstyp" badge next to the hidden scoringMode
+    // input on either the wizard (prefix='wizard_') or edit modal ('edit_').
+    // Wired to the hidden input's onchange so picker-driven dispatchEvent('change')
+    // updates the display. Should also be called explicitly after wizard reset
+    // and edit-modal load (when the value is set without a change event).
+    window.faltUpdateScoringModeDisplay = function(prefix) {
+        var fld = document.getElementById(prefix + 'scoringMode');
+        var dsp = document.getElementById(prefix + 'scoringMode_display');
+        if (!fld || !dsp) return;
+        var labels = { 'Normal': 'Normal', 'Poang': 'Poängfält' };
+        var v = fld.value;
+        if (labels[v]) {
+            dsp.textContent = labels[v];
+            dsp.className = 'badge bg-info text-dark fs-6';
+        } else {
+            dsp.textContent = '(ej satt)';
+            dsp.className = 'badge bg-light text-muted fs-6 border';
+        }
+    };
+
     window.faltPickerLoadConfigs = async function(prefix, preserveSelection) {
         var sel = document.getElementById(prefix + 'faltConfigSelect');
         if (!sel) return;

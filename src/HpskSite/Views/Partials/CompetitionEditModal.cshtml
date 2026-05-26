@@ -453,13 +453,14 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                         <hr>
                         <h6 class="text-primary mb-3"><i class="bi bi-bullseye me-1"></i>Fältskytte-inställningar</h6>
                         <div class="row">
-                            <div class="col-md-3">
+                            <div class="col-md-6">
                                 <div class="mb-3">
-                                    <label for="edit_scoringMode" class="form-label">Poängberäkning</label>
-                                    <select class="form-select" id="edit_scoringMode" name="scoringMode">
-                                        <option value="Normal">Normal (träff/figurer)</option>
-                                        <option value="Poang">Poängfält</option>
-                                    </select>
+                                    <label class="form-label">Tävlingstyp</label>
+                                    <div class="d-flex align-items-center gap-2">
+                                        <input type="hidden" id="edit_scoringMode" name="scoringMode" value="Normal" onchange="faltUpdateScoringModeDisplay('edit_')">
+                                        <span id="edit_scoringMode_display" class="badge bg-info text-dark fs-6">Normal</span>
+                                    </div>
+                                    <div class="form-text small">Sätts från den anslutna stationskonfigurationen.</div>
                                 </div>
                             </div>
                             <div class="col-md-3">
@@ -1044,6 +1045,8 @@ window.populateEditModal = function(competition) {
         } catch(e) {}
         // Kick the picker so the dropdown + status reflect the loaded value.
         if (typeof faltPickerInit === 'function') faltPickerInit('edit_');
+        // Sync the read-only Tävlingstyp badge with the loaded scoringMode.
+        if (typeof faltUpdateScoringModeDisplay === 'function') faltUpdateScoringModeDisplay('edit_');
     }
 
     // Egenbokning section (only for precision-family types)
