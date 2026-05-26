@@ -1188,10 +1188,10 @@ Two SQL migrations: `add-approval-to-faltskytte-configuration.sql` (status + app
 - T-10 s on tap of Starta: "10 SEKUNDER KVAR!" (rate 1.0)
 - T-3 s: "FÄRDIGA!"
 - T+0: "ELD!", shooting bar starts moving
-- T+(shoot − 3): "EEELD UPPHÖÖR!" at rate 0.55 (drawn-out elongation via natural Swedish-voice pacing)
+- T+(shoot − 3): "Eld upphöör!" at rate 0.3 / pitch 1.2 (drawn out to ~3 s; reference voice Microsoft Bengt/Hedvig in Edge)
 - T+shoot: bar full, display switches to "Eld upphör" in red, Återställ button shown
 
-**Voice:** Web Speech API, **strict sv-* lang requirement** (refuses to let an English voice mangle Swedish). Preferred voices: Alva / Klara / Oskar (iOS) → Google Svenska (Android) → any other sv-*. If no Swedish voice is installed, speech is silently skipped and a yellow banner explains how to install one. Voices populate async on Chrome / Android via `voiceschanged`; a 🔊 "Test röst" button next to Starta lets the operator verify TTS works on the device before the first patrol. Screen Wake Lock acquired on Starta (re-acquired on `visibilitychange`).
+**Voice:** Web Speech API, **strict sv-* lang requirement** (refuses to let an English voice mangle Swedish). Preferred voices: Alva / Klara / Oskar (iOS) → Google Svenska (Android) → any other sv-*. If no Swedish voice is installed, speech is silently skipped and a yellow banner explains how to install one. On **Chrome on Windows** the banner also appends an Edge-tip — Chrome only enumerates SAPI-5 voices on Windows, so the Microsoft Bengt/Hedvig OneCore voices that ship with the language pack are invisible to it (Edge sees them natively). UA test excludes `Edg/` and `OPR/` so only true Chrome shows the tip. Voices populate async on Chrome / Android via `voiceschanged`; a 🔊 "Test röst" button next to Starta lets the operator verify TTS works on the device before the first patrol. Screen Wake Lock acquired on Starta (re-acquired on `visibilitychange`).
 
 **Per-figure timeline:** each Framsvängande / Bortsvängande figure gets its own row with the configured behavior + effective times displayed ("fram 8 s, syns 8 s"). Visible windows render as green bands; the now-line scans across, and on a visibility transition the row flashes yellow + a FRAM / UT state badge flips. Fast figures show one full-width green band. Defensive camelCase/PascalCase reads via `tmrPick`, and missing `showTimeSec` / `hideAfterSec` fall back to the configurator's UI defaults (8 / 8) so figures don't render as empty stripes when the user never touched the input field.
 
