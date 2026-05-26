@@ -986,12 +986,21 @@ function faltCfgShowSuggestionDetails(wc, stationNum) {
         footEl.innerHTML = '';
     } else {
         bodyEl.innerHTML = sugg.breakdown.map(function(b) {
-            if (b.info) {
-                // Informational row (per-målgrupp per-shot time, no sek contribution).
+            // Three line shapes:
+            //   1. sec=0 + info  → per-målgrupp info-only row (compact info on the right).
+            //   2. sec>0 + info  → primary row with the sek total, then a small italic
+            //                       sub-row spanning both columns with the long detail.
+            //                       Used by the Normal-mode allocator output.
+            //   3. sec + no info → normal sek-contribution row.
+            if (b.sec === 0 && b.info) {
                 return '<tr class="text-muted small"><td>' + b.label + '</td><td class="text-end text-nowrap">' + b.info + '</td></tr>';
             }
             var prefix = b.sec > 0 ? '+' : '';
-            return '<tr><td>' + b.label + '</td><td class="text-end text-nowrap">' + prefix + b.sec + ' sek</td></tr>';
+            var primary = '<tr><td>' + b.label + '</td><td class="text-end text-nowrap">' + prefix + b.sec + ' sek</td></tr>';
+            if (b.info) {
+                primary += '<tr class="text-muted fst-italic"><td colspan="2" style="font-size:0.75em;padding-top:0;padding-left:1.5em;line-height:1.3">' + b.info + '</td></tr>';
+            }
+            return primary;
         }).join('');
         var foot = '<tr class="fw-bold"><td>Föreslaget skjuttid</td><td class="text-end">' + sugg.totalSec + ' sek</td></tr>';
         // Svårighetsgrad — only meaningful when station has a vald skjuttid set.
