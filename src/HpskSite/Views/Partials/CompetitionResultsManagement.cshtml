@@ -7,6 +7,8 @@
     var competitionId = ViewData["CompetitionId"]?.ToString() ?? "";
     var subCompetitionName = ViewData["SubCompetitionName"]?.ToString() ?? "";
     var resultPageUrl = ViewData["ResultPageUrl"]?.ToString() ?? "";
+    var competitionTypeForView = ViewData["CompetitionType"]?.ToString() ?? "";
+    var supportsSkjutledareView = competitionTypeForView is "Precision" or "MagnumPrecision";
 
     // Get values from ViewData with appropriate defaults
     var numberOfSeriesOrStations = ViewData["NumberOfSeriesOrStations"] as int?;
@@ -66,6 +68,7 @@
     <script>
     (function() {
         var cid = '@competitionId';
+        var supportsSkjutledare = @(supportsSkjutledareView ? "true" : "false");
         fetch('/umbraco/surface/PrecisionStartList/GetOfficialStartList?competitionId=' + cid)
             .then(function(r) { return r.json(); })
             .then(function(data) {
@@ -92,12 +95,29 @@
                             var teamNum = team.teamNumber || team.TeamNumber;
                             var startTime = team.startTime || team.StartTime || '';
                             var timeStr = startTime;
+                            // Group each team's links (Lag + optional Skjutledare-vy) so
+                            // the pair stays visually attached on wrap.
+                            var grp = document.createElement('div');
+                            grp.className = 'btn-group btn-group-sm';
+                            grp.setAttribute('role', 'group');
+
                             var a = document.createElement('a');
                             a.href = '/station?c=' + cid + '&s=' + teamNum;
-                            a.className = 'btn btn-outline-primary btn-sm';
+                            a.className = 'btn btn-outline-primary';
                             a.target = '_blank';
                             a.innerHTML = '<i class="bi bi-people me-1"></i>Lag ' + teamNum + (timeStr ? ' <small class="text-muted">(' + timeStr + ')</small>' : '');
-                            el.appendChild(a);
+                            grp.appendChild(a);
+
+                            if (supportsSkjutledare) {
+                                var s = document.createElement('a');
+                                s.href = '/skjutledare?c=' + cid + '&l=' + teamNum;
+                                s.className = 'btn btn-outline-warning';
+                                s.target = '_blank';
+                                s.title = 'Öppna Skjutledare-vy för Lag ' + teamNum;
+                                s.innerHTML = '<i class="bi bi-megaphone"></i>';
+                                grp.appendChild(s);
+                            }
+                            el.appendChild(grp);
                         });
                     });
             })

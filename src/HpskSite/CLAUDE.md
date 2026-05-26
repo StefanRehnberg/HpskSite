@@ -1214,6 +1214,34 @@ No state machine — every command button is tappable any time so the chief can 
 
 **Test röst** plays `eld-upphor.mp3` (the longest + most distinctive clip) — verifies playback works AND gives the operator a feel for the cease-fire on this device.
 
+### Skjutledare-vy for Precision / MagnumPrecision (2026-05-26)
+
+**What:** Dedicated range-officer page at `/skjutledare?c=<compId>&l=<lagNum>` for the precision-family disciplines where a Skjutledare commands the firing line instead of marking results. Separate from the staff-facing `/station?c=...&s=...` page on purpose — those have different mental models. Reached via a small yellow 📢 icon button rendered next to each Lag entry on the Resultat tab in `CompetitionManagement`, only shown when `competitionType` is Precision or MagnumPrecision.
+
+**Routing:** Umbraco content node with template `SkjutledareView`. Setup: create doctype `skjutledareView` (no properties, template `SkjutledareView`, allowed under Home) and publish a content node with URL alias `skjutledare`. Same pattern as `/station` and `/competitionmanagement`.
+
+**Auth gates:** mirror `/station`'s `canEnterResults` branch — site admins, competition managers, club admins of the hosting club, and Skjutledare cert holders for the hosting club. Comp-type guard refuses to render for non-Precision/MagnumPrecision with a friendly "Inte tillgängligt" message.
+
+**Auto-sequence (per serie):**
+- T-60 s on tap of STARTA SERIE N: plays `ladda.mp3` (skjutledare voices "Serie X" verbally *before* the tap; not part of the auto sequence)
+- T-3 s: `fardiga.mp3`
+- T+0: `eld.mp3`
+- T+(shoot − 3): `eld-upphor.mp3`
+- T+shoot: bar full, "Eld upphör" displayed
+
+**Editable shoot-time:** Tap on the big countdown display → modal opens with minute and second steppers (60 s steps for minutes, 5 s for seconds, range 0:05–15:00). Saved per-comp in `localStorage` under `hpsk_skj_shoot_sec_<compId>`. Pencil icon affords the edit, hidden during running.
+
+**Vidare (skip-ahead) button** sits in STARTA's position while the sequence runs (btn-warning yellow). Two skip targets depending on phase:
+- During pre-fire (tSec < −3 s): re-anchors `skjStartMs` so next tick fires Färdiga immediately (Eld follows naturally 3 s later)
+- During firing (0 ≤ tSec < shoot−3): re-anchors so next tick fires Eld upphör immediately
+- Otherwise hidden (between Färdiga–Eld and during cease-fire window — nothing useful to skip to)
+
+**Multi-skjutledare per lag:** a single skjutlag can span multiple ranges (e.g. positions 1–25 in Hall 1, 26–50 in Hall 2) — both Skjutledare open the same URL on their own devices. Timers run independently per device. No server sync.
+
+**Föregående/Nästa serie:** paired buttons at the bottom of the card. Föregående disabled at Serie 1, Nästa disabled at the last serie, both disabled during the running sequence. Either action calls `skjTimerReset()` so the next serie starts from a clean display.
+
+**Manual command buttons (post-fire):** Patron ur, proppa vapen + Visitation — same MP3 files as the Fältskytte Tidur (`/wwwroot/sounds/kommandon/`). The pre-fire manual Ladda/Alla klara buttons of Fältskytte are deliberately omitted here — the Skjutledare voices "Serie X" themselves before tapping STARTA, and Alla klara isn't part of standard Precision range commands.
+
 ### Fältkonfigurator: figure timings no longer auto-scaled to shootingTimeSec (2026-05-26)
 
 **What changed:** Figure timing fields (`delayBeforeShowSec` / `showTimeSec` / `hideAfterSec` / `reappearSec`) used to be auto-rescaled across weapon classes by `ratio = destClassTime / srcClassTime` inside `faltCfgSyncShape` (Simple-mode shape-mirror) and `faltCfgUpdateStation` (Simple-mode shootingTimeSec change). That silently rewrote operator-entered values — a "fram efter 8 s" on a 14 s class became "fram efter 10 s" on an 18 s class, and the scaling was only visible after switching to Advanced mode. Both call sites are now removed; the helper `faltCfgScaleFigureTimings` is deleted. Existing snapshots aren't auto-fixed.

@@ -1,0 +1,531 @@
+﻿@using Umbraco.Cms.Web.Common.PublishedModels
+@using Newtonsoft.Json
+@inject Umbraco.Cms.Core.Services.IMemberService MemberService
+@inject Umbraco.Cms.Core.Security.IMemberManager MemberManager
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+
+    // Query params: c = competitionId, l = skjutlagNumber (teamNumber)
+    var cStr = Context.Request.Query["c"].FirstOrDefault();
+    var lStr = Context.Request.Query["l"].FirstOrDefault();
+    int competitionId = 0;
+    int lagNumber = 0;
+    int.TryParse(cStr, out competitionId);
+    int.TryParse(lStr, out lagNumber);
+
+    IPublishedContent? competition = null;
+    string competitionName = "";
+    string competitionType = "";
+    int numberOfSeries = 0;
+    int numberOfFinalSeries = 0;
+
+    if (competitionId > 0)
+    {
+        var node = Umbraco.Content(competitionId);
+        if (node != null && node.ContentType.Alias == "competition")
+        {
+            competition = node;
+            competitionName = node.Value<string>("competitionName") ?? "";
+            competitionType = node.Value<string>("competitionType") ?? "Precision";
+            numberOfSeries = node.Value<int>("numberOfSeriesOrStations");
+            numberOfFinalSeries = node.Value<int>("numberOfFinalSeries");
+        }
+    }
+
+    // Only Precision and MagnumPrecision use this view. Other precision-family
+    // disciplines (Snabb, Duell, Milsnabb, NationellHelmatch) have different
+    // command sequences — they'll get their own view when implemented.
+    bool isSupportedType = competitionType is "Precision" or "MagnumPrecision";
+    int qualificationSeriesCount = Math.Max(1, numberOfSeries - numberOfFinalSeries);
+
+    // Authorization — only competition managers, club staff for the hosting
+    // club, and site admins can run the Skjutledare view. Same gates as
+    // /station's canEnterResults branch.
+    var currentMember = await MemberManager.GetCurrentMemberAsync();
+    bool isAuthorized = false;
+    if (currentMember != null && competition != null)
+    {
+        var memberData = MemberService.GetByEmail(currentMember.Email ?? "");
+        if (memberData != null)
+        {
+            var roles = MemberService.GetAllRoles(memberData.Id)?.ToList() ?? new List<string>();
+            bool isSiteAdmin = roles.Contains("Administrators");
+
+            var cmJson = competition.Value<string>("competitionManagers") ?? "[]";
+            int[] cmIds;
+            try { cmIds = JsonConvert.DeserializeObject<int[]>(cmJson) ?? Array.Empty<int>(); }
+            catch { cmIds = Array.Empty<int>(); }
+            bool isCompetitionManager = cmIds.Contains(memberData.Id);
+
+            int competitionClubId = competition.Value<int>("clubId");
+            bool isClubStaff = competitionClubId > 0
+                && (roles.Contains($"ClubAdmin_{competitionClubId}")
+                    || roles.Contains($"Skjutledare_{competitionClubId}"));
+
+            isAuthorized = isSiteAdmin || isCompetitionManager || isClubStaff;
+        }
+    }
+
+    ViewBag.Title = competition != null
+        ? $"Skjutledare — {competitionName} — Lag {lagNumber}"
+        : "Skjutledare";
+}
+
+<div class="container-fluid mt-3" style="max-width:600px">
+
+    @if (competitionId == 0 || lagNumber == 0)
+    {
+        <div class="alert alert-warning">
+            <i class="bi bi-exclamation-triangle me-2"></i>
+            Skjutledare-vyn kräver båda parametrarna <code>c</code> (tävling) och <code>l</code> (skjutlag).
+        </div>
+    }
+    else if (competition == null)
+    {
+        <div class="alert alert-warning"><i class="bi bi-exclamation-triangle me-2"></i>Tävlingen hittades inte.</div>
+    }
+    else if (!isSupportedType)
+    {
+        <div class="alert alert-info">
+            <h5><i class="bi bi-info-circle me-2"></i>Inte tillgängligt för @competitionType</h5>
+            <p class="mb-0">Skjutledare-vyn finns just nu bara för Precision och Magnum-Precision. Andra discipliner får sin egen vy när de implementeras.</p>
+        </div>
+    }
+    else if (!isAuthorized)
+    {
+        <div class="alert alert-warning"><i class="bi bi-lock me-2"></i>Du har inte behörighet för Skjutledare-vyn för den här tävlingen.</div>
+    }
+    else
+    {
+        <style>
+            .skj-tmr-display { font-size:3em; line-height:1; font-variant-numeric:tabular-nums; position:relative; }
+            .skj-tmr-display.is-prefire { color:var(--bs-warning); }
+            .skj-tmr-display.is-firing { color:var(--bs-success); }
+            .skj-tmr-display.is-ceasefire { color:var(--bs-danger); }
+            .skj-tmr-progbar-wrap { position:relative; height:28px; background:var(--bs-secondary-bg); border-radius:4px; overflow:visible; }
+            .skj-tmr-progbar-fill { position:absolute; top:0; bottom:0; left:0; background:var(--bs-success); border-radius:4px; transition:width 0.1s linear; }
+            .skj-tmr-cursor { position:absolute; top:-2px; bottom:-2px; width:2px; background:var(--bs-body-color); pointer-events:none; }
+        </style>
+
+        <div class="d-flex align-items-center justify-content-between mb-2 p-2 rounded" style="background:var(--bs-warning-bg-subtle); border:2px solid var(--bs-warning-border-subtle)">
+            <span class="fw-bold fs-5"><i class="bi bi-megaphone me-1"></i>Skjutledare</span>
+            <span class="badge bg-info fs-6">Lag @lagNumber</span>
+        </div>
+        <div class="small text-muted mb-3">@competitionName · @competitionType · @qualificationSeriesCount serier</div>
+
+        <!-- Skjuttid editor overlay (modal-style, tap outside to dismiss) -->
+        <div id="skjShootEditor" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1080;display:none;align-items:center;justify-content:center;padding:16px" onclick="if(event.target===this)skjCloseShootEditor()">
+            <div style="background:var(--bs-body-bg);border-radius:12px;padding:20px;max-width:340px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,0.3)">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h6 class="mb-0"><i class="bi bi-stopwatch me-2"></i>Ändra skjuttid</h6>
+                    <button type="button" class="btn-close" aria-label="Stäng" onclick="skjCloseShootEditor()"></button>
+                </div>
+                <div class="text-center mb-3" style="font-size:2em;font-weight:bold;font-variant-numeric:tabular-nums" id="skjShootEditPreview">5:00</div>
+                <div class="row g-2 mb-3">
+                    <div class="col-6 text-center">
+                        <div class="small text-muted mb-1">Minuter</div>
+                        <div class="d-flex justify-content-center align-items-center gap-1">
+                            <button class="btn btn-outline-secondary" style="min-width:48px" onclick="skjShootEditAdj(-60)" id="skjEditMinDec"><i class="bi bi-dash-lg"></i></button>
+                            <span class="fw-bold" style="min-width:36px;font-size:1.4em;font-variant-numeric:tabular-nums" id="skjShootEditMin">5</span>
+                            <button class="btn btn-outline-secondary" style="min-width:48px" onclick="skjShootEditAdj(60)" id="skjEditMinInc"><i class="bi bi-plus-lg"></i></button>
+                        </div>
+                    </div>
+                    <div class="col-6 text-center">
+                        <div class="small text-muted mb-1">Sekunder</div>
+                        <div class="d-flex justify-content-center align-items-center gap-1">
+                            <button class="btn btn-outline-secondary" style="min-width:48px" onclick="skjShootEditAdj(-5)" id="skjEditSecDec"><i class="bi bi-dash-lg"></i></button>
+                            <span class="fw-bold" style="min-width:36px;font-size:1.4em;font-variant-numeric:tabular-nums" id="skjShootEditSec">00</span>
+                            <button class="btn btn-outline-secondary" style="min-width:48px" onclick="skjShootEditAdj(5)" id="skjEditSecInc"><i class="bi bi-plus-lg"></i></button>
+                        </div>
+                    </div>
+                </div>
+                <div class="d-flex gap-2">
+                    <button class="btn btn-outline-secondary flex-fill" onclick="skjCloseShootEditor()">Avbryt</button>
+                    <button class="btn btn-primary flex-fill" onclick="skjSaveShootEditor()"><i class="bi bi-check-lg me-1"></i>Spara</button>
+                </div>
+                <div class="text-center text-muted small mt-2">Standard 5 min · Sekunder i steg om 5</div>
+            </div>
+        </div>
+
+        <!-- Tidur card -->
+        <div class="card mb-3" id="skjTimerCard">
+            <div class="card-header py-2 d-flex justify-content-between align-items-center">
+                <span class="fw-bold small">
+                    <i class="bi bi-stopwatch me-1"></i>Tidur — Serie <span id="skjSerieNum">1</span> av @qualificationSeriesCount
+                </span>
+                <div class="d-flex gap-1">
+                    <button class="btn btn-outline-secondary btn-sm" id="skjTimerTestBtn" onclick="skjTimerTestVoice()" title="Test röst (spelar Eld upphör)">
+                        <i class="bi bi-volume-up"></i>
+                    </button>
+                    <button class="btn btn-outline-secondary btn-sm" id="skjTimerResetBtn" onclick="skjTimerReset()" style="display:none">
+                        <i class="bi bi-arrow-counterclockwise me-1"></i>Återställ
+                    </button>
+                </div>
+            </div>
+            <div class="card-body py-2">
+                <div class="alert alert-warning small mb-2 py-1" id="skjTimerVoiceBanner" style="display:none"></div>
+
+                <button class="btn btn-success w-100 mb-2 py-3" id="skjTimerStartBtn" onclick="skjTimerStart()" style="font-size:1.1em;font-weight:bold">
+                    <i class="bi bi-play-fill me-1"></i>STARTA SERIE <span id="skjStartBtnSerieNum">1</span>
+                </button>
+                <!-- Vidare — skips to the next milestone (Färdiga or Eld upphör). Only visible during the running sequence. -->
+                <button class="btn btn-warning w-100 mb-2 py-3" id="skjSkipBtn" onclick="skjTimerSkip()" style="font-size:1.1em;font-weight:bold;display:none">
+                    <i class="bi bi-fast-forward me-1"></i>VIDARE — <span id="skjSkipBtnLabel">Färdiga</span>
+                </button>
+
+                <div class="text-center fw-bold skj-tmr-display" id="skjTimerDisplay" style="cursor:pointer" onclick="skjOpenShootEditor()" title="Ändra skjuttid">
+                    <span id="skjTimerDisplayText">5:00</span>
+                    <i class="bi bi-pencil-square text-muted" id="skjShootEditIcon" style="position:absolute;top:0;right:8px;font-size:0.45em;opacity:0.7"></i>
+                </div>
+                <div class="d-flex align-items-center gap-2 mt-2 mb-1">
+                    <div class="fw-bold" style="width:80px;flex-shrink:0;font-size:0.85em">Skjuttid</div>
+                    <div class="skj-tmr-progbar-wrap" style="flex-grow:1">
+                        <div class="skj-tmr-progbar-fill" id="skjTimerBar" style="width:0%"></div>
+                        <div class="skj-tmr-cursor" id="skjTimerCursor" style="left:0%;display:none"></div>
+                    </div>
+                </div>
+                <div class="small text-muted mb-2" id="skjTimerStatus">Tryck Starta för att inleda serien (Ladda → 57 s → Färdiga → 3 s → Eld → ... → Eld upphör).</div>
+
+                <!-- Post-fire commands -->
+                <div class="d-flex gap-2 mt-2">
+                    <button class="btn btn-outline-primary flex-fill py-2" onclick="skjTimerCmd('patron-ur')" style="font-size:0.95em">
+                        <i class="bi bi-megaphone me-1"></i>Patron ur,<br/>proppa vapen
+                    </button>
+                    <button class="btn btn-outline-primary flex-fill py-2" onclick="skjTimerCmd('visitation')">
+                        <i class="bi bi-megaphone me-1"></i>Visitation
+                    </button>
+                </div>
+
+                <!-- Serie navigation (back/forward — clear and reversible) -->
+                <div class="d-flex gap-2 mt-2">
+                    <button class="btn btn-outline-secondary flex-fill" id="skjPrevSerieBtn" onclick="skjPrevSerie()">
+                        <i class="bi bi-skip-backward me-1"></i>Föregående serie
+                    </button>
+                    <button class="btn btn-outline-success flex-fill" id="skjNextSerieBtn" onclick="skjNextSerie()">
+                        <i class="bi bi-skip-forward me-1"></i>Nästa serie
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <script>
+        (function() {
+            var SKJ_TOTAL_SERIES = @qualificationSeriesCount;
+            var SKJ_PREFIRE_SEC = 60;       // Ladda → Eld
+            var SKJ_FARDIG_SEC = 3;         // Färdiga fires this many sec before Eld
+            var SKJ_CEASEFIRE_SEC = 3;      // "Eld upphör" starts this many sec before end
+            var SKJ_SHOOT_DEFAULT_SEC = 300;// 5 min — standard precision
+            var SKJ_SHOOT_MIN_SEC = 5;      // floor — accommodates Snabb-style short clocks
+            var SKJ_SHOOT_MAX_SEC = 900;    // 15 min — generous ceiling
+            var SKJ_SHOOT_STORAGE_KEY = 'hpsk_skj_shoot_sec_@(competitionId)';
+
+            function skjLoadShootSec() {
+                try {
+                    var v = parseInt(localStorage.getItem(SKJ_SHOOT_STORAGE_KEY), 10);
+                    if (v >= SKJ_SHOOT_MIN_SEC && v <= SKJ_SHOOT_MAX_SEC) return v;
+                } catch (e) {}
+                return SKJ_SHOOT_DEFAULT_SEC;
+            }
+            var skjShootSec = skjLoadShootSec();
+            var SKJ_SOUND_BASE = '/sounds/kommandon/';
+            var SKJ_SOUND_FILES = {
+                ladda:         'ladda.mp3',
+                fardig:        'fardiga.mp3',
+                eld:           'eld.mp3',
+                upphor:        'eld-upphor.mp3',
+                'alla-klara':  'alla-klara.mp3',
+                'patron-ur':   'patron-ur-proppa-vapen.mp3',
+                'visitation':  'visitation.mp3'
+            };
+            // No per-serie "Serie X — Ladda" audio: the skjutledare announces
+            // the serie number themselves (verbally) before tapping Starta.
+            // The auto-sequence then plays the generic Ladda 60 s before Eld.
+
+            var skjCurrentSerie = 1;
+            var skjRunning = false;
+            var skjStartMs = 0;             // performance.now() at T=0 (= Eld moment)
+            var skjFrameHandle = 0;
+            var skjSpoken = {};
+            var skjWakeLock = null;
+            var skjSounds = {};
+            var skjAudioBlocked = false;
+
+            function skjLoadSounds() {
+                Object.keys(SKJ_SOUND_FILES).forEach(function(key) {
+                    var a = new Audio(SKJ_SOUND_BASE + SKJ_SOUND_FILES[key]);
+                    a.preload = 'auto';
+                    a.addEventListener('error', function() { a._loadFailed = true; });
+                    a.load();
+                    skjSounds[key] = a;
+                });
+            }
+            skjLoadSounds();
+
+            function skjPlayAudio(a) {
+                try {
+                    a.currentTime = 0;
+                    var p = a.play();
+                    if (p && typeof p.then === 'function') {
+                        p.then(function() {
+                            if (skjAudioBlocked) { skjAudioBlocked = false; skjUpdateAudioBanner(); }
+                        }).catch(function() {
+                            skjAudioBlocked = true;
+                            skjUpdateAudioBanner();
+                        });
+                    }
+                } catch (e) { skjAudioBlocked = true; skjUpdateAudioBanner(); }
+            }
+
+            function skjPlay(key) {
+                var a = skjSounds[key];
+                if (!a || a._loadFailed) return;
+                skjPlayAudio(a);
+            }
+
+            function skjUpdateAudioBanner() {
+                var banner = document.getElementById('skjTimerVoiceBanner');
+                if (!banner) return;
+                if (skjAudioBlocked) {
+                    banner.style.display = '';
+                    banner.innerHTML = '<i class="bi bi-volume-mute me-1"></i>Webbläsaren har blockerat ljuduppspelning — tryck <i class="bi bi-volume-up"></i> Test röst en gång för att aktivera, sedan funkar tiduret normalt.';
+                } else {
+                    banner.style.display = 'none';
+                    banner.innerHTML = '';
+                }
+            }
+
+            window.skjTimerTestVoice = function() { skjPlay('upphor'); };
+            window.skjTimerCmd = function(key) { skjPlay(key); };
+
+            function skjFormatMMSS(sec) {
+                sec = Math.max(0, Math.ceil(sec));
+                var m = Math.floor(sec / 60);
+                var s = sec % 60;
+                return m + ':' + (s < 10 ? '0' : '') + s;
+            }
+
+            function skjUpdateNextSerieBtn() {
+                // Both Prev + Next disabled mid-sequence. Otherwise: Prev disabled
+                // at serie 1, Next disabled at the last serie.
+                var prev = document.getElementById('skjPrevSerieBtn');
+                var next = document.getElementById('skjNextSerieBtn');
+                if (prev) prev.disabled = skjRunning || skjCurrentSerie <= 1;
+                if (next) next.disabled = skjRunning || skjCurrentSerie >= SKJ_TOTAL_SERIES;
+            }
+
+            // Skjuttid editor — tap on the big countdown display opens the modal.
+            // Suppressed while the auto-sequence is running.
+            var skjEditPending = 0; // sec — staged value inside the modal, applied on Save.
+            function skjSyncShootSecUi() {
+                // Pencil icon hidden during running so the chief can't fat-finger
+                // an edit mid-cycle.
+                var icon = document.getElementById('skjShootEditIcon');
+                if (icon) icon.style.display = skjRunning ? 'none' : '';
+            }
+            function skjRenderEditor() {
+                var m = Math.floor(skjEditPending / 60);
+                var s = skjEditPending % 60;
+                document.getElementById('skjShootEditMin').textContent = m;
+                document.getElementById('skjShootEditSec').textContent = (s < 10 ? '0' : '') + s;
+                document.getElementById('skjShootEditPreview').textContent = skjFormatMMSS(skjEditPending);
+                document.getElementById('skjEditMinDec').disabled = skjEditPending <= SKJ_SHOOT_MIN_SEC || m <= 0;
+                document.getElementById('skjEditMinInc').disabled = skjEditPending + 60 > SKJ_SHOOT_MAX_SEC;
+                document.getElementById('skjEditSecDec').disabled = skjEditPending - 5 < SKJ_SHOOT_MIN_SEC;
+                document.getElementById('skjEditSecInc').disabled = skjEditPending + 5 > SKJ_SHOOT_MAX_SEC;
+            }
+            window.skjOpenShootEditor = function() {
+                if (skjRunning) return;
+                skjEditPending = skjShootSec;
+                skjRenderEditor();
+                document.getElementById('skjShootEditor').style.display = 'flex';
+            };
+            window.skjCloseShootEditor = function() {
+                document.getElementById('skjShootEditor').style.display = 'none';
+            };
+            window.skjShootEditAdj = function(deltaSec) {
+                var next = skjEditPending + deltaSec;
+                if (next < SKJ_SHOOT_MIN_SEC) next = SKJ_SHOOT_MIN_SEC;
+                if (next > SKJ_SHOOT_MAX_SEC) next = SKJ_SHOOT_MAX_SEC;
+                if (next === skjEditPending) return;
+                skjEditPending = next;
+                skjRenderEditor();
+            };
+            window.skjSaveShootEditor = function() {
+                skjShootSec = skjEditPending;
+                try { localStorage.setItem(SKJ_SHOOT_STORAGE_KEY, String(skjShootSec)); } catch (e) {}
+                skjCloseShootEditor();
+                // Refresh the big countdown display (keep the pencil icon child).
+                var txt = document.getElementById('skjTimerDisplayText');
+                if (txt) txt.textContent = skjFormatMMSS(skjShootSec);
+            };
+
+            // Vidare — fast-forward to the next milestone. Two skip targets:
+            //   pre-fire (tSec < -3 s)  →  jump to Färdiga (tSec = -3)
+            //   firing  (0 ≤ tSec < shoot-3) →  jump to Eld upphör (tSec = shoot-3)
+            // Between Färdiga and Eld (-3 ≤ tSec < 0) and during cease-fire
+            // (tSec ≥ shoot-3) there's nothing useful to skip to, so the
+            // button hides — handled by skjUpdateSkipBtn.
+            function skjUpdateSkipBtn(tSec) {
+                var btn = document.getElementById('skjSkipBtn');
+                var lbl = document.getElementById('skjSkipBtnLabel');
+                if (!btn) return;
+                if (!skjRunning) { btn.style.display = 'none'; return; }
+                if (tSec < -SKJ_FARDIG_SEC) {
+                    btn.style.display = '';
+                    if (lbl) lbl.textContent = 'Färdiga';
+                } else if (tSec >= 0 && tSec < (skjShootSec - SKJ_CEASEFIRE_SEC)) {
+                    btn.style.display = '';
+                    if (lbl) lbl.textContent = 'Eld upphör';
+                } else {
+                    btn.style.display = 'none';
+                }
+            }
+            window.skjTimerSkip = function() {
+                if (!skjRunning) return;
+                var now = performance.now();
+                var tSec = (now - skjStartMs) / 1000;
+                if (tSec < -SKJ_FARDIG_SEC) {
+                    // Re-anchor so the next tick reads tSec = -SKJ_FARDIG_SEC,
+                    // triggering Färdiga (and 3 s later, Eld) on schedule.
+                    skjStartMs = now + (SKJ_FARDIG_SEC * 1000);
+                } else if (tSec >= 0 && tSec < (skjShootSec - SKJ_CEASEFIRE_SEC)) {
+                    // Re-anchor so the next tick reads tSec = skjShootSec - 3,
+                    // triggering Eld upphör immediately.
+                    skjStartMs = now - ((skjShootSec - SKJ_CEASEFIRE_SEC) * 1000);
+                }
+                // The tick loop is already running via rAF — next frame picks
+                // up the new tSec and fires the appropriate audio + display.
+            };
+
+            function skjResetDisplay() {
+                document.getElementById('skjTimerDisplayText').textContent = skjFormatMMSS(skjShootSec);
+                document.getElementById('skjTimerDisplay').className = 'text-center fw-bold skj-tmr-display';
+                document.getElementById('skjTimerBar').style.width = '0%';
+                var cur = document.getElementById('skjTimerCursor');
+                if (cur) { cur.style.display = 'none'; cur.style.left = '0%'; }
+                document.getElementById('skjTimerStatus').textContent = 'Tryck Starta för att inleda serien (Ladda → 57 s → Färdiga → 3 s → Eld → ... → Eld upphör).';
+                document.getElementById('skjTimerStartBtn').style.display = '';
+                document.getElementById('skjTimerStartBtn').disabled = false;
+                document.getElementById('skjTimerResetBtn').style.display = 'none';
+                document.getElementById('skjSkipBtn').style.display = 'none';
+                skjUpdateNextSerieBtn();
+                skjSyncShootSecUi();
+                skjUpdateAudioBanner();
+            }
+            skjResetDisplay();
+
+            async function skjAcquireWakeLock() {
+                if (!('wakeLock' in navigator)) return;
+                try {
+                    skjWakeLock = await navigator.wakeLock.request('screen');
+                    skjWakeLock.addEventListener('release', function() { skjWakeLock = null; });
+                } catch (e) { }
+            }
+            function skjReleaseWakeLock() {
+                if (skjWakeLock) { try { skjWakeLock.release(); } catch (e) {} skjWakeLock = null; }
+            }
+            document.addEventListener('visibilitychange', function() {
+                if (skjRunning && document.visibilityState === 'visible' && !skjWakeLock) skjAcquireWakeLock();
+            });
+
+            window.skjTimerStart = function() {
+                if (skjRunning) return;
+                skjRunning = true;
+                skjSpoken = {};
+                skjStartMs = performance.now() + (SKJ_PREFIRE_SEC * 1000);
+                document.getElementById('skjTimerStartBtn').style.display = 'none';
+                document.getElementById('skjTimerResetBtn').style.display = '';
+                document.getElementById('skjTimerCursor').style.display = '';
+                skjUpdateNextSerieBtn();
+                skjSyncShootSecUi();
+                skjAcquireWakeLock();
+                // Fire the Ladda command immediately on the user gesture so the
+                // browser unlocks audio for the rest of the cycle. The skjutledare
+                // is expected to have voiced "Serie X" manually just before this tap.
+                skjPlay('ladda');
+                skjSpoken.ladda = true;
+                skjTick();
+            };
+
+            function skjTick() {
+                if (!skjRunning) return;
+                var now = performance.now();
+                var tSec = (now - skjStartMs) / 1000;  // negative during prefire, 0..shoot during firing
+                var disp = document.getElementById('skjTimerDisplay');
+                var dispText = document.getElementById('skjTimerDisplayText');
+                var bar = document.getElementById('skjTimerBar');
+                var cur = document.getElementById('skjTimerCursor');
+                var status = document.getElementById('skjTimerStatus');
+
+                skjUpdateSkipBtn(tSec);
+                if (tSec < 0) {
+                    var rem = Math.max(0, Math.ceil(-tSec));
+                    dispText.textContent = skjFormatMMSS(rem);
+                    disp.className = 'text-center fw-bold skj-tmr-display is-prefire';
+                    bar.style.width = '0%';
+                    cur.style.left = '0%';
+                    status.textContent = 'Upprop: ' + skjFormatMMSS(rem) + ' kvar till Eld';
+                    if (!skjSpoken.fardig && tSec >= -SKJ_FARDIG_SEC) { skjPlay('fardig'); skjSpoken.fardig = true; }
+                } else if (tSec < skjShootSec) {
+                    if (!skjSpoken.eld) { skjPlay('eld'); skjSpoken.eld = true; }
+                    var rem2 = Math.max(0, skjShootSec - tSec);
+                    dispText.textContent = skjFormatMMSS(rem2);
+                    disp.className = 'text-center fw-bold skj-tmr-display is-firing';
+                    var pct = (tSec / skjShootSec) * 100;
+                    bar.style.width = pct + '%';
+                    cur.style.left = pct + '%';
+                    status.textContent = 'Skjuttid: ' + skjFormatMMSS(rem2) + ' kvar';
+                    if (!skjSpoken.upphor && tSec >= (skjShootSec - SKJ_CEASEFIRE_SEC)) {
+                        skjPlay('upphor');
+                        skjSpoken.upphor = true;
+                        disp.className = 'text-center fw-bold skj-tmr-display is-ceasefire';
+                    }
+                } else {
+                    dispText.textContent = 'Eld upphör';
+                    disp.className = 'text-center fw-bold skj-tmr-display is-ceasefire';
+                    bar.style.width = '100%';
+                    cur.style.left = '100%';
+                    var hasMore = skjCurrentSerie < SKJ_TOTAL_SERIES;
+                    status.textContent = hasMore
+                        ? 'Serien klar. Genomför patron ur + visitation, tryck sedan Nästa serie.'
+                        : 'Alla serier klara. Avsluta med patron ur + visitation.';
+                    skjRunning = false;
+                    skjUpdateNextSerieBtn();
+                    skjReleaseWakeLock();
+                    return;
+                }
+                skjFrameHandle = requestAnimationFrame(skjTick);
+            }
+
+            window.skjTimerReset = function() {
+                if (skjFrameHandle) { cancelAnimationFrame(skjFrameHandle); skjFrameHandle = 0; }
+                skjRunning = false;
+                Object.keys(skjSounds).forEach(function(k) {
+                    try { skjSounds[k].pause(); skjSounds[k].currentTime = 0; } catch (e) {}
+                });
+                skjReleaseWakeLock();
+                skjResetDisplay();
+            };
+
+            window.skjNextSerie = function() {
+                if (skjRunning || skjCurrentSerie >= SKJ_TOTAL_SERIES) return;
+                skjCurrentSerie++;
+                skjSyncSerieLabels();
+                window.skjTimerReset();
+            };
+            window.skjPrevSerie = function() {
+                if (skjRunning || skjCurrentSerie <= 1) return;
+                skjCurrentSerie--;
+                skjSyncSerieLabels();
+                window.skjTimerReset();
+            };
+            function skjSyncSerieLabels() {
+                document.getElementById('skjSerieNum').textContent = skjCurrentSerie;
+                document.getElementById('skjStartBtnSerieNum').textContent = skjCurrentSerie;
+            }
+        })();
+        </script>
+    }
+
+</div>
