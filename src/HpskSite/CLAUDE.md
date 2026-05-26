@@ -1180,6 +1180,33 @@ Two SQL migrations: `add-approval-to-faltskytte-configuration.sql` (status + app
 
 **Banläggare cert check** uses the existing `CertificationService.HasActiveCertAsync(memberId, CertificationTypes.Banlaggare)` — no new role plumbing.
 
+### Stationschef Tidur (2026-05-26)
+
+**What:** Voice-driven shooting-time clock on the station entry page (`FaltskytteStationEntry.cshtml`), sitting between Upprop and "Starta resultatinmatning" on the roll-call screen. Reads the patrol's weapon-class `shootingTimeSec` from the loaded station config and runs a 10 s upprop → ELD → skjuttid → EELD UPPHÖR sequence with per-figure visibility timelines.
+
+**Sequence (anchored on `performance.now()` + scheduled via `requestAnimationFrame`, no chained setTimeouts):**
+- T-10 s on tap of Starta: "10 SEKUNDER KVAR!" (rate 1.0)
+- T-3 s: "FÄRDIGA!"
+- T+0: "ELD!", shooting bar starts moving
+- T+(shoot − 3): "EEELD UPPHÖÖR!" at rate 0.55 (drawn-out elongation via natural Swedish-voice pacing)
+- T+shoot: bar full, display switches to "Eld upphör" in red, Återställ button shown
+
+**Voice:** Web Speech API, **strict sv-* lang requirement** (refuses to let an English voice mangle Swedish). Preferred voices: Alva / Klara / Oskar (iOS) → Google Svenska (Android) → any other sv-*. If no Swedish voice is installed, speech is silently skipped and a yellow banner explains how to install one. Voices populate async on Chrome / Android via `voiceschanged`; a 🔊 "Test röst" button next to Starta lets the operator verify TTS works on the device before the first patrol. Screen Wake Lock acquired on Starta (re-acquired on `visibilitychange`).
+
+**Per-figure timeline:** each Framsvängande / Bortsvängande figure gets its own row with the configured behavior + effective times displayed ("fram 8 s, syns 8 s"). Visible windows render as green bands; the now-line scans across, and on a visibility transition the row flashes yellow + a FRAM / UT state badge flips. Fast figures show one full-width green band. Defensive camelCase/PascalCase reads via `tmrPick`, and missing `showTimeSec` / `hideAfterSec` fall back to the configurator's UI defaults (8 / 8) so figures don't render as empty stripes when the user never touched the input field.
+
+**Layout:** the main shooting-time bar sits in the same flex row structure as figure rows (140 px "Skjuttid" label + flex-grow bar + 64 px spacer), so the main bar end aligns vertically with figure timeline ends.
+
+**Status line:** shows the read shooting time and weapon class — `"Skjuttid 16 s (vapenklass A). Tryck Starta…"` — which surfaces config drift if the read value doesn't match expectations.
+
+**Lifecycle:** `fseTimerCancel()` runs when leaving the roll-call screen (in `fseStartEntry` and `fseBackFromRollCall`) so the timer never bleeds into result entry or back to the patrol picker.
+
+### Fältkonfigurator: figure timings no longer auto-scaled to shootingTimeSec (2026-05-26)
+
+**What changed:** Figure timing fields (`delayBeforeShowSec` / `showTimeSec` / `hideAfterSec` / `reappearSec`) used to be auto-rescaled across weapon classes by `ratio = destClassTime / srcClassTime` inside `faltCfgSyncShape` (Simple-mode shape-mirror) and `faltCfgUpdateStation` (Simple-mode shootingTimeSec change). That silently rewrote operator-entered values — a "fram efter 8 s" on a 14 s class became "fram efter 10 s" on an 18 s class, and the scaling was only visible after switching to Advanced mode. Both call sites are now removed; the helper `faltCfgScaleFigureTimings` is deleted. Existing snapshots aren't auto-fixed.
+
+**What's kept:** the explicit Advanced-mode **"Kopiera från … Δsek"** copy button still applies proportional scaling — that one's user-initiated and labeled, so it's not a surprise. Re-attaching a config to a competition still copies the full blob (the picker is unchanged).
+
 ### Fältskytte SHB Shoot-Time Suggestion + Svårighetsgrad (2026-05-24 → 26)
 
 **What:** The configurator surfaces a SHB-derived suggested skjuttid per station per weapon class, a live breakdown modal, an "Använd" button that copies it to the Skjuttid field, and a **Svårighetsgrad %** badge that scores the chosen Skjuttid against the SHB minimum.
