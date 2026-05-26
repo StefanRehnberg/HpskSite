@@ -977,6 +977,26 @@
         if ('onvoiceschanged' in window.speechSynthesis) {
             window.speechSynthesis.addEventListener('voiceschanged', tmrLoadVoices);
         }
+        // Many Android browsers (Edge / Chrome) defer voice enumeration until
+        // the speech engine is first activated by a user gesture, so
+        // voiceschanged never fires from cold. Poll for ~3 s, then give up
+        // and switch to 'missing' so the user gets an actionable banner
+        // instead of "Söker…" forever — tapping the Test-röst button
+        // triggers a warmup that often unlocks the voice list.
+        if (tmrVoiceState === 'pending') {
+            var tmrPollTries = 0;
+            var tmrPollHandle = setInterval(function() {
+                tmrPollTries++;
+                tmrLoadVoices();
+                if (tmrVoiceState !== 'pending' || tmrPollTries >= 8) {
+                    clearInterval(tmrPollHandle);
+                    if (tmrVoiceState === 'pending') {
+                        tmrVoiceState = 'missing';
+                        tmrUpdateVoiceBanner();
+                    }
+                }
+            }, 400);
+        }
     }
 
     function tmrUpdateVoiceBanner() {
@@ -996,7 +1016,7 @@
             var tip = (isWin && isChromeNotEdge)
                 ? ' <strong>Tips:</strong> Edge har Microsoft-svenska inbyggd. Chrome p&aring; Windows kr&auml;ver en SAPI-5-svensk r&ouml;st (t.ex. Ivona) som inte ing&aring;r i Windows.'
                 : '';
-            banner.innerHTML = '<i class="bi bi-volume-mute me-1"></i>Ingen svensk r&ouml;st finns p&aring; enheten &mdash; tiduret k&ouml;rs utan r&ouml;stkommandon. Installera svensk r&ouml;st i operativsystemets r&ouml;stinst&auml;llningar f&ouml;r att aktivera.' + tip;
+            banner.innerHTML = '<i class="bi bi-volume-mute me-1"></i>Ingen svensk r&ouml;st hittad &mdash; tryck <i class="bi bi-volume-up"></i> Test r&ouml;st f&ouml;r att v&auml;cka enhetens talsyntes. F&aring;r du inget ljud d&aring;, kontrollera att svensk r&ouml;st &auml;r installerad i operativsystemets r&ouml;stinst&auml;llningar.' + tip;
         } else if (tmrVoiceState === 'pending') {
             banner.style.display = '';
             banner.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>S&ouml;ker svensk r&ouml;st p&aring; enheten&hellip;';
@@ -1021,8 +1041,26 @@
 
     window.fseTimerTestVoice = function() {
         tmrLoadVoices();
-        if (tmrVoiceState === 'ok') tmrSpeak('Eld!', 1.0);
-        else tmrUpdateVoiceBanner();
+        if (tmrVoiceState === 'ok') { tmrSpeak('Eld!', 1.0); return; }
+        // Android browsers often hide the voice list until the speech engine
+        // has been activated by a user gesture. The tap on Test-röst counts
+        // as that gesture: fire a silent warmup utterance, give the engine
+        // a moment to enumerate voices, then re-scan and speak Eld for real.
+        if (window.speechSynthesis && window.SpeechSynthesisUtterance) {
+            try {
+                var warmup = new SpeechSynthesisUtterance(' ');
+                warmup.lang = 'sv-SE';
+                warmup.volume = 0;
+                window.speechSynthesis.speak(warmup);
+            } catch (e) {}
+            setTimeout(function() {
+                tmrLoadVoices();
+                if (tmrVoiceState === 'ok') tmrSpeak('Eld!', 1.0);
+                else tmrUpdateVoiceBanner();
+            }, 300);
+        } else {
+            tmrUpdateVoiceBanner();
+        }
     };
 
     // Case-insensitive lookup with sane fallbacks. The JSON blob may come back
