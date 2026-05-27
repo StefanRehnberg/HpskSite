@@ -1288,6 +1288,27 @@ No state machine — every command button is tappable any time so the chief can 
 
 **Controller clamps:** `FaltskytteController.CreateTarget` / `UpdateTarget` clamp SizeGroup to 1–15. The legacy `UpdateTargetDistances` endpoint was deleted.
 
+### Live Result Board (Resultattavla) — Fältskytte support + weapon-class multi-select & Växla (2026-05-27)
+
+**What:** The "Visa Live resultat" button opens a self-contained dark spectator/TV board in a new window — a single shared `rbBoardScript` function inside `Views/Competition.cshtml` (NOT a separate page). It polls a results endpoint every 15 s (`REFRESH=15000`) and re-renders the full standings each time (full snapshot, no diff). Visibility-aware: polling pauses when the tab is hidden, resumes with an immediate fetch.
+
+**Discipline dispatch inside `rbBoardScript`:**
+- `fetchResults()` picks the endpoint by `compTypeId`: Springskytte → `/Springskytte/GetSpringskytteResults`; **Fältskytte/MagnumFalt → `/Faltskytte/GetFaltskytteResults`** (reads `d.results.classGroups / stationCount / scoringMode / isOfficial / isAwardingStandardMedals`; does NOT gate on `d.exists`, which only the Precision payload has); else Precision-family → `/CompetitionResults/GetResultsList`.
+- `renderAll()` dispatches: `renderSpringskytte` / `renderFaltskytte` / the default flat Precision list.
+- **`renderFaltskytte`** groups every shooter into its **weapon class** (`getWC` → first char: C/B/A/R/L/M) and renders **one combined leaderboard per weapon group**, ranked across all sub-classes by the server tiebreaker keys (Normal: hits→figures→poängmål; Poäng: points→poängmål). The shooter's real sub-class stays in the Klass column. **Deliberate:** the top row is the best raw score in the group, NOT the official per-class placement; medals (Std) come from the server's medal grouping so they can sit below row 1. Station columns carry `rb-series-col` so they auto-hide on narrow screens.
+
+**Why Fältskytte was broken before:** the board only branched `isSpringskytte ? Spring : CompetitionResults`. A Fältskytte comp hit the Precision endpoint (empty `PrecisionResultEntry`), bailed on `!d.exists`, and `renderAll` parsed per-series `shots` JSON that Fältskytte has no concept of. The *button* was already wired for Fältskytte (published case at `Competition.cshtml`'s results section is type-agnostic; pre-publish DB-check already fetched `GetFaltskytteResults`) — only the rendering was missing.
+
+**Weapon-class filter is a multi-select + Växla (all disciplines):**
+- The old single `<select id="rbWcSelect">` was replaced by a **checkbox per weapon group** (`#rbWcFilter`, built from `configuredWCs`) + a **Växla** toggle (`#rbCycleToggle`) + a current-class label (`#rbCycleNow`). State moved from `selectedWC` (string) to `selectedWCs` (object map) plus `cycleMode`/`cycleIdx`/`cycleTimer` (`CYCLE_MS=12000`).
+- **Växla off** → selected classes stacked. **Växla on** → rotates one weapon class at a time every ~12 s via `cycleTick`, skipping empty classes (`orderedSelectedPresent`). `getFiltered()` returns groups for `currentDisplayWcs()` (all selected, or just the current one when cycling).
+- Rotation timer pauses/resumes alongside the poll in the `visibilitychange` handler.
+- **Persistence:** `localStorage` per comp — `hpsk_rb_wcs_<compId>` (selected classes JSON) and `hpsk_rb_cycle_<compId>` (`'1'`/`'0'`). `populateWcFilter` only rebuilds the checkbox DOM when the class list (`data-sig`) changes, so user ticks survive each 15 s poll.
+
+**Badge:** `updateStatus()` shows OFFICIELLT (orange) when `isOfficial`, else LIVE (green, pulsing). For Fältskytte `isOfficial` = competition `faltskytteResultsOfficial`. "LIVE" means preliminary, not "in progress".
+
+**No backend changes** — reuses `GetFaltskytteResults` (recomputes live from `FaltskytteResultEntry` each call, incl. merges/medals/Särskjutning). View-only change to `Competition.cshtml`; deploys without a rebuild, but the board window copies `rbBoardScript` at open time, so the competition page must be **reloaded and the board reopened** to pick up changes.
+
 ## Common Patterns
 
 ### Model Usage
