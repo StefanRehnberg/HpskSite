@@ -213,18 +213,14 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
     {
         public string CompetitionName { get; set; } = "";
         public bool Published { get; set; }
-        public List<PatrolListGroup> Groups { get; set; } = new();
-    }
-
-    public class PatrolListGroup
-    {
-        public string WeaponGroup { get; set; } = "";
+        /// <summary>Flat, in patrol-number order (not grouped by weapon group).</summary>
         public List<PatrolListRow> Patrols { get; set; } = new();
     }
 
     public class PatrolListRow
     {
         public int PatrolNumber { get; set; }
+        public string WeaponGroup { get; set; } = "";
         public DateTime? StartTime { get; set; }
         public string? Label { get; set; }
         public List<PatrolListMember> Members { get; set; } = new();

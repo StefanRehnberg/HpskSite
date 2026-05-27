@@ -53,25 +53,21 @@ namespace HpskSite.Controllers
                         $"WHERE PatrolId IN ({string.Join(",", patrolIds)}) ORDER BY Position")
                     : new List<FaltskyttePatrolMember>();
 
-                model.Groups = patrols
-                    .GroupBy(p => string.IsNullOrEmpty(p.WeaponGroup) ? "?" : p.WeaponGroup)
-                    .OrderBy(g => g.Key)
-                    .Select(g => new PatrolListGroup
+                model.Patrols = patrols
+                    .OrderBy(p => p.PatrolNumber)
+                    .Select(p => new PatrolListRow
                     {
-                        WeaponGroup = g.Key,
-                        Patrols = g.OrderBy(p => p.PatrolNumber).Select(p => new PatrolListRow
-                        {
-                            PatrolNumber = p.PatrolNumber,
-                            StartTime = p.StartTime,
-                            Label = p.Label,
-                            Members = members.Where(m => m.PatrolId == p.Id).OrderBy(m => m.Position)
-                                .Select(m => new PatrolListMember
-                                {
-                                    Name = m.MemberName,
-                                    Club = HpskSite.Helpers.ClubNameHelper.Shorten(m.ClubName),
-                                    ShootingClass = m.ShootingClass
-                                }).ToList()
-                        }).ToList()
+                        PatrolNumber = p.PatrolNumber,
+                        WeaponGroup = string.IsNullOrEmpty(p.WeaponGroup) ? "?" : p.WeaponGroup,
+                        StartTime = p.StartTime,
+                        Label = p.Label,
+                        Members = members.Where(m => m.PatrolId == p.Id).OrderBy(m => m.Position)
+                            .Select(m => new PatrolListMember
+                            {
+                                Name = m.MemberName,
+                                Club = HpskSite.Helpers.ClubNameHelper.Shorten(m.ClubName),
+                                ShootingClass = m.ShootingClass
+                            }).ToList()
                     }).ToList();
             }
 
