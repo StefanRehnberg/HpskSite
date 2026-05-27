@@ -7,6 +7,7 @@
 @inject Umbraco.Cms.Core.Services.IContentService ContentService
 @inject HpskSite.Services.ClubService ClubService
 @inject Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabaseFactory DbFactory
+@inject Microsoft.AspNetCore.DataProtection.IDataProtectionProvider DataProtection
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
     Layout = "Master.cshtml";
@@ -18,6 +19,49 @@
     int stationNumber = 0;
     int.TryParse(cStr, out competitionId);
     int.TryParse(sStr, out stationNumber);
+
+    // ── QR-1: read-only Förutsättningar via opaque token (?t=) ──────────
+    // Public, no login, NON-enumerable. Decodes "<compId>:<station>" (minted by
+    // GetStationInfoToken) and renders the layout + static figure timeline
+    // server-side. Mutually exclusive with ?c&s — when present it short-circuits.
+    var tToken = Context.Request.Query["t"].FirstOrDefault();
+    bool isInfoToken = !string.IsNullOrEmpty(tToken);
+    bool infoTokenValid = false;
+    int infoStation = 0;
+    string infoCompName = "";
+    string infoScoringMode = "Normal";
+    Dictionary<string, FaltskytteStationConfig>? infoStations = null;
+    if (isInfoToken)
+    {
+        try
+        {
+            var raw = DataProtection.CreateProtector("Faltskytte.StationInfoQr.v1").Unprotect(tToken!);
+            var parts = raw.Split(':');
+            if (parts.Length == 2 && int.TryParse(parts[0], out var infoCompId) && int.TryParse(parts[1], out infoStation))
+            {
+                var infoNode = Umbraco.Content(infoCompId);
+                if (infoNode != null && infoNode.ContentType.Alias == "competition"
+                    && (infoNode.Value<string>("competitionType") ?? "") is "Faltskytte" or "MagnumFalt")
+                {
+                    var cfg = FaltskytteConfigParser.Parse(infoNode.Value<string>("stationConfig") ?? "");
+                    var byWc = new Dictionary<string, FaltskytteStationConfig>();
+                    foreach (var kv in cfg.WeaponConfigs)
+                    {
+                        var st = kv.Value.Stations.FirstOrDefault(s => s.Station == infoStation);
+                        if (st != null) byWc[kv.Key] = st;
+                    }
+                    if (byWc.Count > 0)
+                    {
+                        infoStations = byWc;
+                        infoCompName = infoNode.Value<string>("competitionName") ?? infoNode.Name ?? "";
+                        infoScoringMode = infoNode.Value<string>("scoringMode") ?? "Normal";
+                        infoTokenValid = true;
+                    }
+                }
+            }
+        }
+        catch { infoTokenValid = false; }
+    }
 
     // Load competition
     IPublishedContent? competition = null;
@@ -93,57 +137,50 @@
         catch { /* config parse failure → fall through to normal handling */ }
     }
 
-    // ── Fältskytte self-service mode ─────────────────────────────
-    // Tri-modal: staff (canEnterResults), self-service (logged-in shooter
-    // in a patrol of a competition with faltskytteSelfServiceResults on),
-    // or public (everyone else). Resolved here so the rendering tree
-    // below can dispatch on a single state.
+    // ── Fältskytte QR-2 destinations (login required) ────────────────────
+    // After scanning the entry QR, a user may have access to the Stationschef
+    // view (staff) AND/OR self-service entry for the patrol(s) they're in (when
+    // self-service is on). Patrols are resolved for EVERYONE — including staff —
+    // so a functionary who is also a shooter gets to choose rather than being
+    // forced into the chief view. 0 destinations → no access; 1 → go straight
+    // there; 2+ → chooser.
     bool selfServiceFlag = competition != null
         && competition.HasProperty("faltskytteSelfServiceResults")
         && competition.Value<bool>("faltskytteSelfServiceResults");
 
-    // "none" | "picker" | "resolved"
-    string selfServiceMode = "none";
-    int? selfServicePatrolId = null;
-    int? selfServicePatrolNumber = null;
-    string? selfServicePatrolWeapon = null;
-    var selfServicePatrols = new List<FaltskyttePatrol>();
-
-    if (isFaltskytte && !canEnterResults && isLoggedIn && competition != null && selfServiceFlag)
+    var memberPatrols = new List<FaltskyttePatrol>();
+    if (isFaltskytte && isLoggedIn && competition != null && selfServiceFlag)
     {
         var memberData = MemberService.GetByEmail(currentMember!.Email ?? "");
         if (memberData != null)
         {
             using var db = DbFactory.CreateDatabase();
-            selfServicePatrols = await FaltskytteSelfServiceQueries
+            memberPatrols = await FaltskytteSelfServiceQueries
                 .GetPatrolsForMemberAsync(db, competitionId, memberData.Id);
-
-            if (selfServicePatrols.Count > 0)
-            {
-                // Did the picker (or a previous resolution) hand us ?p=patrolId?
-                int.TryParse(Context.Request.Query["p"].FirstOrDefault(), out var pParam);
-                FaltskyttePatrol? resolved = null;
-                if (pParam > 0)
-                    resolved = selfServicePatrols.FirstOrDefault(p => p.Id == pParam);
-                if (resolved == null && selfServicePatrols.Count == 1)
-                    resolved = selfServicePatrols[0];
-
-                if (resolved != null)
-                {
-                    selfServiceMode = "resolved";
-                    selfServicePatrolId = resolved.Id;
-                    selfServicePatrolNumber = resolved.PatrolNumber;
-                    selfServicePatrolWeapon = resolved.WeaponGroup;
-                }
-                else
-                {
-                    selfServiceMode = "picker";
-                }
-            }
         }
     }
 
-    bool willEnter = canEnterResults || selfServiceMode == "resolved";
+    int.TryParse(Context.Request.Query["p"].FirstOrDefault(), out var pParam);
+    bool chiefChosen = Context.Request.Query["role"].FirstOrDefault() == "chief";
+    bool hasChief = canEnterResults;
+    int destCount = (hasChief ? 1 : 0) + memberPatrols.Count;
+
+    FaltskyttePatrol? resolvedPatrol = null;
+    bool renderChief = false;
+    bool showChooser = false;
+    if (destCount == 0) { /* no access — handled in the body */ }
+    else if (pParam > 0 && memberPatrols.Any(p => p.Id == pParam))
+        resolvedPatrol = memberPatrols.First(p => p.Id == pParam);
+    else if (chiefChosen && hasChief)
+        renderChief = true;
+    else if (destCount == 1)
+    {
+        if (memberPatrols.Count == 1 && !hasChief) resolvedPatrol = memberPatrols[0];
+        else renderChief = true; // single destination is the chief view
+    }
+    else showChooser = true;
+
+    bool willEnter = renderChief || resolvedPatrol != null;
 
     ViewBag.Title = competition != null
         ? $"Station {stationNumber} — {competitionName}"
@@ -152,7 +189,24 @@
 
 <div class="container-fluid mt-3">
 
-    @if (competitionId == 0 || (stationNumber == 0 && isFaltskytte))
+    @if (isInfoToken)
+    {
+        @* QR-1: read-only Förutsättningar + static timeline (public, token-gated). *@
+        if (infoTokenValid)
+        {
+            var infoVd = new ViewDataDictionary(ViewData);
+            infoVd["CompetitionName"] = infoCompName;
+            infoVd["StationNumber"] = infoStation;
+            infoVd["ScoringMode"] = infoScoringMode;
+            infoVd["StationsByWeaponClass"] = infoStations;
+            @await Html.PartialAsync("FaltskytteStationInfoStatic", infoVd)
+        }
+        else
+        {
+            <div class="alert alert-warning"><i class="bi bi-exclamation-triangle me-2"></i>Ogiltig länk.</div>
+        }
+    }
+    else if (competitionId == 0 || (stationNumber == 0 && isFaltskytte))
     {
         <!-- No params (or no station for Fältskytte) — show resume prompt or landing -->
         <div class="text-center py-5">
@@ -228,10 +282,10 @@
             // Self-service hints — partial filters its patrol list to this one
             // patrol, skips roll call, and renders a locked read-only view if
             // CurrentStation drifts away from the requested station.
-            entryViewData["IsSelfService"] = selfServiceMode == "resolved";
-            entryViewData["PresetPatrolId"] = selfServicePatrolId;
-            entryViewData["PresetPatrolNumber"] = selfServicePatrolNumber;
-            entryViewData["PresetPatrolWeapon"] = selfServicePatrolWeapon;
+            entryViewData["IsSelfService"] = resolvedPatrol != null;
+            entryViewData["PresetPatrolId"] = resolvedPatrol?.Id;
+            entryViewData["PresetPatrolNumber"] = resolvedPatrol?.PatrolNumber;
+            entryViewData["PresetPatrolWeapon"] = resolvedPatrol?.WeaponGroup;
             @await Html.PartialAsync("FaltskytteStationEntry", entryViewData)
         }
         else if (isSpringskytte)
@@ -262,66 +316,49 @@
             @await Html.PartialAsync("CompetitionResultsManagement", entryViewData)
         }
     }
-    else if (selfServiceMode == "picker")
+    else if (showChooser)
     {
-        <!-- Multi-class shooter: pick which patrol to use for this round.
-             The choice is reflected in the URL via ?p=<patrolId> — when the
-             page reloads with that param the resolution branch picks it up
-             and renders the entry surface scoped to the chosen patrol. -->
+        @* Dual-role / multi-patrol: let the scanner pick where to go. The choice
+           is carried in the URL (?role=chief or ?p=<patrolId>) so the resolution
+           block above renders the chosen surface on the next load. No sticky
+           memory — the shooter selects every scan (safest: avoids entering
+           results under the wrong class/patrol). *@
         <div class="text-center py-4">
-            <h4><i class="bi bi-people me-2"></i>Vilken patrull skjuter du i nu?</h4>
-            <p class="text-muted small mb-3">Du är anmäld i flera klasser. Välj patrull för att fortsätta till station @stationNumber.</p>
+            <h4><i class="bi bi-signpost-split me-2"></i>Vad vill du göra?</h4>
+            <p class="text-muted small mb-3">Station @stationNumber — välj hur du vill fortsätta.</p>
             <div class="d-grid gap-2 col-md-6 mx-auto">
-                @foreach (var p in selfServicePatrols)
+                @if (hasChief)
                 {
-                    var label = $"Patrull {p.PatrolNumber}"
-                        + (string.IsNullOrEmpty(p.Label) ? "" : $" — {p.Label}")
-                        + (string.IsNullOrEmpty(p.WeaponGroup) ? "" : $" ({p.WeaponGroup})");
-                    var href = $"/station?c={competitionId}&s={stationNumber}&p={p.Id}";
-                    <a class="btn btn-primary btn-lg" href="@href" data-faltselfservice-pick="@p.Id"><i class="bi bi-arrow-right me-1"></i>@label</a>
+                    <a class="btn btn-outline-primary btn-lg" href="/station?c=@competitionId&s=@stationNumber&role=chief"><i class="bi bi-person-badge me-1"></i>Stationschef</a>
+                }
+                @foreach (var p in memberPatrols)
+                {
+                    var t = p.StartTime.HasValue ? p.StartTime.Value.ToString("HH:mm") : "";
+                    var lbl = (string.IsNullOrEmpty(p.WeaponGroup) ? "" : p.WeaponGroup + " · ")
+                        + "Patrull " + p.PatrolNumber
+                        + (string.IsNullOrEmpty(t) ? "" : " · " + t)
+                        + (string.IsNullOrEmpty(p.Label) ? "" : " — " + p.Label);
+                    <a class="btn btn-primary btn-lg" href="/station?c=@competitionId&s=@stationNumber&p=@p.Id"><i class="bi bi-arrow-right me-1"></i>@lbl</a>
                 }
             </div>
         </div>
-        <script>
-        // Persist the picker choice so subsequent scans resolve straight to
-        // this patrol without prompting again. Cleared by a "Byt patrull"
-        // link in the entry partial header.
-        document.querySelectorAll('[data-faltselfservice-pick]').forEach(function(a) {
-            a.addEventListener('click', function() {
-                try {
-                    localStorage.setItem('hpsk_faltselfservice_' + @competitionId, a.getAttribute('data-faltselfservice-pick'));
-                } catch(e) {}
-            });
-        });
-        // Auto-resolve from cache: if we have a remembered patrolId for this
-        // competition, redirect to it before the user has to tap.
-        (function() {
-            try {
-                var cached = localStorage.getItem('hpsk_faltselfservice_' + @competitionId);
-                if (!cached) return;
-                var pid = parseInt(cached, 10);
-                if (!pid) return;
-                // Only auto-resolve if this patrol is still in the picker list
-                var match = document.querySelector('[data-faltselfservice-pick="' + pid + '"]');
-                if (match) window.location.replace(match.getAttribute('href'));
-            } catch(e) {}
-        })();
-        </script>
+    }
+    else if (!isLoggedIn)
+    {
+        @* Not logged in — offer login, return to this entry URL. NO layout shown. *@
+        <div class="text-center py-5">
+            <h4><i class="bi bi-box-arrow-in-right me-2"></i>Logga in för att registrera resultat</h4>
+            <p class="text-muted">Station @stationNumber@(string.IsNullOrEmpty(competitionName) ? "" : " — " + competitionName)</p>
+            <a class="btn btn-primary" href="/login-register?returnUrl=/station?c=@(competitionId)%26s=@(stationNumber)"><i class="bi bi-box-arrow-in-right me-1"></i>Logga in</a>
+        </div>
     }
     else
     {
-        <!-- Not authorized for entry: Show station info card -->
-        var infoViewData = new ViewDataDictionary(ViewData);
-        infoViewData["CompetitionId"] = competitionId;
-        infoViewData["CompetitionName"] = competitionName;
-        infoViewData["CompetitionType"] = competitionType;
-        infoViewData["StationNumber"] = stationNumber;
-        infoViewData["IsLoggedIn"] = isLoggedIn;
-        // When self-service is enabled and the viewer isn't logged in, the
-        // info card surfaces a small "Logga in för att registrera resultat"
-        // link so shooters know how to switch to the entry view.
-        infoViewData["ShowSelfServiceLoginPrompt"] = selfServiceFlag && !isLoggedIn;
-        @await Html.PartialAsync("StationInfoCard", infoViewData)
+        @* Logged in but no valid destination (not staff, not in a patrol, or
+           self-service off). Never reveal the layout here. *@
+        <div class="alert alert-warning text-center">
+            <i class="bi bi-exclamation-triangle me-2"></i>Du har inte behörighet att registrera resultat på den här stationen.
+        </div>
     }
 
 </div>

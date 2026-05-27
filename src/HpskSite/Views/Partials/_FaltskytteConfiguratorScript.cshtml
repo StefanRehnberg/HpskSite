@@ -2107,14 +2107,27 @@ function faltCfgPrintStation(stationNum, wc) {
         w.document.write('<' + '/div>');
     });
 
-    // QR code for station page
+    // Two QR codes: QR-1 (F\u00f6ruts\u00e4ttningar, secret token) stays on the card;
+    // QR-2 (result entry) is a separate cut-out to place by the m\u00e5lgrupper.
     var compId = faltCfgGetCompetitionId();
     if (compId) {
-        var stationUrl = window.location.origin + '/station?c=' + compId + '&s=' + stationNum;
-        var qrSrc = '/umbraco/surface/Faltskytte/GenerateQrCode?url=' + encodeURIComponent(stationUrl);
+        // QR-1 \u2014 F\u00f6ruts\u00e4ttningar. Token minted + rendered server-side
+        // (GetStationInfoQr): non-enumerable, no login. Slightly larger because
+        // the token URL is denser than ?c&s.
+        var qr1Src = '/umbraco/surface/Faltskytte/GetStationInfoQr?competitionId=' + compId + '&stationNumber=' + stationNum;
         w.document.write('<div style="margin-top:20px;text-align:center;page-break-inside:avoid">');
-        w.document.write('<img src="' + qrSrc + '" alt="QR" style="width:120px;height:120px">');
-        w.document.write('<div style="font-size:0.8em;color:#666;margin-top:4px">Skanna f\u00f6r stationsinfo<' + '/div>');
+        w.document.write('<img src="' + qr1Src + '" alt="QR F\u00f6ruts\u00e4ttningar" style="width:150px;height:150px">');
+        w.document.write('<div style="font-size:0.85em;color:#333;margin-top:4px;font-weight:bold">F\u00f6ruts\u00e4ttningar \u2014 skanna h\u00e4r<' + '/div>');
+        w.document.write('<' + '/div>');
+
+        // QR-2 \u2014 Result entry (login required). Own page; cut out + place by targets.
+        var entryUrl = window.location.origin + '/station?c=' + compId + '&s=' + stationNum;
+        var qr2Src = '/umbraco/surface/Faltskytte/GenerateQrCode?url=' + encodeURIComponent(entryUrl);
+        w.document.write('<div style="margin-top:24px;page-break-before:always;border:2px dashed #888;border-radius:8px;padding:16px;text-align:center">');
+        w.document.write('<div style="font-size:1.1em;font-weight:bold;margin-bottom:8px">Station ' + stationNum + ' \u2014 Resultatregistrering<' + '/div>');
+        w.document.write('<img src="' + qr2Src + '" alt="QR Resultat" style="width:150px;height:150px">');
+        w.document.write('<div style="font-size:0.85em;color:#333;margin-top:4px">Klipp ut och placera vid m\u00e5lgrupperna<' + '/div>');
+        w.document.write('<div style="font-size:0.8em;color:#666">Kr\u00e4ver inloggning<' + '/div>');
         w.document.write('<' + '/div>');
     }
 

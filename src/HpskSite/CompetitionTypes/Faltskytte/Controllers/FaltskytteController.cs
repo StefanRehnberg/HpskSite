@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Logging;
 using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Logging;
@@ -31,6 +32,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         private readonly AdminAuthorizationService _adminAuthorizationService;
         private readonly UmbracoStartListRepository _startListRepository;
         private readonly FaltskytteShootOffService _shootOffService;
+        private readonly IDataProtectionProvider _dataProtectionProvider;
 
         public FaltskytteController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -46,7 +48,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             ClubService clubService,
             AdminAuthorizationService adminAuthorizationService,
             UmbracoStartListRepository startListRepository,
-            FaltskytteShootOffService shootOffService)
+            FaltskytteShootOffService shootOffService,
+            IDataProtectionProvider dataProtectionProvider)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _contentService = contentService;
@@ -58,6 +61,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             _adminAuthorizationService = adminAuthorizationService;
             _startListRepository = startListRepository;
             _shootOffService = shootOffService;
+            _dataProtectionProvider = dataProtectionProvider;
         }
 
         // ── Authorization helpers ───────────────────────────────────
@@ -199,8 +203,14 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         // ── Station Config ──────────────────────────────────────────
 
         [HttpGet]
-        public IActionResult GetStationConfig(int competitionId)
+        public async Task<IActionResult> GetStationConfig(int competitionId)
         {
+            // Station layouts are secret — only staff or a logged-in participant
+            // (self-service) of this competition may read the config. QR-1's public
+            // Förutsättningar page renders server-side, NOT via this endpoint.
+            if (!await CanReadStationAsync(competitionId))
+                return Json(new { success = false, message = "Du har inte behörighet att se den här tävlingens stationer." });
+
             var competition = _contentService.GetById(competitionId);
             if (competition == null)
                 return Json(new { success = false, message = "Tävlingen hittades inte." });
@@ -1745,6 +1755,33 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         {
             if (string.IsNullOrWhiteSpace(url))
                 return BadRequest("URL required");
+            var png = QrPng(url);
+            return png == null ? StatusCode(500) : File(png, "image/png");
+        }
+
+        /// <summary>
+        /// Returns the QR PNG for a station's read-only Förutsättningar page
+        /// (QR-1 on the station card). Mints the opaque IDataProtector token,
+        /// builds the absolute `/station?t=…` URL, and renders the QR in one call
+        /// so the print stays synchronous. Staff-gated — only functionaries print
+        /// cards, which stops a shooter minting tokens for stations the patrol
+        /// hasn't reached. The token is non-enumerable + non-forgeable; no DB.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetStationInfoQr(int competitionId, int stationNumber)
+        {
+            if (!await IsAuthorizedForCompetition(competitionId))
+                return Forbid();
+            var protector = _dataProtectionProvider.CreateProtector("Faltskytte.StationInfoQr.v1");
+            var token = protector.Protect($"{competitionId}:{stationNumber}");
+            var url = $"{Request.Scheme}://{Request.Host}/station?t={Uri.EscapeDataString(token)}";
+            var png = QrPng(url);
+            return png == null ? StatusCode(500) : File(png, "image/png");
+        }
+
+        /// <summary>Renders a QR code PNG for arbitrary URL text; null on failure.</summary>
+        private byte[]? QrPng(string url)
+        {
             try
             {
                 var gen = new QRCoder.QRCodeGenerator();
@@ -1757,12 +1794,12 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                     drawQuietZones: true);
                 using var ms = new System.IO.MemoryStream();
                 img.Save(ms, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
-                return File(ms.ToArray(), "image/png");
+                return ms.ToArray();
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error generating QR code");
-                return StatusCode(500);
+                return null;
             }
         }
 

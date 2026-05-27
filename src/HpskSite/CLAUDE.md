@@ -1316,6 +1316,24 @@ No state machine — every command button is tappable any time so the chief can 
 
 **Operator setup (Umbraco backoffice, per environment — same shape as /skjutledare, /station):** create template `ResultBoard`, doctype `resultBoard` (no properties, allowed under Home, default template `ResultBoard`), and publish a `resultBoard` content node with URL alias **`live`**. Without the node, `/live?c=…` 404s and all 3 triggers dead-link. No SQL, no doctype properties.
 
+### Fältskytte: two QR codes per station + station-layout secrecy (2026-05-27)
+
+**What:** Each Fältskytte station now carries **two** purpose-built QR codes, and station layouts are kept secret (not browsable/enumerable).
+
+- **QR-1 — Förutsättningar (on the station card):** opens a **read-only** view of that station's conditions + a **static per-figure visibility timeline** (green show/hide bands, no clock). **No login.** Served at **`/station?t=<token>`** where the token is an opaque `IDataProtector` payload (`"<compId>:<station>"`, protector purpose `"Faltskytte.StationInfoQr.v1"`) — non-enumerable + non-forgeable, so a shooter can't change a station number to preview others. Rendered **server-side** by the new partial `Views/Partials/FaltskytteStationInfoStatic.cshtml` (typed `FaltskytteStationConfig`; C# port of the Tidur's `tmrFigBands`; bands use inline styles + `InvariantCulture` percentages — avoids the "top-level `<style>` in a partial 500s" trap).
+- **QR-2 — Result entry (separate cut-out, placed by the Målgrupper):** opens `/station?c&s`. **Login required.** Shows an **adaptive landing**: a *Stationschef* button if the user has staff access + one button per patrol they're in (labelled `Vapengrupp · Patrull N · HH:mm`) when `faltskytteSelfServiceResults` is on. 0 → "ingen behörighet"; 1 → straight there (`?role=chief` or `?p=<patrolId>`); 2+ → chooser. **Fixes the dual-role case** (functionary who is also a shooter). **No sticky memory — select every scan** (the old `hpsk_faltselfservice_*` localStorage auto-resolve was removed; entering under the wrong class is the failure mode to avoid).
+
+**Secrecy lock-down:** the old `/station` `else` branch rendered the full layout (`StationInfoCard`) to **anyone** with `?c&s`, and `GetStationConfig` was an **unauthenticated** endpoint returning the **whole** competition. Both fixed: the leaky `else` is gone (logged-out → login CTA, logged-in non-participant → "ingen behörighet", never the layout), and **`GetStationConfig` is now gated by `CanReadStationAsync`** (staff or self-service participant). QR-1 renders server-side so it needs no endpoint. `StationInfoCard.cshtml` is now **orphaned** (delete in a follow-up). Residual: a registered participant could still read other stations via the API — acceptable ("hard, not impossible"); tightening it to per-allowed-station is a follow-up.
+
+**Key code:**
+- `CompetitionTypes/Faltskytte/Controllers/FaltskytteController.cs` — injected `IDataProtectionProvider`; `GetStationConfig` now `async` + `CanReadStationAsync` gate; new `GetStationInfoQr(competitionId, stationNumber)` (staff-gated: mints token, builds absolute `/station?t=…` URL via `Request.Scheme/Host`, returns the QR PNG in one call so the print stays synchronous); extracted `QrPng` helper shared with `GenerateQrCode`.
+- `Views/StationPage.cshtml` — injects `IDataProtectionProvider`; first body branch handles `?t=` (decode in try/catch → "Ogiltig länk"); the entry path is now a destinations model (`hasChief` + `memberPatrols`, dropped the old `!canEnterResults` gate so staff also get patrol options); `?role=chief` / `?p=` resolution; chooser/login/no-access branches replace the picker + leaky `else`.
+- `Views/Partials/FaltskytteStationInfoStatic.cshtml` (NEW).
+- `Views/Partials/_FaltskytteConfiguratorScript.cshtml` — `faltCfgPrintStation` prints QR-1 (`GetStationInfoQr`) on the card + QR-2 (`GenerateQrCode?url=/station?c&s`) in a dashed `page-break-before` cut-out.
+- Reuses: `FaltskytteSelfServiceQueries` (patrol resolution, cursor advance/lock — unchanged), `IDataProtector` (configured in `Program.cs:54-56`, keys persisted so printed tokens survive recycles).
+
+**Deploy:** adds C# → **full publish/rebuild required** (not views-only). No new Umbraco node/doctype/property; no SQL.
+
 ## Common Patterns
 
 ### Model Usage
