@@ -207,6 +207,51 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public string Qr2Url { get; set; } = "";  // Result entry (GenerateQrCode → /station?c&s)
     }
 
+    // ── Public patrol-list page (/patrullista/{id}) ───────────────
+
+    public class FaltskyttePatrolListModel
+    {
+        public string CompetitionName { get; set; } = "";
+        public bool Published { get; set; }
+        public List<PatrolListGroup> Groups { get; set; } = new();
+    }
+
+    public class PatrolListGroup
+    {
+        public string WeaponGroup { get; set; } = "";
+        public List<PatrolListRow> Patrols { get; set; } = new();
+    }
+
+    public class PatrolListRow
+    {
+        public int PatrolNumber { get; set; }
+        public DateTime? StartTime { get; set; }
+        public string? Label { get; set; }
+        public List<PatrolListMember> Members { get; set; } = new();
+    }
+
+    public class PatrolListMember
+    {
+        public string Name { get; set; } = "";
+        public string Club { get; set; } = "";
+        public string ShootingClass { get; set; } = "";
+    }
+
+    // ── Flow/statistics page (/faltskytte/statistik/{id}) ─────────
+
+    public class FaltskytteStatsModel
+    {
+        public string CompetitionName { get; set; } = "";
+        public int PatrolCount { get; set; }
+        public int StationCount { get; set; }
+        public int? BottleneckStation { get; set; }
+        public double AvgPatrolMinutes { get; set; }
+        /// <summary>JSON: [{ station, patrolsDone, avgLegMinutes }] — leg = time from completing the previous station.</summary>
+        public string StationsJson { get; set; } = "[]";
+        /// <summary>JSON: [{ patrol, station, wg, t }] — one completion point per (patrol, station), t = first-entry time (UTC).</summary>
+        public string PointsJson { get; set; } = "[]";
+    }
+
     // ── Result Entry ────────────────────────────────────────────────
 
     /// <summary>Save one shooter's result at one station</summary>

@@ -1,0 +1,126 @@
+@using HpskSite.CompetitionTypes.Faltskytte.Models
+@model FaltskytteStatsModel
+@{
+    // Fältskytte flow/statistics page (/faltskytte/statistik/{id}). Chromeless; opened in a
+    // new tab from the Stationer tab. Charts derive from result-entry timestamps (EnteredAt).
+    Layout = null;
+}
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <title>Flödesstatistik@(string.IsNullOrEmpty(Model.CompetitionName) ? "" : " — " + Model.CompetitionName)</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@@1.11.3/font/bootstrap-icons.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <style>
+        body { background: #f5f6f8; }
+        .chart-box { position: relative; height: 320px; }
+    </style>
+</head>
+<body>
+    <div class="container-fluid py-3">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3 border-bottom pb-2">
+            <h2 class="mb-0"><i class="bi bi-graph-up me-2"></i>Flödesstatistik</h2>
+            <div class="fw-bold">@Model.CompetitionName</div>
+        </div>
+
+        <div id="statEmpty" class="alert alert-info d-none"><i class="bi bi-info-circle me-2"></i>Inga resultat har registrerats ännu — statistiken fylls i allt eftersom patrullerna skjuter.</div>
+
+        <div class="row g-2 mb-3">
+            <div class="col-6 col-md-3"><div class="card text-center h-100"><div class="card-body py-2"><div class="fs-3 fw-bold">@Model.PatrolCount</div><div class="text-muted small">Patruller igång</div></div></div></div>
+            <div class="col-6 col-md-3"><div class="card text-center h-100"><div class="card-body py-2"><div class="fs-3 fw-bold">@Model.StationCount</div><div class="text-muted small">Stationer</div></div></div></div>
+            <div class="col-6 col-md-3"><div class="card text-center h-100"><div class="card-body py-2"><div class="fs-3 fw-bold">@Model.AvgPatrolMinutes<span class="fs-6"> min</span></div><div class="text-muted small">Snittid per patrull</div></div></div></div>
+            <div class="col-6 col-md-3"><div class="card text-center h-100 border-danger"><div class="card-body py-2"><div class="fs-3 fw-bold text-danger">@(Model.BottleneckStation?.ToString() ?? "—")</div><div class="text-muted small">Trolig flaskhals (station)</div></div></div></div>
+        </div>
+
+        <div class="row g-3">
+            <div class="col-12 col-xl-6">
+                <div class="card"><div class="card-header py-2 fw-bold">Genomsnittlig tid per station <span class="text-muted small">(längst = flaskhals)</span></div>
+                    <div class="card-body"><div class="chart-box"><canvas id="chartBottleneck"></canvas></div></div></div>
+            </div>
+            <div class="col-12 col-xl-6">
+                <div class="card"><div class="card-header py-2 fw-bold">Genomströmning <span class="text-muted small">(klara stationer per kvart)</span></div>
+                    <div class="card-body"><div class="chart-box"><canvas id="chartThroughput"></canvas></div></div></div>
+            </div>
+            <div class="col-12">
+                <div class="card"><div class="card-header py-2 fw-bold">Patrullernas väg genom stationerna <span class="text-muted small">(tid × station; täta lodräta band = kö vid en station)</span></div>
+                    <div class="card-body"><div class="chart-box" style="height:420px"><canvas id="chartFlow"></canvas></div></div></div>
+            </div>
+            <div class="col-12">
+                <div class="card"><div class="card-header py-2 fw-bold">Per station</div>
+                    <div class="card-body p-0"><div class="table-responsive"><table class="table table-sm mb-0">
+                        <thead class="table-light"><tr><th>Station</th><th>Klara patruller</th><th>Snittid (min)</th></tr></thead>
+                        <tbody id="statTable"></tbody>
+                    </table></div></div></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        var stations = @Html.Raw(Model.StationsJson);   // [{station, patrolsDone, avgLegMinutes}]
+        var points = @Html.Raw(Model.PointsJson);        // [{patrol, station, wg, t}]
+        var bottleneck = @(Model.BottleneckStation?.ToString() ?? "null");
+        var palette = ['#0d6efd', '#198754', '#dc3545', '#fd7e14', '#6f42c1', '#20c997', '#d63384', '#0dcaf0'];
+
+        // Per-station table
+        document.getElementById('statTable').innerHTML = stations.map(function (s) {
+            return '<tr><td class="fw-bold">' + s.station + '</td><td>' + s.patrolsDone + '</td><td>' + (s.avgLegMinutes || '—') + '</td></tr>';
+        }).join('') || '<tr><td colspan="3" class="text-muted text-center py-2">—</td></tr>';
+
+        if (!points.length) {
+            document.getElementById('statEmpty').classList.remove('d-none');
+        } else {
+            // 1) Bottleneck — avg time per station, slowest highlighted
+            new Chart(document.getElementById('chartBottleneck'), {
+                type: 'bar',
+                data: {
+                    labels: stations.map(function (s) { return 'St ' + s.station; }),
+                    datasets: [{
+                        label: 'Snittid (min)',
+                        data: stations.map(function (s) { return s.avgLegMinutes; }),
+                        backgroundColor: stations.map(function (s) { return s.station === bottleneck ? '#dc3545' : '#0d6efd'; })
+                    }]
+                },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { title: { display: true, text: 'Minuter' }, beginAtZero: true } } }
+            });
+
+            // 2) Throughput — completions per 15-min bucket (local time)
+            var buckets = {};
+            points.forEach(function (p) {
+                var d = new Date(p.t);
+                d.setMinutes(Math.floor(d.getMinutes() / 15) * 15, 0, 0);
+                var k = d.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
+                buckets[k] = (buckets[k] || 0) + 1;
+            });
+            var bk = Object.keys(buckets).sort();
+            new Chart(document.getElementById('chartThroughput'), {
+                type: 'bar',
+                data: { labels: bk, datasets: [{ label: 'Klara stationer', data: bk.map(function (k) { return buckets[k]; }), backgroundColor: '#198754' }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+            });
+
+            // 3) Patrol flow — scatter (time × station), coloured by weapon group
+            var byWg = {};
+            points.forEach(function (p) { (byWg[p.wg] = byWg[p.wg] || []).push({ x: p.t, y: p.station, patrol: p.patrol }); });
+            var ds = Object.keys(byWg).map(function (wg, i) {
+                return { label: 'Vapengrupp ' + wg, data: byWg[wg], backgroundColor: palette[i % palette.length], pointRadius: 4, pointHoverRadius: 6 };
+            });
+            new Chart(document.getElementById('chartFlow'), {
+                type: 'scatter',
+                data: { datasets: ds },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    scales: {
+                        x: { type: 'time', time: { unit: 'minute', displayFormats: { minute: 'HH:mm' }, tooltipFormat: 'HH:mm' }, title: { display: true, text: 'Tid' } },
+                        y: { title: { display: true, text: 'Station' }, ticks: { stepSize: 1, precision: 0 } }
+                    },
+                    plugins: { tooltip: { callbacks: { label: function (c) { return 'Patrull ' + c.raw.patrol + ' · Station ' + c.raw.y; } } } }
+                }
+            });
+        }
+    </script>
+</body>
+</html>
