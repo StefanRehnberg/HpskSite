@@ -415,6 +415,71 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             return Json(new { success = true, name = m.Name ?? "", phone });
         }
 
+        /// <summary>
+        /// Public patrol-list state for the send-off screen (/patrullista): patrols
+        /// (ordered by number) + members + DepartedAt. No auth — the wall screen and
+        /// the starters' phones both poll this; the list is not secret. Only returns
+        /// patrols once published.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetPatrolListState(int competitionId)
+        {
+            var competition = _contentService.GetById(competitionId);
+            if (competition == null)
+                return Json(new { success = false, message = "Tävlingen hittades inte." });
+
+            var published = competition.HasProperty("faltskyttePatrolsPublished")
+                && competition.GetValue<bool>("faltskyttePatrolsPublished");
+            if (!published)
+                return Json(new { success = true, published = false, patrols = Array.Empty<object>() });
+
+            using var db = _umbracoDatabaseFactory.CreateDatabase();
+            var patrols = await db.FetchAsync<FaltskyttePatrol>(
+                "WHERE CompetitionId = @0 ORDER BY PatrolNumber", competitionId);
+            var patrolIds = patrols.Select(p => p.Id).ToList();
+            var members = patrolIds.Any()
+                ? await db.FetchAsync<FaltskyttePatrolMember>(
+                    $"WHERE PatrolId IN ({string.Join(",", patrolIds)}) ORDER BY Position")
+                : new List<FaltskyttePatrolMember>();
+
+            var result = patrols.Select(p => new
+            {
+                patrolId = p.Id,
+                patrolNumber = p.PatrolNumber,
+                weaponGroup = string.IsNullOrEmpty(p.WeaponGroup) ? "?" : p.WeaponGroup,
+                startTime = p.StartTime,
+                label = p.Label,
+                departedAt = p.DepartedAt,
+                members = members.Where(m => m.PatrolId == p.Id).Select(m => new
+                {
+                    name = m.MemberName,
+                    club = HpskSite.Helpers.ClubNameHelper.Shorten(m.ClubName),
+                    shootingClass = m.ShootingClass
+                }).ToList()
+            }).ToList();
+
+            return Json(new { success = true, published = true, patrols = result });
+        }
+
+        /// <summary>Marks/unmarks a patrol as sent off from the start line (staff-gated).</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetPatrolDeparted([FromBody] SetPatrolDepartedRequest request)
+        {
+            if (request == null || !await IsAuthorizedForCompetition(request.CompetitionId))
+                return Json(new { success = false, message = "Du har inte behörighet." });
+
+            using var db = _umbracoDatabaseFactory.CreateDatabase();
+            var patrol = await db.FirstOrDefaultAsync<FaltskyttePatrol>(
+                "WHERE Id = @0 AND CompetitionId = @1", request.PatrolId, request.CompetitionId);
+            if (patrol == null)
+                return Json(new { success = false, message = "Patrullen hittades inte." });
+
+            object when = request.Departed ? DateTime.UtcNow : (object)DBNull.Value;
+            await db.ExecuteAsync("UPDATE FaltskyttePatrol SET DepartedAt = @0 WHERE Id = @1", when, request.PatrolId);
+            return Json(new { success = true, departed = request.Departed });
+        }
+
         // ── Station Entry View ──────────────────────────────────────
 
         /// <summary>

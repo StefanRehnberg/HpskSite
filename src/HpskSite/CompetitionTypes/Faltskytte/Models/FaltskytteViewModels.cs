@@ -211,26 +211,19 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
 
     public class FaltskyttePatrolListModel
     {
+        public int CompetitionId { get; set; }
         public string CompetitionName { get; set; } = "";
         public bool Published { get; set; }
-        /// <summary>Flat, in patrol-number order (not grouped by weapon group).</summary>
-        public List<PatrolListRow> Patrols { get; set; } = new();
+        /// <summary>True when the current viewer (logged-in staff) may tick patrols off.</summary>
+        public bool CanSendOff { get; set; }
     }
 
-    public class PatrolListRow
+    /// <summary>Mark/unmark a patrol as sent off from the start line.</summary>
+    public class SetPatrolDepartedRequest
     {
-        public int PatrolNumber { get; set; }
-        public string WeaponGroup { get; set; } = "";
-        public DateTime? StartTime { get; set; }
-        public string? Label { get; set; }
-        public List<PatrolListMember> Members { get; set; } = new();
-    }
-
-    public class PatrolListMember
-    {
-        public string Name { get; set; } = "";
-        public string Club { get; set; } = "";
-        public string ShootingClass { get; set; } = "";
+        public int CompetitionId { get; set; }
+        public int PatrolId { get; set; }
+        public bool Departed { get; set; }
     }
 
     // ── Flow/statistics page (/faltskytte/statistik/{id}) ─────────

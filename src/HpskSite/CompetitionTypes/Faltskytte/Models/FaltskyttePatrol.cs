@@ -34,6 +34,14 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         /// use is multi-day competitions.
         /// </summary>
         public string? Label { get; set; }
+
+        /// <summary>
+        /// When the patrol was sent off from the start line (UTC), set by a starter
+        /// ticking it off on /patrullista. Null = not yet sent. Drives the send-off
+        /// screen's "next" (lowest patrol number with DepartedAt null). Requires the
+        /// add-departedat-to-faltskyttepatrol.sql column.
+        /// </summary>
+        public DateTime? DepartedAt { get; set; }
     }
 
     [TableName("FaltskyttePatrolMember")]

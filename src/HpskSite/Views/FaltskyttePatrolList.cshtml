@@ -1,13 +1,10 @@
 @using HpskSite.CompetitionTypes.Faltskytte.Models
-@using System.Globalization
 @model FaltskyttePatrolListModel
-@functions {
-    static string Hm(DateTime? t) => t.HasValue ? t.Value.ToString("HH:mm", CultureInfo.GetCultureInfo("sv-SE")) : "";
-}
 @{
-    // Standalone public patrol-list page (/patrullista/{id}) — built for a clubhouse
-    // screen, so it's large/readable and reloads every 60 s to stay current. The start
-    // time is the headline info ("when does my patrol leave?").
+    // Send-off screen (/patrullista/{id}). Public read-only wall screen; for a logged-in
+    // staff member it also shows "Skicka iväg" controls so the starter ticks patrols off
+    // as they leave. Polls GetPatrolListState every 10 s so the wall screen reflects the
+    // starter's taps. "Next" = lowest patrol number with no DepartedAt.
     Layout = null;
 }
 <!DOCTYPE html>
@@ -21,61 +18,142 @@
     <style>
         body { background: #f5f6f8; }
         .pl-time { font-variant-numeric: tabular-nums; }
-        .pl-patrol-no { font-size: 1.15rem; }
+        .pl-departed { opacity: .55; }
+        .pl-next { box-shadow: 0 0 0 .25rem rgba(25,135,84,.35); }
         .pl-member { font-size: .9rem; }
     </style>
 </head>
 <body>
     <div class="container-fluid py-3">
-        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3 border-bottom pb-2">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2 border-bottom pb-2">
             <h2 class="mb-0"><i class="bi bi-people-fill me-2"></i>Patrullista</h2>
             <div class="text-end">
                 <div class="fw-bold">@Model.CompetitionName</div>
-                <div class="text-muted small">Uppdaterad <span id="plUpdated"></span></div>
+                <div class="text-muted small">Uppdaterad <span id="plUpdated"></span>@(Model.CanSendOff ? " · funktionärsläge (avprickning på)" : "")</div>
             </div>
         </div>
 
-        @if (!Model.Published)
-        {
-            <div class="alert alert-info"><i class="bi bi-hourglass-split me-2"></i>Patrullistan har inte publicerats än.</div>
-        }
-        else if (!Model.Patrols.Any())
-        {
-            <div class="alert alert-warning">Inga patruller.</div>
-        }
-        else
-        {
-            <div class="row g-2">
-                @foreach (var p in Model.Patrols)
-                {
-                    <div class="col-12 col-sm-6 col-lg-4 col-xxl-3">
-                        <div class="card h-100">
-                            <div class="card-header d-flex justify-content-between align-items-center py-2">
-                                <span class="fw-bold pl-patrol-no">Patrull @p.PatrolNumber, Vapengrupp @p.WeaponGroup@(string.IsNullOrEmpty(p.Label) ? "" : " — " + p.Label)</span>
-                                @if (p.StartTime.HasValue)
-                                {
-                                    <span class="badge bg-primary pl-time fs-6"><i class="bi bi-clock me-1"></i>@Hm(p.StartTime)</span>
-                                }
-                            </div>
-                            <ul class="list-group list-group-flush">
-                                @foreach (var m in p.Members)
-                                {
-                                    <li class="list-group-item py-1 pl-member d-flex justify-content-between">
-                                        <span>@m.Name <span class="text-muted">(@m.Club)</span></span>
-                                        <span class="badge bg-body-secondary text-body">@m.ShootingClass</span>
-                                    </li>
-                                }
-                            </ul>
-                        </div>
-                    </div>
-                }
-            </div>
-        }
+        @Html.AntiForgeryToken()
+        <div id="plBanner"></div>
+        <div class="row g-2" id="plCards">
+            <div class="col-12 text-center text-muted py-4"><div class="spinner-border spinner-border-sm" role="status"></div> Laddar…</div>
+        </div>
     </div>
+
     <script>
-        document.getElementById('plUpdated').textContent = new Date().toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
-        // Clubhouse screen: keep it current without anyone touching it.
-        setTimeout(function () { location.reload(); }, 60000);
+        var compId = @Model.CompetitionId;
+        var canSendOff = @(Model.CanSendOff ? "true" : "false");
+        var REFRESH = 10000;
+        var lastNextId = null;
+
+        function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+        function fmt(d) { try { return d.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }); } catch (e) { return ''; } }
+        function token() { var el = document.querySelector('input[name="__RequestVerificationToken"]'); return el ? el.value : ''; }
+
+        async function refresh() {
+            try {
+                var r = await fetch('/umbraco/surface/Faltskytte/GetPatrolListState?competitionId=' + compId);
+                var d = await r.json();
+                render(d);
+                document.getElementById('plUpdated').textContent = new Date().toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            } catch (e) { console.error(e); }
+        }
+
+        function render(d) {
+            var banner = document.getElementById('plBanner');
+            var host = document.getElementById('plCards');
+            if (!d || !d.success) return;
+            if (!d.published) {
+                banner.innerHTML = '';
+                host.innerHTML = '<div class="col-12"><div class="alert alert-info"><i class="bi bi-hourglass-split me-2"></i>Patrullistan har inte publicerats än.</div></div>';
+                return;
+            }
+            var patrols = d.patrols || [];
+            if (!patrols.length) {
+                banner.innerHTML = '';
+                host.innerHTML = '<div class="col-12"><div class="alert alert-warning">Inga patruller.</div></div>';
+                return;
+            }
+
+            var next = patrols.find(function (p) { return !p.departedAt; });
+            var deps = patrols.filter(function (p) { return p.departedAt; }).map(function (p) { return new Date(p.departedAt).getTime(); });
+            var lastDep = deps.length ? new Date(Math.max.apply(null, deps)) : null;
+
+            // ── Banner: next up + rhythm ─────────────────────────────
+            var b = '';
+            if (next) {
+                b += '<div class="alert alert-success d-flex align-items-center justify-content-between flex-wrap gap-2 py-3 mb-2">'
+                    + '<div><span class="badge bg-success me-2">NÄST PÅ TUR</span>'
+                    + '<span class="fs-2 fw-bold">Patrull ' + next.patrolNumber + '</span>'
+                    + '<span class="fs-5 ms-2 text-muted">Vapengrupp ' + esc(next.weaponGroup) + (next.label ? ' — ' + esc(next.label) : '') + '</span></div>';
+                if (canSendOff) {
+                    b += '<button class="btn btn-success btn-lg" onclick="sendOff(' + next.patrolId + ',true)"><i class="bi bi-send-fill me-1"></i>Skicka iväg patrull ' + next.patrolNumber + '</button>';
+                }
+                b += '</div>';
+            } else {
+                b += '<div class="alert alert-secondary fs-4 py-3 mb-2"><i class="bi bi-check2-all me-2"></i>Alla patruller har gått ut.</div>';
+            }
+            if (lastDep) {
+                var mins = Math.max(0, Math.floor((Date.now() - lastDep.getTime()) / 60000));
+                b += '<div class="text-muted mb-2"><i class="bi bi-stopwatch me-1"></i>Senaste utgång: <strong>' + fmt(lastDep) + '</strong> · ' + mins + ' min sedan</div>';
+            }
+            banner.innerHTML = b;
+
+            // ── Cards ────────────────────────────────────────────────
+            host.innerHTML = patrols.map(function (p) {
+                var dep = p.departedAt ? new Date(p.departedAt) : null;
+                var isNext = next && p.patrolId === next.patrolId;
+                var cardCls = 'card h-100' + (dep ? ' pl-departed' : (isNext ? ' border-success border-3 pl-next' : ''));
+                var startBadge = p.startTime ? '<span class="badge bg-light text-dark pl-time"><i class="bi bi-clock me-1"></i>' + fmt(new Date(p.startTime)) + '</span>' : '';
+                var status = dep
+                    ? '<span class="badge bg-success"><i class="bi bi-check-lg me-1"></i>Utgått ' + fmt(dep) + '</span>'
+                    : (isNext ? '<span class="badge bg-success">NÄST PÅ TUR</span>' : '');
+                var btn = '';
+                if (canSendOff) {
+                    btn = dep
+                        ? '<button class="btn btn-outline-secondary btn-sm" onclick="sendOff(' + p.patrolId + ',false)"><i class="bi bi-arrow-counterclockwise me-1"></i>Ångra</button>'
+                        : '<button class="btn ' + (isNext ? 'btn-success' : 'btn-outline-success') + ' btn-sm" onclick="sendOff(' + p.patrolId + ',true)"><i class="bi bi-send me-1"></i>Skicka iväg</button>';
+                }
+                var members = (p.members || []).map(function (m) {
+                    return '<li class="list-group-item py-1 pl-member d-flex justify-content-between"><span>' + esc(m.name) + ' <span class="text-muted">(' + esc(m.club) + ')</span></span><span class="badge bg-body-secondary text-body">' + esc(m.shootingClass) + '</span></li>';
+                }).join('');
+                return '<div class="col-12 col-sm-6 col-lg-4 col-xxl-3" data-patrol="' + p.patrolId + '">'
+                    + '<div class="' + cardCls + '">'
+                    + '<div class="card-header d-flex justify-content-between align-items-center py-2">'
+                    + '<span class="fw-bold">Patrull ' + p.patrolNumber + ', Vapengrupp ' + esc(p.weaponGroup) + (p.label ? ' — ' + esc(p.label) : '') + '</span>'
+                    + startBadge
+                    + '</div>'
+                    + ((status || btn) ? '<div class="card-body py-2 d-flex justify-content-between align-items-center">' + (status || '<span></span>') + btn + '</div>' : '')
+                    + '<ul class="list-group list-group-flush">' + members + '</ul>'
+                    + '</div></div>';
+            }).join('');
+
+            // Auto-scroll the next patrol into view when it changes (handy on a long wall list).
+            var nextId = next ? next.patrolId : null;
+            if (nextId && nextId !== lastNextId) {
+                var el = host.querySelector('[data-patrol="' + nextId + '"]');
+                if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            }
+            lastNextId = nextId;
+        }
+
+        window.sendOff = async function (patrolId, departed) {
+            try {
+                await fetch('/umbraco/surface/Faltskytte/SetPatrolDeparted', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token() },
+                    body: JSON.stringify({ competitionId: compId, patrolId: patrolId, departed: departed })
+                });
+            } catch (e) { /* ignore — next poll reconciles */ }
+            refresh();
+        };
+
+        refresh();
+        var timer = setInterval(refresh, REFRESH);
+        document.addEventListener('visibilitychange', function () {
+            if (document.hidden) { if (timer) { clearInterval(timer); timer = null; } }
+            else { refresh(); timer = setInterval(refresh, REFRESH); }
+        });
     </script>
 </body>
 </html>
