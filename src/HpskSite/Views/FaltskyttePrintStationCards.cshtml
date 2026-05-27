@@ -1,0 +1,70 @@
+@using HpskSite.CompetitionTypes.Faltskytte.Models
+@model FaltskyttePrintStationCardsModel
+@{
+    // Chromeless print page (rendered by FaltskyttePrintController). One station per
+    // page: Förutsättningar + figure timeline (FaltskytteStationInfoStatic) + QR-1 on
+    // the card and QR-2 as a cut-out for the targets. Auto-prints once images load.
+    Layout = null;
+}
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <title>Stationskort@(string.IsNullOrEmpty(Model.CompetitionName) ? "" : " — " + Model.CompetitionName)</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@@1.11.3/font/bootstrap-icons.min.css">
+    <style>
+        body { font-family: sans-serif; margin: 16px; }
+        .station-block { page-break-after: always; }
+        .station-block:last-child { page-break-after: auto; }
+        .qr-card { text-align: center; margin-top: 16px; page-break-inside: avoid; }
+        .qr-cut { margin-top: 24px; page-break-before: always; border: 2px dashed #888; border-radius: 8px; padding: 16px; text-align: center; }
+        @@media print { body { margin: 12mm; } }
+    </style>
+</head>
+<body>
+@if (!Model.Stations.Any())
+{
+    <div class="alert alert-warning">Inga stationer att skriva ut.</div>
+}
+@foreach (var item in Model.Stations)
+{
+    var vd = new ViewDataDictionary(ViewData)
+    {
+        { "CompetitionName", Model.CompetitionName },
+        { "StationNumber", item.Station },
+        { "ScoringMode", Model.ScoringMode },
+        { "StationsByWeaponClass", item.StationsByWeaponClass },
+        { "CompactNoTargets", true }   // printed card: Förutsättningar only; figures/timeline live behind QR-1
+    };
+    <div class="station-block">
+        @await Html.PartialAsync("FaltskytteStationInfoStatic", vd)
+        <div class="qr-card">
+            <img src="@item.Qr1Url" alt="QR Förutsättningar" style="width:150px;height:150px">
+            <div style="font-weight:bold">Förutsättningar — skanna här</div>
+        </div>
+        <div class="qr-cut">
+            <div style="font-size:1.1em;font-weight:bold;margin-bottom:8px">Station @item.Station — Resultatregistrering</div>
+            <img src="@item.Qr2Url" alt="QR Resultat" style="width:150px;height:150px">
+            <div>Klipp ut och placera vid målgrupperna</div>
+            <div style="font-size:0.85em;color:#666">Kräver inloggning</div>
+        </div>
+    </div>
+}
+<script>
+    // Print once all QR images have loaded.
+    window.addEventListener('load', function () {
+        var imgs = Array.prototype.slice.call(document.images);
+        var pending = imgs.filter(function (im) { return !im.complete; }).length;
+        if (pending === 0) { window.print(); return; }
+        function done() { if (--pending <= 0) window.print(); }
+        imgs.forEach(function (im) {
+            if (im.complete) return;
+            im.addEventListener('load', done);
+            im.addEventListener('error', done);
+        });
+    });
+</script>
+</body>
+</html>

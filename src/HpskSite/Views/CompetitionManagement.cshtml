@@ -472,6 +472,14 @@
                 <i class="bi bi-list-ol me-1"></i>Startlistor
             </button>
         </li>
+        @if ((ViewData["CompetitionType"]?.ToString() ?? "Precision") is "Faltskytte" or "MagnumFalt")
+        {
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="stationer-tab" data-bs-toggle="tab" data-bs-target="#stationer" type="button" role="tab">
+                    <i class="bi bi-geo-alt me-1"></i>Stationer
+                </button>
+            </li>
+        }
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="results-tab" data-bs-toggle="tab" data-bs-target="#results" type="button" role="tab">
                 <i class="bi bi-trophy me-1"></i>Resultat
@@ -623,6 +631,16 @@
                 }
             </div>
         </div>
+
+        @if ((ViewData["CompetitionType"]?.ToString() ?? "Precision") is "Faltskytte" or "MagnumFalt")
+        {
+            <!-- Stationer Tab -->
+            <div class="tab-pane fade" id="stationer" role="tabpanel">
+                <div class="mt-3">
+                    @await Html.PartialAsync("FaltskytteStationerManagement", new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId } })
+                </div>
+            </div>
+        }
 
     </div>
 </div>

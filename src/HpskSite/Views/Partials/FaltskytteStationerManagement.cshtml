@@ -1,0 +1,204 @@
+@{
+    // Stationer tab (Fältskytte). One card per station with small figure thumbnails
+    // (so it's instantly recognisable as the real station) + assigned station chief
+    // + live last-patrol/completion (polls GetStationOverview every 15 s) + per-station
+    // station-card/QR printing. A button opens the attached standalone configurator.
+    var competitionId = ViewData["CompetitionId"];
+}
+
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+    <span class="fw-bold fs-5"><i class="bi bi-geo-alt me-1"></i>Stationer</span>
+    <div class="d-flex align-items-center gap-2 flex-wrap">
+        <span class="text-muted small" id="fseStnUpdated"></span>
+        <span id="fseStnCfgBtn"></span>
+        <a class="btn btn-outline-primary btn-sm" href="/faltskytte/stationskort/@competitionId" target="_blank">
+            <i class="bi bi-printer me-1"></i>Skriv ut alla stationskort
+        </a>
+    </div>
+</div>
+
+@Html.AntiForgeryToken()
+
+<div class="row g-3" id="fseStnCards">
+    <div class="col-12 text-center text-muted py-4"><div class="spinner-border spinner-border-sm" role="status"></div> Laddar…</div>
+</div>
+
+<p class="text-muted small mt-3 mb-0">"Senaste patrull" visar när patrullen först registrerade på stationen (senare rättelser flyttar inte tiden). "Klart" = inmatade resultat / förväntat antal.</p>
+
+<!-- Station chief modal -->
+<div class="modal fade" id="fseStnMgrModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Stationschef — Station <span id="fseMgrStnNum"></span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <label class="form-label small">Sök medlem</label>
+                <input type="text" class="form-control mb-1" id="fseMgrSearch" placeholder="Namn eller e-post…" autocomplete="off">
+                <div id="fseMgrResults" class="list-group mb-3" style="max-height:180px;overflow:auto"></div>
+                <div class="row g-2">
+                    <div class="col-7"><label class="form-label small">Namn</label><input type="text" class="form-control" id="fseMgrName"></div>
+                    <div class="col-5"><label class="form-label small">Telefon</label><input type="text" class="form-control" id="fseMgrPhone"></div>
+                </div>
+                <div class="form-text">Sök upp en medlem (fyller i namn + telefon automatiskt) eller skriv fritt.</div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-danger me-auto" id="fseMgrClear">Ta bort</button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="fseMgrSave">Spara</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    var compId = @competitionId;
+    var REFRESH = 15000;
+    var timer = null;
+    var managers = {};      // station -> { memberId, name, phone }
+    var editStation = null;
+    var pickedMemberId = null;
+
+    function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+    function token() {
+        var el = document.querySelector('#stationer input[name="__RequestVerificationToken"]') || document.querySelector('input[name="__RequestVerificationToken"]');
+        return el ? el.value : '';
+    }
+    function fmtTime(iso) { if (!iso) return '—'; try { return new Date(iso).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }); } catch (e) { return '—'; } }
+
+    function figThumbs(figs) {
+        var html = (figs || []).map(function (f) {
+            var star = f.isPoangmal ? '<span style="position:absolute;top:-5px;right:-3px;color:#d39e00;font-size:.8rem;text-shadow:0 0 2px #fff">★</span>' : '';
+            if (f.imageUrl) {
+                return '<span style="position:relative;display:inline-block">'
+                    + '<img src="' + esc(f.imageUrl) + '" alt="" style="height:42px;border-radius:3px;border:1px solid #ddd;background:#fff">' + star + '</span>';
+            }
+            var lbl = ((f.behavior || '?').charAt(0) || '?').toUpperCase();
+            return '<span title="' + esc(f.behavior || '') + '" style="position:relative;display:inline-flex;align-items:center;justify-content:center;width:42px;height:42px;border:1px solid #ccc;border-radius:3px;background:#f3f3f3;font-weight:bold;color:#666">' + lbl + star + '</span>';
+        }).join('');
+        return html || '<span class="text-muted small">Inga figurer konfigurerade</span>';
+    }
+
+    async function refresh() {
+        try {
+            var r = await fetch('/umbraco/surface/Faltskytte/GetStationOverview?competitionId=' + compId);
+            var d = await r.json();
+            var host = document.getElementById('fseStnCards');
+            if (!d.success) { host.innerHTML = '<div class="col-12 text-danger">' + esc(d.message || 'Fel') + '</div>'; return; }
+
+            var cfgBtn = document.getElementById('fseStnCfgBtn');
+            if (cfgBtn) cfgBtn.innerHTML = d.attachedConfigId
+                ? '<a class="btn btn-outline-secondary btn-sm" href="/faltkonfig/' + d.attachedConfigId + '/redigera" target="_blank"><i class="bi bi-sliders me-1"></i>Öppna konfigurator</a>'
+                : '';
+
+            var expected = d.expectedCount || 0;
+            managers = {};
+            var html = (d.stations || []).map(function (s) {
+                managers[s.station] = { memberId: s.managerMemberId, name: s.managerName, phone: s.managerPhone };
+                var chief = s.managerName
+                    ? (esc(s.managerName) + (s.managerPhone ? ' · <span class="text-muted">' + esc(s.managerPhone) + '</span>' : ''))
+                    : '<span class="text-muted">ej satt</span>';
+                var lastP = s.lastPatrolNumber ? ('Patrull ' + s.lastPatrolNumber + ' · ' + fmtTime(s.lastEnteredAt)) : '<span class="text-muted">—</span>';
+                var done = s.entryCount + (expected > 0 ? (' / ' + expected) : '');
+                return '<div class="col-12 col-md-6 col-xl-4">'
+                    + '<div class="card h-100">'
+                    + '<div class="card-header d-flex justify-content-between align-items-center py-2">'
+                    + '<span class="fw-bold">Station ' + s.station + '</span>'
+                    + '<a class="btn btn-outline-primary btn-sm" title="Skriv ut stationskort" href="/faltskytte/stationskort/' + compId + '?station=' + s.station + '" target="_blank"><i class="bi bi-printer"></i></a>'
+                    + '</div>'
+                    + '<div class="card-body">'
+                    + '<div class="d-flex flex-wrap gap-1 mb-2">' + figThumbs(s.figures) + '</div>'
+                    + '<div class="small mb-1"><i class="bi bi-person-badge me-1"></i><strong>Stationschef:</strong> ' + chief
+                    + ' <button class="btn btn-link btn-sm p-0 ms-1 align-baseline" onclick="fseMgrEdit(' + s.station + ')">Ändra</button></div>'
+                    + '<div class="small mb-1"><i class="bi bi-people me-1"></i><strong>Senaste patrull:</strong> ' + lastP + '</div>'
+                    + '<div class="small"><i class="bi bi-check2-square me-1"></i><strong>Klart:</strong> ' + done + '</div>'
+                    + '</div></div></div>';
+            }).join('');
+            host.innerHTML = html || '<div class="col-12 text-muted text-center py-4">Inga stationer konfigurerade.</div>';
+            var up = document.getElementById('fseStnUpdated');
+            if (up) up.textContent = 'Uppdaterad ' + new Date().toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        } catch (e) { console.error(e); }
+    }
+
+    window.fseMgrEdit = function (stn) {
+        editStation = stn;
+        var m = managers[stn] || {};
+        document.getElementById('fseMgrStnNum').textContent = stn;
+        document.getElementById('fseMgrName').value = m.name || '';
+        document.getElementById('fseMgrPhone').value = m.phone || '';
+        document.getElementById('fseMgrResults').innerHTML = '';
+        document.getElementById('fseMgrSearch').value = '';
+        pickedMemberId = m.memberId || null;
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('fseStnMgrModal')).show();
+    };
+
+    var searchTimer = null;
+    document.getElementById('fseMgrSearch').addEventListener('input', function () {
+        var q = this.value.trim();
+        clearTimeout(searchTimer);
+        if (q.length < 2) { document.getElementById('fseMgrResults').innerHTML = ''; return; }
+        searchTimer = setTimeout(async function () {
+            try {
+                var r = await fetch('/umbraco/surface/FaltskytteConfiguration/SearchMembers?query=' + encodeURIComponent(q));
+                var d = await r.json();
+                var list = d.members || d.data || [];
+                document.getElementById('fseMgrResults').innerHTML = list.map(function (mb) {
+                    var id = mb.memberId || mb.MemberId, nm = mb.memberName || mb.MemberName || '', cl = mb.clubName || mb.ClubName || '';
+                    return '<button type="button" class="list-group-item list-group-item-action py-1" data-mid="' + id + '" data-nm="' + esc(nm) + '">' + esc(nm) + (cl ? ' <span class="text-muted small">' + esc(cl) + '</span>' : '') + '</button>';
+                }).join('') || '<div class="text-muted small p-2">Inga träffar.</div>';
+            } catch (e) { console.error(e); }
+        }, 250);
+    });
+
+    document.getElementById('fseMgrResults').addEventListener('click', async function (e) {
+        var btn = e.target.closest('[data-mid]');
+        if (!btn) return;
+        var mid = parseInt(btn.getAttribute('data-mid'), 10);
+        document.getElementById('fseMgrName').value = btn.getAttribute('data-nm') || '';
+        pickedMemberId = mid;
+        document.getElementById('fseMgrResults').innerHTML = '';
+        document.getElementById('fseMgrSearch').value = '';
+        try {
+            var r = await fetch('/umbraco/surface/Faltskytte/GetMemberContact?competitionId=' + compId + '&memberId=' + mid);
+            var d = await r.json();
+            if (d.success && d.phone) document.getElementById('fseMgrPhone').value = d.phone;
+        } catch (e) { /* phone optional */ }
+    });
+
+    // Typing the name by hand detaches the member link (free-text entry).
+    document.getElementById('fseMgrName').addEventListener('input', function () { pickedMemberId = null; });
+
+    document.getElementById('fseMgrClear').addEventListener('click', function () {
+        document.getElementById('fseMgrName').value = '';
+        document.getElementById('fseMgrPhone').value = '';
+        pickedMemberId = null;
+    });
+
+    document.getElementById('fseMgrSave').addEventListener('click', async function () {
+        var name = document.getElementById('fseMgrName').value.trim();
+        var phone = document.getElementById('fseMgrPhone').value.trim();
+        if (name) managers[editStation] = { memberId: pickedMemberId || null, name: name, phone: phone };
+        else delete managers[editStation];
+        try {
+            var r = await fetch('/umbraco/surface/Faltskytte/SaveStationManagers', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token() },
+                body: JSON.stringify({ competitionId: compId, managersJson: JSON.stringify(managers) })
+            });
+            var d = await r.json();
+            if (!d.success) { alert(d.message || 'Kunde inte spara.'); return; }
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('fseStnMgrModal')).hide();
+            refresh();
+        } catch (e) { alert('Fel vid sparande.'); }
+    });
+
+    refresh();
+    timer = setInterval(refresh, REFRESH);
+    document.addEventListener('visibilitychange', function () {
+        if (document.hidden) { if (timer) { clearInterval(timer); timer = null; } }
+        else { refresh(); timer = setInterval(refresh, REFRESH); }
+    });
+})();
+</script>

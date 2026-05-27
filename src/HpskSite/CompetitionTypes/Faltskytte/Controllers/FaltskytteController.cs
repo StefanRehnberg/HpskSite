@@ -287,6 +287,134 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             }
         }
 
+        /// <summary>
+        /// Live, lightweight per-station overview for the "Stationer" tab: config
+        /// summary, assigned station chief, last patrol that entered + when, and a
+        /// completion ratio. Staff-gated. "Last patrol" uses EnteredAt (immutable
+        /// first-entry time) so a late correction doesn't reorder the flow.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetStationOverview(int competitionId)
+        {
+            if (!await IsAuthorizedForCompetition(competitionId))
+                return Json(new { success = false, message = "Du har inte behörighet." });
+
+            var competition = _contentService.GetById(competitionId);
+            if (competition == null)
+                return Json(new { success = false, message = "Tävlingen hittades inte." });
+
+            var config = ParseCompetitionConfig(competition);
+            var firstWc = config.WeaponConfigs.Values.FirstOrDefault();
+            var stationNumbers = (firstWc?.Stations ?? new List<FaltskytteStationConfig>())
+                .Where(s => !s.IsShootOffOnly)
+                .Select(s => s.Station)
+                .Distinct().OrderBy(n => n).ToList();
+
+            var managers = new Dictionary<string, StationManagerDto>();
+            var mgrJson = competition.GetValue<string>("faltskytteStationManagers");
+            if (!string.IsNullOrWhiteSpace(mgrJson))
+            {
+                try { managers = JsonConvert.DeserializeObject<Dictionary<string, StationManagerDto>>(mgrJson) ?? new(); }
+                catch { managers = new(); }
+            }
+
+            using var db = _umbracoDatabaseFactory.CreateDatabase();
+            var allResults = await db.FetchAsync<FaltskytteResultEntry>(
+                "WHERE CompetitionId = @0", competitionId);
+            var patrols = await db.FetchAsync<FaltskyttePatrol>("WHERE CompetitionId = @0", competitionId);
+            var patrolIds = patrols.Select(p => p.Id).ToList();
+            // Expected roster = total patrol-member rows (every (member,class) shoots every station once).
+            var expectedCount = patrolIds.Any()
+                ? await db.ExecuteScalarAsync<int>(
+                    $"SELECT COUNT(1) FROM FaltskyttePatrolMember WHERE PatrolId IN ({string.Join(",", patrolIds)})")
+                : 0;
+
+            var byStation = allResults.GroupBy(r => r.StationNumber).ToDictionary(g => g.Key, g => g.ToList());
+
+            var stations = stationNumbers.Select(n =>
+            {
+                var sample = config.WeaponConfigs.Values
+                    .Select(wc => wc.Stations.FirstOrDefault(s => s.Station == n))
+                    .FirstOrDefault(st => st != null);
+                // Small figure thumbnails so the card is instantly recognisable as the real station.
+                var figures = (sample?.TargetGroups ?? new List<FaltskytteTargetGroup>())
+                    .SelectMany(tg => tg.Figures)
+                    .Select(f => new { imageUrl = f.ImageUrl, behavior = f.Behavior, isPoangmal = f.IsPoangmal })
+                    .ToList();
+
+                FaltskytteResultEntry? last = null;
+                int entryCount = 0, distinctPatrols = 0;
+                if (byStation.TryGetValue(n, out var rows) && rows.Count > 0)
+                {
+                    last = rows.OrderByDescending(r => r.EnteredAt).First();
+                    entryCount = rows.Count;
+                    distinctPatrols = rows.Select(r => r.PatrolNumber).Distinct().Count();
+                }
+
+                managers.TryGetValue(n.ToString(), out var mgr);
+
+                return new
+                {
+                    station = n,
+                    figureCount = figures.Count,
+                    figures,
+                    managerName = mgr?.Name ?? "",
+                    managerPhone = mgr?.Phone ?? "",
+                    managerMemberId = mgr?.MemberId,
+                    lastPatrolNumber = last?.PatrolNumber,
+                    lastEnteredAt = last?.EnteredAt,
+                    entryCount,
+                    distinctPatrols
+                };
+            }).ToList();
+
+            // The attached standalone config id (if any) — lets the tab open the configurator.
+            int? attachedConfigId = null;
+            try
+            {
+                var rawCfg = competition.GetValue<string>("stationConfig");
+                if (!string.IsNullOrWhiteSpace(rawCfg))
+                    attachedConfigId = Newtonsoft.Json.Linq.JObject.Parse(rawCfg).Value<int?>("_attachedConfigId");
+            }
+            catch { /* inline/legacy config without an attached id */ }
+
+            return Json(new { success = true, expectedCount, attachedConfigId, stations });
+        }
+
+        /// <summary>Saves the per-station chief assignments (JSON keyed by station number).</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveStationManagers([FromBody] SaveStationManagersRequest request)
+        {
+            if (request == null || !await IsAuthorizedForCompetition(request.CompetitionId))
+                return Json(new { success = false, message = "Du har inte behörighet." });
+
+            var competition = _contentService.GetById(request.CompetitionId);
+            if (competition == null)
+                return Json(new { success = false, message = "Tävlingen hittades inte." });
+
+            competition.SetValue("faltskytteStationManagers", request.ManagersJson ?? "");
+            _contentService.Save(competition);
+            _contentService.Publish(competition, new[] { "*" }, -1);
+
+            return Json(new { success = true, message = "Stationschefer sparade." });
+        }
+
+        /// <summary>Returns a member's name + phone for the station-chief picker autofill (staff-gated).</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetMemberContact(int competitionId, int memberId)
+        {
+            if (!await IsAuthorizedForCompetition(competitionId))
+                return Json(new { success = false, message = "Du har inte behörighet." });
+
+            var m = _memberService.GetById(memberId);
+            if (m == null)
+                return Json(new { success = false, message = "Medlem hittades inte." });
+
+            var phone = m.HasProperty("phoneNumber") ? (m.GetValue<string>("phoneNumber") ?? "") : "";
+            return Json(new { success = true, name = m.Name ?? "", phone });
+        }
+
         // ── Station Entry View ──────────────────────────────────────
 
         /// <summary>

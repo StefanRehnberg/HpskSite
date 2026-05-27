@@ -8,10 +8,12 @@
     notes) and InvariantCulture percentages (CSS needs '.' not ',').
 *@
 @functions {
-    // C# port of tmrFigBands (FaltskytteStationEntry.cshtml): static visible windows in [0, shootSec].
-    static List<(int From, int To)> FigBands(FaltskytteFigure fig, int shootSec)
+    // C# port of tmrFigBands (FaltskytteStationEntry.cshtml): static visible windows
+    // in [0, shootSec]. Each band is int[]{from, to} (plain arrays — named tuples are
+    // fragile inside Razor @@functions/ternaries).
+    static List<int[]> FigBands(FaltskytteFigure fig, int shootSec)
     {
-        var bands = new List<(int, int)>();
+        var bands = new List<int[]>();
         var b = fig.Behavior ?? "Fast";
         if (b == "Framsvängande")
         {
@@ -20,18 +22,18 @@
             if (dur <= 0) return bands;
             int from = Math.Max(0, Math.Min(shootSec, delay));
             int to = Math.Max(from, Math.Min(shootSec, delay + dur));
-            if (from < to) bands.Add((from, to));
+            if (from < to) bands.Add(new[] { from, to });
             return bands;
         }
         if (b == "Bortsvängande")
         {
             int hideAt = fig.HideAfterSec ?? 8;
             int reappear = fig.ReappearSec ?? 0;
-            if (hideAt > 0) bands.Add((0, Math.Min(shootSec, hideAt)));
-            if (reappear > 0 && reappear < shootSec) bands.Add((reappear, shootSec));
+            if (hideAt > 0) bands.Add(new[] { 0, Math.Min(shootSec, hideAt) });
+            if (reappear > 0 && reappear < shootSec) bands.Add(new[] { reappear, shootSec });
             return bands;
         }
-        bands.Add((0, shootSec)); // Fast / static → visible the whole time
+        bands.Add(new[] { 0, shootSec }); // Fast / static → visible the whole time
         return bands;
     }
     static string Pct(double v) => v.ToString("0.##", CultureInfo.InvariantCulture);
@@ -57,6 +59,9 @@
     var shootSec = primary?.ShootingTimeSec ?? 0;
     var anyMin = stationsByWc.Values.Any(s => s.MinShotsPerFigure > 0);
     var anyMaxLimited = stationsByWc.Values.Any(s => s.MaxShotsPerFigure < 6);
+    // Compact mode (printed station card): Förutsättningar only — figures + timeline
+    // are revealed only when scanning the QR, never on the printed card.
+    var compact = ViewData["CompactNoTargets"] is true;
 }
 
 <div class="container py-3" style="max-width:820px">
@@ -104,7 +109,11 @@
             </div>
         </div>
 
-        @if (primary.IsShootOffOnly)
+        @if (compact)
+        {
+            <p class="text-muted small mb-0"><i class="bi bi-qr-code-scan me-1"></i>Skanna QR-koden vid stationen för figurer och tidslinje.</p>
+        }
+        else if (primary.IsShootOffOnly)
         {
             <div class="alert alert-info"><i class="bi bi-bullseye me-2"></i>Station @stationNumber är en särskjutningsstation.</div>
         }
@@ -131,7 +140,7 @@
                         }
                         @foreach (var fig in tg.Figures)
                         {
-                            var bands = shootSec > 0 ? FigBands(fig, shootSec) : new List<(int, int)>();
+                            var bands = shootSec > 0 ? FigBands(fig, shootSec) : new List<int[]>();
                             <div class="d-flex align-items-center gap-2 mb-1">
                                 <div style="width:170px;flex-shrink:0;font-size:.8rem;line-height:1.15">
                                     <strong>Fig @fig.FigureNumber</strong>@(fig.IsPoangmal ? " ★" : "")@(fig.TargetsPerFigure > 1 ? $" ({fig.TargetsPerFigure} mål)" : "")
@@ -140,8 +149,8 @@
                                 <div style="flex-grow:1;position:relative;height:18px;background:#e9ecef;border-radius:3px;overflow:hidden">
                                     @foreach (var band in bands)
                                     {
-                                        var left = (double)band.From / shootSec * 100;
-                                        var width = (double)(band.To - band.From) / shootSec * 100;
+                                        var left = (double)band[0] / shootSec * 100;
+                                        var width = (double)(band[1] - band[0]) / shootSec * 100;
                                         <div style="position:absolute;top:0;bottom:0;left:@(Pct(left))%;width:@(Pct(width))%;background:#198754"></div>
                                     }
                                 </div>

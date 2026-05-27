@@ -172,6 +172,41 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public string? StationConfigJson { get; set; }
     }
 
+    // ── Station chiefs (Stationer tab) ────────────────────────────
+
+    /// <summary>One station chief assignment. MemberId is null for a free-text entry.</summary>
+    public class StationManagerDto
+    {
+        public int? MemberId { get; set; }
+        public string Name { get; set; } = "";
+        public string Phone { get; set; } = "";
+    }
+
+    public class SaveStationManagersRequest
+    {
+        public int CompetitionId { get; set; }
+        /// <summary>JSON dict keyed by station number → StationManagerDto.</summary>
+        public string? ManagersJson { get; set; }
+    }
+
+    // ── Station card printing (Stationer tab → FaltskyttePrintController) ──
+
+    public class FaltskyttePrintStationCardsModel
+    {
+        public string CompetitionName { get; set; } = "";
+        public string ScoringMode { get; set; } = "Normal";
+        public List<StationPrintItem> Stations { get; set; } = new();
+    }
+
+    public class StationPrintItem
+    {
+        public int Station { get; set; }
+        /// <summary>Per-weapon-class config for this station (fed to FaltskytteStationInfoStatic).</summary>
+        public Dictionary<string, FaltskytteStationConfig> StationsByWeaponClass { get; set; } = new();
+        public string Qr1Url { get; set; } = "";  // Förutsättningar (GetStationInfoQr)
+        public string Qr2Url { get; set; } = "";  // Result entry (GenerateQrCode → /station?c&s)
+    }
+
     // ── Result Entry ────────────────────────────────────────────────
 
     /// <summary>Save one shooter's result at one station</summary>
