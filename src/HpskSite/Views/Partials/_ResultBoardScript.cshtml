@@ -7,6 +7,8 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
     var cycleMode=false;           // Växla: rotate through selected classes one at a time
     var cycleTimer=null,cycleIdx=0;
     var CYCLE_MS=12000;            // ~12 s per class in Växla mode
+    var layoutMode='list';         // 'list' | 'grid' (tiled dashboard)
+    var tileCount=4;               // grid: 1-4 tiles
     var REFRESH=15000;
     configuredWCs=configuredWCs||[];
     compTypeId=compTypeId||'Precision';
@@ -56,7 +58,7 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
             var cb=document.createElement('input');cb.type='checkbox';cb.value=w;cb.checked=!!selectedWCs[w];
             cb.addEventListener('change',function(){
                 if(this.checked)selectedWCs[this.value]=1;else delete selectedWCs[this.value];
-                persistFilter();cycleIdx=0;renderAll();restartCycle();
+                persistFilter();cycleIdx=0;syncUrl();renderAll();restartCycle();
             });
             lab.appendChild(cb);lab.appendChild(document.createTextNode(' '+w));
             box.appendChild(lab);
@@ -78,9 +80,10 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
     }
     function restartCycle(){stopCycle();if(cycleMode)cycleTimer=setInterval(cycleTick,CYCLE_MS)}
     function stopCycle(){if(cycleTimer){clearInterval(cycleTimer);cycleTimer=null}}
-    function cycleTick(){var sel=orderedSelectedPresent();if(sel.length<=1)return;cycleIdx=(cycleIdx+1)%sel.length;renderAll()}
+    function cycleTick(){var tot=orderedSelectedPresent().length;if(layoutMode==='grid'){if(tot<=tileCount)return}else if(tot<=1)return;cycleIdx=(cycleIdx+1)%tot;renderAll()}
     function updateCycleLabel(){
         var el=document.getElementById('rbCycleNow');if(!el)return;
+        if(layoutMode==='grid'){var tot=orderedSelectedPresent().length;el.textContent=(cycleMode&&tot>tileCount)?'▶ roterar':'';return}
         if(cycleMode){var s=orderedSelectedPresent();el.textContent=s.length?('▶ Vapengrupp '+(s[cycleIdx]||s[0])):''}
         else el.textContent='';
     }
@@ -125,11 +128,46 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
         else{b.className='rb-badge-live';b.innerHTML='<i class="bi bi-broadcast me-1 rb-pulse"></i>LIVE'}
         if(ts)ts.textContent='Uppdaterad '+new Date().toLocaleTimeString('sv-SE',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
     }
-    // Render a flat list of all filtered shooters sorted by total score (or time for Springskytte)
     function renderAll(){
         var wr=document.getElementById('rbTableWrap');
         updateCycleLabel();
-        var groups=getFiltered();
+        if(layoutMode==='grid'){renderGrid(wr);return}
+        wr.className='rb-table-wrap';
+        renderInto(wr,getFiltered());
+    }
+    // Weapon groups (selected + present) with participant counts, largest first
+    function weaponGroupsByCount(){
+        var map={};
+        allGroups.forEach(function(g){
+            var wc=isSpringskytte?getSpringWC(g):getWC(g.className||g.ClassName||'');
+            if(!(selectedWCs&&selectedWCs[wc]))return;
+            if(!map[wc])map[wc]={wc:wc,groups:[],count:0};
+            map[wc].groups.push(g);
+            map[wc].count+=(g.shooters||g.Shooters||[]).length;
+        });
+        return Object.keys(map).map(function(k){return map[k]}).sort(function(a,b){return b.count-a.count});
+    }
+    // Tiled dashboard: 1-4 weapon-group panels (largest = hero), optional Växla rotation of overflow
+    function renderGrid(wr){
+        var wgs=weaponGroupsByCount();
+        if(!wgs.length){wr.className='rb-table-wrap';wr.innerHTML='<div style="text-align:center;padding:3rem 0;opacity:.5"><i class="bi bi-inbox" style="font-size:2rem"></i><p>Inga resultat</p></div>';return}
+        var n=Math.max(1,Math.min(4,tileCount));
+        var ordered=wgs.slice();
+        if(cycleMode&&wgs.length>n){var off=cycleIdx%wgs.length;ordered=wgs.slice(off).concat(wgs.slice(0,off))}
+        var show=ordered.slice(0,n);
+        var html='<div class="rb-grid cols-'+n+'">';
+        for(var i=0;i<n;i++){
+            var wg=show[i];
+            var head=(wg&&!isFaltskytte)?('<div class="rb-tile-head">Vapengrupp '+wg.wc+' ('+wg.count+' deltagare)</div>'):'';
+            html+='<div class="rb-tile">'+head+'<div class="rb-tile-body" id="rbTile'+i+'"></div></div>';
+        }
+        html+='</div>';
+        wr.className='rb-table-wrap is-grid';
+        wr.innerHTML=html;
+        show.forEach(function(wg,i){var body=document.getElementById('rbTile'+i);if(body)renderInto(body,wg.groups)});
+    }
+    // Render a flat list of all filtered shooters sorted by total score (or time for Springskytte)
+    function renderInto(wr,groups){
         if(isSpringskytte){renderSpringskytte(wr,groups);return}
         if(isFaltskytte){renderFaltskytte(wr,groups);return}
         // Flatten all shooters into one list with calculated scores
@@ -397,13 +435,46 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
         h+='</div>';
         return h;
     }
-    // Växla toggle — rotate through the selected weapon classes one at a time
+    function persistLayout(){try{localStorage.setItem('hpsk_rb_layout_'+compId,layoutMode==='grid'?('grid'+tileCount):'list')}catch(e){}}
+    // Keep the URL in sync with current state so the board is castable: copy the address to a TV/kiosk.
+    function syncUrl(){
+        try{
+            var qp=new URLSearchParams(location.search);
+            qp.set('c',compId);
+            var wcsel=Object.keys(selectedWCs||{});
+            if(wcsel.length)qp.set('wc',wcsel.join(','));else qp.delete('wc');
+            if(layoutMode==='grid')qp.set('tiles',tileCount);else qp.delete('tiles');
+            if(cycleMode)qp.set('vaxla','1');else qp.delete('vaxla');
+            history.replaceState(null,'','?'+qp.toString());
+        }catch(e){}
+    }
+    // Init: localStorage defaults, then URL params override (so a cast URL is deterministic), then wire controls
     (function(){
+        try{
+            var lay=localStorage.getItem('hpsk_rb_layout_'+compId);
+            if(lay==='list')layoutMode='list';
+            else if(lay&&lay.indexOf('grid')===0){layoutMode='grid';tileCount=Math.max(1,Math.min(4,parseInt(lay.slice(4))||4))}
+            cycleMode=localStorage.getItem('hpsk_rb_cycle_'+compId)==='1';
+        }catch(e){}
+        var qp=new URLSearchParams(location.search);
+        var wcp=qp.get('wc');
+        if(wcp){selectedWCs={};wcp.split(',').forEach(function(w){w=(w||'').trim().toUpperCase();if(w)selectedWCs[w]=1})}
+        var tp=qp.get('tiles');
+        if(tp!==null){var t=parseInt(tp);if(t>=1&&t<=4){layoutMode='grid';tileCount=t}}
+        var vp=qp.get('vaxla');
+        if(vp==='1'||vp==='true')cycleMode=true;else if(vp==='0'||vp==='false')cycleMode=false;
         var ct=document.getElementById('rbCycleToggle');
-        if(!ct)return;
-        try{cycleMode=localStorage.getItem('hpsk_rb_cycle_'+compId)==='1'}catch(e){}
-        ct.checked=cycleMode;
-        ct.addEventListener('change',function(){cycleMode=this.checked;cycleIdx=0;persistCycle();renderAll();restartCycle()});
+        if(ct){ct.checked=cycleMode;ct.addEventListener('change',function(){cycleMode=this.checked;cycleIdx=0;persistCycle();syncUrl();renderAll();restartCycle()})}
+        var ls=document.getElementById('rbLayoutSel');
+        if(ls){
+            ls.value=layoutMode==='grid'?('grid'+tileCount):'list';
+            ls.addEventListener('change',function(){
+                var v=this.value;
+                if(v==='list')layoutMode='list';
+                else{layoutMode='grid';tileCount=Math.max(1,Math.min(4,parseInt(v.slice(4))||4))}
+                cycleIdx=0;persistLayout();syncUrl();renderAll();restartCycle();
+            });
+        }
     })();
     document.addEventListener('visibilitychange',function(){
         if(document.hidden){if(refreshTimer){clearInterval(refreshTimer);refreshTimer=null}stopCycle()}
