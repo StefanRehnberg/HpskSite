@@ -1,0 +1,414 @@
+<script>
+// Live result board logic (rbBoardScript) — rendered by /live (Views/ResultBoard.cshtml). Do not duplicate; this is the single home.
+function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, totalSeriesCount, configuredWCs, compTypeId) {
+    var refreshTimer=null;
+    var allGroups=[],isOfficial=false,isMedals=false;
+    var selectedWCs=null;          // object map of checked weapon classes, e.g. {C:1,A:1}
+    var cycleMode=false;           // Växla: rotate through selected classes one at a time
+    var cycleTimer=null,cycleIdx=0;
+    var CYCLE_MS=12000;            // ~12 s per class in Växla mode
+    var REFRESH=15000;
+    configuredWCs=configuredWCs||[];
+    compTypeId=compTypeId||'Precision';
+    var isMilsnabb=compTypeId==='Milsnabb';
+    var isNH=compTypeId==='NationellHelmatch';
+    var isGrouped12=isMilsnabb||isNH;
+    var isSpringskytte=compTypeId==='Springskytte';
+    var isFaltskytte=compTypeId==='Faltskytte'||compTypeId==='MagnumFalt';
+    var faltStationCount=0,faltIsPoang=false;
+
+    function getWC(n){
+        if(isSpringskytte){
+            // Extract weapon class letter from "Vapengrupp A - D 21" or weaponClass field
+            var m=(n||'').match(/Vapengrupp\s+([AC])/i);
+            return m?m[1].toUpperCase():((n||'').trim().charAt(0).toUpperCase()||'?');
+        }
+        return(n||'').trim().charAt(0).toUpperCase()||'?';
+    }
+    function getSpringWC(g){return g.weaponClass||getWC(g.className||g.ClassName||'')}
+
+    // Build the weapon-class checkbox filter from configured classes
+    function populateWcFilter(){
+        var box=document.getElementById('rbWcFilter');
+        if(!box)return;
+        var wcs=configuredWCs.length>0?configuredWCs.slice():[];
+        if(!wcs.length){
+            var s=new Set();allGroups.forEach(function(g){
+                s.add(isSpringskytte?getSpringWC(g):getWC(g.className||g.ClassName||''));
+            });
+            var o=['C','B','A','R','L','M'];
+            wcs=Array.from(s).sort(function(a,b){var ai=o.indexOf(a),bi=o.indexOf(b);return(ai<0?99:ai)-(bi<0?99:bi)});
+        }
+        if(!wcs.length)return; // no classes yet — wait for data
+        if(selectedWCs===null){
+            var saved=null;
+            try{var raw=localStorage.getItem('hpsk_rb_wcs_'+compId);if(raw)saved=JSON.parse(raw)}catch(e){}
+            selectedWCs={};
+            (saved&&saved.length?saved:wcs).forEach(function(w){if(wcs.indexOf(w)>=0)selectedWCs[w]=1});
+            if(!Object.keys(selectedWCs).length)wcs.forEach(function(w){selectedWCs[w]=1});
+        }
+        var sig=wcs.join(',');
+        if(box.getAttribute('data-sig')===sig)return; // class list unchanged — keep DOM + selection
+        box.setAttribute('data-sig',sig);
+        box.innerHTML='';
+        wcs.forEach(function(w){
+            var lab=document.createElement('label');lab.className='rb-wc-chk';
+            var cb=document.createElement('input');cb.type='checkbox';cb.value=w;cb.checked=!!selectedWCs[w];
+            cb.addEventListener('change',function(){
+                if(this.checked)selectedWCs[this.value]=1;else delete selectedWCs[this.value];
+                persistFilter();cycleIdx=0;renderAll();restartCycle();
+            });
+            lab.appendChild(cb);lab.appendChild(document.createTextNode(' '+w));
+            box.appendChild(lab);
+        });
+    }
+    function persistFilter(){try{localStorage.setItem('hpsk_rb_wcs_'+compId,JSON.stringify(Object.keys(selectedWCs||{})))}catch(e){}}
+    function persistCycle(){try{localStorage.setItem('hpsk_rb_cycle_'+compId,cycleMode?'1':'0')}catch(e){}}
+    // Weapon classes present in the data AND selected, in dropdown order
+    function orderedSelectedPresent(){
+        var s={};allGroups.forEach(function(g){s[isSpringskytte?getSpringWC(g):getWC(g.className||g.ClassName||'')]=1});
+        var o=['C','B','A','R','L','M'];
+        return Object.keys(s).filter(function(w){return selectedWCs&&selectedWCs[w]}).sort(function(a,b){var ai=o.indexOf(a),bi=o.indexOf(b);return(ai<0?99:ai)-(bi<0?99:bi)});
+    }
+    // Which weapon classes to render right now (one at a time when Växla is on)
+    function currentDisplayWcs(){
+        var sel=orderedSelectedPresent();
+        if(cycleMode){if(!sel.length)return[];if(cycleIdx>=sel.length)cycleIdx=0;return[sel[cycleIdx]]}
+        return sel;
+    }
+    function restartCycle(){stopCycle();if(cycleMode)cycleTimer=setInterval(cycleTick,CYCLE_MS)}
+    function stopCycle(){if(cycleTimer){clearInterval(cycleTimer);cycleTimer=null}}
+    function cycleTick(){var sel=orderedSelectedPresent();if(sel.length<=1)return;cycleIdx=(cycleIdx+1)%sel.length;renderAll()}
+    function updateCycleLabel(){
+        var el=document.getElementById('rbCycleNow');if(!el)return;
+        if(cycleMode){var s=orderedSelectedPresent();el.textContent=s.length?('▶ Vapengrupp '+(s[cycleIdx]||s[0])):''}
+        else el.textContent='';
+    }
+
+    function getFiltered(){
+        var show={};currentDisplayWcs().forEach(function(w){show[w]=1});
+        return allGroups.filter(function(g){return show[isSpringskytte?getSpringWC(g):getWC(g.className||g.ClassName||'')]});
+    }
+
+    function fetchResults(){
+        var url=isSpringskytte
+            ?'/umbraco/surface/Springskytte/GetSpringskytteResults?competitionId='+compId
+            :isFaltskytte
+            ?'/umbraco/surface/Faltskytte/GetFaltskytteResults?competitionId='+compId
+            :'/umbraco/surface/CompetitionResults/GetResultsList?competitionId='+compId;
+        fetch(url)
+        .then(function(r){return r.json()})
+        .then(function(d){
+            if(!d.success)return;
+            if(isSpringskytte){
+                allGroups=d.classGroups||[];
+                isOfficial=false;isMedals=false;
+            } else if(isFaltskytte){
+                var rr=d.results||d.Results||{};
+                allGroups=rr.classGroups||rr.ClassGroups||[];
+                faltStationCount=rr.stationCount||rr.StationCount||0;
+                faltIsPoang=(rr.scoringMode||rr.ScoringMode)==='Poang';
+                isOfficial=rr.isOfficial||rr.IsOfficial||false;
+                isMedals=rr.isAwardingStandardMedals||rr.IsAwardingStandardMedals||false;
+            } else {
+                if(!d.exists)return;
+                isOfficial=d.isOfficial||d.IsOfficial||false;
+                isMedals=d.isAwardingStandardMedals||d.IsAwardingStandardMedals||false;
+                allGroups=(d.results||d.Results).classGroups||(d.results||d.Results).ClassGroups||[];
+            }
+            populateWcFilter();updateStatus();renderAll();
+        }).catch(function(e){console.error(e)});
+    }
+    function updateStatus(){
+        var b=document.getElementById('rbStatusBadge'),ts=document.getElementById('rbLastUpdated');
+        if(isOfficial){b.className='rb-badge-official';b.innerHTML='<i class="bi bi-check-circle me-1"></i>OFFICIELLT'}
+        else{b.className='rb-badge-live';b.innerHTML='<i class="bi bi-broadcast me-1 rb-pulse"></i>LIVE'}
+        if(ts)ts.textContent='Uppdaterad '+new Date().toLocaleTimeString('sv-SE',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    }
+    // Render a flat list of all filtered shooters sorted by total score (or time for Springskytte)
+    function renderAll(){
+        var wr=document.getElementById('rbTableWrap');
+        updateCycleLabel();
+        var groups=getFiltered();
+        if(isSpringskytte){renderSpringskytte(wr,groups);return}
+        if(isFaltskytte){renderFaltskytte(wr,groups);return}
+        // Flatten all shooters into one list with calculated scores
+        var all=[];
+        groups.forEach(function(cg){
+            var cn=cg.className||cg.ClassName||'';
+            (cg.shooters||cg.Shooters||[]).forEach(function(sh){
+                var nm=sh.name||sh.Name||'',cl=sh.club||sh.Club||'',sc=sh.shootingClass||sh.ShootingClass||cn;
+                var res=sh.results||sh.Results||[];
+                var tot=0,tx=0,sr=[];
+                res.forEach(function(r){var shots=JSON.parse(r.shots||r.Shots||'[]');var s=0,x=0;shots.forEach(function(v){s+=(v==='X'||v==='x')?10:(parseInt(v)||0);if(v==='X'||v==='x')x++});sr.push({s:s,x:x});tot+=s;tx+=x});
+                all.push({nm:nm,cl:cl,sc:sc,sr:sr,tot:tot,tx:tx,medal:sh.standardMedal||sh.StandardMedal||''});
+            });
+        });
+        if(!all.length){wr.innerHTML='<div style="text-align:center;padding:3rem 0;opacity:.5"><i class="bi bi-inbox" style="font-size:2rem"></i><p>Inga resultat</p></div>';return}
+        // Sort by total desc, then X count desc
+        all.sort(function(a,b){return b.tot-a.tot||(b.tx-a.tx)});
+        var maxSeries=0;
+        all.forEach(function(s){if(s.sr.length>maxSeries)maxSeries=s.sr.length});
+        var useFinals=hasFinalsRound&&maxSeries>=totalSeriesCount;
+        // Build table
+        var h='<table class="rb-table"><thead><tr><th>#</th><th>Namn</th><th>Klass</th><th>Förening</th>';
+        if(isGrouped12){
+            var gLabels=isNH?['Prec','Duell','Fält']:['10s','8s','6s'];
+            for(var g=0;g<3;g++){for(var i=g*4+1;i<=g*4+4;i++)h+='<th class="rb-series-col">'+i+'</th>';h+='<th class="rb-subtotal">'+gLabels[g]+'</th>'}
+        } else if(useFinals){for(var i=1;i<=qualSeriesCount;i++)h+='<th class="rb-series-col">'+i+'</th>';h+='<th class="rb-series-col">Tot</th>';for(var i=1;i<=numFinalSeries;i++)h+='<th class="rb-series-col">F'+i+'</th>'}
+        else{for(var i=1;i<=maxSeries;i++)h+='<th class="rb-series-col">'+i+'</th>'}
+        h+='<th>Tot</th><th>X</th>';if(isMedals)h+='<th>S</th>';h+='</tr></thead><tbody>';
+        all.forEach(function(sh,pos0){
+            var pos=pos0+1,sr=sh.sr,qs=0;
+            if(useFinals)qs=sr.slice(0,qualSeriesCount).reduce(function(a,v){return a+v.s},0);
+            var pc=pos<=3?' rb-pos-'+pos:'';
+            h+='<tr><td class="'+pc.trim()+'">'+pos+'</td><td>'+sh.nm+'</td><td>'+sh.sc+'</td><td>'+sh.cl+'</td>';
+            if(isGrouped12){
+                var grps=[[0,4],[4,8],[8,12]];
+                grps.forEach(function(g){var gt=0;for(var i=g[0];i<g[1];i++){var v=i<sr.length?sr[i].s:0;gt+=v;h+='<td class="rb-series-col">'+(i<sr.length?v:'-')+'</td>'}h+='<td class="rb-subtotal">'+gt+'</td>'});
+            } else if(useFinals){
+                for(var i=0;i<qualSeriesCount;i++)h+='<td class="rb-series-col">'+(i<sr.length?sr[i].s:'-')+'</td>';
+                h+='<td class="rb-series-col"><strong>'+qs+'</strong></td>';
+                for(var i=qualSeriesCount;i<totalSeriesCount;i++)h+='<td class="rb-series-col">'+(i<sr.length?sr[i].s:'-')+'</td>';
+            } else {
+                for(var i=0;i<maxSeries;i++)h+='<td class="rb-series-col">'+(i<sr.length?sr[i].s:'-')+'</td>';
+            }
+            h+='<td><strong>'+sh.tot+'</strong></td><td>'+sh.tx+'</td>';
+            if(isMedals){var mc=sh.medal==='S'?' rb-medal-s':sh.medal==='B'?' rb-medal-b':'';h+='<td class="'+mc.trim()+'">'+sh.medal+'</td>'}
+            h+='</tr>';
+        });
+        h+='</tbody></table>';wr.innerHTML=h;
+    }
+    // Fältskytte / MagnumFält result board — one combined leaderboard per weapon class.
+    // Sub-classes (C1/C2/C3/CVet/CDam…) are merged and ranked together; each shooter's
+    // own sub-class stays visible in the Klass column. Top row is the best raw score in
+    // the weapon group, NOT the official per-class placement (deliberate, spectator view).
+    function fNum(camel,pascal){var v=(camel!=null?camel:pascal);return v!=null?v:0}
+    function renderFaltskytte(wr,groups){
+        if(!groups.length){wr.innerHTML='<div style="text-align:center;padding:3rem 0;opacity:.5"><i class="bi bi-inbox" style="font-size:2rem"></i><p>Inga resultat</p></div>';return}
+        var n=faltStationCount,h='';
+        // Bucket every shooter into its weapon class; collect per-class shoot-off notes.
+        var buckets={},notesByWc={};
+        groups.forEach(function(cg){
+            var cn=cg.className||cg.ClassName||'';
+            (cg.shooters||cg.Shooters||[]).forEach(function(sh){
+                var wc=getWC(sh.shootingClass||sh.ShootingClass||cn);
+                (buckets[wc]=buckets[wc]||[]).push(sh);
+            });
+            var ns=cg.shootOffNotes||cg.ShootOffNotes||[];
+            if(Array.isArray(ns)&&ns.length){var w=getWC(cn);(notesByWc[w]=notesByWc[w]||[]).push.apply(notesByWc[w],ns)}
+        });
+        // Render weapon-class tables in the dropdown's order.
+        var order=['C','B','A','R','L','M'];
+        var wcs=Object.keys(buckets).sort(function(a,b){var ai=order.indexOf(a),bi=order.indexOf(b);return(ai<0?99:ai)-(bi<0?99:bi)});
+        wcs.forEach(function(wc){
+            var shooters=buckets[wc];
+            if(!shooters.length)return;
+            // Rank across the whole weapon class using the server's tiebreaker keys.
+            shooters.sort(function(a,b){
+                if(faltIsPoang){
+                    return fNum(b.totalPoints,b.TotalPoints)-fNum(a.totalPoints,a.TotalPoints)
+                        || fNum(b.totalTiebreakerScore,b.TotalTiebreakerScore)-fNum(a.totalTiebreakerScore,a.TotalTiebreakerScore);
+                }
+                return fNum(b.totalHits,b.TotalHits)-fNum(a.totalHits,a.TotalHits)
+                    || fNum(b.totalFigures,b.TotalFigures)-fNum(a.totalFigures,a.TotalFigures)
+                    || fNum(b.totalTiebreakerScore,b.TotalTiebreakerScore)-fNum(a.totalTiebreakerScore,a.TotalTiebreakerScore);
+            });
+            var hasSS=shooters.some(function(s){var r=s.shootOffRounds||s.ShootOffRounds;return Array.isArray(r)&&r.length>0});
+            var cols=4+n+2+(hasSS?1:0)+(isMedals?1:0);
+            h+='<table class="rb-table" style="margin-bottom:1rem">';
+            h+='<thead><tr><td colspan="'+cols+'" style="background:#0f3460;color:#4ecca3;font-weight:700;padding:.5rem;text-align:left;border-bottom:2px solid #4ecca3">Vapengrupp '+wc+' <span style="opacity:.6;font-weight:400">('+shooters.length+' deltagare)</span></td></tr>';
+            h+='<tr><th>#</th><th>Namn</th><th>Klass</th><th>Förening</th>';
+            for(var i=1;i<=n;i++)h+='<th class="rb-series-col">'+i+'</th>';
+            h+='<th>'+(faltIsPoang?'Poäng':'Tot')+'</th><th>Pm</th>';
+            if(hasSS)h+='<th>Sär</th>';
+            if(isMedals)h+='<th>S</th>';
+            h+='</tr></thead><tbody>';
+            shooters.forEach(function(sh,idx){
+                var pos=idx+1;
+                var nm=sh.name||sh.Name||'',cl=sh.club||sh.Club||'',sc=sh.shootingClass||sh.ShootingClass||'';
+                var sts=sh.stations||sh.Stations||[];
+                var pc=pos<=3?' rb-pos-'+pos:'';
+                h+='<tr><td class="'+pc.trim()+'">'+pos+'</td><td>'+nm+'</td><td>'+sc+'</td><td>'+cl+'</td>';
+                for(var i=1;i<=n;i++){
+                    var st=null;
+                    for(var j=0;j<sts.length;j++){if((sts[j].stationNumber||sts[j].StationNumber)===i){st=sts[j];break}}
+                    if(st){
+                        var hits=st.hits!=null?st.hits:st.Hits,figs=st.figures!=null?st.figures:st.Figures;
+                        var tb=st.tiebreakerScore!=null?st.tiebreakerScore:st.TiebreakerScore;
+                        var cell=hits+'/'+figs;
+                        if(tb!=null)cell+=' <small style="opacity:.7">'+tb+'p</small>';
+                        h+='<td class="rb-series-col">'+cell+'</td>';
+                    } else {
+                        h+='<td class="rb-series-col" style="opacity:.4">-</td>';
+                    }
+                }
+                if(faltIsPoang){h+='<td><strong>'+(sh.totalPoints!=null?sh.totalPoints:sh.TotalPoints)+'</strong></td>'}
+                else{h+='<td><strong>'+(sh.totalHits!=null?sh.totalHits:sh.TotalHits)+'/'+(sh.totalFigures!=null?sh.totalFigures:sh.TotalFigures)+'</strong></td>'}
+                var pm=sh.totalTiebreakerScore!=null?sh.totalTiebreakerScore:sh.TotalTiebreakerScore;
+                h+='<td>'+(pm||'')+'</td>';
+                if(hasSS){
+                    var rounds=sh.shootOffRounds||sh.ShootOffRounds||[];
+                    if(rounds.length>0){var tip=rounds.map(function(t,i){return'Runda '+(i+1)+': '+t}).join(', ');h+='<td title="'+tip+'"><strong>'+rounds.join(' / ')+'</strong></td>'}
+                    else h+='<td style="opacity:.4">—</td>';
+                }
+                if(isMedals){var m=sh.standardMedal||sh.StandardMedal||'';var mc=m==='S'?' rb-medal-s':m==='B'?' rb-medal-b':'';h+='<td class="'+mc.trim()+'">'+m+'</td>'}
+                h+='</tr>';
+            });
+            h+='</tbody></table>';
+            var notes=notesByWc[wc]||[];
+            if(Array.isArray(notes)&&notes.length>0){
+                h+='<div style="opacity:.6;font-size:.8rem;margin:-.5rem 0 1rem .25rem">';
+                notes.forEach(function(note){var safe=String(note).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]});h+='<div><i class="bi bi-info-circle me-1"></i>'+safe+'</div>'});
+                h+='</div>';
+            }
+        });
+        wr.innerHTML=h||'<div style="text-align:center;padding:3rem 0;opacity:.5"><i class="bi bi-inbox" style="font-size:2rem"></i><p>Inga resultat</p></div>';
+    }
+    // Format class name with age span, e.g. "Vapengrupp A - D 21" → "Vapengrupp A - D 21-34"
+    function formatClassWithAgeSpan(cn){
+        var map=[['15','-15 år',true],['18','16-18 år',true],['jun','15-20 år',true],
+            ['21','21-34',false],['35','35-49',false],['50','50-59',false],
+            ['60','60-64',false],['65','65-69',false],['70','70+',false]];
+        for(var i=0;i<map.length;i++){
+            var code=map[i][0],span=map[i][1],parens=map[i][2];
+            if(cn.endsWith(' '+code)||cn.endsWith('-'+code)){
+                if(parens)return cn+' ('+span+')';
+                return cn.substring(0,cn.length-code.length)+span;
+            }
+        }
+        return cn;
+    }
+
+    // Springskytte result board — with shot visualization for Class C
+    function renderSpringskytte(wr,groups){
+        if(!groups.length){wr.innerHTML='<div style="text-align:center;padding:3rem 0;opacity:.5"><i class="bi bi-inbox" style="font-size:2rem"></i><p>Inga resultat</p></div>';return}
+
+        var h='';
+        // Ranked table per group
+        h+='<table class="rb-table">';
+        h+='<colgroup><col style="width:2.5rem"><col style="width:2.5rem"><col><col>';
+        h+='<col><col style="width:5rem"><col style="width:3rem"><col style="width:4.5rem"><col style="width:5.5rem"></colgroup>';
+        h+='<thead><tr><th>#</th><th>Nr</th><th style="text-align:left">Namn</th><th style="text-align:left">Förening</th>';
+        h+='<th>Skytte</th><th>Löptid</th><th>Bom</th><th>Tillägg</th><th>Totaltid</th></tr></thead><tbody>';
+        groups.forEach(function(cg,gi){
+            var cn=formatClassWithAgeSpan(cg.className||cg.ClassName||'');
+            var wc=cg.weaponClass||'C';
+            var shooters=cg.shooters||[];
+            if(!shooters.length)return;
+            h+='<tr><td colspan="9" style="background:#0f3460;color:#4ecca3;font-weight:700;padding:.6rem .5rem;font-size:.95rem;text-align:left;border-bottom:2px solid #4ecca3'+(gi>0?';border-top:4px solid #1a1a2e':'')+'">'+cn+'</td></tr>';
+            shooters.forEach(function(sh){
+                var rank=sh.rank||0;
+                var status=sh.status||null;
+                var pc=rank>=1&&rank<=3&&!status?' rb-pos-'+rank:'';
+                var nm=sh.name||'';
+                var cl=sh.club||'';
+                var so=sh.startOrder||'';
+                if(status){
+                    h+='<tr><td>-</td><td>'+so+'</td><td style="text-align:left">'+nm+'</td><td style="text-align:left">'+cl+'</td>';
+                    h+='<td colspan="5" style="text-align:center;opacity:.6">'+status+'</td></tr>';
+                } else {
+                    h+='<tr><td class="'+pc.trim()+'">'+(rank||'-')+'</td><td>'+so+'</td><td style="text-align:left">'+nm+'</td><td style="text-align:left">'+cl+'</td>';
+                    h+='<td>'+renderShotDots(sh,wc)+'</td>';
+                    h+='<td>'+(sh.sprintTimeDisplay||'-')+'</td>';
+                    h+='<td>'+(sh.shootingScore||0)+'</td>';
+                    h+='<td>'+(sh.penaltyTimeDisplay||'-')+'</td>';
+                    h+='<td><strong>'+(sh.totalTimeDisplay||'-')+'</strong></td></tr>';
+                }
+            });
+        });
+        h+='</tbody></table>';
+        wr.innerHTML=h;
+    }
+
+    function isUnshot(shot){return !shot||shot===''||shot==='-'}
+
+    // Render compact shot dots for table row — Class C: green/red dots, Class A: zone numbers
+    function renderShotDots(sh,wc){
+        var series=sh.shotSeries||sh.ShotSeries||[];
+        if(!series.length)return'<span style="opacity:.3">-</span>';
+        var h='<span style="display:inline-flex;gap:3px;flex-wrap:nowrap">';
+        if(wc==='C'){
+            series.forEach(function(station,si){
+                var allEmpty=(station||[]).every(isUnshot);
+                if(allEmpty)return; // skip unshot stations entirely in compact view
+                if(si>0)h+='<span style="width:1px;background:rgba(255,255,255,.15);margin:0 1px"></span>';
+                (station||[]).forEach(function(shot){
+                    if(isUnshot(shot)){h+='<span style="display:inline-block;width:8px;height:8px;border-radius:50%;border:1px solid rgba(255,255,255,.2)"></span>';return}
+                    var isHit=shot==='H'||shot==='h';
+                    h+='<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:'+(isHit?'#27ae60':'#e74c3c')+'"></span>';
+                });
+            });
+        } else {
+            // Class A — zone counts per target, show penalty score per target
+            var zp=[0,0,1,2,3];
+            series.forEach(function(station,si){
+                var allEmpty=(station||[]).every(isUnshot);
+                if(allEmpty)return;
+                if(si>0)h+='<span style="width:1px;background:rgba(255,255,255,.15);margin:0 1px"></span>';
+                var ts=0;(station||[]).forEach(function(s,zi){var v=parseInt(s)||0;ts+=v*(zp[zi]||0)});
+                var c=ts===0?'#27ae60':ts<=2?'#8bc34a':ts<=4?'#f39c12':'#e74c3c';
+                h+='<span style="display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;border-radius:.2rem;background:'+c+';font-size:.65rem;color:#fff;font-weight:700;padding:0 2px">'+ts+'</span>';
+            });
+        }
+        h+='</span>';
+        return h;
+    }
+
+    // Render larger shot card for "Senast in" banner
+    function renderShotCard(sh,wc){
+        var series=sh.shotSeries||sh.ShotSeries||[];
+        if(!series.length)return'';
+        var h='<div style="display:flex;gap:.5rem;flex-wrap:wrap;margin:.25rem 0">';
+        if(wc==='C'){
+            series.forEach(function(station,si){
+                var allEmpty=(station||[]).every(isUnshot);
+                var shotCount=(station||[]).filter(function(s){return !isUnshot(s)}).length;
+                if(allEmpty)return; // skip entirely unshot stations
+                var hits=(station||[]).filter(function(s){return s==='H'||s==='h'}).length;
+                h+='<div style="background:rgba(255,255,255,.05);border-radius:.35rem;padding:.3rem .5rem;display:flex;align-items:center;gap:4px">';
+                h+='<span style="font-size:.7rem;opacity:.4;margin-right:2px">'+(si+1)+'</span>';
+                (station||[]).forEach(function(shot){
+                    if(isUnshot(shot)){h+='<span style="display:inline-block;width:12px;height:12px;border-radius:50%;border:1.5px solid rgba(255,255,255,.15)"></span>';return}
+                    var isHit=shot==='H'||shot==='h';
+                    h+='<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:'+(isHit?'#27ae60':'#e74c3c')+'"></span>';
+                });
+                h+='<span style="font-size:.75rem;margin-left:3px;color:'+(hits===shotCount&&shotCount>0?'#27ae60':'rgba(255,255,255,.5)')+'">'+hits+'/'+shotCount+'</span>';
+                h+='</div>';
+            });
+        } else {
+            // Class A — show zone values
+            series.forEach(function(station,si){
+                var allEmpty=(station||[]).every(isUnshot);
+                if(allEmpty)return;
+                var sum=(station||[]).filter(function(s){return !isUnshot(s)}).reduce(function(a,s){return a+(parseInt(s)||0)},0);
+                h+='<div style="background:rgba(255,255,255,.05);border-radius:.35rem;padding:.3rem .5rem;display:flex;align-items:center;gap:4px">';
+                h+='<span style="font-size:.7rem;opacity:.4;margin-right:2px">'+(si+1)+'</span>';
+                (station||[]).forEach(function(shot){
+                    if(isUnshot(shot)){h+='<span style="display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:50%;border:1.5px solid rgba(255,255,255,.15)"></span>';return}
+                    var v=parseInt(shot)||0;
+                    var c=v===0?'#27ae60':v===1?'#8bc34a':v===2?'#f39c12':'#e74c3c';
+                    h+='<span style="display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:50%;background:'+c+';font-size:.6rem;color:#fff;font-weight:700">'+v+'</span>';
+                });
+                h+='<span style="font-size:.75rem;margin-left:3px;opacity:.5">'+sum+'</span>';
+                h+='</div>';
+            });
+        }
+        h+='</div>';
+        return h;
+    }
+    // Växla toggle — rotate through the selected weapon classes one at a time
+    (function(){
+        var ct=document.getElementById('rbCycleToggle');
+        if(!ct)return;
+        try{cycleMode=localStorage.getItem('hpsk_rb_cycle_'+compId)==='1'}catch(e){}
+        ct.checked=cycleMode;
+        ct.addEventListener('change',function(){cycleMode=this.checked;cycleIdx=0;persistCycle();renderAll();restartCycle()});
+    })();
+    document.addEventListener('visibilitychange',function(){
+        if(document.hidden){if(refreshTimer){clearInterval(refreshTimer);refreshTimer=null}stopCycle()}
+        else{fetchResults();refreshTimer=setInterval(fetchResults,REFRESH);restartCycle()}
+    });
+    fetchResults();refreshTimer=setInterval(fetchResults,REFRESH);restartCycle();
+}
+</script>

@@ -982,6 +982,7 @@ Keep form helper text subtle:
 11. **registrationInvoicesHub** - Payment invoice container (child of competition)
 12. **registrationInvoice** - Individual payment invoice (see Swish Payment System section for properties)
 13. **faltskytteConfigurationHub** - Hub for standalone Fältskytte configurations (no properties; allow under Home). Published as URL alias `faltkonfig`. Without this content node the editor route returns 500.
+14. **resultBoard** - Standalone live results board (no properties; allow under Home; default template `ResultBoard`). Published as URL alias `live` → `/live?c=<competitionId>`. Without this content node the board triggers on the competition page dead-link (404).
 
 ### Content Pages to Create
 Create content nodes using above document types and publish them under Home page.
@@ -1288,9 +1289,9 @@ No state machine — every command button is tappable any time so the chief can 
 
 **Controller clamps:** `FaltskytteController.CreateTarget` / `UpdateTarget` clamp SizeGroup to 1–15. The legacy `UpdateTargetDistances` endpoint was deleted.
 
-### Live Result Board (Resultattavla) — Fältskytte support + weapon-class multi-select & Växla (2026-05-27)
+### Live Result Board (Resultattavla) — Fältskytte support, weapon-class multi-select & Växla, standalone /live URL (2026-05-27)
 
-**What:** The "Visa Live resultat" button opens a self-contained dark spectator/TV board in a new window — a single shared `rbBoardScript` function inside `Views/Competition.cshtml` (NOT a separate page). It polls a results endpoint every 15 s (`REFRESH=15000`) and re-renders the full standings each time (full snapshot, no diff). Visibility-aware: polling pauses when the tab is hidden, resumes with an immediate fetch.
+**What:** A dark spectator/TV board served at its own public URL **`/live?c=<competitionId>`** (chromeless page `Views/ResultBoard.cshtml`, `Layout=null`). The board logic is `rbBoardScript`, which lives in **`Views/Partials/_ResultBoardScript.cshtml`** (its single home — do not duplicate). It polls a results endpoint every 15 s (`REFRESH=15000`) and re-renders the full standings each time (full snapshot, no diff). Visibility-aware: polling pauses when the tab is hidden, resumes with an immediate fetch. (It was originally an in-memory `window.open('','_blank')` + `document.write` popup that showed `about:blank`; moved to a real URL 2026-05-27 so it's bookmarkable / castable / reloadable on a wall-TV browser.)
 
 **Discipline dispatch inside `rbBoardScript`:**
 - `fetchResults()` picks the endpoint by `compTypeId`: Springskytte → `/Springskytte/GetSpringskytteResults`; **Fältskytte/MagnumFalt → `/Faltskytte/GetFaltskytteResults`** (reads `d.results.classGroups / stationCount / scoringMode / isOfficial / isAwardingStandardMedals`; does NOT gate on `d.exists`, which only the Precision payload has); else Precision-family → `/CompetitionResults/GetResultsList`.
@@ -1307,7 +1308,11 @@ No state machine — every command button is tappable any time so the chief can 
 
 **Badge:** `updateStatus()` shows OFFICIELLT (orange) when `isOfficial`, else LIVE (green, pulsing). For Fältskytte `isOfficial` = competition `faltskytteResultsOfficial`. "LIVE" means preliminary, not "in progress".
 
-**No backend changes** — reuses `GetFaltskytteResults` (recomputes live from `FaltskytteResultEntry` each call, incl. merges/medals/Särskjutning). View-only change to `Competition.cshtml`; deploys without a rebuild, but the board window copies `rbBoardScript` at open time, so the competition page must be **reloaded and the board reopened** to pick up changes.
+**No backend changes** — reuses `GetFaltskytteResults` / `GetSpringskytteResults` / `GetResultsList` (recompute live each call, incl. merges/medals/Särskjutning).
+
+**Standalone page (`/live`):** `Views/ResultBoard.cshtml` reads `?c=<id>`, looks up the competition via `Umbraco.Content(id)` (require `ContentType.Alias == "competition"`), reproduces the board params server-side (competitionName, competitionType, numberOfSeriesOrStations/numberOfFinalSeries, and `configuredWCs` parsed from `shootingClassIds` via `HpskSite.Models.ShootingClasses.GetById().Weapon`), then calls `rbBoardScript(...)`. It is **public** (a TV/Chromecast can't log in — unlike the staff-gated `/skjutledare` & `/station`) but only renders when `showLiveResults && !isExternal`; otherwise a minimal "Live-resultat är inte tillgängligt" page. The 3 triggers on the competition page are now `<a href="/live?c=@Model.Id" target="_blank" rel="noopener">` anchors (no `window.open`, so no popup-blocker and bookmarkable; F5 reloads and restores filter/Växla from localStorage). `@Model.Id` interpolates in all 3 contexts incl. the JS-injected one inside the `<text>` block. Views deploy without a rebuild.
+
+**Operator setup (Umbraco backoffice, per environment — same shape as /skjutledare, /station):** create template `ResultBoard`, doctype `resultBoard` (no properties, allowed under Home, default template `ResultBoard`), and publish a `resultBoard` content node with URL alias **`live`**. Without the node, `/live?c=…` 404s and all 3 triggers dead-link. No SQL, no doctype properties.
 
 ## Common Patterns
 

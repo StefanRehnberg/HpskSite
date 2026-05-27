@@ -1,0 +1,141 @@
+﻿@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    // Standalone live results board at /live?c=<competitionId>. Chromeless (no Master)
+    // so it fills a wall-TV/kiosk screen. Public, but only renders when the competition
+    // has live results enabled. The board logic lives in Partials/_ResultBoardScript.cshtml
+    // (shared single home of rbBoardScript); this page only computes params + skeleton.
+    Layout = null;
+
+    var cStr = Context.Request.Query["c"].FirstOrDefault();
+    int competitionId = 0;
+    int.TryParse(cStr, out competitionId);
+
+    IPublishedContent? competition = null;
+    if (competitionId > 0)
+    {
+        var node = Umbraco.Content(competitionId);
+        if (node != null && node.ContentType.Alias == "competition") competition = node;
+    }
+
+    var competitionName = competition?.Value<string>("competitionName") ?? competition?.Name ?? "";
+    var competitionType = competition?.Value<string>("competitionType") ?? "Precision";
+    var numberOfSeriesOrStations = competition?.Value<int>("numberOfSeriesOrStations") ?? 0;
+    var numberOfFinalSeries = competition?.Value<int>("numberOfFinalSeries") ?? 0;
+    var showLiveResults = competition?.Value<bool>("showLiveResults") ?? false;
+    var isExternal = competition?.Value<bool>("isExternal") ?? false;
+
+    // Reproduce Competition.cshtml's configuredWCs derivation from shootingClassIds
+    // (JSON array OR CSV; map each id to its weapon group; dedupe; order C,B,A,R,L,M).
+    var configuredWCs = new string[0];
+    if (competition != null)
+    {
+        var raw = competition.Value("shootingClassIds");
+        var scIds = "";
+        if (raw is string[] arr) scIds = string.Join(",", arr);
+        else if (raw is IEnumerable<string> en) scIds = string.Join(",", en);
+        else if (raw is string s) scIds = s ?? "";
+        else if (raw != null)
+        {
+            try { var t = competition.Value<IEnumerable<string>>("shootingClassIds"); if (t != null) scIds = string.Join(",", t); }
+            catch { scIds = ""; }
+        }
+
+        var ids = new List<string>();
+        if (!string.IsNullOrEmpty(scIds))
+        {
+            if (scIds.StartsWith("[") && scIds.EndsWith("]"))
+            {
+                var inner = scIds.Substring(1, scIds.Length - 2);
+                ids.AddRange(inner.Split(',').Select(x => x.Trim().Trim('"')).Where(x => !string.IsNullOrEmpty(x)));
+            }
+            else
+            {
+                ids.AddRange(scIds.Split(',').Select(x => x.Trim()).Where(x => !string.IsNullOrEmpty(x)));
+            }
+        }
+        var order = new[] { "C", "B", "A", "R", "L", "M" };
+        configuredWCs = ids
+            .Select(id => HpskSite.Models.ShootingClasses.GetById(id))
+            .Where(sc => sc != null)
+            .Select(sc => sc!.Weapon.ToString())
+            .Distinct()
+            .OrderBy(wc => { var i = Array.IndexOf(order, wc); return i < 0 ? 99 : i; })
+            .ToArray();
+    }
+
+    var boardAvailable = competition != null && showLiveResults && !isExternal;
+    var hasFinals = numberOfFinalSeries > 0;
+    var qualSeriesCount = hasFinals ? numberOfSeriesOrStations - numberOfFinalSeries : numberOfSeriesOrStations;
+}<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <title>Resultattavla@(competition != null ? " — " + competitionName : "")</title>
+@if (boardAvailable)
+{
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@@1.11.3/font/bootstrap-icons.min.css">
+    <style>
+        *{box-sizing:border-box}
+        html,body{margin:0;padding:0;height:100%;overflow:hidden;font-family:Arial,sans-serif}
+        body{background:#1a1a2e;color:#e0e0e0;display:flex;flex-direction:column}
+        .rb-header{background:#16213e;border-bottom:1px solid #0f3460;padding:.5rem 1rem;display:flex;align-items:center;gap:.75rem;flex-shrink:0;flex-wrap:wrap}
+        .rb-header h1{font-size:1.1rem;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
+        .rb-badge-live{background:#27ae60;font-size:.75rem;letter-spacing:.05em;padding:.25rem .5rem;border-radius:.25rem;white-space:nowrap}
+        .rb-badge-official{background:#f39c12;color:#1a1a2e;font-size:.75rem;letter-spacing:.05em;padding:.25rem .5rem;border-radius:.25rem;white-space:nowrap}
+        .rb-pulse{animation:rbPulse 1.5s ease-in-out infinite}
+        @@keyframes rbPulse{0%,100%{opacity:1}50%{opacity:.3}}
+        .rb-wc-filter{display:flex;gap:.35rem;flex-wrap:wrap;align-items:center}
+        .rb-wc-chk{display:inline-flex;align-items:center;gap:.25rem;background:#1a1a2e;border:1px solid #0f3460;border-radius:.25rem;padding:.2rem .45rem;font-size:.85rem;cursor:pointer;user-select:none}
+        .rb-wc-chk input{cursor:pointer;margin:0}
+        .rb-vaxla{display:inline-flex;align-items:center;gap:.3rem;font-size:.85rem;cursor:pointer;user-select:none;color:#4ecca3}
+        .rb-vaxla input{cursor:pointer;margin:0}
+        .rb-ts{color:rgba(255,255,255,.5);font-size:.75rem;white-space:nowrap}
+        .rb-table-wrap{flex:1;overflow-y:auto;padding:.5rem}
+        .rb-table{width:100%;border-collapse:collapse;font-size:1.1rem}
+        .rb-table th{position:sticky;top:0;background:#16213e;color:#4ecca3;padding:.45rem .5rem;text-align:center;font-weight:600;font-size:.85rem;border-bottom:2px solid #0f3460;z-index:1}
+        .rb-table td{padding:.4rem .5rem;border-bottom:1px solid rgba(255,255,255,.06);text-align:center}
+        .rb-table th:nth-child(2),.rb-table td:nth-child(2){text-align:left}
+        .rb-table th:nth-child(4),.rb-table td:nth-child(4){text-align:left}
+        .rb-table tbody tr:hover{background:rgba(78,204,163,.07)}
+        .rb-pos-1{color:#ffd700;font-weight:700}
+        .rb-pos-2{color:#c0c0c0;font-weight:700}
+        .rb-pos-3{color:#cd7f32;font-weight:700}
+        .rb-medal-s{color:#c0c0c0;font-weight:700}
+        .rb-medal-b{color:#cd7f32;font-weight:700}
+        .rb-subtotal{border-left:2px solid rgba(78,204,163,.4);font-weight:700;color:#4ecca3}
+        @@media(max-width:767.98px){.rb-table{font-size:.95rem}.rb-table .rb-series-col{display:none}.rb-header{padding:.4rem .75rem}}
+        @@media(min-width:768px) and (max-width:991.98px){.rb-table{font-size:.95rem}}
+        @@media(max-height:500px){.rb-header{padding:.25rem .75rem}.rb-header h1{font-size:.9rem}.rb-table td,.rb-table th{padding:.25rem .4rem}}
+    </style>
+}
+else
+{
+    <style>html,body{margin:0;height:100%;background:#1a1a2e;color:#e0e0e0;font-family:Arial,sans-serif;display:flex;align-items:center;justify-content:center;text-align:center;padding:1rem}</style>
+}
+</head>
+<body>
+@if (boardAvailable)
+{
+    <div class="rb-header">
+        <h1><i class="bi bi-trophy me-2"></i>@competitionName</h1>
+        <span class="rb-badge-live" id="rbStatusBadge"><i class="bi bi-broadcast me-1 rb-pulse"></i>LIVE</span>
+        <div class="rb-wc-filter" id="rbWcFilter"></div>
+        <label class="rb-vaxla"><input type="checkbox" id="rbCycleToggle"> Växla</label>
+        <span class="rb-ts" id="rbCycleNow"></span>
+        <span class="rb-ts" id="rbLastUpdated"></span>
+    </div>
+    <div class="rb-table-wrap" id="rbTableWrap"><div style="text-align:center;padding:3rem 0"><div class="spinner-border text-light" role="status"></div></div></div>
+
+    @await Html.PartialAsync("_ResultBoardScript")
+    <script>
+        rbBoardScript(@competitionId, @(hasFinals ? "true" : "false"), @qualSeriesCount, @numberOfFinalSeries, @numberOfSeriesOrStations, @Html.Raw(System.Text.Json.JsonSerializer.Serialize(configuredWCs)), @Html.Raw(System.Text.Json.JsonSerializer.Serialize(competitionType)));
+    </script>
+}
+else
+{
+    <div><p style="font-size:1.2rem;margin:0">Live-resultat är inte tillgängligt för den här tävlingen.</p></div>
+}
+</body>
+</html>
