@@ -201,7 +201,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
     public class StationPrintItem
     {
         public int Station { get; set; }
-        /// <summary>Per-weapon-class config for this station (fed to FaltskytteStationInfoStatic).</summary>
+        /// <summary>Per-weapon-class config for this station. Rendered by FaltskyttePrintStationCards.cshtml
+        /// (mirrors the configurator's faltCfgPrintStation HTML — text behaviors, combined classes, etc).</summary>
         public Dictionary<string, FaltskytteStationConfig> StationsByWeaponClass { get; set; } = new();
         public string Qr1Url { get; set; } = "";  // Förutsättningar (GetStationInfoQr)
         public string Qr2Url { get; set; } = "";  // Result entry (GenerateQrCode → /station?c&s)

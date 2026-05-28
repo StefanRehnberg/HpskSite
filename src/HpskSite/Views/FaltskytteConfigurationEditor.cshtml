@@ -784,8 +784,26 @@ function fkEditorApplyWeaponClasses() {
     if (picked.length === 0) { alert('Välj minst en vapenklass.'); return; }
     bootstrap.Modal.getInstance(document.getElementById('fkEditorWeaponClassModal')).hide();
 
-    // Re-init configurator with the new class set; keep the existing JSON.
+    // CRITICAL — simple-mode wipe guard:
+    // picked is in alphabetical DOM order (A, A_Opt, …, B, C). When the
+    // operator ADDS a class that sorts before any existing class — e.g.
+    // adding A to existing C → picked = ["A","C"] — then in simple mode
+    // faltCfgMarkDirty(picked[0]) calls faltCfgSyncShape(canonical=picked[0]),
+    // which copies the (default-empty) shape of the just-created class into
+    // every other class, wiping the operator's real config.
+    // Fix: before re-init, pre-populate every newly-added class with a deep
+    // clone of the existing canonical's stations. Then syncShape mirrors the
+    // canonical's shape to itself — a no-op for the existing data.
+    var prevCanonical = faltCfgWeaponClasses[0];
+    var added = picked.filter(function (k) { return faltCfgWeaponClasses.indexOf(k) < 0; });
+
     var blob = JSON.parse(JSON.stringify(faltCfgData));
+    if (prevCanonical && blob[prevCanonical] && added.length > 0)
+    {
+        added.forEach(function (newWc) {
+            blob[newWc] = JSON.parse(JSON.stringify(blob[prevCanonical]));
+        });
+    }
     // Remove unselected classes from the blob.
     Object.keys(blob).forEach(function(k) {
         if (k.startsWith('_')) return;

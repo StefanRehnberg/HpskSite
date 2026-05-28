@@ -1,10 +1,52 @@
 @using HpskSite.CompetitionTypes.Faltskytte.Models
 @model FaltskyttePrintStationCardsModel
 @{
-    // Chromeless print page (rendered by FaltskyttePrintController). One station per
-    // page: Förutsättningar + figure timeline (FaltskytteStationInfoStatic) + QR-1 on
-    // the card and QR-2 as a cut-out for the targets. Auto-prints once images load.
+    // Print-friendly station cards: mirrors the configurator's faltCfgPrintStation
+    // output (same CSS classes + HTML shape) so comp-side and configurator-side
+    // prints look alike. Adds QR-1 on the card + QR-2 as a cut-out (the configurator
+    // print does this too when a competition is attached).
+    // Does NOT use FaltskytteStationInfoStatic — that partial drives the on-screen
+    // QR-1 landing page (timeline visualization), a different audience.
     Layout = null;
+}
+@functions {
+    static readonly string[] WcOrder = new[] { "C", "B", "A", "A_Opt", "R", "L", "M" };
+
+    static string OrderKey(string wc)
+    {
+        var i = Array.IndexOf(WcOrder, wc);
+        return (i < 0 ? "99" : i.ToString("D2")) + "_" + wc;
+    }
+
+    // Mirrors faltDescribeBehavior in _FaltskytteConfiguratorScript.cshtml — describes
+    // a figure's behavior + timing as plain text (the configurator's print does NOT
+    // show timeline bands, only the text description).
+    static string FigTiming(FaltskytteFigure fig)
+    {
+        var b = fig.Behavior ?? "Fast";
+        if (b == "Framsvängande")
+            return $"Framsvängande, fram {fig.DelayBeforeShowSec ?? 0} s, syns {fig.ShowTimeSec ?? 8} s";
+        if (b == "Bortsvängande")
+        {
+            var r = fig.ReappearSec ?? 0;
+            return $"Bortsvängande, ut {fig.HideAfterSec ?? 8} s" + (r > 0 ? $", åter {r} s" : "");
+        }
+        return b;
+    }
+
+    // Per-class timing without the leading behavior word — used inside the
+    // multi-class time-variants line where the behavior is already shown above.
+    static string TimingWithoutBehavior(FaltskytteFigure fig)
+    {
+        var b = fig.Behavior ?? "Fast";
+        if (b == "Framsvängande") return $"fram {fig.DelayBeforeShowSec ?? 0} s, syns {fig.ShowTimeSec ?? 8} s";
+        if (b == "Bortsvängande")
+        {
+            var r = fig.ReappearSec ?? 0;
+            return $"ut {fig.HideAfterSec ?? 8} s" + (r > 0 ? $", åter {r} s" : "");
+        }
+        return "";
+    }
 }
 <!DOCTYPE html>
 <html lang="sv">
@@ -12,15 +54,30 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1.0">
     <title>Stationskort@(string.IsNullOrEmpty(Model.CompetitionName) ? "" : " — " + Model.CompetitionName)</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@@1.11.3/font/bootstrap-icons.min.css">
     <style>
-        body { font-family: sans-serif; margin: 16px; }
+        body { font-family: sans-serif; margin: 30px; max-width: 210mm; }
         .station-block { page-break-after: always; }
         .station-block:last-child { page-break-after: auto; }
-        .qr-card { text-align: center; margin-top: 16px; page-break-inside: avoid; }
+        h1 { font-size: 1.8em; border-bottom: 3px solid #333; padding-bottom: 8px; margin-top: 0; }
+        .rules { background: #f0f0f0; padding: 12px; border-radius: 6px; margin: 15px 0; font-size: 0.95em; }
+        .rules-tbl { border-collapse: collapse; margin-top: 4px; font-size: 0.95em; width: 100%; }
+        .rules-tbl th, .rules-tbl td { padding: 2px 12px 2px 0; text-align: left; }
+        .rules-tbl th { font-weight: 600; border-bottom: 1px solid #888; }
+        .rules-tbl td { border-bottom: 1px solid #ddd; }
+        .rules-tbl tr:last-child td { border-bottom: none; }
+        .tg { border: 2px solid #666; border-radius: 8px; padding: 15px; margin: 20px 0; page-break-inside: avoid; }
+        .tg h3 { margin: 0 0 10px; font-size: 1.2em; }
+        .tg-desc { font-style: italic; margin: 10px 0; font-size: 0.95em; line-height: 1.4; }
+        .tg-img { text-align: center; margin: 10px 0; }
+        .tg-img img { max-width: 80%; max-height: 200px; border-radius: 6px; }
+        .fig { margin: 8px 0; padding: 8px; background: #fafafa; border-radius: 4px; display: flex; align-items: center; gap: 12px; }
+        .fig img { height: 50px; border-radius: 4px; }
+        .fig-info { flex: 1; }
+        .pm-badge { background: #ffc107; color: #000; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 0.85em; }
+        .time-variants { margin: 2px 0 2px 20px; font-size: 0.9em; color: #444; }
+        .qr-card { text-align: center; margin-top: 20px; page-break-inside: avoid; }
         .qr-cut { margin-top: 24px; page-break-before: always; border: 2px dashed #888; border-radius: 8px; padding: 16px; text-align: center; }
-        @@media print { body { margin: 12mm; } }
+        @@media print { body { margin: 15mm; } }
     </style>
 </head>
 <body>
@@ -30,26 +87,173 @@
 }
 @foreach (var item in Model.Stations)
 {
-    var vd = new ViewDataDictionary(ViewData)
-    {
-        { "CompetitionName", Model.CompetitionName },
-        { "StationNumber", item.Station },
-        { "ScoringMode", Model.ScoringMode },
-        { "StationsByWeaponClass", item.StationsByWeaponClass },
-        { "CompactNoTargets", true }   // printed card: Förutsättningar only; figures/timeline live behind QR-1
-    };
+    var classKeys = item.StationsByWeaponClass.Keys.OrderBy(k => OrderKey(k)).ToList();
+    var firstWc = classKeys.FirstOrDefault();
+    var primary = firstWc != null ? item.StationsByWeaponClass[firstWc] : null;
+    var isCombined = classKeys.Count > 1;
+    var anyMin = classKeys.Any(c => item.StationsByWeaponClass[c].MinShotsPerFigure > 0);
+    var anyMaxLimited = classKeys.Any(c => item.StationsByWeaponClass[c].MaxShotsPerFigure < 6);
+
     <div class="station-block">
-        @await Html.PartialAsync("FaltskytteStationInfoStatic", vd)
-        <div class="qr-card">
-            <img src="@item.Qr1Url" alt="QR Förutsättningar" style="width:150px;height:150px">
-            <div style="font-weight:bold">Förutsättningar — skanna här</div>
-        </div>
-        <div class="qr-cut">
-            <div style="font-size:1.1em;font-weight:bold;margin-bottom:8px">Station @item.Station — Resultatregistrering</div>
-            <img src="@item.Qr2Url" alt="QR Resultat" style="width:150px;height:150px">
-            <div>Klipp ut och placera vid målgrupperna</div>
-            <div style="font-size:0.85em;color:#666">Kräver inloggning</div>
-        </div>
+        @if (primary == null)
+        {
+            <h1>Station @item.Station</h1>
+            <div class="rules">Stationens förutsättningar kunde inte läsas.</div>
+        }
+        else
+        {
+            // Header
+            if (isCombined)
+            {
+                <h1>Station @item.Station</h1>
+            }
+            else
+            {
+                <h1>Station @item.Station — Vapenklass @firstWc</h1>
+            }
+
+            // Förutsättningar
+            <div class="rules">
+                @if (isCombined)
+                {
+                    <table class="rules-tbl">
+                        <thead>
+                            <tr>
+                                <th>Vapenklass</th>
+                                <th>Skjuttid</th>
+                                <th>Utgångsläge</th>
+                                <th>Vapenläge</th>
+                                <th>Stödhand</th>
+                                @if (anyMin) { <th>Min träff/fig</th> }
+                                @if (anyMaxLimited) { <th>Max träff/fig</th> }
+                            </tr>
+                        </thead>
+                        <tbody>
+                        @foreach (var c in classKeys)
+                        {
+                            var st = item.StationsByWeaponClass[c];
+                            <tr>
+                                <td><strong>@c</strong></td>
+                                <td>@st.ShootingTimeSec sek</td>
+                                <td>@st.ShooterStartPosition</td>
+                                <td>@st.WeaponStartPosition</td>
+                                <td>@st.SupportHand</td>
+                                @if (anyMin) { <td>@(st.MinShotsPerFigure > 0 ? st.MinShotsPerFigure.ToString() : "—")</td> }
+                                @if (anyMaxLimited) { <td>@(st.MaxShotsPerFigure < 6 ? st.MaxShotsPerFigure.ToString() : "—")</td> }
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                }
+                else
+                {
+                    <span>
+                        <strong>Skjuttid:</strong> @primary.ShootingTimeSec sek
+                        &nbsp;|&nbsp; <strong>Utgångsläge:</strong> @primary.ShooterStartPosition
+                        &nbsp;|&nbsp; <strong>Vapenläge:</strong> @primary.WeaponStartPosition
+                        &nbsp;|&nbsp; <strong>@primary.SupportHand</strong>
+                    </span>
+                    if (primary.MinShotsPerFigure > 0)
+                    {
+                        <br />
+                        <span><strong>Min träff/fig:</strong> @primary.MinShotsPerFigure</span>
+                    }
+                    if (primary.MaxShotsPerFigure < 6)
+                    {
+                        <span>&nbsp;|&nbsp; <strong>Max träff/fig:</strong> @primary.MaxShotsPerFigure</span>
+                    }
+                }
+            </div>
+
+            // Målgrupper + figurer
+            for (var tgIdx = 0; tgIdx < primary.TargetGroups.Count; tgIdx++)
+            {
+                var tg = primary.TargetGroups[tgIdx];
+                var letter = (char)(64 + tg.Group);
+                <div class="tg">
+                    <h3>Målgrupp @letter</h3>
+                    @if (!string.IsNullOrWhiteSpace(tg.Description))
+                    {
+                        <div class="tg-desc">@Html.Raw(System.Net.WebUtility.HtmlEncode(tg.Description).Replace("\n", "<br>"))</div>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(tg.ImageUrl))
+                    {
+                        <div class="tg-img"><img src="@tg.ImageUrl" alt="Målgrupp @letter" /></div>
+                    }
+                    @for (var fIdx = 0; fIdx < tg.Figures.Count; fIdx++)
+                    {
+                        var fig = tg.Figures[fIdx];
+                        var capturedTgIdx = tgIdx;
+                        var capturedFIdx = fIdx;
+                        <div class="fig">
+                            @if (!string.IsNullOrWhiteSpace(fig.ImageUrl))
+                            {
+                                <img src="@fig.ImageUrl" alt="" />
+                            }
+                            <div class="fig-info">
+                                <strong>Figur @fig.FigureNumber</strong>
+                                @if (fig.IsPoangmal)
+                                {
+                                    <span class="pm-badge">Poängräkning</span>
+                                }
+                                @if (isCombined && fig.Behavior != "Fast")
+                                {
+                                    // Multi-class moving figure: group classes by per-figure timing string.
+                                    // Same timing across classes → render once; otherwise one time-variants row per group.
+                                    var groups = new Dictionary<string, List<string>>();
+                                    foreach (var c in classKeys)
+                                    {
+                                        var cTg = item.StationsByWeaponClass[c].TargetGroups.ElementAtOrDefault(capturedTgIdx);
+                                        var cFig = cTg?.Figures.ElementAtOrDefault(capturedFIdx);
+                                        if (cFig == null) continue;
+                                        var key = TimingWithoutBehavior(cFig);
+                                        if (!groups.ContainsKey(key)) groups[key] = new List<string>();
+                                        groups[key].Add(c);
+                                    }
+
+                                    <span> — @fig.Behavior</span>
+
+                                    if (groups.Count == 1)
+                                    {
+                                        var only = groups.Keys.First();
+                                        if (!string.IsNullOrEmpty(only))
+                                        {
+                                            <span>, @only</span>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <br />
+                                        foreach (var kvp in groups)
+                                        {
+                                            <div class="time-variants">@string.Join(",", kvp.Value): @(string.IsNullOrEmpty(kvp.Key) ? "inga tider" : kvp.Key)</div>
+                                        }
+                                    }
+                                }
+                                else
+                                {
+                                    <span> — @FigTiming(fig)</span>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+
+            // QR-1 — Förutsättningar (token, public). On the card.
+            <div class="qr-card">
+                <img src="@item.Qr1Url" alt="QR Förutsättningar" style="width:150px;height:150px" />
+                <div style="font-size:0.85em;color:#333;margin-top:4px;font-weight:bold">Förutsättningar — skanna här</div>
+            </div>
+
+            // QR-2 — Resultatregistrering (login required). Own page; cut out + place by targets.
+            <div class="qr-cut">
+                <div style="font-size:1.1em;font-weight:bold;margin-bottom:8px">Station @item.Station — Resultatregistrering</div>
+                <img src="@item.Qr2Url" alt="QR Resultat" style="width:150px;height:150px" />
+                <div style="font-size:0.85em;color:#333;margin-top:4px">Klipp ut och placera vid målgrupperna</div>
+                <div style="font-size:0.8em;color:#666">Kräver inloggning</div>
+            </div>
+        }
     </div>
 }
 <script>

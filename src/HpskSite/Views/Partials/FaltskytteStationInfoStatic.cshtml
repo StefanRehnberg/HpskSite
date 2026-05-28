@@ -1,16 +1,25 @@
 @using HpskSite.CompetitionTypes.Faltskytte.Models
 @using System.Globalization
 @*
-    Read-only Förutsättningar + static per-figure visibility timeline for one
-    Fältskytte station. Rendered server-side by StationPage.cshtml's ?t=<token>
-    branch (QR-1 on the station card) — public, no login, non-enumerable.
-    Bands use inline styles (no top-level <style> in a partial — see project
-    notes) and InvariantCulture percentages (CSS needs '.' not ',').
+    QR-1 landing page (Förutsättningar). Mirrors the printed station card layout
+    (same CSS class names + HTML shape as FaltskyttePrintStationCards.cshtml) but
+    adds per-figure timeline bars. The print card hides figures behind the QR;
+    this IS the QR landing, so the bars + figures ARE what the shooter wants.
+    No QR codes here.
+
+    Multi-class behaviour (added 2026-05-28): the Förutsättningar table renders
+    one clickable row per weapon class, and one Målgrupper panel per class is
+    rendered server-side (others hidden). Clicking a row switches which panel is
+    visible. Single-class configs skip the click affordance entirely.
+
+    Rendered server-side from StationPage.cshtml's ?t=<token> branch (public, no
+    login). Styles injected via JS at runtime (top-level <style> in partials is a
+    known 500-trap — see razor-partial-styles memory).
 *@
 @functions {
-    // C# port of tmrFigBands (FaltskytteStationEntry.cshtml): static visible windows
-    // in [0, shootSec]. Each band is int[]{from, to} (plain arrays — named tuples are
-    // fragile inside Razor @@functions/ternaries).
+    // Static visible windows in [0, shootSec] for one figure. Mirrors tmrFigBands
+    // in FaltskytteStationEntry.cshtml. Plain int[]{from,to} arrays — named tuples
+    // are fragile inside Razor @functions/ternaries.
     static List<int[]> FigBands(FaltskytteFigure fig, int shootSec)
     {
         var bands = new List<int[]>();
@@ -33,134 +42,312 @@
             if (reappear > 0 && reappear < shootSec) bands.Add(new[] { reappear, shootSec });
             return bands;
         }
-        bands.Add(new[] { 0, shootSec }); // Fast / static → visible the whole time
+        bands.Add(new[] { 0, shootSec }); // Fast/static → visible whole time
         return bands;
     }
+
     static string Pct(double v) => v.ToString("0.##", CultureInfo.InvariantCulture);
+
+    // Mirrors faltDescribeBehavior in _FaltskytteConfiguratorScript.cshtml.
     static string FigTiming(FaltskytteFigure fig)
     {
         var b = fig.Behavior ?? "Fast";
-        if (b == "Framsvängande") return $"Framsvängande (fram {fig.DelayBeforeShowSec ?? 0} s, syns {fig.ShowTimeSec ?? 8} s)";
-        if (b == "Bortsvängande") { var r = fig.ReappearSec ?? 0; return $"Bortsvängande (ut {fig.HideAfterSec ?? 8} s{(r > 0 ? $", åter {r} s" : "")})"; }
+        if (b == "Framsvängande")
+            return $"Framsvängande, fram {fig.DelayBeforeShowSec ?? 0} s, syns {fig.ShowTimeSec ?? 8} s";
+        if (b == "Bortsvängande")
+        {
+            var r = fig.ReappearSec ?? 0;
+            return $"Bortsvängande, ut {fig.HideAfterSec ?? 8} s" + (r > 0 ? $", åter {r} s" : "");
+        }
         return b;
+    }
+
+    static readonly string[] WcOrder = new[] { "C", "B", "A", "A_Opt", "R", "L", "M" };
+    static string OrderKey(string wc)
+    {
+        var i = Array.IndexOf(WcOrder, wc);
+        return (i < 0 ? "99" : i.ToString("D2")) + "_" + wc;
     }
 }
 @{
     var competitionName = ViewData["CompetitionName"] as string ?? "";
     var stationNumber = (int)(ViewData["StationNumber"] ?? 0);
-    var scoringMode = ViewData["ScoringMode"] as string ?? "Normal";
     var stationsByWc = ViewData["StationsByWeaponClass"] as Dictionary<string, FaltskytteStationConfig> ?? new();
-    var wcOrder = new[] { "C", "B", "A", "A_Opt", "R", "L", "M" };
-    var orderedWcs = stationsByWc.Keys
-        .OrderBy(k => { var i = Array.IndexOf(wcOrder, k); return i < 0 ? 99 : i; })
-        .ToList();
-    var firstWc = orderedWcs.FirstOrDefault();
-    var primary = firstWc != null ? stationsByWc[firstWc] : null;
-    var shootSec = primary?.ShootingTimeSec ?? 0;
-    var anyMin = stationsByWc.Values.Any(s => s.MinShotsPerFigure > 0);
-    var anyMaxLimited = stationsByWc.Values.Any(s => s.MaxShotsPerFigure < 6);
-    // Compact mode (printed station card): Förutsättningar only — figures + timeline
-    // are revealed only when scanning the QR, never on the printed card.
+    // Legacy CompactNoTargets — kept for any caller that still passes it. The
+    // station card print (FaltskyttePrintStationCards.cshtml) no longer uses
+    // this partial; nothing live passes the flag, but harmless to keep.
     var compact = ViewData["CompactNoTargets"] is true;
+    var classKeys = stationsByWc.Keys.OrderBy(k => OrderKey(k)).ToList();
+    var firstWc = classKeys.FirstOrDefault();
+    var primary = firstWc != null ? stationsByWc[firstWc] : null;
+    var isCombined = classKeys.Count > 1;
+    var anyMin = classKeys.Any(c => stationsByWc[c].MinShotsPerFigure > 0);
+    var anyMaxLimited = classKeys.Any(c => stationsByWc[c].MaxShotsPerFigure < 6);
 }
 
-<div class="container py-3" style="max-width:820px">
-    <h3 class="border-bottom pb-2 mb-3">
-        <i class="bi bi-geo-alt-fill me-2"></i>Station @stationNumber@(string.IsNullOrEmpty(competitionName) ? "" : " — " + competitionName)
-    </h3>
-
-    @if (primary == null)
+<div class="fss-root">
+@if (primary == null)
+{
+    <div class="fss-warn-note">Stationens förutsättningar kunde inte läsas.</div>
+}
+else
+{
+    // Header
+    if (isCombined)
     {
-        <div class="alert alert-warning">Stationens förutsättningar kunde inte läsas.</div>
+        <h1 class="fss-h1">Station @stationNumber@(string.IsNullOrEmpty(competitionName) ? "" : " — " + competitionName)</h1>
     }
     else
     {
-        <div class="card mb-3">
-            <div class="card-header fw-bold py-2">Förutsättningar</div>
-            <div class="card-body p-0">
-                <table class="table table-sm mb-0 align-middle">
-                    <thead class="table-light">
-                        <tr>
-                            <th>Vapenklass</th>
-                            <th>Skjuttid</th>
-                            <th>Utgångsläge</th>
-                            <th>Vapenläge</th>
-                            <th>Stödhand</th>
-                            @if (anyMin) { <th>Min träff/fig</th> }
-                            @if (anyMaxLimited) { <th>Max träff/fig</th> }
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var wc in orderedWcs)
-                        {
-                            var st = stationsByWc[wc];
-                            <tr>
-                                <td class="fw-bold">@wc</td>
-                                <td>@st.ShootingTimeSec s</td>
-                                <td>@st.ShooterStartPosition</td>
-                                <td>@st.WeaponStartPosition</td>
-                                <td>@st.SupportHand</td>
-                                @if (anyMin) { <td>@(st.MinShotsPerFigure > 0 ? st.MinShotsPerFigure.ToString() : "—")</td> }
-                                @if (anyMaxLimited) { <td>@(st.MaxShotsPerFigure < 6 ? st.MaxShotsPerFigure.ToString() : "—")</td> }
-                            </tr>
-                        }
-                    </tbody>
-                </table>
-            </div>
-        </div>
+        <h1 class="fss-h1">Station @stationNumber — Vapenklass @firstWc@(string.IsNullOrEmpty(competitionName) ? "" : " — " + competitionName)</h1>
+    }
 
-        @if (compact)
+    // Förutsättningar
+    <div class="fss-rules">
+        @if (isCombined)
         {
-            <p class="text-muted small mb-0"><i class="bi bi-qr-code-scan me-1"></i>Skanna QR-koden vid stationen för figurer och tidslinje.</p>
-        }
-        else if (primary.IsShootOffOnly)
-        {
-            <div class="alert alert-info"><i class="bi bi-bullseye me-2"></i>Station @stationNumber är en särskjutningsstation.</div>
+            var showTraffCol = anyMin || anyMaxLimited;
+            <table class="fss-rules-tbl">
+                <thead>
+                    <tr>
+                        <th>Vapen</th>
+                        <th>Tid</th>
+                        <th>Läge</th>
+                        <th>Stödhand</th>
+                        @if (showTraffCol) { <th>Träff/fig</th> }
+                    </tr>
+                </thead>
+                <tbody>
+                @for (var i = 0; i < classKeys.Count; i++)
+                {
+                    var c = classKeys[i];
+                    var st = stationsByWc[c];
+                    var activeAttr = i == 0 ? "fss-row-active" : "";
+                    // Per-row cell content — inlined (no local functions) since
+                    // local fns inside @if bodies can confuse Razor's parser.
+                    var weapon = st.WeaponStartPosition ?? "";
+                    var weaponShort = weapon == "45 grader" ? "45"
+                        : weapon == "Riktning tillåten" ? "Riktning"
+                        : weapon;
+                    var stod = string.Equals(st.SupportHand, "Ej stödhand", StringComparison.OrdinalIgnoreCase) ? "Nej" : "Ja";
+                    var traffParts = new List<string>();
+                    if (st.MaxShotsPerFigure < 6) { traffParts.Add($"max {st.MaxShotsPerFigure}"); }
+                    if (st.MinShotsPerFigure > 0) { traffParts.Add($"min {st.MinShotsPerFigure}"); }
+                    var traffStr = traffParts.Count > 0 ? string.Join(", ", traffParts) : "—";
+                    <tr class="fss-row-clickable @activeAttr" data-fss-wc-row="@c">
+                        <td><strong>@c</strong></td>
+                        <td>@st.ShootingTimeSec</td>
+                        <td>@st.ShooterStartPosition · @weaponShort</td>
+                        <td>@stod</td>
+                        @if (showTraffCol) { <td>@traffStr</td> }
+                    </tr>
+                }
+                </tbody>
+            </table>
+            <div class="fss-row-hint">Tryck på en rad för att se figurer och tider för den vapenklassen.</div>
         }
         else
         {
-            if (orderedWcs.Count > 1)
+            <span>
+                <strong>Skjuttid:</strong> @primary.ShootingTimeSec sek
+                &nbsp;|&nbsp; <strong>Utgångsläge:</strong> @primary.ShooterStartPosition
+                &nbsp;|&nbsp; <strong>Vapenläge:</strong> @primary.WeaponStartPosition
+                &nbsp;|&nbsp; <strong>@primary.SupportHand</strong>
+            </span>
+            if (primary.MinShotsPerFigure > 0)
             {
-                <p class="text-muted small mb-2"><i class="bi bi-info-circle me-1"></i>Tidslinjen nedan visar vapenklass <strong>@firstWc</strong> (@shootSec s skjuttid). Andra klasser kan ha annan skjuttid — se tabellen ovan.</p>
+                <br />
+                <span><strong>Min träff/fig:</strong> @primary.MinShotsPerFigure</span>
             }
-
-            foreach (var tg in primary.TargetGroups)
+            if (primary.MaxShotsPerFigure < 6)
             {
-                var letter = (char)(64 + tg.Group);
-                <div class="card mb-2">
-                    <div class="card-header py-2 fw-bold">Målgrupp @letter</div>
-                    <div class="card-body">
+                <span>&nbsp;|&nbsp; <strong>Max träff/fig:</strong> @primary.MaxShotsPerFigure</span>
+            }
+        }
+    </div>
+
+    if (compact)
+    {
+        <p class="fss-muted">Skanna QR-koden vid stationen för figurer och tidslinje.</p>
+    }
+    else if (primary.IsShootOffOnly)
+    {
+        <div class="fss-info-note">Station @stationNumber är en särskjutningsstation.</div>
+    }
+    else
+    {
+        // One panel per weapon class. All rendered server-side; only the active
+        // one is visible. Clicking a row in the table above switches panels via
+        // the inline script at the bottom.
+        for (var ci = 0; ci < classKeys.Count; ci++)
+        {
+            var wc = classKeys[ci];
+            var station = stationsByWc[wc];
+            var shootSec = station.ShootingTimeSec;
+            var isActive = ci == 0;
+            <div class="fss-panel" data-fss-wc-panel="@wc" @(isActive ? "" : "hidden")>
+                @if (isCombined)
+                {
+                    <div class="fss-panel-label">
+                        <strong>Vapenklass @wc</strong> — @shootSec s skjuttid
+                    </div>
+                }
+
+                @for (var tgIdx = 0; tgIdx < station.TargetGroups.Count; tgIdx++)
+                {
+                    var tg = station.TargetGroups[tgIdx];
+                    var letter = (char)(64 + tg.Group);
+                    <div class="fss-tg">
+                        <h3 class="fss-tg-h3">Målgrupp @letter</h3>
                         @if (!string.IsNullOrWhiteSpace(tg.Description))
                         {
-                            <p class="fst-italic small mb-2">@tg.Description</p>
+                            <div class="fss-tg-desc">@Html.Raw(System.Net.WebUtility.HtmlEncode(tg.Description).Replace("\n", "<br>"))</div>
                         }
                         @if (!string.IsNullOrWhiteSpace(tg.ImageUrl))
                         {
-                            <div class="text-center mb-2"><img src="@tg.ImageUrl" alt="Målgrupp @letter" style="max-width:80%;max-height:200px;border-radius:6px" /></div>
+                            <div class="fss-tg-img"><img src="@tg.ImageUrl" alt="Målgrupp @letter" /></div>
                         }
-                        @foreach (var fig in tg.Figures)
+                        @for (var fIdx = 0; fIdx < tg.Figures.Count; fIdx++)
                         {
+                            var fig = tg.Figures[fIdx];
                             var bands = shootSec > 0 ? FigBands(fig, shootSec) : new List<int[]>();
-                            <div class="d-flex align-items-center gap-2 mb-1">
-                                <div style="width:170px;flex-shrink:0;font-size:.8rem;line-height:1.15">
-                                    <strong>Fig @fig.FigureNumber</strong>@(fig.IsPoangmal ? " ★" : "")@(fig.TargetsPerFigure > 1 ? $" ({fig.TargetsPerFigure} mål)" : "")
-                                    <div class="text-muted">@FigTiming(fig)</div>
-                                </div>
-                                <div style="flex-grow:1;position:relative;height:18px;background:#e9ecef;border-radius:3px;overflow:hidden">
-                                    @foreach (var band in bands)
+                            <div class="fss-fig">
+                                @* Image slot is always rendered (even empty) so timeline bars
+                                   align across all figures, whether they have an image or not. *@
+                                <div class="fss-fig-img-slot">
+                                    @if (!string.IsNullOrWhiteSpace(fig.ImageUrl))
                                     {
-                                        var left = (double)band[0] / shootSec * 100;
-                                        var width = (double)(band[1] - band[0]) / shootSec * 100;
-                                        <div style="position:absolute;top:0;bottom:0;left:@(Pct(left))%;width:@(Pct(width))%;background:#198754"></div>
+                                        <img src="@fig.ImageUrl" alt="" />
+                                    }
+                                </div>
+                                <div class="fss-fig-info">
+                                    <div class="fss-fig-meta">
+                                        <strong>Figur @fig.FigureNumber</strong>
+                                        @if (fig.IsPoangmal)
+                                        {
+                                            <span class="fss-pm-badge">Poängräkning</span>
+                                        }
+                                        <span> — @FigTiming(fig)</span>
+                                    </div>
+                                    @if (shootSec > 0)
+                                    {
+                                        <div class="fss-fig-bar">
+                                            @foreach (var band in bands)
+                                            {
+                                                var left = (double)band[0] / shootSec * 100;
+                                                var width = (double)(band[1] - band[0]) / shootSec * 100;
+                                                <span style="left:@(Pct(left))%;width:@(Pct(width))%"></span>
+                                            }
+                                        </div>
                                     }
                                 </div>
                             </div>
                         }
                     </div>
-                </div>
-            }
+                }
 
-            <p class="text-muted small mt-2">★ = poängmål. Gröna fält visar när figuren är synlig under skjuttiden (0–@shootSec s).</p>
+                @if (shootSec > 0)
+                {
+                    <p class="fss-legend">Gröna fält visar när figuren är synlig under skjuttiden (0–@shootSec s).</p>
+                }
+            </div>
         }
     }
+}
 </div>
+
+<script>
+// Inject styles at runtime — top-level <style> in partials is a known 500-trap
+// in this project (see razor-partial-styles memory). Idempotent: safe if the
+// partial is rendered multiple times in a single page.
+// Colors use Bootstrap CSS variables so the layout works in dark mode too.
+(function injectFssStyles() {
+    if (document.getElementById('fss-styles')) return;
+    var css = [
+        // Page fits inside the Master layout (so the site nav + footer span the
+        // same width). The Förutsättningar table is kept compact via abbreviated
+        // headers + merged Läge/Träff-fig columns, so the whole layout fits in
+        // a phone viewport without horizontal scroll. Desktop caps at 820px.
+        '.fss-root { max-width: 820px; margin: 0 auto; padding: 16px 12px; font-family: sans-serif; color: var(--bs-body-color); }',
+        '.fss-h1 { font-size: 1.5em; border-bottom: 3px solid var(--bs-emphasis-color); padding-bottom: 8px; margin: 0 0 12px; }',
+        '.fss-rules { background: var(--bs-tertiary-bg); padding: 12px; border-radius: 6px; margin: 12px 0; font-size: 0.95em; }',
+        '.fss-rules-tbl { border-collapse: collapse; margin-top: 4px; font-size: 0.95em; width: 100%; }',
+        '.fss-rules-tbl th, .fss-rules-tbl td { padding: 5px 12px 5px 8px; text-align: left; }',
+        '.fss-rules-tbl th { font-weight: 600; border-bottom: 1px solid var(--bs-border-color); }',
+        '.fss-rules-tbl td { border-bottom: 1px solid var(--bs-border-color); }',
+        '.fss-rules-tbl tr:last-child td { border-bottom: none; }',
+        // Multi-class: clickable rows + active highlight + hint
+        '.fss-row-clickable { cursor: pointer; transition: background 0.12s ease-in; }',
+        '.fss-row-clickable:hover { background: var(--bs-secondary-bg); }',
+        '.fss-row-clickable.fss-row-active { background: var(--bs-primary-bg-subtle, rgba(13,110,253,0.15)); }',
+        '.fss-row-clickable.fss-row-active td { font-weight: 600; }',
+        '.fss-row-hint { margin-top: 8px; font-size: 0.85em; color: var(--bs-secondary-color); font-style: italic; }',
+        '.fss-panel-label { font-size: 0.95em; margin: 12px 0 4px; color: var(--bs-secondary-color); }',
+        '.fss-panel-label strong { color: var(--bs-body-color); }',
+        '.fss-tg { border: 2px solid var(--bs-border-color); border-radius: 8px; padding: 15px; margin: 12px 0 18px; background: transparent; }',
+        '.fss-tg-h3 { margin: 0 0 10px; font-size: 1.15em; }',
+        '.fss-tg-desc { font-style: italic; margin: 10px 0; font-size: 0.95em; line-height: 1.4; }',
+        '.fss-tg-img { text-align: center; margin: 10px 0; }',
+        '.fss-tg-img img { max-width: 80%; max-height: 200px; border-radius: 6px; }',
+        '.fss-fig { margin: 8px 0; padding: 8px; background: var(--bs-tertiary-bg); border-radius: 4px; display: flex; align-items: flex-start; gap: 12px; }',
+        '.fss-fig-img-slot { width: 50px; flex-shrink: 0; }',
+        '.fss-fig-img-slot img { width: 50px; height: 50px; border-radius: 4px; object-fit: cover; }',
+        '.fss-fig-info { flex: 1; min-width: 0; }',
+        '.fss-fig-meta { margin-bottom: 6px; }',
+        '.fss-fig-bar { position: relative; height: 14px; background: var(--bs-secondary-bg); border-radius: 3px; overflow: hidden; }',
+        '.fss-fig-bar > span { position: absolute; top: 0; bottom: 0; background: #198754; }',
+        '.fss-pm-badge { background: #ffc107; color: #000; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 0.85em; margin-left: 4px; }',
+        '.fss-legend { text-align: center; font-size: 0.85em; color: var(--bs-secondary-color); margin-top: 16px; }',
+        '.fss-muted { color: var(--bs-secondary-color); font-size: 0.9em; margin: 0 0 8px; }',
+        '.fss-info-note { background: var(--bs-info-bg-subtle, rgba(13,202,240,0.15)); color: var(--bs-info-text-emphasis, inherit); border: 1px solid var(--bs-info-border-subtle, var(--bs-border-color)); border-radius: 6px; padding: 12px; margin: 12px 0; }',
+        '.fss-warn-note { background: var(--bs-warning-bg-subtle, rgba(255,193,7,0.15)); color: var(--bs-warning-text-emphasis, inherit); border: 1px solid var(--bs-warning-border-subtle, var(--bs-border-color)); border-radius: 6px; padding: 12px; margin: 12px 0; }'
+    ].join('\n');
+    var el = document.createElement('style');
+    el.id = 'fss-styles';
+    el.textContent = css;
+    document.head.appendChild(el);
+})();
+
+// Wire the row-click → panel-switch + remember the last-picked class across
+// QR scans (localStorage). No-op for single-class (no clickable rows).
+(function wireFssRowSwitching() {
+    var STORAGE_KEY = 'hpsk_fss_last_wc';
+    var rows = document.querySelectorAll('.fss-rules-tbl [data-fss-wc-row]');
+    if (rows.length < 2) return;
+
+    function hasWc(wc) {
+        for (var i = 0; i < rows.length; i++) {
+            if (rows[i].getAttribute('data-fss-wc-row') === wc) return true;
+        }
+        return false;
+    }
+
+    function activateWc(wc) {
+        if (!hasWc(wc)) return false; // silently no-op when the remembered class
+                                       // isn't configured here — keep the
+                                       // server-rendered first-row default.
+        rows.forEach(function (r) {
+            r.classList.toggle('fss-row-active', r.getAttribute('data-fss-wc-row') === wc);
+        });
+        document.querySelectorAll('[data-fss-wc-panel]').forEach(function (p) {
+            p.hidden = p.getAttribute('data-fss-wc-panel') !== wc;
+        });
+        return true;
+    }
+
+    rows.forEach(function (row) {
+        row.addEventListener('click', function () {
+            var wc = row.getAttribute('data-fss-wc-row');
+            activateWc(wc);
+            try { localStorage.setItem(STORAGE_KEY, wc); } catch (e) { /* private mode, quota — fine */ }
+        });
+    });
+
+    // On load: if a remembered class is in this station's config, default to it.
+    // Otherwise the server's first-row-active stays.
+    try {
+        var saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) activateWc(saved);
+    } catch (e) { /* ignore */ }
+})();
+</script>

@@ -1,5 +1,6 @@
 ﻿@using Umbraco.Cms.Web.Common.PublishedModels
 @using Newtonsoft.Json
+@using Microsoft.AspNetCore.DataProtection
 @using HpskSite.CompetitionTypes.Faltskytte.Models
 @using HpskSite.CompetitionTypes.Faltskytte.Services
 @inject Umbraco.Cms.Core.Services.IMemberService MemberService
@@ -33,6 +34,26 @@
     Dictionary<string, FaltskytteStationConfig>? infoStations = null;
     if (isInfoToken)
     {
+        // Defensive string read — same pattern as CompetitionUrlProvider.ReadScopeValue.
+        // Umbraco's typed Value<string>() routes through FlexibleDropdownPropertyValueConverter
+        // which JSON-parses the stored value; plain-string values (scoringMode="Normal",
+        // competitionType="Faltskytte", etc) crash there. Untyped Value() can return
+        // string OR string[] OR IEnumerable<string> depending on storage shape.
+        string SafeStr(Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent node, string alias)
+        {
+            try
+            {
+                var raw = node.Value(alias);
+                return raw switch
+                {
+                    string s => s,
+                    string[] arr => arr.FirstOrDefault() ?? "",
+                    IEnumerable<string> e => e.FirstOrDefault() ?? "",
+                    _ => raw?.ToString() ?? ""
+                };
+            }
+            catch { return ""; }
+        }
         try
         {
             var raw = DataProtection.CreateProtector("Faltskytte.StationInfoQr.v1").Unprotect(tToken!);
@@ -40,10 +61,11 @@
             if (parts.Length == 2 && int.TryParse(parts[0], out var infoCompId) && int.TryParse(parts[1], out infoStation))
             {
                 var infoNode = Umbraco.Content(infoCompId);
-                if (infoNode != null && infoNode.ContentType.Alias == "competition"
-                    && (infoNode.Value<string>("competitionType") ?? "") is "Faltskytte" or "MagnumFalt")
+                if (infoNode != null
+                    && infoNode.ContentType.Alias == "competition"
+                    && SafeStr(infoNode, "competitionType") is "Faltskytte" or "MagnumFalt")
                 {
-                    var cfg = FaltskytteConfigParser.Parse(infoNode.Value<string>("stationConfig") ?? "");
+                    var cfg = FaltskytteConfigParser.Parse(SafeStr(infoNode, "stationConfig"));
                     var byWc = new Dictionary<string, FaltskytteStationConfig>();
                     foreach (var kv in cfg.WeaponConfigs)
                     {
@@ -53,8 +75,10 @@
                     if (byWc.Count > 0)
                     {
                         infoStations = byWc;
-                        infoCompName = infoNode.Value<string>("competitionName") ?? infoNode.Name ?? "";
-                        infoScoringMode = infoNode.Value<string>("scoringMode") ?? "Normal";
+                        var n = SafeStr(infoNode, "competitionName");
+                        infoCompName = !string.IsNullOrEmpty(n) ? n : (infoNode.Name ?? "");
+                        var sm = SafeStr(infoNode, "scoringMode");
+                        infoScoringMode = !string.IsNullOrEmpty(sm) ? sm : "Normal";
                         infoTokenValid = true;
                     }
                 }
