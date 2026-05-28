@@ -632,7 +632,7 @@ Each is a separate `WeaponClass` enum value (`A_M`, `A_P`, `A_G`) with 3 compete
 
 **Composer order pitfall**: `builder.UrlProviders().InsertBefore<DefaultUrlProvider, CompetitionUrlProvider>()` throws at startup — `DefaultUrlProvider` isn't in the collection yet at composer time. Use `Insert<CompetitionUrlProvider>()` (defaults to index 0 — runs first).
 
-**Pretty URLs cover all three host states** (club / krets / national), so the warning text on the wizard's club-mismatch banner ("Du måste gå till den allmänna administrationssidan…") is **honest today** but reflects a missing capability — there is no Competitions section on `RegionalAdminPanel` yet. Backlog item to add one.
+**Pretty URLs cover all three host states** (club / krets / national). The wizard's club-mismatch banner ("Du måste gå till den allmänna administrationssidan…") is now stale — RegionalAdminPanel got a Tävlingar sub-tab in 2026-05-28 mirroring the ClubAdminPanel one. Regional admins manage every competition in their region (both region-hosted via `regionalFederation` and club-hosted via `clubId` whose club lives in the region). The wizard / edit / advert-edit / springskytte-edit / delete-confirm / upload-file modals are included on `RegionalPage.cshtml` under `isRegionalAdmin`. `CompetitionAdminController.CopyCompetition` and `DeleteCompetition` now accept regional admins via the new `IsRegionalAdminForCompetition` helper; `CreateCompetition` already did via `GetManagedRegions()`. `GetCompetitionsList` already filtered comps to the regional admin's managed regions automatically.
 
 ### CompetitionController (Public + Admin endpoints)
 **Location:** `Controllers/CompetitionController.cs`
@@ -1013,6 +1013,7 @@ Navigate to **Members → Member Groups**:
 - **precisionStartList**: add `qualifyingResultsSnapshot` Textarea property (optional, label "Kvalresultat — frusna klasser (JSON)"). Stores the per-championship-class snapshot dict — each frozen class carries its own `FrozenAt`, `FrozenBy`, `ChecksumAtFreeze`, and ranked `QualifiedShooters` list inside the same blob. Without this property, freezing silently no-ops. Added 2026-05-21.
 - **finalsStartList**: add `perClassConfigData` Textarea property (optional, label "Per-klass-konfiguration (JSON)"). Stores the admin's per-championship-class skjutlag-assignment + cut overrides so they survive regeneration. Added 2026-05-21.
 - **finalsStartList**: add `startListContent` Textarea property (optional, label "Cachad HTML"). Mirrors the property on `precisionStartList`. Added 2026-05-21.
+- **competition**: add `resultListFile` Media Picker property (optional, label "Resultatlista"). Mirrors `invitationFile` — stores a PDF/Word result list uploaded for external competitions. Without it, the "Ladda upp resultatlista" button silently no-ops and the public "Resultatlista" card never renders. Added 2026-05-28.
 
 ### Finals Start List for Precision Competitions (2026-05-21)
 

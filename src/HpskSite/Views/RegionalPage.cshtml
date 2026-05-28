@@ -133,6 +133,15 @@
 {
     @Html.AntiForgeryToken()
     @await Html.PartialAsync("FeaturedItemsPicker")
+
+    @* Competition management modals for the Tävlingar sub-tab in RegionalAdminPanel *@
+    @await Html.PartialAsync("CompetitionWizardModal")
+    @await Html.PartialAsync("CompetitionAdvertModal")
+    @await Html.PartialAsync("CompetitionEditModal")
+    @await Html.PartialAsync("SpringskytteEditModal")
+    @await Html.PartialAsync("CompetitionAdvertEditModal")
+    @await Html.PartialAsync("UploadCompetitionFileModal")
+    @await Html.PartialAsync("CompetitionDeleteConfirmModal")
 }
 
 <div class="tab-content" id="regionPageTabContent">

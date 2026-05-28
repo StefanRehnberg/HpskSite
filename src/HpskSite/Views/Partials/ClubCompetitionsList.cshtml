@@ -114,10 +114,12 @@
                             }
 
                             // Past + internal + official result page → link to /resultat/
+                            // Past + external + uploaded result list → link directly to the file
                             // Else → /competition/xxxx
                             var compUrl = comp.Url();
                             var linkUrl = compUrl;
-                            var linkText = isPast ? "Visa" : "Visa";
+                            var linkText = "Visa";
+                            var linkTargetBlank = false;
 
                             if (isPast && !isExternal)
                             {
@@ -135,6 +137,18 @@
                                     // but the result page node hasn't been backfilled yet — link to the
                                     // competition page where the result modal serves the data.
                                     linkText = "Resultat";
+                                }
+                            }
+                            else if (isPast && isExternal)
+                            {
+                                IPublishedContent? extResultListFile = null;
+                                try { extResultListFile = comp.Value<IPublishedContent>("resultListFile"); }
+                                catch (ArgumentException) { }
+                                if (extResultListFile != null)
+                                {
+                                    linkUrl = extResultListFile.Url();
+                                    linkText = "Resultat";
+                                    linkTargetBlank = true;
                                 }
                             }
 
@@ -169,9 +183,18 @@
                                 </td>
                                 <td><span class="badge bg-@statusClass">@statusLabel</span></td>
                                 <td class="text-end">
-                                    <a href="@linkUrl" class="btn btn-sm btn-outline-primary">
-                                        <i class="bi bi-arrow-right me-1"></i>@linkText
-                                    </a>
+                                    @if (linkTargetBlank)
+                                    {
+                                        <a href="@linkUrl" class="btn btn-sm btn-outline-primary" target="_blank" rel="noopener">
+                                            <i class="bi bi-arrow-right me-1"></i>@linkText
+                                        </a>
+                                    }
+                                    else
+                                    {
+                                        <a href="@linkUrl" class="btn btn-sm btn-outline-primary">
+                                            <i class="bi bi-arrow-right me-1"></i>@linkText
+                                        </a>
+                                    }
                                 </td>
                             </tr>
                         }

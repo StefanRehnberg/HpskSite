@@ -101,6 +101,24 @@
         // Invalid invitation file path - ignore and continue
     }
     var hasInvitation = invitationFile != null;
+
+    IPublishedContent? resultListFile = null;
+    try
+    {
+        resultListFile = Model.Value<IPublishedContent>("resultListFile");
+    }
+    catch (ArgumentException)
+    {
+        // Invalid result list file path - ignore and continue
+    }
+    var hasResultList = resultListFile != null;
+
+    // Smart defaults for the collapsible Inbjudan / Resultatlista cards:
+    // past comp → Resultatlista open, Inbjudan closed; otherwise → Inbjudan open, Resultatlista closed.
+    var compEffectiveEnd = (competitionEndDate.HasValue && competitionEndDate.Value.Year > 1900 && competitionEndDate.Value.Date >= competitionDate.Date)
+        ? competitionEndDate.Value.Date
+        : competitionDate.Date;
+    var competitionIsPast = compEffectiveEnd < DateTime.Today;
     // Get multiple shooting classes support - handle both string array and comma-separated string
     var shootingClassIdsRaw = Model.Value("shootingClassIds");
     var shootingClassIds = "";
@@ -787,48 +805,145 @@
 				</div>
 			}
 
+			@if (hasInvitation || hasResultList)
+			{
+				<style>
+					.collapse-chevron { transition: transform .2s ease; }
+					.btn-link.collapsed .collapse-chevron { transform: rotate(-90deg); }
+				</style>
+			}
+
 			@* ======================================== Invitation File Display (Both Internal & External) ======================================== *@
 			@if (hasInvitation && invitationFile != null)
 			{
+				var invitationOpen = !competitionIsPast;
 				<div class="card mb-4">
-					<div class="card-header" style="background-color: var(--bs-tertiary-bg);">
-						<h3 class="card-title h5 mb-0">
-							<i class="bi bi-file-earmark-pdf me-2"></i>Inbjudan
-							@if (isExternal)
-							{
-								<span class="badge bg-info ms-2">Extern tävling</span>
-							}
-						</h3>
+					<div class="card-header p-0" style="background-color: var(--bs-tertiary-bg);">
+						<button class="btn btn-link w-100 text-start d-flex align-items-center justify-content-between text-decoration-none p-3 @(invitationOpen ? "" : "collapsed")"
+								type="button"
+								data-bs-toggle="collapse"
+								data-bs-target="#invitationCollapse"
+								aria-expanded="@(invitationOpen ? "true" : "false")"
+								aria-controls="invitationCollapse"
+								style="color: inherit;">
+							<span class="h5 mb-0">
+								<i class="bi bi-file-earmark-pdf me-2"></i>Inbjudan
+								@if (isExternal)
+								{
+									<span class="badge bg-info ms-2">Extern tävling</span>
+								}
+							</span>
+							<i class="bi bi-chevron-down collapse-chevron"></i>
+						</button>
 					</div>
-					<div class="card-body">
-						<div class="mb-3">
-							<a href="@invitationFile.Url()" class="btn btn-primary" target="_blank" download>
-								<i class="bi bi-download me-1"></i>Ladda ner inbjudan
-							</a>
-							<small class="text-muted ms-2">@invitationFile.Name</small>
+					<div id="invitationCollapse" class="collapse @(invitationOpen ? "show" : "")">
+						<div class="card-body">
+							<div class="mb-3">
+								<a href="@invitationFile.Url()" class="btn btn-primary" target="_blank" download>
+									<i class="bi bi-download me-1"></i>Ladda ner inbjudan
+								</a>
+								<small class="text-muted ms-2">@invitationFile.Name</small>
+							</div>
+							@if (invitationFile.Url().EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+							{
+								<div class="ratio ratio-4x3" style="min-height: 600px;">
+									<iframe src="@invitationFile.Url()"
+											frameborder="0"
+											style="border: 1px solid #ddd; border-radius: 4px;"
+											title="Tävlingsinbjudan">
+									</iframe>
+								</div>
+								<p class="text-muted small mt-2">
+									<i class="bi bi-info-circle"></i> PDF-förhandsgranskning. Om den inte visas korrekt, ladda ner filen ovan.
+								</p>
+							}
+							else
+							{
+								<div class="alert alert-info">
+									<i class="bi bi-file-earmark-word me-1"></i>
+									Dokumentet är inte en PDF-fil och kan inte förhandsgranskas. Klicka på "Ladda ner inbjudan" ovan.
+								</div>
+							}
 						</div>
-						@if (invitationFile.Url().EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
-						{
-							<div class="ratio ratio-4x3" style="min-height: 600px;">
-								<iframe src="@invitationFile.Url()"
-										frameborder="0"
-										style="border: 1px solid #ddd; border-radius: 4px;"
-										title="Tävlingsinbjudan">
-								</iframe>
-							</div>
-							<p class="text-muted small mt-2">
-								<i class="bi bi-info-circle"></i> PDF-förhandsgranskning. Om den inte visas korrekt, ladda ner filen ovan.
-							</p>
-						}
-						else
-						{
-							<div class="alert alert-info">
-								<i class="bi bi-file-earmark-word me-1"></i>
-								Dokumentet är inte en PDF-fil och kan inte förhandsgranskas. Klicka på "Ladda ner inbjudan" ovan.
-							</div>
-						}
 					</div>
 				</div>
+			}
+
+			@* ======================================== Result List File Display (External only) ======================================== *@
+			@if (hasResultList && resultListFile != null)
+			{
+				var resultListOpen = competitionIsPast;
+				<div class="card mb-4" id="resultatCard">
+					<div class="card-header p-0" style="background-color: var(--bs-tertiary-bg);">
+						<button class="btn btn-link w-100 text-start d-flex align-items-center justify-content-between text-decoration-none p-3 @(resultListOpen ? "" : "collapsed")"
+								type="button"
+								data-bs-toggle="collapse"
+								data-bs-target="#resultListCollapse"
+								aria-expanded="@(resultListOpen ? "true" : "false")"
+								aria-controls="resultListCollapse"
+								style="color: inherit;">
+							<span class="h5 mb-0">
+								<i class="bi bi-file-earmark-bar-graph me-2"></i>Resultatlista
+								@if (isExternal)
+								{
+									<span class="badge bg-info ms-2">Extern tävling</span>
+								}
+							</span>
+							<i class="bi bi-chevron-down collapse-chevron"></i>
+						</button>
+					</div>
+					<div id="resultListCollapse" class="collapse @(resultListOpen ? "show" : "")">
+						<div class="card-body">
+							<div class="mb-3">
+								<a href="@resultListFile.Url()" class="btn btn-primary" target="_blank" download>
+									<i class="bi bi-download me-1"></i>Ladda ner resultatlista
+								</a>
+								<small class="text-muted ms-2">@resultListFile.Name</small>
+							</div>
+							@if (resultListFile.Url().EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+							{
+								<div class="ratio ratio-4x3" style="min-height: 600px;">
+									<iframe src="@resultListFile.Url()"
+											frameborder="0"
+											style="border: 1px solid #ddd; border-radius: 4px;"
+											title="Resultatlista">
+									</iframe>
+								</div>
+								<p class="text-muted small mt-2">
+									<i class="bi bi-info-circle"></i> PDF-förhandsgranskning. Om den inte visas korrekt, ladda ner filen ovan.
+								</p>
+							}
+							else
+							{
+								<div class="alert alert-info">
+									<i class="bi bi-file-earmark-word me-1"></i>
+									Dokumentet är inte en PDF-fil och kan inte förhandsgranskas. Klicka på "Ladda ner resultatlista" ovan.
+								</div>
+							}
+						</div>
+					</div>
+				</div>
+				<script>
+					(function () {
+						function openResultList() {
+							var el = document.getElementById('resultListCollapse');
+							if (!el) return;
+							var inst = bootstrap.Collapse.getOrCreateInstance(el, { toggle: false });
+							inst.show();
+							var card = document.getElementById('resultatCard');
+							if (card && card.scrollIntoView) {
+								card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+							}
+						}
+						if (window.location.hash === '#resultat') {
+							document.addEventListener('DOMContentLoaded', openResultList);
+							if (document.readyState !== 'loading') openResultList();
+						}
+						window.addEventListener('hashchange', function () {
+							if (window.location.hash === '#resultat') openResultList();
+						});
+					})();
+				</script>
 			}
 
 		</div>

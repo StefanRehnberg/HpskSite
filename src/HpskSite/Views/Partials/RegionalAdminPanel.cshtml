@@ -118,6 +118,12 @@
             </button>
         </li>
         <li class="nav-item" role="presentation">
+            <button class="nav-link" id="regionAdminCompetitions-tab" data-bs-toggle="tab" data-bs-target="#regionAdminCompetitionsTab" type="button"
+                    data-region-code="@(ViewBag.regionCode as string ?? "")">
+                <i class="bi bi-trophy me-2"></i>Tävlingar
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
             <button class="nav-link" id="regionSettings-tab" data-bs-toggle="tab" data-bs-target="#regionSettingsTab" type="button">
                 <i class="bi bi-gear me-2"></i>Inställningar
             </button>
@@ -164,6 +170,57 @@
                 <div class="text-center py-4">
                     <div class="spinner-border" role="status">
                         <span class="visually-hidden">Laddar händelser...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Competitions Sub-Tab -->
+        <div class="tab-pane fade" id="regionAdminCompetitionsTab">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5>Kretstävlingar</h5>
+                <button class="btn btn-primary" onclick="showCreateRegionCompetitionModal()">
+                    <i class="bi bi-plus-circle me-2"></i>Ny Tävling
+                </button>
+            </div>
+
+            <!-- Filter Section -->
+            <div class="card mb-3">
+                <div class="card-body">
+                    <div class="row g-3 align-items-end">
+                        <div class="col-md-3">
+                            <label for="regionCompYearFilter" class="form-label">År</label>
+                            <select class="form-select" id="regionCompYearFilter" onchange="onRegionCompYearFilterChange()">
+                                <!-- Populated by JavaScript -->
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label for="regionCompTypeFilter" class="form-label">Tävlingstyp</label>
+                            <select class="form-select" id="regionCompTypeFilter" onchange="onRegionCompTypeFilterChange()">
+                                <option value="">Alla typer</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="regionCompShowCompleted" onchange="onRegionCompShowCompletedChange()">
+                                <label class="form-check-label" for="regionCompShowCompleted">
+                                    Visa avslutade tävlingar
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <button class="btn btn-outline-secondary w-100" onclick="clearRegionCompFilters()">
+                                <i class="bi bi-x-circle me-1"></i>Rensa filter
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="regionAdminCompetitionsTableContainer">
+                <div class="text-center py-4">
+                    <div class="spinner-border" role="status">
+                        <span class="visually-hidden">Laddar tävlingar...</span>
                     </div>
                 </div>
             </div>
@@ -880,6 +937,286 @@
             alert('Fel vid borttagning av bild.');
         });
     };
+})();
+</script>
+
+@* ============================================================
+   Tävlingar sub-tab — admin of competitions in the region.
+   Reuses CompetitionWizardModal / CompetitionEditModal / CompetitionAdvertEditModal
+   (rendered on RegionalPage.cshtml). Endpoints honour regional admin auth.
+   ============================================================ *@
+<script>
+(function() {
+    var _rcTabBtn = document.getElementById('regionAdminCompetitions-tab');
+    var regionCode = (_rcTabBtn && _rcTabBtn.getAttribute('data-region-code')) || '';
+
+    function rcGetAntiForgeryToken() {
+        var t = document.querySelector('input[name="__RequestVerificationToken"]');
+        return t ? t.value : '';
+    }
+
+    function rcEscapeHtml(text) {
+        if (!text) return '';
+        var d = document.createElement('div');
+        d.textContent = text;
+        return d.innerHTML;
+    }
+
+    var regionCompFilters = {
+        year: new Date().getFullYear(),
+        includeCompleted: false,
+        type: ''
+    };
+    var regionCompTypesCache = [];
+    var regionCompLoaded = false;
+
+    function populateRegionCompYearFilter() {
+        var sel = document.getElementById('regionCompYearFilter');
+        if (!sel) return;
+        var currentYear = new Date().getFullYear();
+        if (sel.options.length > 0) return;
+        sel.innerHTML = '';
+        for (var y = currentYear + 1; y >= 2024; y--) {
+            var opt = document.createElement('option');
+            opt.value = y;
+            opt.textContent = y;
+            if (y === regionCompFilters.year) opt.selected = true;
+            sel.appendChild(opt);
+        }
+    }
+
+    window.onRegionCompYearFilterChange = function() {
+        var v = document.getElementById('regionCompYearFilter').value;
+        regionCompFilters.year = v ? parseInt(v) : null;
+        loadRegionCompetitions();
+    };
+    window.onRegionCompTypeFilterChange = function() {
+        regionCompFilters.type = document.getElementById('regionCompTypeFilter').value;
+        loadRegionCompetitions();
+    };
+    window.onRegionCompShowCompletedChange = function() {
+        regionCompFilters.includeCompleted = document.getElementById('regionCompShowCompleted').checked;
+        loadRegionCompetitions();
+    };
+    window.clearRegionCompFilters = function() {
+        regionCompFilters = { year: new Date().getFullYear(), includeCompleted: false, type: '' };
+        document.getElementById('regionCompYearFilter').value = regionCompFilters.year;
+        document.getElementById('regionCompTypeFilter').value = '';
+        document.getElementById('regionCompShowCompleted').checked = false;
+        loadRegionCompetitions();
+    };
+
+    function populateRegionCompTypeFilter(comps) {
+        var typeSet = new Set();
+        comps.forEach(function(c) { if (c.type) typeSet.add(c.type); });
+        var types = Array.from(typeSet).sort();
+        regionCompTypesCache = types;
+        var sel = document.getElementById('regionCompTypeFilter');
+        var current = regionCompFilters.type || '';
+        sel.innerHTML = '<option value="">Alla typer</option>';
+        types.forEach(function(t) {
+            var opt = document.createElement('option');
+            opt.value = t;
+            opt.textContent = t;
+            if (t === current) opt.selected = true;
+            sel.appendChild(opt);
+        });
+    }
+
+    function getRegionCompetitionStatusBadge(status) {
+        var badges = {
+            'Draft': '<span class="badge bg-secondary">Utkast</span>',
+            'Scheduled': '<span class="badge bg-info">Schemalagd</span>',
+            'Active': '<span class="badge bg-success">Aktiv</span>',
+            'Completed': '<span class="badge bg-dark">Avslutad</span>'
+        };
+        return badges[status] || '<span class="badge bg-secondary">-</span>';
+    }
+
+    function loadRegionCompetitions() {
+        var container = document.getElementById('regionAdminCompetitionsTableContainer');
+        container.innerHTML = '<div class="text-center py-4"><div class="spinner-border" role="status"><span class="visually-hidden">Laddar tävlingar...</span></div></div>';
+
+        populateRegionCompYearFilter();
+
+        var params = [];
+        if (regionCompFilters.year) params.push('year=' + regionCompFilters.year);
+        params.push('includeCompleted=' + regionCompFilters.includeCompleted);
+        if (regionCompFilters.type) params.push('type=' + encodeURIComponent(regionCompFilters.type));
+        if (regionCode) params.push('region=' + encodeURIComponent(regionCode));
+        var url = '/umbraco/surface/CompetitionAdmin/GetCompetitionsList?' + params.join('&');
+
+        fetch(url)
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (!data.success) {
+                    container.innerHTML = '<div class="alert alert-warning">Kunde inte ladda tävlingar.</div>';
+                    return;
+                }
+                // Hide isClubOnly comps — these are private to a specific club's
+                // members; managed by that club's admin, not at the regional level.
+                var comps = (data.data || []).filter(function(c) { return !c.isClubOnly; });
+                if (!regionCompFilters.type && regionCompTypesCache.length === 0) {
+                    populateRegionCompTypeFilter(comps);
+                }
+                displayRegionCompetitions(comps);
+            })
+            .catch(function(err) {
+                console.error('Error loading region competitions:', err);
+                container.innerHTML = '<div class="alert alert-danger">Fel vid laddning av tävlingar.</div>';
+            });
+    }
+
+    function displayRegionCompetitions(competitions) {
+        var container = document.getElementById('regionAdminCompetitionsTableContainer');
+        if (!competitions || competitions.length === 0) {
+            container.innerHTML = '<div class="alert alert-info">Inga tävlingar i kretsen för valda filter.</div>';
+            return;
+        }
+
+        var html = '<div class="table-responsive"><table class="table table-striped">';
+        html += '<thead><tr><th>Namn</th><th>Typ</th><th>Startdatum</th><th>Status</th><th>Anmälningar</th><th class="text-end">Åtgärder</th></tr></thead><tbody>';
+
+        competitions.forEach(function(comp) {
+            var startDate = comp.startDate ? new Date(comp.startDate).toLocaleDateString('sv-SE') : '-';
+            var statusBadge = getRegionCompetitionStatusBadge(comp.status);
+            var nameEsc = rcEscapeHtml(comp.name);
+            var typeEsc = rcEscapeHtml(comp.type);
+            var externalBadge = comp.isExternal
+                ? '<span class="badge bg-info ms-2"><i class="bi bi-box-arrow-up-right me-1"></i>Extern</span>'
+                : '';
+            var uploadBtns = '';
+            if (comp.isExternal) {
+                uploadBtns =
+                    '<button class="btn btn-sm btn-outline-success" onclick="openUploadInvitationModal(' + comp.id + ', \'' + nameEsc.replace(/'/g, "\\'") + '\')" title="Ladda upp inbjudan"><i class="bi bi-file-earmark-arrow-up"></i></button>' +
+                    ' <button class="btn btn-sm btn-outline-warning" onclick="openUploadResultListModal(' + comp.id + ', \'' + nameEsc.replace(/'/g, "\\'") + '\')" title="Ladda upp resultatlista"><i class="bi bi-file-earmark-bar-graph"></i></button>';
+            }
+
+            html +=
+                '<tr>' +
+                  '<td><strong>' + nameEsc + '</strong>' + externalBadge + '</td>' +
+                  '<td><span class="badge bg-secondary">' + typeEsc + '</span></td>' +
+                  '<td>' + startDate + '</td>' +
+                  '<td>' + statusBadge + '</td>' +
+                  '<td><span class="badge bg-info">' + (comp.registrationCount || 0) + '</span></td>' +
+                  '<td class="text-end">' +
+                    '<a href="/competitions/' + comp.id + '/" class="btn btn-sm btn-outline-secondary" title="Öppna" target="_blank"><i class="bi bi-eye"></i></a> ' +
+                    '<button class="btn btn-sm btn-outline-primary" onclick="editRegionCompetition(' + comp.id + ', ' + (comp.isExternal ? 'true' : 'false') + ', \'' + typeEsc.replace(/'/g, "\\'") + '\')" title="Redigera"><i class="bi bi-pencil"></i></button> ' +
+                    '<button class="btn btn-sm btn-outline-info" onclick="copyRegionCompetition(' + comp.id + ')" title="Kopiera"><i class="bi bi-files"></i></button> ' +
+                    '<a href="/competitionmanagement?competitionId=' + comp.id + '" class="btn btn-sm btn-outline-info" title="Hantera tävling"><i class="bi bi-gear"></i></a> ' +
+                    uploadBtns + ' ' +
+                    '<button class="btn btn-sm btn-outline-danger" onclick="deleteRegionCompetition(' + comp.id + ', \'' + nameEsc.replace(/'/g, "\\'") + '\')" title="Radera"><i class="bi bi-trash"></i></button>' +
+                  '</td>' +
+                '</tr>';
+        });
+
+        html += '</tbody></table></div>';
+        container.innerHTML = html;
+    }
+
+    // Expose loadCompetitionsList globally so the wizard / edit modal callbacks refresh the list
+    window.loadCompetitionsList = window.loadCompetitionsList || function() { loadRegionCompetitions(); };
+
+    window.showCreateRegionCompetitionModal = function() {
+        var modalElement = document.getElementById('competitionWizardModal');
+        if (!modalElement) {
+            alert('Tävlingsguide kunde inte hittas. Kontakta administratören.');
+            return;
+        }
+        var modal = window.competitionWizardModalInstance || new bootstrap.Modal(modalElement);
+        window.competitionWizardModalInstance = modal;
+        modal.show();
+        if (typeof window.resetWizard === 'function') {
+            window.resetWizard();
+        }
+        window.onCompetitionSaved = function() { loadRegionCompetitions(); };
+    };
+
+    window.editRegionCompetition = function(competitionId, isExternal, competitionType) {
+        if (typeof window.openAdminEditModal === 'function') {
+            window.openAdminEditModal(competitionId, isExternal, competitionType);
+            window.onCompetitionSaved = function() { loadRegionCompetitions(); };
+        } else {
+            alert('Redigeringsfunktion kunde inte hittas. Kontakta administratören.');
+        }
+    };
+
+    window.copyRegionCompetition = function(competitionId) {
+        if (!confirm('Kopiera tävlingen? Datum flyttas fram ett år.')) return;
+        var token = rcGetAntiForgeryToken();
+        fetch('/umbraco/surface/CompetitionAdmin/CopyCompetition', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+            body: JSON.stringify({ sourceCompetitionId: competitionId })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.success) {
+                alert('✅ Tävlingen har kopierats! Datum har flyttats fram ett år.');
+                loadRegionCompetitions();
+            } else {
+                alert('❌ Kunde inte kopiera: ' + (data.message || 'Okänt fel'));
+            }
+        })
+        .catch(function(err) {
+            console.error('Error copying competition:', err);
+            alert('❌ Fel vid kopiering av tävling');
+        });
+    };
+
+    window.deleteRegionCompetition = function(competitionId, competitionName) {
+        if (typeof window.showDeleteConfirmation === 'function') {
+            window.showDeleteConfirmation(competitionName, function() {
+                doDeleteRegionCompetition(competitionId);
+            });
+        } else if (confirm('Radera tävlingen "' + competitionName + '"?')) {
+            doDeleteRegionCompetition(competitionId);
+        }
+    };
+
+    function doDeleteRegionCompetition(competitionId) {
+        var token = rcGetAntiForgeryToken();
+        fetch('/umbraco/surface/CompetitionAdmin/DeleteCompetition', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+            credentials: 'include',
+            body: JSON.stringify({ competitionId: competitionId })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.success) {
+                loadRegionCompetitions();
+                alert('Tävling raderad!');
+            } else {
+                alert('Fel: ' + (data.message || 'Kunde inte radera tävlingen'));
+            }
+        })
+        .catch(function(err) {
+            console.error('Error deleting competition:', err);
+            alert('Fel vid radering.');
+        });
+    }
+
+    function ensureRegionCompetitionsLoaded() {
+        if (!regionCompLoaded) {
+            regionCompLoaded = true;
+            loadRegionCompetitions();
+        }
+    }
+
+    var compTabBtn = document.getElementById('regionAdminCompetitions-tab');
+    if (compTabBtn) {
+        // Bind to click rather than shown.bs.tab — the Bootstrap transition event
+        // doesn't reliably reach addEventListener here (the symmetric Events tab
+        // works fine with shown.bs.tab, but this one didn't in prod).
+        compTabBtn.addEventListener('click', ensureRegionCompetitionsLoaded);
+
+        // If the sub-tab is already active when the partial loads (URL hash etc.),
+        // trigger immediately.
+        if (compTabBtn.classList.contains('active')) {
+            ensureRegionCompetitionsLoaded();
+        }
+    }
 })();
 </script>
 

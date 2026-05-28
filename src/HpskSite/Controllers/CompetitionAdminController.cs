@@ -1317,7 +1317,7 @@ namespace HpskSite.Controllers
                         // Skip fields already handled or special fields
                         if (field.Key == "competitionName" || field.Key == "competitionType" ||
                             field.Key == "isExternal" || field.Key == "isActive" || field.Key == "isClubOnly" ||
-                            field.Key == "clubId" || field.Key == "invitationFile") // Skip file upload field - handle separately if needed
+                            field.Key == "clubId" || field.Key == "invitationFile" || field.Key == "resultListFile") // Skip file upload fields - handle separately
                             continue;
 
                         var value = field.Value;
@@ -1599,7 +1599,7 @@ namespace HpskSite.Controllers
                     try
                     {
                         // Skip special fields already handled
-                        if (field.Key == "competitionId" || field.Key == "invitationFile" ||
+                        if (field.Key == "competitionId" || field.Key == "invitationFile" || field.Key == "resultListFile" ||
                             field.Key == "competitionName" || field.Key == "numberOfSeriesOrStations" ||
                             field.Key == "numberOfFinalSeries" || field.Key == "clubId")
                             continue;
@@ -1719,7 +1719,7 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Invalid competition content type" });
                 }
 
-                // AUTHORIZATION: Site Admin OR Club Admin OR Skjutledare (for competition's club)
+                // AUTHORIZATION: Site Admin OR Club Admin OR Skjutledare OR Regional Admin (for competition's region)
                 bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
 
                 // Check Club Admin / Skjutledare (based on source competition's clubId)
@@ -1733,8 +1733,15 @@ namespace HpskSite.Controllers
                         isSkjutledare = await _authorizationService.IsSkjutledareForClub(competitionClubId);
                 }
 
-                // Allow if Site Admin OR Club Admin OR Skjutledare for this club
+                // Check Regional Admin (region-hosted comp via regionalFederation,
+                // or club-hosted comp whose club lives in a managed region)
+                bool isRegionalAdmin = false;
                 if (!isSiteAdmin && !isClubAdmin && !isSkjutledare)
+                {
+                    isRegionalAdmin = await IsRegionalAdminForCompetition(sourceCompetition);
+                }
+
+                if (!isSiteAdmin && !isClubAdmin && !isSkjutledare && !isRegionalAdmin)
                 {
                     return Ok(new { success = false, message = "Access denied" });
                 }
@@ -1855,7 +1862,7 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Invalid competition content type" });
                 }
 
-                // AUTHORIZATION: Site Admin OR Club Admin OR Skjutledare (for competition's club)
+                // AUTHORIZATION: Site Admin OR Club Admin OR Skjutledare OR Regional Admin (for competition's region)
                 bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
 
                 // Check Club Admin / Skjutledare (based on competition's clubId)
@@ -1869,8 +1876,15 @@ namespace HpskSite.Controllers
                         isSkjutledare = await _authorizationService.IsSkjutledareForClub(competitionClubId);
                 }
 
-                // Allow if Site Admin OR Club Admin OR Skjutledare for this club
+                // Check Regional Admin (region-hosted comp via regionalFederation,
+                // or club-hosted comp whose club lives in a managed region)
+                bool isRegionalAdmin = false;
                 if (!isSiteAdmin && !isClubAdmin && !isSkjutledare)
+                {
+                    isRegionalAdmin = await IsRegionalAdminForCompetition(competition);
+                }
+
+                if (!isSiteAdmin && !isClubAdmin && !isSkjutledare && !isRegionalAdmin)
                 {
                     return Ok(new { success = false, message = "Access denied" });
                 }
@@ -2252,6 +2266,35 @@ namespace HpskSite.Controllers
         {
             _appCaches.RuntimeCache.ClearByKey(SeriesListCacheKey);
             _appCaches.RuntimeCache.ClearByRegex("^admin_competitions_list_");
+        }
+
+        /// <summary>
+        /// Returns true when the current member is a regional admin for the competition's region.
+        /// The comp's region is `regionalFederation` (region-hosted) or — when `clubId > 0` —
+        /// the host club's `regionalFederation`.
+        /// </summary>
+        private async Task<bool> IsRegionalAdminForCompetition(Umbraco.Cms.Core.Models.IContent competition)
+        {
+            // Direct region property (region-hosted comp)
+            var compRegion = competition.GetValue<string>("regionalFederation") ?? "";
+            if (!string.IsNullOrEmpty(compRegion) && await _authorizationService.IsRegionalAdminForRegion(compRegion))
+            {
+                return true;
+            }
+
+            // Club-hosted: resolve the club's region via the published cache
+            var compClubId = competition.GetValue<int>("clubId");
+            if (compClubId > 0 && _umbracoContextAccessor.TryGetUmbracoContext(out var ctx) && ctx.Content != null)
+            {
+                var clubNode = ctx.Content.GetById(compClubId);
+                var clubRegion = clubNode?.Value<string>("regionalFederation") ?? "";
+                if (!string.IsNullOrEmpty(clubRegion) && await _authorizationService.IsRegionalAdminForRegion(clubRegion))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         /// <summary>
@@ -3240,18 +3283,27 @@ namespace HpskSite.Controllers
 
                 foreach (var competition in allCompetitions)
                 {
+                    bool changed = false;
+
                     var invitationFileValue = competition.GetValue<string>("invitationFile");
-                    if (!string.IsNullOrEmpty(invitationFileValue))
+                    if (!string.IsNullOrEmpty(invitationFileValue) && !invitationFileValue.StartsWith("umb://"))
                     {
-                        // Check if it's a valid UDI
-                        if (!invitationFileValue.StartsWith("umb://"))
-                        {
-                            // Invalid value - clear it
-                            competition.SetValue("invitationFile", null);
-                            _contentService.Save(competition);
-                            _contentService.Publish(competition, new[] { "*" }, -1);
-                            clearedCount++;
-                        }
+                        competition.SetValue("invitationFile", null);
+                        changed = true;
+                    }
+
+                    var resultListFileValue = competition.GetValue<string>("resultListFile");
+                    if (!string.IsNullOrEmpty(resultListFileValue) && !resultListFileValue.StartsWith("umb://"))
+                    {
+                        competition.SetValue("resultListFile", null);
+                        changed = true;
+                    }
+
+                    if (changed)
+                    {
+                        _contentService.Save(competition);
+                        _contentService.Publish(competition, new[] { "*" }, -1);
+                        clearedCount++;
                     }
                 }
 
@@ -3419,6 +3471,145 @@ namespace HpskSite.Controllers
                 {
                     success = true,
                     message = "Invitation file uploaded successfully",
+                    fileName = fileName
+                });
+            }
+            catch (Exception ex)
+            {
+                return Ok(new { success = false, message = "Error uploading file: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Upload result list file for external competition
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> UploadResultListFile(int competitionId, IFormFile resultListFile)
+        {
+            // AUTHORIZATION: Site Admin OR Competition Manager OR Club Admin OR Skjutledare
+            bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
+            bool isCompetitionManager = await _authorizationService.IsCompetitionManager(competitionId);
+
+            var managedClubIds = await _authorizationService.GetManagedClubIds();
+            var skjutledareClubIds = await _authorizationService.GetSkjutledareClubIds();
+
+            if (!isSiteAdmin && !isCompetitionManager && !managedClubIds.Any() && !skjutledareClubIds.Any())
+            {
+                return Ok(new { success = false, message = "Access denied" });
+            }
+
+            try
+            {
+                var competition = _contentService.GetById(competitionId);
+                if (competition == null)
+                {
+                    return Ok(new { success = false, message = "Competition not found" });
+                }
+
+                bool isExternal = competition.GetValue<bool>("isExternal");
+                if (!isExternal)
+                {
+                    return Ok(new { success = false, message = "File upload only available for external competitions" });
+                }
+
+                var competitionClubId = competition.GetValue<int?>("clubId") ?? 0;
+                bool isClubAdmin = competitionClubId > 0 && managedClubIds.Contains(competitionClubId);
+                bool isSkjutledare = competitionClubId > 0 && skjutledareClubIds.Contains(competitionClubId);
+
+                if (!isSiteAdmin && !isCompetitionManager && !isClubAdmin && !isSkjutledare)
+                {
+                    return Ok(new { success = false, message = "You don't have permission to upload files for this competition" });
+                }
+
+                if (resultListFile == null || resultListFile.Length == 0)
+                {
+                    return Ok(new { success = false, message = "No file uploaded" });
+                }
+
+                if (resultListFile.Length > 10 * 1024 * 1024)
+                {
+                    return Ok(new { success = false, message = "File too large. Maximum 10 MB allowed." });
+                }
+
+                var extension = Path.GetExtension(resultListFile.FileName).ToLowerInvariant();
+                var allowedExtensions = new[] { ".pdf", ".doc", ".docx" };
+                if (!allowedExtensions.Contains(extension))
+                {
+                    return Ok(new { success = false, message = "Invalid file type. Only PDF and Word documents allowed." });
+                }
+
+                // Find or create "Competition Results" folder in Media Library
+                var resultsFolder = _mediaService.GetRootMedia()
+                    .FirstOrDefault(m => m.Name == "Competition Results");
+
+                if (resultsFolder == null)
+                {
+                    resultsFolder = _mediaService.CreateMedia("Competition Results", -1, "Folder");
+                    _mediaService.Save(resultsFolder);
+                }
+
+                string fileName = Path.GetFileName(resultListFile.FileName);
+                string fileExtension = Path.GetExtension(fileName);
+                string uniqueFileName = $"{Path.GetFileNameWithoutExtension(fileName)}_{Guid.NewGuid()}{fileExtension}";
+
+                var mediaItem = _mediaService.CreateMedia(fileName, resultsFolder.Id, "File");
+
+                var tempFilePath = Path.Combine(Path.GetTempPath(), uniqueFileName);
+                using (var fileStream = new FileStream(tempFilePath, FileMode.Create))
+                {
+                    await resultListFile.CopyToAsync(fileStream);
+                }
+
+                try
+                {
+                    var mediaFolderPath = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "media", "competition-results");
+
+                    if (!Directory.Exists(mediaFolderPath))
+                    {
+                        Directory.CreateDirectory(mediaFolderPath);
+                    }
+
+                    var physicalFilePath = Path.Combine(mediaFolderPath, uniqueFileName);
+                    System.IO.File.Copy(tempFilePath, physicalFilePath, true);
+
+                    var relativePath = $"/media/competition-results/{uniqueFileName}";
+                    mediaItem.SetValue("umbracoFile", relativePath);
+                    mediaItem.SetValue("umbracoExtension", fileExtension.TrimStart('.'));
+                    mediaItem.SetValue("umbracoBytes", resultListFile.Length.ToString());
+
+                    var mediaSaveResult = _mediaService.Save(mediaItem);
+                    if (!mediaSaveResult.Success)
+                    {
+                        if (System.IO.File.Exists(physicalFilePath))
+                        {
+                            System.IO.File.Delete(physicalFilePath);
+                        }
+                        return Ok(new { success = false, message = "Failed to save file to media library" });
+                    }
+                }
+                finally
+                {
+                    if (System.IO.File.Exists(tempFilePath))
+                    {
+                        System.IO.File.Delete(tempFilePath);
+                    }
+                }
+
+                competition.SetValue("resultListFile", mediaItem.GetUdi().ToString());
+
+                var competitionSaveResult = _contentService.Save(competition);
+                if (!competitionSaveResult.Success)
+                {
+                    return Ok(new { success = false, message = "Failed to link file to competition" });
+                }
+
+                _contentService.Publish(competition, new[] { "*" }, -1);
+
+                return Ok(new
+                {
+                    success = true,
+                    message = "Result list file uploaded successfully",
                     fileName = fileName
                 });
             }

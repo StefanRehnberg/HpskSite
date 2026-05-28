@@ -139,6 +139,7 @@
                 <i class="bi bi-files"></i>
             </button>
             {uploadInvitationButton}
+            {uploadResultListButton}
             <button class="btn btn-sm btn-outline-danger" onclick="openDeleteModal({id}, '{nameEscaped}')" title="Ta bort">
                 <i class="bi bi-trash"></i>
             </button>
@@ -496,12 +497,20 @@ function renderCompetitionRow(comp, template) {
         ? '<span class="badge bg-info ms-2"><i class="bi bi-box-arrow-up-right me-1"></i>Extern</span>'
         : '';
 
-    // Generate upload invitation button (only for external competitions)
+    // Generate upload buttons (only for external competitions)
+    const nameEscaped = escapeHtml(comp.name).replace(/'/g, "\\'");
     const uploadInvitationButton = comp.isExternal
         ? `<button class="btn btn-sm btn-outline-success"
-                   onclick="openUploadInvitationModal(${comp.id}, '${escapeHtml(comp.name).replace(/'/g, "\\'")}')"
+                   onclick="openUploadInvitationModal(${comp.id}, '${nameEscaped}')"
                    title="Ladda upp inbjudan">
                <i class="bi bi-file-earmark-arrow-up"></i>
+           </button>`
+        : '';
+    const uploadResultListButton = comp.isExternal
+        ? `<button class="btn btn-sm btn-outline-warning"
+                   onclick="openUploadResultListModal(${comp.id}, '${nameEscaped}')"
+                   title="Ladda upp resultatlista">
+               <i class="bi bi-file-earmark-bar-graph"></i>
            </button>`
         : '';
 
@@ -516,7 +525,8 @@ function renderCompetitionRow(comp, template) {
         .replace(/{registrationCount}/g, comp.registrationCount || 0)
         .replace(/{externalBadge}/g, externalBadge)
         .replace(/{isExternal}/g, comp.isExternal ? 'true' : 'false')
-        .replace(/{uploadInvitationButton}/g, uploadInvitationButton);
+        .replace(/{uploadInvitationButton}/g, uploadInvitationButton)
+        .replace(/{uploadResultListButton}/g, uploadResultListButton);
 }
 
 function calculateStatus(comp) {

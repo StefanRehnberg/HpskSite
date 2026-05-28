@@ -1,29 +1,32 @@
 @*
- * Upload Invitation File Modal
- * Allows admins to upload invitation files for external competitions
+ * Upload Competition File Modal
+ * Generic modal for uploading either an invitation or a result-list file
+ * to an external competition. Driven by a "kind" parameter passed to the
+ * opener (invitation | resultList).
  *@
 
-<div class="modal fade" id="uploadInvitationModal" tabindex="-1" aria-labelledby="uploadInvitationModalLabel" aria-hidden="true">
+<div class="modal fade" id="uploadCompetitionFileModal" tabindex="-1" aria-labelledby="uploadCompetitionFileModalLabel" aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header bg-success text-white">
-                <h5 class="modal-title" id="uploadInvitationModalLabel">
-                    <i class="bi bi-file-earmark-arrow-up me-2"></i>Ladda upp inbjudan
+                <h5 class="modal-title" id="uploadCompetitionFileModalLabel">
+                    <i class="bi bi-file-earmark-arrow-up me-2"></i><span id="upload_modalTitle">Ladda upp fil</span>
                 </h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
-                <form id="uploadInvitationForm">
+                <form id="uploadCompetitionFileForm">
                     <input type="hidden" id="upload_competitionId" name="competitionId">
+                    <input type="hidden" id="upload_kind" value="invitation">
 
                     <p class="mb-3">
-                        Ladda upp inbjudan för: <strong id="upload_competitionName"></strong>
+                        <span id="upload_introText">Ladda upp fil för:</span> <strong id="upload_competitionName"></strong>
                     </p>
 
                     <div class="mb-3">
-                        <label for="upload_invitationFile" class="form-label">Välj fil (PDF, Word)</label>
-                        <input type="file" class="form-control" id="upload_invitationFile"
-                               name="invitationFile" accept=".pdf,.doc,.docx" required>
+                        <label for="upload_competitionFile" class="form-label">Välj fil (PDF, Word)</label>
+                        <input type="file" class="form-control" id="upload_competitionFile"
+                               name="competitionFile" accept=".pdf,.doc,.docx" required>
                         <small class="form-text text-muted">Max 10 MB</small>
                     </div>
                 </form>
@@ -32,7 +35,7 @@
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
                     <i class="bi bi-x-circle me-1"></i>Avbryt
                 </button>
-                <button type="button" class="btn btn-success" id="uploadInvitationBtn" onclick="uploadInvitationFile()">
+                <button type="button" class="btn btn-success" id="uploadCompetitionFileBtn" onclick="uploadCompetitionFile()">
                     <i class="bi bi-upload me-1"></i>Ladda upp
                 </button>
             </div>
@@ -41,22 +44,58 @@
 </div>
 
 <script>
-function openUploadInvitationModal(competitionId, competitionName) {
-    console.log('Opening upload invitation modal for competition:', competitionId, competitionName);
+const UPLOAD_KINDS = {
+    invitation: {
+        title: 'Ladda upp inbjudan',
+        intro: 'Ladda upp inbjudan för:',
+        endpoint: '/umbraco/surface/CompetitionAdmin/UploadInvitationFile',
+        formField: 'invitationFile',
+        successMessage: 'Inbjudan uppladdad!'
+    },
+    resultList: {
+        title: 'Ladda upp resultatlista',
+        intro: 'Ladda upp resultatlista för:',
+        endpoint: '/umbraco/surface/CompetitionAdmin/UploadResultListFile',
+        formField: 'resultListFile',
+        successMessage: 'Resultatlista uppladdad!'
+    }
+};
+
+function openUploadCompetitionFileModal(kind, competitionId, competitionName) {
+    const cfg = UPLOAD_KINDS[kind];
+    if (!cfg) {
+        console.error('Unknown upload kind:', kind);
+        return;
+    }
 
     document.getElementById('upload_competitionId').value = competitionId;
+    document.getElementById('upload_kind').value = kind;
     document.getElementById('upload_competitionName').textContent = competitionName;
-    document.getElementById('upload_invitationFile').value = ''; // Clear previous file
+    document.getElementById('upload_modalTitle').textContent = cfg.title;
+    document.getElementById('upload_introText').textContent = cfg.intro;
+    document.getElementById('upload_competitionFile').value = '';
 
-    const modal = new bootstrap.Modal(document.getElementById('uploadInvitationModal'));
+    const modal = new bootstrap.Modal(document.getElementById('uploadCompetitionFileModal'));
     modal.show();
 }
 
-function uploadInvitationFile() {
-    const form = document.getElementById('uploadInvitationForm');
-    const fileInput = document.getElementById('upload_invitationFile');
+// Backwards-compatible openers (existing callers + future ones)
+function openUploadInvitationModal(competitionId, competitionName) {
+    openUploadCompetitionFileModal('invitation', competitionId, competitionName);
+}
+function openUploadResultListModal(competitionId, competitionName) {
+    openUploadCompetitionFileModal('resultList', competitionId, competitionName);
+}
 
-    // Validation
+function uploadCompetitionFile() {
+    const kind = document.getElementById('upload_kind').value;
+    const cfg = UPLOAD_KINDS[kind];
+    if (!cfg) {
+        alert('Okänd uppladdningstyp');
+        return;
+    }
+
+    const fileInput = document.getElementById('upload_competitionFile');
     if (!fileInput.files || fileInput.files.length === 0) {
         alert('Välj en fil att ladda upp');
         return;
@@ -64,13 +103,11 @@ function uploadInvitationFile() {
 
     const file = fileInput.files[0];
 
-    // Validate file size (10 MB max)
     if (file.size > 10 * 1024 * 1024) {
         alert('Filen är för stor. Max 10 MB.');
         return;
     }
 
-    // Validate file type
     const validExtensions = ['.pdf', '.doc', '.docx'];
     const fileName = file.name.toLowerCase();
     if (!validExtensions.some(ext => fileName.endsWith(ext))) {
@@ -78,20 +115,18 @@ function uploadInvitationFile() {
         return;
     }
 
-    // Prepare FormData
     const formData = new FormData();
     formData.append('competitionId', document.getElementById('upload_competitionId').value);
-    formData.append('invitationFile', file);
+    formData.append(cfg.formField, file);
 
     const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
 
-    // Upload
-    const uploadBtn = document.getElementById('uploadInvitationBtn');
+    const uploadBtn = document.getElementById('uploadCompetitionFileBtn');
     const originalText = uploadBtn.innerHTML;
     uploadBtn.disabled = true;
     uploadBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Laddar upp...';
 
-    fetch('/umbraco/surface/CompetitionAdmin/UploadInvitationFile', {
+    fetch(cfg.endpoint, {
         method: 'POST',
         headers: {
             'RequestVerificationToken': token
@@ -104,13 +139,9 @@ function uploadInvitationFile() {
         uploadBtn.innerHTML = originalText;
 
         if (data.success) {
-            // Show success notification
-            showUploadNotification('Inbjudan uppladdad!', 'success');
+            showUploadNotification(cfg.successMessage, 'success');
+            bootstrap.Modal.getInstance(document.getElementById('uploadCompetitionFileModal')).hide();
 
-            // Close modal
-            bootstrap.Modal.getInstance(document.getElementById('uploadInvitationModal')).hide();
-
-            // Refresh competitions list if function exists
             if (typeof loadCompetitionsList === 'function') {
                 setTimeout(() => {
                     loadCompetitionsList();
