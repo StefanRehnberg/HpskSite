@@ -77,6 +77,14 @@ if (Test-Path 'C:\temp\publish\wwwroot\images\field-targets') {
 } else {
     Write-Host "  - Field-targets folder not found (OK)" -ForegroundColor Gray
 }
+
+# Remove faltskytte images (managed in production)
+if (Test-Path 'C:\temp\publish\wwwroot\images\faltskytte') {
+    Remove-Item -Path 'C:\temp\publish\wwwroot\images\faltskytte' -Recurse -Force
+    Write-Host "  - Faltskytte images folder removed (preserved on server)" -ForegroundColor Green
+} else {
+    Write-Host "  - Faltskytte folder not found (OK)" -ForegroundColor Gray
+}
 Write-Host ""
 
 # Step 7: Create app_offline.htm (for graceful deployment)
@@ -128,6 +136,7 @@ Write-Host ""
 Write-Host "PRESERVED ON SERVER (not in package):" -ForegroundColor Yellow
 Write-Host "  - wwwroot/media/              (user uploads)" -ForegroundColor Gray
 Write-Host "  - wwwroot/images/field-targets/ (Figurkatalog images)" -ForegroundColor Gray
+Write-Host "  - wwwroot/images/faltskytte/  (Faltskytte images)" -ForegroundColor Gray
 Write-Host "  - App_Data/                   (Firebase credentials)" -ForegroundColor Gray
 Write-Host ""
 Write-Host "Deployment package ready!" -ForegroundColor Green
