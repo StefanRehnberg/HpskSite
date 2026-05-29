@@ -78,7 +78,10 @@ namespace HpskSite.Controllers
                 {
                     var proofToDelete = existing.ProofFileRef;
                     var (deleted, _) = await _medalLedger.DeleteAwardAsync(existing.Id);
-                    if (deleted) _proofStorage.Delete(proofToDelete);
+                    // Award is gone now; delete its file only if no other award still references it.
+                    if (deleted && !string.IsNullOrEmpty(proofToDelete)
+                        && await _medalLedger.CountAwardsUsingProofAsync(proofToDelete) == 0)
+                        _proofStorage.Delete(proofToDelete);
                 }
                 return;
             }
@@ -111,9 +114,18 @@ namespace HpskSite.Controllers
             if (existing.GoldApplicationId.HasValue)
                 return;
 
-            existing.Year = entry.TrainingDate.Year;
+            // Detect changes that affect what gets reported, before overwriting, so we can
+            // re-open verification when a member edits an already-verified medal.
+            var newMedal = entry.CompetitionStdMedal!;
+            var newYear = entry.TrainingDate.Year;
+            bool materialChange =
+                existing.MedalType != newMedal ||
+                existing.Year != newYear ||
+                !string.Equals(existing.ShootingClass ?? "", entry.CompetitionShootingClass ?? "", StringComparison.OrdinalIgnoreCase);
+
+            existing.Year = newYear;
             existing.Discipline = string.IsNullOrWhiteSpace(entry.Discipline) ? StandardMedals.Precision : entry.Discipline;
-            existing.MedalType = entry.CompetitionStdMedal!;
+            existing.MedalType = newMedal;
             existing.CompetitionDate = entry.TrainingDate;
             existing.ShootingClass = entry.CompetitionShootingClass;
             // Name/location aren't loaded into the edit form, so only overwrite when the caller
@@ -121,17 +133,28 @@ namespace HpskSite.Controllers
             if (!string.IsNullOrWhiteSpace(entry.CompetitionName)) existing.CompetitionName = entry.CompetitionName;
             if (!string.IsNullOrWhiteSpace(entry.CompetitionLocation)) existing.Location = entry.CompetitionLocation;
 
-            // Replace the proof file only when a new one was uploaded; otherwise keep what's there.
+            // Replace/reuse the proof reference only when the caller supplied a different one;
+            // otherwise keep what's there. Delete the old file only if no other award uses it.
             if (!string.IsNullOrEmpty(entry.MedalProofFileRef) && entry.MedalProofFileRef != existing.ProofFileRef)
             {
-                _proofStorage.Delete(existing.ProofFileRef);
+                var oldRef = existing.ProofFileRef;
                 existing.ProofFileRef = entry.MedalProofFileRef;
                 existing.ProofType = StandardMedals.ProofFile;
+                if (!string.IsNullOrEmpty(oldRef)
+                    && await _medalLedger.CountAwardsUsingProofAsync(oldRef, existing.Id) == 0)
+                    _proofStorage.Delete(oldRef);
             }
 
-            // A self-reported edit re-opens verification.
-            if (existing.Status == StandardMedals.StatusRejected)
+            // A member edit re-opens verification: a rejected medal returns to reported, and a
+            // material change to an already-verified medal must be re-checked by the club before
+            // it's reported to SPSF.
+            if (existing.Status == StandardMedals.StatusRejected ||
+                (existing.Status == StandardMedals.StatusVerified && materialChange))
+            {
                 existing.Status = StandardMedals.StatusReported;
+                existing.VerifiedByMemberId = null;
+                existing.VerifiedAt = null;
+            }
 
             await _medalLedger.UpdateAwardAsync(existing);
         }
@@ -883,7 +906,10 @@ namespace HpskSite.Controllers
                     {
                         var proofToDelete = linkedAward.ProofFileRef;
                         var (deleted, _) = await _medalLedger.DeleteAwardAsync(linkedAward.Id);
-                        if (deleted) _proofStorage.Delete(proofToDelete);
+                        // Delete the file only if no other award still references it.
+                        if (deleted && !string.IsNullOrEmpty(proofToDelete)
+                            && await _medalLedger.CountAwardsUsingProofAsync(proofToDelete) == 0)
+                            _proofStorage.Delete(proofToDelete);
                     }
 
                     // Delete the record

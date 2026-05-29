@@ -68,10 +68,11 @@ function loadScoreDetails(scoreId) {
                 if (score) {
                     content.innerHTML = renderScoreDetails(score);
                     window.__currentEditScore = score;
-                    // Edit + Delete are only available for entries that aren't flagged as competition
-                    const isLocked = score.isCompetition === true;
-                    document.getElementById('editScoreBtn').classList.toggle('d-none', isLocked);
-                    document.getElementById('deleteScoreBtn').classList.toggle('d-none', isLocked);
+                    // Ändra is available for all self-entered results — including competition results,
+                    // so members can add or replace standard-medal proof and correct mistakes.
+                    // Delete stays hidden for competition results to avoid removing a reported/verified medal.
+                    document.getElementById('editScoreBtn').classList.remove('d-none');
+                    document.getElementById('deleteScoreBtn').classList.toggle('d-none', score.isCompetition === true);
                 } else {
                     content.innerHTML = `
                         <div class="alert alert-warning">
@@ -481,6 +482,29 @@ function deleteTrainingScore() {
                                 <div class="form-text">Standard medalj om uppnådd</div>
                             </div>
                         </div>
+
+                        @* Proof of standard medal — add or replace, shown when a medal is selected *@
+                        <div id="editMedalProofBlock" style="display: none;" class="mt-2 p-3 border rounded bg-body">
+                            <label for="editMedalProofFile" class="form-label">
+                                <i class="bi bi-paperclip"></i> Bevis för standardmedalj <span class="text-muted">(frivilligt)</span>
+                            </label>
+                            <div id="editMedalProofCurrent" class="small mb-2"></div>
+                            <div id="editMedalProofDrop" class="border border-2 rounded text-center text-muted py-3 px-2 mb-2" style="border-style: dashed !important; cursor: pointer;">
+                                <i class="bi bi-clipboard-plus"></i> Klistra in en skärmdump (Ctrl/Cmd+V), släpp en bild här, eller välj fil nedan
+                            </div>
+                            <input type="file" class="form-control" id="editMedalProofFile" accept=".pdf,image/*" capture="environment">
+                            <div id="editMedalProofPreview" class="small mt-2"></div>
+                            <div class="mt-2">
+                                <select class="form-select form-select-sm" id="editMedalProofReuse">
+                                    <option value="">— eller återanvänd ett tidigare uppladdat bevis —</option>
+                                </select>
+                                <div id="editMedalProofReuseInfo" class="small text-success mt-1" style="display: none;"></div>
+                            </div>
+                            <div class="form-text">
+                                Ladda upp resultatlistan eller ett foto (PDF, JPG, PNG, WEBP – max 10 MB). En ny fil <strong>ersätter</strong> ett tidigare bevis.
+                                Samma resultatlista kan återanvändas för flera resultat från samma tävling. Utan bevis registreras medaljen som <strong>overifierad</strong>.
+                            </div>
+                        </div>
                     </div>
 
                     @* Entry Method Selector *@
@@ -836,6 +860,18 @@ function openEditScoreModal() {
     document.getElementById('editCompetitionShootingClass').value = score.competitionShootingClass || '';
     document.getElementById('editCompetitionStdMedal').value = score.competitionStdMedal || '';
 
+    // Reset + populate the standard-medal proof field
+    const editProofFile = document.getElementById('editMedalProofFile');
+    if (editProofFile) { editProofFile.value = ''; editProofFile.disabled = false; }
+    document.getElementById('editMedalProofCurrent').innerHTML = '';
+    editShowProofPreview(null);
+    editClearProofReuse();
+    toggleEditMedalProofBlock();
+    if (isComp && score.competitionStdMedal) {
+        loadEditMedalProofState(score.id);
+        loadEditReusableProofs();
+    }
+
     // Split notes into description + optional notes (mirrors create-form serialization "desc - notes")
     const fullNotes = score.notes || '';
     const sepIdx = fullNotes.indexOf(' - ');
@@ -984,13 +1020,18 @@ function submitEditScore() {
 
     document.getElementById('editSubmitBtn').disabled = true;
 
-    fetch('/umbraco/surface/TrainingScoring/UpdateTrainingScore', {
-        method: 'PUT',
-        headers: {
-            'Content-Type': 'application/json',
-            'RequestVerificationToken': token
-        },
-        body: JSON.stringify(payload)
+    // Resolve proof (new upload, pasted screenshot, or a reused list) first, then save.
+    editResolveMedalProofRef(token)
+    .then(fileRef => {
+        if (fileRef) payload.medalProofFileRef = fileRef;
+        return fetch('/umbraco/surface/TrainingScoring/UpdateTrainingScore', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': token
+            },
+            body: JSON.stringify(payload)
+        });
     })
     .then(r => r.json())
     .then(result => {
@@ -1007,7 +1048,7 @@ function submitEditScore() {
     .catch(err => {
         console.error('Error updating score:', err);
         document.getElementById('editSubmitBtn').disabled = false;
-        alert('Kunde inte spara ändringar.');
+        alert('Kunde inte spara ändringar: ' + (err.message || 'okänt fel'));
     });
 }
 
@@ -1021,7 +1062,201 @@ document.addEventListener('DOMContentLoaded', function () {
     if (editCompCheckbox && editCompSection) {
         editCompCheckbox.addEventListener('change', function () {
             editCompSection.style.display = this.checked ? 'block' : 'none';
+            toggleEditMedalProofBlock();
         });
     }
+
+    const editMedalSel = document.getElementById('editCompetitionStdMedal');
+    if (editMedalSel) {
+        editMedalSel.addEventListener('change', function () {
+            toggleEditMedalProofBlock();
+            if (this.value) {
+                if (window.__currentEditScore && window.__currentEditScore.id) {
+                    loadEditMedalProofState(window.__currentEditScore.id);
+                }
+                loadEditReusableProofs();
+            }
+        });
+    }
+
+    const editProofFileInput = document.getElementById('editMedalProofFile');
+    if (editProofFileInput) {
+        editProofFileInput.addEventListener('change', function () {
+            if (this.files && this.files.length > 0) {
+                editClearProofReuse();
+                editShowProofPreview(this.files[0]);
+            } else {
+                editShowProofPreview(null);
+            }
+        });
+    }
+
+    const editProofReuse = document.getElementById('editMedalProofReuse');
+    if (editProofReuse) {
+        editProofReuse.addEventListener('change', function () {
+            const block = document.getElementById('editMedalProofBlock');
+            const info = document.getElementById('editMedalProofReuseInfo');
+            if (this.value) {
+                if (block) block.dataset.reuseRef = this.value;
+                const fi = document.getElementById('editMedalProofFile');
+                if (fi) fi.value = '';
+                editShowProofPreview(null);
+                if (info) {
+                    info.style.display = 'block';
+                    info.innerHTML = '<i class="bi bi-recycle"></i> Återanvänder: ' + editMpEsc(this.options[this.selectedIndex] ? this.options[this.selectedIndex].textContent : 'tidigare bevis');
+                }
+            } else {
+                editClearProofReuse();
+            }
+        });
+    }
+
+    const editProofDrop = document.getElementById('editMedalProofDrop');
+    if (editProofDrop) {
+        editProofDrop.addEventListener('click', function () {
+            const fi = document.getElementById('editMedalProofFile');
+            if (fi && !fi.disabled) fi.click();
+        });
+        ['dragover', 'dragenter'].forEach(ev => editProofDrop.addEventListener(ev, e => { e.preventDefault(); editProofDrop.classList.add('border-primary', 'text-primary'); }));
+        ['dragleave', 'drop'].forEach(ev => editProofDrop.addEventListener(ev, e => { e.preventDefault(); editProofDrop.classList.remove('border-primary', 'text-primary'); }));
+        editProofDrop.addEventListener('drop', function (e) {
+            const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+            if (f && (f.type.startsWith('image/') || f.type === 'application/pdf')) editSetProofFile(f);
+        });
+    }
+
+    // Paste a screenshot anywhere while the edit modal + proof block are open.
+    document.addEventListener('paste', function (e) {
+        const modal = document.getElementById('editTrainingScoreModal');
+        const block = document.getElementById('editMedalProofBlock');
+        if (!modal || !modal.classList.contains('show')) return;
+        if (!block || block.style.display === 'none') return;
+        const items = (e.clipboardData && e.clipboardData.items) || [];
+        for (const it of items) {
+            if (it.kind === 'file' && it.type.startsWith('image/')) {
+                const f = it.getAsFile();
+                if (f) { editSetProofFile(f); e.preventDefault(); break; }
+            }
+        }
+    });
 });
+
+// Show the proof block only when this is a competition result with a medal selected.
+function toggleEditMedalProofBlock() {
+    const block = document.getElementById('editMedalProofBlock');
+    if (!block) return;
+    const isComp = document.getElementById('editIsCompetitionCheckbox')?.checked;
+    const medal = document.getElementById('editCompetitionStdMedal')?.value;
+    block.style.display = (isComp && medal) ? 'block' : 'none';
+}
+
+// Populate the "current proof" line for an existing medal award.
+function loadEditMedalProofState(trainingScoreId) {
+    const el = document.getElementById('editMedalProofCurrent');
+    const fileInput = document.getElementById('editMedalProofFile');
+    if (!el) return;
+    el.innerHTML = '';
+    fetch(`/umbraco/surface/StandardMedal/GetMedalForTrainingScore?trainingScoreId=${trainingScoreId}`)
+        .then(r => r.json())
+        .then(d => {
+            if (!d.success || !d.hasAward) {
+                el.innerHTML = '<span class="text-muted">Ingen registrerad medalj ännu — välj medalj och ladda gärna upp bevis.</span>';
+                return;
+            }
+            if (d.inGold) {
+                el.innerHTML = '<span class="text-warning"><i class="bi bi-lock"></i> Medaljen ingår i en guldmedaljansökan och kan inte ändras.</span>';
+                if (fileInput) fileInput.disabled = true;
+                return;
+            }
+            if (fileInput) fileInput.disabled = false;
+            if (d.hasProofFile) {
+                el.innerHTML = `<span class="text-success"><i class="bi bi-check-circle"></i> Bevis uppladdat.</span> `
+                    + `<a href="/umbraco/surface/StandardMedal/GetProof?awardId=${d.awardId}" target="_blank" rel="noopener">Visa</a>`
+                    + ` <span class="text-muted">— ladda upp en ny fil nedan för att ersätta.</span>`;
+            } else {
+                el.innerHTML = '<span class="text-muted"><i class="bi bi-exclamation-circle"></i> Inget bevis uppladdat — medaljen är overifierad tills ett bevis finns.</span>';
+            }
+        })
+        .catch(() => { el.innerHTML = ''; });
+}
+
+// Resolve the proof reference to save: a newly uploaded/pasted file, a reused existing file,
+// or undefined (leave the current proof untouched).
+function editResolveMedalProofRef(token) {
+    const isComp = document.getElementById('editIsCompetitionCheckbox')?.checked;
+    const medal = document.getElementById('editCompetitionStdMedal')?.value;
+    if (!isComp || !medal) return Promise.resolve(undefined);
+
+    const fileInput = document.getElementById('editMedalProofFile');
+    const block = document.getElementById('editMedalProofBlock');
+
+    if (fileInput && !fileInput.disabled && fileInput.files && fileInput.files.length > 0) {
+        const fd = new FormData();
+        fd.append('file', fileInput.files[0]);
+        return fetch('/umbraco/surface/StandardMedal/UploadProof', {
+            method: 'POST',
+            headers: { 'RequestVerificationToken': token },
+            body: fd
+        })
+        .then(r => r.json())
+        .then(res => { if (res.success) return res.fileRef; throw new Error(res.message || 'Kunde inte ladda upp bevis.'); });
+    }
+    if (block && block.dataset.reuseRef) return Promise.resolve(block.dataset.reuseRef);
+    return Promise.resolve(undefined);
+}
+
+function editMpEsc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function editSetProofFile(file) {
+    const fi = document.getElementById('editMedalProofFile');
+    if (!fi || fi.disabled || !file) return;
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    fi.files = dt.files;
+    editClearProofReuse();          // a chosen/pasted file wins over a reused one
+    editShowProofPreview(file);
+}
+
+function editShowProofPreview(file) {
+    const el = document.getElementById('editMedalProofPreview');
+    if (!el) return;
+    if (!file) { el.innerHTML = ''; return; }
+    let thumb;
+    if (file.type && file.type.startsWith('image/')) {
+        thumb = `<img src="${URL.createObjectURL(file)}" alt="" style="max-height:48px;border-radius:4px;margin-right:6px;vertical-align:middle;">`;
+    } else {
+        thumb = '<i class="bi bi-file-earmark-pdf me-1"></i>';
+    }
+    el.innerHTML = `<span class="text-success">${thumb}Bild bifogad${file.name ? ': ' + editMpEsc(file.name) : ''}.</span>`;
+}
+
+function editClearProofReuse() {
+    const block = document.getElementById('editMedalProofBlock');
+    const sel = document.getElementById('editMedalProofReuse');
+    const info = document.getElementById('editMedalProofReuseInfo');
+    if (block) delete block.dataset.reuseRef;
+    if (sel) sel.value = '';
+    if (info) { info.style.display = 'none'; info.innerHTML = ''; }
+}
+
+function loadEditReusableProofs() {
+    const sel = document.getElementById('editMedalProofReuse');
+    if (!sel) return;
+    fetch('/umbraco/surface/StandardMedal/GetMyReusableProofs')
+        .then(r => r.json())
+        .then(d => {
+            sel.innerHTML = '<option value="">— eller återanvänd ett tidigare uppladdat bevis —</option>';
+            if (!d.success || !d.proofs) return;
+            d.proofs.forEach(p => {
+                const date = p.competitionDate ? new Date(p.competitionDate).toLocaleDateString('sv-SE') : '';
+                const opt = document.createElement('option');
+                opt.value = p.proofRef;
+                opt.textContent = `${p.competitionName || 'Tävling'}${date ? ' (' + date + ')' : ''}`;
+                sel.appendChild(opt);
+            });
+        })
+        .catch(() => {});
+}
 </script>

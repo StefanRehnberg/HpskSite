@@ -126,6 +126,74 @@ namespace HpskSite.Controllers
             });
         }
 
+        /// <summary>
+        /// The linked Standardmedalj award for one of the current member's self-entered results —
+        /// so the edit modal can show current proof status and offer to add/replace it.
+        /// GET /umbraco/surface/StandardMedal/GetMedalForTrainingScore?trainingScoreId=123
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetMedalForTrainingScore(int trainingScoreId)
+        {
+            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            if (currentMember == null)
+                return Json(new { success = false, message = "Inte inloggad." });
+
+            var member = _memberService.GetByEmail(currentMember.Email ?? string.Empty);
+            if (member == null)
+                return Json(new { success = false, message = "Medlem hittades inte." });
+
+            var award = await _ledger.GetByTrainingScoreAsync(trainingScoreId);
+            if (award == null || award.MemberId != member.Id)
+                return Json(new { success = true, hasAward = false });
+
+            return Json(new
+            {
+                success = true,
+                hasAward = true,
+                awardId = award.Id,
+                medalType = award.MedalType,
+                status = award.Status,
+                hasProofFile = award.ProofType == Models.StandardMedals.ProofFile && !string.IsNullOrEmpty(award.ProofFileRef),
+                inGold = award.GoldApplicationId.HasValue
+            });
+        }
+
+        /// <summary>
+        /// The current member's previously-uploaded proof files, so a single result list can be
+        /// reused across several results from the same competition without re-uploading. One entry
+        /// per distinct file, newest first.
+        /// GET /umbraco/surface/StandardMedal/GetMyReusableProofs
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetMyReusableProofs()
+        {
+            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            if (currentMember == null)
+                return Json(new { success = false, message = "Inte inloggad." });
+
+            var member = _memberService.GetByEmail(currentMember.Email ?? string.Empty);
+            if (member == null)
+                return Json(new { success = false, message = "Medlem hittades inte." });
+
+            var awards = await _ledger.GetAwardsForMemberAsync(member.Id, includeRejected: false);
+            var proofs = awards
+                .Where(a => a.ProofType == Models.StandardMedals.ProofFile && !string.IsNullOrEmpty(a.ProofFileRef))
+                .GroupBy(a => a.ProofFileRef!)
+                .Select(g => g.OrderByDescending(a => a.CompetitionDate ?? DateTime.MinValue).First())
+                .OrderByDescending(a => a.CompetitionDate ?? DateTime.MinValue)
+                .Take(25)
+                .Select(a => new
+                {
+                    proofRef = a.ProofFileRef,
+                    awardId = a.Id,
+                    competitionName = a.CompetitionName,
+                    competitionDate = a.CompetitionDate,
+                    medalType = a.MedalType
+                });
+
+            return Json(new { success = true, proofs });
+        }
+
         // ── Club secretary endpoints ──────────────────────────────────
 
         /// <summary>
@@ -568,11 +636,13 @@ namespace HpskSite.Controllers
                 var awards = await _ledger.GetAwardsByIdsAsync(ids);
                 foreach (var a in awards)
                 {
-                    if (!string.IsNullOrEmpty(a.ProofFileRef))
-                    {
-                        _proofStorage.Delete(a.ProofFileRef);
-                        await _ledger.ClearAwardProofRefAsync(a.Id);
-                    }
+                    var proofRef = a.ProofFileRef;
+                    if (string.IsNullOrEmpty(proofRef)) continue;
+                    // Clear this award's reference first, then delete the file only if no other
+                    // award still references it (the same list may back several medals).
+                    await _ledger.ClearAwardProofRefAsync(a.Id);
+                    if (await _ledger.CountAwardsUsingProofAsync(proofRef) == 0)
+                        _proofStorage.Delete(proofRef);
                 }
             }
             catch

@@ -147,6 +147,20 @@ namespace HpskSite.Services
             return (true, null);
         }
 
+        /// <summary>
+        /// How many awards still reference a given proof file (optionally excluding one award).
+        /// Used to make physical proof-file deletion safe when a file is shared across several
+        /// awards (one result list backing medals in multiple classes from the same competition).
+        /// </summary>
+        public async Task<int> CountAwardsUsingProofAsync(string proofRef, int excludeAwardId = 0)
+        {
+            if (string.IsNullOrEmpty(proofRef)) return 0;
+            using var db = _databaseFactory.CreateDatabase();
+            return await db.ExecuteScalarAsync<int>(
+                "SELECT COUNT(*) FROM StandardMedalAward WHERE ProofFileRef = @0 AND Id <> @1",
+                proofRef, excludeAwardId);
+        }
+
         /// <summary>Null an award's stored proof reference (after the file has been deleted).</summary>
         public async Task ClearAwardProofRefAsync(int awardId)
         {
