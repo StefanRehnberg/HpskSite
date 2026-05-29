@@ -214,6 +214,10 @@ namespace HpskSite.Controllers
                         return Ok(new { success = false, message = "Club not found" });
                     }
 
+                    // Region the club belongs to — used to scope which competitions appear
+                    // in the calendar (see competition filter below).
+                    var clubRegion = clubNode.Value<string>("regionalFederation") ?? "";
+
                     // Get club simple events (children of club node)
                     var simpleEvents = clubNode.Children
                         .Where(c => c.ContentType.Alias == "clubSimpleEvent")
@@ -243,20 +247,34 @@ namespace HpskSite.Controllers
                         }
                     }
 
-                    // Also get competitions for this club (if isClubOnly = true and clubId matches)
-                    // These would be global competitions, but we query all competitions for this club
+                    // Also get competitions relevant to this club, scoped to the club's region:
+                    //  - the club's own competitions (club-only or open) are always shown
+                    //  - other clubs' private (isClubOnly) competitions are never shown
+                    //  - everything else must belong to the club's region — either region-hosted
+                    //    (no clubId, regionalFederation matches) or hosted by another club in the
+                    //    same region.
                     var root = UmbracoContext.Content.GetAtRoot().FirstOrDefault();
                     if (root != null)
                     {
-                        var competitions = GetAllDescendants(root)
-                            .Where(c => c.ContentType.Alias == "competition")
-                            .ToList();
+                        var allNodes = GetAllDescendants(root);
 
-                        foreach (var comp in competitions)
+                        // Map each club node to its region so club-hosted competitions without an
+                        // explicit regionalFederation inherit their host club's region.
+                        var clubRegionLookup = new Dictionary<int, string>();
+                        foreach (var nodeDyn in allNodes)
+                        {
+                            var node = nodeDyn as IPublishedContent;
+                            if (node == null || node.ContentType.Alias != "club") continue;
+                            var nodeRegion = node.Value<string>("regionalFederation") ?? "";
+                            if (!string.IsNullOrEmpty(nodeRegion))
+                                clubRegionLookup[node.Id] = nodeRegion;
+                        }
+
+                        foreach (var compDyn in allNodes)
                         {
                             // Cast to IPublishedContent to access Value<T> extension methods
-                            var publishedComp = comp as Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent;
-                            if (publishedComp == null) continue;
+                            var publishedComp = compDyn as IPublishedContent;
+                            if (publishedComp == null || publishedComp.ContentType.Alias != "competition") continue;
 
                             var compDate = publishedComp.Value<DateTime?>("competitionDate");
                             var isActive = publishedComp.Value<bool>("isActive");
@@ -264,12 +282,40 @@ namespace HpskSite.Controllers
                             var compClubId = publishedComp.Value<int>("clubId");
                             var name = publishedComp.Value<string>("competitionName") ?? publishedComp.Name;
 
-                            // Include if no club restriction or if matches this club
-                            if (isActive &&
-                                compDate.HasValue &&
-                                compDate.Value.Date >= startDate.Date &&
-                                compDate.Value.Date <= endDate.Date &&
-                                (!isClubOnly || compClubId == clubId))
+                            if (!isActive ||
+                                !compDate.HasValue ||
+                                compDate.Value.Date < startDate.Date ||
+                                compDate.Value.Date > endDate.Date)
+                            {
+                                continue;
+                            }
+
+                            bool include;
+                            if (compClubId == clubId)
+                            {
+                                // This club's own competition — always relevant.
+                                include = true;
+                            }
+                            else if (isClubOnly)
+                            {
+                                // Another club's private competition — never shown.
+                                include = false;
+                            }
+                            else if (string.IsNullOrEmpty(clubRegion))
+                            {
+                                // Club has no region configured — can't scope, so show only its own.
+                                include = false;
+                            }
+                            else
+                            {
+                                var compRegion = publishedComp.Value<string>("regionalFederation") ?? "";
+                                if (string.IsNullOrEmpty(compRegion) && compClubId > 0)
+                                    clubRegionLookup.TryGetValue(compClubId, out compRegion);
+
+                                include = string.Equals(compRegion ?? "", clubRegion, StringComparison.OrdinalIgnoreCase);
+                            }
+
+                            if (include)
                             {
                                 events.Add(new
                                 {
