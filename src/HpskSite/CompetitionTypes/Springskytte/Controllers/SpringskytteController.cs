@@ -29,6 +29,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
         private readonly ClubService _clubService;
         private readonly AdminAuthorizationService _adminAuthorizationService;
         private readonly SpringskytteScoringService _scoringService;
+        private readonly StandardMedalMaterializationService _medalMaterialization;
 
         public SpringskytteController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -44,7 +45,8 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
             ILogger<SpringskytteController> logger,
             UmbracoStartListRepository startListRepository,
             ClubService clubService,
-            AdminAuthorizationService adminAuthorizationService)
+            AdminAuthorizationService adminAuthorizationService,
+            StandardMedalMaterializationService medalMaterialization)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _contentService = contentService;
@@ -57,6 +59,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
             _clubService = clubService;
             _adminAuthorizationService = adminAuthorizationService;
             _scoringService = new SpringskytteScoringService();
+            _medalMaterialization = medalMaterialization;
         }
 
         // ===== RESULT ENTRY =====
@@ -587,6 +590,27 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
 
                     _logger.LogInformation("Published Springskytte final results for CompetitionId={CompetitionId}, {Count} shooters",
                         competitionId, shooterResults.Count);
+
+                    // Materialize won Standard medals into the ledger. Springskytte has no
+                    // Riksmästarklass, but its medals still count toward the pooled Guldmedalj.
+                    try
+                    {
+                        var competitionDate = competition.GetValue<DateTime?>("competitionDate");
+                        var year = competitionDate?.Year ?? DateTime.Now.Year;
+                        var competitionName = competition.GetValue<string>("competitionName");
+                        if (string.IsNullOrWhiteSpace(competitionName)) competitionName = competition.Name;
+
+                        var medals = shooterResults
+                            .Where(s => s.StandardMedal == "S" || s.StandardMedal == "B")
+                            .Select(s => new OnSiteMedal(s.MemberId, $"{s.WeaponClass}-{s.AgeGenderClass}", s.StandardMedal!));
+
+                        await _medalMaterialization.UpsertOnSiteMedalsAsync(
+                            competitionId, "Springskytte", year, competitionName, competitionDate, medals);
+                    }
+                    catch (Exception medalEx)
+                    {
+                        _logger.LogError(medalEx, "Failed to materialize Springskytte standard medals for CompetitionId={CompetitionId}", competitionId);
+                    }
                 }
 
                 return Json(new

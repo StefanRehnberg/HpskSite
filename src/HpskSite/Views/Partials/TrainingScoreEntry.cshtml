@@ -106,6 +106,31 @@
                                 <div class="form-text">Standard medalj om uppnådd</div>
                             </div>
                         </div>
+
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="competitionName" class="form-label">Tävlingens namn</label>
+                                <input type="text" class="form-control" id="competitionName" name="competitionName" maxlength="300" placeholder="T.ex. 'Vårserien deltävling 2'">
+                            </div>
+                            <div class="col-md-6">
+                                <label for="competitionLocation" class="form-label">Ort / plats</label>
+                                <input type="text" class="form-control" id="competitionLocation" name="competitionLocation" maxlength="200" placeholder="T.ex. 'Skövde'">
+                            </div>
+                        </div>
+
+                        @* Proof of standard medal — shown only when a medal is selected.
+                           Optional: upload a PDF/photo, or rely on the attestation note. *@
+                        <div id="medalProofBlock" style="display: none;" class="mt-2 p-3 border rounded bg-body">
+                            <label for="medalProofFile" class="form-label">
+                                <i class="bi bi-paperclip"></i> Bevis för standardmedalj <span class="text-muted">(frivilligt)</span>
+                            </label>
+                            <input type="file" class="form-control" id="medalProofFile" name="medalProofFile"
+                                   accept=".pdf,image/*" capture="environment">
+                            <div class="form-text">
+                                Ladda upp resultatlistan eller ett foto (PDF, JPG, PNG, WEBP – max 10 MB).
+                                Utan bevis registreras medaljen som <strong>overifierad</strong> och kan inte rapporteras till SPSF — den räknas då varken mot kvalificering till Riksmästarklass eller mot poäng för guldmedalj.
+                            </div>
+                        </div>
                     </div>
 
                     @* Entry Method Selector *@
@@ -343,12 +368,51 @@ document.addEventListener('DOMContentLoaded', function() {
     if (competitionCheckbox && competitionDetailsSection) {
         competitionCheckbox.addEventListener('change', function() {
             competitionDetailsSection.style.display = this.checked ? 'block' : 'none';
+            if (!this.checked) toggleMedalProofBlock();
         });
+    }
+
+    // Show the proof upload block only when a standard medal is selected
+    const medalSelect = document.getElementById('competitionStdMedal');
+    if (medalSelect) {
+        medalSelect.addEventListener('change', toggleMedalProofBlock);
     }
 
     // Initialize with first series input for Series-Total mode
     addSeriesInput();
 });
+
+// Show/hide the standard-medal proof block depending on whether a medal is selected.
+function toggleMedalProofBlock() {
+    const block = document.getElementById('medalProofBlock');
+    if (!block) return;
+    const isComp = document.getElementById('isCompetitionCheckbox')?.checked;
+    const medal = document.getElementById('competitionStdMedal')?.value;
+    block.style.display = (isComp && medal) ? 'block' : 'none';
+}
+
+// Upload the chosen proof file (if any) and resolve to its stored reference, else null.
+// Only uploads when this is a competition result with a selected medal and a chosen file.
+function uploadMedalProofIfAny(token) {
+    const isComp = document.getElementById('isCompetitionCheckbox')?.checked;
+    const medal = document.getElementById('competitionStdMedal')?.value;
+    const fileInput = document.getElementById('medalProofFile');
+    if (!isComp || !medal || !fileInput || !fileInput.files || fileInput.files.length === 0) {
+        return Promise.resolve(null);
+    }
+    const fd = new FormData();
+    fd.append('file', fileInput.files[0]);
+    return fetch('/umbraco/surface/StandardMedal/UploadProof', {
+        method: 'POST',
+        headers: { 'RequestVerificationToken': token },
+        body: fd
+    })
+    .then(r => r.json())
+    .then(res => {
+        if (res.success) return res.fileRef;
+        throw new Error(res.message || 'Kunde inte ladda upp bevis.');
+    });
+}
 
 function switchEntryMethod(method) {
     // Hide all entry sections
@@ -716,6 +780,9 @@ function submitTrainingScore() {
         competitionPlace: document.getElementById('competitionPlace').value ? parseInt(document.getElementById('competitionPlace').value) : null,
         competitionShootingClass: document.getElementById('competitionShootingClass').value || null,
         competitionStdMedal: document.getElementById('competitionStdMedal').value || null,
+        competitionName: document.getElementById('competitionName').value || null,
+        competitionLocation: document.getElementById('competitionLocation').value || null,
+        medalProofFileRef: null, // set below after the proof file (if any) is uploaded
         series: seriesData,
         notes: document.getElementById('trainingDescription').value +
                (document.getElementById('trainingNotes').value ? ' - ' + document.getElementById('trainingNotes').value : '')
@@ -761,14 +828,18 @@ function submitTrainingScore() {
     // Get anti-forgery token
     const token = document.querySelector('input[name="__RequestVerificationToken"]').value;
 
-    // Submit to API
-    fetch('/umbraco/surface/TrainingScoring/RecordTrainingScore', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'RequestVerificationToken': token
-        },
-        body: JSON.stringify(data)
+    // Upload any standard-medal proof file first, then submit the result with its reference.
+    uploadMedalProofIfAny(token)
+    .then(fileRef => {
+        data.medalProofFileRef = fileRef;
+        return fetch('/umbraco/surface/TrainingScoring/RecordTrainingScore', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': token
+            },
+            body: JSON.stringify(data)
+        });
     })
     .then(response => response.json())
     .then(result => {
@@ -789,7 +860,7 @@ function submitTrainingScore() {
     })
     .catch(error => {
         console.error('Error saving training score:', error);
-        alert('Kunde inte spara träningsresultat. Försök igen.');
+        alert('Kunde inte spara träningsresultat: ' + (error.message || 'Försök igen.'));
     });
 }
 
@@ -852,6 +923,11 @@ document.addEventListener('DOMContentLoaded', function() {
             // Reset competition checkbox and hide details section
             document.getElementById('isCompetitionCheckbox').checked = false;
             document.getElementById('competitionDetailsSection').style.display = 'none';
+            document.getElementById('competitionStdMedal').value = '';
+            document.getElementById('competitionName').value = '';
+            document.getElementById('competitionLocation').value = '';
+            document.getElementById('medalProofFile').value = '';
+            document.getElementById('medalProofBlock').style.display = 'none';
 
             // Reset entry method to Detaljerad (ShotByShot)
             document.getElementById('methodDetailed').checked = true;
@@ -1068,5 +1144,8 @@ document.addEventListener('DOMContentLoaded', function() {
 // Reset form when modal is hidden
 document.getElementById('addTrainingScoreModal')?.addEventListener('hidden.bs.modal', function () {
     document.getElementById('isCompetitionCheckbox').checked = false;
+    document.getElementById('competitionDetailsSection').style.display = 'none';
+    document.getElementById('medalProofBlock').style.display = 'none';
+    document.getElementById('medalProofFile').value = '';
 });
 </script>

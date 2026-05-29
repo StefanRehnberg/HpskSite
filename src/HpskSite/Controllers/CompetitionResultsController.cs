@@ -55,6 +55,7 @@ namespace HpskSite.Controllers
         private readonly AdminAuthorizationService _adminAuthorizationService;
         private readonly EmailService _emailService;
         private readonly ShootOffService _shootOffService;
+        private readonly StandardMedalMaterializationService _medalMaterialization;
 
         public CompetitionResultsController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -74,7 +75,8 @@ namespace HpskSite.Controllers
             SeriesCalculationService seriesCalculationService,
             AdminAuthorizationService adminAuthorizationService,
             EmailService emailService,
-            ShootOffService shootOffService)
+            ShootOffService shootOffService,
+            StandardMedalMaterializationService medalMaterialization)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _contentService = contentService;
@@ -91,6 +93,7 @@ namespace HpskSite.Controllers
             _adminAuthorizationService = adminAuthorizationService;
             _emailService = emailService;
             _shootOffService = shootOffService;
+            _medalMaterialization = medalMaterialization;
         }
 
         [HttpPost]
@@ -977,13 +980,21 @@ namespace HpskSite.Controllers
                 var competitionDateValue = competition?.GetValue("competitionDate");
                 DateTime? competitionDate = competitionDateValue != null ? (DateTime?)competitionDateValue : null;
 
-                // Query database for this member's results (don't filter by shootingClass - get all their results)
-                // Route to correct table based on competition type
+                // Query this member's results for the requested class. A member can be registered
+                // in more than one class for the same competition (e.g. A and C); without the class
+                // filter their series get merged into one bogus combined result. Fall back to no
+                // class filter only when the caller didn't supply one (legacy callers).
+                // Route to correct table based on competition type.
                 using var database = _umbracoDatabaseFactory.CreateDatabase();
                 var resultTable = GetResultTableName(GetCompetitionTypeId(competitionId));
-                var query = $"SELECT * FROM [{resultTable}] WHERE CompetitionId = @0 AND MemberId = @1 ORDER BY SeriesNumber";
+                var hasClass = !string.IsNullOrWhiteSpace(shootingClass);
+                var query = hasClass
+                    ? $"SELECT * FROM [{resultTable}] WHERE CompetitionId = @0 AND MemberId = @1 AND ShootingClass = @2 ORDER BY SeriesNumber"
+                    : $"SELECT * FROM [{resultTable}] WHERE CompetitionId = @0 AND MemberId = @1 ORDER BY SeriesNumber";
 
-                var results = await database.FetchAsync<PrecisionResultEntry>(query, competitionId, memberId);
+                var results = hasClass
+                    ? await database.FetchAsync<PrecisionResultEntry>(query, competitionId, memberId, shootingClass)
+                    : await database.FetchAsync<PrecisionResultEntry>(query, competitionId, memberId);
 
                 if (!results.Any())
                 {
@@ -996,6 +1007,36 @@ namespace HpskSite.Controllers
                 // Derive weapon class via the registry (so A_opt_X correctly maps to "A_Opt").
                 var weaponClass = ShootingClasses.GetWeaponClassCode(actualShootingClass);
                 if (string.IsNullOrEmpty(weaponClass)) weaponClass = "?";
+
+                // Placement + standard medal from the published result snapshot (if any), so the
+                // detail modal can show a "Tävlingsresultat" section like self-reported results do.
+                int? placement = null;
+                string? standardMedal = null;
+                var resultPage = _contentService.GetPagedChildren(competitionId, 0, int.MaxValue, out _)
+                    .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
+                var snapshotJson = resultPage?.GetValue<string>("resultData");
+                if (!string.IsNullOrEmpty(snapshotJson))
+                {
+                    try
+                    {
+                        var snapshot = JsonConvert.DeserializeObject<FinalResults>(snapshotJson);
+                        if (snapshot?.ClassGroups != null)
+                        {
+                            foreach (var grp in snapshot.ClassGroups)
+                            {
+                                var idx = grp.Shooters.FindIndex(s => s.MemberId.ToString() == memberId
+                                    && string.Equals(s.ShootingClass, actualShootingClass, StringComparison.OrdinalIgnoreCase));
+                                if (idx >= 0)
+                                {
+                                    placement = idx + 1;
+                                    standardMedal = grp.Shooters[idx].StandardMedal;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    catch { /* snapshot shape mismatch — leave place/medal null */ }
+                }
 
                 // Build series data
                 var series = results.Select(r => {
@@ -1017,6 +1058,8 @@ namespace HpskSite.Controllers
                     competitionDate,
                     shootingClass = actualShootingClass,
                     weaponClass,
+                    place = placement,
+                    standardMedal,
                     series,
                     totalScore,
                     xCount = totalX,
@@ -2540,6 +2583,16 @@ namespace HpskSite.Controllers
 
                 _logger.LogInformation("Created/updated final results list for competition {CompetitionId}", request.CompetitionId);
 
+                // If "Uppdatera" regenerates an ALREADY-OFFICIAL main list, reconcile the
+                // Standardmedalj ledger from the fresh results. This covers the case where
+                // Standardmedaljsgrundande was forgotten at first publish, then enabled later and
+                // the admin clicks Uppdatera (not the publish toggle). Idempotent: medals are
+                // upserted by identity, and ones no longer earned are removed (except gold-locked).
+                if (!request.IsSubCompetition && existingIsOfficial && results.Any())
+                {
+                    await MaterializeStandardMedalsAsync(competition, finalResults);
+                }
+
                 var totalShooters = finalResults.ClassGroups.Sum(g => g.Shooters.Count);
 
                 return Json(new {
@@ -2803,7 +2856,15 @@ namespace HpskSite.Controllers
                         finalResultsList.SetValue("resultData", resultDataJson);
                         _logger.LogInformation("Regenerated results JSON with {Count} shooters for competition {CompetitionId}",
                             freshResults.ClassGroups.Sum(g => g.Shooters.Count), request.CompetitionId);
+
+                        // Materialize the won Standard medals into the Standardmedalj ledger.
+                        await MaterializeStandardMedalsAsync(competition, freshResults);
                     }
+                }
+                else if (!newIsOfficial && !request.IsSubCompetition)
+                {
+                    // Results pulled back to preliminary — the medals are no longer official.
+                    await _medalMaterialization.RemoveOnSiteForCompetitionAsync(request.CompetitionId);
                 }
 
                 if (request.IsSubCompetition)
@@ -2835,6 +2896,35 @@ namespace HpskSite.Controllers
             {
                 _logger.LogError(ex, "Error toggling isOfficial for competition {CompetitionId}", request?.CompetitionId);
                 return Json(new { Success = false, Message = "Ett fel uppstod: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Extract won Standard medals from a freshly computed precision-family result set and
+        /// upsert them into the Standardmedalj ledger. Discipline comes from the competition's
+        /// competitionType; season year from competitionDate. Never blocks publishing.
+        /// </summary>
+        private async Task MaterializeStandardMedalsAsync(Umbraco.Cms.Core.Models.IContent competition, FinalResults freshResults)
+        {
+            try
+            {
+                var discipline = competition.GetValue<string>("competitionType") ?? StandardMedals.Precision;
+                var competitionDate = competition.GetValue<DateTime?>("competitionDate");
+                var year = competitionDate?.Year ?? DateTime.Now.Year;
+                var competitionName = competition.GetValue<string>("competitionName");
+                if (string.IsNullOrWhiteSpace(competitionName)) competitionName = competition.Name;
+
+                var medals = freshResults.ClassGroups
+                    .SelectMany(g => g.Shooters)
+                    .Where(s => StandardMedals.IsMedal(s.StandardMedal))
+                    .Select(s => new OnSiteMedal(s.MemberId, s.ShootingClass, s.StandardMedal!));
+
+                await _medalMaterialization.UpsertOnSiteMedalsAsync(
+                    competition.Id, discipline, year, competitionName, competitionDate, medals);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to materialize standard medals for competition {CompetitionId}", competition.Id);
             }
         }
 

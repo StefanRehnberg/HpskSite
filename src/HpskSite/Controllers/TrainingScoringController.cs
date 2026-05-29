@@ -29,6 +29,8 @@ namespace HpskSite.Controllers
         private readonly UnifiedResultsService _unifiedResultsService;
         private readonly IShooterStatisticsService _statisticsService;
         private readonly FaltskytteStatsService _faltskytteStatsService;
+        private readonly StandardMedalLedgerService _medalLedger;
+        private readonly StandardMedalProofStorage _proofStorage;
 
         public TrainingScoringController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -42,7 +44,9 @@ namespace HpskSite.Controllers
             IContentService contentService,
             UnifiedResultsService unifiedResultsService,
             IShooterStatisticsService statisticsService,
-            FaltskytteStatsService faltskytteStatsService)
+            FaltskytteStatsService faltskytteStatsService,
+            StandardMedalLedgerService medalLedger,
+            StandardMedalProofStorage proofStorage)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _memberManager = memberManager;
@@ -52,6 +56,84 @@ namespace HpskSite.Controllers
             _unifiedResultsService = unifiedResultsService;
             _statisticsService = statisticsService;
             _faltskytteStatsService = faltskytteStatsService;
+            _medalLedger = medalLedger;
+            _proofStorage = proofStorage;
+        }
+
+        /// <summary>
+        /// Keep the Standardmedalj ledger in sync with a self-entered competition result.
+        /// Creates / updates / removes the linked StandardMedalAward as the medal on the
+        /// TrainingScores row changes. Awards already consumed by a Guldmedalj application are
+        /// left untouched (their points are locked into a submitted application).
+        /// </summary>
+        private async Task SyncSelfReportedMedalAsync(int trainingScoreId, TrainingScoreEntry entry)
+        {
+            var existing = await _medalLedger.GetByTrainingScoreAsync(trainingScoreId);
+            bool hasMedal = entry.IsCompetition && StandardMedals.IsMedal(entry.CompetitionStdMedal);
+
+            if (!hasMedal)
+            {
+                // Medal removed/never present — drop the linked award (unless locked into a Gold app).
+                if (existing != null && !existing.GoldApplicationId.HasValue)
+                {
+                    var proofToDelete = existing.ProofFileRef;
+                    var (deleted, _) = await _medalLedger.DeleteAwardAsync(existing.Id);
+                    if (deleted) _proofStorage.Delete(proofToDelete);
+                }
+                return;
+            }
+
+            if (existing == null)
+            {
+                await _medalLedger.InsertAwardAsync(new StandardMedalAward
+                {
+                    MemberId = entry.MemberId,
+                    Year = entry.TrainingDate.Year,
+                    Discipline = string.IsNullOrWhiteSpace(entry.Discipline) ? StandardMedals.Precision : entry.Discipline,
+                    MedalType = entry.CompetitionStdMedal!,
+                    Source = StandardMedals.SourceSelfReported,
+                    CompetitionName = entry.CompetitionName,
+                    CompetitionDate = entry.TrainingDate,
+                    Location = entry.CompetitionLocation,
+                    ShootingClass = entry.CompetitionShootingClass,
+                    ProofType = string.IsNullOrEmpty(entry.MedalProofFileRef)
+                        ? StandardMedals.ProofAttestation
+                        : StandardMedals.ProofFile,
+                    ProofFileRef = entry.MedalProofFileRef,
+                    Status = StandardMedals.StatusReported,
+                    TrainingScoreId = trainingScoreId,
+                    EnteredByMemberId = entry.MemberId
+                });
+                return;
+            }
+
+            // Existing award — refresh descriptive fields. Don't touch a locked (consumed) award.
+            if (existing.GoldApplicationId.HasValue)
+                return;
+
+            existing.Year = entry.TrainingDate.Year;
+            existing.Discipline = string.IsNullOrWhiteSpace(entry.Discipline) ? StandardMedals.Precision : entry.Discipline;
+            existing.MedalType = entry.CompetitionStdMedal!;
+            existing.CompetitionDate = entry.TrainingDate;
+            existing.ShootingClass = entry.CompetitionShootingClass;
+            // Name/location aren't loaded into the edit form, so only overwrite when the caller
+            // actually supplied them — otherwise keep what was entered at creation.
+            if (!string.IsNullOrWhiteSpace(entry.CompetitionName)) existing.CompetitionName = entry.CompetitionName;
+            if (!string.IsNullOrWhiteSpace(entry.CompetitionLocation)) existing.Location = entry.CompetitionLocation;
+
+            // Replace the proof file only when a new one was uploaded; otherwise keep what's there.
+            if (!string.IsNullOrEmpty(entry.MedalProofFileRef) && entry.MedalProofFileRef != existing.ProofFileRef)
+            {
+                _proofStorage.Delete(existing.ProofFileRef);
+                existing.ProofFileRef = entry.MedalProofFileRef;
+                existing.ProofType = StandardMedals.ProofFile;
+            }
+
+            // A self-reported edit re-opens verification.
+            if (existing.Status == StandardMedals.StatusRejected)
+                existing.Status = StandardMedals.StatusReported;
+
+            await _medalLedger.UpdateAwardAsync(existing);
         }
 
         #region Public Endpoints (Member Access)
@@ -94,9 +176,10 @@ namespace HpskSite.Controllers
                 entry.CalculateTotals();
 
                 // Save to database
+                int newTrainingScoreId;
                 using (var db = _databaseFactory.CreateDatabase())
                 {
-                    db.Insert("TrainingScores", "Id", true, new
+                    var newId = db.Insert("TrainingScores", "Id", true, new
                     {
                         MemberId = entry.MemberId,
                         TrainingDate = entry.TrainingDate,
@@ -113,7 +196,11 @@ namespace HpskSite.Controllers
                         CreatedAt = entry.CreatedAt,
                         UpdatedAt = entry.UpdatedAt
                     });
+                    newTrainingScoreId = Convert.ToInt32(newId);
                 }
+
+                // Record any self-reported standard medal in the Standardmedalj ledger.
+                await SyncSelfReportedMedalAsync(newTrainingScoreId, entry);
 
                 // Update shooter statistics for handicap calculation
                 if (!string.IsNullOrEmpty(entry.WeaponClass) && entry.SeriesCount > 0)
@@ -544,15 +631,16 @@ namespace HpskSite.Controllers
                 var allDates = allResults.Select(r => r.Date.Year).Distinct().OrderByDescending(y => y).ToList();
                 var availableYears = allDates.Any() ? allDates : new List<int> { DateTime.Now.Year };
 
-                // Calculate medal statistics for all years in a single batch
-                var medalStatsByYear = GetAllYearMedalStats(member.Id, availableYears, competitionType);
+                // Medal statistics — the Standardmedalj ledger is the canonical source (replaces the
+                // old TrainingScores+result-doc tally). Returns total (non-rejected) + verified split.
+                var medalStatsByYear = await _medalLedger.GetMedalStatsByYearAsync(member.Id, competitionType, availableYears);
                 // Default medalStats is for current year (or most recent year with data)
                 var currentYear = DateTime.Now.Year;
                 var medalStats = medalStatsByYear.ContainsKey(currentYear)
-                    ? medalStatsByYear[currentYear]
+                    ? (object)medalStatsByYear[currentYear]
                     : (availableYears.Any() && medalStatsByYear.ContainsKey(availableYears.First())
                         ? medalStatsByYear[availableYears.First()]
-                        : (object)new { silverCount = 0, bronzeCount = 0, totalPoints = 0 });
+                        : new MedalYearStats());
 
                 var stats = new
                 {
@@ -738,6 +826,10 @@ namespace HpskSite.Controllers
                         await _statisticsService.RecalculateFromHistoryAsync(member.Id, oldWeaponClass);
                     }
 
+                    // Keep the Standardmedalj ledger in sync with the edited result.
+                    entry.MemberId = member.Id;
+                    await SyncSelfReportedMedalAsync(entry.Id, entry);
+
                     return Json(new { success = true, message = "Training score updated successfully" });
                 }
             }
@@ -785,6 +877,15 @@ namespace HpskSite.Controllers
                     // Track weapon class for statistics recalculation
                     string? weaponClass = existing.WeaponClass as string;
 
+                    // Remove any linked Standardmedalj award (unless locked into a Gold application).
+                    var linkedAward = await _medalLedger.GetByTrainingScoreAsync(id);
+                    if (linkedAward != null && !linkedAward.GoldApplicationId.HasValue)
+                    {
+                        var proofToDelete = linkedAward.ProofFileRef;
+                        var (deleted, _) = await _medalLedger.DeleteAwardAsync(linkedAward.Id);
+                        if (deleted) _proofStorage.Delete(proofToDelete);
+                    }
+
                     // Delete the record
                     db.Execute("DELETE FROM TrainingScores WHERE Id = @0", id);
 
@@ -805,246 +906,7 @@ namespace HpskSite.Controllers
 
         #endregion
 
-        #region Medal Statistics
-
-        /// <summary>
-        /// Get medal statistics for a member for a specific year.
-        /// Sources: TrainingScores (external competitions) and Competition Results documents.
-        /// </summary>
-        private object GetMemberMedalStats(int memberId, int year, string competitionType = "Precision")
-        {
-            int silverCount = 0;
-            int bronzeCount = 0;
-
-            try
-            {
-                using (var db = _databaseFactory.CreateDatabase())
-                {
-                    // Source 1: TrainingScores table - external competitions with medals
-                    // Filter by discipline so medals are counted per competition type
-                    var disciplineFilter = competitionType == "Precision"
-                        ? "AND (Discipline = 'Precision' OR Discipline IS NULL)"
-                        : $"AND Discipline = @2";
-                    var trainingMedals = db.Fetch<dynamic>($@"
-                        SELECT CompetitionStdMedal, COUNT(*) as MedalCount
-                        FROM TrainingScores
-                        WHERE MemberId = @0
-                          AND IsCompetition = 1
-                          AND CompetitionStdMedal IS NOT NULL
-                          AND CompetitionStdMedal != ''
-                          AND YEAR(TrainingDate) = @1
-                          {disciplineFilter}
-                        GROUP BY CompetitionStdMedal",
-                        memberId, year, competitionType);
-
-                    foreach (var medal in trainingMedals)
-                    {
-                        string medalType = medal.CompetitionStdMedal?.ToString()?.ToUpper() ?? "";
-                        int count = (int)(medal.MedalCount ?? 0);
-
-                        if (medalType == "S")
-                            silverCount += count;
-                        else if (medalType == "B")
-                            bronzeCount += count;
-                    }
-
-                    // Source 2: Competition Results - get competitions the member participated in
-                    var resultTable = competitionType switch { "Milsnabb" => "MilsnabbResultEntry", "Duell" => "DuellResultEntry", "NationellHelmatch" => "NationellHelmatchResultEntry", "MagnumPrecision" => "MagnumPrecisionResultEntry", _ => "PrecisionResultEntry" };
-                    var competitionIds = db.Fetch<int>($@"
-                        SELECT DISTINCT CompetitionId
-                        FROM {resultTable}
-                        WHERE MemberId = @0",
-                        memberId);
-
-                    // Batch load competitions for year filtering
-                    var competitionIdsForYear = GetCompetitionIdsForYear(competitionIds, year);
-
-                    foreach (var competitionId in competitionIdsForYear)
-                    {
-                        // Find the specific result page named "Resultat" (official results)
-                        var resultPage = _contentService.GetPagedChildren(competitionId, 0, 50, out _)
-                            .FirstOrDefault(n => n.ContentType.Alias == "competitionResult" && n.Name == "Resultat");
-
-                        if (resultPage == null) continue;
-
-                        var resultDataJson = resultPage.GetValue<string>("resultData");
-                        if (string.IsNullOrEmpty(resultDataJson)) continue;
-
-                        try
-                        {
-                            var finalResults = Newtonsoft.Json.JsonConvert.DeserializeObject<HpskSite.CompetitionTypes.Precision.Models.PrecisionFinalResults>(resultDataJson);
-                            if (finalResults?.ClassGroups == null) continue;
-
-                            foreach (var classGroup in finalResults.ClassGroups)
-                            {
-                                var shooter = classGroup.Shooters?.FirstOrDefault(s => s.MemberId == memberId);
-                                if (shooter != null && !string.IsNullOrEmpty(shooter.StandardMedal))
-                                {
-                                    if (shooter.StandardMedal.ToUpper() == "S")
-                                        silverCount++;
-                                    else if (shooter.StandardMedal.ToUpper() == "B")
-                                        bronzeCount++;
-                                }
-                            }
-                        }
-                        catch
-                        {
-                            // Skip invalid JSON
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"[MedalStats] ERROR: {ex.Message}");
-            }
-
-            // Calculate total points: Silver = 2, Bronze = 1
-            int totalPoints = (silverCount * 2) + (bronzeCount * 1);
-
-            return new
-            {
-                silverCount,
-                bronzeCount,
-                totalPoints
-            };
-        }
-
-        /// <summary>
-        /// Filter competition IDs by year (optimization - reduces content service calls)
-        /// </summary>
-        private List<int> GetCompetitionIdsForYear(List<int> competitionIds, int year)
-        {
-            var result = new List<int>();
-
-            if (!competitionIds.Any()) return result;
-
-            var competitions = _contentService.GetByIds(competitionIds);
-
-            foreach (var competition in competitions)
-            {
-                var competitionDate = competition.GetValue<DateTime>("competitionDate");
-                if (competitionDate.Year == year)
-                {
-                    result.Add(competition.Id);
-                }
-            }
-
-            return result;
-        }
-
-        /// <summary>
-        /// Get medal statistics for all years in a single batch instead of per-year queries.
-        /// </summary>
-        private Dictionary<int, object> GetAllYearMedalStats(int memberId, List<int> years, string competitionType = "Precision")
-        {
-            var result = new Dictionary<int, object>();
-            // Initialize all years with zero counts
-            foreach (var y in years)
-                result[y] = new { silverCount = 0, bronzeCount = 0, totalPoints = 0 };
-
-            var medalsByYear = new Dictionary<int, (int silver, int bronze)>();
-            foreach (var y in years)
-                medalsByYear[y] = (0, 0);
-
-            try
-            {
-                using (var db = _databaseFactory.CreateDatabase())
-                {
-                    // Source 1: TrainingScores — single query grouped by year
-                    var disciplineFilter = competitionType == "Precision"
-                        ? "AND (Discipline = 'Precision' OR Discipline IS NULL)"
-                        : $"AND Discipline = @1";
-                    var trainingMedals = db.Fetch<dynamic>($@"
-                        SELECT YEAR(TrainingDate) as MedalYear, CompetitionStdMedal, COUNT(*) as MedalCount
-                        FROM TrainingScores
-                        WHERE MemberId = @0
-                          AND IsCompetition = 1
-                          AND CompetitionStdMedal IS NOT NULL
-                          AND CompetitionStdMedal != ''
-                          {disciplineFilter}
-                        GROUP BY YEAR(TrainingDate), CompetitionStdMedal",
-                        memberId, competitionType);
-
-                    foreach (var medal in trainingMedals)
-                    {
-                        int medalYear = (int)medal.MedalYear;
-                        if (!medalsByYear.ContainsKey(medalYear)) continue;
-                        string medalType = medal.CompetitionStdMedal?.ToString()?.ToUpper() ?? "";
-                        int count = (int)(medal.MedalCount ?? 0);
-                        var (s, b) = medalsByYear[medalYear];
-                        if (medalType == "S") medalsByYear[medalYear] = (s + count, b);
-                        else if (medalType == "B") medalsByYear[medalYear] = (s, b + count);
-                    }
-
-                    // Source 2: Competition results — single batch load, grouped by year
-                    var resultTable = competitionType switch { "Milsnabb" => "MilsnabbResultEntry", "Duell" => "DuellResultEntry", "NationellHelmatch" => "NationellHelmatchResultEntry", "MagnumPrecision" => "MagnumPrecisionResultEntry", _ => "PrecisionResultEntry" };
-                    var competitionIds = db.Fetch<int>($@"
-                        SELECT DISTINCT CompetitionId FROM {resultTable} WHERE MemberId = @0",
-                        memberId);
-
-                    if (competitionIds.Any())
-                    {
-                        // Batch load all competitions once, group by year
-                        var competitions = _contentService.GetByIds(competitionIds);
-                        var competitionsByYear = new Dictionary<int, List<int>>();
-                        foreach (var comp in competitions)
-                        {
-                            var compDate = comp.GetValue<DateTime>("competitionDate");
-                            if (compDate != default && medalsByYear.ContainsKey(compDate.Year))
-                            {
-                                if (!competitionsByYear.ContainsKey(compDate.Year))
-                                    competitionsByYear[compDate.Year] = new List<int>();
-                                competitionsByYear[compDate.Year].Add(comp.Id);
-                            }
-                        }
-
-                        // Load result pages for all competitions at once
-                        foreach (var (compYear, compIds) in competitionsByYear)
-                        {
-                            foreach (var competitionId in compIds)
-                            {
-                                var resultPage = _contentService.GetPagedChildren(competitionId, 0, 50, out _)
-                                    .FirstOrDefault(n => n.ContentType.Alias == "competitionResult" && n.Name == "Resultat");
-                                if (resultPage == null) continue;
-
-                                var resultDataJson = resultPage.GetValue<string>("resultData");
-                                if (string.IsNullOrEmpty(resultDataJson)) continue;
-
-                                try
-                                {
-                                    var finalResults = Newtonsoft.Json.JsonConvert.DeserializeObject<HpskSite.CompetitionTypes.Precision.Models.PrecisionFinalResults>(resultDataJson);
-                                    if (finalResults?.ClassGroups == null) continue;
-
-                                    foreach (var classGroup in finalResults.ClassGroups)
-                                    {
-                                        var shooter = classGroup.Shooters?.FirstOrDefault(s => s.MemberId == memberId);
-                                        if (shooter != null && !string.IsNullOrEmpty(shooter.StandardMedal))
-                                        {
-                                            var (s, b) = medalsByYear[compYear];
-                                            if (shooter.StandardMedal.ToUpper() == "S")
-                                                medalsByYear[compYear] = (s + 1, b);
-                                            else if (shooter.StandardMedal.ToUpper() == "B")
-                                                medalsByYear[compYear] = (s, b + 1);
-                                        }
-                                    }
-                                }
-                                catch { }
-                            }
-                        }
-                    }
-                }
-            }
-            catch { }
-
-            // Build result dictionary
-            foreach (var (y, (s, b)) in medalsByYear)
-            {
-                result[y] = new { silverCount = s, bronzeCount = b, totalPoints = (s * 2) + b };
-            }
-
-            return result;
-        }
+        #region Discipline result loading
 
         /// <summary>
         /// Load results for a non-Precision discipline directly from discipline-specific sources,

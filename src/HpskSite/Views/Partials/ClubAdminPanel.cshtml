@@ -67,6 +67,11 @@
             </button>
         </li>
         <li class="nav-item" role="presentation">
+            <button class="nav-link" id="standardMedals-tab" data-bs-toggle="tab" data-bs-target="#standardMedalsTab" type="button">
+                <i class="bi bi-award me-2"></i>Standardmedaljer
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
             <button class="nav-link" id="clubstats-tab" data-bs-toggle="tab" data-bs-target="#clubStatsTab" type="button">
                 <i class="bi bi-graph-up me-2"></i>Statistik
             </button>
@@ -417,9 +422,51 @@
             @await Html.PartialAsync("ReigningChampionsPanel", null, clubChampAdminVD)
         </div>
 
+        <!-- Standardmedaljer Tab -->
+        <div class="tab-pane fade" id="standardMedalsTab">
+            <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+                <div>
+                    <h5 class="mb-1"><i class="bi bi-award text-warning me-2"></i>Standardmedaljer</h5>
+                    <p class="text-muted small mb-0">
+                        Medlemmar som tagit standardmedaljer (silver = 2 p, brons = 1 p). Egenrapporterade
+                        medaljer kan behöva verifieras innan de rapporteras till förbundet.
+                    </p>
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                    <label for="medalYearFilter" class="small text-muted mb-0">År:</label>
+                    <select id="medalYearFilter" class="form-select form-select-sm" style="width:auto;" onchange="loadClubMedals()"></select>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="exportClubMedals()" title="Exportera årets medaljer som CSV">
+                        <i class="bi bi-download me-1"></i>Exportera
+                    </button>
+                </div>
+            </div>
+            <div id="clubMedalsContent">
+                <div class="text-center py-4">
+                    <div class="spinner-border text-primary" role="status"><span class="visually-hidden">Laddar...</span></div>
+                </div>
+            </div>
+        </div>
+
         <!-- Statistik Tab -->
         <div class="tab-pane fade" id="clubStatsTab">
             @await Html.PartialAsync("ClubStatistics")
+        </div>
+    </div>
+</div>
+
+<!-- Member medal detail modal -->
+<div class="modal fade" id="memberMedalDetailModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-award text-warning me-2"></i><span id="memberMedalDetailName"></span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body" id="memberMedalDetailBody">
+                <div class="text-center py-4">
+                    <div class="spinner-border text-primary" role="status"><span class="visually-hidden">Laddar...</span></div>
+                </div>
+            </div>
         </div>
     </div>
 </div>
@@ -1086,6 +1133,276 @@ function getAntiForgeryToken() {
 document.getElementById('events-tab').addEventListener('shown.bs.tab', function () {
     loadEvents();
 });
+
+// Standardmedaljer tab
+let medalYearInitialized = false;
+document.getElementById('standardMedals-tab').addEventListener('shown.bs.tab', function () {
+    if (!medalYearInitialized) {
+        const sel = document.getElementById('medalYearFilter');
+        const now = new Date().getFullYear();
+        for (let y = now; y >= now - 6; y--) {
+            const opt = document.createElement('option');
+            opt.value = y; opt.textContent = y;
+            sel.appendChild(opt);
+        }
+        medalYearInitialized = true;
+    }
+    loadClubMedals();
+});
+
+function exportClubMedals() {
+    const year = document.getElementById('medalYearFilter')?.value || new Date().getFullYear();
+    window.location = `/umbraco/surface/StandardMedal/ExportClubMedals?clubId=${clubId}&year=${year}`;
+}
+
+function loadClubMedals() {
+    const year = document.getElementById('medalYearFilter')?.value || new Date().getFullYear();
+    const content = document.getElementById('clubMedalsContent');
+    content.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary"></div></div>';
+    fetch(`/umbraco/surface/StandardMedal/GetClubMedalSummary?clubId=${clubId}&year=${year}`)
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) { content.innerHTML = `<div class="alert alert-danger">${data.message || 'Kunde inte ladda.'}</div>`; return; }
+            renderClubMedals(data.members || []);
+        })
+        .catch(() => { content.innerHTML = '<div class="alert alert-danger">Fel vid inläsning.</div>'; });
+}
+
+function renderClubMedals(members) {
+    const content = document.getElementById('clubMedalsContent');
+    if (members.length === 0) {
+        content.innerHTML = '<div class="text-muted text-center py-4"><i class="bi bi-award d-block" style="font-size:2rem;opacity:.4;"></i>Inga standardmedaljer registrerade för valt år.</div>';
+        return;
+    }
+    let html = `<div class="table-responsive"><table class="table table-hover align-middle">
+        <thead><tr>
+            <th>Medlem</th><th class="text-center">Poäng</th><th class="text-center">Silver</th>
+            <th class="text-center">Brons</th><th class="text-center">Status</th><th></th>
+        </tr></thead><tbody>`;
+    members.forEach(m => {
+        const status = m.unverified > 0
+            ? `<span class="badge bg-warning text-dark" title="Egenrapporterade som väntar på verifiering">${m.unverified} att verifiera</span>`
+            : '<span class="badge bg-success-subtle text-success">Klar</span>';
+        html += `<tr>
+            <td>${escapeMedalHtml(m.name)}</td>
+            <td class="text-center fw-semibold">${m.points} p</td>
+            <td class="text-center">${m.silver}</td>
+            <td class="text-center">${m.brons}</td>
+            <td class="text-center">${status}</td>
+            <td class="text-end"><button class="btn btn-sm btn-outline-primary" onclick="openMemberMedalDetail(${m.memberId}, '${escapeMedalAttr(m.name)}')"><i class="bi bi-list-ul me-1"></i>Detaljer</button></td>
+        </tr>`;
+    });
+    html += '</tbody></table></div>';
+    content.innerHTML = html;
+}
+
+function openMemberMedalDetail(memberId, name) {
+    document.getElementById('memberMedalDetailName').textContent = name;
+    const body = document.getElementById('memberMedalDetailBody');
+    body.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary"></div></div>';
+    const modalEl = document.getElementById('memberMedalDetailModal');
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+    const year = document.getElementById('medalYearFilter')?.value || new Date().getFullYear();
+    fetch(`/umbraco/surface/StandardMedal/GetMemberMedalDetail?memberId=${memberId}&year=${year}`)
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) { body.innerHTML = `<div class="alert alert-danger">${data.message || 'Kunde inte ladda.'}</div>`; return; }
+            renderMemberMedalDetail(data);
+        })
+        .catch(() => { body.innerHTML = '<div class="alert alert-danger">Fel vid inläsning.</div>'; });
+}
+
+function renderMemberMedalDetail(data) {
+    const body = document.getElementById('memberMedalDetailBody');
+    const awards = data.awards || [];
+    if (awards.length === 0) { body.innerHTML = '<p class="text-muted">Inga medaljer för valt år.</p>'; return; }
+    let html = `<div class="table-responsive"><table class="table table-sm align-middle"><thead><tr>
+        <th>Tävling</th><th>Gren</th><th>Klass</th><th>Medalj</th><th>Källa</th><th>Bevis</th><th>Status</th><th></th>
+    </tr></thead><tbody>`;
+    awards.forEach(a => {
+        const date = a.competitionDate ? new Date(a.competitionDate).toLocaleDateString('sv-SE') : '';
+        const compCell = `${escapeMedalHtml(a.competitionName || '–')}${a.location ? ' <span class="text-muted small">(' + escapeMedalHtml(a.location) + ')</span>' : ''}${date ? '<div class="text-muted small">' + date + '</div>' : ''}`;
+        const medalBadge = a.medalType === 'S'
+            ? '<span class="badge" style="background-color:#9ca3af;">Silver (2p)</span>'
+            : '<span class="badge" style="background-color:#cd7f32;">Brons (1p)</span>';
+        // Self-reported/admin medals can be corrected (e.g. shooter entered S instead of B).
+        // pistol.nu medals follow the result list and gold-locked ones can't change.
+        const medalCell = a.editable
+            ? `<select class="form-select form-select-sm" style="width:auto;display:inline-block;" onchange="updateAwardMedal(${a.id}, this.value, ${data.memberId}, '${escapeMedalAttr(data.memberName)}')">
+                   <option value="S"${a.medalType === 'S' ? ' selected' : ''}>Silver (2p)</option>
+                   <option value="B"${a.medalType === 'B' ? ' selected' : ''}>Brons (1p)</option>
+               </select>`
+            : medalBadge;
+        let source;
+        if (a.source === 'OnSite') source = '<span class="text-success" title="Resultat från pistol.nu-tävling"><i class="bi bi-check-circle-fill"></i> pistol.nu</span>';
+        else if (a.source === 'SelfReported') source = '<span title="Egenrapporterad av skytten"><i class="bi bi-person"></i> Egen</span>';
+        else source = '<span><i class="bi bi-pencil"></i> Admin</span>';
+
+        let proof;
+        if (a.source === 'OnSite') proof = '<span class="text-muted small">Resultatlista</span>';
+        else if (a.hasProofFile) proof = `<a href="/umbraco/surface/StandardMedal/GetProof?awardId=${a.id}" target="_blank" rel="noopener"><i class="bi bi-paperclip"></i> Visa</a>`;
+        else proof = '<span class="text-muted small">Intygat</span>';
+
+        let statusBadge;
+        if (a.status === 'Verified') statusBadge = '<span class="badge bg-success">Verifierad</span>';
+        else if (a.status === 'Rejected') statusBadge = '<span class="badge bg-danger">Avvisad</span>';
+        else statusBadge = '<span class="badge bg-warning text-dark">Inrapporterad</span>';
+
+        let actions = '';
+        if (a.source !== 'OnSite') {
+            if (a.status !== 'Verified') actions += `<button class="btn btn-sm btn-success me-1" title="Verifiera" onclick="setMedalStatus(${a.id}, true, ${data.memberId}, '${escapeMedalAttr(data.memberName)}')"><i class="bi bi-check-lg"></i></button>`;
+            if (a.status !== 'Rejected') actions += `<button class="btn btn-sm btn-outline-danger" title="Avvisa" onclick="setMedalStatus(${a.id}, false, ${data.memberId}, '${escapeMedalAttr(data.memberName)}')"><i class="bi bi-x-lg"></i></button>`;
+        }
+
+        html += `<tr>
+            <td>${compCell}</td>
+            <td>${escapeMedalHtml(a.discipline)}</td>
+            <td>${escapeMedalHtml(a.shootingClass || '–')}</td>
+            <td>${medalCell}</td>
+            <td>${source}</td>
+            <td>${proof}</td>
+            <td>${statusBadge}</td>
+            <td class="text-end text-nowrap">${actions}</td>
+        </tr>`;
+    });
+    const totalPts = awards.filter(a => a.status !== 'Rejected').reduce((s, a) => s + a.points, 0);
+    const verifiedPts = awards.filter(a => a.status === 'Verified').reduce((s, a) => s + a.points, 0);
+    html += `</tbody><tfoot><tr class="fw-semibold"><td colspan="3">Summa (ej avvisade)</td><td colspan="5">${totalPts} p <span class="fw-normal text-muted">varav ${verifiedPts} p verifierade</span></td></tr></tfoot></table></div>`;
+    body.innerHTML = '<div id="memberGoldSection" class="mb-3"></div>' + html;
+    loadMemberGold(data.memberId, data.memberName);
+}
+
+// Guldmedalj section inside the member detail modal.
+function loadMemberGold(memberId, memberName) {
+    const section = document.getElementById('memberGoldSection');
+    if (!section) return;
+    fetch(`/umbraco/surface/StandardMedal/GetMemberGoldStatus?memberId=${memberId}`)
+        .then(r => r.json())
+        .then(data => { if (data.success) renderMemberGold(data, memberName); })
+        .catch(() => {});
+}
+
+function renderMemberGold(data, memberName) {
+    const section = document.getElementById('memberGoldSection');
+    if (!section) return;
+    const g = data.gold || {};
+    const apps = data.applications || [];
+    const pct = Math.min(100, Math.round(((g.available || 0) / 50) * 100));
+
+    let appsHtml = '';
+    if (apps.length > 0) {
+        appsHtml = '<ul class="list-group list-group-flush small mt-2">' + apps.map(a => {
+            let badge, actions = '';
+            if (a.status === 'Approved') badge = '<span class="badge bg-success">Godkänd</span>';
+            else if (a.status === 'Rejected') badge = '<span class="badge bg-secondary">Avbruten</span>';
+            else badge = '<span class="badge bg-warning text-dark">Inskickad</span>';
+            if (a.status === 'Applied') {
+                actions = `<button class="btn btn-sm btn-success me-1" onclick="goldAction(${a.id}, true, ${data.memberId}, '${escapeMedalAttr(memberName)}')">Markera godkänd</button>`
+                        + `<button class="btn btn-sm btn-outline-danger" onclick="goldAction(${a.id}, false, ${data.memberId}, '${escapeMedalAttr(memberName)}')">Avbryt</button>`;
+            }
+            if (a.status !== 'Rejected') {
+                actions += ` <a class="btn btn-sm btn-outline-secondary" href="/umbraco/surface/StandardMedal/ExportGoldApplication?applicationId=${a.id}" title="Ladda ner underlag (CSV)"><i class="bi bi-download"></i></a>`;
+            }
+            const dt = a.approvedAt ? new Date(a.approvedAt).toLocaleDateString('sv-SE')
+                     : (a.appliedAt ? new Date(a.appliedAt).toLocaleDateString('sv-SE') : '');
+            return `<li class="list-group-item d-flex justify-content-between align-items-center px-0 flex-wrap gap-1">
+                <span>Guldmedalj #${a.sequenceNumber} ${badge} <span class="text-muted">${dt}</span></span>
+                <span>${actions}</span></li>`;
+        }).join('') + '</ul>';
+    }
+
+    const applyBtn = g.canApply
+        ? `<button class="btn btn-warning btn-sm" onclick="createGold(${data.memberId}, '${escapeMedalAttr(memberName)}')"><i class="bi bi-trophy-fill me-1"></i>Ansök om guldmedalj (50 p)</button>`
+        : '';
+
+    section.innerHTML = `
+        <div class="card border-warning-subtle">
+          <div class="card-body py-2">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+              <span><i class="bi bi-trophy-fill text-warning"></i> <strong>Guldmedalj</strong>
+                <span class="text-muted small">${g.available || 0} / 50 verifierade p tillgängliga${g.goldsAwarded > 0 ? ' · ' + g.goldsAwarded + ' godkända' : ''}</span>
+              </span>
+              ${applyBtn}
+            </div>
+            <div class="progress mt-1" style="height:6px;"><div class="progress-bar bg-warning" style="width:${pct}%"></div></div>
+            ${appsHtml}
+          </div>
+        </div>`;
+}
+
+function createGold(memberId, memberName) {
+    if (!confirm('Skapa en guldmedaljsansökan? 50 verifierade poäng reserveras (äldsta först).')) return;
+    fetch('/umbraco/surface/StandardMedal/CreateGoldApplication', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getAntiForgeryToken() },
+        body: JSON.stringify({ memberId })
+    })
+    .then(r => r.json())
+    .then(res => {
+        if (!res.success) { alert('Fel: ' + (res.message || 'Kunde inte skapa ansökan.')); return; }
+        openMemberMedalDetail(memberId, memberName);
+        loadClubMedals();
+    })
+    .catch(() => alert('Kunde inte skapa ansökan.'));
+}
+
+function goldAction(applicationId, approve, memberId, memberName) {
+    if (!approve && !confirm('Avbryt ansökan? De reserverade poängen frigörs.')) return;
+    const url = approve ? '/umbraco/surface/StandardMedal/ApproveGoldApplication' : '/umbraco/surface/StandardMedal/RejectGoldApplication';
+    fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getAntiForgeryToken() },
+        body: JSON.stringify({ applicationId })
+    })
+    .then(r => r.json())
+    .then(res => {
+        if (!res.success) { alert('Fel: ' + (res.message || 'Kunde inte uppdatera ansökan.')); return; }
+        openMemberMedalDetail(memberId, memberName);
+        loadClubMedals();
+    })
+    .catch(() => alert('Kunde inte uppdatera ansökan.'));
+}
+
+function updateAwardMedal(awardId, medalType, memberId, memberName) {
+    fetch('/umbraco/surface/StandardMedal/UpdateAwardMedal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getAntiForgeryToken() },
+        body: JSON.stringify({ awardId, medalType })
+    })
+    .then(r => r.json())
+    .then(res => {
+        if (!res.success) { alert('Fel: ' + (res.message || 'Kunde inte ändra medaljen.')); }
+        openMemberMedalDetail(memberId, memberName); // reload (also resets the select on failure)
+        loadClubMedals();
+    })
+    .catch(() => alert('Kunde inte ändra medaljen.'));
+}
+
+function setMedalStatus(awardId, verify, memberId, memberName) {
+    const url = verify ? '/umbraco/surface/StandardMedal/VerifyAward' : '/umbraco/surface/StandardMedal/RejectAward';
+    if (!verify && !confirm('Avvisa denna medalj? Den räknas då inte med i rapporten.')) return;
+    fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getAntiForgeryToken() },
+        body: JSON.stringify({ awardId })
+    })
+    .then(r => r.json())
+    .then(res => {
+        if (!res.success) { alert('Fel: ' + (res.message || 'Kunde inte uppdatera.')); return; }
+        openMemberMedalDetail(memberId, memberName); // reload detail
+        loadClubMedals();                              // refresh summary counts
+    })
+    .catch(() => alert('Kunde inte uppdatera medaljstatus.'));
+}
+
+// Local HTML escapers (self-reported competition names/locations are member input)
+function escapeMedalHtml(s) {
+    if (s == null) return '';
+    return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+function escapeMedalAttr(s) {
+    return escapeMedalHtml(s);
+}
 
 document.getElementById('settings-tab').addEventListener('shown.bs.tab', function () {
     loadClubSettings();

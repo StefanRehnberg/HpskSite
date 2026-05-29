@@ -719,6 +719,65 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// Send a single formatted HTML email through the site SMTP, but presented as coming from a
+        /// club/region (display name) with replies routed to their own address. Lets clubs without
+        /// Brevo still send nice HTML member mail. From address stays the authenticated site address
+        /// (for SPF/DKIM); only the display name + Reply-To reflect the club. Returns true on success.
+        /// </summary>
+        public async Task<bool> SendHtmlEmailAsync(
+            string toEmail, string subject, string htmlBody,
+            string? fromDisplayName = null, string? replyToEmail = null, string? replyToName = null)
+        {
+            if (string.IsNullOrEmpty(_smtpHost))
+            {
+                _logger.LogWarning("SMTP host not configured. Email not sent to {Email}.", toEmail);
+                return false;
+            }
+
+            try
+            {
+                using var message = new MailMessage();
+                message.From = new MailAddress(_fromAddress, string.IsNullOrWhiteSpace(fromDisplayName) ? _fromName : fromDisplayName);
+                message.To.Add(toEmail);
+                message.Subject = subject;
+                message.Body = htmlBody;
+                message.IsBodyHtml = true;
+                if (!string.IsNullOrWhiteSpace(replyToEmail))
+                {
+                    try { message.ReplyToList.Add(new MailAddress(replyToEmail, replyToName ?? "")); } catch { /* bad reply-to → skip */ }
+                }
+
+                using var smtpClient = new SmtpClient(_smtpHost, _smtpPort)
+                {
+                    EnableSsl = _useSsl,
+                    UseDefaultCredentials = false,
+                    Credentials = new NetworkCredential(_username, _password)
+                };
+                await smtpClient.SendMailAsync(message);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to send HTML email to {Email}", toEmail);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Send the admin an oversight copy of a member mailing (one copy per campaign, not per
+        /// recipient). Goes to the configured Email:AdminEmail (admin@pistol.nu). No-op if unset.
+        /// </summary>
+        public async Task SendMemberMailAdminCopyAsync(string senderLabel, int recipientCount, string subject, string htmlBody)
+        {
+            if (string.IsNullOrEmpty(_adminEmail)) return;
+
+            var note = $@"<div style='background:#f3f4f6;padding:10px 12px;border-radius:6px;margin-bottom:14px;font-size:13px;color:#555;'>
+                Kopia av medlemsutskick från <strong>{WebUtility.HtmlEncode(senderLabel)}</strong> till {recipientCount} mottagare.
+            </div>";
+            await SendHtmlEmailAsync(_adminEmail, "[Kopia] " + subject, note + htmlBody);
+        }
+
+        /// <summary>
         /// Core method to send an email
         /// </summary>
         private async Task SendEmailAsync(string toEmail, string subject, string htmlBody)

@@ -18,11 +18,16 @@ namespace HpskSite.Controllers
         private readonly AdminAuthorizationService _authService;
         private readonly BoardRoleService _boardRoleService;
         private readonly BrevoEmailService _brevoService;
+        private readonly EmailService _emailService;
         private readonly IMemberService _memberService;
         private readonly IMemberManager _memberManager;
         private readonly IContentService _contentService;
         private readonly ClubService _clubService;
         private readonly ILogger<ClubEmailController> _logger;
+
+        // Simply.com's websmtp is fine for club-sized sends but discourages high volume. Cap the
+        // per-send recipient count and steer larger campaigns to Brevo / a dedicated ESP.
+        private const int MaxSmtpRecipients = 250;
 
         public ClubEmailController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -34,6 +39,7 @@ namespace HpskSite.Controllers
             AdminAuthorizationService authService,
             BoardRoleService boardRoleService,
             BrevoEmailService brevoService,
+            EmailService emailService,
             IMemberService memberService,
             IMemberManager memberManager,
             IContentService contentService,
@@ -44,6 +50,7 @@ namespace HpskSite.Controllers
             _authService = authService;
             _boardRoleService = boardRoleService;
             _brevoService = brevoService;
+            _emailService = emailService;
             _memberService = memberService;
             _memberManager = memberManager;
             _contentService = contentService;
@@ -197,9 +204,102 @@ namespace HpskSite.Controllers
             var htmlBody = FormatEmailHtml(body, fromName);
             var (sent, failed) = await _brevoService.SendBulkEmailAsync(apiKey, fromEmail, fromName, recipients, subject, htmlBody);
 
+            // Silent oversight copy to admin@pistol.nu (via site SMTP, regardless of Brevo).
+            if (sent > 0)
+                await _emailService.SendMemberMailAdminCopyAsync(fromName, sent, subject, htmlBody);
+
             _logger.LogInformation("Club {ClubId} sent email via Brevo: {Sent} sent, {Failed} failed", clubId, sent, failed);
 
             return Json(new { success = true, message = $"E-post skickat till {sent} mottagare" + (failed > 0 ? $" ({failed} misslyckades)" : ""), sent, failed });
+        }
+
+        /// <summary>
+        /// Send a formatted HTML email to selected club members via the site SMTP (no Brevo needed).
+        /// Presented as from the club (display name) with replies routed to the club contact email.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SendClubEmailViaSmtp(int clubId, string subject, string body, string recipientIds, bool isTest = false)
+        {
+            if (!await _authService.IsClubAdminForClub(clubId))
+                return Json(new { success = false, message = "Åtkomst nekad" });
+
+            if (string.IsNullOrWhiteSpace(subject) || string.IsNullOrWhiteSpace(body))
+                return Json(new { success = false, message = "Ämne och meddelande krävs" });
+
+            var clubContent = _contentService.GetById(clubId);
+            var fromName = _clubService.GetClubNameById(clubId) ?? "Klubb";
+            var replyTo = clubContent?.GetValue<string>("contactEmail") ?? "";
+
+            List<string> recipients;
+            if (isTest)
+            {
+                // Test = a single preview copy to the logged-in admin, ignoring the recipient list.
+                var current = await _memberManager.GetCurrentMemberAsync();
+                var myEmail = current?.Email;
+                if (string.IsNullOrEmpty(myEmail))
+                    return Json(new { success = false, message = "Din användare saknar e-postadress." });
+                recipients = new List<string> { myEmail };
+            }
+            else
+            {
+                recipients = recipientIds.Split(',')
+                    .Select(s => int.TryParse(s.Trim(), out var id) ? id : 0)
+                    .Where(id => id > 0)
+                    .Select(id => _memberService.GetById(id))
+                    .Where(m => m != null && !string.IsNullOrEmpty(m.Email))
+                    .Select(m => m!.Email!)
+                    .ToList();
+
+                if (recipients.Count == 0)
+                    return Json(new { success = false, message = "Inga mottagare valda" });
+
+                // Stay within Simply.com's volume guidance for websmtp; bigger sends go via Brevo.
+                if (recipients.Count > MaxSmtpRecipients)
+                    return Json(new { success = false, message = $"För många mottagare ({recipients.Count}) för utskick via pistol.nu (max {MaxSmtpRecipients}). Använd Brevo för större utskick." });
+            }
+
+            // Test sends are clearly marked and never copied to admin.
+            var effectiveSubject = isTest ? "[TEST] " + subject : subject;
+            var htmlBody = FormatEmailHtml(body, fromName);
+            int sent = 0, failed = 0;
+            foreach (var email in recipients)
+            {
+                // One message per recipient (no exposed BCC list). Reply-To = club contact.
+                var ok = await _emailService.SendHtmlEmailAsync(
+                    email, effectiveSubject, htmlBody,
+                    fromDisplayName: fromName,
+                    replyToEmail: string.IsNullOrEmpty(replyTo) ? null : replyTo,
+                    replyToName: fromName);
+                if (ok) sent++; else failed++;
+            }
+
+            // Silent oversight copy to admin@pistol.nu — real campaigns only, one copy per send.
+            if (!isTest && sent > 0)
+                await _emailService.SendMemberMailAdminCopyAsync(fromName, sent, subject, htmlBody);
+
+            _logger.LogInformation("Club {ClubId} sent member email via SMTP (test={IsTest}): {Sent} sent, {Failed} failed", clubId, isTest, sent, failed);
+
+            if (isTest)
+                return Json(new
+                {
+                    success = sent > 0,
+                    message = sent > 0 ? "Testkopia skickad till din e-post." : "Kunde inte skicka testkopian — kontrollera e-postinställningarna.",
+                    sent,
+                    failed
+                });
+
+            // When nothing went out, surface it as a failure rather than a misleading success.
+            if (sent == 0)
+                return Json(new { success = false, message = $"Inget mejl kunde skickas ({failed} misslyckades). Kontrollera e-postinställningarna.", sent, failed });
+
+            return Json(new
+            {
+                success = true,
+                message = $"E-post skickat till {sent} mottagare" + (failed > 0 ? $" ({failed} misslyckades)" : ""),
+                sent,
+                failed
+            });
         }
 
         /// <summary>
@@ -245,6 +345,10 @@ namespace HpskSite.Controllers
 
             var htmlBody = FormatEmailHtml(body, fromName);
             var (sent, failed) = await _brevoService.SendBulkEmailAsync(apiKey, fromEmail, fromName, recipients, subject, htmlBody);
+
+            // Silent oversight copy to admin@pistol.nu (via site SMTP, regardless of Brevo).
+            if (sent > 0)
+                await _emailService.SendMemberMailAdminCopyAsync(fromName, sent, subject, htmlBody);
 
             _logger.LogInformation("Region {RegionId} sent email via Brevo: {Sent} sent, {Failed} failed", regionContentId, sent, failed);
 

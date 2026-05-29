@@ -52,6 +52,15 @@ namespace HpskSite.Composers
             // Klubb- och kretsrekord (manual record entry, IsCurrent + history chain)
             builder.Services.AddScoped<CompetitionRecordsService>();
 
+            // Standardmedaljer ledger (per-discipline klass 3 qualification + pooled Guldmedalj accounting)
+            builder.Services.AddScoped<StandardMedalLedgerService>();
+
+            // Standardmedalj proof files (PDF/image) stored under App_Data, served via authorized endpoint
+            builder.Services.AddScoped<StandardMedalProofStorage>();
+
+            // Materializes won Standard medals from our own competitions into the ledger on publish
+            builder.Services.AddScoped<StandardMedalMaterializationService>();
+
             // Manual klubb-/kretsmästare entries (auto-compute approach abandoned —
             // many clubs don't run results through pistol.nu)
             builder.Services.AddScoped<CompetitionChampionsService>();

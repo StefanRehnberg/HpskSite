@@ -68,6 +68,17 @@
                     <small class="text-muted" id="clubEmailRecipientCount"></small>
                 </div>
 
+                <!-- Template picker -->
+                <div class="mb-3">
+                    <label class="form-label fw-semibold" for="clubEmailTemplate">Mall</label>
+                    <select class="form-select" id="clubEmailTemplate" onchange="clubEmailApplyTemplate()">
+                        <option value="">Eget meddelande…</option>
+                        <option value="yearEndResults">Påminnelse: registrera tävlingsresultat (årsslut)</option>
+                        <option value="membershipFee">Påminnelse: medlemsavgift</option>
+                    </select>
+                    <small class="text-muted">Välj en mall för att fylla i ämne och meddelande — du kan redigera fritt innan du skickar.</small>
+                </div>
+
                 <!-- Subject -->
                 <div class="mb-3">
                     <label class="form-label fw-semibold" for="clubEmailSubject">Ämne</label>
@@ -91,14 +102,21 @@
                     <button class="btn btn-outline-primary" onclick="clubEmailOpenMailto()">
                         <i class="bi bi-box-arrow-up-right me-1"></i>Öppna i e-postklient
                     </button>
-                    <button class="btn btn-primary" id="clubEmailBrevoBtn" onclick="clubEmailSendViaBrevo()">
+                    <button class="btn btn-primary" id="clubEmailSmtpBtn" onclick="clubEmailSendViaSmtp(false)">
+                        <i class="bi bi-send me-1"></i>Skicka via pistol.nu
+                    </button>
+                    <button class="btn btn-outline-secondary" id="clubEmailTestBtn" onclick="clubEmailSendViaSmtp(true)">
+                        <i class="bi bi-envelope-check me-1"></i>Skicka testkopia till mig
+                    </button>
+                    <button class="btn btn-outline-primary" id="clubEmailBrevoBtn" onclick="clubEmailSendViaBrevo()">
                         <i class="bi bi-send me-1"></i>Skicka med Brevo
                     </button>
                 </div>
                 <small class="text-muted d-block mt-2">
-                    <strong>Tips:</strong> "Kopiera e-postadresser" kopierar alla valda e-postadresser till urklipp.
-                    Klistra sedan in dem i BCC-fältet i din e-postklient.
-                    "Öppna i e-postklient" stöder inte HTML-formatering — använd Brevo för formaterade utskick.
+                    <strong>Skicka via pistol.nu</strong> skickar det formaterade mailet direkt till de valda medlemmarna
+                    (svar går till klubbens kontakt-e-post).
+                    <strong>Brevo</strong> är ett valfritt alternativ som skickar från klubbens egen avsändare.
+                    "Kopiera e-postadresser" lägger adresserna i urklipp för BCC i din egen e-postklient.
                 </small>
             </div>
             <div class="modal-footer">
@@ -181,6 +199,7 @@
         const modal = new bootstrap.Modal(document.getElementById('clubEmailModal'));
         modal.show();
         loadClubEmailRecipients();
+        document.getElementById('clubEmailTemplate').value = '';
         document.getElementById('clubEmailSubject').value = '';
         if (ceEditor) ceEditor.setData('');
         document.getElementById('clubEmailStatus').classList.add('d-none');
@@ -322,6 +341,99 @@
         });
 
         fetch('/umbraco/surface/ClubEmail/SendClubEmailViaBrevo', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'RequestVerificationToken': token
+            },
+            body: params.toString()
+        })
+        .then(r => r.json())
+        .then(data => {
+            btn.disabled = false;
+            btn.innerHTML = origText;
+            showStatus(data.success ? 'success' : 'danger', data.message || 'Fel vid skickning');
+        })
+        .catch(() => {
+            btn.disabled = false;
+            btn.innerHTML = origText;
+            showStatus('danger', 'Nätverksfel vid skickning');
+        });
+    };
+
+    // Prebuilt templates — populate subject + body, then the admin edits freely before sending.
+    const ceTemplates = {
+        yearEndResults: {
+            subject: 'Dags att registrera dina tävlingsresultat för ' + new Date().getFullYear(),
+            body: '<p>Hej!</p>'
+                + '<p>Snart är året slut — se till att alla dina tävlingsresultat finns registrerade, '
+                + 'särskilt om du tagit <strong>standardmedaljer</strong> (silver eller brons). Det är så klubben kan rapportera dem till SPSF.</p>'
+                + '<p><strong>Så här gör du:</strong></p>'
+                + '<ol>'
+                + '<li>Logga in på pistol.nu och gå till <strong>Min sida → Resultat</strong>.</li>'
+                + '<li>Klicka på <strong>Lägg in resultat</strong> och kryssa i att resultatet kommer från en tävling.</li>'
+                + '<li>Välj eventuell <strong>standardmedalj</strong> och ladda upp ett bevis (resultatlista eller foto).</li>'
+                + '</ol>'
+                + '<p>Utan bevis registreras medaljen som overifierad och kan inte rapporteras till SPSF — '
+                + 'den räknas då varken mot kvalificering till Riksmästarklass eller mot poäng till guldmedalj.</p>'
+                + '<p>Tack för hjälpen!</p>'
+        },
+        membershipFee: {
+            subject: 'Påminnelse: medlemsavgift ' + new Date().getFullYear(),
+            body: '<p>Hej!</p>'
+                + '<p>Det är dags att betala medlemsavgiften för ' + new Date().getFullYear() + '. '
+                + '<em>[Fyll i belopp, sista betalningsdag och betalningssätt här.]</em></p>'
+                + '<p>Hör av dig om du har några frågor.</p>'
+                + '<p>Vänliga hälsningar,<br>Styrelsen</p>'
+        }
+    };
+
+    window.clubEmailApplyTemplate = function() {
+        const key = document.getElementById('clubEmailTemplate').value;
+        if (!key) return; // "Eget meddelande" — leave current content
+        const t = ceTemplates[key];
+        if (!t) return;
+
+        const hasContent = document.getElementById('clubEmailSubject').value.trim() || getEditorHtml().trim();
+        if (hasContent && !confirm('Ersätt nuvarande ämne och meddelande med mallen?')) {
+            document.getElementById('clubEmailTemplate').value = '';
+            return;
+        }
+        document.getElementById('clubEmailSubject').value = t.subject;
+        if (ceEditor) ceEditor.setData(t.body);
+        else setTimeout(() => { if (ceEditor) ceEditor.setData(t.body); }, 300);
+    };
+
+    window.clubEmailSendViaSmtp = function(isTest) {
+        const selected = getSelectedRecipients();
+        // A test goes to the logged-in admin only, so it doesn't need recipients selected.
+        if (!isTest && selected.length === 0) { alert('Välj minst en mottagare'); return; }
+
+        const subject = document.getElementById('clubEmailSubject').value.trim();
+        const htmlBody = getEditorHtml();
+        if (!subject) { alert('Ange ett ämne'); return; }
+        if (!htmlBody) { alert('Skriv ett meddelande'); return; }
+
+        const confirmMsg = isTest
+            ? 'Skicka en testkopia till din egen e-post?'
+            : `Skicka mail till ${selected.length} mottagare via pistol.nu?`;
+        if (!confirm(confirmMsg)) return;
+
+        const btn = document.getElementById(isTest ? 'clubEmailTestBtn' : 'clubEmailSmtpBtn');
+        const origText = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Skickar...';
+
+        const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+        const params = new URLSearchParams({
+            clubId: ceClubId,
+            subject: subject,
+            body: htmlBody,
+            recipientIds: isTest ? '' : selected.map(r => r.id).join(','),
+            isTest: isTest ? 'true' : 'false'
+        });
+
+        fetch('/umbraco/surface/ClubEmail/SendClubEmailViaSmtp', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',

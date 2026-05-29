@@ -65,6 +65,21 @@ namespace HpskSite.Models.ViewModels.TrainingScoring
         public string? CompetitionStdMedal { get; set; }
 
         /// <summary>
+        /// External competition name. Input-only for self-reported standard medals — routed to
+        /// the StandardMedalAward ledger, not stored as a TrainingScores column.
+        /// </summary>
+        public string? CompetitionName { get; set; }
+
+        /// <summary>External competition location. Input-only; routed to the medal ledger.</summary>
+        public string? CompetitionLocation { get; set; }
+
+        /// <summary>
+        /// Reference to an uploaded proof file for a self-reported standard medal, or null when
+        /// the member attests without a file. Input-only; routed to the ledger.
+        /// </summary>
+        public string? MedalProofFileRef { get; set; }
+
+        /// <summary>
         /// List of all series shot during this training session
         /// </summary>
         public List<TrainingSeries> Series { get; set; } = new List<TrainingSeries>();

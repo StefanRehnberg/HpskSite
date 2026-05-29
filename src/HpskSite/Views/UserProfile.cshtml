@@ -137,6 +137,18 @@
                                 </div>
                             </div>
 
+                            @* Standardmedaljer — progress toward klass 3 (per discipline) + Guldmedalj.
+                               Populated by loadMedalSummary(), tied to the year filter above. *@
+                            <div id="medalSummaryCard" class="card mb-3 border-warning-subtle" style="display:none;">
+                                <div class="card-body">
+                                    <h6 class="card-title mb-3">
+                                        <i class="bi bi-award text-warning"></i> Standardmedaljer
+                                        <span id="medalSummaryYear" class="text-muted fw-normal small"></span>
+                                    </h6>
+                                    <div id="medalSummaryContent"></div>
+                                </div>
+                            </div>
+
                             @* Results Content *@
                             <div id="resultsContent">
                                 <div class="text-center py-3">
@@ -1830,17 +1842,21 @@ function renderDashboard(data, selectedYears = null) {
             }
         });
 
-        // Aggregate medal stats for selected years
-        let aggregatedMedalStats = { silverCount: 0, bronzeCount: 0, totalPoints: 0 };
+        // Aggregate medal stats for selected years (total + verified subset)
+        let aggregatedMedalStats = { silverCount: 0, bronzeCount: 0, totalPoints: 0, verifiedSilver: 0, verifiedBronze: 0, verifiedPoints: 0, unverifiedPoints: 0 };
         if (data.medalStatsByYear) {
             selectedYears.forEach(year => {
                 const yearStats = data.medalStatsByYear[year];
                 if (yearStats) {
                     aggregatedMedalStats.silverCount += yearStats.silverCount || 0;
                     aggregatedMedalStats.bronzeCount += yearStats.bronzeCount || 0;
+                    aggregatedMedalStats.verifiedSilver += yearStats.verifiedSilver || 0;
+                    aggregatedMedalStats.verifiedBronze += yearStats.verifiedBronze || 0;
                 }
             });
             aggregatedMedalStats.totalPoints = (aggregatedMedalStats.silverCount * 2) + aggregatedMedalStats.bronzeCount;
+            aggregatedMedalStats.verifiedPoints = (aggregatedMedalStats.verifiedSilver * 2) + aggregatedMedalStats.verifiedBronze;
+            aggregatedMedalStats.unverifiedPoints = aggregatedMedalStats.totalPoints - aggregatedMedalStats.verifiedPoints;
         }
 
         filteredData = {
@@ -1991,8 +2007,9 @@ function renderDashboard(data, selectedYears = null) {
                             </div>
                             <hr class="my-2">
                             <div>
-                                <strong>${filteredData.medalStats.totalPoints}</strong>
-                                <span class="text-muted small">poäng</span>
+                                <strong>${filteredData.medalStats.verifiedPoints != null ? filteredData.medalStats.verifiedPoints : filteredData.medalStats.totalPoints}</strong>
+                                <span class="text-muted small">poäng verifierade</span>
+                                ${filteredData.medalStats.unverifiedPoints > 0 ? `<div class="text-muted small">(+${filteredData.medalStats.unverifiedPoints} ej verifierade)</div>` : ''}
                             </div>
                         ` : `
                             <div class="text-muted py-3">
@@ -2370,6 +2387,89 @@ function initializeResultsTab() {
     loadResults();
 }
 
+// Standardmedalj progress card — per-discipline klass-3 qualification + lifetime Guldmedalj.
+function loadMedalSummary(year) {
+    const card = document.getElementById('medalSummaryCard');
+    const content = document.getElementById('medalSummaryContent');
+    if (!card || !content) return;
+
+    fetch(`/umbraco/surface/StandardMedal/GetMyMedalSummary?year=${year}`)
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) { card.style.display = 'none'; return; }
+            renderMedalSummary(data);
+        })
+        .catch(() => { card.style.display = 'none'; });
+}
+
+function renderMedalSummary(data) {
+    const card = document.getElementById('medalSummaryCard');
+    const content = document.getElementById('medalSummaryContent');
+    const yearLabel = document.getElementById('medalSummaryYear');
+    if (yearLabel) yearLabel.textContent = '· ' + data.year;
+
+    const qual = (data.qualification || []).filter(q => q.points > 0);
+    const gold = data.gold || {};
+    const qThreshold = data.qualificationThreshold || 3;
+    const gThreshold = data.goldThreshold || 50;
+
+    // Nothing to show: no medals this year and no lifetime points toward gold.
+    if (qual.length === 0 && (!gold.lifetimePoints || gold.lifetimePoints === 0)) {
+        card.style.display = 'none';
+        return;
+    }
+    card.style.display = 'block';
+
+    let html = '';
+
+    if (qual.length > 0) {
+        html += '<div class="mb-2 small text-muted">Riksmästarklass (klass 3) – krav ' + qThreshold + ' p per gren:</div>';
+        qual.forEach(q => {
+            const pct = Math.min(100, Math.round((q.points / qThreshold) * 100));
+            const barClass = q.qualified ? 'bg-success' : 'bg-warning';
+            const badge = q.qualified
+                ? '<span class="badge bg-success ms-2">Kvalificerad</span>'
+                : '<span class="text-muted ms-2">' + Math.max(0, qThreshold - q.points) + ' p kvar</span>';
+            html += `
+                <div class="mb-2">
+                    <div class="d-flex justify-content-between align-items-center flex-wrap">
+                        <span><strong>${q.displayName}</strong>
+                            <span class="text-muted small">(${q.silver}× silver, ${q.brons}× brons)</span>
+                        </span>
+                        <span>${q.points} / ${qThreshold} p ${badge}</span>
+                    </div>
+                    <div class="progress" style="height:6px;">
+                        <div class="progress-bar ${barClass}" role="progressbar" style="width:${pct}%"></div>
+                    </div>
+                </div>`;
+        });
+    } else {
+        html += '<div class="small text-muted mb-2">Inga standardmedaljer registrerade för ' + data.year + ' än.</div>';
+    }
+
+    const available = gold.available || 0;
+    const goldPct = Math.min(100, Math.round((available / gThreshold) * 100));
+    const goldLine = gold.canApply
+        ? `<span class="badge bg-warning text-dark">Klar för guldmedalj!</span> ${available} p tillgängliga`
+        : `${available} / ${gThreshold} p – ${gold.toNext} p till nästa guldmedalj`;
+    const goldsAwardedLine = gold.goldsAwarded > 0
+        ? ` <span class="text-muted small">(${gold.goldsAwarded} guldmedalj${gold.goldsAwarded === 1 ? '' : 'er'} hittills)</span>`
+        : '';
+
+    html += `
+        <hr class="my-2">
+        <div class="mb-1 small text-muted">Guldmedalj – 50 p sammanlagt över alla grenar:</div>
+        <div class="d-flex justify-content-between align-items-center flex-wrap">
+            <span><i class="bi bi-trophy-fill text-warning"></i> Guldmedalj${goldsAwardedLine}</span>
+            <span>${goldLine}</span>
+        </div>
+        <div class="progress mt-1" style="height:6px;">
+            <div class="progress-bar bg-warning" role="progressbar" style="width:${goldPct}%"></div>
+        </div>`;
+
+    content.innerHTML = html;
+}
+
 function loadResults() {
     const content = document.getElementById('resultsContent');
     if (!content) return;
@@ -2386,6 +2486,10 @@ function loadResults() {
     const competitionType = document.getElementById('competitionTypeFilter')?.value || 'Precision';
     const year = document.getElementById('yearFilter')?.value || new Date().getFullYear();
     const weaponClass = document.getElementById('weaponClassFilter')?.value || 'Alla';
+
+    // Standardmedalj progress follows the same year filter (it's cross-discipline, so the
+    // competition-type filter doesn't apply to it).
+    loadMedalSummary(year);
 
     fetch(`/umbraco/surface/Member/GetMemberResults?competitionType=${competitionType}&year=${year}&weaponClass=${weaponClass}`)
         .then(response => response.json())
@@ -2445,6 +2549,7 @@ function renderResultsTable(results) {
                         <th class="d-none d-md-table-cell">Medel</th>
                         <th>Klass</th>
                         <th>Totalt</th>
+                        <th title="Standardmedalj">StM</th>
                         <th>Åtgärder</th>
                     </tr>
                 </thead>
@@ -2463,6 +2568,7 @@ function renderResultsTable(results) {
                             <td class="d-none d-md-table-cell"><strong>${r.averageScore}</strong></td>
                             <td><span class="badge bg-secondary">${r.weaponClass}</span></td>
                             <td>${r.totalScore} <small class="text-muted">(${r.seriesCount} serier)</small></td>
+                            <td>${r.stdMedal === 'S' ? '<span class="badge" style="background-color:#9ca3af;" title="Silver">S</span>' : (r.stdMedal === 'B' ? '<span class="badge" style="background-color:#cd7f32;" title="Brons">B</span>' : '')}</td>
                             <td>
                                 <button type="button" class="btn btn-sm btn-outline-primary me-1" onclick="viewResultDetails('${r.type}', ${r.trainingScoreId || 'null'}, ${r.competitionId || 'null'}, '${r.shootingClass || ''}')" title="Visa">
                                     <i class="bi bi-eye"></i>
@@ -2556,6 +2662,32 @@ function renderCompetitionResultDetails(data) {
                 </div>
             </div>
         </div>
+
+        ${(data.place || data.standardMedal) ? `
+            <div class="mb-4">
+                <div class="alert alert-info">
+                    <h6 class="mb-2"><i class="bi bi-trophy"></i> Tävlingsresultat</h6>
+                    <div class="row">
+                        ${data.place ? `
+                            <div class="col-md-4">
+                                <small class="text-muted d-block">Placering</small>
+                                <strong class="h5">#${data.place}</strong>
+                            </div>
+                        ` : ''}
+                        <div class="col-md-4">
+                            <small class="text-muted d-block">Klass</small>
+                            <strong class="h5">${data.shootingClass || data.weaponClass || '-'}</strong>
+                        </div>
+                        ${data.standardMedal ? `
+                            <div class="col-md-4">
+                                <small class="text-muted d-block">Standard Medalj</small>
+                                <strong class="h5">${data.standardMedal === 'B' ? '🥉 Brons' : data.standardMedal === 'S' ? '🥈 Silver' : data.standardMedal}</strong>
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>
+            </div>
+        ` : ''}
 
         <div class="row mb-4">
             <div class="col-md-4 text-center">
@@ -2867,7 +2999,7 @@ function renderFaltskytteDashboard(data) {
                                 </div>
                             </div>
                             <hr class="my-2">
-                            <div><strong>${stats.medalStats.totalPoints}</strong> <span class="text-muted small">poäng</span></div>
+                            <div><strong>${stats.medalStats.verifiedPoints != null ? stats.medalStats.verifiedPoints : stats.medalStats.totalPoints}</strong> <span class="text-muted small">poäng verifierade</span>${stats.medalStats.unverifiedPoints > 0 ? ` <span class="text-muted small">(+${stats.medalStats.unverifiedPoints} ej)</span>` : ''}</div>
                         ` : `<div class="text-muted py-3"><i class="bi bi-dash-circle fs-3"></i><p class="mb-0 mt-1 small">Inga medaljer</p></div>`}
                     </div>
                 </div>

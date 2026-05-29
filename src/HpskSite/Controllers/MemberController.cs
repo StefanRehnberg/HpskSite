@@ -796,6 +796,16 @@ namespace HpskSite.Controllers
 
                 using (var db = _databaseFactory.CreateDatabase())
                 {
+                    // Won standard medals at our OWN competitions (materialized ledger), keyed by
+                    // competition + class so each result row can show its StM (S/B).
+                    var onSiteMedalLookup = new Dictionary<string, string>();
+                    foreach (var m in db.Fetch<dynamic>(
+                        "SELECT CompetitionId, ShootingClass, MedalType FROM StandardMedalAward WHERE MemberId = @0 AND Source = 'OnSite'",
+                        memberId))
+                    {
+                        onSiteMedalLookup[(int)m.CompetitionId + "|" + ((string)m.ShootingClass ?? "")] = (string)m.MedalType;
+                    }
+
                     // Query 1: Get competition results from the correct table based on type
                     var resultTable = competitionType switch
                     {
@@ -871,7 +881,8 @@ namespace HpskSite.Controllers
                             totalScore = totalScore,
                             seriesCount = seriesCount,
                             competitionId = group.Key.CompetitionId,
-                            shootingClass = group.Key.ShootingClass
+                            shootingClass = group.Key.ShootingClass,
+                            stdMedal = onSiteMedalLookup.GetValueOrDefault(group.Key.CompetitionId + "|" + group.Key.ShootingClass)
                         });
                     }
 
@@ -893,6 +904,7 @@ namespace HpskSite.Controllers
                             TotalScore,
                             Notes,
                             IsCompetition,
+                            CompetitionStdMedal,
                             TrainingMatchId
                         FROM TrainingScores
                         WHERE MemberId = @0
@@ -955,7 +967,8 @@ namespace HpskSite.Controllers
                             totalScore = totalScore,
                             seriesCount = seriesCount,
                             trainingScoreId = (int)score.Id,
-                            trainingMatchId = (int?)score.TrainingMatchId
+                            trainingMatchId = (int?)score.TrainingMatchId,
+                            stdMedal = isCompetition ? (string)score.CompetitionStdMedal : null
                         });
                     }
                 }
