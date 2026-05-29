@@ -806,6 +806,18 @@ namespace HpskSite.Controllers
                         onSiteMedalLookup[(int)m.CompetitionId + "|" + ((string)m.ShootingClass ?? "")] = (string)m.MedalType;
                     }
 
+                    // Whether each self-entered medal has an uploaded proof file (keyed by TrainingScoreId),
+                    // so each row can show a proof cue (has proof / missing).
+                    var selfProofByScore = new Dictionary<int, bool>();
+                    foreach (var a in db.Fetch<dynamic>(
+                        "SELECT TrainingScoreId, ProofType, ProofFileRef FROM StandardMedalAward WHERE MemberId = @0 AND TrainingScoreId IS NOT NULL",
+                        memberId))
+                    {
+                        if (a.TrainingScoreId == null) continue;
+                        bool hasFile = ((string)a.ProofType == "File") && !string.IsNullOrEmpty((string)a.ProofFileRef);
+                        selfProofByScore[(int)a.TrainingScoreId] = hasFile;
+                    }
+
                     // Query 1: Get competition results from the correct table based on type
                     var resultTable = competitionType switch
                     {
@@ -882,7 +894,9 @@ namespace HpskSite.Controllers
                             seriesCount = seriesCount,
                             competitionId = group.Key.CompetitionId,
                             shootingClass = group.Key.ShootingClass,
-                            stdMedal = onSiteMedalLookup.GetValueOrDefault(group.Key.CompetitionId + "|" + group.Key.ShootingClass)
+                            stdMedal = onSiteMedalLookup.GetValueOrDefault(group.Key.CompetitionId + "|" + group.Key.ShootingClass),
+                            // pistol.nu-medaljer är belagda av tävlingens egen resultatlista.
+                            proofStatus = onSiteMedalLookup.ContainsKey(group.Key.CompetitionId + "|" + group.Key.ShootingClass) ? "has" : (string)null
                         });
                     }
 
@@ -968,7 +982,11 @@ namespace HpskSite.Controllers
                             seriesCount = seriesCount,
                             trainingScoreId = (int)score.Id,
                             trainingMatchId = (int?)score.TrainingMatchId,
-                            stdMedal = isCompetition ? (string)score.CompetitionStdMedal : null
+                            stdMedal = isCompetition ? (string)score.CompetitionStdMedal : null,
+                            // Only medal rows carry a proof cue: has uploaded proof vs missing.
+                            proofStatus = (isCompetition && (((string)score.CompetitionStdMedal) == "S" || ((string)score.CompetitionStdMedal) == "B"))
+                                ? (selfProofByScore.TryGetValue((int)score.Id, out var hasFile) && hasFile ? "has" : "missing")
+                                : (string)null
                         });
                     }
                 }
