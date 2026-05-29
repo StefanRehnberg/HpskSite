@@ -1703,7 +1703,7 @@ function updateEditMismatchWarning() {
             message = '<strong>Obs!</strong> Tävlingen blir nationell utan klubb eller krets. Den kan bara hanteras på den allmänna administrationssidan.';
         } else if (!newClubId && newRegion) {
             // Case 3: Club removed but region set
-            message = '<strong>Obs!</strong> Tävlingen flyttas till kretsnivå. Den kommer inte att visas i någon klubbs tävlingslista och kan bara hanteras på den allmänna administrationssidan.';
+            message = '<strong>Obs!</strong> Tävlingen flyttas till kretsnivå. Den kommer inte att visas i någon klubbs tävlingslista — den hanteras istället från <strong>kretsens regionsida</strong>.';
         }
     } else if (origRegion) {
         // Competition originally had a region but no club

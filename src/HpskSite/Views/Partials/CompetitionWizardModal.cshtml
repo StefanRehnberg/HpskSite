@@ -1514,7 +1514,7 @@ function updateWizardMismatchWarning() {
         message = '<strong>Varning!</strong> Tävlingen kommer att visas och hanteras på <strong>' + newClubName + '</strong>s administrationssida — inte på <strong>' + origClubName + '</strong>s sida.';
     } else if (!newClubId && newRegion) {
         // Club removed, region set
-        message = '<strong>Varning!</strong> Tävlingen kopplas till en krets istället för <strong>' + origClubName + '</strong>. Den kommer inte att visas i någon klubbs tävlingslista. Du måste gå till den allmänna <strong>administrationssidan</strong> för att redigera den.';
+        message = '<strong>Varning!</strong> Tävlingen kopplas till en krets istället för <strong>' + origClubName + '</strong>. Den kommer inte att visas i någon klubbs tävlingslista — den hanteras istället från <strong>kretsens regionsida</strong>.';
     } else if (!newClubId && !newRegion) {
         // Both cleared — national competition
         message = '<strong>Varning!</strong> Tävlingen skapas utan klubb eller krets och blir nationell. Den kommer inte att visas i <strong>' + origClubName + '</strong>s tävlingslista. Du måste gå till den allmänna <strong>administrationssidan</strong> för att redigera den.';
