@@ -1246,7 +1246,7 @@ function renderMemberMedalDetail(data) {
         let statusBadge;
         if (a.status === 'Verified') statusBadge = '<span class="badge bg-success">Verifierad</span>';
         else if (a.status === 'Rejected') statusBadge = '<span class="badge bg-danger">Avvisad</span>';
-        else statusBadge = '<span class="badge bg-warning text-dark">Inrapporterad</span>';
+        else statusBadge = '<span class="badge bg-warning text-dark">Ej verifierad</span>';
 
         let actions = '';
         if (a.source !== 'OnSite') {

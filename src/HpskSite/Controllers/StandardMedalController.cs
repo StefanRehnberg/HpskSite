@@ -492,7 +492,7 @@ namespace HpskSite.Controllers
 
         private static string StatusDisplay(string? status) => status switch
         {
-            Models.StandardMedals.StatusReported => "Inrapporterad",
+            Models.StandardMedals.StatusReported => "Ej verifierad",
             Models.StandardMedals.StatusVerified => "Verifierad",
             Models.StandardMedals.StatusRejected => "Avvisad",
             Models.StandardMedals.GoldStatusApplied => "Inskickad",
