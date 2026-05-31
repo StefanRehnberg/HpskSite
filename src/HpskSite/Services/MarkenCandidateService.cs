@@ -80,31 +80,34 @@ namespace HpskSite.Services
             result.QualifyingSeries = qualifying.OrderByDescending(q => q.Score).ThenBy(q => q.Date).ToList();
             result.Part1Met = result.QualifyingSeries.Count >= Marken.GuldfodringPrecisionSeriesRequired;
 
-            // Pending Guldserier (for the member's progress view)
+            // All of the year's series (one query) — pending counts + verified speed count.
             var allSeries = await _ledger.GetSeriesForMemberAsync(memberId, year);
             result.PendingPrecisionCount = allSeries.Count(s =>
                 s.SeriesType == Marken.SeriesTypePrecision && s.Status == Marken.SeriesStatusPending);
+            result.PendingSpeedCount = allSeries.Count(s =>
+                s.SeriesType == Marken.SeriesTypeSpeed && s.Status == Marken.SeriesStatusPending);
+            result.Part2SeriesCount = allSeries.Count(s =>
+                s.SeriesType == Marken.SeriesTypeSpeed && s.Status == Marken.StatusVerified
+                && string.Equals(s.ClaimedLevel, Marken.LevelGuld, StringComparison.OrdinalIgnoreCase));
 
-            // ── Part 2: Verified Guld Snabbserie → else Standardmedalj i fält ──
-            var speed = await _ledger.GetVerifiedSpeedAsync(memberId, year, Marken.LevelGuld);
-            if (speed != null)
+            // ── Part 2 (SHB 5.1.1.1 pt 2): a held Standardmedalj i fält satisfies the whole part;
+            //    otherwise 3 verified Guld Snabbserier are required. ──
+            var awards = await _standardMedals.GetAwardsForMemberAsync(memberId, year, includeRejected: false);
+            var faltMedal = awards.FirstOrDefault(a =>
+                string.Equals(a.Discipline, StandardMedals.Faltskytte, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(a.Discipline, StandardMedals.MagnumFalt, StringComparison.OrdinalIgnoreCase));
+            if (faltMedal != null)
+            {
+                result.Part2Met = true;
+                result.Part2ViaFalt = true;
+                result.Part2Source = Marken.PartSourceStandardMedal;
+                result.Part2Detail = $"{StandardMedals.MedalDisplayName(faltMedal.MedalType)} – {faltMedal.CompetitionName ?? "fältskjutning"}";
+            }
+            else if (result.Part2SeriesCount >= Marken.GuldfodringSpeedSeriesRequired)
             {
                 result.Part2Met = true;
                 result.Part2Source = Marken.SeriesTypeSpeed;
-                result.Part2Detail = $"Snabbserie ({Marken.SpeedTargetDisplay(speed.Target)})";
-            }
-            else
-            {
-                var awards = await _standardMedals.GetAwardsForMemberAsync(memberId, year, includeRejected: false);
-                var faltMedal = awards.FirstOrDefault(a =>
-                    string.Equals(a.Discipline, StandardMedals.Faltskytte, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(a.Discipline, StandardMedals.MagnumFalt, StringComparison.OrdinalIgnoreCase));
-                if (faltMedal != null)
-                {
-                    result.Part2Met = true;
-                    result.Part2Source = Marken.PartSourceStandardMedal;
-                    result.Part2Detail = $"{StandardMedals.MedalDisplayName(faltMedal.MedalType)} – {faltMedal.CompetitionName ?? "fältskjutning"}";
-                }
+                result.Part2Detail = $"{result.Part2SeriesCount}/{Marken.GuldfodringSpeedSeriesRequired} snabbserier";
             }
 
             return result;
@@ -218,6 +221,10 @@ namespace HpskSite.Services
         public bool Part2Met { get; set; }
         public string? Part2Source { get; set; }
         public string? Part2Detail { get; set; }
+        public bool Part2ViaFalt { get; set; }
+        public int Part2SeriesCount { get; set; }
+        public int PendingSpeedCount { get; set; }
+        public int RequiredSpeedSeries => Marken.GuldfodringSpeedSeriesRequired;
 
         public bool BothPartsMet => Part1Met && Part2Met;
     }

@@ -2779,9 +2779,11 @@ function renderMarken(data) {
     html += partRow('Precisionsdel',
         part1,
         `${gf.qualifyingSeriesCount || 0}/${gf.requiredSeries} godkända serier${pendingTxt}`);
-    html += partRow('Snabbskyttedel',
-        part2,
-        part2 ? (gf.part2Detail || (p && p.part2Note) || 'klar') : 'snabbserie eller fältmedalj');
+    const speedPending = gf.pendingSpeedCount > 0 ? ` <span class="text-muted">(${gf.pendingSpeedCount} väntar)</span>` : '';
+    const speedDetail = gf.part2ViaFalt
+        ? (gf.part2Detail || 'fältmedalj')
+        : `${gf.part2SeriesCount || 0}/${gf.part2Required || 3} godkända snabbserier${speedPending}`;
+    html += partRow('Snabbskyttedel', part2, speedDetail);
 
     if (gf.part1Note) html += `<div class="small text-muted mt-1">${escapeHtmlMarken(gf.part1Note)}</div>`;
 
@@ -2790,7 +2792,7 @@ function renderMarken(data) {
     } else if (gf.candidateBothMet) {
         html += `<div class="mt-2 small text-success"><i class="bi bi-check2-all"></i> Båda delarna klara – en funktionär kan signera årets guldfodring.</div>`;
     } else {
-        html += `<div class="mt-2 small text-muted">Skicka in guldserier och en snabbserie ovan; en funktionär validerar och signerar.</div>`;
+        html += `<div class="mt-2 small text-muted">Skicka in 3 guldserier och 3 snabbserier (eller en fältmedalj) ovan; en funktionär validerar dem.</div>`;
     }
 
     content.innerHTML = html;

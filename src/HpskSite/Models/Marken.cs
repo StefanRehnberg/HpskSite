@@ -134,8 +134,14 @@ namespace HpskSite.Models
             _ => 40
         };
 
-        /// <summary>Series required for a Guldfodring precision part.</summary>
+        /// <summary>Series required for a Guldfodring precision part (SHB 5.1.1.1 pt 1: 3 precisionsserier).</summary>
         public const int GuldfodringPrecisionSeriesRequired = 3;
+
+        /// <summary>
+        /// Snabbserier required for a Guldfodring speed part (SHB 5.1.1.1 pt 2: 3 tillämpningsserier,
+        /// each 6 träff within the valör's time) — OR a single held Standardmedalj i fältskjutning.
+        /// </summary>
+        public const int GuldfodringSpeedSeriesRequired = 3;
 
         /// <summary>The Guld per-series requirement for a weapon group (before age concessions), for display.</summary>
         public static int GuldPerSeriesBase(string group) => GuldPerSeries(group);

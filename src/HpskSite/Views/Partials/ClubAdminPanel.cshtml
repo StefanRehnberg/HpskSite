@@ -1627,7 +1627,7 @@ function renderMemberMarkenDetail(data) {
             ${partLine('Precisionsdel (3 godkända guldserier)', part1, `${gf.qualifyingSeriesCount || 0}/${gf.requiredSeries} serier`)}
             ${seriesRows ? `<ul class="small text-muted mt-1 mb-1">${seriesRows}</ul>` : ''}
             <hr class="my-2">
-            ${partLine('Snabbskyttedel', part2, part2 ? escapeMedalHtml(gf.part2Detail || 'klar') : 'snabbserie eller fältmedalj')}
+            ${partLine('Snabbskyttedel (3 godkända snabbserier)', part2, gf.part2ViaFalt ? escapeMedalHtml(gf.part2Detail || 'fältmedalj') : `${gf.part2SeriesCount || 0}/${gf.part2Required || 3} serier`)}
             <div class="mt-2">${gfStatus}</div>
         </div></div>
         <p class="text-muted small">Precisionsdelen byggs av validerade guldserier och resultat från hemmatävlingar. Serier valideras i kön högst upp på fliken (eller via QR).</p>`;

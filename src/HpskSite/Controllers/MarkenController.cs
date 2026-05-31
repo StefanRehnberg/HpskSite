@@ -671,6 +671,10 @@ namespace HpskSite.Controllers
                     part2Met = cand.Part2Met,
                     part2Source = cand.Part2Source,
                     part2Detail = cand.Part2Detail,
+                    part2ViaFalt = cand.Part2ViaFalt,
+                    part2SeriesCount = cand.Part2SeriesCount,
+                    pendingSpeedCount = cand.PendingSpeedCount,
+                    part2Required = cand.RequiredSpeedSeries,
                     candidateBothMet = cand.BothPartsMet,
                     // Persisted row (sign-off state)
                     persisted = thisYearQ == null ? null : new
