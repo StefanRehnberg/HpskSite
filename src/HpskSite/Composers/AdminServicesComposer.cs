@@ -66,6 +66,9 @@ namespace HpskSite.Composers
             // (proposes Guldfodring parts from TrainingScores; never writes).
             builder.Services.AddScoped<MarkenLedgerService>();
             builder.Services.AddScoped<MarkenCandidateService>();
+            // Phase 2: competition-driven discipline märken (Precision/Fält/Milsnabb/NatHelmatch) —
+            // harvests hosted results live + merges verified self-reports; evaluates valör + årtalsmärke.
+            builder.Services.AddScoped<MarkenCompetitionService>();
 
             // Manual klubb-/kretsmästare entries (auto-compute approach abandoned —
             // many clubs don't run results through pistol.nu)
