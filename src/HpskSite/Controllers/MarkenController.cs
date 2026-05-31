@@ -33,6 +33,7 @@ namespace HpskSite.Controllers
         private readonly ClubService _clubService;
         private readonly MarkenLedgerService _ledger;
         private readonly MarkenCandidateService _candidates;
+        private readonly MarkenCompetitionService _compService;
         private readonly StandardMedalProofStorage _proofStorage;
         private readonly IDataProtector _verifyProtector;
 
@@ -51,6 +52,7 @@ namespace HpskSite.Controllers
             ClubService clubService,
             MarkenLedgerService ledger,
             MarkenCandidateService candidates,
+            MarkenCompetitionService compService,
             StandardMedalProofStorage proofStorage,
             IDataProtectionProvider dataProtectionProvider)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
@@ -63,6 +65,7 @@ namespace HpskSite.Controllers
             _clubService = clubService;
             _ledger = ledger;
             _candidates = candidates;
+            _compService = compService;
             _proofStorage = proofStorage;
             _verifyProtector = dataProtectionProvider.CreateProtector("Marken.SeriesVerify.v1");
         }
@@ -83,7 +86,10 @@ namespace HpskSite.Controllers
             if (member == null) return Json(new { success = false, message = "Inte inloggad." });
 
             int y = year ?? DateTime.Now.Year;
-            return Json(await BuildMemberPayloadAsync(member.Id, y, includeUnverifiedInLadder: true, isOwnView: true));
+            var pistolskytte = await BuildMemberPayloadAsync(member.Id, y, includeUnverifiedInLadder: true, isOwnView: true);
+            await RecomputeCompetitionFamiliesAsync(member.Id);
+            var families = await BuildFamilySummariesAsync(member.Id, y);
+            return Json(new { success = true, year = y, pistolskytte, families });
         }
 
         /// <summary>The current member's clubs (primary + additional) for the validation-club picker.</summary>
@@ -707,6 +713,76 @@ namespace HpskSite.Controllers
                 await _ledger.SyncTrappaBadgesAsync(member.Id, progress.CompletedSteps, null);
             }
             catch { /* best-effort */ }
+        }
+
+        /// <summary>
+        /// Auto-award competition-driven family valörer + årtalsmärke years from the member's hosted
+        /// (and verified self-reported) competition results. Idempotent; runs lazily on read.
+        /// </summary>
+        private async Task RecomputeCompetitionFamiliesAsync(int memberId)
+        {
+            foreach (var fam in MarkenFamilies.CompetitionFamilies)
+            {
+                CompFamilyAnalysis a;
+                try { a = await _compService.AnalyzeAsync(memberId, fam.Key, DateTime.Now.Year); }
+                catch { continue; }
+
+                if (!string.IsNullOrEmpty(a.EarnedLevel))
+                {
+                    int earnedYear = a.GuldMetYears.Count > 0 ? a.GuldMetYears[0] : DateTime.Now.Year;
+                    await _ledger.EnsureBadgeAsync(memberId, fam.Key, a.EarnedLevel!, earnedYear, Marken.SourceAuto);
+                }
+                // Årtalsmärke years = guld-met years after the first (the first earns the guld märke).
+                foreach (var gy in a.GuldMetYears.Skip(1))
+                    await _ledger.EnsureFulfilledYearAsync(memberId, fam.Key, gy);
+            }
+        }
+
+        /// <summary>Read-only per-family summaries (competition-driven families) for the member view.</summary>
+        private async Task<List<object>> BuildFamilySummariesAsync(int memberId, int year)
+        {
+            var pistolBadges = await _ledger.GetBadgesForMemberAsync(memberId, Marken.FamilyPistolskytte);
+            int pistolTop = pistolBadges.Where(b => b.LevelOrdinal is >= 1 and <= 3)
+                .Select(b => b.LevelOrdinal).DefaultIfEmpty(0).Max();
+
+            var list = new List<object>();
+            foreach (var fam in MarkenFamilies.CompetitionFamilies)
+            {
+                CompFamilyAnalysis a;
+                try { a = await _compService.AnalyzeAsync(memberId, fam.Key, year); }
+                catch { continue; }
+
+                var badges = await _ledger.GetBadgesForMemberAsync(memberId, fam.Key);
+                var top = badges.Where(b => b.LevelOrdinal is >= 1 and <= 3)
+                    .OrderByDescending(b => b.LevelOrdinal).FirstOrDefault();
+                var ladder = await _ledger.GetArtalsmarkeStatusAsync(memberId, fam.Key, includeUnverified: false);
+
+                bool hasActivity = top != null || a.ThisYear.Count > 0 || ladder.FulfilledYears > 0 || !string.IsNullOrEmpty(a.EarnedLevel);
+                if (!hasActivity) continue;
+
+                bool prereqOk = fam.PrereqPistolskytteLevel == null
+                    || pistolTop >= Marken.LevelOrdinal(fam.PrereqPistolskytteLevel);
+
+                list.Add(new
+                {
+                    family = fam.Key,
+                    displayName = fam.DisplayName,
+                    earnedLevel = top?.Level ?? a.EarnedLevel,
+                    compsRequired = a.CompetitionsRequired,
+                    thisYearLevel = a.ThisYearLevel,
+                    thisYearComps = a.ThisYear.Select(e => new
+                    {
+                        name = e.CompetitionName,
+                        group = e.WeaponGroup,
+                        total = e.Total,
+                        level = e.ReachedLevel,
+                        source = e.Source
+                    }),
+                    artalsmarke = new { current = ladder.CurrentName, fulfilledYears = ladder.FulfilledYears, next = ladder.NextName, nextAtYears = ladder.NextAtYears },
+                    prereqText = prereqOk ? null : fam.PrereqText
+                });
+            }
+            return list;
         }
 
         /// <summary>

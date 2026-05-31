@@ -202,6 +202,9 @@
                                 </div>
                             </div>
 
+                            @* Övriga märken (Precision/Fält/Milsnabb/Nationell helmatch) — auto från tävlingsresultat. *@
+                            <div id="markenFamiliesContent"></div>
+
                             @* Standardmedaljer — klass-3 qualification (per discipline) + Guldmedalj. *@
                             <div id="medalSummaryCard" class="card mb-3 border-warning-subtle" style="display:none;">
                                 <div class="card-body">
@@ -2697,8 +2700,10 @@ function loadMarkenTab() {
 function updateMarkenEmptyState() {
     const anyVisible = ['markenCard', 'medalSummaryCard', 'mySeriesCard', 'markenQueueCard']
         .some(id => { const e = document.getElementById(id); return e && e.style.display !== 'none'; });
+    const fam = document.getElementById('markenFamiliesContent');
+    const famHas = fam && fam.children.length > 0;
     const empty = document.getElementById('markenEmptyState');
-    if (empty) empty.style.display = anyVisible ? 'none' : 'block';
+    if (empty) empty.style.display = (anyVisible || famHas) ? 'none' : 'block';
 }
 
 function loadMarken(year) {
@@ -2709,18 +2714,53 @@ function loadMarken(year) {
     fetch(`/umbraco/surface/Marken/GetMyMarken?year=${year}`)
         .then(r => r.json())
         .then(data => {
-            if (!data.success) { card.style.display = 'none'; updateMarkenEmptyState(); return; }
-            renderMarken(data);
+            if (!data.success) { card.style.display = 'none'; renderFamilies([], year); updateMarkenEmptyState(); return; }
+            renderMarken(data.pistolskytte || {}, year);
+            renderFamilies(data.families || [], year);
             updateMarkenEmptyState();
         })
         .catch(() => { card.style.display = 'none'; });
 }
 
-function renderMarken(data) {
+// Other discipline märken (Precision/Fält/Milsnabb/Nationell helmatch) — auto from competition results.
+function renderFamilies(families, year) {
+    const wrap = document.getElementById('markenFamiliesContent');
+    if (!wrap) return;
+    if (!families || families.length === 0) { wrap.innerHTML = ''; return; }
+    wrap.innerHTML = families.map(f => {
+        const valor = f.earnedLevel
+            ? `<span class="badge bg-warning text-dark">${escapeHtmlMarken(f.earnedLevel)}</span>`
+            : '<span class="text-muted small">Inget märke än</span>';
+        const art = f.artalsmarke || {};
+        const artLine = (art.fulfilledYears > 0)
+            ? `<div class="small"><i class="bi bi-calendar-check text-warning"></i> ${escapeHtmlMarken(art.current || '')} <span class="text-muted">(${art.fulfilledYears} år${art.nextAtYears > 0 ? `, nästa vid ${art.nextAtYears}` : ''})</span></div>`
+            : '';
+        const comps = (f.thisYearComps || []);
+        const compRows = comps.length
+            ? `<ul class="small text-muted mt-1 mb-1">${comps.slice(0, 6).map(c =>
+                `<li>${escapeHtmlMarken(c.name)} – ${escapeHtmlMarken(c.group)}: <strong>${c.total}</strong>${c.level ? ` <span class="badge bg-light text-dark border">${escapeHtmlMarken(c.level)}</span>` : ''}${c.source === 'SelfReported' ? ' <span class="text-muted">(egen)</span>' : ''}</li>`).join('')}</ul>`
+            : `<div class="small text-muted mt-1">Inga tävlingsresultat ${year} än.</div>`;
+        const thisYear = f.thisYearLevel
+            ? `<span class="badge bg-success-subtle text-success">${escapeHtmlMarken(f.thisYearLevel)}-nivå uppnådd ${year}</span>`
+            : `<span class="text-muted small">${comps.length}/${f.compsRequired} tävlingar ${year}</span>`;
+        const prereq = f.prereqText ? `<div class="small text-warning mt-1"><i class="bi bi-exclamation-triangle"></i> ${escapeHtmlMarken(f.prereqText)}</div>` : '';
+        return `
+            <div class="card mb-3 border-warning-subtle">
+                <div class="card-body">
+                    <h6 class="card-title mb-2"><i class="bi bi-patch-check text-warning"></i> ${escapeHtmlMarken(f.displayName)} ${valor}</h6>
+                    <div class="d-flex justify-content-between align-items-center flex-wrap"><span class="small text-muted">Tävlingsmärke (3 tävlingar/år)</span>${thisYear}</div>
+                    ${compRows}${artLine}${prereq}
+                </div>
+            </div>`;
+    }).join('');
+}
+
+function renderMarken(data, year) {
     const card = document.getElementById('markenCard');
     const content = document.getElementById('markenContent');
     const yearLabel = document.getElementById('markenYear');
-    if (yearLabel) yearLabel.textContent = '· ' + data.year;
+    if (!data || !data.success) { card.style.display = 'none'; return; }
+    if (yearLabel) yearLabel.textContent = '· ' + (data.year || year);
 
     const badges = (data.badges || []).filter(b => b.levelOrdinal >= 1 && b.levelOrdinal <= 3);
     const art = data.artalsmarke || {};

@@ -37,6 +37,7 @@ namespace HpskSite.Models
         public const string SourceOnSite = "OnSite";
         public const string SourceAdmin = "Admin";
         public const string SourceTrappa = "Skyttetrappan"; // base valör materialized from Skyttetrappan completion
+        public const string SourceAuto = "Auto";            // valör auto-derived from competition results
 
         // ── Award / qualification status ──
         public const string StatusReported = "Reported"; // "Ej verifierad"
@@ -108,6 +109,7 @@ namespace HpskSite.Models
             SourceOnSite => "pistol.nu",
             SourceAdmin => "Admin",
             SourceTrappa => "Skyttetrappan",
+            SourceAuto => "Tävlingsresultat",
             _ => source ?? ""
         };
 

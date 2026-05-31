@@ -349,14 +349,54 @@ namespace HpskSite.Services
         public async Task<ArtalsmarkeStatus> GetArtalsmarkeStatusAsync(int memberId, string family, bool includeUnverified = false)
         {
             int years = await GetFulfilledYearCountAsync(memberId, family, includeUnverified);
-            int nextAt = Marken.YearsToNextArtalsmarke(years);
+            // Family-aware ladder (Pistolskytte uses its own 17-step; the rest use their family ladder).
+            var (name, nextAt) = MarkenFamilies.Artalsmarke(family, years);
+            var nextName = nextAt > 0 ? MarkenFamilies.Artalsmarke(family, nextAt).Name : "";
             return new ArtalsmarkeStatus
             {
                 FulfilledYears = years,
-                CurrentName = Marken.ArtalsmarkeName(years),
-                NextName = nextAt > 0 ? Marken.ArtalsmarkeLadder[Marken.ArtalsmarkeStepIndex(years) + 1] : "",
+                CurrentName = name,
+                NextName = nextName,
                 NextAtYears = nextAt
             };
+        }
+
+        /// <summary>
+        /// Idempotently ensure a verified badge at <paramref name="level"/> for a family (used by the
+        /// auto-award of competition-driven valörer). Skips if any badge at that level already exists
+        /// (incl. rejected, so it isn't resurrected).
+        /// </summary>
+        public async Task EnsureBadgeAsync(int memberId, string family, string level, int year, string source)
+        {
+            var existing = await GetBadgesForMemberAsync(memberId, family, includeRejected: true);
+            if (existing.Any(b => b.Level == level)) return;
+            await InsertBadgeAsync(new MemberBadge
+            {
+                MemberId = memberId,
+                BadgeFamily = family,
+                Level = level,
+                LevelOrdinal = Marken.LevelOrdinal(level),
+                AchievedYear = year,
+                AchievedDate = DateTime.Now,
+                Source = source,
+                Status = Marken.StatusVerified,
+                SignedOffDate = DateTime.Now,
+                EnteredByMemberId = 0
+            });
+        }
+
+        /// <summary>Idempotently materialize a Fulfilled + Verified årtalsmärke year for a family.</summary>
+        public async Task EnsureFulfilledYearAsync(int memberId, string family, int year)
+        {
+            var q = await GetQualificationForYearAsync(memberId, family, year);
+            if (q != null && q.Fulfilled && q.Status == Marken.StatusVerified) return;
+            q ??= new MemberBadgeQualification { MemberId = memberId, BadgeFamily = family, Year = year, EnteredByMemberId = 0 };
+            q.Part1Met = true;
+            q.Part2Met = true;
+            q.Fulfilled = true;
+            q.Status = Marken.StatusVerified;
+            q.SignedOffDate ??= DateTime.Now;
+            await UpsertQualificationAsync(q);
         }
 
         // ── Club secretary reads ──────────────────────────────────────
