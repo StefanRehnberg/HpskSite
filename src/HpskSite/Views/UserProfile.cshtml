@@ -2906,16 +2906,47 @@ function markenUploadPhoto(inputId) {
     return fetch('/umbraco/surface/Marken/UploadSeriePhoto', { method: 'POST', body: fd })
         .then(r => r.json()).then(d => d.success ? d.fileRef : null).catch(() => null);
 }
-function markenRenderQr(container, res) {
+let markenQrPoll = null;
+function markenStopStatusPoll() { if (markenQrPoll) { clearInterval(markenQrPoll); markenQrPoll = null; } }
+
+function markenRenderQr(container, res, modalId) {
     const qr = `/umbraco/surface/Faltskytte/GenerateQrCode?url=${encodeURIComponent(res.verifyUrl)}`;
     container.innerHTML = `
-        <div class="text-center">
+        <div class="text-center" id="qrPending_${res.id}">
             <div class="alert ${res.qualifies === false ? 'alert-warning' : 'alert-success'}">${escapeHtmlMarken(res.message)}</div>
             <p class="mb-2">Visa koden för en styrelsemedlem eller skjutledare så kan de validera direkt:</p>
             <img src="${qr}" alt="QR" class="img-fluid border rounded" style="max-width:240px;">
-            <div class="d-grid mt-3"><button class="btn btn-primary" data-bs-dismiss="modal">Klar</button></div>
+            <div class="text-muted small mt-2"><span class="spinner-border spinner-border-sm"></span> Väntar på validering…</div>
+            <div class="d-grid mt-3"><button class="btn btn-outline-secondary" data-bs-dismiss="modal">Stäng</button></div>
         </div>`;
     container.style.display = 'block';
+    markenStartStatusPoll(res.id, modalId, container);
+}
+
+// Poll the shooter's own series so the screen updates the instant a functionary validates it
+// (on their own device / via QR). On resolution: refresh the list behind, show a result, auto-close.
+function markenStartStatusPoll(id, modalId, container) {
+    markenStopStatusPoll();
+    markenQrPoll = setInterval(() => {
+        fetch(`/umbraco/surface/Marken/GetMySerieStatus?id=${id}`)
+            .then(r => r.json())
+            .then(d => {
+                if (!d.success || (d.status !== 'Verified' && d.status !== 'Rejected')) return;
+                markenStopStatusPoll();
+                loadMySeries(markenTabYear);
+                loadMarken(markenTabYear);
+                const ok = d.status === 'Verified';
+                container.innerHTML = `<div class="text-center py-3">
+                    <div class="alert ${ok ? 'alert-success' : 'alert-secondary'} mb-0">
+                        <i class="bi ${ok ? 'bi-check-circle-fill' : 'bi-x-circle'}"></i> ${ok ? 'Godkänd!' : 'Avvisad'}
+                    </div></div>`;
+                setTimeout(() => {
+                    const m = bootstrap.Modal.getInstance(document.getElementById(modalId));
+                    if (m) m.hide();
+                }, 1400);
+            })
+            .catch(() => {});
+    }, 3000);
 }
 
 // ── Guldserie modal ────────────────────────────────────────────────
@@ -2964,7 +2995,7 @@ function gsSave() {
     }).then(r => r.json()).then(res => {
         if (!res.success) { alert('Fel: ' + (res.message || 'Kunde inte spara.')); btn.disabled = false; btn.innerHTML = '<i class="bi bi-send"></i> Skicka för validering'; return; }
         document.getElementById('gsForm').style.display = 'none';
-        markenRenderQr(document.getElementById('gsResult'), res);
+        markenRenderQr(document.getElementById('gsResult'), res, 'guldserieModal');
         loadMySeries(markenTabYear);
     }).catch(() => { alert('Något gick fel.'); btn.disabled = false; });
 }
@@ -2995,12 +3026,15 @@ function ssSave() {
     }).then(r => r.json()).then(res => {
         if (!res.success) { alert('Fel: ' + (res.message || 'Kunde inte spara.')); return; }
         document.getElementById('ssForm').style.display = 'none';
-        markenRenderQr(document.getElementById('ssResult'), res);
+        markenRenderQr(document.getElementById('ssResult'), res, 'snabbserieModal');
         loadMySeries(markenTabYear);
     }).catch(() => alert('Något gick fel.'));
 }
 
 document.getElementById('marken-tab')?.addEventListener('shown.bs.tab', loadMarkenTab);
+['guldserieModal', 'snabbserieModal'].forEach(id => {
+    document.getElementById(id)?.addEventListener('hidden.bs.modal', markenStopStatusPoll);
+});
 
 function loadResults() {
     const content = document.getElementById('resultsContent');

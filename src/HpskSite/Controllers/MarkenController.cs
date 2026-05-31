@@ -258,6 +258,21 @@ namespace HpskSite.Controllers
             return Json(new { success = true, year = y, series = series.Select(SerieDto) });
         }
 
+        /// <summary>
+        /// Lightweight status of one of the current member's own series — polled by the QR modal so
+        /// the shooter's screen updates the moment a functionary validates it on another device.
+        /// GET /umbraco/surface/Marken/GetMySerieStatus?id=123
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetMySerieStatus(int id)
+        {
+            var member = await GetCurrentMemberAsync();
+            if (member == null) return Json(new { success = false });
+            var s = await _ledger.GetSeriesAsync(id);
+            if (s == null || s.MemberId != member.Id) return Json(new { success = false });
+            return Json(new { success = true, status = s.Status });
+        }
+
         // ── Validation queue + verify (board / Skjutledare) ───────────
 
         /// <summary>Pending series the current user is authorized to validate (their board/Skjutledare clubs).</summary>
