@@ -59,6 +59,11 @@
                             </button>
                         </li>
                         <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="marken-tab" data-bs-toggle="tab" data-bs-target="#marken-pane" type="button" role="tab">
+                                <i class="bi bi-patch-check"></i> Medaljer &amp; Märken
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
                             <button class="nav-link" id="competitions-tab" data-bs-toggle="tab" data-bs-target="#competitions-pane" type="button" role="tab">
                                 <i class="bi bi-trophy"></i> Tävlingar
                             </button>
@@ -137,8 +142,67 @@
                                 </div>
                             </div>
 
-                            @* Standardmedaljer — progress toward klass 3 (per discipline) + Guldmedalj.
-                               Populated by loadMedalSummary(), tied to the year filter above. *@
+                            @* Results Content *@
+                            <div id="resultsContent">
+                                <div class="text-center py-3">
+                                    <div class="spinner-border text-primary" role="status">
+                                        <span class="visually-hidden">Laddar...</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        @* Medaljer & Märken Tab *@
+                        <div class="tab-pane fade" id="marken-pane" role="tabpanel">
+                            <div class="d-flex justify-content-end mb-3">
+                                <select id="markenYearFilter" class="form-select form-select-sm" style="width:auto;" onchange="loadMarkenTab()">
+                                    @* populated by JS *@
+                                </select>
+                            </div>
+
+                            @* Validation queue — only shown to board members / Skjutledare with pending series. *@
+                            <div id="markenQueueCard" class="card mb-3 border-info" style="display:none;">
+                                <div class="card-body">
+                                    <h6 class="card-title mb-1"><i class="bi bi-clipboard-check text-info"></i> Serier att validera</h6>
+                                    <p class="text-muted small mb-2">Du är funktionär (styrelse/skjutledare). Skyttar i din klubb har skickat in serier – kontrollera och godkänn eller avvisa.</p>
+                                    <div id="markenQueueContent"></div>
+                                </div>
+                            </div>
+
+                            @* Entry buttons *@
+                            <div class="row g-2 mb-3">
+                                <div class="col-12 col-sm-6">
+                                    <button class="btn btn-warning btn-lg w-100 py-3 fw-bold" onclick="openGuldserieModal()">
+                                        <i class="bi bi-bullseye"></i> Jag har skjutit en GULDSERIE!
+                                    </button>
+                                </div>
+                                <div class="col-12 col-sm-6">
+                                    <button class="btn btn-outline-warning btn-lg w-100 py-3 fw-bold" onclick="openSnabbserieModal()">
+                                        <i class="bi bi-stopwatch"></i> Jag har skjutit en SNABBSERIE!
+                                    </button>
+                                </div>
+                            </div>
+
+                            @* My submitted series this year *@
+                            <div id="mySeriesCard" class="card mb-3" style="display:none;">
+                                <div class="card-body">
+                                    <h6 class="card-title mb-2"><i class="bi bi-list-check"></i> Mina inskickade serier <span id="mySeriesYear" class="text-muted fw-normal small"></span></h6>
+                                    <div id="mySeriesContent"></div>
+                                </div>
+                            </div>
+
+                            @* Pistolskyttemärket — valör, årtalsmärke ladder, this year's Guldfodring. *@
+                            <div id="markenCard" class="card mb-3 border-warning-subtle" style="display:none;">
+                                <div class="card-body">
+                                    <h6 class="card-title mb-3">
+                                        <i class="bi bi-patch-check text-warning"></i> Pistolskyttemärket
+                                        <span id="markenYear" class="text-muted fw-normal small"></span>
+                                    </h6>
+                                    <div id="markenContent"></div>
+                                </div>
+                            </div>
+
+                            @* Standardmedaljer — klass-3 qualification (per discipline) + Guldmedalj. *@
                             <div id="medalSummaryCard" class="card mb-3 border-warning-subtle" style="display:none;">
                                 <div class="card-body">
                                     <h6 class="card-title mb-3">
@@ -149,15 +213,12 @@
                                 </div>
                             </div>
 
-                            @* Results Content *@
-                            <div id="resultsContent">
-                                <div class="text-center py-3">
-                                    <div class="spinner-border text-primary" role="status">
-                                        <span class="visually-hidden">Laddar...</span>
-                                    </div>
-                                </div>
+                            <div id="markenEmptyState" class="text-muted text-center py-4" style="display:none;">
+                                <i class="bi bi-patch-check d-block mb-2" style="font-size:2rem;opacity:.4;"></i>
+                                Inga märken eller medaljer registrerade för valt år än. Skjut en guldserie och be en funktionär validera den.
                             </div>
                         </div>
+                        @* End Medaljer & Märken Tab *@
 
                         @* Competitions Tab *@
                         <div class="tab-pane fade" id="competitions-pane" role="tabpanel">
@@ -744,6 +805,141 @@
         </div>
     </div>
 </div>
+
+@* ── Guldserie entry modal (5-shot keypad) ── *@
+<div class="modal fade" id="guldserieModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-fullscreen-sm-down">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-bullseye text-warning"></i> Ny guldserie</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <div id="gsForm">
+                    <div class="row g-2 mb-3">
+                        <div class="col-6">
+                            <label class="form-label small mb-1">Vapengrupp</label>
+                            <select id="gsWeapon" class="form-select" onchange="gsUpdateThreshold()">
+                                <option value="C">C – kal .22</option>
+                                <option value="A">A – grovpistol</option>
+                                <option value="B">B – kal .32–.45</option>
+                                <option value="R">R – revolver</option>
+                            </select>
+                        </div>
+                        <div class="col-6" id="gsClubWrap" style="display:none;">
+                            <label class="form-label small mb-1">Klubb (för validering)</label>
+                            <select id="gsClub" class="form-select"></select>
+                        </div>
+                    </div>
+                    <div class="text-center small text-muted mb-2" id="gsThresholdNote"></div>
+
+                    <div class="shot-display mb-3">
+                        <div class="shot-circles">
+                            <span class="shot-circle" id="gs-circle-0">_</span>
+                            <span class="shot-circle" id="gs-circle-1">_</span>
+                            <span class="shot-circle" id="gs-circle-2">_</span>
+                            <span class="shot-circle" id="gs-circle-3">_</span>
+                            <span class="shot-circle" id="gs-circle-4">_</span>
+                        </div>
+                        <div class="mt-2 text-center"><strong>Totalt: <span id="gsTotal">0</span> p</strong></div>
+                    </div>
+
+                    <div class="gs-keypad mb-3">
+                        <button type="button" class="btn btn-primary shot-btn" onclick="gsAddShot('X')">X</button>
+                        <button type="button" class="btn btn-primary shot-btn" onclick="gsAddShot('10')">10</button>
+                        <button type="button" class="btn btn-primary shot-btn" onclick="gsAddShot('9')">9</button>
+                        <button type="button" class="btn btn-primary shot-btn" onclick="gsAddShot('8')">8</button>
+                        <button type="button" class="btn btn-primary shot-btn" onclick="gsAddShot('7')">7</button>
+                        <button type="button" class="btn btn-primary shot-btn" onclick="gsAddShot('6')">6</button>
+                        <button type="button" class="btn btn-primary shot-btn" onclick="gsAddShot('5')">5</button>
+                        <button type="button" class="btn btn-primary shot-btn" onclick="gsAddShot('4')">4</button>
+                        <button type="button" class="btn btn-primary shot-btn" onclick="gsAddShot('3')">3</button>
+                        <button type="button" class="btn btn-primary shot-btn" onclick="gsAddShot('2')">2</button>
+                        <button type="button" class="btn btn-primary shot-btn" onclick="gsAddShot('1')">1</button>
+                        <button type="button" class="btn btn-primary shot-btn" onclick="gsAddShot('0')">0</button>
+                    </div>
+                    <div class="d-flex gap-2 mb-3">
+                        <button type="button" class="btn btn-outline-warning flex-fill" onclick="gsClear()"><i class="bi bi-x-circle"></i> Rensa</button>
+                        <button type="button" class="btn btn-outline-secondary flex-fill" onclick="gsBackspace()"><i class="bi bi-backspace"></i> Ångra skott</button>
+                    </div>
+
+                    <div class="mb-2">
+                        <label class="form-label small mb-1"><i class="bi bi-camera"></i> Foto på tavlan (valfritt)</label>
+                        <input type="file" class="form-control" id="gsPhoto" accept="image/*" capture="environment">
+                    </div>
+                    <button type="button" class="btn btn-success btn-lg w-100" id="gsSaveBtn" onclick="gsSave()" disabled>
+                        <i class="bi bi-send"></i> Skicka för validering
+                    </button>
+                </div>
+                <div id="gsResult" style="display:none;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* ── Snabbserie entry modal (target + valör) ── *@
+<div class="modal fade" id="snabbserieModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-fullscreen-sm-down">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-stopwatch text-warning"></i> Ny snabbserie</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <div id="ssForm">
+                    <div class="mb-3">
+                        <label class="form-label small mb-1">Mål</label>
+                        <select id="ssTarget" class="form-select">
+                            <option value="C30_25m">1/6 C30, 25 m</option>
+                            <option value="B100_50m">B100, 50 m</option>
+                        </select>
+                    </div>
+                    <div class="row g-2 mb-3">
+                        <div class="col-6">
+                            <label class="form-label small mb-1">Vapengrupp</label>
+                            <select id="ssWeapon" class="form-select" onchange="ssUpdateReq()">
+                                <option value="C">C</option>
+                                <option value="A">A</option>
+                                <option value="B">B</option>
+                                <option value="R">R</option>
+                            </select>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small mb-1">Valör</label>
+                            <select id="ssLevel" class="form-select" onchange="ssUpdateReq()">
+                                <option value="Guld">Guld</option>
+                                <option value="Silver">Silver</option>
+                                <option value="Brons">Brons</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="alert alert-light border small" id="ssReqNote"></div>
+                    <div id="ssClubWrap" class="mb-3" style="display:none;">
+                        <label class="form-label small mb-1">Klubb (för validering)</label>
+                        <select id="ssClub" class="form-select"></select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small mb-1"><i class="bi bi-camera"></i> Foto (valfritt)</label>
+                        <input type="file" class="form-control" id="ssPhoto" accept="image/*" capture="environment">
+                    </div>
+                    <button type="button" class="btn btn-success btn-lg w-100" onclick="ssSave()">
+                        <i class="bi bi-send"></i> Skicka för validering
+                    </button>
+                </div>
+                <div id="ssResult" style="display:none;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .gs-keypad { display:grid; grid-template-columns:repeat(4,1fr); gap:.5rem; }
+    #guldserieModal .shot-btn { height:54px; font-size:1.4rem; font-weight:bold; }
+    #guldserieModal .shot-circles { display:flex; justify-content:center; gap:.75rem; font-size:1.6rem; font-weight:bold; }
+    #guldserieModal .shot-circle { width:46px; height:46px; display:inline-flex; align-items:center; justify-content:center; border:3px solid var(--bs-border-color); border-radius:50%; background:var(--bs-body-bg); color:var(--bs-secondary-color); }
+    #guldserieModal .shot-circle.filled { border-color:var(--bs-primary); color:var(--bs-body-color); }
+    #guldserieModal .shot-display { background:var(--bs-tertiary-bg); padding:1rem; border-radius:.5rem; border:2px solid var(--bs-border-color); }
+</style>
 
 @* Chart.js Library *@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -2470,6 +2666,342 @@ function renderMedalSummary(data) {
     content.innerHTML = html;
 }
 
+// Märken — Pistolskyttemärket: current valör, årtalsmärke ladder, and this year's Guldfodring.
+// ── Medaljer & Märken tab ──────────────────────────────────────────
+let markenTabInit = false;
+let markenTabYear = new Date().getFullYear();
+let markenClubs = [];
+
+function loadMarkenTab() {
+    const sel = document.getElementById('markenYearFilter');
+    if (!sel) return;
+    if (!markenTabInit) {
+        const now = new Date().getFullYear();
+        for (let y = now; y >= now - 6; y--) {
+            const o = document.createElement('option');
+            o.value = y; o.textContent = y;
+            sel.appendChild(o);
+        }
+        markenTabInit = true;
+        fetch('/umbraco/surface/Marken/GetMyClubsForSeries')
+            .then(r => r.json()).then(d => { if (d.success) markenClubs = d.clubs || []; }).catch(() => {});
+    }
+    markenTabYear = parseInt(sel.value) || new Date().getFullYear();
+    loadMarken(markenTabYear);
+    loadMedalSummary(markenTabYear);
+    loadMySeries(markenTabYear);
+    loadValidationQueue();
+    setTimeout(updateMarkenEmptyState, 800);
+}
+
+function updateMarkenEmptyState() {
+    const anyVisible = ['markenCard', 'medalSummaryCard', 'mySeriesCard', 'markenQueueCard']
+        .some(id => { const e = document.getElementById(id); return e && e.style.display !== 'none'; });
+    const empty = document.getElementById('markenEmptyState');
+    if (empty) empty.style.display = anyVisible ? 'none' : 'block';
+}
+
+function loadMarken(year) {
+    const card = document.getElementById('markenCard');
+    const content = document.getElementById('markenContent');
+    if (!card || !content) return;
+
+    fetch(`/umbraco/surface/Marken/GetMyMarken?year=${year}`)
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) { card.style.display = 'none'; updateMarkenEmptyState(); return; }
+            renderMarken(data);
+            updateMarkenEmptyState();
+        })
+        .catch(() => { card.style.display = 'none'; });
+}
+
+function renderMarken(data) {
+    const card = document.getElementById('markenCard');
+    const content = document.getElementById('markenContent');
+    const yearLabel = document.getElementById('markenYear');
+    if (yearLabel) yearLabel.textContent = '· ' + data.year;
+
+    const badges = (data.badges || []).filter(b => b.levelOrdinal >= 1 && b.levelOrdinal <= 3);
+    const art = data.artalsmarke || {};
+    const gf = data.guldfodring || {};
+    const top = badges.length ? badges.reduce((a, b) => b.levelOrdinal > a.levelOrdinal ? b : a) : null;
+    const hasGuld = badges.some(b => b.isGuld);
+
+    // Nothing to show for a member with no badges, no qualifying years, and no candidacy this year.
+    if (!top && (art.fulfilledYears || 0) === 0 && !gf.part1Met && !gf.part2Met) {
+        card.style.display = 'none';
+        return;
+    }
+    card.style.display = 'block';
+
+    let html = '';
+
+    // Current valör
+    if (top) {
+        const guldBadge = badges.find(b => b.isGuld);
+        const numTxt = guldBadge && guldBadge.uniqueNumber ? ` <span class="text-muted small">nr ${escapeHtmlMarken(guldBadge.uniqueNumber)}</span>` : '';
+        html += `<div class="mb-2"><span class="badge bg-warning text-dark">${escapeHtmlMarken(top.level)}</span> ${escapeHtmlMarken(data.familyName || 'Pistolskyttemärket')}${numTxt}</div>`;
+    } else {
+        html += `<div class="mb-2 small text-muted">Inget grundmärke registrerat än.</div>`;
+    }
+
+    // Årtalsmärke ladder (only meaningful once Guld is held / years accrue)
+    if (hasGuld || (art.fulfilledYears || 0) > 0) {
+        const years = art.fulfilledYears || 0;
+        const nextLine = art.nextAtYears > 0
+            ? `<span class="text-muted small">Nästa: ${escapeHtmlMarken(art.next)} vid ${art.nextAtYears} år</span>`
+            : `<span class="text-muted small">Högsta årtalsmärket uppnått</span>`;
+        html += `
+            <div class="mb-2">
+                <div class="d-flex justify-content-between align-items-center flex-wrap">
+                    <span><i class="bi bi-calendar-check text-warning"></i> ${art.current ? escapeHtmlMarken(art.current) : 'Inget årtalsmärke än'}</span>
+                    <span class="small">${years} godkända guldfodringar</span>
+                </div>
+                <div class="small">${nextLine}</div>
+            </div>`;
+    }
+
+    // This year's Guldfodring (two parts)
+    const p = gf.persisted;
+    const signed = p && p.signedOff;
+    const part1 = gf.part1Met || (p && p.part1Met);
+    const part2 = gf.part2Met || (p && p.part2Met);
+
+    const partRow = (label, met, detail) => `
+        <div class="d-flex justify-content-between align-items-center">
+            <span>${met ? '<i class="bi bi-check-circle-fill text-success"></i>' : '<i class="bi bi-circle text-muted"></i>'} ${label}</span>
+            <span class="small text-muted">${detail || ''}</span>
+        </div>`;
+
+    const pendingTxt = gf.pendingPrecisionCount > 0 ? ` <span class="text-muted">(${gf.pendingPrecisionCount} väntar på validering)</span>` : '';
+    html += `<hr class="my-2"><div class="mb-1 small text-muted">Guldfodring ${data.year}:</div>`;
+    html += partRow('Precisionsdel',
+        part1,
+        `${gf.qualifyingSeriesCount || 0}/${gf.requiredSeries} godkända serier${pendingTxt}`);
+    html += partRow('Snabbskyttedel',
+        part2,
+        part2 ? (gf.part2Detail || (p && p.part2Note) || 'klar') : 'snabbserie eller fältmedalj');
+
+    if (gf.part1Note) html += `<div class="small text-muted mt-1">${escapeHtmlMarken(gf.part1Note)}</div>`;
+
+    if (signed) {
+        html += `<div class="mt-2"><span class="badge bg-success">Signerad guldfodring ${data.year}</span></div>`;
+    } else if (gf.candidateBothMet) {
+        html += `<div class="mt-2 small text-success"><i class="bi bi-check2-all"></i> Båda delarna klara – en funktionär kan signera årets guldfodring.</div>`;
+    } else {
+        html += `<div class="mt-2 small text-muted">Skicka in guldserier och en snabbserie ovan; en funktionär validerar och signerar.</div>`;
+    }
+
+    content.innerHTML = html;
+}
+
+function escapeHtmlMarken(s) {
+    if (s == null) return '';
+    return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function getAntiForgeryTokenMarken() {
+    const el = document.querySelector('input[name="__RequestVerificationToken"]');
+    return el ? el.value : '';
+}
+
+// ── My submitted series ────────────────────────────────────────────
+function loadMySeries(year) {
+    const card = document.getElementById('mySeriesCard');
+    const content = document.getElementById('mySeriesContent');
+    if (!card || !content) return;
+    fetch(`/umbraco/surface/Marken/GetMySeries?year=${year}`)
+        .then(r => r.json())
+        .then(d => {
+            const list = (d.series || []);
+            const yl = document.getElementById('mySeriesYear'); if (yl) yl.textContent = '· ' + year;
+            if (!d.success || list.length === 0) { card.style.display = 'none'; updateMarkenEmptyState(); return; }
+            card.style.display = 'block';
+            content.innerHTML = list.map(s => {
+                const badge = s.status === 'Verified' ? '<span class="badge bg-success">Godkänd</span>'
+                    : s.status === 'Rejected' ? '<span class="badge bg-danger">Avvisad</span>'
+                    : '<span class="badge bg-secondary">Väntar</span>';
+                const desc = s.seriesType === 'Precision'
+                    ? `Guldserie <strong>${s.total} p</strong> <span class="text-muted">(krav ${s.threshold}, ${escapeHtmlMarken(s.weaponGroup)})</span>${s.qualifies ? '' : ' <span class="text-warning small">under krav</span>'}`
+                    : `Snabbserie ${escapeHtmlMarken(s.claimedLevel)} <span class="text-muted">(${escapeHtmlMarken(s.targetName)})</span>`;
+                const date = s.seriesDate ? new Date(s.seriesDate).toLocaleDateString('sv-SE') : '';
+                return `<div class="d-flex justify-content-between align-items-center py-1 border-bottom">
+                    <span>${desc} <span class="text-muted small">${date}</span></span> ${badge}</div>`;
+            }).join('');
+            updateMarkenEmptyState();
+        })
+        .catch(() => { card.style.display = 'none'; });
+}
+
+// ── Validation queue (board / Skjutledare) ─────────────────────────
+function loadValidationQueue() {
+    const card = document.getElementById('markenQueueCard');
+    const content = document.getElementById('markenQueueContent');
+    if (!card || !content) return;
+    fetch('/umbraco/surface/Marken/GetPendingSeries')
+        .then(r => r.json())
+        .then(d => {
+            const list = (d.series || []);
+            if (!d.success || list.length === 0) { card.style.display = 'none'; updateMarkenEmptyState(); return; }
+            card.style.display = 'block';
+            content.innerHTML = list.map(renderQueueItem).join('');
+            updateMarkenEmptyState();
+        })
+        .catch(() => { card.style.display = 'none'; });
+}
+
+function renderQueueItem(s) {
+    const desc = s.seriesType === 'Precision'
+        ? `Guldserie <strong>${s.total} p</strong> <span class="text-muted">(krav ${s.threshold}, ${escapeHtmlMarken(s.weaponGroup)})</span>${s.qualifies ? '' : ' <span class="text-warning small">under krav</span>'}`
+        : `Snabbserie ${escapeHtmlMarken(s.claimedLevel)} <span class="text-muted">(${escapeHtmlMarken(s.targetName)} · ${escapeHtmlMarken(s.speedRequirement || '')})</span>`;
+    const photo = s.hasPhoto ? ` <a href="/umbraco/surface/Marken/GetSeriePhoto?id=${s.id}" target="_blank" rel="noopener"><i class="bi bi-camera"></i></a>` : '';
+    const shots = (s.seriesType === 'Precision' && s.shots) ? `<div class="small text-muted">${s.shots.map(escapeHtmlMarken).join(' · ')}</div>` : '';
+    return `<div class="border-bottom py-2">
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+            <div><strong>${escapeHtmlMarken(s.memberName)}</strong> <span class="text-muted small">${escapeHtmlMarken(s.clubName || '')}</span><br>${desc}${photo}${shots}</div>
+            <div class="text-nowrap">
+                <button class="btn btn-sm btn-success" onclick="queueAct(${s.id}, true)"><i class="bi bi-check-lg me-1"></i>Godkänn</button>
+                <button class="btn btn-sm btn-outline-danger" onclick="queueAct(${s.id}, false)"><i class="bi bi-x-lg me-1"></i>Avvisa</button>
+            </div>
+        </div></div>`;
+}
+
+function queueAct(id, approve) {
+    if (!approve && !confirm('Avvisa serien?')) return;
+    const url = approve ? '/umbraco/surface/Marken/VerifySeries' : '/umbraco/surface/Marken/RejectSeries';
+    fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getAntiForgeryTokenMarken() },
+        body: JSON.stringify({ id })
+    })
+    .then(r => r.json())
+    .then(res => {
+        if (!res.success) { alert('Fel: ' + (res.message || 'Kunde inte uppdatera.')); return; }
+        loadValidationQueue();
+        loadMarken(markenTabYear); // a verify may complete a guldfodring part
+    })
+    .catch(() => alert('Något gick fel.'));
+}
+
+// ── Club picker population (shared by both entry modals) ────────────
+function markenPopulateClubPicker(wrapId, selectId) {
+    const wrap = document.getElementById(wrapId);
+    const sel = document.getElementById(selectId);
+    if (!wrap || !sel) return;
+    sel.innerHTML = markenClubs.map(c => `<option value="${c.id}">${escapeHtmlMarken(c.name)}</option>`).join('');
+    wrap.style.display = markenClubs.length > 1 ? '' : 'none';
+}
+function markenSelectedClubId(selectId) {
+    if (markenClubs.length === 1) return markenClubs[0].id;
+    const sel = document.getElementById(selectId);
+    return sel && sel.value ? parseInt(sel.value) : (markenClubs[0] ? markenClubs[0].id : 0);
+}
+function markenUploadPhoto(inputId) {
+    const input = document.getElementById(inputId);
+    if (!input || !input.files || input.files.length === 0) return Promise.resolve(null);
+    const fd = new FormData();
+    fd.append('file', input.files[0]);
+    fd.append('__RequestVerificationToken', getAntiForgeryTokenMarken());
+    return fetch('/umbraco/surface/Marken/UploadSeriePhoto', { method: 'POST', body: fd })
+        .then(r => r.json()).then(d => d.success ? d.fileRef : null).catch(() => null);
+}
+function markenRenderQr(container, res) {
+    const qr = `/umbraco/surface/Faltskytte/GenerateQrCode?url=${encodeURIComponent(res.verifyUrl)}`;
+    container.innerHTML = `
+        <div class="text-center">
+            <div class="alert ${res.qualifies === false ? 'alert-warning' : 'alert-success'}">${escapeHtmlMarken(res.message)}</div>
+            <p class="mb-2">Visa koden för en styrelsemedlem eller skjutledare så kan de validera direkt:</p>
+            <img src="${qr}" alt="QR" class="img-fluid border rounded" style="max-width:240px;">
+            <div class="d-grid mt-3"><button class="btn btn-primary" data-bs-dismiss="modal">Klar</button></div>
+        </div>`;
+    container.style.display = 'block';
+}
+
+// ── Guldserie modal ────────────────────────────────────────────────
+let gsShots = [];
+function openGuldserieModal() {
+    gsShots = [];
+    document.getElementById('gsForm').style.display = 'block';
+    document.getElementById('gsResult').style.display = 'none';
+    document.getElementById('gsPhoto').value = '';
+    gsRenderShots();
+    gsUpdateThreshold();
+    markenPopulateClubPicker('gsClubWrap', 'gsClub');
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('guldserieModal')).show();
+}
+function gsGuldKrav(group) { return group === 'A' ? 43 : group === 'B' ? 45 : 46; }
+function gsUpdateThreshold() {
+    const g = document.getElementById('gsWeapon').value;
+    document.getElementById('gsThresholdNote').textContent = `Guldkrav: ${gsGuldKrav(g)} p/serie (åldersavdrag tillämpas automatiskt för 55+/65+).`;
+}
+function gsAddShot(v) { if (gsShots.length < 5) { gsShots.push(v); gsRenderShots(); } }
+function gsBackspace() { gsShots.pop(); gsRenderShots(); }
+function gsClear() { gsShots = []; gsRenderShots(); }
+function gsRenderShots() {
+    let total = 0;
+    for (let i = 0; i < 5; i++) {
+        const c = document.getElementById('gs-circle-' + i);
+        if (i < gsShots.length) {
+            c.textContent = gsShots[i]; c.classList.add('filled');
+            total += gsShots[i] === 'X' ? 10 : (parseInt(gsShots[i]) || 0);
+        } else { c.textContent = '_'; c.classList.remove('filled'); }
+    }
+    document.getElementById('gsTotal').textContent = total;
+    document.getElementById('gsSaveBtn').disabled = gsShots.length !== 5;
+}
+function gsSave() {
+    const btn = document.getElementById('gsSaveBtn');
+    const clubId = markenSelectedClubId('gsClub');
+    if (!clubId) { alert('Du måste vara medlem i en klubb för att skicka in.'); return; }
+    btn.disabled = true; btn.textContent = 'Skickar...';
+    markenUploadPhoto('gsPhoto').then(photoRef => {
+        return fetch('/umbraco/surface/Marken/SubmitSeries', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getAntiForgeryTokenMarken() },
+            body: JSON.stringify({ seriesType: 'Precision', clubId, weaponGroup: document.getElementById('gsWeapon').value, shots: gsShots, claimedLevel: 'Guld', photoRef })
+        });
+    }).then(r => r.json()).then(res => {
+        if (!res.success) { alert('Fel: ' + (res.message || 'Kunde inte spara.')); btn.disabled = false; btn.innerHTML = '<i class="bi bi-send"></i> Skicka för validering'; return; }
+        document.getElementById('gsForm').style.display = 'none';
+        markenRenderQr(document.getElementById('gsResult'), res);
+        loadMySeries(markenTabYear);
+    }).catch(() => { alert('Något gick fel.'); btn.disabled = false; });
+}
+
+// ── Snabbserie modal ───────────────────────────────────────────────
+function openSnabbserieModal() {
+    document.getElementById('ssForm').style.display = 'block';
+    document.getElementById('ssResult').style.display = 'none';
+    document.getElementById('ssPhoto').value = '';
+    ssUpdateReq();
+    markenPopulateClubPicker('ssClubWrap', 'ssClub');
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('snabbserieModal')).show();
+}
+function ssUpdateReq() {
+    const lvl = document.getElementById('ssLevel').value;
+    const reqs = { Brons: '5 träff, 60 sek', Silver: '6 träff, 40 sek', Guld: '6 träff (vapengrupp A & R 17 sek, B & C 15 sek)' };
+    document.getElementById('ssReqNote').innerHTML = `<i class="bi bi-info-circle"></i> Krav för ${escapeHtmlMarken(lvl.toLowerCase())}: ${reqs[lvl]}`;
+}
+function ssSave() {
+    const clubId = markenSelectedClubId('ssClub');
+    if (!clubId) { alert('Du måste vara medlem i en klubb för att skicka in.'); return; }
+    markenUploadPhoto('ssPhoto').then(photoRef => {
+        return fetch('/umbraco/surface/Marken/SubmitSeries', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getAntiForgeryTokenMarken() },
+            body: JSON.stringify({ seriesType: 'Speed', clubId, weaponGroup: document.getElementById('ssWeapon').value, target: document.getElementById('ssTarget').value, claimedLevel: document.getElementById('ssLevel').value, photoRef })
+        });
+    }).then(r => r.json()).then(res => {
+        if (!res.success) { alert('Fel: ' + (res.message || 'Kunde inte spara.')); return; }
+        document.getElementById('ssForm').style.display = 'none';
+        markenRenderQr(document.getElementById('ssResult'), res);
+        loadMySeries(markenTabYear);
+    }).catch(() => alert('Något gick fel.'));
+}
+
+document.getElementById('marken-tab')?.addEventListener('shown.bs.tab', loadMarkenTab);
+
 function loadResults() {
     const content = document.getElementById('resultsContent');
     if (!content) return;
@@ -2487,9 +3019,7 @@ function loadResults() {
     const year = document.getElementById('yearFilter')?.value || new Date().getFullYear();
     const weaponClass = document.getElementById('weaponClassFilter')?.value || 'Alla';
 
-    // Standardmedalj progress follows the same year filter (it's cross-discipline, so the
-    // competition-type filter doesn't apply to it).
-    loadMedalSummary(year);
+    // (Standardmedaljer + Märken moved to the "Medaljer & Märken" tab — loaded by loadMarkenTab.)
 
     fetch(`/umbraco/surface/Member/GetMemberResults?competitionType=${competitionType}&year=${year}&weaponClass=${weaponClass}`)
         .then(response => response.json())
@@ -2850,6 +3380,12 @@ function _faltMedalIcon(m) {
     if (m === 'B') return '<img src="/images/StdMedB.png" alt="Brons" style="height:18px;width:auto;" title="Brons">';
     return '<span class="text-muted">—</span>';
 }
+// Proof-of-placement cue for a Fältskytte medal (mirrors renderStmCell for the other disciplines).
+function _faltProofCue(r) {
+    if (r.proofStatus === 'has') return ' <i class="bi bi-paperclip text-success" title="Bevis finns"></i>';
+    if (r.proofStatus === 'missing') return ' <i class="bi bi-exclamation-triangle-fill text-warning" title="Saknar bevis – öppna resultatet och ladda upp"></i>';
+    return '';
+}
 
 function _faltEditFromButton(btn) {
     try {
@@ -2878,6 +3414,8 @@ function renderFaltskytteResultsTable(rows) {
         <p class="small text-muted mb-2">
             <i class="bi bi-trophy text-primary"></i> = tävling på pistol.nu (resultat hämtas automatiskt).
             <i class="bi bi-globe text-secondary ms-2"></i> = extern tävling som du själv lagt in.
+            <span class="ms-2">StM: <i class="bi bi-paperclip text-success"></i> = bevis finns,
+            <i class="bi bi-exclamation-triangle-fill text-warning"></i> = saknar bevis.</span>
         </p>
         <div class="table-responsive">
             <table class="table table-hover align-middle">
@@ -2916,7 +3454,7 @@ function renderFaltskytteResultsTable(rows) {
                             <td class="text-end ${hitClass}">${r.hitPercent.toFixed(1)} %</td>
                             <td class="text-end">${r.figurePercent.toFixed(1)} %</td>
                             <td class="text-center">${_faltPlacementChip(r.placement, r.participants)}</td>
-                            <td class="text-center">${_faltMedalIcon(r.standardMedal)}</td>
+                            <td class="text-center">${_faltMedalIcon(r.standardMedal)}${_faltProofCue(r)}</td>
                             <td class="text-center">${actions}</td>
                         </tr>`;
                 }).join('')}

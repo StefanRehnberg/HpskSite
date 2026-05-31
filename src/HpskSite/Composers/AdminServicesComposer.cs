@@ -61,6 +61,12 @@ namespace HpskSite.Composers
             // Materializes won Standard medals from our own competitions into the ledger on publish
             builder.Services.AddScoped<StandardMedalMaterializationService>();
 
+            // Märken (marksmanship proficiency badges, SHB kap 5) — Phase 1: Pistolskyttemärket.
+            // Ledger (badges + yearly Guldfodringar + årtalsmärke derivation) + candidate engine
+            // (proposes Guldfodring parts from TrainingScores; never writes).
+            builder.Services.AddScoped<MarkenLedgerService>();
+            builder.Services.AddScoped<MarkenCandidateService>();
+
             // Manual klubb-/kretsmästare entries (auto-compute approach abandoned —
             // many clubs don't run results through pistol.nu)
             builder.Services.AddScoped<CompetitionChampionsService>();

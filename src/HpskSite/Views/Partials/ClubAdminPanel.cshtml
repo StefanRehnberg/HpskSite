@@ -72,6 +72,11 @@
             </button>
         </li>
         <li class="nav-item" role="presentation">
+            <button class="nav-link" id="marken-tab" data-bs-toggle="tab" data-bs-target="#markenTab" type="button">
+                <i class="bi bi-patch-check me-2"></i>Märken
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
             <button class="nav-link" id="clubstats-tab" data-bs-toggle="tab" data-bs-target="#clubStatsTab" type="button">
                 <i class="bi bi-graph-up me-2"></i>Statistik
             </button>
@@ -447,9 +452,61 @@
             </div>
         </div>
 
+        <!-- Märken Tab -->
+        <div class="tab-pane fade" id="markenTab">
+            <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+                <div>
+                    <h5 class="mb-1"><i class="bi bi-patch-check text-warning me-2"></i>Pistolskyttemärket</h5>
+                    <p class="text-muted small mb-0">
+                        Skyttar skickar in guldserier/snabbserier som valideras nedan. Årets guldfodring
+                        blir klar automatiskt när 3 godkända guldserier + snabbskyttedelen finns.
+                        Validering görs av styrelsemedlem <span id="markenSkjutledareHint"></span>.
+                    </p>
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                    <label for="markenYearFilter" class="small text-muted mb-0">År:</label>
+                    <select id="markenYearFilter" class="form-select form-select-sm" style="width:auto;" onchange="loadClubMarken()"></select>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="exportClubMarken()" title="Exportera som CSV (för MAP)">
+                        <i class="bi bi-download me-1"></i>Exportera
+                    </button>
+                </div>
+            </div>
+
+            @* Validation queue — submitted series awaiting a functionary's Godkänn/Avvisa. *@
+            <div id="clubMarkenQueueCard" class="card mb-3 border-info" style="display:none;">
+                <div class="card-body">
+                    <h6 class="card-title mb-2"><i class="bi bi-clipboard-check text-info me-1"></i>Serier att validera <span id="clubMarkenQueueCount" class="text-muted fw-normal"></span></h6>
+                    <div id="clubMarkenQueueContent"></div>
+                </div>
+            </div>
+
+            <div id="clubMarkenContent">
+                <div class="text-center py-4">
+                    <div class="spinner-border text-primary" role="status"><span class="visually-hidden">Laddar...</span></div>
+                </div>
+            </div>
+        </div>
+
         <!-- Statistik Tab -->
         <div class="tab-pane fade" id="clubStatsTab">
             @await Html.PartialAsync("ClubStatistics")
+        </div>
+    </div>
+</div>
+
+<!-- Member märken detail modal -->
+<div class="modal fade" id="memberMarkenDetailModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-patch-check text-warning me-2"></i><span id="memberMarkenDetailName"></span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body" id="memberMarkenDetailBody">
+                <div class="text-center py-4">
+                    <div class="spinner-border text-primary" role="status"><span class="visually-hidden">Laddar...</span></div>
+                </div>
+            </div>
         </div>
     </div>
 </div>
@@ -1402,6 +1459,267 @@ function escapeMedalHtml(s) {
 }
 function escapeMedalAttr(s) {
     return escapeMedalHtml(s);
+}
+
+// ── Märken (Pistolskyttemärket) tab ───────────────────────────────────
+let markenYearInitialized = false;
+document.getElementById('marken-tab').addEventListener('shown.bs.tab', function () {
+    if (!markenYearInitialized) {
+        const sel = document.getElementById('markenYearFilter');
+        const now = new Date().getFullYear();
+        for (let y = now; y >= now - 6; y--) {
+            const opt = document.createElement('option');
+            opt.value = y; opt.textContent = y;
+            sel.appendChild(opt);
+        }
+        const hint = document.getElementById('markenSkjutledareHint');
+        if (hint) hint.textContent = '(eller skjutledare om klubben aktiverat det i inställningarna)';
+        markenYearInitialized = true;
+    }
+    loadClubMarkenQueue();
+    loadClubMarken();
+});
+
+function exportClubMarken() {
+    const year = document.getElementById('markenYearFilter')?.value || new Date().getFullYear();
+    window.location = `/umbraco/surface/Marken/ExportClubMarken?clubId=${clubId}&year=${year}`;
+}
+
+function loadClubMarken() {
+    const year = document.getElementById('markenYearFilter')?.value || new Date().getFullYear();
+    const content = document.getElementById('clubMarkenContent');
+    content.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary"></div></div>';
+    fetch(`/umbraco/surface/Marken/GetClubMarkenSummary?clubId=${clubId}&year=${year}`)
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) { content.innerHTML = `<div class="alert alert-danger">${data.message || 'Kunde inte ladda.'}</div>`; return; }
+            renderClubMarken(data.members || []);
+        })
+        .catch(() => { content.innerHTML = '<div class="alert alert-danger">Fel vid inläsning.</div>'; });
+}
+
+function renderClubMarken(members) {
+    const content = document.getElementById('clubMarkenContent');
+    if (members.length === 0) {
+        content.innerHTML = '<div class="text-muted text-center py-4"><i class="bi bi-patch-check d-block" style="font-size:2rem;opacity:.4;"></i>Inga märken registrerade för valt år än. Skyttar dyker upp här när de skickat in serier (validera dem i kön ovan) eller när du tilldelat ett grundmärke via Detaljer.</div>';
+        return;
+    }
+    let html = `<div class="table-responsive"><table class="table table-hover align-middle">
+        <thead><tr>
+            <th>Medlem</th><th>Grundmärke</th><th>Guldnr</th>
+            <th class="text-center">Guldfodringar</th><th>Årtalsmärke</th><th class="text-center">Årets status</th><th></th>
+        </tr></thead><tbody>`;
+    members.forEach(m => {
+        let statusCell;
+        if (m.pending > 0) statusCell = `<span class="badge bg-warning text-dark" title="Väntar på signering">${m.pending} att signera</span>`;
+        else if (m.thisYearFulfilled) statusCell = '<span class="badge bg-success-subtle text-success">Signerad</span>';
+        else statusCell = '<span class="text-muted small">–</span>';
+        const top = m.topLevel ? `<span class="badge bg-warning text-dark">${escapeMedalHtml(m.topLevel)}</span>` : '<span class="text-muted small">–</span>';
+        html += `<tr>
+            <td>${escapeMedalHtml(m.name)}</td>
+            <td>${top}</td>
+            <td>${escapeMedalHtml(m.guldNumber) || '<span class="text-muted small">–</span>'}</td>
+            <td class="text-center">${m.fulfilledYears}</td>
+            <td class="small">${escapeMedalHtml(m.artalsmarke) || '<span class="text-muted">–</span>'}</td>
+            <td class="text-center">${statusCell}</td>
+            <td class="text-end"><button class="btn btn-sm btn-outline-primary" onclick="openMemberMarkenDetail(${m.memberId}, '${escapeMedalAttr(m.name)}')"><i class="bi bi-list-ul me-1"></i>Detaljer</button></td>
+        </tr>`;
+    });
+    html += '</tbody></table></div>';
+    content.innerHTML = html;
+}
+
+function openMemberMarkenDetail(memberId, name) {
+    document.getElementById('memberMarkenDetailName').textContent = name;
+    const body = document.getElementById('memberMarkenDetailBody');
+    body.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary"></div></div>';
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('memberMarkenDetailModal')).show();
+    const year = document.getElementById('markenYearFilter')?.value || new Date().getFullYear();
+    fetch(`/umbraco/surface/Marken/GetMemberMarkenDetail?memberId=${memberId}&year=${year}`)
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) { body.innerHTML = `<div class="alert alert-danger">${data.message || 'Kunde inte ladda.'}</div>`; return; }
+            renderMemberMarkenDetail(data);
+        })
+        .catch(() => { body.innerHTML = '<div class="alert alert-danger">Fel vid inläsning.</div>'; });
+}
+
+function renderMemberMarkenDetail(data) {
+    const body = document.getElementById('memberMarkenDetailBody');
+    const d = data.detail || {};
+    const canSign = !!data.canSignOff;
+    const memberId = d.memberId;
+    const name = d.memberName || '';
+    const badges = d.badges || [];
+    const art = d.artalsmarke || {};
+    const gf = d.guldfodring || {};
+    const year = d.year;
+
+    const heldByLevel = {};
+    badges.forEach(b => heldByLevel[b.level] = b);
+
+    // ── Grundmärken (B/S/G) ──
+    let badgeRows = '';
+    ['Brons', 'Silver', 'Guld'].forEach(level => {
+        const held = heldByLevel[level];
+        let right;
+        if (held) {
+            const yr = held.achievedYear ? ` <span class="text-muted small">(${held.achievedYear})</span>` : '';
+            const src = held.source === 'Skyttetrappan' ? ' <span class="badge bg-info-subtle text-info border border-info-subtle">Skyttetrappan</span>' : '';
+            if (level === 'Guld') {
+                const num = held.uniqueNumber ? escapeMedalAttr(held.uniqueNumber) : '';
+                right = `<span class="text-success me-2"><i class="bi bi-check-circle-fill"></i> Tilldelat${yr}${src}</span>
+                    <span class="input-group input-group-sm" style="width:auto;display:inline-flex;vertical-align:middle;">
+                      <span class="input-group-text">Nr</span>
+                      <input type="text" class="form-control" id="guldNr_${held.id}" value="${num}" style="width:120px;" placeholder="registreringsnr">
+                      <button class="btn btn-outline-secondary" onclick="setMarkenGuldNumber(${held.id}, ${memberId}, '${escapeMedalAttr(name)}')">Spara</button>
+                    </span>`;
+            } else {
+                right = `<span class="text-success"><i class="bi bi-check-circle-fill"></i> Tilldelat${yr}${src}</span>`;
+            }
+        } else if (canSign) {
+            right = `<button class="btn btn-sm btn-outline-warning" onclick="awardMarkenBadge(${memberId}, '${level}', '${escapeMedalAttr(name)}')">Tilldela ${level.toLowerCase()}</button>`;
+        } else {
+            right = '<span class="text-muted small">Ej tilldelat</span>';
+        }
+        badgeRows += `<li class="list-group-item d-flex justify-content-between align-items-center px-0 flex-wrap gap-2">
+            <span><span class="badge bg-warning text-dark me-1">${level}</span></span><span>${right}</span></li>`;
+    });
+
+    // ── Årtalsmärke ──
+    const artLine = (art.fulfilledYears || 0) > 0 || badges.some(b => b.isGuld)
+        ? `<strong>${escapeMedalHtml(art.current) || 'Inget årtalsmärke än'}</strong>
+           <span class="text-muted">— ${art.fulfilledYears || 0} godkända guldfodringar${art.nextAtYears > 0 ? `, nästa (${escapeMedalHtml(art.next)}) vid ${art.nextAtYears}` : ', högsta uppnått'}</span>`
+        : '<span class="text-muted">Kräver guldmärke först.</span>';
+
+    // ── Guldfodring (this year) ──
+    const p = gf.persisted;
+    const signed = p && p.signedOff;
+    const part1 = gf.part1Met || (p && p.part1Met);
+    const part2 = gf.part2Met || (p && p.part2Met);
+    const seriesRows = (gf.bestSeries || []).map(s =>
+        `<li>${escapeMedalHtml(s.weaponGroup)}: <strong>${s.score}</strong> (krav ${s.threshold})${s.source ? ' <span class="text-muted">' + escapeMedalHtml(s.source === 'Tävling' ? (s.label || 'tävling') : 'guldserie') + '</span>' : ''}</li>`).join('');
+
+    // Read-only status — the year completes automatically when both parts are validated.
+    const bothDone = gf.candidateBothMet || (p && p.fulfilled);
+    let gfStatus;
+    if (bothDone) {
+        gfStatus = `<span class="badge bg-success"><i class="bi bi-check2-all me-1"></i>Guldfodring ${year} klar</span>`;
+    } else {
+        const need = [];
+        if (!part1) need.push(`${gf.qualifyingSeriesCount || 0}/${gf.requiredSeries} guldserier`);
+        if (!part2) need.push('snabbskyttedel');
+        gfStatus = `<span class="text-muted small">Återstår: ${need.join(' + ')}. Blir klar automatiskt när delarna validerats.</span>`;
+    }
+
+    const partLine = (label, met, detail) =>
+        `<div class="d-flex justify-content-between"><span>${met ? '<i class="bi bi-check-circle-fill text-success"></i>' : '<i class="bi bi-circle text-muted"></i>'} ${label}</span><span class="text-muted small">${detail || ''}</span></div>`;
+
+    body.innerHTML = `
+        <h6 class="text-muted">Grundmärken</h6>
+        <ul class="list-group list-group-flush mb-3">${badgeRows}</ul>
+
+        <h6 class="text-muted">Årtalsmärke</h6>
+        <p class="mb-3"><i class="bi bi-calendar-check text-warning"></i> ${artLine}</p>
+
+        <h6 class="text-muted">Guldfodring ${year}</h6>
+        <div class="card border-warning-subtle mb-2"><div class="card-body py-2">
+            ${partLine('Precisionsdel (3 godkända guldserier)', part1, `${gf.qualifyingSeriesCount || 0}/${gf.requiredSeries} serier`)}
+            ${seriesRows ? `<ul class="small text-muted mt-1 mb-1">${seriesRows}</ul>` : ''}
+            <hr class="my-2">
+            ${partLine('Snabbskyttedel', part2, part2 ? escapeMedalHtml(gf.part2Detail || 'klar') : 'snabbserie eller fältmedalj')}
+            <div class="mt-2">${gfStatus}</div>
+        </div></div>
+        <p class="text-muted small">Precisionsdelen byggs av validerade guldserier och resultat från hemmatävlingar. Serier valideras i kön högst upp på fliken (eller via QR).</p>`;
+}
+
+// ── Series validation queue (club admin tab) ──────────────────────
+function loadClubMarkenQueue() {
+    const card = document.getElementById('clubMarkenQueueCard');
+    const content = document.getElementById('clubMarkenQueueContent');
+    if (!card || !content) return;
+    fetch(`/umbraco/surface/Marken/GetClubPendingSeries?clubId=${clubId}`)
+        .then(r => r.json())
+        .then(d => {
+            const list = (d.series || []);
+            if (!d.success || list.length === 0) { card.style.display = 'none'; return; }
+            card.style.display = 'block';
+            document.getElementById('clubMarkenQueueCount').textContent = `(${list.length})`;
+            content.innerHTML = list.map(s => renderClubQueueItem(s, d.canValidate)).join('');
+        })
+        .catch(() => { card.style.display = 'none'; });
+}
+
+function renderClubQueueItem(s, canValidate) {
+    const desc = s.seriesType === 'Precision'
+        ? `Guldserie <strong>${s.total} p</strong> <span class="text-muted">(krav ${s.threshold}, ${escapeMedalHtml(s.weaponGroup)})</span>${s.qualifies ? '' : ' <span class="text-warning small">under krav</span>'}`
+        : `Snabbserie ${escapeMedalHtml(s.claimedLevel)} <span class="text-muted">(${escapeMedalHtml(s.targetName)} · ${escapeMedalHtml(s.speedRequirement || '')})</span>`;
+    const shots = (s.seriesType === 'Precision' && s.shots) ? `<div class="small text-muted">${s.shots.map(escapeMedalHtml).join(' · ')}</div>` : '';
+    const photo = s.hasPhoto ? ` <a href="/umbraco/surface/Marken/GetSeriePhoto?id=${s.id}" target="_blank" rel="noopener" title="Foto"><i class="bi bi-camera"></i></a>` : '';
+    const buttons = canValidate
+        ? `<div class="text-nowrap mt-1">
+             <button class="btn btn-sm btn-success" onclick="clubQueueAct(${s.id}, true)"><i class="bi bi-check-lg me-1"></i>Godkänn</button>
+             <button class="btn btn-sm btn-outline-danger" onclick="clubQueueAct(${s.id}, false)"><i class="bi bi-x-lg me-1"></i>Avvisa</button>
+           </div>`
+        : '<div class="small text-muted mt-1">Endast styrelse/skjutledare kan validera.</div>';
+    return `<div class="border-bottom py-2">
+        <div><strong>${escapeMedalHtml(s.memberName)}</strong></div>
+        <div>${desc}${photo}</div>${shots}${buttons}</div>`;
+}
+
+function clubQueueAct(id, approve) {
+    if (!approve && !confirm('Avvisa serien?')) return;
+    const url = approve ? '/umbraco/surface/Marken/VerifySeries' : '/umbraco/surface/Marken/RejectSeries';
+    fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getAntiForgeryToken() },
+        body: JSON.stringify({ id })
+    })
+    .then(r => r.json())
+    .then(res => {
+        if (!res.success) { alert('Fel: ' + (res.message || 'Kunde inte uppdatera.')); return; }
+        loadClubMarkenQueue();
+        loadClubMarken(); // a validation may complete a member's guldfodring
+    })
+    .catch(() => alert('Något gick fel.'));
+}
+
+function awardMarkenBadge(memberId, level, name) {
+    let uniqueNumber = null;
+    if (level === 'Guld') {
+        uniqueNumber = prompt('Tilldela guldmärket. Ange registreringsnummer från förbundet (kan lämnas tomt och fyllas i senare):', '');
+        if (uniqueNumber === null) return;
+    } else if (!confirm(`Tilldela ${level.toLowerCase()}märket till ${name}?`)) {
+        return;
+    }
+    fetch('/umbraco/surface/Marken/AwardBadge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getAntiForgeryToken() },
+        body: JSON.stringify({ memberId, level, year: 0, uniqueNumber })
+    })
+    .then(r => r.json())
+    .then(res => {
+        if (!res.success) { alert('Fel: ' + (res.message || 'Kunde inte tilldela.')); return; }
+        openMemberMarkenDetail(memberId, name);
+        loadClubMarken();
+    })
+    .catch(() => alert('Kunde inte tilldela märket.'));
+}
+
+function setMarkenGuldNumber(badgeId, memberId, name) {
+    const input = document.getElementById('guldNr_' + badgeId);
+    const uniqueNumber = input ? input.value.trim() : '';
+    fetch('/umbraco/surface/Marken/SetBadgeUniqueNumber', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getAntiForgeryToken() },
+        body: JSON.stringify({ badgeId, uniqueNumber })
+    })
+    .then(r => r.json())
+    .then(res => {
+        alert(res.message || (res.success ? 'Sparat.' : 'Kunde inte spara.'));
+        if (res.success) loadClubMarken();
+    })
+    .catch(() => alert('Kunde inte spara registreringsnummer.'));
 }
 
 document.getElementById('settings-tab').addEventListener('shown.bs.tab', function () {

@@ -155,6 +155,19 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// Club ids where the given member is an active board member (Styrelse). Reverse of
+        /// <see cref="GetBoardMembers"/> — used to scope märke sign-off authority to a person.
+        /// </summary>
+        public List<int> GetClubIdsWhereBoardMember(int memberId)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+            return db.Fetch<int>(
+                "SELECT OwnerId FROM BoardRoles WHERE OwnerType = @0 AND MemberId = @1 AND IsActive = 1 AND IsBoardMember = 1",
+                DocumentOwnerType.Club, memberId);
+        }
+
+        /// <summary>
         /// Get a single board role by ID.
         /// </summary>
         public BoardRole? GetById(int id)

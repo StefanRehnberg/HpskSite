@@ -22,6 +22,7 @@ namespace HpskSite.Controllers
         private readonly AdminAuthorizationService _authorizationService;
         private readonly TrainingGroupService _trainingGroupService;
         private readonly EmailService _emailService;
+        private readonly MarkenLedgerService _markenLedger;
         private readonly ILogger<TrainingController> _logger;
         private const string ClubMemberTypeAlias = "hpskClub";
 
@@ -38,6 +39,7 @@ namespace HpskSite.Controllers
             AdminAuthorizationService authorizationService,
             TrainingGroupService trainingGroupService,
             EmailService emailService,
+            MarkenLedgerService markenLedger,
             ILogger<TrainingController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
@@ -47,6 +49,7 @@ namespace HpskSite.Controllers
             _authorizationService = authorizationService;
             _trainingGroupService = trainingGroupService;
             _emailService = emailService;
+            _markenLedger = markenLedger;
             _logger = logger;
         }
 
@@ -341,6 +344,22 @@ namespace HpskSite.Controllers
                 // Save progress
                 progress.SaveToMember(member);
                 _memberService.Save(member);
+
+                // Skyttetrappan → Pistolskyttemärket link: completing all steps of levels 1/2/3
+                // (Nybörjartrappa Brons/Silver/Guld) awards the matching base valör, stamped with
+                // the approving functionary. Idempotent; best-effort so it never breaks step approval.
+                if (levelId is 1 or 2 or 3)
+                {
+                    try
+                    {
+                        var actingMember = _memberService.GetByEmail(instructor?.Email ?? string.Empty);
+                        await _markenLedger.SyncTrappaBadgesAsync(memberId, progress.CompletedSteps, actingMember?.Id);
+                    }
+                    catch (Exception markenEx)
+                    {
+                        _logger.LogWarning(markenEx, "Failed to sync Skyttetrappan märke for member {MemberId}", memberId);
+                    }
+                }
 
                 // Send notification email (non-blocking)
                 try
