@@ -1118,7 +1118,7 @@ namespace HpskSite.Controllers
             {
                 CompFamilyAnalysis a;
                 try { a = await _compService.AnalyzeAsync(memberId, fam.Key, year); }
-                catch { continue; }
+                catch { a = new CompFamilyAnalysis { Family = fam.Key, CompetitionsRequired = fam.CompetitionsRequired }; }
 
                 var badges = await _ledger.GetBadgesForMemberAsync(memberId, fam.Key);
                 var top = badges.Where(b => b.LevelOrdinal is >= 1 and <= 3)
@@ -1160,7 +1160,7 @@ namespace HpskSite.Controllers
             {
                 (string? earned, List<int> guldYears, List<MarkenSeries> thisYear) sp;
                 try { sp = await AnalyzeSeriesProofAsync(memberId, fam, year); }
-                catch { continue; }
+                catch { sp = (null, new List<int>(), new List<MarkenSeries>()); }
 
                 var badges = await _ledger.GetBadgesForMemberAsync(memberId, fam.Key);
                 var top = badges.Where(b => b.LevelOrdinal is >= 1 and <= 3).OrderByDescending(b => b.LevelOrdinal).FirstOrDefault();

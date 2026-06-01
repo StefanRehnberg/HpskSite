@@ -55,10 +55,17 @@ namespace HpskSite.Services
         }
 
         // ── Self-reported result CRUD ─────────────────────────────────
+        // Reads degrade gracefully when the MarkenCompetitionResult table hasn't been created yet
+        // (create-marken-competition-result-table.sql) — competition märken still work from hosted
+        // results; only the external self-report path needs the table.
         public async Task<MarkenCompetitionResult?> GetSelfReportedAsync(int id)
         {
-            using var db = _databaseFactory.CreateDatabase();
-            return await db.SingleOrDefaultAsync<MarkenCompetitionResult>("WHERE Id = @0", id);
+            try
+            {
+                using var db = _databaseFactory.CreateDatabase();
+                return await db.SingleOrDefaultAsync<MarkenCompetitionResult>("WHERE Id = @0", id);
+            }
+            catch { return null; }
         }
 
         public async Task<int> InsertSelfReportedAsync(MarkenCompetitionResult r)
@@ -83,22 +90,30 @@ namespace HpskSite.Services
 
         public async Task<List<MarkenCompetitionResult>> GetPendingSelfReportedAsync(IEnumerable<int>? clubIds)
         {
-            using var db = _databaseFactory.CreateDatabase();
-            if (clubIds == null)
-                return await db.FetchAsync<MarkenCompetitionResult>("WHERE Status = @0 ORDER BY CreatedAt", Marken.SeriesStatusPending);
-            var ids = clubIds.Distinct().ToList();
-            if (ids.Count == 0) return new();
-            return await db.FetchAsync<MarkenCompetitionResult>(
-                $"WHERE Status = @0 AND ClubId IN ({string.Join(",", ids)}) ORDER BY CreatedAt", Marken.SeriesStatusPending);
+            try
+            {
+                using var db = _databaseFactory.CreateDatabase();
+                if (clubIds == null)
+                    return await db.FetchAsync<MarkenCompetitionResult>("WHERE Status = @0 ORDER BY CreatedAt", Marken.SeriesStatusPending);
+                var ids = clubIds.Distinct().ToList();
+                if (ids.Count == 0) return new();
+                return await db.FetchAsync<MarkenCompetitionResult>(
+                    $"WHERE Status = @0 AND ClubId IN ({string.Join(",", ids)}) ORDER BY CreatedAt", Marken.SeriesStatusPending);
+            }
+            catch { return new(); }
         }
 
         public async Task<List<MarkenCompetitionResult>> GetSelfReportedForMemberAsync(int memberId, string family, int? year = null)
         {
-            using var db = _databaseFactory.CreateDatabase();
-            var sql = new Sql("WHERE MemberId = @0 AND BadgeFamily = @1", memberId, family);
-            if (year.HasValue) sql.Append("AND [Year] = @0", year.Value);
-            sql.Append("ORDER BY CompetitionDate DESC");
-            return await db.FetchAsync<MarkenCompetitionResult>(sql);
+            try
+            {
+                using var db = _databaseFactory.CreateDatabase();
+                var sql = new Sql("WHERE MemberId = @0 AND BadgeFamily = @1", memberId, family);
+                if (year.HasValue) sql.Append("AND [Year] = @0", year.Value);
+                sql.Append("ORDER BY CompetitionDate DESC");
+                return await db.FetchAsync<MarkenCompetitionResult>(sql);
+            }
+            catch { return new(); }
         }
 
         // ── Analysis ──────────────────────────────────────────────────
