@@ -1079,6 +1079,32 @@ namespace HpskSite.Controllers
             return null;
         }
 
+        /// <summary>Human-readable krav (requirement thresholds) for a family, for the "Visa krav" section.</summary>
+        private static List<string> FamilyKravLines(MarkenFamilyDef def)
+        {
+            var lines = new List<string>();
+            if (def.Pattern == MarkenPattern.CompetitionAchievement && def.CompLevels != null)
+            {
+                string unit = def.HitBased ? "stn" : "ser";
+                lines.Add($"{(def.HitBased ? "Antal träff" : "Poäng")}/tävling (Brons/Silver/Guld) — {def.CompetitionsRequired} tävlingar (krets+):");
+                foreach (var (group, byDim) in def.CompLevels)
+                {
+                    var parts = byDim.OrderBy(kv => kv.Key).Select(kv =>
+                        kv.Key == 0 ? $"{kv.Value[0]}/{kv.Value[1]}/{kv.Value[2]}"
+                                    : $"{kv.Key} {unit}: {kv.Value[0]}/{kv.Value[1]}/{kv.Value[2]}");
+                    lines.Add($"Vapengrupp {group}: {string.Join(" · ", parts)}");
+                }
+            }
+            else if (def.Pattern == MarkenPattern.SeriesProof && def.SeriesThreshold != null)
+            {
+                lines.Add($"Per serie (Brons/Silver/Guld): {def.SeriesThreshold[0]}/{def.SeriesThreshold[1]}/{def.SeriesThreshold[2]}");
+                lines.Add(def.RequiresSpeedSeriesToo
+                    ? $"{def.SeriesRequired} precisionsserier + {def.SeriesRequired} snabbserier (snabbpistoltavla)"
+                    : $"{def.SeriesRequired} serier");
+            }
+            return lines;
+        }
+
         /// <summary>Next valör up from the current one (null current → Brons; Guld → null).</summary>
         private static string? NextLevel(string? earned) => earned switch
         {
@@ -1136,8 +1162,10 @@ namespace HpskSite.Controllers
                 else
                 {
                     int atNext = a.ThisYear.Count(e => Marken.LevelOrdinal(e.ReachedLevel) >= Marken.LevelOrdinal(next));
-                    status = $"Saknar {atNext}/{a.CompetitionsRequired} tävlingar på {next.ToLowerInvariant()}-nivå i år "
-                           + $"(har {atNext}) — krets-/landsdels-/riks-/nationell tävling.";
+                    int needMore = Math.Max(0, a.CompetitionsRequired - atNext);
+                    status = $"För {next.ToLowerInvariant()}: {atNext}/{a.CompetitionsRequired} tävlingar i år"
+                           + (needMore > 0 ? $" (saknar {needMore})" : "")
+                           + " — krets-/landsdels-/riks-/nationell tävling.";
                 }
 
                 list.Add(new
@@ -1148,6 +1176,8 @@ namespace HpskSite.Controllers
                     earnedLevel = earned,
                     nextLevel = next,
                     statusText = status,
+                    kravLines = FamilyKravLines(fam),
+                    earnedSource = top?.Source,
                     compsRequired = a.CompetitionsRequired,
                     thisYearComps = a.ThisYear.Select(e => new { name = e.CompetitionName, group = e.WeaponGroup, total = e.Total, level = e.ReachedLevel, source = e.Source }),
                     artalsmarke = new { current = ladder.CurrentName, fulfilledYears = ladder.FulfilledYears, next = ladder.NextName, nextAtYears = ladder.NextAtYears },
@@ -1175,7 +1205,9 @@ namespace HpskSite.Controllers
                 else
                 {
                     int atNext = SeriesProofCount(fam, sp.thisYear, next);
-                    status = $"Saknar {Math.Max(0, fam.SeriesRequired - atNext)} av {fam.SeriesRequired} serier på {next.ToLowerInvariant()}-nivå i år (har {atNext})"
+                    int needMore = Math.Max(0, fam.SeriesRequired - atNext);
+                    status = $"För {next.ToLowerInvariant()}: {atNext}/{fam.SeriesRequired} serier på nivå i år"
+                           + (needMore > 0 ? $" (saknar {needMore})" : "")
                            + (fam.RequiresSpeedSeriesToo ? " — av både precisions- och snabbserier." : ".");
                 }
 
@@ -1187,6 +1219,8 @@ namespace HpskSite.Controllers
                     earnedLevel = earned,
                     nextLevel = next,
                     statusText = status,
+                    kravLines = FamilyKravLines(fam),
+                    earnedSource = top?.Source,
                     seriesRequired = fam.SeriesRequired,
                     requiresSpeedSeriesToo = fam.RequiresSpeedSeriesToo,
                     artalsmarke = new { current = ladder.CurrentName, fulfilledYears = ladder.FulfilledYears, next = ladder.NextName, nextAtYears = ladder.NextAtYears },

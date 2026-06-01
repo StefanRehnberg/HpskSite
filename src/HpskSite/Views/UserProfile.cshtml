@@ -2778,17 +2778,20 @@ function renderFamilies(families, year) {
     if (!families || families.length === 0) { wrap.innerHTML = ''; return; }
     wrap.innerHTML = families.map(f => {
         const done = !f.nextLevel; // no next level = guld held
-        const valor = f.earnedLevel
-            ? `<span class="badge bg-warning text-dark">${escapeHtmlMarken(f.earnedLevel)}</span>`
+        const held = !!f.earnedLevel;
+        const srcTxt = held && f.earnedSource ? ` <span class="text-muted small">(via ${escapeHtmlMarken(markenSourceLabel(f.earnedSource))})</span>` : '';
+        const valor = held
+            ? `<span class="badge bg-success"><i class="bi bi-check-lg"></i> Innehar ${escapeHtmlMarken(f.earnedLevel)}</span>`
             : '<span class="badge bg-secondary">Ej taget</span>';
         const art = f.artalsmarke || {};
         const artLine = (art.fulfilledYears > 0)
             ? `<div class="small mt-1"><i class="bi bi-calendar-check text-warning"></i> ${escapeHtmlMarken(art.current || '')} <span class="text-muted">(${art.fulfilledYears} år${art.nextAtYears > 0 ? `, nästa vid ${art.nextAtYears}` : ''})</span></div>`
             : '';
         const prereq = f.prereqText ? `<div class="small text-warning mt-1"><i class="bi bi-exclamation-triangle"></i> ${escapeHtmlMarken(f.prereqText)}</div>` : '';
-        const statusLine = `<div class="small ${done ? 'text-success' : 'text-muted'} mt-1">${done ? '<i class="bi bi-check2-all"></i> ' : ''}${escapeHtmlMarken(f.statusText || '')}</div>`;
+        const statusLine = `<div class="small ${done ? 'text-success' : 'text-muted'} mt-1">${done ? '<i class="bi bi-check2-all"></i> ' : ''}${escapeHtmlMarken(f.statusText || '')}${srcTxt}</div>`;
+        const krav = markenKravBlock('fam_' + f.family, f.kravLines);
 
-        // Competition families: list this year's qualifying comps. Elit: its own entry button.
+        // Competition families: list this year's qualifying comps. Elit: how it's registered.
         let detail = '';
         if (f.pattern === 'comp') {
             const comps = (f.thisYearComps || []);
@@ -2806,10 +2809,31 @@ function renderFamilies(families, year) {
                         <h6 class="card-title mb-0"><i class="bi bi-patch-check text-warning"></i> ${escapeHtmlMarken(f.displayName)}</h6>
                         ${valor}
                     </div>
-                    ${statusLine}${detail}${artLine}${prereq}${entry}
+                    ${statusLine}${detail}${artLine}${prereq}${entry}${krav}
                 </div>
             </div>`;
     }).join('');
+}
+
+function markenSourceLabel(src) {
+    return src === 'Skyttetrappan' ? 'Skyttetrappan'
+        : src === 'Auto' ? 'tävlingsresultat'
+        : src === 'Admin' ? 'manuell tilldelning'
+        : src === 'SelfReported' ? 'egenrapport' : '';
+}
+
+// Collapsible "Visa krav" block from server-provided krav lines.
+let markenKravSeq = 0;
+function markenKravBlock(idBase, lines) {
+    if (!lines || lines.length === 0) return '';
+    const id = idBase + '_' + (markenKravSeq++);
+    const items = lines.map(l => `<div>${escapeHtmlMarken(l)}</div>`).join('');
+    return `<div class="mt-2">
+        <button class="btn btn-link btn-sm p-0 text-decoration-none" type="button" data-bs-toggle="collapse" data-bs-target="#${id}">
+            <i class="bi bi-list-ol"></i> Visa krav
+        </button>
+        <div id="${id}" class="collapse small text-muted mt-1">${items}</div>
+    </div>`;
 }
 
 function renderMarken(data, year) {
@@ -2820,7 +2844,7 @@ function renderMarken(data, year) {
     const gfContent = document.getElementById('guldfodringContent');
     const gfYear = document.getElementById('guldfodringYear');
     if (!data || !data.success) { card.style.display = 'none'; if (gfCard) gfCard.style.display = 'none'; return; }
-    if (yearLabel) yearLabel.textContent = '· ' + (data.year || year);
+    if (yearLabel) yearLabel.textContent = ''; // grundmärket är inte årsbundet — år visas på guldfodringskortet
 
     const badges = (data.badges || []).filter(b => b.levelOrdinal >= 1 && b.levelOrdinal <= 3);
     const art = data.artalsmarke || {};
@@ -2832,12 +2856,14 @@ function renderMarken(data, year) {
     card.style.display = 'block';
     {
         const valor = top
-            ? `<span class="badge bg-warning text-dark">${escapeHtmlMarken(top.level)}</span>`
+            ? `<span class="badge bg-success"><i class="bi bi-check-lg"></i> Innehar ${escapeHtmlMarken(top.level)}</span>`
             : '<span class="badge bg-secondary">Ej taget</span>';
         let html = `<div class="d-flex justify-content-between align-items-center flex-wrap mb-1"><span class="text-muted small">Grundmärke</span>${valor}</div>`;
         if (top) {
+            const src = top.source ? ` <span class="text-muted">(via ${escapeHtmlMarken(markenSourceLabel(top.source) || 'registrering')})</span>` : '';
             const guldBadge = badges.find(b => b.isGuld);
-            if (guldBadge && guldBadge.uniqueNumber) html += `<div class="small text-muted">Guldnr ${escapeHtmlMarken(guldBadge.uniqueNumber)}</div>`;
+            const num = guldBadge && guldBadge.uniqueNumber ? ` · Guldnr ${escapeHtmlMarken(guldBadge.uniqueNumber)}` : '';
+            html += `<div class="small text-muted">${escapeHtmlMarken(top.level)}-märket${src}${num}</div>`;
         } else {
             html += `<div class="small text-muted">Tas via Skyttetrappan (brons/silver/guld) eller validerade serier nedan.</div>`;
         }
@@ -2854,6 +2880,12 @@ function renderMarken(data, year) {
                 </div>
                 <div class="small text-muted">${nextLine}</div>`;
         }
+        html += markenKravBlock('fam_Pistolskytte', [
+            'Grundmärke — 3 precisionsserier/år, poäng/serie (Brons/Silver/Guld):',
+            'Vapengrupp A: 32/38/43 · B: 33/39/45 · C: 34/40/46',
+            '+ 3 tillämpningsserier (brons 5 träff/60 s, silver 6/40 s, guld 6/17–15 s) eller fältmedalj',
+            'Åldersavdrag: fyllt 55 år −1 p/serie, fyllt 65 år −2 p/serie'
+        ]);
         content.innerHTML = html;
     }
 
