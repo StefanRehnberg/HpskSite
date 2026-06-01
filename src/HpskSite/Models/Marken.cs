@@ -11,6 +11,7 @@ namespace HpskSite.Models
     {
         // ── Badge families (only Pistolskytte is built in Phase 1; the rest are reserved) ──
         public const string FamilyPistolskytte = "Pistolskytte";
+        public const string FamilyLuftpistol = "Luftpistol"; // mirrors MarkenFamilies.Luftpistol (for discipline classification)
 
         public static string FamilyDisplayName(string? family) => family switch
         {
@@ -58,18 +59,47 @@ namespace HpskSite.Models
             _ => t ?? ""
         };
 
-        // Snabbserie targets (SHB 5.1.1.1 pt 2)
+        // Snabbserie targets. B100/C30 = tillämpning (Pistolskyttemärket, hits-in-time).
+        // Snabbpistol = snabbpistoltavla 25 m, scored 0–50 (Elit/Mästar).
         public const string SpeedTargetB100 = "B100_50m";
         public const string SpeedTargetC30 = "C30_25m";
+        public const string SpeedTargetSnabbpistol = "Snabbpistol_25m";
 
         public static string SpeedTargetDisplay(string? t) => t switch
         {
             SpeedTargetB100 => "B100, 50 m",
             SpeedTargetC30 => "1/6 C30, 25 m",
+            SpeedTargetSnabbpistol => "Snabbpistoltavla 25 m",
             _ => t ?? ""
         };
 
-        public static bool IsValidSpeedTarget(string? t) => t is SpeedTargetB100 or SpeedTargetC30;
+        public static bool IsValidSpeedTarget(string? t) => t is SpeedTargetB100 or SpeedTargetC30 or SpeedTargetSnabbpistol;
+
+        // ── Series discipline (what a series physically is — drives which badges it feeds) ──
+        // A precision series feeds Pistolskytte Guldfodring AND Elit precision; a tillämpning series
+        // feeds Pistolskytte's speed part; a snabbpistol series feeds Elit's speed part; an air series
+        // feeds Luftpistol. One entry, credited to every badge whose per-series threshold it meets.
+        public const string DisciplinePrecision = "Precision";
+        public const string DisciplineTillampning = "Tillampning";
+        public const string DisciplineSnabbpistol = "Snabbpistol";
+        public const string DisciplineAir = "Air";
+
+        public static string SeriesDiscipline(string? badgeFamily, string? seriesType, string? target)
+        {
+            if (badgeFamily == FamilyLuftpistol) return DisciplineAir;
+            if (seriesType == SeriesTypeSpeed)
+                return target == SpeedTargetSnabbpistol ? DisciplineSnabbpistol : DisciplineTillampning;
+            return DisciplinePrecision;
+        }
+
+        public static string DisciplineDisplay(string? d) => d switch
+        {
+            DisciplinePrecision => "Precisionsserie",
+            DisciplineTillampning => "Snabbserie (tillämpning)",
+            DisciplineSnabbpistol => "Snabbpistolserie",
+            DisciplineAir => "Luftpistolserie",
+            _ => ""
+        };
 
         /// <summary>The snabbserie requirement text for a claimed valör (SHB 5.1.1.1 pt 2), for display.</summary>
         public static string SpeedRequirementText(string? level) => level switch

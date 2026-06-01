@@ -125,6 +125,7 @@ namespace HpskSite.Controllers
             public List<string>? Shots { get; set; }     // precision (5)
             public string? Target { get; set; }          // speed
             public string ClaimedLevel { get; set; } = Marken.LevelGuld;
+            public int? Total { get; set; }               // snabbpistol speed series (scored 0–50)
             public string? PhotoRef { get; set; }
             public string? Notes { get; set; }
         }
@@ -170,12 +171,27 @@ namespace HpskSite.Controllers
             {
                 if (!Marken.IsValidSpeedTarget(request.Target))
                     return Json(new { success = false, message = "Välj ett giltigt mål." });
-                if (Marken.LevelOrdinal(request.ClaimedLevel) == 0)
-                    return Json(new { success = false, message = "Välj valör (brons/silver/guld)." });
                 series.SeriesType = Marken.SeriesTypeSpeed;
                 series.Target = request.Target;
-                series.ClaimedLevel = request.ClaimedLevel;
-                series.Qualifies = true; // self-declared pass; validator confirms hits-in-time
+
+                if (request.Target == Marken.SpeedTargetSnabbpistol)
+                {
+                    // Snabbpistoltavla — scored 0–50 (Elit/Mästar). Level by Elit per-series thresholds.
+                    int total = request.Total ?? 0;
+                    if (total <= 0 || total > 50)
+                        return Json(new { success = false, message = "Ange seriens poäng (0–50)." });
+                    series.Total = total;
+                    series.ClaimedLevel = total >= 49 ? Marken.LevelGuld : total >= 48 ? Marken.LevelSilver : total >= 45 ? Marken.LevelBrons : "";
+                    series.Qualifies = total >= 45;
+                }
+                else
+                {
+                    // Tillämpning (B100/C30) — hits-in-time, pass/fail per valör (Pistolskytte).
+                    if (Marken.LevelOrdinal(request.ClaimedLevel) == 0)
+                        return Json(new { success = false, message = "Välj valör (brons/silver/guld)." });
+                    series.ClaimedLevel = request.ClaimedLevel;
+                    series.Qualifies = true; // self-declared pass; validator confirms hits-in-time
+                }
             }
             else
             {
@@ -591,14 +607,13 @@ namespace HpskSite.Controllers
             int validatorId = await GetCurrentMemberIdAsync();
             var (ok, msg) = await _ledger.SetSeriesStatusAsync(id, status, validatorId);
 
-            // No separate sign-off: validating a series may complete (or un-complete) the member's
-            // yearly badge automatically. Dispatch by family.
+            // No separate sign-off: validating a series may complete (or un-complete) a yearly badge
+            // automatically. A precision series feeds Pistolskytte AND Elit, so recompute both the
+            // Guldfodring and the series-proof families on every series validation.
             if (ok)
             {
-                if (series.BadgeFamily == Family)
-                    await RecomputeYearlyQualificationAsync(series.MemberId, series.Year, validatorId);
-                else if (MarkenFamilies.Get(series.BadgeFamily)?.Pattern == MarkenPattern.SeriesProof)
-                    await RecomputeSeriesProofFamiliesAsync(series.MemberId);
+                await RecomputeYearlyQualificationAsync(series.MemberId, series.Year, validatorId);
+                await RecomputeSeriesProofFamiliesAsync(series.MemberId);
             }
 
             return Json(new { success = ok, message = ok ? (status == Marken.StatusVerified ? "Godkänd." : "Avvisad.") : msg });
@@ -1011,7 +1026,25 @@ namespace HpskSite.Controllers
         private async Task<(string? Earned, List<int> GuldYears, List<MarkenSeries> ThisYear)>
             AnalyzeSeriesProofAsync(int memberId, MarkenFamilyDef def, int displayYear)
         {
-            var series = await _ledger.GetVerifiedSeriesByFamilyAsync(memberId, def.Key);
+            // Read by DISCIPLINE, not family: Elit's precision series come from the Guldserie button
+            // (family Pistolskytte) and its snabb series from the Snabbserie button (snabbpistol target).
+            List<MarkenSeries> series;
+            if (def.Key == MarkenFamilies.Elit)
+            {
+                series = (await _ledger.GetAllVerifiedSeriesAsync(memberId))
+                    .Where(s =>
+                    {
+                        var d = Marken.SeriesDiscipline(s.BadgeFamily, s.SeriesType, s.Target);
+                        return d == Marken.DisciplinePrecision || d == Marken.DisciplineSnabbpistol;
+                    })
+                    .ToList();
+            }
+            else
+            {
+                // Luftpistol = Air discipline (its own family).
+                series = await _ledger.GetVerifiedSeriesByFamilyAsync(memberId, def.Key);
+            }
+
             string? earned = null;
             var guldYears = new List<int>();
             foreach (var yg in series.GroupBy(s => s.Year))
@@ -1292,6 +1325,8 @@ namespace HpskSite.Controllers
                 clubName = _clubService.GetClubNameById(s.ClubId),
                 family = s.BadgeFamily,
                 familyName = MarkenFamilies.DisplayName(s.BadgeFamily),
+                discipline = Marken.SeriesDiscipline(s.BadgeFamily, s.SeriesType, s.Target),
+                disciplineName = Marken.DisciplineDisplay(Marken.SeriesDiscipline(s.BadgeFamily, s.SeriesType, s.Target)),
                 seriesType = s.SeriesType,
                 seriesTypeName = Marken.SeriesTypeDisplay(s.SeriesType),
                 year = s.Year,

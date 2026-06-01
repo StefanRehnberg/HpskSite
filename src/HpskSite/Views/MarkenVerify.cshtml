@@ -62,18 +62,21 @@
                        <span class="text-muted">(vapengrupp ${esc(s.weaponGroup)}${s.dim ? ', ' + s.dim : ''})</span></p>
                     <p class="text-center text-muted">${esc(s.competitionName)}</p>
                     <p class="text-center">${lvl}</p>`;
-            } else if (s.family && s.family !== 'Pistolskytte') {
-                const typ = s.seriesType === 'Speed' ? 'snabbserie' : 'serie';
-                body = `<p class="text-center mb-1"><span class="fs-5 fw-bold">${esc(s.familyName)} – ${typ}</span></p>
-                    <p class="text-center"><span class="fs-4 fw-bold">${s.total} p</span> <span class="text-muted">(nivå ${esc(s.claimedLevel)})</span></p>`;
-            } else if (s.seriesType === 'Precision') {
+            } else if (s.discipline === 'Precision') {
                 const shots = (s.shots || []).map(v => `<span class="shot-pill">${esc(v)}</span>`).join('');
-                body = `<div class="text-center mb-2">${shots}</div>
+                body = `<p class="text-center mb-1"><span class="fs-5 fw-bold">Precisionsserie</span></p>
+                    <div class="text-center mb-2">${shots}</div>
                     <p class="text-center mb-1"><span class="fs-4 fw-bold">${s.total} p</span>
-                       <span class="text-muted">(krav ${s.threshold}, vapengrupp ${esc(s.weaponGroup)})</span></p>
-                    <p class="text-center">${s.qualifies ? '<span class="badge bg-success">Når guldkravet</span>' : '<span class="badge bg-secondary">Under guldkravet</span>'}</p>`;
+                       <span class="text-muted">(vapengrupp ${esc(s.weaponGroup)})</span></p>
+                    <p class="text-center text-muted small">Räknas mot Pistolskyttemärket (guld ≥ ${s.threshold}) och Elitmärket.</p>`;
+            } else if (s.discipline === 'Air') {
+                body = `<p class="text-center mb-1"><span class="fs-5 fw-bold">Luftpistolserie</span></p>
+                    <p class="text-center"><span class="fs-4 fw-bold">${s.total} p</span> <span class="text-muted">(nivå ${esc(s.claimedLevel)})</span></p>`;
+            } else if (s.discipline === 'Snabbpistol') {
+                body = `<p class="text-center mb-1"><span class="fs-5 fw-bold">Snabbpistolserie (Elit)</span></p>
+                    <p class="text-center"><span class="fs-4 fw-bold">${s.total} p</span> <span class="text-muted">(nivå ${esc(s.claimedLevel)} · vapengrupp ${esc(s.weaponGroup)})</span></p>`;
             } else {
-                body = `<p class="text-center mb-1"><span class="fs-5 fw-bold">Snabbserie – ${esc(s.claimedLevel)}</span></p>
+                body = `<p class="text-center mb-1"><span class="fs-5 fw-bold">Snabbserie (tillämpning) – ${esc(s.claimedLevel)}</span></p>
                     <p class="text-center text-muted">Mål: ${esc(s.targetName)} · vapengrupp ${esc(s.weaponGroup)}<br>${esc(s.speedRequirement)}</p>`;
             }
             const photoUrl = s.kind === 'comp' ? `/umbraco/surface/Marken/GetCompResultPhoto?id=${s.id}` : `/umbraco/surface/Marken/GetSeriePhoto?id=${s.id}`;
@@ -92,7 +95,7 @@
 
             content.innerHTML = `<div class="card"><div class="card-body">
                 <h5 class="card-title text-center">${esc(s.memberName)}</h5>
-                <p class="text-center text-muted small mb-3">${esc(s.kind === 'comp' ? 'Tävlingsresultat' : s.seriesTypeName)} · ${esc(s.clubName)} · ${date}</p>
+                <p class="text-center text-muted small mb-3">${esc(s.kind === 'comp' ? 'Tävlingsresultat' : (s.disciplineName || s.seriesTypeName))} · ${esc(s.clubName)} · ${date}</p>
                 ${body}${photo}${actions}</div></div>`;
         }
 
