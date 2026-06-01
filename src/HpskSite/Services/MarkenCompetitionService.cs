@@ -1,3 +1,4 @@
+using HpskSite.CompetitionTypes.Common.Utilities;
 using HpskSite.Models;
 using NPoco;
 using Umbraco.Cms.Core.Web;
@@ -183,25 +184,37 @@ namespace HpskSite.Services
 
             if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null) return list;
 
-            // Resolve each competition's year + name once.
-            var compInfo = new Dictionary<int, (int Year, string Name)>();
-            int CompYear(int compId)
+            // Resolve each competition's year + name + märke-eligibility once. Eligibility (SHB):
+            // competition-driven märken that require krets level only count hosted comps whose scope
+            // is Kretsmästerskap / Landsdelsmästerskap / Svenskt Mästerskap. Club comps (and scope
+            // "Ingen") must be self-reported (a functionary confirms the level). NatHelmatch counts
+            // any level (RequiresKretsScope = false).
+            var compInfo = new Dictionary<int, (int Year, string Name, bool Eligible)>();
+            (int Year, string Name, bool Eligible) CompInfo(int compId)
             {
                 if (!compInfo.TryGetValue(compId, out var ci))
                 {
                     var comp = ctx.Content.GetById(compId);
-                    if (comp == null || comp.ContentType.Alias != "competition") ci = (0, "");
-                    else ci = (comp.Value<DateTime?>("competitionDate")?.Year ?? 0, comp.Name ?? "Tävling");
+                    if (comp == null || comp.ContentType.Alias != "competition")
+                        ci = (0, "", false);
+                    else
+                    {
+                        // Untyped read — competitionScope is a FlexibleDropdown that throws on Value<string>().
+                        var scope = comp.Value("competitionScope")?.ToString();
+                        bool eligible = !def.RequiresKretsScope || IsKretsOrAbove(scope);
+                        ci = (comp.Value<DateTime?>("competitionDate")?.Year ?? 0, comp.Name ?? "Tävling", eligible);
+                    }
                     compInfo[compId] = ci;
                 }
-                return ci.Year;
+                return ci;
             }
 
             foreach (var byComp in rows.GroupBy(r => (int)r.CompetitionId))
             {
                 int compId = byComp.Key;
-                int year = CompYear(compId);
-                if (year == 0) continue;
+                var ci = CompInfo(compId);
+                int year = ci.Year;
+                if (year == 0 || !ci.Eligible) continue;
                 var compRows = byComp.ToList();
                 var group = Marken.WeaponGroup((string?)compRows[0].ShootingClass);
                 if (group == null) continue;
@@ -221,7 +234,7 @@ namespace HpskSite.Services
                 list.Add(new MarkenCompEvidence
                 {
                     CompetitionId = compId,
-                    CompetitionName = compInfo[compId].Name,
+                    CompetitionName = ci.Name,
                     Year = year,
                     WeaponGroup = group,
                     Dim = dim,
@@ -232,6 +245,12 @@ namespace HpskSite.Services
             }
             return list;
         }
+
+        /// <summary>Krets level or above (Kretsmästerskap / Landsdelsmästerskap / Svenskt Mästerskap).</summary>
+        private static bool IsKretsOrAbove(string? scope) =>
+            scope is CompetitionScopeHelper.Kretsmasterskap
+                  or CompetitionScopeHelper.Landsdelsmasterskap
+                  or CompetitionScopeHelper.SvensktMasterskap;
 
         private static int SumShots(string? shotsJson)
         {

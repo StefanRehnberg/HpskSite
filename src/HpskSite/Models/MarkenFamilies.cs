@@ -31,6 +31,14 @@ namespace HpskSite.Models
         /// <summary>Whether the result rows are per-station hits (Fält) vs per-series points (precision-shape).</summary>
         public bool HitBased { get; init; }
 
+        /// <summary>
+        /// SHB: the märke prov is only valid at krets-/landsdels-/riks-/nationella tävlingar (not club
+        /// competitions). When true, hosted comps only count if their competitionScope is krets+
+        /// (Kretsmästerskap / Landsdelsmästerskap / Svenskt Mästerskap); club comps must be
+        /// self-reported (functionary confirms the level). False for Nationell helmatch (any level + träning).
+        /// </summary>
+        public bool RequiresKretsScope { get; init; }
+
         /// <summary>Competitions required (3 for most; 2 for Nationell helmatch). CompetitionAchievement only.</summary>
         public int CompetitionsRequired { get; init; } = 3;
         /// <summary>Series required (SeriesProof only) — e.g. 5 for Luftpistol/Elit.</summary>
@@ -99,6 +107,7 @@ namespace HpskSite.Models
                 Discipline = "Precision",
                 ResultTable = "PrecisionResultEntry",
                 CompetitionsRequired = 3,
+                RequiresKretsScope = true,
                 PrereqPistolskytteLevel = Marken.LevelBrons,
                 PrereqText = "Kräver pistolskyttemärke i brons föregående kalenderår.",
                 ArtalsStepYears = 3,
@@ -126,6 +135,7 @@ namespace HpskSite.Models
                 Discipline = "Milsnabb",
                 ResultTable = "MilsnabbResultEntry",
                 CompetitionsRequired = 3,
+                RequiresKretsScope = true,
                 PrereqPistolskytteLevel = Marken.LevelBrons,
                 PrereqText = "Kräver pistolskyttemärke i brons föregående kalenderår.",
                 ArtalsStepYears = 3,
@@ -231,6 +241,7 @@ namespace HpskSite.Models
                 ResultTable = "FaltskytteResultEntry",
                 HitBased = true,
                 CompetitionsRequired = 3,
+                RequiresKretsScope = true,
                 PrereqPistolskytteLevel = Marken.LevelBrons,
                 PrereqText = "Kräver pistolskyttemärke i brons föregående kalenderår samt fyllda 15 år.",
                 ArtalsStepYears = 3,
