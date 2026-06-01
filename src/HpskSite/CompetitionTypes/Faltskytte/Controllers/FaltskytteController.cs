@@ -1547,7 +1547,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 .Where(c => c.Value<bool>("faltskytteResultsOfficial"))
                 .ToList();
 
-            int created = 0, alreadyOk = 0, synced = 0, failed = 0;
+            int created = 0, alreadyOk = 0, synced = 0, failed = 0, medalsMaterialized = 0;
             var createdNames = new List<string>();
             var syncedNames = new List<string>();
 
@@ -1557,6 +1557,14 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 {
                     var compContent = _contentService.GetById(compNode.Id);
                     if (compContent == null) { failed++; continue; }
+
+                    // Re-materialize won Standard medals into the ledger (idempotent upsert; the
+                    // service gates on isAwardingStandardMedals && !isClubOnly). Backfills comps
+                    // published before medal materialization existed, so the persisted ledger —
+                    // which drives Min sida, the club-secretary view, and SPSF reporting — is
+                    // complete and authoritative.
+                    await MaterializeFaltskytteMedalsAsync(compContent, true);
+                    medalsMaterialized++;
 
                     var existing = _contentService.GetPagedChildren(compContent.Id, 0, int.MaxValue, out _)
                         .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
@@ -1611,6 +1619,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 synced,
                 alreadyOk,
                 failed,
+                medalsMaterialized,
                 createdNames,
                 syncedNames
             });

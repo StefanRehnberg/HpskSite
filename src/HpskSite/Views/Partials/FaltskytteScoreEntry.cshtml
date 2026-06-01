@@ -126,6 +126,31 @@
                             </select>
                         </div>
 
+                        @* Proof of standard medal — same tools as the Precision result modal. *@
+                        <div class="col-12">
+                            <div id="faltMedalProofBlock" style="display: none;" class="p-3 border rounded bg-body">
+                                <label for="faltMedalProofFile" class="form-label">
+                                    <i class="bi bi-paperclip"></i> Bevis för standardmedalj <span class="text-muted">(frivilligt)</span>
+                                </label>
+                                <div id="faltMedalProofCurrent" class="small mb-2"></div>
+                                <div id="faltMedalProofDrop" class="border border-2 rounded text-center text-muted py-3 px-2 mb-2" style="border-style: dashed !important; cursor: pointer;">
+                                    <i class="bi bi-clipboard-plus"></i> Klistra in en skärmdump (Ctrl/Cmd+V), släpp en bild här, eller välj fil nedan
+                                </div>
+                                <input type="file" class="form-control" id="faltMedalProofFile" accept=".pdf,image/*" capture="environment">
+                                <div id="faltMedalProofPreview" class="small mt-2"></div>
+                                <div class="mt-2">
+                                    <select class="form-select form-select-sm" id="faltMedalProofReuse">
+                                        <option value="">— eller återanvänd ett tidigare uppladdat bevis —</option>
+                                    </select>
+                                    <div id="faltMedalProofReuseInfo" class="small text-success mt-1" style="display: none;"></div>
+                                </div>
+                                <div class="form-text">
+                                    Ladda upp resultatlistan eller ett foto (PDF, JPG, PNG, WEBP – max 10 MB). En ny fil <strong>ersätter</strong> ett tidigare bevis.
+                                    Samma resultatlista kan återanvändas för flera resultat från samma tävling. Utan bevis registreras medaljen som <strong>overifierad</strong>.
+                                </div>
+                            </div>
+                        </div>
+
                         <div class="col-12">
                             <label for="faltNotes" class="form-label">Anteckningar</label>
                             <input type="text" class="form-control" id="faltNotes" placeholder="t.ex. byig vind, ny ammunition">
@@ -187,7 +212,186 @@
             document.getElementById(id).addEventListener('input', recomputePreview);
             document.getElementById(id).addEventListener('change', recomputePreview);
         });
+
+        // ── Standardmedalj proof tools (mirror of the Precision result modal) ──
+        var medalSel = document.getElementById('faltMedal');
+        if (medalSel) {
+            medalSel.addEventListener('change', function () {
+                faltToggleProofBlock();
+                if (this.value) {
+                    var idVal = document.getElementById('faltEntryId').value;
+                    if (idVal) faltLoadProofState(idVal);
+                    faltLoadReusableProofs();
+                }
+            });
+        }
+
+        var proofFileInput = document.getElementById('faltMedalProofFile');
+        if (proofFileInput) {
+            proofFileInput.addEventListener('change', function () {
+                if (this.files && this.files.length > 0) { faltClearProofReuse(); faltShowProofPreview(this.files[0]); }
+                else { faltShowProofPreview(null); }
+            });
+        }
+
+        var proofReuse = document.getElementById('faltMedalProofReuse');
+        if (proofReuse) {
+            proofReuse.addEventListener('change', function () {
+                var block = document.getElementById('faltMedalProofBlock');
+                var info = document.getElementById('faltMedalProofReuseInfo');
+                if (this.value) {
+                    if (block) block.dataset.reuseRef = this.value;
+                    var fi = document.getElementById('faltMedalProofFile'); if (fi) fi.value = '';
+                    faltShowProofPreview(null);
+                    if (info) {
+                        info.style.display = 'block';
+                        info.innerHTML = '<i class="bi bi-recycle"></i> Återanvänder: ' + faltMpEsc(this.options[this.selectedIndex] ? this.options[this.selectedIndex].textContent : 'tidigare bevis');
+                    }
+                } else { faltClearProofReuse(); }
+            });
+        }
+
+        var proofDrop = document.getElementById('faltMedalProofDrop');
+        if (proofDrop) {
+            proofDrop.addEventListener('click', function () {
+                var fi = document.getElementById('faltMedalProofFile'); if (fi && !fi.disabled) fi.click();
+            });
+            ['dragover', 'dragenter'].forEach(function (ev) { proofDrop.addEventListener(ev, function (e) { e.preventDefault(); proofDrop.classList.add('border-primary', 'text-primary'); }); });
+            ['dragleave', 'drop'].forEach(function (ev) { proofDrop.addEventListener(ev, function (e) { e.preventDefault(); proofDrop.classList.remove('border-primary', 'text-primary'); }); });
+            proofDrop.addEventListener('drop', function (e) {
+                var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+                if (f && (f.type.startsWith('image/') || f.type === 'application/pdf')) faltSetProofFile(f);
+            });
+        }
+
+        // Paste a screenshot while the fält modal + proof block are open.
+        document.addEventListener('paste', function (e) {
+            var modal = document.getElementById('addFaltskytteScoreModal');
+            var block = document.getElementById('faltMedalProofBlock');
+            if (!modal || !modal.classList.contains('show')) return;
+            if (!block || block.style.display === 'none') return;
+            var items = (e.clipboardData && e.clipboardData.items) || [];
+            for (var i = 0; i < items.length; i++) {
+                var it = items[i];
+                if (it.kind === 'file' && it.type.startsWith('image/')) {
+                    var f = it.getAsFile();
+                    if (f) { faltSetProofFile(f); e.preventDefault(); break; }
+                }
+            }
+        });
     })();
+
+    // ── Standardmedalj proof helpers (fält-scoped twins of the Precision modal helpers) ──
+    function faltMpEsc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; });
+    }
+    // Show the proof block only when a medal is selected.
+    function faltToggleProofBlock() {
+        var block = document.getElementById('faltMedalProofBlock');
+        if (!block) return;
+        var medal = document.getElementById('faltMedal').value;
+        block.style.display = medal ? 'block' : 'none';
+    }
+    function faltResetProof() {
+        var block = document.getElementById('faltMedalProofBlock');
+        var fi = document.getElementById('faltMedalProofFile');
+        if (fi) { fi.value = ''; fi.disabled = false; }
+        var cur = document.getElementById('faltMedalProofCurrent'); if (cur) cur.innerHTML = '';
+        var prev = document.getElementById('faltMedalProofPreview'); if (prev) prev.innerHTML = '';
+        faltClearProofReuse();
+        if (block) delete block.dataset.reuseRef;
+    }
+    function faltClearProofReuse() {
+        var block = document.getElementById('faltMedalProofBlock');
+        var sel = document.getElementById('faltMedalProofReuse');
+        var info = document.getElementById('faltMedalProofReuseInfo');
+        if (block) delete block.dataset.reuseRef;
+        if (sel) sel.value = '';
+        if (info) { info.style.display = 'none'; info.innerHTML = ''; }
+    }
+    function faltSetProofFile(file) {
+        var fi = document.getElementById('faltMedalProofFile');
+        if (!fi || fi.disabled || !file) return;
+        var dt = new DataTransfer(); dt.items.add(file); fi.files = dt.files;
+        faltClearProofReuse();          // a chosen/pasted file wins over a reused one
+        faltShowProofPreview(file);
+    }
+    function faltShowProofPreview(file) {
+        var el = document.getElementById('faltMedalProofPreview');
+        if (!el) return;
+        if (!file) { el.innerHTML = ''; return; }
+        var thumb = (file.type && file.type.startsWith('image/'))
+            ? '<img src="' + URL.createObjectURL(file) + '" alt="" style="max-height:48px;border-radius:4px;margin-right:6px;vertical-align:middle;">'
+            : '<i class="bi bi-file-earmark-pdf me-1"></i>';
+        el.innerHTML = '<span class="text-success">' + thumb + 'Bild bifogad' + (file.name ? ': ' + faltMpEsc(file.name) : '') + '.</span>';
+    }
+    // Populate the "current proof" line for an existing medal award.
+    function faltLoadProofState(trainingScoreId) {
+        var el = document.getElementById('faltMedalProofCurrent');
+        var fileInput = document.getElementById('faltMedalProofFile');
+        if (!el) return;
+        el.innerHTML = '';
+        fetch('/umbraco/surface/StandardMedal/GetMedalForTrainingScore?trainingScoreId=' + trainingScoreId)
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (!d.success || !d.hasAward) {
+                    el.innerHTML = '<span class="text-muted">Ingen registrerad medalj ännu — välj medalj och ladda gärna upp bevis.</span>';
+                    return;
+                }
+                if (d.inGold) {
+                    el.innerHTML = '<span class="text-warning"><i class="bi bi-lock"></i> Medaljen ingår i en guldmedaljansökan och kan inte ändras.</span>';
+                    if (fileInput) fileInput.disabled = true;
+                    return;
+                }
+                if (fileInput) fileInput.disabled = false;
+                if (d.hasProofFile) {
+                    el.innerHTML = '<span class="text-success"><i class="bi bi-check-circle"></i> Bevis uppladdat.</span> '
+                        + '<a href="/umbraco/surface/StandardMedal/GetProof?awardId=' + d.awardId + '" target="_blank" rel="noopener">Visa</a>'
+                        + ' <span class="text-muted">— ladda upp en ny fil nedan för att ersätta.</span>';
+                } else {
+                    el.innerHTML = '<span class="text-muted"><i class="bi bi-exclamation-circle"></i> Inget bevis uppladdat — medaljen är overifierad tills ett bevis finns.</span>';
+                }
+            })
+            .catch(function () { el.innerHTML = ''; });
+    }
+    function faltLoadReusableProofs() {
+        var sel = document.getElementById('faltMedalProofReuse');
+        if (!sel) return;
+        fetch('/umbraco/surface/StandardMedal/GetMyReusableProofs')
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                sel.innerHTML = '<option value="">— eller återanvänd ett tidigare uppladdat bevis —</option>';
+                if (!d.success || !d.proofs) return;
+                d.proofs.forEach(function (p) {
+                    var date = p.competitionDate ? new Date(p.competitionDate).toLocaleDateString('sv-SE') : '';
+                    var opt = document.createElement('option');
+                    opt.value = p.proofRef;
+                    opt.textContent = (p.competitionName || 'Tävling') + (date ? ' (' + date + ')' : '');
+                    sel.appendChild(opt);
+                });
+            })
+            .catch(function () { });
+    }
+    // Resolve the proof reference to save: a newly uploaded/pasted file, a reused list, or
+    // undefined (leave the current proof untouched).
+    function faltResolveProofRef(token) {
+        var medal = document.getElementById('faltMedal').value;
+        if (!medal) return Promise.resolve(undefined);
+        var fileInput = document.getElementById('faltMedalProofFile');
+        var block = document.getElementById('faltMedalProofBlock');
+        if (fileInput && !fileInput.disabled && fileInput.files && fileInput.files.length > 0) {
+            var fd = new FormData(); fd.append('file', fileInput.files[0]);
+            return fetch('/umbraco/surface/StandardMedal/UploadProof', {
+                method: 'POST',
+                headers: { 'RequestVerificationToken': token },
+                body: fd
+            })
+            .then(function (r) { return r.json(); })
+            .then(function (res) { if (res.success) return res.fileRef; throw new Error(res.message || 'Kunde inte ladda upp bevis.'); });
+        }
+        if (block && block.dataset.reuseRef) return Promise.resolve(block.dataset.reuseRef);
+        return Promise.resolve(undefined);
+    }
 
     // Open empty for "new" entry. openFaltskytteScoreModalForEdit(row) prefills.
     function openFaltskytteScoreModal() {
@@ -197,6 +401,8 @@
         document.getElementById('faltMaxHitsHint').textContent = 48;
         document.getElementById('faltMaxHitsSuffix').textContent = 'av 48';
         document.getElementById('faltPreview').classList.add('d-none');
+        faltResetProof();
+        faltToggleProofBlock();
         document.getElementById('addFaltskytteScoreModalLabel').innerHTML = '<i class="bi bi-plus-circle"></i> Lägg in Fältskytte-resultat';
         new bootstrap.Modal(document.getElementById('addFaltskytteScoreModal')).show();
     }
@@ -220,6 +426,13 @@
         var maxHits = (parseInt(row.stationCount, 10) || 0) * 6;
         document.getElementById('faltMaxHitsHint').textContent = maxHits;
         document.getElementById('faltMaxHitsSuffix').textContent = 'av ' + maxHits;
+        // Proof tools: reset, then reveal + load current state when a medal is present.
+        faltResetProof();
+        faltToggleProofBlock();
+        if (row.standardMedal) {
+            if (row.trainingScoreId) faltLoadProofState(row.trainingScoreId);
+            faltLoadReusableProofs();
+        }
         new bootstrap.Modal(document.getElementById('addFaltskytteScoreModal')).show();
     }
 
@@ -261,6 +474,10 @@
         var token = document.querySelector('#faltskytteScoreForm input[name="__RequestVerificationToken"]').value;
         btn.disabled = true;
         try {
+            // Resolve proof (new upload, pasted screenshot, or a reused list) first, then save.
+            var proofRef = await faltResolveProofRef(token);
+            if (proofRef) payload.medalProofFileRef = proofRef;
+
             var endpoint = isEdit
                 ? '/umbraco/surface/TrainingScoring/UpdateFaltskytteScore'
                 : '/umbraco/surface/TrainingScoring/RecordFaltskytteScore';

@@ -372,6 +372,51 @@
                             </div>
                         </div>
                     </div>
+
+                    <!-- Pistolskyttemärket Section (shown only when editing, collapsible) -->
+                    <div id="adminMarkenSection" class="mt-3" style="display: none;">
+                        <hr>
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <a class="text-decoration-none text-body fw-semibold"
+                               data-bs-toggle="collapse"
+                               href="#adminMarkenCollapse"
+                               role="button"
+                               aria-expanded="false"
+                               aria-controls="adminMarkenCollapse">
+                                <i class="bi bi-chevron-right me-1" id="markenCollapseIcon"></i>
+                                <i class="bi bi-award me-1"></i> Pistolskyttemärket
+                            </a>
+                        </div>
+                        <div class="collapse" id="adminMarkenCollapse">
+                            <p class="form-text">Registrera medlemmens grundvalör — för äldre märken tagna utanför Skyttetrappan. Valörer från Skyttetrappan visas här automatiskt; ändra bara om du behöver korrigera.</p>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="adminMarkenLevel" class="form-label">Valör</label>
+                                        <select class="form-select" id="adminMarkenLevel" onchange="adminMarkenToggleGuld()">
+                                            <option value="">Ej taget</option>
+                                            <option value="Brons">Brons</option>
+                                            <option value="Silver">Silver</option>
+                                            <option value="Guld">Guld</option>
+                                        </select>
+                                        <small class="form-text text-muted" id="adminMarkenSourceNote"></small>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3" id="adminMarkenGuldNrWrap" style="display: none;">
+                                        <label for="adminMarkenGuldNr" class="form-label">Guldmärkets registreringsnummer</label>
+                                        <input type="text" class="form-control" id="adminMarkenGuldNr" placeholder="t.ex. 12345">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="d-flex align-items-center gap-2">
+                                <button type="button" class="btn btn-outline-primary btn-sm" onclick="saveAdminMarken()" id="adminMarkenSaveBtn">
+                                    <i class="bi bi-save"></i> Spara märke
+                                </button>
+                                <span id="adminMarkenStatus" class="small"></span>
+                            </div>
+                        </div>
+                    </div>
                 </form>
             </div>
             <div class="modal-footer">
@@ -1104,6 +1149,7 @@ function showAddUserModal() {
 
     // Hide precision section for new members
     document.getElementById('adminPrecisionSection').style.display = 'none';
+    document.getElementById('adminMarkenSection').style.display = 'none';
 
     // Clear shooter class selection
     document.querySelectorAll('input[name="precisionShooterClass"]').forEach(radio => radio.checked = false);
@@ -1173,6 +1219,7 @@ function editUser(userId) {
     document.getElementById('deleteMemberBtn').style.display = 'none';
     document.getElementById('profilePictureSection').style.display = 'none';
     document.getElementById('adminPrecisionSection').style.display = 'none';
+    document.getElementById('adminMarkenSection').style.display = 'none';
 
     // Show modal immediately
     const modal = new bootstrap.Modal(document.getElementById('memberModal'));
@@ -1212,6 +1259,14 @@ function editUser(userId) {
 
                 // Show precision section for existing members
                 document.getElementById('adminPrecisionSection').style.display = 'block';
+
+                // Show + load Pistolskyttemärket section for existing members
+                document.getElementById('adminMarkenSection').style.display = 'block';
+                const markenCollapse = document.getElementById('adminMarkenCollapse');
+                if (markenCollapse) markenCollapse.classList.remove('show');
+                const markenIcon = document.getElementById('markenCollapseIcon');
+                if (markenIcon) { markenIcon.classList.remove('bi-chevron-down'); markenIcon.classList.add('bi-chevron-right'); }
+                loadAdminMarken(member.id);
 
                 // Populate shooter class
                 if (member.precisionShooterClass) {
@@ -2031,6 +2086,64 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 });
+
+// ── Pistolskyttemärket (grundvalör + Guld-nummer) on the member edit form ──
+let adminMarkenMemberId = null;
+
+function adminMarkenToggleGuld() {
+    const lvl = document.getElementById('adminMarkenLevel').value;
+    document.getElementById('adminMarkenGuldNrWrap').style.display = lvl === 'Guld' ? 'block' : 'none';
+}
+
+function loadAdminMarken(memberId) {
+    adminMarkenMemberId = memberId;
+    const sel = document.getElementById('adminMarkenLevel');
+    const note = document.getElementById('adminMarkenSourceNote');
+    const guldNr = document.getElementById('adminMarkenGuldNr');
+    const status = document.getElementById('adminMarkenStatus');
+    const saveBtn = document.getElementById('adminMarkenSaveBtn');
+    sel.value = ''; guldNr.value = ''; note.textContent = ''; status.textContent = '';
+    sel.disabled = false; guldNr.disabled = false; saveBtn.disabled = false;
+    adminMarkenToggleGuld();
+
+    fetch('/umbraco/surface/Marken/GetMemberPistolskytte?memberId=' + memberId)
+        .then(r => r.json())
+        .then(d => {
+            if (!d || !d.success) { note.textContent = (d && d.message) || ''; return; }
+            sel.value = d.level || '';
+            guldNr.value = d.guldNumber || '';
+            note.textContent = (d.level && d.sourceLabel) ? ('Nuvarande: ' + d.level + ' (' + d.sourceLabel + ')') : 'Ingen valör registrerad.';
+            const canEdit = d.canEdit !== false;
+            sel.disabled = !canEdit; guldNr.disabled = !canEdit; saveBtn.disabled = !canEdit;
+            if (!canEdit) note.textContent += ' — endast styrelse/skjutledare kan ändra.';
+            adminMarkenToggleGuld();
+        })
+        .catch(() => { note.textContent = ''; });
+}
+
+function saveAdminMarken() {
+    if (!adminMarkenMemberId) return;
+    const level = document.getElementById('adminMarkenLevel').value;
+    const guldNumber = document.getElementById('adminMarkenGuldNr').value.trim();
+    const status = document.getElementById('adminMarkenStatus');
+    const saveBtn = document.getElementById('adminMarkenSaveBtn');
+    const token = document.querySelector('input[name="__RequestVerificationToken"]');
+    saveBtn.disabled = true;
+    status.textContent = 'Sparar...'; status.className = 'small text-muted';
+    fetch('/umbraco/surface/Marken/SetMemberPistolskytte', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token ? token.value : '' },
+        body: JSON.stringify({ memberId: adminMarkenMemberId, level: level, guldNumber: guldNumber })
+    })
+    .then(r => r.json())
+    .then(d => {
+        saveBtn.disabled = false;
+        status.textContent = (d && d.message) || (d && d.success ? 'Sparat.' : 'Fel.');
+        status.className = 'small ' + (d && d.success ? 'text-success' : 'text-danger');
+        if (d && d.success) loadAdminMarken(adminMarkenMemberId);
+    })
+    .catch(() => { saveBtn.disabled = false; status.textContent = 'Något gick fel.'; status.className = 'small text-danger'; });
+}
 
 // Load handicap profile for a specific member (admin only)
 function loadAdminHandicapProfile(memberId) {

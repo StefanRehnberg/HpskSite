@@ -1589,7 +1589,7 @@ function renderMemberMarkenDetail(data) {
     // ── Årtalsmärke ──
     const artLine = (art.fulfilledYears || 0) > 0 || badges.some(b => b.isGuld)
         ? `<strong>${escapeMedalHtml(art.current) || 'Inget årtalsmärke än'}</strong>
-           <span class="text-muted">— ${art.fulfilledYears || 0} godkända guldfodringar${art.nextAtYears > 0 ? `, nästa (${escapeMedalHtml(art.next)}) vid ${art.nextAtYears}` : ', högsta uppnått'}</span>`
+           <span class="text-muted">— ${art.fulfilledYears || 0} godkända guldfodringar</span>`
         : '<span class="text-muted">Kräver guldmärke först.</span>';
 
     // ── Guldfodring (this year) ──
@@ -1630,7 +1630,61 @@ function renderMemberMarkenDetail(data) {
             ${partLine('Snabbskyttedel (3 godkända snabbserier)', part2, gf.part2ViaFalt ? escapeMedalHtml(gf.part2Detail || 'fältmedalj') : `${gf.part2SeriesCount || 0}/${gf.part2Required || 3} serier`)}
             <div class="mt-2">${gfStatus}</div>
         </div></div>
-        <p class="text-muted small">Precisionsdelen byggs av validerade guldserier och resultat från hemmatävlingar. Serier valideras i kön högst upp på fliken (eller via QR).</p>`;
+        <p class="text-muted small">Precisionsdelen byggs av validerade guldserier och resultat från hemmatävlingar. Serier valideras i kön högst upp på fliken (eller via QR).</p>
+
+        <h6 class="text-muted">Mästarmärket</h6>
+        <div id="memberMastarBlock" class="mb-2"><div class="text-muted small">Laddar…</div></div>`;
+
+    loadMemberMastar(memberId);
+}
+
+// Mästarmärket detail in the secretary per-member panel — auto-qualifying years (silver fält +
+// silver precision same year) plus a functionary add/remove for years earned before the system.
+function loadMemberMastar(memberId) {
+    const block = document.getElementById('memberMastarBlock');
+    if (!block) return;
+    fetch(`/umbraco/surface/Marken/GetMemberMastar?memberId=${memberId}`)
+        .then(r => r.json())
+        .then(d => {
+            if (!d.success) { block.innerHTML = ''; return; }
+            const m = d.mastar || {};
+            const canEdit = !!d.canEdit;
+            const held = m.earnedLevel
+                ? `<span class="badge bg-success"><i class="bi bi-check-lg"></i> ${escapeMedalHtml(m.levelDisplay || m.earnedLevel)}</span>`
+                : '<span class="badge bg-secondary">Ej taget</span>';
+            const years = (m.qualifyingYearList || []);
+            const yearChips = years.length
+                ? years.map(y => `<span class="badge bg-light text-dark border me-1 mb-1">${y}${canEdit ? ` <a href="#" onclick="setMastarYear(${memberId}, ${y}, false);return false;" class="text-danger text-decoration-none" title="Ta bort">×</a>` : ''}</span>`).join('')
+                : '<span class="text-muted small">Inga kvalificerande år registrerade.</span>';
+            const adder = canEdit
+                ? `<div class="input-group input-group-sm mt-2" style="max-width:260px;">
+                     <span class="input-group-text">Lägg till år</span>
+                     <input type="number" class="form-control" id="mastarYearInput_${memberId}" min="1950" max="2099" placeholder="${new Date().getFullYear()}">
+                     <button class="btn btn-outline-warning" onclick="addMastarYear(${memberId})">Lägg till</button>
+                   </div>
+                   <div class="form-text">Kvalificerande år = standardmedalj i silver i både fält och precision samma år. Auto-hämtas; lägg till äldre år manuellt här.</div>`
+                : '';
+            block.innerHTML = `
+                <div class="d-flex justify-content-between align-items-center flex-wrap mb-1">
+                    <span>${escapeMedalHtml(m.statusText || '')}</span>${held}
+                </div>
+                <div>${yearChips}</div>${adder}`;
+        })
+        .catch(() => { block.innerHTML = ''; });
+}
+
+function setMastarYear(memberId, year, qualified) {
+    fetch('/umbraco/surface/Marken/SetMastarQualifyingYear', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getAntiForgeryTokenMedal() },
+        body: JSON.stringify({ memberId: memberId, year: year, qualified: qualified })
+    }).then(r => r.json()).then(d => { if (d.success) loadMemberMastar(memberId); else alert(d.message || 'Fel'); });
+}
+function addMastarYear(memberId) {
+    const input = document.getElementById('mastarYearInput_' + memberId);
+    const year = parseInt(input && input.value) || 0;
+    if (year < 1950) { alert('Ange ett giltigt år.'); return; }
+    setMastarYear(memberId, year, true);
 }
 
 // ── Series validation queue (club admin tab) ──────────────────────
@@ -1651,6 +1705,9 @@ function loadClubMarkenQueue() {
 }
 
 function markenEvidenceDescAdmin(s) {
+    if (s.kind === 'stormastar') {
+        return `Stormästar – ${escapeMedalHtml(s.scopeName)} ${s.year}${s.competitionName ? ' (' + escapeMedalHtml(s.competitionName) + ')' : ''}: <strong>${s.points} p</strong> <span class="text-muted">(${s.participants} dlt, plac ${s.place})</span>`;
+    }
     if (s.kind === 'comp') {
         const lvl = s.reachedLevel
             ? ` <span class="badge bg-light text-dark border">${escapeMedalHtml(s.reachedLevel)}</span>`
@@ -1671,7 +1728,9 @@ function markenEvidenceDescAdmin(s) {
 
 function renderClubQueueItem(s, canValidate) {
     const shots = (s.kind !== 'comp' && s.seriesType === 'Precision' && s.shots) ? `<div class="small text-muted">${s.shots.map(escapeMedalHtml).join(' · ')}</div>` : '';
-    const photoUrl = s.kind === 'comp' ? `/umbraco/surface/Marken/GetCompResultPhoto?id=${s.id}` : `/umbraco/surface/Marken/GetSeriePhoto?id=${s.id}`;
+    const photoUrl = s.kind === 'comp' ? `/umbraco/surface/Marken/GetCompResultPhoto?id=${s.id}`
+        : s.kind === 'stormastar' ? `/umbraco/surface/Marken/GetStormastarPhoto?id=${s.id}`
+        : `/umbraco/surface/Marken/GetSeriePhoto?id=${s.id}`;
     const photo = s.hasPhoto ? ` <a href="${photoUrl}" target="_blank" rel="noopener" title="Foto"><i class="bi bi-camera"></i></a>` : '';
     const buttons = canValidate
         ? `<div class="text-nowrap mt-1">

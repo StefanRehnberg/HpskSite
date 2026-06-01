@@ -12,10 +12,14 @@ namespace HpskSite.Models
         // ── Badge families (only Pistolskytte is built in Phase 1; the rest are reserved) ──
         public const string FamilyPistolskytte = "Pistolskytte";
         public const string FamilyLuftpistol = "Luftpistol"; // mirrors MarkenFamilies.Luftpistol (for discipline classification)
+        public const string FamilyMastar = "Mastar";         // Mästarmärket (5.2) — bespoke, year-count → valör
+        public const string FamilyStormastar = "Stormastar"; // Stormästarmärket (5.3) — career inteckningspoäng
 
         public static string FamilyDisplayName(string? family) => family switch
         {
             FamilyPistolskytte => "Pistolskyttemärket",
+            FamilyMastar => "Mästarmärket",
+            FamilyStormastar => "Stormästarmärket",
             _ => family ?? ""
         };
 
@@ -303,6 +307,98 @@ namespace HpskSite.Models
             int nextStep = ArtalsmarkeStepIndex(fulfilledYears) + 1;
             if (nextStep >= ArtalsmarkeLadder.Length) return 0;
             return nextStep * YearsPerArtalsmarkeStep;
+        }
+
+        // ── Mästarmärket (5.2) ────────────────────────────────────────
+        // Year-count → valör, same time-norm structure as the lägre årtalsmärke: brons/silver/guld at
+        // 3/6/9 qualifying years (not necessarily consecutive), then guld med ★/★★/★★★ each +5 years.
+        // A "qualifying year" (route 1, SHB 5.2 alt. 1) = a standardmedalj i SILVER i fältskjutning AND
+        // a standardmedalj i SILVER i precisionsskjutning the same year. Route 2 (årliga kompetensprov)
+        // is not auto-evaluated — surfaced as a note (see SHB 5.2 alt. 2).
+        public const string MastarRoute2Note =
+            "Alternativ 2 (årliga kompetensprov i precision/serier/fält) finns också — se SHB kap 5.2.";
+
+        /// <summary>Base valör (Brons/Silver/Guld) for a Mästarmärke qualifying-year count, or null below 3.</summary>
+        public static string? MastarLevel(int qualifyingYears) =>
+            qualifyingYears >= 9 ? LevelGuld
+            : qualifyingYears >= 6 ? LevelSilver
+            : qualifyingYears >= 3 ? LevelBrons
+            : null;
+
+        /// <summary>Stars on the guld märke (0–3): +1 per 5 qualifying years beyond the 9 that earn guld.</summary>
+        public static int MastarGuldStars(int qualifyingYears) =>
+            qualifyingYears < 9 ? 0 : Math.Min(3, (qualifyingYears - 9) / 5);
+
+        /// <summary>Full valör name incl. stars, e.g. "Guld med två stjärnor".</summary>
+        public static string MastarLevelDisplay(int qualifyingYears)
+        {
+            var lvl = MastarLevel(qualifyingYears);
+            if (lvl == null) return "";
+            int stars = MastarGuldStars(qualifyingYears);
+            if (lvl != LevelGuld || stars == 0) return lvl;
+            return stars switch
+            {
+                1 => "Guld med en stjärna",
+                2 => "Guld med två stjärnor",
+                _ => "Guld med tre stjärnor"
+            };
+        }
+
+        /// <summary>Qualifying-year count at which the next valör/star step is reached (0 = maxed).</summary>
+        public static int MastarYearsToNext(int qualifyingYears)
+        {
+            if (qualifyingYears < 3) return 3;
+            if (qualifyingYears < 6) return 6;
+            if (qualifyingYears < 9) return 9;
+            if (qualifyingYears < 24) return ((qualifyingYears - 9) / 5 + 1) * 5 + 9; // 14, 19, 24
+            return 0;
+        }
+
+        // ── Stormästarmärket (5.3) ────────────────────────────────────
+        // Career inteckningspoäng; 30 p → eligible (club nominates to SPSF with a meritförteckning).
+        // Tabell 2 (1972→): points by championship level × deltagarantal × placering. Each string lists
+        // points for place 1, 2, 3, … reading left→right. Pre-1972 Tabell 1 and Rikstävlingen (dropped
+        // 1972) are not modelled — they don't apply to current shooters.
+        public const string SmScopeKrets = "Krets";
+        public const string SmScopeLandsdel = "Landsdel";
+        public const string SmScopeSvenskt = "Svenskt";
+        public const int StormastarEligibleAt = 30;
+
+        public static string StormastarScopeDisplay(string? scope) => scope switch
+        {
+            SmScopeKrets => "Kretsmästerskap",
+            SmScopeLandsdel => "Landsdelsmästerskap",
+            SmScopeSvenskt => "Svenskt mästerskap",
+            _ => scope ?? ""
+        };
+
+        // [scope][participant-band index] = points-per-place string. Bands: 8–20,21–50,51–100,101–150,151–200,201+.
+        private static readonly Dictionary<string, string[]> _stormastarTable = new()
+        {
+            // KM 201+ left blank in SHB — carried from 151–200 ("4321").
+            [SmScopeKrets]    = new[] { "21",  "321",  "321",   "321",    "4321",    "4321"     },
+            [SmScopeLandsdel] = new[] { "1",   "21",   "321",   "4321",   "54321",   "654321"   },
+            [SmScopeSvenskt]  = new[] { "321", "4321", "54321", "654321", "7654321", "87654321" }
+        };
+
+        private static int StormastarBandIndex(int participants) =>
+            participants < 8 ? -1
+            : participants <= 20 ? 0
+            : participants <= 50 ? 1
+            : participants <= 100 ? 2
+            : participants <= 150 ? 3
+            : participants <= 200 ? 4
+            : 5;
+
+        /// <summary>Inteckningspoäng for one championship result (Tabell 2). 0 if it doesn't score.</summary>
+        public static int StormastarPoints(string? scope, int participants, int place)
+        {
+            if (place < 1 || scope == null || !_stormastarTable.TryGetValue(scope, out var bands)) return 0;
+            int bi = StormastarBandIndex(participants);
+            if (bi < 0) return 0;
+            string s = bands[bi];
+            if (place > s.Length) return 0;
+            return s[place - 1] - '0'; // leftmost digit = points for place 1
         }
     }
 }

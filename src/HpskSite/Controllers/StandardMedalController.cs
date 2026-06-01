@@ -280,7 +280,12 @@ namespace HpskSite.Controllers
                 proofType = a.ProofType,
                 hasProofFile = a.ProofType == Models.StandardMedals.ProofFile && !string.IsNullOrEmpty(a.ProofFileRef),
                 inGold = a.GoldApplicationId.HasValue,
-                editable = a.Source != Models.StandardMedals.SourceOnSite && !a.GoldApplicationId.HasValue
+                // The medal type is correctable until it's locked in: OnSite awards follow the
+                // result list, Gold-consumed awards back a submitted application, and a Verified
+                // award is the club's confirmed record — all three show a fixed badge, not a select.
+                editable = a.Source != Models.StandardMedals.SourceOnSite
+                           && !a.GoldApplicationId.HasValue
+                           && a.Status != Models.StandardMedals.StatusVerified
             });
 
             return Json(new { success = true, memberId, memberName = member?.Name, year = y, awards = items });
@@ -327,6 +332,9 @@ namespace HpskSite.Controllers
 
             if (award.Source == Models.StandardMedals.SourceOnSite)
                 return Json(new { success = false, message = "Medaljer från pistol.nu-tävlingar ändras i resultatlistan, inte här." });
+
+            if (award.Status == Models.StandardMedals.StatusVerified)
+                return Json(new { success = false, message = "Medaljen är verifierad och kan inte ändras. Avvisa den först om den behöver korrigeras." });
 
             var clubId = GetPrimaryClubId(award.MemberId);
             bool ok = await _authorizationService.IsCurrentUserAdminAsync()

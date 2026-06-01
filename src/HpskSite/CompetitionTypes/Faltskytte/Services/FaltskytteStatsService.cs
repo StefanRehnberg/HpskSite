@@ -17,9 +17,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
     ///   - External — rows in TrainingScores with Discipline='Faltskytte'
     ///                (self-entered from off-site comps)
     ///
-    /// For hosted rows the placement and standard medal are computed by re-running
-    /// the comp's class grouping + tiebreaker + medal service — same code path the
-    /// official result list uses, so the numbers match exactly.
+    /// For hosted rows the placement is computed by re-running the comp's class
+    /// grouping + tiebreaker — same code path the official result list uses, so the
+    /// numbers match exactly. The standard medal is read from the materialized
+    /// StandardMedalAward ledger (Source='OnSite'), the single source of truth shared
+    /// with the club-secretary view and SPSF reporting (it is NOT recomputed here).
     /// </summary>
     public class FaltskytteStatsService
     {
@@ -63,6 +65,19 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
 
             if (!competitionIds.Any())
                 return new List<FaltskytteSeasonEntry>();
+
+            // Won Standard medals at our OWN comps are read from the materialized ledger
+            // (Source='OnSite'), exactly like the Precision path in MemberController — NOT
+            // recomputed here. The ledger is the single source of truth: it's written (gated on
+            // isAwardingStandardMedals && !isClubOnly) when results are published, drives the
+            // club-secretary view + SPSF reporting, and survives recompute. Keyed CompetitionId|Class.
+            var onSiteMedalLookup = new Dictionary<string, string>();
+            foreach (var m in await db.FetchAsync<dynamic>(
+                "SELECT CompetitionId, ShootingClass, MedalType FROM StandardMedalAward WHERE MemberId = @0 AND Source = @1",
+                memberId, StandardMedals.SourceOnSite))
+            {
+                onSiteMedalLookup[(int)m.CompetitionId + "|" + ((string)m.ShootingClass ?? "")] = (string)m.MedalType;
+            }
 
             var results = new List<FaltskytteSeasonEntry>();
 
@@ -147,13 +162,6 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                         .GroupBy(s => mergeLookup.GetValueOrDefault(s.ShootingClass, s.ShootingClass))
                         .ToDictionary(g => g.Key, g => g.OrderByDescending(s => s, tieBreaker).ToList());
 
-                    // Standard medals (same service as the live result page). SHB FR-204:
-                    // C-class is split per category only at SM + Landsdelsmästerskap — NOT KrM/KM.
-                    var scope = competition.GetValue<string>("competitionScope") ?? "";
-                    var isSmOrLdm = scope == HpskSite.CompetitionTypes.Common.Utilities.CompetitionScopeHelper.SvensktMasterskap
-                                 || scope == HpskSite.CompetitionTypes.Common.Utilities.CompetitionScopeHelper.Landsdelsmasterskap;
-                    new FaltskytteStandardMedalService().CalculateStandardMedals(shooters, scoringMode, stationCount, isSmOrLdm);
-
                     // Find the member's row(s) — a member can register in more than one class.
                     var memberRows = shooters.Where(s => s.MemberId == memberId).ToList();
                     foreach (var mine in memberRows)
@@ -163,6 +171,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
 
                         var placement = ranked.FindIndex(s => s.MemberId == memberId && s.ShootingClass == mine.ShootingClass) + 1;
                         var participants = ranked.Count;
+
+                        // Medal comes from the materialized ledger, keyed by the shooter's raw class
+                        // (the same key the publish-time materialization stores). null when the comp
+                        // didn't award medals or results aren't published yet.
+                        var hostedMedal = onSiteMedalLookup.GetValueOrDefault(competitionId + "|" + mine.ShootingClass);
 
                         // Per-weapon-class station config: use the shooter's class to
                         // get the right denominator. Different weapon groups in the
@@ -195,7 +208,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                             FigurePercent = maxFigures > 0 ? Math.Round(100.0 * mine.TotalFigures / maxFigures, 1) : 0,
                             Placement = placement > 0 ? placement : null,
                             Participants = participants,
-                            StandardMedal = mine.StandardMedal,
+                            StandardMedal = hostedMedal,
+                            // pistol.nu-hosted medals are backed by the competition's own result
+                            // list, so no member-uploaded proof is needed (same as Precision OnSite).
+                            ProofStatus = string.IsNullOrEmpty(hostedMedal) ? null : "has",
                             Notes = null
                         });
                     }
@@ -225,6 +241,17 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                 ? db.Fetch<dynamic>(sql, memberId, year.Value)
                 : db.Fetch<dynamic>(sql, memberId);
 
+            // Whether each self-entered medal has an uploaded proof file (keyed by TrainingScoreId),
+            // so each row can show a proof cue (has proof / missing) like the Precision path.
+            var proofByScore = new Dictionary<int, bool>();
+            foreach (var a in db.Fetch<dynamic>(
+                "SELECT TrainingScoreId, ProofType, ProofFileRef FROM StandardMedalAward WHERE MemberId = @0 AND TrainingScoreId IS NOT NULL",
+                memberId))
+            {
+                if (a.TrainingScoreId == null) continue;
+                proofByScore[(int)a.TrainingScoreId] = ((string)a.ProofType == "File") && !string.IsNullOrEmpty((string)a.ProofFileRef);
+            }
+
             var results = new List<FaltskytteSeasonEntry>();
             foreach (var r in rows)
             {
@@ -240,6 +267,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                     var weaponGroup = (string?)r.WeaponClass ?? ShootingClasses.GetWeaponClassCode(shootingClass) ?? "?";
                     var maxHits = payload.StationCount * 6;
                     var maxFigures = payload.FiguresMax;
+
+                    var medal = NormalizeMedal((string?)r.CompetitionStdMedal);
+                    string? proofStatus = (medal == "S" || medal == "B")
+                        ? (proofByScore.TryGetValue((int)r.Id, out var hasFile) && hasFile ? "has" : "missing")
+                        : null;
 
                     results.Add(new FaltskytteSeasonEntry
                     {
@@ -260,7 +292,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                         FigurePercent = maxFigures > 0 ? Math.Round(100.0 * payload.Figures / maxFigures, 1) : 0,
                         Placement = payload.Placement,
                         Participants = payload.Participants,
-                        StandardMedal = NormalizeMedal((string?)r.CompetitionStdMedal),
+                        StandardMedal = medal,
+                        ProofStatus = proofStatus,
                         Notes = (string?)r.Notes
                     });
                 }
@@ -452,6 +485,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         public int? Placement { get; set; }
         public int? Participants { get; set; }
         public string? StandardMedal { get; set; }   // "S" | "B" | null
+        // Proof-of-placement cue for the medal: "has" (proof on file / pistol.nu-verified),
+        // "missing" (self-reported medal without an uploaded proof), or null (no medal).
+        public string? ProofStatus { get; set; }
         public string? Notes { get; set; }
     }
 

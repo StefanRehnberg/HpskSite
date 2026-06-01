@@ -71,6 +71,14 @@ namespace HpskSite.Controllers
             var existing = await _medalLedger.GetByTrainingScoreAsync(trainingScoreId);
             bool hasMedal = entry.IsCompetition && StandardMedals.IsMedal(entry.CompetitionStdMedal);
 
+            // Members typically type the competition name into the result's description (the
+            // "Beskrivning" field, shown as the "Namn" column on Min sida) rather than the optional
+            // dedicated "Tävlingens namn" field. Fall back to that description so the club admin's
+            // verify modal shows the same name the shooter sees instead of a bare "–".
+            var resolvedName = !string.IsNullOrWhiteSpace(entry.CompetitionName)
+                ? entry.CompetitionName!.Trim()
+                : (string.IsNullOrWhiteSpace(entry.Notes) ? null : entry.Notes.Trim());
+
             if (!hasMedal)
             {
                 // Medal removed/never present — drop the linked award (unless locked into a Gold app).
@@ -95,7 +103,7 @@ namespace HpskSite.Controllers
                     Discipline = string.IsNullOrWhiteSpace(entry.Discipline) ? StandardMedals.Precision : entry.Discipline,
                     MedalType = entry.CompetitionStdMedal!,
                     Source = StandardMedals.SourceSelfReported,
-                    CompetitionName = entry.CompetitionName,
+                    CompetitionName = resolvedName,
                     CompetitionDate = entry.TrainingDate,
                     Location = entry.CompetitionLocation,
                     ShootingClass = entry.CompetitionShootingClass,
@@ -128,9 +136,10 @@ namespace HpskSite.Controllers
             existing.MedalType = newMedal;
             existing.CompetitionDate = entry.TrainingDate;
             existing.ShootingClass = entry.CompetitionShootingClass;
-            // Name/location aren't loaded into the edit form, so only overwrite when the caller
-            // actually supplied them — otherwise keep what was entered at creation.
-            if (!string.IsNullOrWhiteSpace(entry.CompetitionName)) existing.CompetitionName = entry.CompetitionName;
+            // The dedicated name/location fields aren't loaded into the edit form, but the
+            // description (→ resolvedName fallback) is — so refresh the name whenever we can resolve
+            // one, and only overwrite location when the caller actually supplied it.
+            if (!string.IsNullOrWhiteSpace(resolvedName)) existing.CompetitionName = resolvedName;
             if (!string.IsNullOrWhiteSpace(entry.CompetitionLocation)) existing.Location = entry.CompetitionLocation;
 
             // Replace/reuse the proof reference only when the caller supplied a different one;
@@ -1121,7 +1130,7 @@ namespace HpskSite.Controllers
                 });
 
                 using var db = _databaseFactory.CreateDatabase();
-                db.Insert("TrainingScores", "Id", true, new
+                var newId = db.Insert("TrainingScores", "Id", true, new
                 {
                     MemberId = member.Id,
                     TrainingDate = request.Date,
@@ -1138,6 +1147,10 @@ namespace HpskSite.Controllers
                     CreatedAt = DateTime.Now,
                     UpdatedAt = DateTime.Now
                 });
+
+                // Record any self-reported standard medal (+ proof) in the Standardmedalj ledger,
+                // exactly like the Precision self-report path.
+                await SyncSelfReportedMedalAsync(Convert.ToInt32(newId), FaltskytteEntryForLedger(member.Id, request));
 
                 return Json(new { success = true });
             }
@@ -1204,6 +1217,9 @@ namespace HpskSite.Controllers
                     DateTime.Now,
                     request.Id.Value);
 
+                // Keep the linked Standardmedalj award (+ proof) in sync with the edited row.
+                await SyncSelfReportedMedalAsync(request.Id.Value, FaltskytteEntryForLedger(member.Id, request));
+
                 return Json(new { success = true });
             }
             catch (Exception ex)
@@ -1231,6 +1247,18 @@ namespace HpskSite.Controllers
                 if ((int)existing.MemberId != member.Id) return Json(new { success = false, message = "Du kan bara ta bort dina egna resultat." });
                 if (((string?)existing.Discipline) != "Faltskytte") return Json(new { success = false, message = "Endast Fältskytte-rader kan tas bort via denna endpoint." });
 
+                // Remove any linked Standardmedalj award (unless locked into a Gold application).
+                var linkedAward = await _medalLedger.GetByTrainingScoreAsync(id);
+                if (linkedAward != null && !linkedAward.GoldApplicationId.HasValue)
+                {
+                    var proofToDelete = linkedAward.ProofFileRef;
+                    var (deleted, _) = await _medalLedger.DeleteAwardAsync(linkedAward.Id);
+                    // Delete the file only if no other award still references it.
+                    if (deleted && !string.IsNullOrEmpty(proofToDelete)
+                        && await _medalLedger.CountAwardsUsingProofAsync(proofToDelete) == 0)
+                        _proofStorage.Delete(proofToDelete);
+                }
+
                 db.Execute("DELETE FROM TrainingScores WHERE Id = @0", id);
                 return Json(new { success = true });
             }
@@ -1239,6 +1267,23 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Kunde inte ta bort: " + ex.Message });
             }
         }
+
+        /// <summary>
+        /// Project a self-entered Fältskytte request onto the shared TrainingScoreEntry shape so the
+        /// common <see cref="SyncSelfReportedMedalAsync"/> ledger logic can create/update/clear the
+        /// linked StandardMedalAward — the same path Precision self-reports use.
+        /// </summary>
+        private static TrainingScoreEntry FaltskytteEntryForLedger(int memberId, FaltskytteScoreRequest r) => new()
+        {
+            MemberId = memberId,
+            TrainingDate = r.Date,
+            Discipline = "Faltskytte",
+            IsCompetition = true,
+            CompetitionStdMedal = string.IsNullOrWhiteSpace(r.StandardMedal) ? null : r.StandardMedal,
+            CompetitionName = r.CompetitionName,
+            CompetitionShootingClass = r.ShootingClass,
+            MedalProofFileRef = r.MedalProofFileRef
+        };
 
         private static string? ValidateFaltskytteRequest(FaltskytteScoreRequest r)
         {
@@ -1274,6 +1319,7 @@ namespace HpskSite.Controllers
             public int? Placement { get; set; }
             public int? Participants { get; set; }
             public string? StandardMedal { get; set; } // "S" | "B" | null
+            public string? MedalProofFileRef { get; set; } // opaque ref from StandardMedal/UploadProof (or reused)
             public string? Notes { get; set; }
         }
 

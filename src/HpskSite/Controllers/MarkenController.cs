@@ -34,6 +34,8 @@ namespace HpskSite.Controllers
         private readonly MarkenLedgerService _ledger;
         private readonly MarkenCandidateService _candidates;
         private readonly MarkenCompetitionService _compService;
+        private readonly MarkenStormastarService _stormastarService;
+        private readonly StandardMedalLedgerService _standardMedals;
         private readonly StandardMedalProofStorage _proofStorage;
         private readonly IDataProtector _verifyProtector;
 
@@ -53,6 +55,8 @@ namespace HpskSite.Controllers
             MarkenLedgerService ledger,
             MarkenCandidateService candidates,
             MarkenCompetitionService compService,
+            MarkenStormastarService stormastarService,
+            StandardMedalLedgerService standardMedals,
             StandardMedalProofStorage proofStorage,
             IDataProtectionProvider dataProtectionProvider)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
@@ -66,6 +70,8 @@ namespace HpskSite.Controllers
             _ledger = ledger;
             _candidates = candidates;
             _compService = compService;
+            _stormastarService = stormastarService;
+            _standardMedals = standardMedals;
             _proofStorage = proofStorage;
             _verifyProtector = dataProtectionProvider.CreateProtector("Marken.SeriesVerify.v1");
         }
@@ -89,8 +95,11 @@ namespace HpskSite.Controllers
             var pistolskytte = await BuildMemberPayloadAsync(member.Id, y, includeUnverifiedInLadder: true, isOwnView: true);
             await RecomputeCompetitionFamiliesAsync(member.Id);
             await RecomputeSeriesProofFamiliesAsync(member.Id);
+            await RecomputeMastarAsync(member.Id);
             var families = await BuildFamilySummariesAsync(member.Id, y);
-            return Json(new { success = true, year = y, pistolskytte, families });
+            var mastar = await MastarSummaryAsync(member.Id);
+            var stormastar = await StormastarSummaryAsync(member.Id);
+            return Json(new { success = true, year = y, pistolskytte, families, mastar, stormastar });
         }
 
         /// <summary>The current member's clubs (primary + additional) for the validation-club picker.</summary>
@@ -524,7 +533,10 @@ namespace HpskSite.Controllers
             var ids = all ? null : (IEnumerable<int>)clubIds;
             var series = await _ledger.GetPendingSeriesAsync(ids);
             var comps = await _compService.GetPendingSelfReportedAsync(ids);
-            var items = series.Select(SerieDto).Concat(comps.Select(CompResultDto)).ToList();
+            var storm = await _stormastarService.GetPendingAsync(ids);
+            var items = series.Select(SerieDto)
+                .Concat(comps.Select(CompResultDto))
+                .Concat(storm.Select(StormastarDto)).ToList();
             return Json(new { success = true, items });
         }
 
@@ -550,6 +562,15 @@ namespace HpskSite.Controllers
                 return Json(new { success = true, serie = CompResultDto(r) });
             }
 
+            if (kind == "stormastar")
+            {
+                var e = await _stormastarService.GetAsync(id);
+                if (e == null) return Json(new { success = false, message = "Inteckningen hittades inte." });
+                if (!await CanSignOffForClubAsync(e.ClubId))
+                    return Json(new { success = false, message = "Du har inte behörighet att validera för den här klubben." });
+                return Json(new { success = true, serie = StormastarDto(e) });
+            }
+
             var series = await _ledger.GetSeriesAsync(id);
             if (series == null) return Json(new { success = false, message = "Serien hittades inte." });
             if (!await CanValidateSeriesAsync(series))
@@ -570,14 +591,22 @@ namespace HpskSite.Controllers
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> VerifyEvidence([FromBody] EvidenceActionRequest request)
-            => request?.Kind == "comp" ? await SetCompResultStatus(request.Id, Marken.StatusVerified)
-                                       : await SetSeriesStatus(request?.Id ?? 0, Marken.StatusVerified);
+            => request?.Kind switch
+            {
+                "comp" => await SetCompResultStatus(request.Id, Marken.StatusVerified),
+                "stormastar" => await SetStormastarStatus(request.Id, Marken.StatusVerified),
+                _ => await SetSeriesStatus(request?.Id ?? 0, Marken.StatusVerified)
+            };
 
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> RejectEvidence([FromBody] EvidenceActionRequest request)
-            => request?.Kind == "comp" ? await SetCompResultStatus(request.Id, Marken.StatusRejected)
-                                       : await SetSeriesStatus(request?.Id ?? 0, Marken.StatusRejected);
+            => request?.Kind switch
+            {
+                "comp" => await SetCompResultStatus(request.Id, Marken.StatusRejected),
+                "stormastar" => await SetStormastarStatus(request.Id, Marken.StatusRejected),
+                _ => await SetSeriesStatus(request?.Id ?? 0, Marken.StatusRejected)
+            };
 
         private async Task<IActionResult> SetCompResultStatus(int id, string status)
         {
@@ -633,7 +662,10 @@ namespace HpskSite.Controllers
 
             var series = await _ledger.GetPendingSeriesAsync(new[] { clubId });
             var comps = await _compService.GetPendingSelfReportedAsync(new[] { clubId });
-            var items = series.Select(SerieDto).Concat(comps.Select(CompResultDto)).ToList();
+            var storm = await _stormastarService.GetPendingAsync(new[] { clubId });
+            var items = series.Select(SerieDto)
+                .Concat(comps.Select(CompResultDto))
+                .Concat(storm.Select(StormastarDto)).ToList();
             return Json(new { success = true, canValidate = await CanSignOffForClubAsync(clubId), items });
         }
 
@@ -811,6 +843,98 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Åtkomst nekad." });
             var (ok, msg) = await _ledger.DeleteBadgeAsync(badge.Id);
             return Json(new { success = ok, message = ok ? "Borttaget." : msg });
+        }
+
+        // ── Member profile surface (member admin edit form) ───────────
+        // Lets a functionary record a member's Pistolskyttemärket grundvalör + Guld
+        // registration number directly on the member edit form — for old-timers who
+        // took their märke long ago and never used Skyttetrappan. Backed by the same
+        // MemberBadge ledger the Skyttetrappan link and Medaljer & Märken read.
+
+        /// <summary>Read a member's current Pistolskyttemärket grundvalör + Guld number for the edit form.</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetMemberPistolskytte(int memberId)
+        {
+            if (memberId <= 0) return Json(new { success = false, message = "Ogiltigt medlems-ID." });
+            if (!await CanViewMemberAsync(memberId))
+                return Json(new { success = false, message = "Åtkomst nekad." });
+
+            var badges = await _ledger.GetBadgesForMemberAsync(memberId, Family);
+            var top = badges.Where(b => b.LevelOrdinal is >= 1 and <= 3)
+                            .OrderByDescending(b => b.LevelOrdinal).FirstOrDefault();
+            var guld = badges.FirstOrDefault(b => b.Level == Marken.LevelGuld);
+
+            return Json(new
+            {
+                success = true,
+                level = top?.Level ?? "",
+                source = top?.Source,
+                sourceLabel = top == null ? null : Marken.SourceDisplay(top.Source),
+                guldNumber = guld?.UniqueNumber ?? "",
+                canEdit = await CanSignOffForMemberAsync(memberId)
+            });
+        }
+
+        /// <summary>
+        /// Set a member's Pistolskyttemärket grundvalör (and Guld number) from the member edit form.
+        /// Reconciles the ledger so the member's highest base valör equals the chosen level:
+        /// ensures a badge at that level, removes any higher base badge (downgrade/clear), and
+        /// for Guld stores the national registration number. Level "" clears all base valörer.
+        /// POST /umbraco/surface/Marken/SetMemberPistolskytte  { memberId, level, guldNumber? }
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetMemberPistolskytte([FromBody] SetMemberPistolskytteRequest request)
+        {
+            int memberId = request?.MemberId ?? 0;
+            string level = (request?.Level ?? "").Trim();
+            if (memberId <= 0) return Json(new { success = false, message = "Ogiltigt medlems-ID." });
+            if (!await CanSignOffForMemberAsync(memberId))
+                return Json(new { success = false, message = "Du har inte behörighet att registrera märken för den här medlemmen." });
+
+            int targetOrd = string.IsNullOrEmpty(level) ? 0 : Marken.LevelOrdinal(level);
+            if (!string.IsNullOrEmpty(level) && targetOrd == 0)
+                return Json(new { success = false, message = "Ogiltig valör." });
+
+            int actingId = await GetCurrentMemberIdAsync();
+            var baseBadges = (await _ledger.GetBadgesForMemberAsync(memberId, Family, includeRejected: true))
+                .Where(b => b.LevelOrdinal is >= 1 and <= 3).ToList();
+
+            // Remove any base valör above the chosen one (downgrade or clear).
+            foreach (var b in baseBadges.Where(b => b.LevelOrdinal > targetOrd))
+                await _ledger.DeleteBadgeAsync(b.Id);
+
+            if (targetOrd >= 1)
+            {
+                var existing = baseBadges.FirstOrDefault(b => b.Level == level);
+                string? guldNr = level == Marken.LevelGuld && !string.IsNullOrWhiteSpace(request?.GuldNumber)
+                    ? request!.GuldNumber!.Trim() : null;
+
+                if (existing == null)
+                {
+                    await _ledger.InsertBadgeAsync(new MemberBadge
+                    {
+                        MemberId = memberId,
+                        BadgeFamily = Family,
+                        Level = level,
+                        LevelOrdinal = targetOrd,
+                        AchievedYear = DateTime.Now.Year,
+                        AchievedDate = DateTime.Now,
+                        Source = Marken.SourceAdmin,
+                        Status = Marken.StatusVerified,
+                        SignedOffByMemberId = actingId,
+                        SignedOffDate = DateTime.Now,
+                        UniqueNumber = guldNr,
+                        EnteredByMemberId = actingId
+                    });
+                }
+                else if (level == Marken.LevelGuld && guldNr != null)
+                {
+                    await _ledger.SetUniqueNumberAsync(existing.Id, guldNr);
+                }
+            }
+
+            return Json(new { success = true, message = "Pistolskyttemärket sparat." });
         }
 
         // ── Exports & report ──────────────────────────────────────────
@@ -1230,6 +1354,287 @@ namespace HpskSite.Controllers
             return list;
         }
 
+        // ── Mästarmärket (5.2) — bespoke, year-count → valör (Route 1) ──
+
+        /// <summary>
+        /// Auto-derive Route 1 qualifying years (a standardmedalj i SILVER in BOTH fält and precision the
+        /// same year, SHB 5.2 alt. 1) from the medal ledger, ensure each as a fulfilled Mästar year, then
+        /// award the base valör for the accumulated count. Manual-override years (added by a functionary
+        /// for pre-system medals) share the same table and are preserved. Lenient/add-only like the
+        /// competition families. Best-effort; lazy on read.
+        /// </summary>
+        private async Task RecomputeMastarAsync(int memberId)
+        {
+            try
+            {
+                var awards = await _standardMedals.GetAwardsForMemberAsync(memberId);
+                foreach (var yg in awards.Where(a => a.MedalType == StandardMedals.Silver).GroupBy(a => a.Year))
+                {
+                    bool falt = yg.Any(a => string.Equals(a.Discipline, StandardMedals.Faltskytte, StringComparison.OrdinalIgnoreCase));
+                    bool prec = yg.Any(a => string.Equals(a.Discipline, StandardMedals.Precision, StringComparison.OrdinalIgnoreCase));
+                    if (falt && prec)
+                        await _ledger.EnsureFulfilledYearAsync(memberId, Marken.FamilyMastar, yg.Key);
+                }
+
+                int years = (await _ledger.GetQualificationsForMemberAsync(memberId, Marken.FamilyMastar))
+                    .Count(q => q.Fulfilled && q.Status == Marken.StatusVerified);
+                var lvl = Marken.MastarLevel(years);
+                if (lvl != null)
+                    await _ledger.EnsureBadgeAsync(memberId, Marken.FamilyMastar, lvl, DateTime.Now.Year, Marken.SourceAuto);
+            }
+            catch { /* best-effort */ }
+        }
+
+        private async Task<object> MastarSummaryAsync(int memberId)
+        {
+            List<int> qualYears = new();
+            try
+            {
+                qualYears = (await _ledger.GetQualificationsForMemberAsync(memberId, Marken.FamilyMastar))
+                    .Where(q => q.Fulfilled && q.Status == Marken.StatusVerified)
+                    .Select(q => q.Year).Distinct().OrderBy(y => y).ToList();
+            }
+            catch { }
+            int years = qualYears.Count;
+
+            var pistolBadges = await _ledger.GetBadgesForMemberAsync(memberId, Marken.FamilyPistolskytte);
+            bool hasGuld = pistolBadges.Any(b => b.Level == Marken.LevelGuld);
+
+            var earned = Marken.MastarLevel(years);
+            var levelDisplay = Marken.MastarLevelDisplay(years);
+            int nextAt = Marken.MastarYearsToNext(years);
+
+            string status;
+            if (earned == null)
+                status = $"För brons krävs 3 kvalificerande år — du har {years}.";
+            else if (nextAt > 0)
+            {
+                string nextLabel = nextAt <= 6 ? "Silver" : nextAt <= 9 ? "Guld" : "Nästa stjärna";
+                status = $"Innehar {levelDisplay}. {nextLabel} vid {nextAt} kvalificerande år (du har {years}).";
+            }
+            else
+                status = $"Innehar {levelDisplay} — högsta valören uppnådd.";
+
+            return new
+            {
+                family = Marken.FamilyMastar,
+                displayName = Marken.FamilyDisplayName(Marken.FamilyMastar),
+                earnedLevel = earned,
+                levelDisplay,
+                qualifyingYears = years,
+                qualifyingYearList = qualYears,
+                statusText = status,
+                kravLines = new List<string>
+                {
+                    "Kräver pistolskyttemärke i guld. Brons/silver/guld vid 3/6/9 kvalificerande år; guld med ★/★★/★★★ vid 14/19/24.",
+                    "Alternativ 1 (kvalificerande år): standardmedalj i silver i BÅDE fält och precision samma år.",
+                    Marken.MastarRoute2Note
+                },
+                prereqText = hasGuld ? null : "Kräver pistolskyttemärke i guld."
+            };
+        }
+
+        public class MastarYearRequest { public int MemberId { get; set; } public int Year { get; set; } public bool Qualified { get; set; } }
+
+        /// <summary>
+        /// Functionary override: mark/unmark a Mästar Route-1 qualifying year for a member (for medals
+        /// earned before the system / off pistol.nu). POST /umbraco/surface/Marken/SetMastarQualifyingYear
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetMastarQualifyingYear([FromBody] MastarYearRequest request)
+        {
+            int memberId = request?.MemberId ?? 0;
+            int year = request?.Year ?? 0;
+            if (memberId <= 0 || year < 1900 || year > DateTime.Now.Year + 1)
+                return Json(new { success = false, message = "Ogiltigt år." });
+            if (!await CanSignOffForMemberAsync(memberId))
+                return Json(new { success = false, message = "Åtkomst nekad." });
+
+            if (request!.Qualified)
+                await _ledger.EnsureFulfilledYearAsync(memberId, Marken.FamilyMastar, year);
+            else
+            {
+                var q = await _ledger.GetQualificationForYearAsync(memberId, Marken.FamilyMastar, year);
+                if (q != null) await _ledger.DeleteQualificationAsync(q.Id);
+            }
+            await RecomputeMastarAsync(memberId);
+            return Json(new { success = true, message = "Sparat." });
+        }
+
+        /// <summary>Mästar summary + edit rights for a member, for the secretary detail panel.</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetMemberMastar(int memberId)
+        {
+            if (memberId <= 0) return Json(new { success = false });
+            if (!await CanViewMemberAsync(memberId)) return Json(new { success = false, message = "Åtkomst nekad." });
+            await RecomputeMastarAsync(memberId);
+            return Json(new { success = true, mastar = await MastarSummaryAsync(memberId), canEdit = await CanSignOffForMemberAsync(memberId) });
+        }
+
+        // ── Stormästarmärket (5.3) — career inteckningspoäng ──────────
+
+        public class SubmitStormastarRequest
+        {
+            public int ClubId { get; set; }
+            public int Year { get; set; }
+            public string Scope { get; set; } = "";
+            public int Participants { get; set; }
+            public int Place { get; set; }
+            public string? Discipline { get; set; }
+            public string? CompetitionName { get; set; }
+            public string? Notes { get; set; }
+            public string? PhotoRef { get; set; }
+        }
+
+        /// <summary>Submit one championship result toward Stormästarmärket. Lands Pending; returns a QR token.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SubmitStormastarEntry([FromBody] SubmitStormastarRequest req)
+        {
+            var member = await GetCurrentMemberAsync();
+            if (member == null) return Json(new { success = false, message = "Inte inloggad." });
+            if (req == null) return Json(new { success = false, message = "Ogiltig begäran." });
+            if (!MemberBelongsToClub(member, req.ClubId))
+                return Json(new { success = false, message = "Välj en klubb du är medlem i." });
+            if (req.Scope is not (Marken.SmScopeKrets or Marken.SmScopeLandsdel or Marken.SmScopeSvenskt))
+                return Json(new { success = false, message = "Välj mästerskapsnivå." });
+            if (req.Participants < 1) return Json(new { success = false, message = "Ange antal deltagare." });
+            if (req.Place < 1) return Json(new { success = false, message = "Ange placering." });
+
+            int year = req.Year > 1900 ? req.Year : DateTime.Now.Year;
+            int points = Marken.StormastarPoints(req.Scope, req.Participants, req.Place);
+
+            var e = new MarkenStormastarEntry
+            {
+                MemberId = member.Id,
+                ClubId = req.ClubId,
+                Year = year,
+                Scope = req.Scope,
+                Participants = req.Participants,
+                Place = req.Place,
+                Points = points,
+                Discipline = string.IsNullOrWhiteSpace(req.Discipline) ? null : req.Discipline!.Trim(),
+                CompetitionName = string.IsNullOrWhiteSpace(req.CompetitionName) ? null : req.CompetitionName!.Trim(),
+                Notes = string.IsNullOrWhiteSpace(req.Notes) ? null : req.Notes!.Trim(),
+                ProofFileRef = string.IsNullOrWhiteSpace(req.PhotoRef) ? null : req.PhotoRef,
+                Status = Marken.SeriesStatusPending,
+                EnteredByMemberId = member.Id
+            };
+            var id = await _stormastarService.InsertAsync(e);
+            var token = _verifyProtector.Protect("stormastar:" + id);
+            return Json(new
+            {
+                success = true,
+                id,
+                points,
+                verifyToken = token,
+                verifyUrl = $"{Request.Scheme}://{Request.Host}/marken/verifiera?t={Uri.EscapeDataString(token)}",
+                message = points > 0
+                    ? $"Sparat ({points} inteckningspoäng) och skickat för validering."
+                    : "Sparat. Resultatet ger 0 inteckningspoäng men kan ändå valideras."
+            });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeleteStormastarEntry([FromBody] IdRequest request)
+        {
+            var e = await _stormastarService.GetAsync(request?.Id ?? 0);
+            if (e == null) return Json(new { success = false, message = "Hittades inte." });
+            var me = await GetCurrentMemberAsync();
+            bool owner = me != null && me.Id == e.MemberId && e.Status == Marken.SeriesStatusPending;
+            if (!owner && !await CanSignOffForClubAsync(e.ClubId))
+                return Json(new { success = false, message = "Åtkomst nekad." });
+            var (ok, msg) = await _stormastarService.DeleteAsync(e.Id);
+            return Json(new { success = ok, message = ok ? "Borttaget." : msg });
+        }
+
+        /// <summary>The member's own Stormästar entries.</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetMyStormastarEntries()
+        {
+            var member = await GetCurrentMemberAsync();
+            if (member == null) return Json(new { success = false });
+            var list = await _stormastarService.GetForMemberAsync(member.Id);
+            return Json(new { success = true, entries = list.Select(StormastarDto) });
+        }
+
+        /// <summary>Poll status of the member's own Stormästar entry (QR live-update).</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetMyStormastarStatus(int id)
+        {
+            var member = await GetCurrentMemberAsync();
+            if (member == null) return Json(new { success = false });
+            var e = await _stormastarService.GetAsync(id);
+            if (e == null || e.MemberId != member.Id) return Json(new { success = false });
+            return Json(new { success = true, status = e.Status });
+        }
+
+        private async Task<object> StormastarSummaryAsync(int memberId)
+        {
+            var list = await _stormastarService.GetForMemberAsync(memberId);
+            int verified = list.Where(e => e.Status == Marken.StatusVerified).Sum(e => e.Points);
+            int pending = list.Where(e => e.Status == Marken.SeriesStatusPending).Sum(e => e.Points);
+            return new
+            {
+                family = Marken.FamilyStormastar,
+                displayName = Marken.FamilyDisplayName(Marken.FamilyStormastar),
+                verifiedPoints = verified,
+                pendingPoints = pending,
+                eligibleAt = Marken.StormastarEligibleAt,
+                eligible = verified >= Marken.StormastarEligibleAt,
+                entries = list.Select(StormastarDto)
+            };
+        }
+
+        private object StormastarDto(MarkenStormastarEntry e) => new
+        {
+            kind = "stormastar",
+            id = e.Id,
+            memberId = e.MemberId,
+            memberName = _memberService.GetById(e.MemberId)?.Name,
+            clubId = e.ClubId,
+            clubName = _clubService.GetClubNameById(e.ClubId),
+            year = e.Year,
+            scope = e.Scope,
+            scopeName = Marken.StormastarScopeDisplay(e.Scope),
+            participants = e.Participants,
+            place = e.Place,
+            points = e.Points,
+            discipline = e.Discipline,
+            competitionName = e.CompetitionName,
+            notes = e.Notes,
+            status = e.Status,
+            hasPhoto = !string.IsNullOrEmpty(e.ProofFileRef),
+            validatedDate = e.ValidatedDate
+        };
+
+        /// <summary>Stream a Stormästar entry's proof photo — owner, an authorized validator, or site admin.</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetStormastarPhoto(int id)
+        {
+            var e = await _stormastarService.GetAsync(id);
+            if (e == null || string.IsNullOrEmpty(e.ProofFileRef)) return NotFound();
+            var viewer = await GetCurrentMemberAsync();
+            if (viewer == null) return Unauthorized();
+            bool ok = viewer.Id == e.MemberId || await _auth.IsCurrentUserAdminAsync() || await CanSignOffForClubAsync(e.ClubId);
+            if (!ok) return Forbid();
+            var path = _proofStorage.GetFilePath(e.ProofFileRef);
+            if (path == null) return NotFound();
+            var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            return File(stream, StandardMedalProofStorage.ContentTypeFor(e.ProofFileRef));
+        }
+
+        private async Task<IActionResult> SetStormastarStatus(int id, string status)
+        {
+            var e = await _stormastarService.GetAsync(id);
+            if (e == null) return Json(new { success = false, message = "Hittades inte." });
+            if (!await CanSignOffForClubAsync(e.ClubId)) return Json(new { success = false, message = "Åtkomst nekad." });
+            var (ok, msg) = await _stormastarService.SetStatusAsync(id, status, await GetCurrentMemberIdAsync());
+            return Json(new { success = ok, message = ok ? (status == Marken.StatusVerified ? "Godkänd." : "Avvisad.") : msg });
+        }
+
         /// <summary>
         /// Recompute a member's yearly Guldfodring from validated evidence and materialize it — no
         /// manual sign-off. When both parts are met the qualification row is written Fulfilled +
@@ -1488,6 +1893,7 @@ namespace HpskSite.Controllers
         public class IdRequest { public int Id { get; set; } }
         public class AwardBadgeRequest { public int MemberId { get; set; } public string Level { get; set; } = ""; public int Year { get; set; } public string? UniqueNumber { get; set; } public string? Note { get; set; } }
         public class UniqueNumberRequest { public int BadgeId { get; set; } public string? UniqueNumber { get; set; } }
+        public class SetMemberPistolskytteRequest { public int MemberId { get; set; } public string Level { get; set; } = ""; public string? GuldNumber { get; set; } }
 
         private class MarkenSummaryRow
         {

@@ -221,14 +221,17 @@
                             @* Märken — Pistolskyttemärket valör + årtalsmärke, then the discipline families. *@
                             <div id="markenCard" class="card mb-3 border-warning-subtle" style="display:none;">
                                 <div class="card-body">
-                                    <h6 class="card-title mb-3">
-                                        <i class="bi bi-patch-check text-warning"></i> Pistolskyttemärket
-                                        <span id="markenYear" class="text-muted fw-normal small"></span>
+                                    <h6 class="card-title mb-3 d-flex align-items-center">
+                                        <img src="/images/marken/Pistolskytte.png" alt="" width="44" height="44" class="me-2 flex-shrink-0" style="object-fit:contain;" onerror="this.style.display='none'">
+                                        <span><i class="bi bi-patch-check text-warning"></i> Pistolskyttemärket
+                                        <span id="markenYear" class="text-muted fw-normal small"></span></span>
                                     </h6>
                                     <div id="markenContent"></div>
                                 </div>
                             </div>
                             <div id="markenFamiliesContent"></div>
+                            <div id="markenMastarContent"></div>
+                            <div id="markenStormastarContent"></div>
 
                             <div id="markenEmptyState" class="text-muted text-center py-4" style="display:none;">
                                 <i class="bi bi-patch-check d-block mb-2" style="font-size:2rem;opacity:.4;"></i>
@@ -949,6 +952,69 @@
                     </button>
                 </div>
                 <div id="ssResult" style="display:none;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* ── Stormästarmärket: lägg till inteckningstävling ── *@
+<div class="modal fade" id="stormastarModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-fullscreen-sm-down">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-trophy text-warning"></i> Lägg till tävling (inteckningspoäng)</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <div id="smForm">
+                    <div class="row g-2 mb-3">
+                        <div class="col-6">
+                            <label class="form-label small mb-1">Mästerskap</label>
+                            <select id="smScope" class="form-select" onchange="smUpdatePoints()">
+                                <option value="Krets">Kretsmästerskap</option>
+                                <option value="Landsdel">Landsdelsmästerskap</option>
+                                <option value="Svenskt">Svenskt mästerskap</option>
+                            </select>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small mb-1">År</label>
+                            <input type="number" class="form-control" id="smYear" min="1972" max="2099">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small mb-1">Antal deltagare i klassen</label>
+                            <input type="number" class="form-control" id="smParticipants" min="1" oninput="smUpdatePoints()">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small mb-1">Placering</label>
+                            <input type="number" class="form-control" id="smPlace" min="1" oninput="smUpdatePoints()">
+                        </div>
+                    </div>
+                    <div class="alert alert-light border d-flex justify-content-between align-items-center" id="smPointsNote">
+                        <span>Inteckningspoäng</span><span class="fs-4 fw-bold" id="smPointsValue">0</span>
+                    </div>
+                    <div class="row g-2 mb-3">
+                        <div class="col-12">
+                            <label class="form-label small mb-1">Tävlingens namn (valfritt)</label>
+                            <input type="text" class="form-control" id="smCompName" placeholder="t.ex. Kretsmästerskap precision">
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label small mb-1">Gren (valfritt)</label>
+                            <input type="text" class="form-control" id="smDiscipline" placeholder="t.ex. Precision, Fält">
+                        </div>
+                    </div>
+                    <div id="smClubWrap" class="mb-3" style="display:none;">
+                        <label class="form-label small mb-1">Klubb (för validering)</label>
+                        <select id="smClub" class="form-select"></select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small mb-1"><i class="bi bi-camera"></i> Foto/bevis (valfritt)</label>
+                        <input type="file" class="form-control" id="smPhoto" accept="image/*" capture="environment">
+                    </div>
+                    <button type="button" class="btn btn-success btn-lg w-100" onclick="smSave()">
+                        <i class="bi bi-send"></i> Skicka för validering
+                    </button>
+                </div>
+                <div id="smResult" style="display:none;"></div>
             </div>
         </div>
     </div>
@@ -2766,6 +2832,8 @@ function loadMarken(year) {
         .then(data => {
             renderMarken(data.success ? (data.pistolskytte || {}) : {}, year);
             renderFamilies(data.success ? (data.families || []) : [], year);
+            renderMastar(data.success ? data.mastar : null);
+            renderStormastar(data.success ? data.stormastar : null);
             updateMarkenEmptyState();
         })
         .catch(() => { renderMarken({}, year); });
@@ -2785,7 +2853,7 @@ function renderFamilies(families, year) {
             : '<span class="badge bg-secondary">Ej taget</span>';
         const art = f.artalsmarke || {};
         const artLine = (art.fulfilledYears > 0)
-            ? `<div class="small mt-1"><i class="bi bi-calendar-check text-warning"></i> ${escapeHtmlMarken(art.current || '')} <span class="text-muted">(${art.fulfilledYears} år${art.nextAtYears > 0 ? `, nästa vid ${art.nextAtYears}` : ''})</span></div>`
+            ? `<div class="small mt-1"><i class="bi bi-calendar-check text-warning"></i> ${escapeHtmlMarken(art.current || '')} <span class="text-muted">(${art.fulfilledYears} år)</span></div>`
             : '';
         const prereq = f.prereqText ? `<div class="small text-warning mt-1"><i class="bi bi-exclamation-triangle"></i> ${escapeHtmlMarken(f.prereqText)}</div>` : '';
         const statusLine = `<div class="small ${done ? 'text-success' : 'text-muted'} mt-1">${done ? '<i class="bi bi-check2-all"></i> ' : ''}${escapeHtmlMarken(f.statusText || '')}${srcTxt}</div>`;
@@ -2806,13 +2874,157 @@ function renderFamilies(families, year) {
             <div class="card mb-3 ${done ? 'border-success-subtle' : 'border-warning-subtle'}">
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center flex-wrap">
-                        <h6 class="card-title mb-0"><i class="bi bi-patch-check text-warning"></i> ${escapeHtmlMarken(f.displayName)}</h6>
+                        <h6 class="card-title mb-0 d-flex align-items-center">${markenBadgeImg(f.family)}<span><i class="bi bi-patch-check text-warning"></i> ${escapeHtmlMarken(f.displayName)}</span></h6>
                         ${valor}
                     </div>
                     ${statusLine}${detail}${artLine}${prereq}${entry}${krav}
                 </div>
             </div>`;
     }).join('');
+}
+
+// ── Mästarmärket (5.2) — year-count → valör (Route 1) ──
+function renderMastar(m) {
+    const wrap = document.getElementById('markenMastarContent');
+    if (!wrap) return;
+    if (!m) { wrap.innerHTML = ''; return; }
+    const held = !!m.earnedLevel;
+    const valor = held
+        ? `<span class="badge bg-success"><i class="bi bi-check-lg"></i> Innehar ${escapeHtmlMarken(m.levelDisplay || m.earnedLevel)}</span>`
+        : '<span class="badge bg-secondary">Ej taget</span>';
+    const prereq = m.prereqText ? `<div class="small text-warning mt-1"><i class="bi bi-exclamation-triangle"></i> ${escapeHtmlMarken(m.prereqText)}</div>` : '';
+    const yearsLine = (m.qualifyingYears > 0)
+        ? `<div class="small text-muted mt-1"><i class="bi bi-calendar-check text-warning"></i> ${m.qualifyingYears} kvalificerande år${(m.qualifyingYearList && m.qualifyingYearList.length) ? ' (' + m.qualifyingYearList.join(', ') + ')' : ''}</div>`
+        : '';
+    const krav = markenKravBlock('fam_Mastar', m.kravLines);
+    wrap.innerHTML = `
+        <div class="card mb-3 ${held ? 'border-success-subtle' : 'border-warning-subtle'}">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center flex-wrap">
+                    <h6 class="card-title mb-0 d-flex align-items-center">${markenBadgeImg('Mastar')}<span><i class="bi bi-patch-check text-warning"></i> ${escapeHtmlMarken(m.displayName)}</span></h6>
+                    ${valor}
+                </div>
+                <div class="small ${held ? 'text-success' : 'text-muted'} mt-1">${escapeHtmlMarken(m.statusText || '')}</div>
+                ${yearsLine}${prereq}${krav}
+            </div>
+        </div>`;
+}
+
+// ── Stormästarmärket (5.3) — career inteckningspoäng ──
+function renderStormastar(s) {
+    const wrap = document.getElementById('markenStormastarContent');
+    if (!wrap) return;
+    if (!s) { wrap.innerHTML = ''; return; }
+    const pct = Math.min(100, Math.round(100 * (s.verifiedPoints || 0) / (s.eligibleAt || 30)));
+    const rows = (s.entries || []).map(e => {
+        const st = e.status === 'Verified' ? '<span class="badge bg-success">Godkänd</span>'
+            : e.status === 'Rejected' ? '<span class="badge bg-secondary">Avvisad</span>'
+            : '<span class="badge bg-warning text-dark">Väntar</span>';
+        const del = (e.status === 'Pending') ? ` <button class="btn btn-sm btn-link text-danger p-0" onclick="smDelete(${e.id})" title="Ta bort"><i class="bi bi-trash"></i></button>` : '';
+        return `<li class="list-group-item d-flex justify-content-between align-items-center px-0 flex-wrap gap-1">
+            <span class="small">${e.year} · ${escapeHtmlMarken(e.scopeName)}${e.competitionName ? ' · ' + escapeHtmlMarken(e.competitionName) : ''}<br>
+            <span class="text-muted">${e.participants} deltagare · plac ${e.place}</span></span>
+            <span><span class="badge bg-light text-dark border me-1">${e.points} p</span>${st}${del}</span></li>`;
+    }).join('');
+    const eligible = s.eligible
+        ? `<div class="alert alert-success small mb-2"><i class="bi bi-stars"></i> Berättigad! Din förening kan föreslå dig till SPSF med en detaljerad meritförteckning.</div>`
+        : `<div class="small text-muted mb-2">${s.verifiedPoints || 0} av ${s.eligibleAt} inteckningspoäng${(s.pendingPoints || 0) > 0 ? ` (+${s.pendingPoints} väntar på validering)` : ''}.</div>`;
+    wrap.innerHTML = `
+        <div class="card mb-3 ${s.eligible ? 'border-success-subtle' : 'border-warning-subtle'}">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center flex-wrap">
+                    <h6 class="card-title mb-0 d-flex align-items-center">${markenBadgeImg('Stormastar')}<span><i class="bi bi-trophy text-warning"></i> ${escapeHtmlMarken(s.displayName)}</span></h6>
+                    <span class="badge ${s.eligible ? 'bg-success' : 'bg-secondary'}">${s.verifiedPoints || 0}/${s.eligibleAt} p</span>
+                </div>
+                <div class="progress my-2" style="height:8px;"><div class="progress-bar bg-warning" style="width:${pct}%"></div></div>
+                ${eligible}
+                ${rows ? `<ul class="list-group list-group-flush mb-2">${rows}</ul>` : ''}
+                <button class="btn btn-outline-primary btn-sm" onclick="openStormastarModal()"><i class="bi bi-plus-lg"></i> Lägg till tävling</button>
+            </div>
+        </div>`;
+}
+
+// JS mirror of Marken.StormastarPoints (Tabell 2): leftmost digit = points for place 1.
+const SM_TABLE = {
+    Krets:    ["21", "321", "321", "321", "4321", "4321"],
+    Landsdel: ["1", "21", "321", "4321", "54321", "654321"],
+    Svenskt:  ["321", "4321", "54321", "654321", "7654321", "87654321"]
+};
+function smBandIndex(p) {
+    if (p < 8) return -1;
+    if (p <= 20) return 0; if (p <= 50) return 1; if (p <= 100) return 2;
+    if (p <= 150) return 3; if (p <= 200) return 4; return 5;
+}
+function smPoints(scope, participants, place) {
+    const bands = SM_TABLE[scope]; if (!bands || place < 1) return 0;
+    const bi = smBandIndex(participants); if (bi < 0) return 0;
+    const str = bands[bi]; if (place > str.length) return 0;
+    return parseInt(str[place - 1], 10);
+}
+function smUpdatePoints() {
+    const scope = document.getElementById('smScope').value;
+    const part = parseInt(document.getElementById('smParticipants').value) || 0;
+    const place = parseInt(document.getElementById('smPlace').value) || 0;
+    document.getElementById('smPointsValue').textContent = smPoints(scope, part, place);
+}
+function openStormastarModal() {
+    document.getElementById('smForm').style.display = 'block';
+    document.getElementById('smResult').style.display = 'none';
+    document.getElementById('smYear').value = new Date().getFullYear();
+    document.getElementById('smParticipants').value = '';
+    document.getElementById('smPlace').value = '';
+    document.getElementById('smCompName').value = '';
+    document.getElementById('smDiscipline').value = '';
+    document.getElementById('smPhoto').value = '';
+    smUpdatePoints();
+    markenPopulateClubPicker('smClubWrap', 'smClub');
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('stormastarModal')).show();
+}
+function smSave() {
+    const clubId = markenSelectedClubId('smClub');
+    if (!clubId) { alert('Du måste tillhöra en klubb.'); return; }
+    const payload = {
+        clubId: clubId,
+        year: parseInt(document.getElementById('smYear').value) || new Date().getFullYear(),
+        scope: document.getElementById('smScope').value,
+        participants: parseInt(document.getElementById('smParticipants').value) || 0,
+        place: parseInt(document.getElementById('smPlace').value) || 0,
+        competitionName: document.getElementById('smCompName').value,
+        discipline: document.getElementById('smDiscipline').value
+    };
+    if (payload.participants < 1) { alert('Ange antal deltagare.'); return; }
+    if (payload.place < 1) { alert('Ange placering.'); return; }
+    markenUploadPhoto('smPhoto').then(photoRef => {
+        payload.photoRef = photoRef;
+        fetch('/umbraco/surface/Marken/SubmitStormastarEntry', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getAntiForgeryTokenMarken() },
+            body: JSON.stringify(payload)
+        })
+        .then(r => r.json())
+        .then(res => {
+            if (!res.success) { alert(res.message || 'Fel'); return; }
+            document.getElementById('smForm').style.display = 'none';
+            markenRenderQr(document.getElementById('smResult'), Object.assign({}, res, { qualifies: res.points > 0 }), 'stormastarModal', 'stormastar');
+            loadMarken(markenTabYear);
+        })
+        .catch(() => alert('Något gick fel.'));
+    });
+}
+function smDelete(id) {
+    if (!confirm('Ta bort den här inteckningen?')) return;
+    fetch('/umbraco/surface/Marken/DeleteStormastarEntry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getAntiForgeryTokenMarken() },
+        body: JSON.stringify({ id: id })
+    }).then(r => r.json()).then(d => { if (d.success) loadMarken(markenTabYear); else alert(d.message || 'Fel'); });
+}
+
+// Miniature of the real badge in each section's first column. Hidden gracefully if the
+// PNG isn't present yet (so sections "light up" as images are added to /images/marken/).
+function markenBadgeImg(family) {
+    if (!family) return '';
+    return `<img src="/images/marken/${encodeURIComponent(family)}.png" alt="" width="44" height="44" class="me-2 flex-shrink-0" style="object-fit:contain;" onerror="this.style.display='none'">`;
 }
 
 function markenSourceLabel(src) {
@@ -2869,16 +3081,12 @@ function renderMarken(data, year) {
         }
         if (hasGuld || (art.fulfilledYears || 0) > 0) {
             const years = art.fulfilledYears || 0;
-            const nextLine = art.nextAtYears > 0
-                ? `Nästa: ${escapeHtmlMarken(art.next)} vid ${art.nextAtYears} år`
-                : 'Högsta årtalsmärket uppnått';
             html += `
                 <hr class="my-2">
                 <div class="d-flex justify-content-between align-items-center flex-wrap">
                     <span><i class="bi bi-calendar-check text-warning"></i> ${art.current ? escapeHtmlMarken(art.current) : 'Inget årtalsmärke än'}</span>
                     <span class="small text-muted">${years} godkända guldfodringar</span>
-                </div>
-                <div class="small text-muted">${nextLine}</div>`;
+                </div>`;
         }
         html += markenKravBlock('fam_Pistolskytte', [
             'Grundmärke — 3 precisionsserier/år, poäng/serie (Brons/Silver/Guld):',
@@ -2962,6 +3170,9 @@ function loadMySeries(year) {
 
 // Shared description for any evidence item (Guldserie / Snabbserie / competition result).
 function markenEvidenceDesc(s) {
+    if (s.kind === 'stormastar') {
+        return `Stormästar – ${escapeHtmlMarken(s.scopeName)} ${s.year}${s.competitionName ? ' (' + escapeHtmlMarken(s.competitionName) + ')' : ''}: <strong>${s.points} p</strong> <span class="text-muted">(${s.participants} dlt, plac ${s.place})</span>`;
+    }
     if (s.kind === 'comp') {
         const lvl = s.reachedLevel
             ? ` <span class="badge bg-light text-dark border">${escapeHtmlMarken(s.reachedLevel)}</span>`
@@ -3000,6 +3211,8 @@ function loadValidationQueue() {
 function renderQueueItem(s) {
     const photoUrl = s.kind === 'comp'
         ? `/umbraco/surface/Marken/GetCompResultPhoto?id=${s.id}`
+        : s.kind === 'stormastar'
+        ? `/umbraco/surface/Marken/GetStormastarPhoto?id=${s.id}`
         : `/umbraco/surface/Marken/GetSeriePhoto?id=${s.id}`;
     const photo = s.hasPhoto ? ` <a href="${photoUrl}" target="_blank" rel="noopener"><i class="bi bi-camera"></i></a>` : '';
     const shots = (s.kind !== 'comp' && s.seriesType === 'Precision' && s.shots) ? `<div class="small text-muted">${s.shots.map(escapeHtmlMarken).join(' · ')}</div>` : '';
@@ -3075,6 +3288,8 @@ function markenStartStatusPoll(id, modalId, container, kind) {
     markenStopStatusPoll();
     const statusUrl = kind === 'comp'
         ? `/umbraco/surface/Marken/GetMyCompResultStatus?id=${id}`
+        : kind === 'stormastar'
+        ? `/umbraco/surface/Marken/GetMyStormastarStatus?id=${id}`
         : `/umbraco/surface/Marken/GetMySerieStatus?id=${id}`;
     markenQrPoll = setInterval(() => {
         fetch(statusUrl)
