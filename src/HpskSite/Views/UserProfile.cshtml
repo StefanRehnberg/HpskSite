@@ -169,52 +169,43 @@
                                 </div>
                             </div>
 
-                            @* Entry buttons *@
+                            @* Entry buttons — "Jag har skjutit en ..." *@
                             <div class="row g-2 mb-3">
-                                <div class="col-12 col-sm-6">
+                                <div class="col-12 col-sm-4">
                                     <button class="btn btn-warning btn-lg w-100 py-3 fw-bold" onclick="openGuldserieModal()">
                                         <i class="bi bi-bullseye"></i> Jag har skjutit en GULDSERIE!
                                     </button>
                                 </div>
-                                <div class="col-12 col-sm-6">
+                                <div class="col-12 col-sm-4">
                                     <button class="btn btn-outline-warning btn-lg w-100 py-3 fw-bold" onclick="openSnabbserieModal()">
                                         <i class="bi bi-stopwatch"></i> Jag har skjutit en SNABBSERIE!
                                     </button>
                                 </div>
-                                <div class="col-12">
-                                    <button class="btn btn-outline-secondary w-100" onclick="openCompResultModal()">
-                                        <i class="bi bi-trophy"></i> Registrera tävlingsresultat (Precision / Fält / Milsnabb / Nat. helmatch)
-                                    </button>
-                                    <div class="form-text">Resultat från pistol.nu-tävlingar räknas automatiskt — använd detta bara för tävlingar på andra håll.</div>
-                                </div>
-                                <div class="col-12">
-                                    <button class="btn btn-outline-secondary w-100" onclick="openProofSerieModal()">
-                                        <i class="bi bi-bullseye"></i> Registrera serie (Luftpistol / Elit)
+                                <div class="col-12 col-sm-4">
+                                    <button class="btn btn-outline-warning btn-lg w-100 py-3 fw-bold" onclick="openProofSerieModal()">
+                                        <i class="bi bi-wind"></i> Jag har skjutit en LUFTPISTOLSERIE!
                                     </button>
                                 </div>
                             </div>
 
-                            @* My submitted series this year *@
+                            @* My submitted series this year — collapsible (can get long). *@
                             <div id="mySeriesCard" class="card mb-3" style="display:none;">
-                                <div class="card-body">
-                                    <h6 class="card-title mb-2"><i class="bi bi-list-check"></i> Mina inskickade serier <span id="mySeriesYear" class="text-muted fw-normal small"></span></h6>
-                                    <div id="mySeriesContent"></div>
+                                <div class="card-body py-2">
+                                    <button class="btn btn-link p-0 text-decoration-none w-100 text-start fw-semibold" type="button" data-bs-toggle="collapse" data-bs-target="#mySeriesCollapse">
+                                        <i class="bi bi-list-check"></i> Mina inskickade serier <span id="mySeriesYear" class="text-muted fw-normal small"></span>
+                                        <i class="bi bi-chevron-down float-end"></i>
+                                    </button>
+                                    <div id="mySeriesCollapse" class="collapse mt-2"><div id="mySeriesContent"></div></div>
                                 </div>
                             </div>
 
-                            @* Pistolskyttemärket — valör, årtalsmärke ladder, this year's Guldfodring. *@
-                            <div id="markenCard" class="card mb-3 border-warning-subtle" style="display:none;">
+                            @* This year's Guldfodring (two-part status). *@
+                            <div id="guldfodringCard" class="card mb-3 border-warning-subtle" style="display:none;">
                                 <div class="card-body">
-                                    <h6 class="card-title mb-3">
-                                        <i class="bi bi-patch-check text-warning"></i> Pistolskyttemärket
-                                        <span id="markenYear" class="text-muted fw-normal small"></span>
-                                    </h6>
-                                    <div id="markenContent"></div>
+                                    <h6 class="card-title mb-2"><i class="bi bi-calendar-check text-warning"></i> Guldfodring <span id="guldfodringYear" class="text-muted fw-normal small"></span></h6>
+                                    <div id="guldfodringContent"></div>
                                 </div>
                             </div>
-
-                            @* Övriga märken (Precision/Fält/Milsnabb/Nationell helmatch) — auto från tävlingsresultat. *@
-                            <div id="markenFamiliesContent"></div>
 
                             @* Standardmedaljer — klass-3 qualification (per discipline) + Guldmedalj. *@
                             <div id="medalSummaryCard" class="card mb-3 border-warning-subtle" style="display:none;">
@@ -226,6 +217,18 @@
                                     <div id="medalSummaryContent"></div>
                                 </div>
                             </div>
+
+                            @* Märken — Pistolskyttemärket valör + årtalsmärke, then the discipline families. *@
+                            <div id="markenCard" class="card mb-3 border-warning-subtle" style="display:none;">
+                                <div class="card-body">
+                                    <h6 class="card-title mb-3">
+                                        <i class="bi bi-patch-check text-warning"></i> Pistolskyttemärket
+                                        <span id="markenYear" class="text-muted fw-normal small"></span>
+                                    </h6>
+                                    <div id="markenContent"></div>
+                                </div>
+                            </div>
+                            <div id="markenFamiliesContent"></div>
 
                             <div id="markenEmptyState" class="text-muted text-center py-4" style="display:none;">
                                 <i class="bi bi-patch-check d-block mb-2" style="font-size:2rem;opacity:.4;"></i>
@@ -941,73 +944,6 @@
                     </button>
                 </div>
                 <div id="ssResult" style="display:none;"></div>
-            </div>
-        </div>
-    </div>
-</div>
-
-@* ── Competition-result self-report modal (external comps) ── *@
-<div class="modal fade" id="compResultModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered modal-fullscreen-sm-down">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title"><i class="bi bi-trophy text-warning"></i> Tävlingsresultat (extern tävling)</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
-            </div>
-            <div class="modal-body">
-                <div id="crForm">
-                    <div class="mb-2">
-                        <label class="form-label small mb-1">Märke / gren</label>
-                        <select id="crFamily" class="form-select" onchange="crUpdateHint()">
-                            <option value="Precision">Precisionsskyttemärket</option>
-                            <option value="Falt">Fältskyttemärket</option>
-                            <option value="Milsnabb">Militär Snabbmatchmärket</option>
-                            <option value="NationellHelmatch">Märke i Nationell helmatch</option>
-                        </select>
-                    </div>
-                    <div class="mb-2">
-                        <label class="form-label small mb-1">Tävlingens namn</label>
-                        <input type="text" class="form-control" id="crName" placeholder="t.ex. Kretsmästerskap precision">
-                    </div>
-                    <div class="row g-2 mb-2">
-                        <div class="col-6">
-                            <label class="form-label small mb-1">Datum</label>
-                            <input type="text" class="form-control" id="crDate">
-                        </div>
-                        <div class="col-6">
-                            <label class="form-label small mb-1">Vapengrupp</label>
-                            <select id="crWeapon" class="form-select">
-                                <option value="A">A</option><option value="B">B</option>
-                                <option value="C" selected>C</option><option value="R">R</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="row g-2 mb-2">
-                        <div class="col-6" id="crDimWrap">
-                            <label class="form-label small mb-1" id="crDimLabel">Antal serier</label>
-                            <select id="crDim" class="form-select"></select>
-                        </div>
-                        <div class="col-6">
-                            <label class="form-label small mb-1" id="crTotalLabel">Totalpoäng</label>
-                            <input type="number" class="form-control" id="crTotal" min="0">
-                        </div>
-                    </div>
-                    <div class="alert alert-light border small" id="crHint"></div>
-                    <div id="crClubWrap" class="mb-2" style="display:none;">
-                        <label class="form-label small mb-1">Klubb (för validering)</label>
-                        <select id="crClub" class="form-select"></select>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label small mb-1"><i class="bi bi-camera"></i> Bevis/foto (valfritt)</label>
-                        <input type="file" class="form-control" id="crPhoto" accept="image/*,application/pdf" capture="environment">
-                    </div>
-                    <button type="button" class="btn btn-success btn-lg w-100" onclick="crSave()">
-                        <i class="bi bi-send"></i> Skicka för validering
-                    </button>
-                    <div class="form-text mt-1">Tre tävlingar/år krävs för märket (två för Nationell helmatch). Skicka in ett resultat per tävling.</div>
-                    <div class="form-text text-warning"><i class="bi bi-exclamation-triangle"></i> Endast krets-, landsdels-, riks- och nationella tävlingar räknas (ej klubbtävlingar). Nationell helmatch undantaget — där räknas även träning. Funktionären bekräftar nivån vid validering.</div>
-                </div>
-                <div id="crResult" style="display:none;"></div>
             </div>
         </div>
     </div>
@@ -2823,7 +2759,7 @@ function loadMarkenTab() {
 }
 
 function updateMarkenEmptyState() {
-    const anyVisible = ['markenCard', 'medalSummaryCard', 'mySeriesCard', 'markenQueueCard']
+    const anyVisible = ['markenCard', 'guldfodringCard', 'medalSummaryCard', 'mySeriesCard', 'markenQueueCard']
         .some(id => { const e = document.getElementById(id); return e && e.style.display !== 'none'; });
     const fam = document.getElementById('markenFamiliesContent');
     const famHas = fam && fam.children.length > 0;
@@ -2832,19 +2768,15 @@ function updateMarkenEmptyState() {
 }
 
 function loadMarken(year) {
-    const card = document.getElementById('markenCard');
-    const content = document.getElementById('markenContent');
-    if (!card || !content) return;
-
+    if (!document.getElementById('markenCard')) return;
     fetch(`/umbraco/surface/Marken/GetMyMarken?year=${year}`)
         .then(r => r.json())
         .then(data => {
-            if (!data.success) { card.style.display = 'none'; renderFamilies([], year); updateMarkenEmptyState(); return; }
-            renderMarken(data.pistolskytte || {}, year);
-            renderFamilies(data.families || [], year);
+            renderMarken(data.success ? (data.pistolskytte || {}) : {}, year);
+            renderFamilies(data.success ? (data.families || []) : [], year);
             updateMarkenEmptyState();
         })
-        .catch(() => { card.style.display = 'none'; });
+        .catch(() => { renderMarken({}, year); });
 }
 
 // Other discipline märken (Precision/Fält/Milsnabb/Nationell helmatch) — auto from competition results.
@@ -2894,7 +2826,10 @@ function renderMarken(data, year) {
     const card = document.getElementById('markenCard');
     const content = document.getElementById('markenContent');
     const yearLabel = document.getElementById('markenYear');
-    if (!data || !data.success) { card.style.display = 'none'; return; }
+    const gfCard = document.getElementById('guldfodringCard');
+    const gfContent = document.getElementById('guldfodringContent');
+    const gfYear = document.getElementById('guldfodringYear');
+    if (!data || !data.success) { card.style.display = 'none'; if (gfCard) gfCard.style.display = 'none'; return; }
     if (yearLabel) yearLabel.textContent = '· ' + (data.year || year);
 
     const badges = (data.badges || []).filter(b => b.levelOrdinal >= 1 && b.levelOrdinal <= 3);
@@ -2903,74 +2838,65 @@ function renderMarken(data, year) {
     const top = badges.length ? badges.reduce((a, b) => b.levelOrdinal > a.levelOrdinal ? b : a) : null;
     const hasGuld = badges.some(b => b.isGuld);
 
-    // Nothing to show for a member with no badges, no qualifying years, and no candidacy this year.
-    if (!top && (art.fulfilledYears || 0) === 0 && !gf.part1Met && !gf.part2Met) {
+    // ── Pistolskyttemärket badge (valör + årtalsmärke) → markenCard ──
+    if (!top && (art.fulfilledYears || 0) === 0) {
         card.style.display = 'none';
-        return;
-    }
-    card.style.display = 'block';
-
-    let html = '';
-
-    // Current valör
-    if (top) {
-        const guldBadge = badges.find(b => b.isGuld);
-        const numTxt = guldBadge && guldBadge.uniqueNumber ? ` <span class="text-muted small">nr ${escapeHtmlMarken(guldBadge.uniqueNumber)}</span>` : '';
-        html += `<div class="mb-2"><span class="badge bg-warning text-dark">${escapeHtmlMarken(top.level)}</span> ${escapeHtmlMarken(data.familyName || 'Pistolskyttemärket')}${numTxt}</div>`;
     } else {
-        html += `<div class="mb-2 small text-muted">Inget grundmärke registrerat än.</div>`;
-    }
-
-    // Årtalsmärke ladder (only meaningful once Guld is held / years accrue)
-    if (hasGuld || (art.fulfilledYears || 0) > 0) {
-        const years = art.fulfilledYears || 0;
-        const nextLine = art.nextAtYears > 0
-            ? `<span class="text-muted small">Nästa: ${escapeHtmlMarken(art.next)} vid ${art.nextAtYears} år</span>`
-            : `<span class="text-muted small">Högsta årtalsmärket uppnått</span>`;
-        html += `
-            <div class="mb-2">
+        card.style.display = 'block';
+        let html = '';
+        if (top) {
+            const guldBadge = badges.find(b => b.isGuld);
+            const numTxt = guldBadge && guldBadge.uniqueNumber ? ` <span class="text-muted small">nr ${escapeHtmlMarken(guldBadge.uniqueNumber)}</span>` : '';
+            html += `<div class="mb-2"><span class="badge bg-warning text-dark">${escapeHtmlMarken(top.level)}</span> ${escapeHtmlMarken(data.familyName || 'Pistolskyttemärket')}${numTxt}</div>`;
+        }
+        if (hasGuld || (art.fulfilledYears || 0) > 0) {
+            const years = art.fulfilledYears || 0;
+            const nextLine = art.nextAtYears > 0
+                ? `<span class="text-muted small">Nästa: ${escapeHtmlMarken(art.next)} vid ${art.nextAtYears} år</span>`
+                : `<span class="text-muted small">Högsta årtalsmärket uppnått</span>`;
+            html += `
                 <div class="d-flex justify-content-between align-items-center flex-wrap">
                     <span><i class="bi bi-calendar-check text-warning"></i> ${art.current ? escapeHtmlMarken(art.current) : 'Inget årtalsmärke än'}</span>
                     <span class="small">${years} godkända guldfodringar</span>
                 </div>
-                <div class="small">${nextLine}</div>
-            </div>`;
+                <div class="small">${nextLine}</div>`;
+        }
+        content.innerHTML = html;
     }
 
-    // This year's Guldfodring (two parts)
-    const p = gf.persisted;
-    const signed = p && p.signedOff;
-    const part1 = gf.part1Met || (p && p.part1Met);
-    const part2 = gf.part2Met || (p && p.part2Met);
+    // ── This year's Guldfodring (two-part status) → guldfodringCard ──
+    if (gfCard && gfContent) {
+        const p = gf.persisted;
+        const part1 = gf.part1Met || (p && p.part1Met);
+        const part2 = gf.part2Met || (p && p.part2Met);
+        const done = gf.candidateBothMet || (p && p.fulfilled);
 
-    const partRow = (label, met, detail) => `
-        <div class="d-flex justify-content-between align-items-center">
-            <span>${met ? '<i class="bi bi-check-circle-fill text-success"></i>' : '<i class="bi bi-circle text-muted"></i>'} ${label}</span>
-            <span class="small text-muted">${detail || ''}</span>
-        </div>`;
-
-    const pendingTxt = gf.pendingPrecisionCount > 0 ? ` <span class="text-muted">(${gf.pendingPrecisionCount} väntar på validering)</span>` : '';
-    html += `<hr class="my-2"><div class="mb-1 small text-muted">Guldfodring ${data.year}:</div>`;
-    html += partRow('Precisionsdel',
-        part1,
-        `${gf.qualifyingSeriesCount || 0}/${gf.requiredSeries} godkända serier${pendingTxt}`);
-    const speedPending = gf.pendingSpeedCount > 0 ? ` <span class="text-muted">(${gf.pendingSpeedCount} väntar)</span>` : '';
-    const speedDetail = gf.part2ViaFalt
-        ? (gf.part2Detail || 'fältmedalj')
-        : `${gf.part2SeriesCount || 0}/${gf.part2Required || 3} godkända snabbserier${speedPending}`;
-    html += partRow('Snabbskyttedel', part2, speedDetail);
-
-    if (gf.part1Note) html += `<div class="small text-muted mt-1">${escapeHtmlMarken(gf.part1Note)}</div>`;
-
-    if (signed) {
-        html += `<div class="mt-2"><span class="badge bg-success">Signerad guldfodring ${data.year}</span></div>`;
-    } else if (gf.candidateBothMet) {
-        html += `<div class="mt-2 small text-success"><i class="bi bi-check2-all"></i> Båda delarna klara – en funktionär kan signera årets guldfodring.</div>`;
-    } else {
-        html += `<div class="mt-2 small text-muted">Skicka in 3 guldserier och 3 snabbserier (eller en fältmedalj) ovan; en funktionär validerar dem.</div>`;
+        if (!part1 && !part2 && !done) {
+            gfCard.style.display = 'none';
+        } else {
+            gfCard.style.display = 'block';
+            if (gfYear) gfYear.textContent = '· ' + (data.year || year);
+            const partRow = (label, met, detail) => `
+                <div class="d-flex justify-content-between align-items-center">
+                    <span>${met ? '<i class="bi bi-check-circle-fill text-success"></i>' : '<i class="bi bi-circle text-muted"></i>'} ${label}</span>
+                    <span class="small text-muted">${detail || ''}</span>
+                </div>`;
+            const pendingTxt = gf.pendingPrecisionCount > 0 ? ` <span class="text-muted">(${gf.pendingPrecisionCount} väntar)</span>` : '';
+            const speedPending = gf.pendingSpeedCount > 0 ? ` <span class="text-muted">(${gf.pendingSpeedCount} väntar)</span>` : '';
+            const speedDetail = gf.part2ViaFalt
+                ? (gf.part2Detail || 'fältmedalj')
+                : `${gf.part2SeriesCount || 0}/${gf.part2Required || 3} godkända snabbserier${speedPending}`;
+            let html = partRow('Precisionsdel', part1, `${gf.qualifyingSeriesCount || 0}/${gf.requiredSeries} godkända serier${pendingTxt}`);
+            html += partRow('Snabbskyttedel', part2, speedDetail);
+            if (gf.part1Note) html += `<div class="small text-muted mt-1">${escapeHtmlMarken(gf.part1Note)}</div>`;
+            if (done) {
+                html += `<div class="mt-2"><span class="badge bg-success"><i class="bi bi-check2-all me-1"></i>Guldfodring ${data.year} uppfylld</span></div>`;
+            } else {
+                html += `<div class="mt-2 small text-muted">Skicka in guldserier och snabbserier (eller en fältmedalj) ovan; en funktionär validerar dem och årets guldfodring blir klar automatiskt.</div>`;
+            }
+            gfContent.innerHTML = html;
+        }
     }
-
-    content.innerHTML = html;
 }
 
 function escapeHtmlMarken(s) {
@@ -3226,75 +3152,6 @@ function ssSave() {
     }).catch(() => alert('Något gick fel.'));
 }
 
-// ── Competition-result self-report modal ───────────────────────────
-let crDatePicker = null;
-function openCompResultModal() {
-    document.getElementById('crForm').style.display = 'block';
-    document.getElementById('crResult').style.display = 'none';
-    document.getElementById('crName').value = '';
-    document.getElementById('crTotal').value = '';
-    document.getElementById('crPhoto').value = '';
-    crUpdateHint();
-    markenPopulateClubPicker('crClubWrap', 'crClub');
-    if (!crDatePicker && window.flatpickr) {
-        crDatePicker = flatpickr('#crDate', { locale: 'sv', dateFormat: 'Y-m-d', defaultDate: 'today', maxDate: 'today' });
-    }
-    bootstrap.Modal.getOrCreateInstance(document.getElementById('compResultModal')).show();
-}
-function crUpdateHint() {
-    const fam = document.getElementById('crFamily').value;
-    const dimWrap = document.getElementById('crDimWrap');
-    const dimSel = document.getElementById('crDim');
-    const dimLabel = document.getElementById('crDimLabel');
-    const totalLabel = document.getElementById('crTotalLabel');
-    let hint = '';
-    if (fam === 'Precision') {
-        dimWrap.style.display = ''; dimLabel.textContent = 'Antal serier';
-        dimSel.innerHTML = '<option value="6">6 serier</option><option value="7">7 serier</option><option value="10">10 serier</option>';
-        totalLabel.textContent = 'Totalpoäng';
-        hint = '3 tävlingar/år. Krav beror på vapengrupp och antal serier.';
-    } else if (fam === 'Falt') {
-        dimWrap.style.display = ''; dimLabel.textContent = 'Antal stationer';
-        dimSel.innerHTML = '<option value="6">6 stationer</option><option value="7">7</option><option value="8">8</option><option value="9">9</option><option value="10">10</option>';
-        totalLabel.textContent = 'Antal träff';
-        hint = '3 tävlingar/år. Krav i antal träff beror på vapengrupp och antal stationer.';
-    } else { // Milsnabb / NationellHelmatch — single point total
-        dimWrap.style.display = 'none'; dimSel.innerHTML = '<option value="0">-</option>';
-        totalLabel.textContent = 'Totalpoäng';
-        hint = (fam === 'NationellHelmatch' ? '2' : '3') + ' tävlingar/år. Krav beror på vapengrupp.';
-    }
-    document.getElementById('crHint').innerHTML = '<i class="bi bi-info-circle"></i> ' + hint;
-}
-function crSave() {
-    const clubId = markenSelectedClubId('crClub');
-    if (!clubId) { alert('Du måste vara medlem i en klubb för att skicka in.'); return; }
-    const name = document.getElementById('crName').value.trim();
-    const total = parseInt(document.getElementById('crTotal').value) || 0;
-    if (!name) { alert('Ange tävlingens namn.'); return; }
-    if (total <= 0) { alert('Ange ditt totalresultat.'); return; }
-    markenUploadPhoto('crPhoto').then(photoRef => {
-        return fetch('/umbraco/surface/Marken/SubmitCompetitionResult', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getAntiForgeryTokenMarken() },
-            body: JSON.stringify({
-                family: document.getElementById('crFamily').value,
-                clubId,
-                competitionName: name,
-                competitionDate: document.getElementById('crDate').value,
-                weaponGroup: document.getElementById('crWeapon').value,
-                dim: parseInt(document.getElementById('crDim').value) || 0,
-                total,
-                photoRef
-            })
-        });
-    }).then(r => r.json()).then(res => {
-        if (!res.success) { alert('Fel: ' + (res.message || 'Kunde inte spara.')); return; }
-        document.getElementById('crForm').style.display = 'none';
-        markenRenderQr(document.getElementById('crResult'), res, 'compResultModal', 'comp');
-        loadMySeries(markenTabYear);
-    }).catch(() => alert('Något gick fel.'));
-}
-
 // ── Series-proof modal (Luftpistol / Elit) ─────────────────────────
 function openProofSerieModal() {
     document.getElementById('psForm').style.display = 'block';
@@ -3340,7 +3197,7 @@ function psSave() {
 }
 
 document.getElementById('marken-tab')?.addEventListener('shown.bs.tab', loadMarkenTab);
-['guldserieModal', 'snabbserieModal', 'compResultModal', 'proofSerieModal'].forEach(id => {
+['guldserieModal', 'snabbserieModal', 'proofSerieModal'].forEach(id => {
     document.getElementById(id)?.addEventListener('hidden.bs.modal', markenStopStatusPoll);
 });
 
