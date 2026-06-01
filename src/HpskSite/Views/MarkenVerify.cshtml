@@ -53,7 +53,16 @@
 
         function render(s) {
             let body = '';
-            if (s.seriesType === 'Precision') {
+            if (s.kind === 'comp') {
+                const lvl = s.reachedLevel
+                    ? `<span class="badge bg-success">${esc(s.reachedLevel)}-nivå</span>`
+                    : '<span class="badge bg-secondary">Under märkeskravet</span>';
+                body = `<p class="text-center mb-1"><span class="fs-5 fw-bold">${esc(s.familyName)}</span></p>
+                    <p class="text-center"><span class="fs-4 fw-bold">${s.total}</span>
+                       <span class="text-muted">(vapengrupp ${esc(s.weaponGroup)}${s.dim ? ', ' + s.dim : ''})</span></p>
+                    <p class="text-center text-muted">${esc(s.competitionName)}</p>
+                    <p class="text-center">${lvl}</p>`;
+            } else if (s.seriesType === 'Precision') {
                 const shots = (s.shots || []).map(v => `<span class="shot-pill">${esc(v)}</span>`).join('');
                 body = `<div class="text-center mb-2">${shots}</div>
                     <p class="text-center mb-1"><span class="fs-4 fw-bold">${s.total} p</span>
@@ -63,14 +72,15 @@
                 body = `<p class="text-center mb-1"><span class="fs-5 fw-bold">Snabbserie – ${esc(s.claimedLevel)}</span></p>
                     <p class="text-center text-muted">Mål: ${esc(s.targetName)} · vapengrupp ${esc(s.weaponGroup)}<br>${esc(s.speedRequirement)}</p>`;
             }
-            const photo = s.hasPhoto ? `<div class="text-center my-2"><a href="/umbraco/surface/Marken/GetSeriePhoto?id=${s.id}" target="_blank" rel="noopener"><img src="/umbraco/surface/Marken/GetSeriePhoto?id=${s.id}" class="img-fluid rounded border" style="max-height:280px;"></a></div>` : '';
-            const date = s.seriesDate ? new Date(s.seriesDate).toLocaleDateString('sv-SE') : '';
+            const photoUrl = s.kind === 'comp' ? `/umbraco/surface/Marken/GetCompResultPhoto?id=${s.id}` : `/umbraco/surface/Marken/GetSeriePhoto?id=${s.id}`;
+            const photo = s.hasPhoto ? `<div class="text-center my-2"><a href="${photoUrl}" target="_blank" rel="noopener"><img src="${photoUrl}" class="img-fluid rounded border" style="max-height:280px;"></a></div>` : '';
+            const date = (s.kind === 'comp' ? s.competitionDate : s.seriesDate) ? new Date(s.kind === 'comp' ? s.competitionDate : s.seriesDate).toLocaleDateString('sv-SE') : '';
 
             let actions;
             if (s.status === 'Pending') {
                 actions = `<div class="d-grid gap-2 mt-3">
-                    <button class="btn btn-success btn-lg" onclick="act(${s.id}, true)"><i class="bi bi-check-lg"></i> Godkänn</button>
-                    <button class="btn btn-outline-danger" onclick="act(${s.id}, false)"><i class="bi bi-x-lg"></i> Avvisa</button></div>`;
+                    <button class="btn btn-success btn-lg" onclick="act('${s.kind}', ${s.id}, true)"><i class="bi bi-check-lg"></i> Godkänn</button>
+                    <button class="btn btn-outline-danger" onclick="act('${s.kind}', ${s.id}, false)"><i class="bi bi-x-lg"></i> Avvisa</button></div>`;
             } else {
                 actions = `<div class="alert ${s.status === 'Verified' ? 'alert-success' : 'alert-secondary'} mt-3 text-center mb-0">
                     Redan ${s.status === 'Verified' ? 'godkänd' : 'avvisad'}.</div>`;
@@ -78,17 +88,17 @@
 
             content.innerHTML = `<div class="card"><div class="card-body">
                 <h5 class="card-title text-center">${esc(s.memberName)}</h5>
-                <p class="text-center text-muted small mb-3">${esc(s.seriesTypeName)} · ${esc(s.clubName)} · ${date}</p>
+                <p class="text-center text-muted small mb-3">${esc(s.kind === 'comp' ? 'Tävlingsresultat' : s.seriesTypeName)} · ${esc(s.clubName)} · ${date}</p>
                 ${body}${photo}${actions}</div></div>`;
         }
 
-        function act(id, approve) {
-            const url = approve ? '/umbraco/surface/Marken/VerifySeries' : '/umbraco/surface/Marken/RejectSeries';
-            if (!approve && !confirm('Avvisa serien?')) return;
+        function act(kind, id, approve) {
+            const url = approve ? '/umbraco/surface/Marken/VerifyEvidence' : '/umbraco/surface/Marken/RejectEvidence';
+            if (!approve && !confirm('Avvisa?')) return;
             fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token() },
-                body: JSON.stringify({ id })
+                body: JSON.stringify({ kind, id })
             })
             .then(r => r.json())
             .then(res => {

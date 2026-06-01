@@ -181,6 +181,12 @@
                                         <i class="bi bi-stopwatch"></i> Jag har skjutit en SNABBSERIE!
                                     </button>
                                 </div>
+                                <div class="col-12">
+                                    <button class="btn btn-outline-secondary w-100" onclick="openCompResultModal()">
+                                        <i class="bi bi-trophy"></i> Registrera tävlingsresultat (Precision / Fält / Milsnabb / Nat. helmatch)
+                                    </button>
+                                    <div class="form-text">Resultat från pistol.nu-tävlingar räknas automatiskt — använd detta bara för tävlingar på andra håll.</div>
+                                </div>
                             </div>
 
                             @* My submitted series this year *@
@@ -930,6 +936,72 @@
                     </button>
                 </div>
                 <div id="ssResult" style="display:none;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* ── Competition-result self-report modal (external comps) ── *@
+<div class="modal fade" id="compResultModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-fullscreen-sm-down">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-trophy text-warning"></i> Tävlingsresultat (extern tävling)</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <div id="crForm">
+                    <div class="mb-2">
+                        <label class="form-label small mb-1">Märke / gren</label>
+                        <select id="crFamily" class="form-select" onchange="crUpdateHint()">
+                            <option value="Precision">Precisionsskyttemärket</option>
+                            <option value="Falt">Fältskyttemärket</option>
+                            <option value="Milsnabb">Militär Snabbmatchmärket</option>
+                            <option value="NationellHelmatch">Märke i Nationell helmatch</option>
+                        </select>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small mb-1">Tävlingens namn</label>
+                        <input type="text" class="form-control" id="crName" placeholder="t.ex. Kretsmästerskap precision">
+                    </div>
+                    <div class="row g-2 mb-2">
+                        <div class="col-6">
+                            <label class="form-label small mb-1">Datum</label>
+                            <input type="text" class="form-control" id="crDate">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small mb-1">Vapengrupp</label>
+                            <select id="crWeapon" class="form-select">
+                                <option value="A">A</option><option value="B">B</option>
+                                <option value="C" selected>C</option><option value="R">R</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="row g-2 mb-2">
+                        <div class="col-6" id="crDimWrap">
+                            <label class="form-label small mb-1" id="crDimLabel">Antal serier</label>
+                            <select id="crDim" class="form-select"></select>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small mb-1" id="crTotalLabel">Totalpoäng</label>
+                            <input type="number" class="form-control" id="crTotal" min="0">
+                        </div>
+                    </div>
+                    <div class="alert alert-light border small" id="crHint"></div>
+                    <div id="crClubWrap" class="mb-2" style="display:none;">
+                        <label class="form-label small mb-1">Klubb (för validering)</label>
+                        <select id="crClub" class="form-select"></select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small mb-1"><i class="bi bi-camera"></i> Bevis/foto (valfritt)</label>
+                        <input type="file" class="form-control" id="crPhoto" accept="image/*,application/pdf" capture="environment">
+                    </div>
+                    <button type="button" class="btn btn-success btn-lg w-100" onclick="crSave()">
+                        <i class="bi bi-send"></i> Skicka för validering
+                    </button>
+                    <div class="form-text mt-1">Tre tävlingar/år krävs för märket (två för Nationell helmatch). Skicka in ett resultat per tävling.</div>
+                </div>
+                <div id="crResult" style="display:none;"></div>
             </div>
         </div>
     </div>
@@ -2864,16 +2936,27 @@ function loadMySeries(year) {
                 const badge = s.status === 'Verified' ? '<span class="badge bg-success">Godkänd</span>'
                     : s.status === 'Rejected' ? '<span class="badge bg-danger">Avvisad</span>'
                     : '<span class="badge bg-secondary">Väntar</span>';
-                const desc = s.seriesType === 'Precision'
-                    ? `Guldserie <strong>${s.total} p</strong> <span class="text-muted">(krav ${s.threshold}, ${escapeHtmlMarken(s.weaponGroup)})</span>${s.qualifies ? '' : ' <span class="text-warning small">under krav</span>'}`
-                    : `Snabbserie ${escapeHtmlMarken(s.claimedLevel)} <span class="text-muted">(${escapeHtmlMarken(s.targetName)})</span>`;
-                const date = s.seriesDate ? new Date(s.seriesDate).toLocaleDateString('sv-SE') : '';
+                const dateRaw = s.kind === 'comp' ? s.competitionDate : s.seriesDate;
+                const date = dateRaw ? new Date(dateRaw).toLocaleDateString('sv-SE') : '';
                 return `<div class="d-flex justify-content-between align-items-center py-1 border-bottom">
-                    <span>${desc} <span class="text-muted small">${date}</span></span> ${badge}</div>`;
+                    <span>${markenEvidenceDesc(s)} <span class="text-muted small">${date}</span></span> ${badge}</div>`;
             }).join('');
             updateMarkenEmptyState();
         })
         .catch(() => { card.style.display = 'none'; });
+}
+
+// Shared description for any evidence item (Guldserie / Snabbserie / competition result).
+function markenEvidenceDesc(s) {
+    if (s.kind === 'comp') {
+        const lvl = s.reachedLevel
+            ? ` <span class="badge bg-light text-dark border">${escapeHtmlMarken(s.reachedLevel)}</span>`
+            : ' <span class="text-warning small">under krav</span>';
+        return `${escapeHtmlMarken(s.familyName)} – ${escapeHtmlMarken(s.competitionName)}: <strong>${s.total}</strong> <span class="text-muted">(${escapeHtmlMarken(s.weaponGroup)})</span>${lvl}`;
+    }
+    return s.seriesType === 'Precision'
+        ? `Guldserie <strong>${s.total} p</strong> <span class="text-muted">(krav ${s.threshold}, ${escapeHtmlMarken(s.weaponGroup)})</span>${s.qualifies ? '' : ' <span class="text-warning small">under krav</span>'}`
+        : `Snabbserie ${escapeHtmlMarken(s.claimedLevel)} <span class="text-muted">(${escapeHtmlMarken(s.targetName)})</span>`;
 }
 
 // ── Validation queue (board / Skjutledare) ─────────────────────────
@@ -2884,7 +2967,7 @@ function loadValidationQueue() {
     fetch('/umbraco/surface/Marken/GetPendingSeries')
         .then(r => r.json())
         .then(d => {
-            const list = (d.series || []);
+            const list = (d.items || []);
             if (!d.success || list.length === 0) { card.style.display = 'none'; updateMarkenEmptyState(); return; }
             card.style.display = 'block';
             content.innerHTML = list.map(renderQueueItem).join('');
@@ -2894,34 +2977,34 @@ function loadValidationQueue() {
 }
 
 function renderQueueItem(s) {
-    const desc = s.seriesType === 'Precision'
-        ? `Guldserie <strong>${s.total} p</strong> <span class="text-muted">(krav ${s.threshold}, ${escapeHtmlMarken(s.weaponGroup)})</span>${s.qualifies ? '' : ' <span class="text-warning small">under krav</span>'}`
-        : `Snabbserie ${escapeHtmlMarken(s.claimedLevel)} <span class="text-muted">(${escapeHtmlMarken(s.targetName)} · ${escapeHtmlMarken(s.speedRequirement || '')})</span>`;
-    const photo = s.hasPhoto ? ` <a href="/umbraco/surface/Marken/GetSeriePhoto?id=${s.id}" target="_blank" rel="noopener"><i class="bi bi-camera"></i></a>` : '';
-    const shots = (s.seriesType === 'Precision' && s.shots) ? `<div class="small text-muted">${s.shots.map(escapeHtmlMarken).join(' · ')}</div>` : '';
+    const photoUrl = s.kind === 'comp'
+        ? `/umbraco/surface/Marken/GetCompResultPhoto?id=${s.id}`
+        : `/umbraco/surface/Marken/GetSeriePhoto?id=${s.id}`;
+    const photo = s.hasPhoto ? ` <a href="${photoUrl}" target="_blank" rel="noopener"><i class="bi bi-camera"></i></a>` : '';
+    const shots = (s.kind !== 'comp' && s.seriesType === 'Precision' && s.shots) ? `<div class="small text-muted">${s.shots.map(escapeHtmlMarken).join(' · ')}</div>` : '';
     return `<div class="border-bottom py-2">
         <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
-            <div><strong>${escapeHtmlMarken(s.memberName)}</strong> <span class="text-muted small">${escapeHtmlMarken(s.clubName || '')}</span><br>${desc}${photo}${shots}</div>
+            <div><strong>${escapeHtmlMarken(s.memberName)}</strong> <span class="text-muted small">${escapeHtmlMarken(s.clubName || '')}</span><br>${markenEvidenceDesc(s)}${photo}${shots}</div>
             <div class="text-nowrap">
-                <button class="btn btn-sm btn-success" onclick="queueAct(${s.id}, true)"><i class="bi bi-check-lg me-1"></i>Godkänn</button>
-                <button class="btn btn-sm btn-outline-danger" onclick="queueAct(${s.id}, false)"><i class="bi bi-x-lg me-1"></i>Avvisa</button>
+                <button class="btn btn-sm btn-success" onclick="queueAct('${s.kind}', ${s.id}, true)"><i class="bi bi-check-lg me-1"></i>Godkänn</button>
+                <button class="btn btn-sm btn-outline-danger" onclick="queueAct('${s.kind}', ${s.id}, false)"><i class="bi bi-x-lg me-1"></i>Avvisa</button>
             </div>
         </div></div>`;
 }
 
-function queueAct(id, approve) {
-    if (!approve && !confirm('Avvisa serien?')) return;
-    const url = approve ? '/umbraco/surface/Marken/VerifySeries' : '/umbraco/surface/Marken/RejectSeries';
+function queueAct(kind, id, approve) {
+    if (!approve && !confirm('Avvisa?')) return;
+    const url = approve ? '/umbraco/surface/Marken/VerifyEvidence' : '/umbraco/surface/Marken/RejectEvidence';
     fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getAntiForgeryTokenMarken() },
-        body: JSON.stringify({ id })
+        body: JSON.stringify({ kind, id })
     })
     .then(r => r.json())
     .then(res => {
         if (!res.success) { alert('Fel: ' + (res.message || 'Kunde inte uppdatera.')); return; }
         loadValidationQueue();
-        loadMarken(markenTabYear); // a verify may complete a guldfodring part
+        loadMarken(markenTabYear); // a verify may complete a guldfodring/family
     })
     .catch(() => alert('Något gick fel.'));
 }
@@ -2951,7 +3034,7 @@ function markenUploadPhoto(inputId) {
 let markenQrPoll = null;
 function markenStopStatusPoll() { if (markenQrPoll) { clearInterval(markenQrPoll); markenQrPoll = null; } }
 
-function markenRenderQr(container, res, modalId) {
+function markenRenderQr(container, res, modalId, kind) {
     const qr = `/umbraco/surface/Faltskytte/GenerateQrCode?url=${encodeURIComponent(res.verifyUrl)}`;
     container.innerHTML = `
         <div class="text-center" id="qrPending_${res.id}">
@@ -2962,15 +3045,18 @@ function markenRenderQr(container, res, modalId) {
             <div class="d-grid mt-3"><button class="btn btn-outline-secondary" data-bs-dismiss="modal">Stäng</button></div>
         </div>`;
     container.style.display = 'block';
-    markenStartStatusPoll(res.id, modalId, container);
+    markenStartStatusPoll(res.id, modalId, container, kind || 'series');
 }
 
-// Poll the shooter's own series so the screen updates the instant a functionary validates it
+// Poll the shooter's own evidence so the screen updates the instant a functionary validates it
 // (on their own device / via QR). On resolution: refresh the list behind, show a result, auto-close.
-function markenStartStatusPoll(id, modalId, container) {
+function markenStartStatusPoll(id, modalId, container, kind) {
     markenStopStatusPoll();
+    const statusUrl = kind === 'comp'
+        ? `/umbraco/surface/Marken/GetMyCompResultStatus?id=${id}`
+        : `/umbraco/surface/Marken/GetMySerieStatus?id=${id}`;
     markenQrPoll = setInterval(() => {
-        fetch(`/umbraco/surface/Marken/GetMySerieStatus?id=${id}`)
+        fetch(statusUrl)
             .then(r => r.json())
             .then(d => {
                 if (!d.success || (d.status !== 'Verified' && d.status !== 'Rejected')) return;
@@ -3073,8 +3159,77 @@ function ssSave() {
     }).catch(() => alert('Något gick fel.'));
 }
 
+// ── Competition-result self-report modal ───────────────────────────
+let crDatePicker = null;
+function openCompResultModal() {
+    document.getElementById('crForm').style.display = 'block';
+    document.getElementById('crResult').style.display = 'none';
+    document.getElementById('crName').value = '';
+    document.getElementById('crTotal').value = '';
+    document.getElementById('crPhoto').value = '';
+    crUpdateHint();
+    markenPopulateClubPicker('crClubWrap', 'crClub');
+    if (!crDatePicker && window.flatpickr) {
+        crDatePicker = flatpickr('#crDate', { locale: 'sv', dateFormat: 'Y-m-d', defaultDate: 'today', maxDate: 'today' });
+    }
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('compResultModal')).show();
+}
+function crUpdateHint() {
+    const fam = document.getElementById('crFamily').value;
+    const dimWrap = document.getElementById('crDimWrap');
+    const dimSel = document.getElementById('crDim');
+    const dimLabel = document.getElementById('crDimLabel');
+    const totalLabel = document.getElementById('crTotalLabel');
+    let hint = '';
+    if (fam === 'Precision') {
+        dimWrap.style.display = ''; dimLabel.textContent = 'Antal serier';
+        dimSel.innerHTML = '<option value="6">6 serier</option><option value="7">7 serier</option><option value="10">10 serier</option>';
+        totalLabel.textContent = 'Totalpoäng';
+        hint = '3 tävlingar/år. Krav beror på vapengrupp och antal serier.';
+    } else if (fam === 'Falt') {
+        dimWrap.style.display = ''; dimLabel.textContent = 'Antal stationer';
+        dimSel.innerHTML = '<option value="6">6 stationer</option><option value="7">7</option><option value="8">8</option><option value="9">9</option><option value="10">10</option>';
+        totalLabel.textContent = 'Antal träff';
+        hint = '3 tävlingar/år. Krav i antal träff beror på vapengrupp och antal stationer.';
+    } else { // Milsnabb / NationellHelmatch — single point total
+        dimWrap.style.display = 'none'; dimSel.innerHTML = '<option value="0">-</option>';
+        totalLabel.textContent = 'Totalpoäng';
+        hint = (fam === 'NationellHelmatch' ? '2' : '3') + ' tävlingar/år. Krav beror på vapengrupp.';
+    }
+    document.getElementById('crHint').innerHTML = '<i class="bi bi-info-circle"></i> ' + hint;
+}
+function crSave() {
+    const clubId = markenSelectedClubId('crClub');
+    if (!clubId) { alert('Du måste vara medlem i en klubb för att skicka in.'); return; }
+    const name = document.getElementById('crName').value.trim();
+    const total = parseInt(document.getElementById('crTotal').value) || 0;
+    if (!name) { alert('Ange tävlingens namn.'); return; }
+    if (total <= 0) { alert('Ange ditt totalresultat.'); return; }
+    markenUploadPhoto('crPhoto').then(photoRef => {
+        return fetch('/umbraco/surface/Marken/SubmitCompetitionResult', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getAntiForgeryTokenMarken() },
+            body: JSON.stringify({
+                family: document.getElementById('crFamily').value,
+                clubId,
+                competitionName: name,
+                competitionDate: document.getElementById('crDate').value,
+                weaponGroup: document.getElementById('crWeapon').value,
+                dim: parseInt(document.getElementById('crDim').value) || 0,
+                total,
+                photoRef
+            })
+        });
+    }).then(r => r.json()).then(res => {
+        if (!res.success) { alert('Fel: ' + (res.message || 'Kunde inte spara.')); return; }
+        document.getElementById('crForm').style.display = 'none';
+        markenRenderQr(document.getElementById('crResult'), res, 'compResultModal', 'comp');
+        loadMySeries(markenTabYear);
+    }).catch(() => alert('Något gick fel.'));
+}
+
 document.getElementById('marken-tab')?.addEventListener('shown.bs.tab', loadMarkenTab);
-['guldserieModal', 'snabbserieModal'].forEach(id => {
+['guldserieModal', 'snabbserieModal', 'compResultModal'].forEach(id => {
     document.getElementById(id)?.addEventListener('hidden.bs.modal', markenStopStatusPoll);
 });
 

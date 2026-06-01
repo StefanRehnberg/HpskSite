@@ -1641,7 +1641,7 @@ function loadClubMarkenQueue() {
     fetch(`/umbraco/surface/Marken/GetClubPendingSeries?clubId=${clubId}`)
         .then(r => r.json())
         .then(d => {
-            const list = (d.series || []);
+            const list = (d.items || []);
             if (!d.success || list.length === 0) { card.style.display = 'none'; return; }
             card.style.display = 'block';
             document.getElementById('clubMarkenQueueCount').textContent = `(${list.length})`;
@@ -1650,30 +1650,40 @@ function loadClubMarkenQueue() {
         .catch(() => { card.style.display = 'none'; });
 }
 
-function renderClubQueueItem(s, canValidate) {
-    const desc = s.seriesType === 'Precision'
+function markenEvidenceDescAdmin(s) {
+    if (s.kind === 'comp') {
+        const lvl = s.reachedLevel
+            ? ` <span class="badge bg-light text-dark border">${escapeMedalHtml(s.reachedLevel)}</span>`
+            : ' <span class="text-warning small">under krav</span>';
+        return `${escapeMedalHtml(s.familyName)} – ${escapeMedalHtml(s.competitionName)}: <strong>${s.total}</strong> <span class="text-muted">(${escapeMedalHtml(s.weaponGroup)})</span>${lvl}`;
+    }
+    return s.seriesType === 'Precision'
         ? `Guldserie <strong>${s.total} p</strong> <span class="text-muted">(krav ${s.threshold}, ${escapeMedalHtml(s.weaponGroup)})</span>${s.qualifies ? '' : ' <span class="text-warning small">under krav</span>'}`
         : `Snabbserie ${escapeMedalHtml(s.claimedLevel)} <span class="text-muted">(${escapeMedalHtml(s.targetName)} · ${escapeMedalHtml(s.speedRequirement || '')})</span>`;
-    const shots = (s.seriesType === 'Precision' && s.shots) ? `<div class="small text-muted">${s.shots.map(escapeMedalHtml).join(' · ')}</div>` : '';
-    const photo = s.hasPhoto ? ` <a href="/umbraco/surface/Marken/GetSeriePhoto?id=${s.id}" target="_blank" rel="noopener" title="Foto"><i class="bi bi-camera"></i></a>` : '';
+}
+
+function renderClubQueueItem(s, canValidate) {
+    const shots = (s.kind !== 'comp' && s.seriesType === 'Precision' && s.shots) ? `<div class="small text-muted">${s.shots.map(escapeMedalHtml).join(' · ')}</div>` : '';
+    const photoUrl = s.kind === 'comp' ? `/umbraco/surface/Marken/GetCompResultPhoto?id=${s.id}` : `/umbraco/surface/Marken/GetSeriePhoto?id=${s.id}`;
+    const photo = s.hasPhoto ? ` <a href="${photoUrl}" target="_blank" rel="noopener" title="Foto"><i class="bi bi-camera"></i></a>` : '';
     const buttons = canValidate
         ? `<div class="text-nowrap mt-1">
-             <button class="btn btn-sm btn-success" onclick="clubQueueAct(${s.id}, true)"><i class="bi bi-check-lg me-1"></i>Godkänn</button>
-             <button class="btn btn-sm btn-outline-danger" onclick="clubQueueAct(${s.id}, false)"><i class="bi bi-x-lg me-1"></i>Avvisa</button>
+             <button class="btn btn-sm btn-success" onclick="clubQueueAct('${s.kind}', ${s.id}, true)"><i class="bi bi-check-lg me-1"></i>Godkänn</button>
+             <button class="btn btn-sm btn-outline-danger" onclick="clubQueueAct('${s.kind}', ${s.id}, false)"><i class="bi bi-x-lg me-1"></i>Avvisa</button>
            </div>`
         : '<div class="small text-muted mt-1">Endast styrelse/skjutledare kan validera.</div>';
     return `<div class="border-bottom py-2">
         <div><strong>${escapeMedalHtml(s.memberName)}</strong></div>
-        <div>${desc}${photo}</div>${shots}${buttons}</div>`;
+        <div>${markenEvidenceDescAdmin(s)}${photo}</div>${shots}${buttons}</div>`;
 }
 
-function clubQueueAct(id, approve) {
-    if (!approve && !confirm('Avvisa serien?')) return;
-    const url = approve ? '/umbraco/surface/Marken/VerifySeries' : '/umbraco/surface/Marken/RejectSeries';
+function clubQueueAct(kind, id, approve) {
+    if (!approve && !confirm('Avvisa?')) return;
+    const url = approve ? '/umbraco/surface/Marken/VerifyEvidence' : '/umbraco/surface/Marken/RejectEvidence';
     fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getAntiForgeryToken() },
-        body: JSON.stringify({ id })
+        body: JSON.stringify({ kind, id })
     })
     .then(r => r.json())
     .then(res => {

@@ -192,7 +192,7 @@ namespace HpskSite.Controllers
             }
 
             var id = await _ledger.InsertSeriesAsync(series);
-            var token = _verifyProtector.Protect(id.ToString());
+            var token = _verifyProtector.Protect("series:" + id);
 
             return Json(new
             {
@@ -261,7 +261,11 @@ namespace HpskSite.Controllers
             if (member == null) return Json(new { success = false, message = "Inte inloggad." });
             int y = year ?? DateTime.Now.Year;
             var series = await _ledger.GetSeriesForMemberAsync(member.Id, y);
-            return Json(new { success = true, year = y, series = series.Select(SerieDto) });
+            var items = series.Select(SerieDto).ToList();
+            foreach (var fam in MarkenFamilies.CompetitionFamilies)
+                foreach (var r in await _compService.GetSelfReportedForMemberAsync(member.Id, fam.Key, y))
+                    items.Add(CompResultDto(r));
+            return Json(new { success = true, year = y, series = items });
         }
 
         /// <summary>
@@ -279,6 +283,143 @@ namespace HpskSite.Controllers
             return Json(new { success = true, status = s.Status });
         }
 
+        // ── External competition self-report (competition-driven families) ──
+
+        public class SubmitCompResultRequest
+        {
+            public string Family { get; set; } = "";
+            public int ClubId { get; set; }
+            public string CompetitionName { get; set; } = "";
+            public string? CompetitionDate { get; set; }
+            public string? Location { get; set; }
+            public string WeaponGroup { get; set; } = "C";
+            public int Dim { get; set; }       // series count (precision-shape) or station count (Fält)
+            public int Total { get; set; }     // points or hits
+            public string? PhotoRef { get; set; }
+            public string? Notes { get; set; }
+        }
+
+        /// <summary>
+        /// Submit a result from an external (non-pistol.nu) competition toward a competition-driven
+        /// märke. Lands Pending in the chosen club's queue; returns a QR verify token.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SubmitCompetitionResult([FromBody] SubmitCompResultRequest req)
+        {
+            var member = await GetCurrentMemberAsync();
+            if (member == null) return Json(new { success = false, message = "Inte inloggad." });
+            if (req == null) return Json(new { success = false, message = "Ogiltig begäran." });
+
+            var def = MarkenFamilies.Get(req.Family);
+            if (def == null || def.Pattern != MarkenPattern.CompetitionAchievement)
+                return Json(new { success = false, message = "Ogiltig märkestyp." });
+            if (!MemberBelongsToClub(member, req.ClubId))
+                return Json(new { success = false, message = "Välj en klubb du är medlem i." });
+            var group = Marken.WeaponGroup(req.WeaponGroup);
+            if (group == null) return Json(new { success = false, message = "Ogiltig vapengrupp." });
+            if (req.Total <= 0) return Json(new { success = false, message = "Ange ditt totalresultat." });
+            if (string.IsNullOrWhiteSpace(req.CompetitionName))
+                return Json(new { success = false, message = "Ange tävlingens namn." });
+
+            DateTime date = DateTime.TryParse(req.CompetitionDate, out var d) ? d : DateTime.Now;
+            var reached = def.LevelForCompetition(group, req.Dim, req.Total);
+
+            var r = new MarkenCompetitionResult
+            {
+                MemberId = member.Id,
+                ClubId = req.ClubId,
+                BadgeFamily = req.Family,
+                Year = date.Year,
+                CompetitionDate = date,
+                CompetitionName = req.CompetitionName.Trim(),
+                Location = string.IsNullOrWhiteSpace(req.Location) ? null : req.Location!.Trim(),
+                WeaponGroup = group,
+                Dim = req.Dim,
+                Total = req.Total,
+                ReachedLevel = reached,
+                Status = Marken.SeriesStatusPending,
+                ProofFileRef = string.IsNullOrWhiteSpace(req.PhotoRef) ? null : req.PhotoRef,
+                Notes = string.IsNullOrWhiteSpace(req.Notes) ? null : req.Notes!.Trim(),
+                EnteredByMemberId = member.Id
+            };
+            var id = await _compService.InsertSelfReportedAsync(r);
+            var token = _verifyProtector.Protect("comp:" + id);
+
+            return Json(new
+            {
+                success = true,
+                id,
+                reachedLevel = reached,
+                qualifies = reached != null,
+                verifyToken = token,
+                verifyUrl = $"{Request.Scheme}://{Request.Host}/marken/verifiera?t={Uri.EscapeDataString(token)}",
+                message = reached == null
+                    ? "Sparat. Resultatet når inte märkeskravet men kan ändå valideras."
+                    : "Sparat och skickat för validering."
+            });
+        }
+
+        /// <summary>The current member's self-reported competition results for a family.</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetMyCompetitionResults(string family, int? year)
+        {
+            var member = await GetCurrentMemberAsync();
+            if (member == null) return Json(new { success = false });
+            var list = await _compService.GetSelfReportedForMemberAsync(member.Id, family, year);
+            return Json(new { success = true, results = list.Select(CompResultDto) });
+        }
+
+        /// <summary>Poll status of the member's own self-reported result (QR live-update).</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetMyCompResultStatus(int id)
+        {
+            var member = await GetCurrentMemberAsync();
+            if (member == null) return Json(new { success = false });
+            var r = await _compService.GetSelfReportedAsync(id);
+            if (r == null || r.MemberId != member.Id) return Json(new { success = false });
+            return Json(new { success = true, status = r.Status });
+        }
+
+        /// <summary>Stream a self-reported result's proof photo — owner, authorized validator, or site admin.</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetCompResultPhoto(int id)
+        {
+            var r = await _compService.GetSelfReportedAsync(id);
+            if (r == null || string.IsNullOrEmpty(r.ProofFileRef)) return NotFound();
+            var viewer = await GetCurrentMemberAsync();
+            if (viewer == null) return Unauthorized();
+            bool ok = viewer.Id == r.MemberId || await _auth.IsCurrentUserAdminAsync() || await CanSignOffForClubAsync(r.ClubId);
+            if (!ok) return Forbid();
+            var path = _proofStorage.GetFilePath(r.ProofFileRef);
+            if (path == null) return NotFound();
+            var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            return File(stream, StandardMedalProofStorage.ContentTypeFor(r.ProofFileRef));
+        }
+
+        private object CompResultDto(MarkenCompetitionResult r) => new
+        {
+            kind = "comp",
+            id = r.Id,
+            memberId = r.MemberId,
+            memberName = _memberService.GetById(r.MemberId)?.Name,
+            clubId = r.ClubId,
+            clubName = _clubService.GetClubNameById(r.ClubId),
+            family = r.BadgeFamily,
+            familyName = MarkenFamilies.DisplayName(r.BadgeFamily),
+            year = r.Year,
+            competitionDate = r.CompetitionDate,
+            competitionName = r.CompetitionName,
+            location = r.Location,
+            weaponGroup = r.WeaponGroup,
+            dim = r.Dim,
+            total = r.Total,
+            reachedLevel = r.ReachedLevel,
+            status = r.Status,
+            hasPhoto = !string.IsNullOrEmpty(r.ProofFileRef),
+            validatedDate = r.ValidatedDate
+        };
+
         // ── Validation queue + verify (board / Skjutledare) ───────────
 
         /// <summary>Pending series the current user is authorized to validate (their board/Skjutledare clubs).</summary>
@@ -290,30 +431,74 @@ namespace HpskSite.Controllers
 
             var (all, clubIds) = await GetMarkenSignoffScopeAsync();
             if (!all && clubIds.Count == 0)
-                return Json(new { success = true, series = Array.Empty<object>() });
+                return Json(new { success = true, items = Array.Empty<object>() });
 
-            var pending = await _ledger.GetPendingSeriesAsync(all ? null : clubIds);
-            return Json(new { success = true, series = pending.Select(SerieDto) });
+            var ids = all ? null : (IEnumerable<int>)clubIds;
+            var series = await _ledger.GetPendingSeriesAsync(ids);
+            var comps = await _compService.GetPendingSelfReportedAsync(ids);
+            var items = series.Select(SerieDto).Concat(comps.Select(CompResultDto)).ToList();
+            return Json(new { success = true, items });
         }
 
-        /// <summary>Series detail for the QR verify page — only returned to an authorized validator.</summary>
+        /// <summary>Evidence detail for the QR verify page — only returned to an authorized validator.</summary>
         [HttpGet]
         public async Task<IActionResult> GetSerieForVerify(string token)
         {
             if (string.IsNullOrWhiteSpace(token)) return Json(new { success = false, message = "Ogiltig länk." });
-            int id;
-            try { id = int.Parse(_verifyProtector.Unprotect(token)); }
+            string raw;
+            try { raw = _verifyProtector.Unprotect(token); }
             catch { return Json(new { success = false, message = "Ogiltig eller utgången länk." }); }
+
+            var (kind, id) = ParseEvidenceToken(raw);
+            var me = await GetCurrentMemberAsync();
+            if (me == null) return Json(new { success = false, message = "Du måste vara inloggad.", needsLogin = true });
+
+            if (kind == "comp")
+            {
+                var r = await _compService.GetSelfReportedAsync(id);
+                if (r == null) return Json(new { success = false, message = "Resultatet hittades inte." });
+                if (!await CanSignOffForClubAsync(r.ClubId))
+                    return Json(new { success = false, message = "Du har inte behörighet att validera för den här klubben." });
+                return Json(new { success = true, serie = CompResultDto(r) });
+            }
 
             var series = await _ledger.GetSeriesAsync(id);
             if (series == null) return Json(new { success = false, message = "Serien hittades inte." });
-
-            var me = await GetCurrentMemberAsync();
-            if (me == null) return Json(new { success = false, message = "Du måste vara inloggad.", needsLogin = true });
             if (!await CanValidateSeriesAsync(series))
                 return Json(new { success = false, message = "Du har inte behörighet att validera för den här klubben." });
-
             return Json(new { success = true, serie = SerieDto(series) });
+        }
+
+        private static (string Kind, int Id) ParseEvidenceToken(string raw)
+        {
+            var parts = raw.Split(':', 2);
+            if (parts.Length == 2 && int.TryParse(parts[1], out var i)) return (parts[0], i);
+            return ("series", int.TryParse(raw, out var j) ? j : 0); // legacy plain-id = series
+        }
+
+        public class EvidenceActionRequest { public string Kind { get; set; } = "series"; public int Id { get; set; } }
+
+        /// <summary>Unified validate — dispatches to series or competition-result by kind.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> VerifyEvidence([FromBody] EvidenceActionRequest request)
+            => request?.Kind == "comp" ? await SetCompResultStatus(request.Id, Marken.StatusVerified)
+                                       : await SetSeriesStatus(request?.Id ?? 0, Marken.StatusVerified);
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> RejectEvidence([FromBody] EvidenceActionRequest request)
+            => request?.Kind == "comp" ? await SetCompResultStatus(request.Id, Marken.StatusRejected)
+                                       : await SetSeriesStatus(request?.Id ?? 0, Marken.StatusRejected);
+
+        private async Task<IActionResult> SetCompResultStatus(int id, string status)
+        {
+            var r = await _compService.GetSelfReportedAsync(id);
+            if (r == null) return Json(new { success = false, message = "Resultatet hittades inte." });
+            if (!await CanSignOffForClubAsync(r.ClubId)) return Json(new { success = false, message = "Åtkomst nekad." });
+            var (ok, msg) = await _compService.SetSelfReportedStatusAsync(id, status, await GetCurrentMemberIdAsync());
+            if (ok && status == Marken.StatusVerified) await RecomputeCompetitionFamiliesAsync(r.MemberId);
+            return Json(new { success = ok, message = ok ? (status == Marken.StatusVerified ? "Godkänd." : "Avvisad.") : msg });
         }
 
         [HttpPost]
@@ -353,8 +538,10 @@ namespace HpskSite.Controllers
             if (!await _auth.IsClubAdminForClub(clubId))
                 return Json(new { success = false, message = "Åtkomst nekad." });
 
-            var pending = await _ledger.GetPendingSeriesAsync(new[] { clubId });
-            return Json(new { success = true, canValidate = await CanSignOffForClubAsync(clubId), series = pending.Select(SerieDto) });
+            var series = await _ledger.GetPendingSeriesAsync(new[] { clubId });
+            var comps = await _compService.GetPendingSelfReportedAsync(new[] { clubId });
+            var items = series.Select(SerieDto).Concat(comps.Select(CompResultDto)).ToList();
+            return Json(new { success = true, canValidate = await CanSignOffForClubAsync(clubId), items });
         }
 
         // ── Club secretary: reads ─────────────────────────────────────
@@ -906,6 +1093,7 @@ namespace HpskSite.Controllers
 
             return new
             {
+                kind = "series",
                 id = s.Id,
                 memberId = s.MemberId,
                 memberName = _memberService.GetById(s.MemberId)?.Name,
