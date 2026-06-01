@@ -1043,7 +1043,16 @@ Both land **Pending** in the chosen club's **validation queue** and are verified
 
 **Operator steps:** run `Migrations/create-marken-tables.sql` AND `Migrations/create-marken-series-table.sql` in SSMS; add the `club.markenSignoffSkjutledare` property. No Umbraco node needed for `/marken/verifiera` (routed controller). Full rebuild (C#).
 
-**Phase-1 limits (intentional):** R weapon group → C thresholds (verify w/ SPSF). Base valörer come from Skyttetrappan/manual award (a Guldserie feeds the yearly Guldfodring, not the base grundmärke). Phase 2 = Fält/Precision/Milsnabb/NatHelmatch/Springskytte/Luftpistol märken + higher badges (Elit/Mästar) reusing `MarkenSeries.ClaimedLevel` (tables in `MARKEN_SYSTEM.md` Appendix A). **Compiles green; not yet load-tested (Razor runtime-compiled — load the tab, both modals, the QR verify page, and the secretary tab once after deploy + SQL).**
+**Phase-1 limits (intentional):** R weapon group → C thresholds (verify w/ SPSF). Base valörer come from Skyttetrappan/manual award (a Guldserie feeds the yearly Guldfodring, not the base grundmärke).
+
+### Märken Phase 2 ✅ (2026-06-01) — discipline + series-proof families
+Generalized, data-driven family framework (`Models/MarkenFamilies.cs` — all thresholds/ladders/prereqs from SHB kap 5, Fält verified from `Documentation/FaltskytteMarketTables.png`). Two patterns:
+- **Competition-achievement** (Precision/Fält/Milsnabb/Nationell helmatch): earned at 3 comps/year (2 for NatHelmatch) meeting point/hit thresholds. `Services/MarkenCompetitionService.cs` harvests the member's **hosted** results live per discipline (precision-shape = sum series totals; Fält = sum per-station hits; comp year/name via `IUmbracoContextAccessor`) + merges **verified self-reported** external results (`MarkenCompetitionResult` table + `create-marken-competition-result-table.sql`). Auto-awards the earned valör (`MemberBadge`, Source=Auto) + family årtalsmärke years (first guld-year earns; later = ånyo). Progression is lenient (highest supported level), documented.
+- **Series-proof** (Luftpistol +5-series, Elit 5 precision + 5 snabb; needs guldmärke): reuse `MarkenSeries` via `SubmitProofSeries` (total → highest valör); `RecomputeSeriesProofFamiliesAsync` auto-awards. Luftpistol årtalsmärke = 1 step/year, others 3.
+
+**Unified validation:** the queue + QR verify now handle both evidence kinds — `GetPendingSeries`/`GetClubPendingSeries` return mixed `items` with a `kind`; `VerifyEvidence`/`RejectEvidence {kind,id}`; QR token `"series:id"`/`"comp:id"`. `GetArtalsmarkeStatusAsync` + `MarkenFamilies.Artalsmarke` are family-aware. Member tab shows all families (`renderFamilies`) with entry modals for comp results + series-proof. **Deferred to Phase 3:** Mästar (5.2), Stormästar (5.3), Springskytte (5.6).
+
+**Deploy (Phase 2):** full rebuild + run `Migrations/create-marken-competition-result-table.sql` in SSMS (the only new table; auto-award writes the existing MemberBadge/Qualification tables; series-proof reuses MarkenSeries). **Compiles green; not yet load-tested — verify the hosted-result harvest against real comp data first (weapon-group parse, series/station counts).**
 
 ### Finals Start List for Precision Competitions (2026-05-21)
 
