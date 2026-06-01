@@ -1008,7 +1008,7 @@ namespace HpskSite.Controllers
         /// series at that level (Elit also needs ≥ required snabb series). Returns the highest valör
         /// across years + the guld-met years + this-year counts.
         /// </summary>
-        private async Task<(string? Earned, List<int> GuldYears, int ThisYearAtGuld, int ThisYearTotal)>
+        private async Task<(string? Earned, List<int> GuldYears, List<MarkenSeries> ThisYear)>
             AnalyzeSeriesProofAsync(int memberId, MarkenFamilyDef def, int displayYear)
         {
             var series = await _ledger.GetVerifiedSeriesByFamilyAsync(memberId, def.Key);
@@ -1021,35 +1021,46 @@ namespace HpskSite.Controllers
                 if (lvl == Marken.LevelGuld) guldYears.Add(yg.Key);
             }
             guldYears.Sort();
-            var thisYear = series.Where(s => s.Year == displayYear).ToList();
-            int atGuld = def.SeriesThreshold != null ? thisYear.Count(s => s.Total >= def.SeriesThreshold[2]) : 0;
-            return (earned, guldYears, atGuld, thisYear.Count);
+            return (earned, guldYears, series.Where(s => s.Year == displayYear).ToList());
+        }
+
+        /// <summary>Count of series qualifying for a level (Elit = min of precision + snabb counts).</summary>
+        private static int SeriesProofCount(MarkenFamilyDef def, List<MarkenSeries> series, string level)
+        {
+            if (def.SeriesThreshold == null) return 0;
+            int thr = def.SeriesThreshold[Marken.LevelOrdinal(level) - 1];
+            if (def.RequiresSpeedSeriesToo)
+            {
+                int prec = series.Count(s => s.SeriesType == Marken.SeriesTypePrecision && s.Total >= thr);
+                int speed = series.Count(s => s.SeriesType == Marken.SeriesTypeSpeed && s.Total >= thr);
+                return Math.Min(prec, speed);
+            }
+            return series.Count(s => s.Total >= thr);
         }
 
         /// <summary>Highest valör a set of verified series satisfies for a series-proof family.</summary>
         private static string? SeriesProofLevel(MarkenFamilyDef def, List<MarkenSeries> series)
         {
-            if (def.SeriesThreshold == null) return null;
             foreach (var level in new[] { Marken.LevelGuld, Marken.LevelSilver, Marken.LevelBrons })
-            {
-                int thr = def.SeriesThreshold[Marken.LevelOrdinal(level) - 1];
-                if (def.RequiresSpeedSeriesToo)
-                {
-                    int prec = series.Count(s => s.SeriesType == Marken.SeriesTypePrecision && s.Total >= thr);
-                    int speed = series.Count(s => s.SeriesType == Marken.SeriesTypeSpeed && s.Total >= thr);
-                    if (prec >= def.SeriesRequired && speed >= def.SeriesRequired) return level;
-                }
-                else if (series.Count(s => s.Total >= thr) >= def.SeriesRequired) return level;
-            }
+                if (SeriesProofCount(def, series, level) >= def.SeriesRequired) return level;
             return null;
         }
+
+        /// <summary>Next valör up from the current one (null current → Brons; Guld → null).</summary>
+        private static string? NextLevel(string? earned) => earned switch
+        {
+            null or "" => Marken.LevelBrons,
+            Marken.LevelBrons => Marken.LevelSilver,
+            Marken.LevelSilver => Marken.LevelGuld,
+            _ => null
+        };
 
         /// <summary>Auto-award series-proof family valörer + årtalsmärke years (lazy on read / on validation).</summary>
         private async Task RecomputeSeriesProofFamiliesAsync(int memberId)
         {
             foreach (var fam in MarkenFamilies.SeriesProofFamilies)
             {
-                (string? earned, List<int> guldYears, int atGuld, int total) tuple;
+                (string? earned, List<int> guldYears, List<MarkenSeries> thisYear) tuple;
                 try { tuple = await AnalyzeSeriesProofAsync(memberId, fam, DateTime.Now.Year); }
                 catch { continue; }
                 if (!string.IsNullOrEmpty(tuple.earned))
@@ -1068,6 +1079,8 @@ namespace HpskSite.Controllers
                 .Select(b => b.LevelOrdinal).DefaultIfEmpty(0).Max();
 
             var list = new List<object>();
+
+            // Competition-driven families — one section each, always shown.
             foreach (var fam in MarkenFamilies.CompetitionFamilies)
             {
                 CompFamilyAnalysis a;
@@ -1078,61 +1091,71 @@ namespace HpskSite.Controllers
                 var top = badges.Where(b => b.LevelOrdinal is >= 1 and <= 3)
                     .OrderByDescending(b => b.LevelOrdinal).FirstOrDefault();
                 var ladder = await _ledger.GetArtalsmarkeStatusAsync(memberId, fam.Key, includeUnverified: false);
+                var earned = top?.Level ?? a.EarnedLevel;
+                bool prereqOk = fam.PrereqPistolskytteLevel == null || pistolTop >= Marken.LevelOrdinal(fam.PrereqPistolskytteLevel);
 
-                bool hasActivity = top != null || a.ThisYear.Count > 0 || ladder.FulfilledYears > 0 || !string.IsNullOrEmpty(a.EarnedLevel);
-                if (!hasActivity) continue;
-
-                bool prereqOk = fam.PrereqPistolskytteLevel == null
-                    || pistolTop >= Marken.LevelOrdinal(fam.PrereqPistolskytteLevel);
+                var next = NextLevel(earned);
+                string status;
+                if (next == null)
+                    status = ladder.FulfilledYears > 0
+                        ? $"Guldmärket uppnått · {ladder.CurrentName}"
+                        : "Guldmärket uppnått.";
+                else
+                {
+                    int atNext = a.ThisYear.Count(e => Marken.LevelOrdinal(e.ReachedLevel) >= Marken.LevelOrdinal(next));
+                    status = $"Saknar {atNext}/{a.CompetitionsRequired} tävlingar på {next.ToLowerInvariant()}-nivå i år "
+                           + $"(har {atNext}) — krets-/landsdels-/riks-/nationell tävling.";
+                }
 
                 list.Add(new
                 {
                     family = fam.Key,
                     displayName = fam.DisplayName,
                     pattern = "comp",
-                    earnedLevel = top?.Level ?? a.EarnedLevel,
+                    earnedLevel = earned,
+                    nextLevel = next,
+                    statusText = status,
                     compsRequired = a.CompetitionsRequired,
-                    thisYearLevel = a.ThisYearLevel,
-                    thisYearComps = a.ThisYear.Select(e => new
-                    {
-                        name = e.CompetitionName,
-                        group = e.WeaponGroup,
-                        total = e.Total,
-                        level = e.ReachedLevel,
-                        source = e.Source
-                    }),
+                    thisYearComps = a.ThisYear.Select(e => new { name = e.CompetitionName, group = e.WeaponGroup, total = e.Total, level = e.ReachedLevel, source = e.Source }),
                     artalsmarke = new { current = ladder.CurrentName, fulfilledYears = ladder.FulfilledYears, next = ladder.NextName, nextAtYears = ladder.NextAtYears },
                     prereqText = prereqOk ? null : fam.PrereqText
                 });
             }
 
-            // Series-proof families (Luftpistol / Elit).
+            // Series-proof families (Luftpistol / Elit) — one section each, always shown.
             foreach (var fam in MarkenFamilies.SeriesProofFamilies)
             {
-                (string? earned, List<int> guldYears, int atGuld, int total) sp;
+                (string? earned, List<int> guldYears, List<MarkenSeries> thisYear) sp;
                 try { sp = await AnalyzeSeriesProofAsync(memberId, fam, year); }
                 catch { continue; }
 
                 var badges = await _ledger.GetBadgesForMemberAsync(memberId, fam.Key);
                 var top = badges.Where(b => b.LevelOrdinal is >= 1 and <= 3).OrderByDescending(b => b.LevelOrdinal).FirstOrDefault();
                 var ladder = await _ledger.GetArtalsmarkeStatusAsync(memberId, fam.Key, includeUnverified: false);
+                var earned = top?.Level ?? sp.earned;
+                bool prereqOk = fam.PrereqPistolskytteLevel == null || pistolTop >= Marken.LevelOrdinal(fam.PrereqPistolskytteLevel);
 
-                bool hasActivity = top != null || sp.total > 0 || ladder.FulfilledYears > 0 || !string.IsNullOrEmpty(sp.earned);
-                if (!hasActivity) continue;
-
-                bool prereqOk = fam.PrereqPistolskytteLevel == null
-                    || pistolTop >= Marken.LevelOrdinal(fam.PrereqPistolskytteLevel);
+                var next = NextLevel(earned);
+                string status;
+                if (next == null)
+                    status = ladder.FulfilledYears > 0 ? $"Guldmärket uppnått · {ladder.CurrentName}" : "Guldmärket uppnått.";
+                else
+                {
+                    int atNext = SeriesProofCount(fam, sp.thisYear, next);
+                    status = $"Saknar {Math.Max(0, fam.SeriesRequired - atNext)} av {fam.SeriesRequired} serier på {next.ToLowerInvariant()}-nivå i år (har {atNext})"
+                           + (fam.RequiresSpeedSeriesToo ? " — av både precisions- och snabbserier." : ".");
+                }
 
                 list.Add(new
                 {
                     family = fam.Key,
                     displayName = fam.DisplayName,
                     pattern = "series",
-                    earnedLevel = top?.Level ?? sp.earned,
+                    earnedLevel = earned,
+                    nextLevel = next,
+                    statusText = status,
                     seriesRequired = fam.SeriesRequired,
                     requiresSpeedSeriesToo = fam.RequiresSpeedSeriesToo,
-                    thisYearAtGuld = sp.atGuld,
-                    thisYearTotal = sp.total,
                     artalsmarke = new { current = ladder.CurrentName, fulfilledYears = ladder.FulfilledYears, next = ladder.NextName, nextAtYears = ladder.NextAtYears },
                     prereqText = prereqOk ? null : fam.PrereqText
                 });
