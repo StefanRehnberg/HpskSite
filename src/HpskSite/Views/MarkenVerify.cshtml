@@ -62,6 +62,10 @@
                        <span class="text-muted">(vapengrupp ${esc(s.weaponGroup)}${s.dim ? ', ' + s.dim : ''})</span></p>
                     <p class="text-center text-muted">${esc(s.competitionName)}</p>
                     <p class="text-center">${lvl}</p>`;
+            } else if (s.family && s.family !== 'Pistolskytte') {
+                const typ = s.seriesType === 'Speed' ? 'snabbserie' : 'serie';
+                body = `<p class="text-center mb-1"><span class="fs-5 fw-bold">${esc(s.familyName)} – ${typ}</span></p>
+                    <p class="text-center"><span class="fs-4 fw-bold">${s.total} p</span> <span class="text-muted">(nivå ${esc(s.claimedLevel)})</span></p>`;
             } else if (s.seriesType === 'Precision') {
                 const shots = (s.shots || []).map(v => `<span class="shot-pill">${esc(v)}</span>`).join('');
                 body = `<div class="text-center mb-2">${shots}</div>

@@ -1657,6 +1657,10 @@ function markenEvidenceDescAdmin(s) {
             : ' <span class="text-warning small">under krav</span>';
         return `${escapeMedalHtml(s.familyName)} – ${escapeMedalHtml(s.competitionName)}: <strong>${s.total}</strong> <span class="text-muted">(${escapeMedalHtml(s.weaponGroup)})</span>${lvl}`;
     }
+    if (s.family && s.family !== 'Pistolskytte') {
+        const typ = s.seriesType === 'Speed' ? 'snabbserie' : 'serie';
+        return `${escapeMedalHtml(s.familyName)} ${typ} <strong>${s.total} p</strong> <span class="text-muted">(nivå ${escapeMedalHtml(s.claimedLevel)})</span>${s.qualifies ? '' : ' <span class="text-warning small">under krav</span>'}`;
+    }
     return s.seriesType === 'Precision'
         ? `Guldserie <strong>${s.total} p</strong> <span class="text-muted">(krav ${s.threshold}, ${escapeMedalHtml(s.weaponGroup)})</span>${s.qualifies ? '' : ' <span class="text-warning small">under krav</span>'}`
         : `Snabbserie ${escapeMedalHtml(s.claimedLevel)} <span class="text-muted">(${escapeMedalHtml(s.targetName)} · ${escapeMedalHtml(s.speedRequirement || '')})</span>`;

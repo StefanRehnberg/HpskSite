@@ -229,6 +229,15 @@ namespace HpskSite.Services
                 memberId, family, year, Marken.SeriesTypeSpeed, Marken.StatusVerified, level);
         }
 
+        /// <summary>All Verified series for a family (all years) — used by the series-proof analyzer.</summary>
+        public async Task<List<MarkenSeries>> GetVerifiedSeriesByFamilyAsync(int memberId, string family)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            return await db.FetchAsync<MarkenSeries>(
+                "WHERE MemberId = @0 AND BadgeFamily = @1 AND Status = @2 ORDER BY [Year], Id",
+                memberId, family, Marken.StatusVerified);
+        }
+
         /// <summary>Pending series awaiting validation, scoped to a set of clubs (the queue). Pass null for all (site admin).</summary>
         public async Task<List<MarkenSeries>> GetPendingSeriesAsync(IEnumerable<int>? clubIds)
         {

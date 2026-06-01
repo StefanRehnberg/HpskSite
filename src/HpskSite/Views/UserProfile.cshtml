@@ -187,6 +187,11 @@
                                     </button>
                                     <div class="form-text">Resultat från pistol.nu-tävlingar räknas automatiskt — använd detta bara för tävlingar på andra håll.</div>
                                 </div>
+                                <div class="col-12">
+                                    <button class="btn btn-outline-secondary w-100" onclick="openProofSerieModal()">
+                                        <i class="bi bi-bullseye"></i> Registrera serie (Luftpistol / Elit)
+                                    </button>
+                                </div>
                             </div>
 
                             @* My submitted series this year *@
@@ -1002,6 +1007,53 @@
                     <div class="form-text mt-1">Tre tävlingar/år krävs för märket (två för Nationell helmatch). Skicka in ett resultat per tävling.</div>
                 </div>
                 <div id="crResult" style="display:none;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* ── Series-proof modal (Luftpistol / Elit) ── *@
+<div class="modal fade" id="proofSerieModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-fullscreen-sm-down">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-bullseye text-warning"></i> Registrera serie</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <div id="psForm">
+                    <div class="mb-2">
+                        <label class="form-label small mb-1">Märke</label>
+                        <select id="psFamily" class="form-select" onchange="psUpdateHint()">
+                            <option value="Luftpistol">Luftpistolmärket (5 serier)</option>
+                            <option value="Elit">Elitmärket (5 precision + 5 snabb)</option>
+                        </select>
+                    </div>
+                    <div class="mb-2" id="psTypeWrap" style="display:none;">
+                        <label class="form-label small mb-1">Serietyp</label>
+                        <select id="psType" class="form-select">
+                            <option value="Precision">Precisionsserie</option>
+                            <option value="Speed">Snabbserie</option>
+                        </select>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small mb-1" id="psTotalLabel">Seriens poäng</label>
+                        <input type="number" class="form-control" id="psTotal" min="0">
+                    </div>
+                    <div class="alert alert-light border small" id="psHint"></div>
+                    <div id="psClubWrap" class="mb-2" style="display:none;">
+                        <label class="form-label small mb-1">Klubb (för validering)</label>
+                        <select id="psClub" class="form-select"></select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small mb-1"><i class="bi bi-camera"></i> Foto (valfritt)</label>
+                        <input type="file" class="form-control" id="psPhoto" accept="image/*" capture="environment">
+                    </div>
+                    <button type="button" class="btn btn-success btn-lg w-100" onclick="psSave()">
+                        <i class="bi bi-send"></i> Skicka för validering
+                    </button>
+                </div>
+                <div id="psResult" style="display:none;"></div>
             </div>
         </div>
     </div>
@@ -2807,21 +2859,31 @@ function renderFamilies(families, year) {
         const artLine = (art.fulfilledYears > 0)
             ? `<div class="small"><i class="bi bi-calendar-check text-warning"></i> ${escapeHtmlMarken(art.current || '')} <span class="text-muted">(${art.fulfilledYears} år${art.nextAtYears > 0 ? `, nästa vid ${art.nextAtYears}` : ''})</span></div>`
             : '';
-        const comps = (f.thisYearComps || []);
-        const compRows = comps.length
-            ? `<ul class="small text-muted mt-1 mb-1">${comps.slice(0, 6).map(c =>
-                `<li>${escapeHtmlMarken(c.name)} – ${escapeHtmlMarken(c.group)}: <strong>${c.total}</strong>${c.level ? ` <span class="badge bg-light text-dark border">${escapeHtmlMarken(c.level)}</span>` : ''}${c.source === 'SelfReported' ? ' <span class="text-muted">(egen)</span>' : ''}</li>`).join('')}</ul>`
-            : `<div class="small text-muted mt-1">Inga tävlingsresultat ${year} än.</div>`;
-        const thisYear = f.thisYearLevel
-            ? `<span class="badge bg-success-subtle text-success">${escapeHtmlMarken(f.thisYearLevel)}-nivå uppnådd ${year}</span>`
-            : `<span class="text-muted small">${comps.length}/${f.compsRequired} tävlingar ${year}</span>`;
         const prereq = f.prereqText ? `<div class="small text-warning mt-1"><i class="bi bi-exclamation-triangle"></i> ${escapeHtmlMarken(f.prereqText)}</div>` : '';
+
+        let subtitle, status, detail;
+        if (f.pattern === 'series') {
+            const req = f.seriesRequired || 5;
+            subtitle = `Färdighetsmärke (${req} serier på samma nivå${f.requiresSpeedSeriesToo ? ' + ' + req + ' snabbserier' : ''})`;
+            status = `<span class="text-muted small">${f.thisYearAtGuld || 0}/${req} serier på guldnivå ${year}</span>`;
+            detail = '';
+        } else {
+            const comps = (f.thisYearComps || []);
+            subtitle = `Tävlingsmärke (${f.compsRequired || 3} tävlingar/år)`;
+            status = f.thisYearLevel
+                ? `<span class="badge bg-success-subtle text-success">${escapeHtmlMarken(f.thisYearLevel)}-nivå uppnådd ${year}</span>`
+                : `<span class="text-muted small">${comps.length}/${f.compsRequired} tävlingar ${year}</span>`;
+            detail = comps.length
+                ? `<ul class="small text-muted mt-1 mb-1">${comps.slice(0, 6).map(c =>
+                    `<li>${escapeHtmlMarken(c.name)} – ${escapeHtmlMarken(c.group)}: <strong>${c.total}</strong>${c.level ? ` <span class="badge bg-light text-dark border">${escapeHtmlMarken(c.level)}</span>` : ''}${c.source === 'SelfReported' ? ' <span class="text-muted">(egen)</span>' : ''}</li>`).join('')}</ul>`
+                : `<div class="small text-muted mt-1">Inga tävlingsresultat ${year} än.</div>`;
+        }
         return `
             <div class="card mb-3 border-warning-subtle">
                 <div class="card-body">
                     <h6 class="card-title mb-2"><i class="bi bi-patch-check text-warning"></i> ${escapeHtmlMarken(f.displayName)} ${valor}</h6>
-                    <div class="d-flex justify-content-between align-items-center flex-wrap"><span class="small text-muted">Tävlingsmärke (3 tävlingar/år)</span>${thisYear}</div>
-                    ${compRows}${artLine}${prereq}
+                    <div class="d-flex justify-content-between align-items-center flex-wrap"><span class="small text-muted">${subtitle}</span>${status}</div>
+                    ${detail}${artLine}${prereq}
                 </div>
             </div>`;
     }).join('');
@@ -2953,6 +3015,10 @@ function markenEvidenceDesc(s) {
             ? ` <span class="badge bg-light text-dark border">${escapeHtmlMarken(s.reachedLevel)}</span>`
             : ' <span class="text-warning small">under krav</span>';
         return `${escapeHtmlMarken(s.familyName)} – ${escapeHtmlMarken(s.competitionName)}: <strong>${s.total}</strong> <span class="text-muted">(${escapeHtmlMarken(s.weaponGroup)})</span>${lvl}`;
+    }
+    if (s.family && s.family !== 'Pistolskytte') {
+        const typ = s.seriesType === 'Speed' ? 'snabbserie' : 'serie';
+        return `${escapeHtmlMarken(s.familyName)} ${typ} <strong>${s.total} p</strong> <span class="text-muted">(nivå ${escapeHtmlMarken(s.claimedLevel)})</span>${s.qualifies ? '' : ' <span class="text-warning small">under krav</span>'}`;
     }
     return s.seriesType === 'Precision'
         ? `Guldserie <strong>${s.total} p</strong> <span class="text-muted">(krav ${s.threshold}, ${escapeHtmlMarken(s.weaponGroup)})</span>${s.qualifies ? '' : ' <span class="text-warning small">under krav</span>'}`
@@ -3228,8 +3294,52 @@ function crSave() {
     }).catch(() => alert('Något gick fel.'));
 }
 
+// ── Series-proof modal (Luftpistol / Elit) ─────────────────────────
+function openProofSerieModal() {
+    document.getElementById('psForm').style.display = 'block';
+    document.getElementById('psResult').style.display = 'none';
+    document.getElementById('psTotal').value = '';
+    document.getElementById('psPhoto').value = '';
+    psUpdateHint();
+    markenPopulateClubPicker('psClubWrap', 'psClub');
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('proofSerieModal')).show();
+}
+function psUpdateHint() {
+    const fam = document.getElementById('psFamily').value;
+    const isElit = fam === 'Elit';
+    document.getElementById('psTypeWrap').style.display = isElit ? '' : 'none';
+    const hint = isElit
+        ? 'Elit: 5 precisionsserier OCH 5 snabbserier på samma valör (brons 45 / silver 48 / guld 49 per serie). Kräver guldmärke.'
+        : 'Luftpistol: 5 serier (brons 66 / silver 76 / guld 88 per serie). 10-skottsserie mot luftpistoltavla.';
+    document.getElementById('psHint').innerHTML = '<i class="bi bi-info-circle"></i> ' + hint;
+    document.getElementById('psTotalLabel').textContent = 'Seriens poäng';
+}
+function psSave() {
+    const clubId = markenSelectedClubId('psClub');
+    if (!clubId) { alert('Du måste vara medlem i en klubb för att skicka in.'); return; }
+    const total = parseInt(document.getElementById('psTotal').value) || 0;
+    if (total <= 0) { alert('Ange seriens poäng.'); return; }
+    const fam = document.getElementById('psFamily').value;
+    markenUploadPhoto('psPhoto').then(photoRef => {
+        return fetch('/umbraco/surface/Marken/SubmitProofSeries', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getAntiForgeryTokenMarken() },
+            body: JSON.stringify({
+                family: fam,
+                seriesType: fam === 'Elit' ? document.getElementById('psType').value : 'Precision',
+                clubId, total, photoRef
+            })
+        });
+    }).then(r => r.json()).then(res => {
+        if (!res.success) { alert('Fel: ' + (res.message || 'Kunde inte spara.')); return; }
+        document.getElementById('psForm').style.display = 'none';
+        markenRenderQr(document.getElementById('psResult'), res, 'proofSerieModal');
+        loadMySeries(markenTabYear);
+    }).catch(() => alert('Något gick fel.'));
+}
+
 document.getElementById('marken-tab')?.addEventListener('shown.bs.tab', loadMarkenTab);
-['guldserieModal', 'snabbserieModal', 'compResultModal'].forEach(id => {
+['guldserieModal', 'snabbserieModal', 'compResultModal', 'proofSerieModal'].forEach(id => {
     document.getElementById(id)?.addEventListener('hidden.bs.modal', markenStopStatusPoll);
 });
 

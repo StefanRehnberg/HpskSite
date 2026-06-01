@@ -88,6 +88,7 @@ namespace HpskSite.Controllers
             int y = year ?? DateTime.Now.Year;
             var pistolskytte = await BuildMemberPayloadAsync(member.Id, y, includeUnverifiedInLadder: true, isOwnView: true);
             await RecomputeCompetitionFamiliesAsync(member.Id);
+            await RecomputeSeriesProofFamiliesAsync(member.Id);
             var families = await BuildFamilySummariesAsync(member.Id, y);
             return Json(new { success = true, year = y, pistolskytte, families });
         }
@@ -420,6 +421,77 @@ namespace HpskSite.Controllers
             validatedDate = r.ValidatedDate
         };
 
+        // ── Series-proof families (Luftpistol / Elit) — series submission ──
+
+        public class SubmitProofSeriesRequest
+        {
+            public string Family { get; set; } = "";
+            public string SeriesType { get; set; } = Marken.SeriesTypePrecision; // Elit: Precision | Speed
+            public int ClubId { get; set; }
+            public string WeaponGroup { get; set; } = "";
+            public int Total { get; set; }
+            public string? PhotoRef { get; set; }
+            public string? Notes { get; set; }
+        }
+
+        /// <summary>
+        /// Submit one series toward a series-proof märke (Luftpistol = 10-shot air series;
+        /// Elit = precision/snabb series). The series total maps to the highest valör it meets.
+        /// Lands Pending in the chosen club's queue (same kind as Guldserier).
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SubmitProofSeries([FromBody] SubmitProofSeriesRequest req)
+        {
+            var member = await GetCurrentMemberAsync();
+            if (member == null) return Json(new { success = false, message = "Inte inloggad." });
+            if (req == null) return Json(new { success = false, message = "Ogiltig begäran." });
+
+            var def = MarkenFamilies.Get(req.Family);
+            if (def == null || def.Pattern != MarkenPattern.SeriesProof)
+                return Json(new { success = false, message = "Ogiltig märkestyp." });
+            if (!MemberBelongsToClub(member, req.ClubId))
+                return Json(new { success = false, message = "Välj en klubb du är medlem i." });
+            if (req.Total <= 0) return Json(new { success = false, message = "Ange seriens poäng." });
+
+            var level = def.LevelForSeries(req.Total);
+            var seriesType = def.RequiresSpeedSeriesToo && req.SeriesType == Marken.SeriesTypeSpeed
+                ? Marken.SeriesTypeSpeed : Marken.SeriesTypePrecision;
+
+            var series = new MarkenSeries
+            {
+                MemberId = member.Id,
+                ClubId = req.ClubId,
+                BadgeFamily = req.Family,
+                SeriesType = seriesType,
+                Year = DateTime.Now.Year,
+                SeriesDate = DateTime.Now,
+                WeaponGroup = string.IsNullOrWhiteSpace(req.WeaponGroup) ? "" : req.WeaponGroup.Trim(),
+                ClaimedLevel = level ?? Marken.LevelBrons,
+                Total = req.Total,
+                Threshold = def.SeriesThreshold != null ? def.SeriesThreshold[0] : 0,
+                Qualifies = level != null,
+                Status = Marken.SeriesStatusPending,
+                PhotoFileRef = string.IsNullOrWhiteSpace(req.PhotoRef) ? null : req.PhotoRef,
+                Notes = string.IsNullOrWhiteSpace(req.Notes) ? null : req.Notes!.Trim(),
+                EnteredByMemberId = member.Id
+            };
+            var id = await _ledger.InsertSeriesAsync(series);
+            var token = _verifyProtector.Protect("series:" + id);
+
+            return Json(new
+            {
+                success = true,
+                id,
+                qualifies = series.Qualifies,
+                verifyToken = token,
+                verifyUrl = $"{Request.Scheme}://{Request.Host}/marken/verifiera?t={Uri.EscapeDataString(token)}",
+                message = level == null
+                    ? "Sparat. Serien når inte bronsnivån men kan ändå valideras."
+                    : "Sparat och skickat för validering."
+            });
+        }
+
         // ── Validation queue + verify (board / Skjutledare) ───────────
 
         /// <summary>Pending series the current user is authorized to validate (their board/Skjutledare clubs).</summary>
@@ -519,9 +591,15 @@ namespace HpskSite.Controllers
             int validatorId = await GetCurrentMemberIdAsync();
             var (ok, msg) = await _ledger.SetSeriesStatusAsync(id, status, validatorId);
 
-            // No separate yearly sign-off: validating a series may complete (or un-complete) the
-            // member's Guldfodring for that year. Recompute it automatically.
-            if (ok) await RecomputeYearlyQualificationAsync(series.MemberId, series.Year, validatorId);
+            // No separate sign-off: validating a series may complete (or un-complete) the member's
+            // yearly badge automatically. Dispatch by family.
+            if (ok)
+            {
+                if (series.BadgeFamily == Family)
+                    await RecomputeYearlyQualificationAsync(series.MemberId, series.Year, validatorId);
+                else if (MarkenFamilies.Get(series.BadgeFamily)?.Pattern == MarkenPattern.SeriesProof)
+                    await RecomputeSeriesProofFamiliesAsync(series.MemberId);
+            }
 
             return Json(new { success = ok, message = ok ? (status == Marken.StatusVerified ? "Godkänd." : "Avvisad.") : msg });
         }
@@ -925,7 +1003,64 @@ namespace HpskSite.Controllers
             }
         }
 
-        /// <summary>Read-only per-family summaries (competition-driven families) for the member view.</summary>
+        /// <summary>
+        /// Series-proof analysis (Luftpistol/Elit): per year, the highest valör reached by ≥ required
+        /// series at that level (Elit also needs ≥ required snabb series). Returns the highest valör
+        /// across years + the guld-met years + this-year counts.
+        /// </summary>
+        private async Task<(string? Earned, List<int> GuldYears, int ThisYearAtGuld, int ThisYearTotal)>
+            AnalyzeSeriesProofAsync(int memberId, MarkenFamilyDef def, int displayYear)
+        {
+            var series = await _ledger.GetVerifiedSeriesByFamilyAsync(memberId, def.Key);
+            string? earned = null;
+            var guldYears = new List<int>();
+            foreach (var yg in series.GroupBy(s => s.Year))
+            {
+                var lvl = SeriesProofLevel(def, yg.ToList());
+                if (Marken.LevelOrdinal(lvl) > Marken.LevelOrdinal(earned)) earned = lvl;
+                if (lvl == Marken.LevelGuld) guldYears.Add(yg.Key);
+            }
+            guldYears.Sort();
+            var thisYear = series.Where(s => s.Year == displayYear).ToList();
+            int atGuld = def.SeriesThreshold != null ? thisYear.Count(s => s.Total >= def.SeriesThreshold[2]) : 0;
+            return (earned, guldYears, atGuld, thisYear.Count);
+        }
+
+        /// <summary>Highest valör a set of verified series satisfies for a series-proof family.</summary>
+        private static string? SeriesProofLevel(MarkenFamilyDef def, List<MarkenSeries> series)
+        {
+            if (def.SeriesThreshold == null) return null;
+            foreach (var level in new[] { Marken.LevelGuld, Marken.LevelSilver, Marken.LevelBrons })
+            {
+                int thr = def.SeriesThreshold[Marken.LevelOrdinal(level) - 1];
+                if (def.RequiresSpeedSeriesToo)
+                {
+                    int prec = series.Count(s => s.SeriesType == Marken.SeriesTypePrecision && s.Total >= thr);
+                    int speed = series.Count(s => s.SeriesType == Marken.SeriesTypeSpeed && s.Total >= thr);
+                    if (prec >= def.SeriesRequired && speed >= def.SeriesRequired) return level;
+                }
+                else if (series.Count(s => s.Total >= thr) >= def.SeriesRequired) return level;
+            }
+            return null;
+        }
+
+        /// <summary>Auto-award series-proof family valörer + årtalsmärke years (lazy on read / on validation).</summary>
+        private async Task RecomputeSeriesProofFamiliesAsync(int memberId)
+        {
+            foreach (var fam in MarkenFamilies.SeriesProofFamilies)
+            {
+                (string? earned, List<int> guldYears, int atGuld, int total) tuple;
+                try { tuple = await AnalyzeSeriesProofAsync(memberId, fam, DateTime.Now.Year); }
+                catch { continue; }
+                if (!string.IsNullOrEmpty(tuple.earned))
+                    await _ledger.EnsureBadgeAsync(memberId, fam.Key, tuple.earned!,
+                        tuple.guldYears.Count > 0 ? tuple.guldYears[0] : DateTime.Now.Year, Marken.SourceAuto);
+                foreach (var gy in tuple.guldYears.Skip(1))
+                    await _ledger.EnsureFulfilledYearAsync(memberId, fam.Key, gy);
+            }
+        }
+
+        /// <summary>Read-only per-family summaries (competition + series-proof families) for the member view.</summary>
         private async Task<List<object>> BuildFamilySummariesAsync(int memberId, int year)
         {
             var pistolBadges = await _ledger.GetBadgesForMemberAsync(memberId, Marken.FamilyPistolskytte);
@@ -954,6 +1089,7 @@ namespace HpskSite.Controllers
                 {
                     family = fam.Key,
                     displayName = fam.DisplayName,
+                    pattern = "comp",
                     earnedLevel = top?.Level ?? a.EarnedLevel,
                     compsRequired = a.CompetitionsRequired,
                     thisYearLevel = a.ThisYearLevel,
@@ -965,6 +1101,38 @@ namespace HpskSite.Controllers
                         level = e.ReachedLevel,
                         source = e.Source
                     }),
+                    artalsmarke = new { current = ladder.CurrentName, fulfilledYears = ladder.FulfilledYears, next = ladder.NextName, nextAtYears = ladder.NextAtYears },
+                    prereqText = prereqOk ? null : fam.PrereqText
+                });
+            }
+
+            // Series-proof families (Luftpistol / Elit).
+            foreach (var fam in MarkenFamilies.SeriesProofFamilies)
+            {
+                (string? earned, List<int> guldYears, int atGuld, int total) sp;
+                try { sp = await AnalyzeSeriesProofAsync(memberId, fam, year); }
+                catch { continue; }
+
+                var badges = await _ledger.GetBadgesForMemberAsync(memberId, fam.Key);
+                var top = badges.Where(b => b.LevelOrdinal is >= 1 and <= 3).OrderByDescending(b => b.LevelOrdinal).FirstOrDefault();
+                var ladder = await _ledger.GetArtalsmarkeStatusAsync(memberId, fam.Key, includeUnverified: false);
+
+                bool hasActivity = top != null || sp.total > 0 || ladder.FulfilledYears > 0 || !string.IsNullOrEmpty(sp.earned);
+                if (!hasActivity) continue;
+
+                bool prereqOk = fam.PrereqPistolskytteLevel == null
+                    || pistolTop >= Marken.LevelOrdinal(fam.PrereqPistolskytteLevel);
+
+                list.Add(new
+                {
+                    family = fam.Key,
+                    displayName = fam.DisplayName,
+                    pattern = "series",
+                    earnedLevel = top?.Level ?? sp.earned,
+                    seriesRequired = fam.SeriesRequired,
+                    requiresSpeedSeriesToo = fam.RequiresSpeedSeriesToo,
+                    thisYearAtGuld = sp.atGuld,
+                    thisYearTotal = sp.total,
                     artalsmarke = new { current = ladder.CurrentName, fulfilledYears = ladder.FulfilledYears, next = ladder.NextName, nextAtYears = ladder.NextAtYears },
                     prereqText = prereqOk ? null : fam.PrereqText
                 });
@@ -1099,6 +1267,8 @@ namespace HpskSite.Controllers
                 memberName = _memberService.GetById(s.MemberId)?.Name,
                 clubId = s.ClubId,
                 clubName = _clubService.GetClubNameById(s.ClubId),
+                family = s.BadgeFamily,
+                familyName = MarkenFamilies.DisplayName(s.BadgeFamily),
                 seriesType = s.SeriesType,
                 seriesTypeName = Marken.SeriesTypeDisplay(s.SeriesType),
                 year = s.Year,
