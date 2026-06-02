@@ -247,6 +247,14 @@ namespace HpskSite.Services
                 "WHERE MemberId = @0 AND Status = @1 ORDER BY [Year], Id", memberId, Marken.StatusVerified);
         }
 
+        /// <summary>All Verified series validated for a club (any member) — feeds the club Guldserie-ligan.</summary>
+        public async Task<List<MarkenSeries>> GetVerifiedSeriesForClubAsync(int clubId)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            return await db.FetchAsync<MarkenSeries>(
+                "WHERE ClubId = @0 AND Status = @1 ORDER BY [Year], Id", clubId, Marken.StatusVerified);
+        }
+
         /// <summary>Pending series awaiting validation, scoped to a set of clubs (the queue). Pass null for all (site admin).</summary>
         public async Task<List<MarkenSeries>> GetPendingSeriesAsync(IEnumerable<int>? clubIds)
         {

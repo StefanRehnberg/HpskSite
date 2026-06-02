@@ -1,0 +1,108 @@
+@{
+    // Club-internal "Guldserie-ligan" — embedded on the Club page Medlemmar tab (TIER 2, logged-in members).
+    // clubId is passed in via ViewData by Club.cshtml.
+    var lbClubId = (int)(ViewData["LeaderboardClubId"] ?? 0);
+}
+
+@if (lbClubId > 0)
+{
+    <div class="card mb-4" id="guldserieLigaCard">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+                <h5 class="mb-0"><i class="bi bi-trophy text-warning me-2"></i>Guldserie-ligan</h5>
+                <select id="ligaYear" class="form-select form-select-sm" style="width:auto;">
+                    <!-- options injected by JS -->
+                </select>
+            </div>
+            <p class="text-muted small mb-3">Vänligt mästerskap mellan klubbens skyttar — antal godkända guldserier, perfekta 50:or och bästa serie. Klicka på en kolumn för att sortera.</p>
+            <div id="ligaContent">
+                <div class="text-center py-3"><div class="spinner-border spinner-border-sm text-primary"></div></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    (function () {
+        var clubId = @lbClubId;
+        var rows = [];
+        var sortKey = 'count';
+        var curYear = new Date().getFullYear();
+
+        function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]; }); }
+
+        function buildYearOptions() {
+            var sel = document.getElementById('ligaYear');
+            if (!sel) return;
+            var html = '';
+            for (var y = curYear; y >= curYear - 6; y--) html += '<option value="' + y + '">' + y + '</option>';
+            html += '<option value="0">Totalt</option>';
+            sel.innerHTML = html;
+            sel.value = curYear;
+            sel.addEventListener('change', load);
+        }
+
+        function load() {
+            var year = document.getElementById('ligaYear').value;
+            var content = document.getElementById('ligaContent');
+            content.innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm text-primary"></div></div>';
+            fetch('/umbraco/surface/Marken/GetClubGuldserieLeaderboard?clubId=' + clubId + '&year=' + year)
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    if (!d.success) { content.innerHTML = ''; document.getElementById('guldserieLigaCard').style.display = 'none'; return; }
+                    rows = d.rows || [];
+                    render();
+                })
+                .catch(function () { content.innerHTML = '<div class="text-muted small">Kunde inte ladda ligan.</div>'; });
+        }
+
+        function sortRows() {
+            rows.sort(function (a, b) {
+                if (sortKey === 'best') return (b.best - a.best) || (b.bestX - a.bestX) || (b.count - a.count);
+                if (sortKey === 'perfect') return (b.perfect - a.perfect) || (b.count - a.count);
+                return (b.count - a.count) || (b.perfect - a.perfect) || (b.best - a.best);
+            });
+        }
+
+        function medal(i) { return i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : (i + 1) + '.'; }
+
+        function th(key, label) {
+            var active = sortKey === key ? ' text-primary fw-bold' : '';
+            var arrow = sortKey === key ? ' ▾' : '';
+            return '<th class="text-center" style="cursor:pointer" data-sort="' + key + '"><span class="' + active + '">' + label + arrow + '</span></th>';
+        }
+
+        function render() {
+            var content = document.getElementById('ligaContent');
+            if (!rows.length) {
+                content.innerHTML = '<div class="text-muted text-center py-3"><i class="bi bi-trophy d-block mb-2" style="font-size:1.8rem;opacity:.4;"></i>Inga godkända guldserier än — bli först!</div>';
+                return;
+            }
+            sortRows();
+            var html = '<div class="table-responsive"><table class="table table-sm table-hover align-middle mb-0">'
+                + '<thead><tr><th style="width:2.5rem"></th><th>Medlem</th>'
+                + th('count', 'Guldserier') + th('perfect', '50:or') + th('best', 'Bästa') + '</tr></thead><tbody>';
+            rows.forEach(function (r, i) {
+                html += '<tr>'
+                    + '<td class="text-center">' + medal(i) + '</td>'
+                    + '<td>' + esc(r.name) + '</td>'
+                    + '<td class="text-center fw-semibold">' + r.count + '</td>'
+                    + '<td class="text-center">' + (r.perfect > 0 ? '<span class="badge bg-warning text-dark">' + r.perfect + '</span>' : '<span class="text-muted">0</span>') + '</td>'
+                    + '<td class="text-center">' + r.best + (r.bestX ? ' <span class="text-muted small">(' + r.bestX + 'x)</span>' : '') + '</td>'
+                    + '</tr>';
+            });
+            html += '</tbody></table></div>';
+            content.innerHTML = html;
+
+            content.querySelectorAll('th[data-sort]').forEach(function (el) {
+                el.addEventListener('click', function () { sortKey = el.getAttribute('data-sort'); render(); });
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', function () {
+            // The Medlemmar tab may be hidden on load; fetch once now (data is small) so it's ready.
+            buildYearOptions();
+            load();
+        });
+    })();
+    </script>
+}

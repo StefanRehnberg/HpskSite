@@ -401,6 +401,39 @@
                 </div>
             </div>
         </div>
+
+        <!-- Section F3: Märken — validerade serier -->
+        <h5 class="mt-4 mb-3"><i class="bi bi-patch-check me-2"></i>Märken — validerade serier</h5>
+        <div class="row g-3 mb-4">
+            <div class="col-md-3 col-sm-6">
+                <div class="card h-100"><div class="card-body text-center">
+                    <h6 class="card-title">Guldserier</h6>
+                    <h3 class="mb-0" id="statGuldserierTotal">—</h3>
+                    <small class="text-muted"><span id="statGuldserierYear">—</span> i år</small>
+                </div></div>
+            </div>
+            <div class="col-md-3 col-sm-6">
+                <div class="card h-100"><div class="card-body text-center">
+                    <h6 class="card-title">Snabbserier</h6>
+                    <h3 class="mb-0" id="statSnabbserierTotal">—</h3>
+                    <small class="text-muted"><span id="statSnabbserierYear">—</span> i år</small>
+                </div></div>
+            </div>
+            <div class="col-md-3 col-sm-6">
+                <div class="card h-100"><div class="card-body text-center">
+                    <h6 class="card-title">Luftpistolserier</h6>
+                    <h3 class="mb-0" id="statLuftpistolserierTotal">—</h3>
+                    <small class="text-muted"><span id="statLuftpistolserierYear">—</span> i år</small>
+                </div></div>
+            </div>
+            <div class="col-md-3 col-sm-6">
+                <div class="card h-100"><div class="card-body">
+                    <h6 class="card-title">Snabbserier per typ</h6>
+                    <div id="snabbserierByTypeList" class="small">—</div>
+                </div></div>
+            </div>
+        </div>
+
         <div class="row g-3 mb-4">
             <div class="col-md-4">
                 <div class="d-flex flex-column gap-3 h-100">
@@ -1002,6 +1035,25 @@
             }).join('');
         } else {
             discList.innerHTML = '<span class="text-muted">Inga</span>';
+        }
+
+        // Section F3: Märken — validated series
+        var ms = d.markenSeries || {};
+        function setMsNum(id, v) { var el = document.getElementById(id); if (el) el.textContent = (v == null ? 0 : v); }
+        setMsNum('statGuldserierTotal', ms.guldserier && ms.guldserier.total);
+        setMsNum('statGuldserierYear', ms.guldserier && ms.guldserier.thisYear);
+        setMsNum('statSnabbserierTotal', ms.snabbserier && ms.snabbserier.total);
+        setMsNum('statSnabbserierYear', ms.snabbserier && ms.snabbserier.thisYear);
+        setMsNum('statLuftpistolserierTotal', ms.luftpistolserier && ms.luftpistolserier.total);
+        setMsNum('statLuftpistolserierYear', ms.luftpistolserier && ms.luftpistolserier.thisYear);
+        var snabbList = document.getElementById('snabbserierByTypeList');
+        if (snabbList) {
+            var bt = (ms.snabbserier && ms.snabbserier.byType) || [];
+            snabbList.innerHTML = bt.length
+                ? bt.map(function (x) {
+                    return '<div class="d-flex justify-content-between"><span>' + escapeHtml(x.name) + '</span><span class="text-muted">' + x.total + '</span></div>';
+                }).join('')
+                : '<span class="text-muted">Inga</span>';
         }
 
         // Section F2: Engagement

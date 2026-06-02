@@ -78,6 +78,9 @@ namespace HpskSite.Controllers
 
         private const string Family = Marken.FamilyPistolskytte;
 
+        /// <summary>Integrity rule: nobody (incl. site admins) may validate their own evidence.</summary>
+        private const string SelfValidateMsg = "Du kan inte validera din egen inrapportering — be en annan funktionär.";
+
         // ── Member-facing ─────────────────────────────────────────────
 
         /// <summary>
@@ -292,6 +295,37 @@ namespace HpskSite.Controllers
                 foreach (var r in await _compService.GetSelfReportedForMemberAsync(member.Id, fam.Key, y))
                     items.Add(CompResultDto(r));
             return Json(new { success = true, year = y, series = items });
+        }
+
+        /// <summary>
+        /// Delete one of the current member's OWN submissions from "Mina inskickade serier" — only
+        /// when it was <b>rejected</b> (so a shooter can clear a declined entry). Handles both a
+        /// MarkenSeries (kind "series") and a self-reported competition result (kind "comp").
+        /// POST /umbraco/surface/Marken/DeleteMyEvidence  { kind, id }
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeleteMyEvidence([FromBody] EvidenceActionRequest request)
+        {
+            var member = await GetCurrentMemberAsync();
+            if (member == null) return Json(new { success = false, message = "Inte inloggad." });
+
+            if (request?.Kind == "comp")
+            {
+                var r = await _compService.GetSelfReportedAsync(request.Id);
+                if (r == null) return Json(new { success = false, message = "Hittades inte." });
+                if (r.MemberId != member.Id) return Json(new { success = false, message = "Åtkomst nekad." });
+                if (r.Status != Marken.StatusRejected) return Json(new { success = false, message = "Bara avvisade inskick kan tas bort." });
+                var (cok, cmsg) = await _compService.DeleteSelfReportedAsync(r.Id);
+                return Json(new { success = cok, message = cok ? "Borttagen." : cmsg });
+            }
+
+            var s = await _ledger.GetSeriesAsync(request?.Id ?? 0);
+            if (s == null) return Json(new { success = false, message = "Serien hittades inte." });
+            if (s.MemberId != member.Id) return Json(new { success = false, message = "Åtkomst nekad." });
+            if (s.Status != Marken.StatusRejected) return Json(new { success = false, message = "Bara avvisade serier kan tas bort." });
+            var (ok, msg) = await _ledger.DeleteSeriesAsync(s.Id);
+            return Json(new { success = ok, message = ok ? "Borttagen." : msg });
         }
 
         /// <summary>
@@ -519,25 +553,41 @@ namespace HpskSite.Controllers
 
         // ── Validation queue + verify (board / Skjutledare) ───────────
 
-        /// <summary>Pending series the current user is authorized to validate (their board/Skjutledare clubs).</summary>
+        /// <summary>
+        /// Pending evidence the current user can validate. By default scoped to the user's own
+        /// functionary clubs (board + enabled Skjutledare) — even for site admins, so the personal
+        /// queue isn't a site-wide firehose. Site admins can pass allClubs=true to see every club.
+        /// Always excludes the viewer's OWN submissions (nobody validates their own).
+        /// </summary>
         [HttpGet]
-        public async Task<IActionResult> GetPendingSeries()
+        public async Task<IActionResult> GetPendingSeries(bool allClubs = false)
         {
             var me = await GetCurrentMemberAsync();
             if (me == null) return Json(new { success = false, message = "Inte inloggad." });
 
-            var (all, clubIds) = await GetMarkenSignoffScopeAsync();
-            if (!all && clubIds.Count == 0)
-                return Json(new { success = true, items = Array.Empty<object>() });
+            bool isSiteAdmin = await _auth.IsCurrentUserAdminAsync();
+            bool showAll = isSiteAdmin && allClubs;
 
-            var ids = all ? null : (IEnumerable<int>)clubIds;
+            IEnumerable<int>? ids;
+            if (showAll)
+            {
+                ids = null; // all clubs
+            }
+            else
+            {
+                var funcClubs = await GetFunctionaryClubsAsync();
+                if (funcClubs.Count == 0)
+                    return Json(new { success = true, items = Array.Empty<object>(), canViewAllClubs = isSiteAdmin, allClubs = false });
+                ids = funcClubs;
+            }
+
             var series = await _ledger.GetPendingSeriesAsync(ids);
             var comps = await _compService.GetPendingSelfReportedAsync(ids);
             var storm = await _stormastarService.GetPendingAsync(ids);
-            var items = series.Select(SerieDto)
-                .Concat(comps.Select(CompResultDto))
-                .Concat(storm.Select(StormastarDto)).ToList();
-            return Json(new { success = true, items });
+            var items = series.Where(s => s.MemberId != me.Id).Select(SerieDto)
+                .Concat(comps.Where(c => c.MemberId != me.Id).Select(CompResultDto))
+                .Concat(storm.Where(e => e.MemberId != me.Id).Select(StormastarDto)).ToList();
+            return Json(new { success = true, items, canViewAllClubs = isSiteAdmin, allClubs = showAll });
         }
 
         /// <summary>Evidence detail for the QR verify page — only returned to an authorized validator.</summary>
@@ -557,6 +607,7 @@ namespace HpskSite.Controllers
             {
                 var r = await _compService.GetSelfReportedAsync(id);
                 if (r == null) return Json(new { success = false, message = "Resultatet hittades inte." });
+                if (r.MemberId == me.Id) return Json(new { success = false, message = SelfValidateMsg });
                 if (!await CanSignOffForClubAsync(r.ClubId))
                     return Json(new { success = false, message = "Du har inte behörighet att validera för den här klubben." });
                 return Json(new { success = true, serie = CompResultDto(r) });
@@ -566,6 +617,7 @@ namespace HpskSite.Controllers
             {
                 var e = await _stormastarService.GetAsync(id);
                 if (e == null) return Json(new { success = false, message = "Inteckningen hittades inte." });
+                if (e.MemberId == me.Id) return Json(new { success = false, message = SelfValidateMsg });
                 if (!await CanSignOffForClubAsync(e.ClubId))
                     return Json(new { success = false, message = "Du har inte behörighet att validera för den här klubben." });
                 return Json(new { success = true, serie = StormastarDto(e) });
@@ -573,6 +625,7 @@ namespace HpskSite.Controllers
 
             var series = await _ledger.GetSeriesAsync(id);
             if (series == null) return Json(new { success = false, message = "Serien hittades inte." });
+            if (series.MemberId == me.Id) return Json(new { success = false, message = SelfValidateMsg });
             if (!await CanValidateSeriesAsync(series))
                 return Json(new { success = false, message = "Du har inte behörighet att validera för den här klubben." });
             return Json(new { success = true, serie = SerieDto(series) });
@@ -612,8 +665,10 @@ namespace HpskSite.Controllers
         {
             var r = await _compService.GetSelfReportedAsync(id);
             if (r == null) return Json(new { success = false, message = "Resultatet hittades inte." });
+            int actingId = await GetCurrentMemberIdAsync();
+            if (r.MemberId == actingId) return Json(new { success = false, message = SelfValidateMsg });
             if (!await CanSignOffForClubAsync(r.ClubId)) return Json(new { success = false, message = "Åtkomst nekad." });
-            var (ok, msg) = await _compService.SetSelfReportedStatusAsync(id, status, await GetCurrentMemberIdAsync());
+            var (ok, msg) = await _compService.SetSelfReportedStatusAsync(id, status, actingId);
             if (ok && status == Marken.StatusVerified) await RecomputeCompetitionFamiliesAsync(r.MemberId);
             return Json(new { success = ok, message = ok ? (status == Marken.StatusVerified ? "Godkänd." : "Avvisad.") : msg });
         }
@@ -630,10 +685,11 @@ namespace HpskSite.Controllers
         {
             var series = await _ledger.GetSeriesAsync(id);
             if (series == null) return Json(new { success = false, message = "Serien hittades inte." });
+            int validatorId = await GetCurrentMemberIdAsync();
+            if (series.MemberId == validatorId) return Json(new { success = false, message = SelfValidateMsg });
             if (!await CanValidateSeriesAsync(series))
                 return Json(new { success = false, message = "Åtkomst nekad." });
 
-            int validatorId = await GetCurrentMemberIdAsync();
             var (ok, msg) = await _ledger.SetSeriesStatusAsync(id, status, validatorId);
 
             // No separate sign-off: validating a series may complete (or un-complete) a yearly badge
@@ -660,13 +716,66 @@ namespace HpskSite.Controllers
             if (!await _auth.IsClubAdminForClub(clubId))
                 return Json(new { success = false, message = "Åtkomst nekad." });
 
+            int meId = await GetCurrentMemberIdAsync(); // never list the viewer's own submissions
             var series = await _ledger.GetPendingSeriesAsync(new[] { clubId });
             var comps = await _compService.GetPendingSelfReportedAsync(new[] { clubId });
             var storm = await _stormastarService.GetPendingAsync(new[] { clubId });
-            var items = series.Select(SerieDto)
-                .Concat(comps.Select(CompResultDto))
-                .Concat(storm.Select(StormastarDto)).ToList();
+            var items = series.Where(s => s.MemberId != meId).Select(SerieDto)
+                .Concat(comps.Where(c => c.MemberId != meId).Select(CompResultDto))
+                .Concat(storm.Where(e => e.MemberId != meId).Select(StormastarDto)).ToList();
             return Json(new { success = true, canValidate = await CanSignOffForClubAsync(clubId), items });
+        }
+
+        // ── Club Guldserie-ligan (friendly leaderboard, Medlemmar tab) ─
+
+        private static int CountX(string? shotsJson)
+        {
+            try
+            {
+                var list = System.Text.Json.JsonSerializer.Deserialize<List<string>>(shotsJson ?? "") ?? new();
+                return list.Count(v => string.Equals(v?.Trim(), "X", StringComparison.OrdinalIgnoreCase));
+            }
+            catch { return 0; }
+        }
+
+        /// <summary>
+        /// Per-member leaderboard of approved guldserier for a club — antal, perfekta (50p), bästa serie.
+        /// Counts Verified precision-discipline series validated for the club. Logged-in members only
+        /// (the Medlemmar tab is members-facing). year &gt; 0 filters to that year; 0/absent = all-time.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetClubGuldserieLeaderboard(int clubId, int? year)
+        {
+            if (clubId <= 0) return Json(new { success = false, message = "Ogiltigt klubb-ID." });
+            if (await GetCurrentMemberAsync() == null) return Json(new { success = false, message = "Inte inloggad." });
+
+            List<MarkenSeries> all;
+            try { all = await _ledger.GetVerifiedSeriesForClubAsync(clubId); }
+            catch { all = new(); }
+
+            var prec = all.Where(s => Marken.SeriesDiscipline(s.BadgeFamily, s.SeriesType, s.Target) == Marken.DisciplinePrecision);
+            if (year is > 0) prec = prec.Where(s => s.Year == year);
+
+            var rows = prec.GroupBy(s => s.MemberId)
+                .Select(g =>
+                {
+                    var list = g.ToList();
+                    var best = list.OrderByDescending(s => s.Total).ThenByDescending(s => CountX(s.Shots)).First();
+                    return new
+                    {
+                        memberId = g.Key,
+                        name = _memberService.GetById(g.Key)?.Name ?? $"Medlem {g.Key}",
+                        count = list.Count(s => s.Qualifies),
+                        perfect = list.Count(s => s.Total >= 50),
+                        best = best.Total,
+                        bestX = CountX(best.Shots)
+                    };
+                })
+                .Where(r => r.count > 0)
+                .OrderByDescending(r => r.count).ThenByDescending(r => r.perfect).ThenByDescending(r => r.best)
+                .ToList();
+
+            return Json(new { success = true, year = year ?? 0, rows });
         }
 
         // ── Club Märken settings (sign-off authority) ─────────────────
@@ -1676,8 +1785,10 @@ namespace HpskSite.Controllers
         {
             var e = await _stormastarService.GetAsync(id);
             if (e == null) return Json(new { success = false, message = "Hittades inte." });
+            int actingId = await GetCurrentMemberIdAsync();
+            if (e.MemberId == actingId) return Json(new { success = false, message = SelfValidateMsg });
             if (!await CanSignOffForClubAsync(e.ClubId)) return Json(new { success = false, message = "Åtkomst nekad." });
-            var (ok, msg) = await _stormastarService.SetStatusAsync(id, status, await GetCurrentMemberIdAsync());
+            var (ok, msg) = await _stormastarService.SetStatusAsync(id, status, actingId);
             return Json(new { success = ok, message = ok ? (status == Marken.StatusVerified ? "Godkänd." : "Avvisad.") : msg });
         }
 
@@ -1754,17 +1865,20 @@ namespace HpskSite.Controllers
         private Task<bool> CanValidateSeriesAsync(MarkenSeries s) => CanSignOffForClubAsync(s.ClubId);
 
         /// <summary>(All, ClubIds) describing where the current user may validate märke series.</summary>
-        private async Task<(bool All, HashSet<int> ClubIds)> GetMarkenSignoffScopeAsync()
+        /// <summary>Clubs where the current user is a functionary who may validate märken —
+        /// board members always, Skjutledare only where the club enabled it. (No site-admin
+        /// short-circuit: site admins validate any club via that club's admin tab / QR / the
+        /// "alla klubbar" toggle, not by flooding their personal queue.)</summary>
+        private async Task<HashSet<int>> GetFunctionaryClubsAsync()
         {
-            if (await _auth.IsCurrentUserAdminAsync()) return (true, new HashSet<int>());
             var clubs = new HashSet<int>();
             int actingId = await GetCurrentMemberIdAsync();
-            if (actingId <= 0) return (false, clubs);
+            if (actingId <= 0) return clubs;
 
             foreach (var c in _boardRoles.GetClubIdsWhereBoardMember(actingId)) clubs.Add(c);
             foreach (var c in await _auth.GetSkjutledareClubIds())
                 if (SkjutledareSignoffEnabled(c)) clubs.Add(c);
-            return (false, clubs);
+            return clubs;
         }
 
         private static bool MemberBelongsToClub(Umbraco.Cms.Core.Models.IMember member, int clubId)

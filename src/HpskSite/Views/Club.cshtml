@@ -485,6 +485,11 @@ window.currentClubId = clubId;
                 <!-- TIER 2: Members Directory (All logged-in users) -->
                 <div class="tab-pane fade" id="clubMembers" role="tabpanel">
                     @await Html.PartialAsync("ClubInstructorsPublicPanel")
+                    @{
+                        var ligaVD = new ViewDataDictionary(ViewData);
+                        ligaVD["LeaderboardClubId"] = clubId;
+                    }
+                    @await Html.PartialAsync("ClubGuldserieLeaderboard", null, ligaVD)
                     @await Html.PartialAsync("ClubMembersDirectory")
                 </div>
 

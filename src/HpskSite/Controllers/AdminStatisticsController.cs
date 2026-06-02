@@ -223,6 +223,14 @@ namespace HpskSite.Controllers
             public int PageViews { get; set; }
         }
 
+        /// <summary>Zero-valued Märken series stats — used as the default and the no-content fallback.</summary>
+        private static object ZeroMarkenSeriesStats() => new
+        {
+            guldserier = new { total = 0, thisYear = 0 },
+            snabbserier = new { total = 0, thisYear = 0, byType = new List<object>() },
+            luftpistolserier = new { total = 0, thisYear = 0 }
+        };
+
         private object BuildStatistics()
         {
             var now = DateTime.Now;
@@ -519,6 +527,7 @@ namespace HpskSite.Controllers
                     int uniqueTrainers30d = 0;
                     int trainingMatchesTotal = 0;
                     int trainingStairsActiveGroups = 0;
+                    object markenSeriesStats = ZeroMarkenSeriesStats();
                     var devicesByPlatform = new List<object>();
                     int uniqueLogins30d = 0;
                     long totalUsedBytes = 0;
@@ -631,6 +640,51 @@ namespace HpskSite.Controllers
                         // ── Single query for remaining simple counts ──
                         trainingStairsActiveGroups = db.Single<int>(
                             "SELECT COUNT(*) FROM TrainingGroups WHERE IsActive = 1");
+
+                        // ── Märken: validated series (Guldserie / Snabbserie by target / Luftpistolserie) ──
+                        // Discipline is computed (not stored), so classify in-memory. Graceful if the
+                        // MarkenSeries table doesn't exist yet — falls back to the zero object.
+                        try
+                        {
+                            var verifiedSeries = db.Fetch<MarkenSeries>("WHERE Status = @0", Marken.StatusVerified);
+                            int curYear = now.Year;
+                            string Disc(MarkenSeries s) => Marken.SeriesDiscipline(s.BadgeFamily, s.SeriesType, s.Target);
+                            int Tot(Func<MarkenSeries, bool> p) => verifiedSeries.Count(p);
+                            int Yr(Func<MarkenSeries, bool> p) => verifiedSeries.Count(s => s.Year == curYear && p(s));
+
+                            var snabbByType = verifiedSeries
+                                .Where(s => s.SeriesType == Marken.SeriesTypeSpeed)
+                                .GroupBy(s => s.Target)
+                                .Select(g => (object)new
+                                {
+                                    name = Marken.SpeedTargetDisplay(g.Key),
+                                    total = g.Count(),
+                                    thisYear = g.Count(s => s.Year == curYear)
+                                })
+                                .OrderByDescending(x => ((dynamic)x).total)
+                                .ToList();
+
+                            markenSeriesStats = new
+                            {
+                                guldserier = new
+                                {
+                                    total = Tot(s => Disc(s) == Marken.DisciplinePrecision),
+                                    thisYear = Yr(s => Disc(s) == Marken.DisciplinePrecision)
+                                },
+                                snabbserier = new
+                                {
+                                    total = Tot(s => s.SeriesType == Marken.SeriesTypeSpeed),
+                                    thisYear = Yr(s => s.SeriesType == Marken.SeriesTypeSpeed),
+                                    byType = snabbByType
+                                },
+                                luftpistolserier = new
+                                {
+                                    total = Tot(s => Disc(s) == Marken.DisciplineAir),
+                                    thisYear = Yr(s => Disc(s) == Marken.DisciplineAir)
+                                }
+                            };
+                        }
+                        catch { /* table not present — keep zero defaults */ }
 
                         // ── Combined device + login query (replaces 2 separate queries) ──
                         try
@@ -887,6 +941,7 @@ namespace HpskSite.Controllers
                         trainingStairsMembersPerLevel,
                         trainingScoresPerMonth,
                         trainingScoresThisYear,
+                        markenSeries = markenSeriesStats,
                         scoresByWeaponClass,
                         scoresByDiscipline,
                         uniqueTrainers30d,
@@ -952,6 +1007,7 @@ namespace HpskSite.Controllers
                 trainingStairsMembersPerLevel = new List<object>(),
                 trainingScoresPerMonth = new List<object>(),
                 trainingScoresThisYear = 0,
+                markenSeries = ZeroMarkenSeriesStats(),
                 scoresByWeaponClass = new List<object>(),
                 scoresByDiscipline = new List<object>(),
                 uniqueTrainers30d = 0,

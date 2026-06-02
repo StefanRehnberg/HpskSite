@@ -88,6 +88,17 @@ namespace HpskSite.Services
             return (true, null);
         }
 
+        public async Task<(bool, string?)> DeleteSelfReportedAsync(int id)
+        {
+            try
+            {
+                using var db = _databaseFactory.CreateDatabase();
+                await db.ExecuteAsync("DELETE FROM MarkenCompetitionResult WHERE Id = @0", id);
+                return (true, null);
+            }
+            catch (Exception ex) { return (false, ex.Message); }
+        }
+
         public async Task<List<MarkenCompetitionResult>> GetPendingSelfReportedAsync(IEnumerable<int>? clubIds)
         {
             try
