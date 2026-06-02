@@ -1875,9 +1875,21 @@ namespace HpskSite.Controllers
             int actingId = await GetCurrentMemberIdAsync();
             if (actingId <= 0) return clubs;
 
+            // Board memberships (member-scoped).
             foreach (var c in _boardRoles.GetClubIdsWhereBoardMember(actingId)) clubs.Add(c);
-            foreach (var c in await _auth.GetSkjutledareClubIds())
-                if (SkjutledareSignoffEnabled(c)) clubs.Add(c);
+
+            // Skjutledare clubs from the member's OWN roles. We must NOT use
+            // _auth.GetSkjutledareClubIds() here: it returns EVERY club for a site admin, which would
+            // re-introduce the site-wide firehose this scoping is meant to remove (the personal queue
+            // would show all clubs that have markenSignoffSkjutledare on). Read the Skjutledare_{id}
+            // roles directly so a site admin only gets the clubs they're actually a Skjutledare of.
+            foreach (var role in _memberService.GetAllRoles(actingId))
+            {
+                if (role.StartsWith("Skjutledare_", StringComparison.Ordinal)
+                    && int.TryParse(role.Substring("Skjutledare_".Length), out var clubId)
+                    && SkjutledareSignoffEnabled(clubId))
+                    clubs.Add(clubId);
+            }
             return clubs;
         }
 
