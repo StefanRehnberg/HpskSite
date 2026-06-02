@@ -669,6 +669,52 @@ namespace HpskSite.Controllers
             return Json(new { success = true, canValidate = await CanSignOffForClubAsync(clubId), items });
         }
 
+        // ── Club Märken settings (sign-off authority) ─────────────────
+
+        /// <summary>Read the club's Märken sign-off setting (whether Skjutledare may validate). Club admins only.</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetMarkenClubSettings(int clubId)
+        {
+            if (clubId <= 0) return Json(new { success = false, message = "Ogiltigt klubb-ID." });
+            if (!await _auth.IsClubAdminForClub(clubId)) return Json(new { success = false, message = "Åtkomst nekad." });
+            var club = _contentService.GetById(clubId);
+            bool hasProp = club != null && club.HasProperty("markenSignoffSkjutledare");
+            return Json(new
+            {
+                success = true,
+                skjutledareSignoff = hasProp && club!.GetValue<bool>("markenSignoffSkjutledare"),
+                propertyExists = hasProp
+            });
+        }
+
+        public class MarkenClubSettingsRequest { public int ClubId { get; set; } public bool SkjutledareSignoff { get; set; } }
+
+        /// <summary>Set whether the club's Skjutledare may validate märken. Club admins only.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetMarkenClubSettings([FromBody] MarkenClubSettingsRequest request)
+        {
+            int clubId = request?.ClubId ?? 0;
+            if (clubId <= 0) return Json(new { success = false, message = "Ogiltigt klubb-ID." });
+            if (!await _auth.IsClubAdminForClub(clubId)) return Json(new { success = false, message = "Åtkomst nekad." });
+
+            var club = _contentService.GetById(clubId);
+            if (club == null) return Json(new { success = false, message = "Klubben hittades inte." });
+            if (!club.HasProperty("markenSignoffSkjutledare"))
+                return Json(new { success = false, message = "Egenskapen 'markenSignoffSkjutledare' saknas på klubbtypen — be en administratör lägga till den i Umbraco." });
+
+            club.SetValue("markenSignoffSkjutledare", request!.SkjutledareSignoff);
+            _contentService.Save(club);
+            _contentService.Publish(club, new[] { "*" }, -1);
+            return Json(new
+            {
+                success = true,
+                message = request.SkjutledareSignoff
+                    ? "Skjutledare kan nu validera märken för klubben."
+                    : "Endast styrelsemedlemmar kan validera märken för klubben."
+            });
+        }
+
         // ── Club secretary: reads ─────────────────────────────────────
 
         /// <summary>

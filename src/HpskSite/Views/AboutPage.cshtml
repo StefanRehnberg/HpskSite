@@ -194,6 +194,18 @@
         display: block;
         margin-inline: auto;
     }
+    /* Placeholder shown until a screenshot file is dropped in (swapped via img onerror). */
+    .about-shot-placeholder {
+        width: 100%;
+        min-height: 260px;
+        border: 2px dashed var(--bs-border-color);
+        border-radius: 0.75rem;
+        background-color: var(--bs-tertiary-bg);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+    }
     .about-slab h3 {
         font-weight: 700;
     }
@@ -435,6 +447,71 @@
 </section>
 
 @* ============================================================
+   3b. MÄRKEN — spotlight on the marksmanship-badge system
+   Screenshot: drop /images/about/marken.png in later; the placeholder
+   below swaps to it automatically (img onerror), no view change needed.
+============================================================ *@
+<section class="container-fluid">
+    <header class="about-section-heading text-center">
+        <h2 class="mb-3"><i class="bi bi-patch-check me-2"></i>Märken och utmärkelser</h2>
+        <p class="text-muted prose-wide mx-auto">
+            Hela Skjuthandbokens märkessystem i ett flöde — från Pistolskyttemärket till Stormästarmärket.
+        </p>
+    </header>
+
+    <div class="about-slab">
+        <div class="row align-items-center g-4">
+            <div class="col-lg-6">
+                <img src="/images/about/marken.png" alt="Märken och utmärkelser" class="about-shot" loading="lazy"
+                     onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+                <div class="about-shot-placeholder" style="display:none;">
+                    <div class="text-muted p-4">
+                        <i class="bi bi-image" style="font-size:2.5rem;"></i>
+                        <div class="mt-2 small">Skärmbild kommer<br><code>/images/about/marken.png</code></div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-6">
+                <div class="prose">
+                    <h3 class="mb-2">Märken — ta dem, följ dem, visa upp dem</h3>
+                    <p class="lead mb-2">
+                        Skytten registrerar sina serier i mobilen, en funktionär godkänner med en QR-scanning,
+                        och valörerna räknas fram automatiskt.
+                    </p>
+                    <div class="d-flex flex-wrap gap-3 align-items-center">
+                        <button class="btn btn-link read-more-btn" type="button"
+                                data-bs-toggle="collapse" data-bs-target="#markenSlab0"
+                                aria-expanded="false" aria-controls="markenSlab0">
+                            Läs mer <i class="bi bi-chevron-down ms-1"></i>
+                        </button>
+                    </div>
+                    <div class="collapse mt-2" id="markenSlab0">
+                        <p class="mb-2">
+                            pistol.nu håller reda på skyttarnas hela märkessamling: <strong>Pistolskyttemärket</strong>
+                            i brons, silver och guld — med guldnummer, årliga Guldfodringar och årtalsmärken —
+                            grenmärkena i <strong>fält, precision, militär snabbmatch, nationell helmatch, luftpistol
+                            och elit</strong>, samt <strong>Mästar-</strong> och <strong>Stormästarmärket</strong>.
+                        </p>
+                        <p class="mb-2">
+                            Skytten knappar in en guld- eller snabbserie (eller för in ett tävlingsresultat) direkt i
+                            mobilen — med foto på tavlan om man vill. En styrelsemedlem eller skjutledare godkänner på
+                            plats genom att scanna skyttens QR-kod, eller via klubbens valideringskö. Resultat från
+                            tävlingar på pistol.nu fylls på automatiskt, och varje märke visas med krav och status på
+                            Min sida.
+                        </p>
+                        <p class="mb-0">
+                            Klubben får en samlad valideringskö, manuell tilldelning med guldnummer på medlemskortet,
+                            och underlag att rapportera vidare till SPSF:s MAP. Allt utan papperslistor och
+                            efterregistrering.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+@* ============================================================
    4. PÅ GÅNG — small roadmap glimpse of major upcoming work
 ============================================================ *@
 <section class="container-fluid">
@@ -475,10 +552,22 @@
             </div>
         </div>
         <div class="col-md-6 col-lg-4">
-            <div class="card h-100 border-0 shadow-sm">
+            <div class="card h-100 border-0 shadow-sm position-relative" style="opacity: 0.85;">
+                <div class="position-absolute top-0 end-0 m-2">
+                    <span class="badge rounded-pill bg-success">
+                        <i class="bi bi-check-circle-fill me-1"></i>Klart
+                    </span>
+                </div>
                 <div class="card-body">
-                    <h6 class="card-title"><i class="bi bi-trophy text-primary me-2"></i>Guldfordringar</h6>
-                    <p class="card-text small mb-0">Registrering, verifiering och årlig rapportering av medlemmarnas Guldfordringar — för klubbarna.</p>
+                    <h6 class="card-title text-decoration-line-through">
+                        <i class="bi bi-trophy text-success me-2"></i>Guldfordringar och Märken
+                    </h6>
+                    <p class="card-text small mb-0">
+                        Registrering, verifiering och årlig rapportering av medlemmarnas märken och Guldfordringar — för klubbarna och skyttarna.
+                        <span class="d-block mt-1 text-success small fw-semibold">
+                            <i class="bi bi-arrow-right me-1"></i>Levererat maj–juni 2026 — hela Pistolskyttemärket (brons/silver/guld med guldnummer, årliga Guldfordringar och årtalsmärken), grenmärkena Fält, Precision, Militär snabbmatch, Nationell helmatch, Luftpistol och Elit, samt Mästar- och Stormästarmärket. Skyttar registrerar guld-/snabbserier och tävlingsresultat (med foto och QR), funktionärer validerar på plats, och poäng och valörer räknas fram automatiskt.
+                        </span>
+                    </p>
                 </div>
             </div>
         </div>

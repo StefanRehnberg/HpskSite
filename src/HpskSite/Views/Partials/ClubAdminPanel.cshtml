@@ -472,6 +472,20 @@
                 </div>
             </div>
 
+            @* Sign-off authority — club setting (visible to club admins only). *@
+            <div id="markenSettingsCard" class="card mb-3 border-0 bg-body-tertiary" style="display:none;">
+                <div class="card-body py-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
+                    <div>
+                        <span class="fw-semibold"><i class="bi bi-shield-check me-1"></i>Vem får validera märken?</span>
+                        <div class="form-text mb-0">Styrelsemedlemmar kan alltid validera. Slå på detta för att även låta klubbens skjutledare validera och signera.</div>
+                    </div>
+                    <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" role="switch" id="markenSkjutledareToggle" onchange="saveMarkenSettings()">
+                        <label class="form-check-label small" for="markenSkjutledareToggle">Tillåt skjutledare</label>
+                    </div>
+                </div>
+            </div>
+
             @* Validation queue — submitted series awaiting a functionary's Godkänn/Avvisa. *@
             <div id="clubMarkenQueueCard" class="card mb-3 border-info" style="display:none;">
                 <div class="card-body">
@@ -1473,12 +1487,57 @@ document.getElementById('marken-tab').addEventListener('shown.bs.tab', function 
             sel.appendChild(opt);
         }
         const hint = document.getElementById('markenSkjutledareHint');
-        if (hint) hint.textContent = '(eller skjutledare om klubben aktiverat det i inställningarna)';
+        if (hint) hint.textContent = '(eller skjutledare om klubben aktiverat det nedan)';
         markenYearInitialized = true;
     }
+    loadMarkenSettings();
     loadClubMarkenQueue();
     loadClubMarken();
 });
+
+// Sign-off authority toggle — only club admins get a successful read, so the card stays hidden for
+// plain functionaries (skjutledare). Keeps the intro hint in sync with the actual setting.
+function loadMarkenSettings() {
+    fetch(`/umbraco/surface/Marken/GetMarkenClubSettings?clubId=${clubId}`)
+        .then(r => r.json())
+        .then(d => {
+            const card = document.getElementById('markenSettingsCard');
+            if (!d.success) { if (card) card.style.display = 'none'; return; }
+            const toggle = document.getElementById('markenSkjutledareToggle');
+            if (toggle) toggle.checked = !!d.skjutledareSignoff;
+            if (card) card.style.display = 'block';
+            markenSyncHint(!!d.skjutledareSignoff);
+            if (!d.propertyExists) {
+                const ft = card ? card.querySelector('.form-text') : null;
+                if (ft) ft.innerHTML = '<span class="text-warning">Egenskapen saknas på klubbtypen i Umbraco — kontakta en administratör innan inställningen kan sparas.</span>';
+            }
+        })
+        .catch(() => {});
+}
+
+function markenSyncHint(enabled) {
+    const hint = document.getElementById('markenSkjutledareHint');
+    if (hint) hint.textContent = enabled ? '(eller skjutledare — aktiverat för klubben)' : '';
+}
+
+function saveMarkenSettings() {
+    const toggle = document.getElementById('markenSkjutledareToggle');
+    const enabled = toggle.checked;
+    toggle.disabled = true;
+    fetch('/umbraco/surface/Marken/SetMarkenClubSettings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getAntiForgeryToken() },
+        body: JSON.stringify({ clubId: clubId, skjutledareSignoff: enabled })
+    })
+    .then(r => r.json())
+    .then(d => {
+        toggle.disabled = false;
+        if (!d.success) { alert(d.message || 'Kunde inte spara.'); toggle.checked = !enabled; return; }
+        markenSyncHint(enabled);
+        loadClubMarkenQueue(); // re-evaluate who can validate after the change
+    })
+    .catch(() => { toggle.disabled = false; alert('Något gick fel.'); toggle.checked = !enabled; });
+}
 
 function exportClubMarken() {
     const year = document.getElementById('markenYearFilter')?.value || new Date().getFullYear();
