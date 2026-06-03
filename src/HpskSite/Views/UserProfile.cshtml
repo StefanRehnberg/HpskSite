@@ -708,56 +708,15 @@
                                     <div class="form-text">Dina nuvarande medlemsgrupper i systemet</div>
                                 </div>
 
-                                <hr class="my-4">
-
-                                <h5>Ändra Lösenord</h5>
-                                <div class="row">
-                                    <div class="col-md-6">
-                                        <div class="mb-3">
-                                            <label for="currentPassword" class="form-label">Nuvarande Lösenord</label>
-                                            <input type="password" class="form-control" id="currentPassword" name="currentPassword">
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="row">
-                                    <div class="col-md-6">
-                                        <div class="mb-3">
-                                            <label for="newPassword" class="form-label">Nytt Lösenord</label>
-                                            <input type="password" class="form-control" id="newPassword" name="newPassword">
-                                        </div>
-                                    </div>
-                                    <div class="col-md-6">
-                                        <div class="mb-3">
-                                            <label for="confirmPassword" class="form-label">Bekräfta Nytt Lösenord</label>
-                                            <input type="password" class="form-control" id="confirmPassword" name="confirmPassword">
-                                        </div>
-                                    </div>
-                                </div>
                             </form>
 
                             <div class="mt-3">
                                 <button type="button" class="btn btn-primary" onclick="saveProfile()">
                                     <i class="bi bi-check-circle"></i> Spara Ändringar
                                 </button>
-                                <button type="button" class="btn btn-secondary" onclick="savePasswordOnly()">
-                                    <i class="bi bi-key"></i> Ändra Endast Lösenord
+                                <button type="button" class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#changePasswordModal">
+                                    <i class="bi bi-key"></i> Ändra lösenord
                                 </button>
-                            </div>
-
-                            <hr class="my-4">
-
-                            <!-- Tutorial Settings Section -->
-                            <div class="mb-4">
-                                <h5 class="mb-3">
-                                    <i class="bi bi-camera-video me-2"></i>Handledningar
-                                </h5>
-                                <p class="text-muted">
-                                    Om du har stängt bort hjälpbannerna på olika sidor kan du återställa dem här för att se handledningarna igen.
-                                </p>
-                                <button type="button" class="btn btn-outline-primary" id="resetTutorialsBtn" onclick="resetTutorialBanners()">
-                                    <i class="bi bi-arrow-clockwise me-1"></i> Återställ alla handledningsbannrar
-                                </button>
-                                <div id="resetTutorialsMessage" class="alert mt-3" style="display: none;"></div>
                             </div>
 
                             @{ ViewBag.memberId = memberData?.Id ?? 0; }
@@ -802,6 +761,40 @@
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
                 <button type="button" class="btn btn-primary" onclick="saveDashboardSharing()">
                     <i class="bi bi-check-lg me-1"></i>Spara
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* Change Password Modal *@
+<div class="modal fade" id="changePasswordModal" tabindex="-1" aria-labelledby="changePasswordModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="changePasswordModalLabel"><i class="bi bi-key me-2"></i>Ändra lösenord</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label for="cpCurrentPassword" class="form-label">Nuvarande lösenord</label>
+                    <input type="password" class="form-control" id="cpCurrentPassword" autocomplete="current-password">
+                </div>
+                <div class="mb-3">
+                    <label for="cpNewPassword" class="form-label">Nytt lösenord</label>
+                    <input type="password" class="form-control" id="cpNewPassword" autocomplete="new-password">
+                    <div class="form-text">Minst 6 tecken.</div>
+                </div>
+                <div class="mb-3">
+                    <label for="cpConfirmPassword" class="form-label">Bekräfta nytt lösenord</label>
+                    <input type="password" class="form-control" id="cpConfirmPassword" autocomplete="new-password">
+                </div>
+                <div id="cpMessage" class="alert mb-0" style="display:none;"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="cpSaveBtn" onclick="changePasswordFromModal()">
+                    <i class="bi bi-check-lg me-1"></i>Spara nytt lösenord
                 </button>
             </div>
         </div>
@@ -1427,25 +1420,6 @@ function saveProfile() {
     const milsnabbClassRadio = document.querySelector('input[name="milsnabbShooterClass"]:checked');
     formData.append('milsnabbShooterClass', milsnabbClassRadio ? milsnabbClassRadio.value : '');
 
-    // Include password fields if they are filled
-    const currentPassword = document.getElementById('currentPassword').value;
-    const newPassword = document.getElementById('newPassword').value;
-    const confirmPassword = document.getElementById('confirmPassword').value;
-
-    if (currentPassword || newPassword || confirmPassword) {
-        if (newPassword !== confirmPassword) {
-            alert('Nya lösenord matchar inte!');
-            return;
-        }
-        if (newPassword.length < 6) {
-            alert('Nytt lösenord måste vara minst 6 tecken långt!');
-            return;
-        }
-
-        formData.append('currentPassword', currentPassword);
-        formData.append('newPassword', newPassword);
-    }
-
     fetch('/umbraco/surface/Member/UpdateProfile', {
         method: 'POST',
         body: formData
@@ -1461,10 +1435,6 @@ function saveProfile() {
     .then(data => {
         if (data.success) {
             alert('Profil uppdaterad framgångsrikt!');
-            // Clear password fields
-            document.getElementById('currentPassword').value = '';
-            document.getElementById('newPassword').value = '';
-            document.getElementById('confirmPassword').value = '';
             // Reload page to reflect changes in navigation
             window.location.reload();
         } else {
@@ -1477,125 +1447,55 @@ function saveProfile() {
     });
 }
 
-function savePasswordOnly() {
-    const currentPassword = document.getElementById('currentPassword').value;
-    const newPassword = document.getElementById('newPassword').value;
-    const confirmPassword = document.getElementById('confirmPassword').value;
+// Change password from its own modal (Profil-fliken).
+function changePasswordFromModal() {
+    const current = document.getElementById('cpCurrentPassword').value;
+    const next = document.getElementById('cpNewPassword').value;
+    const confirm = document.getElementById('cpConfirmPassword').value;
+    const msg = document.getElementById('cpMessage');
+    const btn = document.getElementById('cpSaveBtn');
+    const show = (type, text) => { msg.className = 'alert alert-' + type + ' mb-0'; msg.style.display = 'block'; msg.textContent = text; };
 
-    if (!currentPassword || !newPassword || !confirmPassword) {
-        alert('Alla lösenordsfält måste fyllas i för att ändra lösenord!');
-        return;
-    }
-
-    if (newPassword !== confirmPassword) {
-        alert('Nya lösenord matchar inte!');
-        return;
-    }
-
-    if (newPassword.length < 6) {
-        alert('Nytt lösenord måste vara minst 6 tecken långt!');
-        return;
-    }
+    if (!current || !next || !confirm) { show('warning', 'Alla fält måste fyllas i.'); return; }
+    if (next !== confirm) { show('warning', 'Nya lösenord matchar inte.'); return; }
+    if (next.length < 6) { show('warning', 'Nytt lösenord måste vara minst 6 tecken långt.'); return; }
 
     const formData = new FormData();
-
-    // Add anti-forgery token
     const token = document.querySelector('input[name="__RequestVerificationToken"]');
-    if (token) {
-        formData.append('__RequestVerificationToken', token.value);
-    }
+    if (token) formData.append('__RequestVerificationToken', token.value);
+    formData.append('currentPassword', current);
+    formData.append('newPassword', next);
 
-    formData.append('currentPassword', currentPassword);
-    formData.append('newPassword', newPassword);
-
-    fetch('/umbraco/surface/Member/ChangePassword', {
-        method: 'POST',
-        body: formData
-    })
-    .then(response => {
-        if (!response.ok) {
-            return response.text().then(text => {
-                throw new Error(`HTTP ${response.status}: ${text}`);
-            });
-        }
-        return response.json();
-    })
-    .then(data => {
-        if (data.success) {
-            alert('Lösenord ändrat framgångsrikt!');
-            // Clear password fields
-            document.getElementById('currentPassword').value = '';
-            document.getElementById('newPassword').value = '';
-            document.getElementById('confirmPassword').value = '';
-        } else {
-            alert('Fel: ' + data.message);
-        }
-    })
-    .catch(error => {
-        console.error('Password change error:', error);
-        alert('Kunde inte ändra lösenord: ' + error.message);
-    });
-}
-
-// Reset tutorial banners - clears dismissed tutorial banners from localStorage
-function resetTutorialBanners() {
-    const button = document.getElementById('resetTutorialsBtn');
-    const messageDiv = document.getElementById('resetTutorialsMessage');
-
-    // Disable button during operation
-    button.disabled = true;
-    button.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Återställer...';
-
-    try {
-        // Get current dismissed banners
-        const dismissed = JSON.parse(localStorage.getItem('dismissedBanners') || '[]');
-        const count = dismissed.length;
-
-        // Clear dismissed banners
-        localStorage.removeItem('dismissedBanners');
-
-        // Also clear seen icon flags
-        const allKeys = Object.keys(localStorage);
-        allKeys.forEach(key => {
-            if (key.startsWith('seenIcon_')) {
-                localStorage.removeItem(key);
+    btn.disabled = true;
+    msg.style.display = 'none';
+    fetch('/umbraco/surface/Member/ChangePassword', { method: 'POST', body: formData })
+        .then(response => {
+            if (!response.ok) return response.text().then(text => { throw new Error(`HTTP ${response.status}: ${text}`); });
+            return response.json();
+        })
+        .then(data => {
+            btn.disabled = false;
+            if (data.success) {
+                const m = bootstrap.Modal.getInstance(document.getElementById('changePasswordModal'));
+                if (m) m.hide();
+                alert('Lösenord ändrat framgångsrikt!');
+            } else {
+                show('danger', 'Fel: ' + (data.message || 'Kunde inte ändra lösenord.'));
             }
+        })
+        .catch(error => {
+            btn.disabled = false;
+            console.error('Password change error:', error);
+            show('danger', 'Kunde inte ändra lösenord: ' + error.message);
         });
-
-        // Show success message
-        messageDiv.className = 'alert alert-success mt-3';
-        messageDiv.style.display = 'block';
-        messageDiv.innerHTML = `
-            <i class="bi bi-check-circle me-2"></i>
-            <strong>Klart!</strong> ${count > 0 ? count + ' handledningsbannrar' : 'Alla handledningsbannrar'} har återställts.
-            Du kommer nu att se hjälpbannrarna igen när du besöker olika sidor.
-        `;
-
-        // Reset button
-        button.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i> Återställ alla handledningsbannrar';
-        button.disabled = false;
-
-        // Auto-hide success message after 5 seconds
-        setTimeout(() => {
-            messageDiv.style.display = 'none';
-        }, 5000);
-
-    } catch (error) {
-        console.error('Error resetting tutorial banners:', error);
-
-        // Show error message
-        messageDiv.className = 'alert alert-danger mt-3';
-        messageDiv.style.display = 'block';
-        messageDiv.innerHTML = `
-            <i class="bi bi-exclamation-triangle me-2"></i>
-            <strong>Fel!</strong> Kunde inte återställa handledningsbannrar. Försök igen.
-        `;
-
-        // Reset button
-        button.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i> Återställ alla handledningsbannrar';
-        button.disabled = false;
-    }
 }
+
+// Reset the change-password modal whenever it closes.
+document.getElementById('changePasswordModal')?.addEventListener('hidden.bs.modal', function () {
+    ['cpCurrentPassword', 'cpNewPassword', 'cpConfirmPassword'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+    const msg = document.getElementById('cpMessage'); if (msg) msg.style.display = 'none';
+});
+
 
 function loadTrainingScoresDashboard() {
     const content = document.getElementById('trainingScoresContent');
