@@ -688,6 +688,45 @@
 								<li><i class="bi bi-geo-alt"></i> @venue</li>
 							</ul>
 
+							@if (currentMember != null)
+							{
+								<link rel="stylesheet" href="https://unpkg.com/leaflet@@1.9.4/dist/leaflet.css" />
+								<script src="https://unpkg.com/leaflet@@1.9.4/dist/leaflet.js"></script>
+								<div id="compRangeBlock" class="mb-3" style="display:none">
+									<p class="mb-1"><strong>Skjutbana:</strong></p>
+									<div id="compRangeName" class="mb-1"></div>
+									<div id="compRangeMap" style="height:220px;border-radius:.5rem;border:1px solid var(--bs-border-color);display:none"></div>
+									<a id="compRangeDir" href="#" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary mt-2" style="display:none"><i class="bi bi-signpost-2 me-1"></i>Vägbeskrivning</a>
+								</div>
+								<script>
+								(function () {
+									const compId = @Model.Id;
+									const esc = s => (s == null ? '' : String(s)).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+									(async function () {
+										try {
+											const d = await (await fetch('/umbraco/surface/ShootingRange/GetRangeForCompetition?competitionId=' + compId)).json();
+											if (!d.success || !d.hasRange) return;
+											const r = d.range;
+											document.getElementById('compRangeBlock').style.display = '';
+											const addr = [r.address, r.postcode, r.city].filter(Boolean).join(', ');
+											document.getElementById('compRangeName').innerHTML =
+												`<i class="bi bi-geo-alt-fill"></i> <strong>${esc(r.name)}</strong>` + (addr ? `<br><span class="text-muted small ms-3">${esc(addr)}</span>` : '');
+											if (r.latitude != null && r.longitude != null) {
+												document.getElementById('compRangeMap').style.display = '';
+												const map = L.map('compRangeMap').setView([r.latitude, r.longitude], 14);
+												L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map);
+												L.circleMarker([r.latitude, r.longitude], { radius: 9, color: '#fff', weight: 2, fillColor: '#dc3545', fillOpacity: 1 }).addTo(map).bindPopup(esc(r.name));
+												setTimeout(() => map.invalidateSize(), 120);
+												const dir = document.getElementById('compRangeDir');
+												dir.href = `https://www.google.com/maps/dir/?api=1&destination=${r.latitude},${r.longitude}`;
+												dir.style.display = '';
+											}
+										} catch (e) { }
+									})();
+								})();
+								</script>
+							}
+
 							@if (isSpringskytte)
 							{
 								<p><strong>Klasser:</strong></p>

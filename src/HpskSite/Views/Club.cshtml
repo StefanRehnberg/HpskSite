@@ -472,6 +472,86 @@ window.currentClubId = clubId;
                     }
                 </div>
 
+                <!-- TIER 2: Banor Tab (All logged-in users) -->
+                <div class="tab-pane fade" id="clubRanges" role="tabpanel">
+                    <div class="card mb-4" id="clubRangesCard" style="display:none">
+                        <div class="card-header">
+                            <h5 class="mb-0"><i class="bi bi-geo-alt me-2"></i>Våra skjutbanor</h5>
+                        </div>
+                        <div class="card-body">
+                            <div id="clubRangesList" class="mb-3"></div>
+                            <div id="clubRangesMap" style="height:340px;border-radius:.5rem;border:1px solid var(--bs-border-color);display:none"></div>
+                        </div>
+                    </div>
+                    <div id="clubRangesEmpty" class="alert alert-info" style="display:none">
+                        <i class="bi bi-info-circle me-1"></i>Inga skjutbanor är kopplade till klubben ännu.
+                        En klubbadministratör kan hävda eller koppla en bana i <a href="/skjutbanor">skjutbanedatabasen</a>.
+                    </div>
+                    <link rel="stylesheet" href="https://unpkg.com/leaflet@@1.9.4/dist/leaflet.css" />
+                    <script src="https://unpkg.com/leaflet@@1.9.4/dist/leaflet.js"></script>
+                    <script>
+                    (function () {
+                        const crClubId = @clubId;
+                        const DAYS = { 1:'Mån', 2:'Tis', 3:'Ons', 4:'Tor', 5:'Fre', 6:'Lör', 7:'Sön' };
+                        const esc = s => (s == null ? '' : String(s)).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+                        let crMap = null, crPts = [], crBuilt = false, crMarkers = {};
+                        function buildMap() {
+                            if (crBuilt || !crPts.length) { if (crMap) setTimeout(() => crMap.invalidateSize(), 60); return; }
+                            crBuilt = true;
+                            document.getElementById('clubRangesMap').style.display = '';
+                            crMap = L.map('clubRangesMap');
+                            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(crMap);
+                            crMarkers = {};
+                            crPts.forEach(p => {
+                                crMarkers[p.id] = L.circleMarker([p.lat, p.lng], { radius: 9, color: '#fff', weight: 2, fillColor: '#198754', fillOpacity: 1 })
+                                    .bindPopup(`<div class="fw-semibold mb-1">${esc(p.name)}</div><a class="btn btn-sm btn-primary" style="color:#fff" href="/skjutbanor?range=${p.id}">Visa</a>`)
+                                    .addTo(crMap);
+                            });
+                            if (crPts.length === 1) {
+                                crMap.setView([crPts[0].lat, crPts[0].lng], 14); // most clubs have one range
+                            } else {
+                                const g = L.featureGroup(crPts.map(p => L.marker([p.lat, p.lng])));
+                                crMap.fitBounds(g.getBounds().pad(0.2), { maxZoom: 14 });
+                            }
+                            setTimeout(() => crMap.invalidateSize(), 80);
+                        }
+                        async function load() {
+                            try {
+                                const d = await (await fetch('/umbraco/surface/ShootingRange/GetClubRanges?clubId=' + crClubId)).json();
+                                if (!d.success || !d.ranges.length) { document.getElementById('clubRangesEmpty').style.display = ''; return; }
+                                document.getElementById('clubRangesCard').style.display = '';
+                                crPts = [];
+                                document.getElementById('clubRangesList').innerHTML = d.ranges.map(r => {
+                                    if (r.latitude != null && r.longitude != null) crPts.push({ id: r.id, name: r.name, lat: r.latitude, lng: r.longitude });
+                                    const times = r.allocations.length
+                                        ? r.allocations.map(a => `<span class="badge bg-info-subtle text-info-emphasis me-1 mb-1">${DAYS[a.dayOfWeek]} ${a.startTime}–${a.endTime}${a.note ? ' (' + esc(a.note) + ')' : ''}</span>`).join('')
+                                        : '<span class="text-muted small">Inga tider angivna.</span>';
+                                    return `<div class="mb-2"><a href="/skjutbanor?range=${r.id}" class="fw-semibold text-decoration-none" onclick="return crNameClick(${r.id})">${esc(r.name)}</a>${r.city ? ' <span class="text-muted small">· ' + esc(r.city) + '</span>' : ''}<div class="mt-1">${times}</div></div>`;
+                                }).join('');
+                                // Build immediately if the Banor tab is already active; otherwise on first show
+                                // (Leaflet needs a sized, visible container to zoom correctly).
+                                if (document.getElementById('clubRanges').classList.contains('active')) buildMap();
+                            } catch (e) { }
+                        }
+                        // Clicking a range NAME pans/zooms the map to it (the map marker opens the range page).
+                        window.crNameClick = function (id) {
+                            buildMap();
+                            const pt = crPts.find(p => p.id === id);
+                            if (pt && crMap) {
+                                crMap.setView([pt.lat, pt.lng], 15);
+                                if (crMarkers[id]) crMarkers[id].openPopup();
+                                document.getElementById('clubRangesMap').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                                return false; // panned — don't navigate
+                            }
+                            return true; // range has no coordinates — fall back to opening its page
+                        };
+                        const tabBtn = document.getElementById('clubRanges-tab');
+                        if (tabBtn) tabBtn.addEventListener('shown.bs.tab', buildMap);
+                        load();
+                    })();
+                    </script>
+                </div>
+
                 <!-- TIER 2: Calendar Tab (All logged-in users) -->
                 <div class="tab-pane fade" id="clubCalendar" role="tabpanel">
                     @await Html.PartialAsync("ClubCalendar")

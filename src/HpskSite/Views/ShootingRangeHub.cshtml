@@ -1,0 +1,1238 @@
+﻿@using Umbraco.Cms.Core.Security
+@inject IMemberManager MemberManager
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+    ViewBag.Title = "Skjutbanor";
+
+    var currentMember = await MemberManager.GetCurrentMemberAsync();
+    var isLoggedIn = currentMember != null;
+}
+
+@if (!isLoggedIn)
+{
+    <div class="container py-5 text-center">
+        <h4><i class="bi bi-lock me-2"></i>Inloggning krävs</h4>
+        <p class="text-muted">Du måste vara inloggad för att se skjutbanedatabasen.</p>
+        <a class="btn btn-primary" href="/login-register"><i class="bi bi-box-arrow-in-right me-1"></i>Logga in</a>
+    </div>
+    return;
+}
+
+@Html.AntiForgeryToken()
+
+@* Leaflet + marker clustering (OpenStreetMap tiles — no API key; data is OSM-sourced) *@
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+
+<div class="container-fluid range-hub py-3">
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+        <div>
+            <h4 class="mb-1"><i class="bi bi-geo-alt me-2"></i>Skjutbanor</h4>
+            <p class="text-muted small mb-0">
+                Sveriges skjutbanor. Hävda din klubbs bana för att förvalta den — koppla klubbar,
+                lägg till banor/vallar och ange klubbarnas tider.
+            </p>
+        </div>
+        <div class="d-flex gap-2">
+            <button class="btn btn-outline-secondary" id="rngImportBtn" style="display:none" onclick="rngOpenImport()">
+                <i class="bi bi-cloud-upload me-1"></i>Importera OSM
+            </button>
+            <button class="btn btn-success" onclick="rngOpenEdit(0)">
+                <i class="bi bi-plus-lg me-1"></i>Ny skjutbana
+            </button>
+        </div>
+    </div>
+
+    <!-- Filter row -->
+    <div class="row g-2 mb-3 align-items-center">
+        <div class="col-md-4">
+            <input type="text" class="form-control" id="rngSearch" placeholder="Sök på namn, ort eller kommun..." oninput="rngRender()">
+        </div>
+        <div class="col-md-auto">
+            <div class="btn-group btn-group-sm" role="group">
+                <input type="radio" class="btn-check" name="rngFilter" id="rngFilter_all" value="all" checked onchange="rngRender()">
+                <label class="btn btn-outline-primary" for="rngFilter_all">Alla</label>
+
+                <input type="radio" class="btn-check" name="rngFilter" id="rngFilter_mine" value="mine" onchange="rngRender()">
+                <label class="btn btn-outline-primary" for="rngFilter_mine">Mina banor</label>
+
+                <input type="radio" class="btn-check" name="rngFilter" id="rngFilter_unclaimed" value="unclaimed" onchange="rngRender()">
+                <label class="btn btn-outline-primary" for="rngFilter_unclaimed">Okända</label>
+            </div>
+        </div>
+        <div class="col-md-auto">
+            <div class="btn-group btn-group-sm" role="group">
+                <input type="radio" class="btn-check" name="rngView" id="rngView_list" value="list" onchange="rngSetView('list')">
+                <label class="btn btn-outline-secondary" for="rngView_list"><i class="bi bi-list-ul me-1"></i>Lista</label>
+                <input type="radio" class="btn-check" name="rngView" id="rngView_map" value="map" checked onchange="rngSetView('map')">
+                <label class="btn btn-outline-secondary" for="rngView_map"><i class="bi bi-map me-1"></i>Karta</label>
+            </div>
+        </div>
+        <div class="col-md-auto ms-auto">
+            <small class="text-muted" id="rngCount"></small>
+        </div>
+    </div>
+
+    <div id="rngListWrap" style="display:none">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead>
+                    <tr>
+                        <th>Namn</th>
+                        <th>Ort / Kommun</th>
+                        <th>Huvudman</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody id="rngTableBody"></tbody>
+            </table>
+        </div>
+        <div id="rngEmpty" class="text-center py-5 text-muted" style="display:none">
+            <i class="bi bi-geo" style="font-size:2rem"></i>
+            <p class="mt-2 mb-0">Inga skjutbanor matchar filtret.</p>
+        </div>
+    </div>
+
+    <div id="rngMapWrap">
+        <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+            <p class="text-muted small mb-0">
+                <i class="bi bi-info-circle me-1"></i>Klicka på en markör för att öppna banan. Gula = okända,
+                gröna = aktiva. Banor utan koordinater visas inte på kartan.
+            </p>
+            <button class="btn btn-sm btn-success" id="rngPlaceBtn" onclick="rngStartPlacement()">
+                <i class="bi bi-geo-alt-fill me-1"></i>Lägg till skjutbana här
+            </button>
+        </div>
+        <div id="rngPlaceHint" class="alert alert-info py-2 d-none">
+            <i class="bi bi-hand-index me-1"></i>Klicka på kartan där skjutbanan ligger.
+            <a href="#" class="ms-2" onclick="rngCancelPlacement();return false;">Avbryt</a>
+        </div>
+        <div id="rngMap" style="height:70vh;border-radius:.5rem;border:1px solid var(--bs-border-color)"></div>
+        <small class="text-muted" id="rngMapCount"></small>
+    </div>
+</div>
+
+@* ─────────── Detail modal ─────────── *@
+<div class="modal fade" id="rngDetailModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="rngDetailTitle">Skjutbana</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="rngClaimBanner" class="alert alert-warning d-none">
+            <i class="bi bi-flag me-1"></i>Den här skjutbanan är inte hävdad ännu.
+            <button class="btn btn-sm btn-warning ms-2" onclick="rngOpenClaim()">Hävda för din klubb</button>
+        </div>
+        <ul class="nav nav-tabs" role="tablist">
+            <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#rngTabInfo" type="button">Info</button></li>
+            <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#rngTabSections" type="button">Banor / vallar</button></li>
+            <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#rngTabClubs" type="button">Klubbar &amp; tider</button></li>
+            <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#rngTabStewards" type="button">Förvaltare</button></li>
+            <li class="nav-item" id="rngDossierTabLi" style="display:none"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#rngTabDossier" type="button">Tillstånd &amp; dokument</button></li>
+            <li class="nav-item" id="rngActivityTabLi" style="display:none"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#rngTabActivity" type="button">Aktivitet</button></li>
+        </ul>
+        <div class="tab-content pt-3">
+            <div class="tab-pane fade show active" id="rngTabInfo"></div>
+            <div class="tab-pane fade" id="rngTabSections"></div>
+            <div class="tab-pane fade" id="rngTabClubs"></div>
+            <div class="tab-pane fade" id="rngTabStewards"></div>
+            <div class="tab-pane fade" id="rngTabDossier"></div>
+            <div class="tab-pane fade" id="rngTabActivity"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+@* ─────────── Edit range modal ─────────── *@
+<div class="modal fade" id="rngEditModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="rngEditTitle">Skjutbana</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="rngEditId">
+        <div class="row g-3">
+            <div class="col-md-8">
+                <label class="form-label">Namn *</label>
+                <input type="text" class="form-control" id="rngEditName">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Synlighet</label>
+                <select class="form-select" id="rngEditSensitivity">
+                    <option value="Members">Medlemmar (standard)</option>
+                    <option value="Restricted">Begränsad (dölj koordinater)</option>
+                </select>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Adress</label>
+                <input type="text" class="form-control" id="rngEditAddress">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Postnr</label>
+                <input type="text" class="form-control" id="rngEditPostcode">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Ort</label>
+                <input type="text" class="form-control" id="rngEditCity">
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Kommun</label>
+                <input type="text" class="form-control" id="rngEditMunicipality">
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Län</label>
+                <input type="text" class="form-control" id="rngEditCounty">
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Latitud</label>
+                <input type="number" step="any" class="form-control" id="rngEditLat">
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Longitud</label>
+                <input type="number" step="any" class="form-control" id="rngEditLon">
+            </div>
+            <div class="col-12">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                    <label class="form-label mb-0">Placering <span class="text-muted small">— klicka eller dra markören</span></label>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="rngFetchAddress()">
+                        <i class="bi bi-pin-map me-1"></i>Hämta adress från position
+                    </button>
+                </div>
+                <div id="rngEditMap" style="height:280px;border-radius:.5rem;border:1px solid var(--bs-border-color)"></div>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Huvudman (typ)</label>
+                <select class="form-select" id="rngEditHuvudmanType">
+                    <option value="">—</option>
+                    <option value="ClubOnPlatform">Klubb på pistol.nu</option>
+                    <option value="ExternalParty">Extern part</option>
+                    <option value="Municipality">Kommun</option>
+                    <option value="Private">Privat</option>
+                    <option value="Federation">Förbund</option>
+                </select>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Huvudman (namn)</label>
+                <input type="text" class="form-control" id="rngEditHuvudmanName" placeholder="Om ägaren inte finns på pistol.nu">
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Skjutbanechef</label>
+                <input type="text" class="form-control" id="rngEditChefName">
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Skjutbanechef – kontakt</label>
+                <input type="text" class="form-control" id="rngEditChefContact">
+            </div>
+            <div class="col-12">
+                <label class="form-label">Beskrivning</label>
+                <textarea class="form-control" id="rngEditDescription" rows="2"></textarea>
+            </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+        <button class="btn btn-primary" onclick="rngSaveRange()"><i class="bi bi-save me-1"></i>Spara</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+@* ─────────── Claim modal ─────────── *@
+<div class="modal fade" id="rngClaimModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Hävda skjutbana</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted small">Välj vilken klubb som hävdar banan. Du blir förvaltare och kan
+            koppla fler klubbar, lägga till banor/vallar och ange tider.</p>
+        <select class="form-select" id="rngClaimClub"></select>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+        <button class="btn btn-warning" onclick="rngDoClaim()"><i class="bi bi-flag me-1"></i>Hävda</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+@* ─────────── Section modal ─────────── *@
+<div class="modal fade" id="rngSectionModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Bana / vall</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="rngSecId">
+        <div class="row g-2">
+            <div class="col-12"><label class="form-label">Etikett *</label>
+                <input type="text" class="form-control" id="rngSecLabel" placeholder="t.ex. 25 m pistol, Vall A"></div>
+            <div class="col-md-6"><label class="form-label">Typ</label>
+                <input type="text" class="form-control" id="rngSecType" placeholder="Pistol 25 m, Gevär 300 m…"></div>
+            <div class="col-md-3"><label class="form-label">Avstånd (m)</label>
+                <input type="number" class="form-control" id="rngSecDistance"></div>
+            <div class="col-md-3"><label class="form-label">Skjutplatser</label>
+                <input type="number" class="form-control" id="rngSecFiringPoints"></div>
+            <div class="col-md-6"><label class="form-label">Riktning (°)</label>
+                <input type="number" class="form-control" id="rngSecDirection"></div>
+            <div class="col-md-6"><label class="form-label">Tillåtna vapen / kalibrar</label>
+                <input type="text" class="form-control" id="rngSecWeapons"></div>
+            <div class="col-12"><label class="form-label">Kulfång (beskrivning)</label>
+                <textarea class="form-control" id="rngSecKulfang" rows="2"></textarea></div>
+            <div class="col-12"><label class="form-label">Anteckningar</label>
+                <textarea class="form-control" id="rngSecNotes" rows="2"></textarea></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+        <button class="btn btn-primary" onclick="rngSaveSection()">Spara</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+@* ─────────── Allocation modal ─────────── *@
+<div class="modal fade" id="rngAllocModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Lägg till tid</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="rngAllocLinkId">
+        <div class="row g-2">
+            <div class="col-12"><label class="form-label">Veckodag</label>
+                <select class="form-select" id="rngAllocDay">
+                    <option value="1">Måndag</option><option value="2">Tisdag</option>
+                    <option value="3">Onsdag</option><option value="4">Torsdag</option>
+                    <option value="5">Fredag</option><option value="6">Lördag</option>
+                    <option value="7">Söndag</option>
+                </select></div>
+            <div class="col-6"><label class="form-label">Från</label>
+                <input type="text" class="form-control" id="rngAllocStart" placeholder="09:00"></div>
+            <div class="col-6"><label class="form-label">Till</label>
+                <input type="text" class="form-control" id="rngAllocEnd" placeholder="21:00"></div>
+            <div class="col-12"><label class="form-label">Bana/vall (valfritt)</label>
+                <select class="form-select" id="rngAllocSection"><option value="">Hela banan</option></select></div>
+            <div class="col-12"><label class="form-label">Notering (valfritt)</label>
+                <input type="text" class="form-control" id="rngAllocNote"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+        <button class="btn btn-primary" onclick="rngSaveAlloc()">Spara tid</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+@* ─────────── OSM import modal ─────────── *@
+<div class="modal fade" id="rngImportModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Importera skjutbanor från OSM</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted small">Ladda upp en GeoJSON-export (overpass-turbo, sport=shooting). Banor
+            läggs till som <em>ej hävdade</em> och dubbletter hoppas över (matchas på OSM-id).</p>
+        <input type="file" class="form-control" id="rngImportFile" accept=".geojson,.json,application/json">
+        <div id="rngImportResult" class="mt-3 small"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+        <button class="btn btn-primary" id="rngImportSubmit" onclick="rngDoImport()"><i class="bi bi-cloud-upload me-1"></i>Importera</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+@* ─────────── Permit modal ─────────── *@
+<div class="modal fade" id="rngPermitModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Tillstånd</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="rngPermitId">
+        <div class="row g-2">
+            <div class="col-md-6"><label class="form-label">Typ</label>
+                <select class="form-select" id="rngPermitType">
+                    <option value="PoliceTillstand">Polistillstånd</option>
+                    <option value="EnvAnmalanC">Miljö – anmälan (C)</option>
+                    <option value="EnvTillstandB">Miljö – tillstånd (B)</option>
+                    <option value="Other">Annat</option>
+                </select></div>
+            <div class="col-md-6"><label class="form-label">Utfärdande myndighet</label>
+                <input type="text" class="form-control" id="rngPermitAuthority" placeholder="t.ex. Polismyndigheten region Syd"></div>
+            <div class="col-md-6"><label class="form-label">Diarienummer</label>
+                <input type="text" class="form-control" id="rngPermitRef"></div>
+            <div class="col-md-3"><label class="form-label">Utfärdat</label>
+                <input type="text" class="form-control rng-date" id="rngPermitIssued" placeholder="ÅÅÅÅ-MM-DD"></div>
+            <div class="col-md-3"><label class="form-label">Giltigt t.o.m.</label>
+                <input type="text" class="form-control rng-date" id="rngPermitExpiry" placeholder="ÅÅÅÅ-MM-DD"></div>
+            <div class="col-md-6"><label class="form-label">Max antal skott/år</label>
+                <input type="number" class="form-control" id="rngPermitMaxShots" placeholder="t.ex. 50000"></div>
+            <div class="col-12">
+                <label class="form-label mb-1">Tillåtna skjuttider</label>
+                <div id="rngPermitWindows"></div>
+                <button type="button" class="btn btn-sm btn-outline-secondary mt-1" onclick="rngAddWindowRow()"><i class="bi bi-plus-lg me-1"></i>Lägg till tid</button>
+            </div>
+            <div class="col-12"><label class="form-label">Villkor / övrigt</label>
+                <textarea class="form-control" id="rngPermitConditions" rows="2"></textarea></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+        <button class="btn btn-primary" onclick="rngSavePermit()">Spara</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+@* ─────────── Document upload modal ─────────── *@
+<div class="modal fade" id="rngDocModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Ladda upp dokument</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-2">
+            <div class="col-12"><label class="form-label">Typ</label>
+                <select class="form-select" id="rngDocType">
+                    <option value="PoliceTillstand">Polistillstånd</option>
+                    <option value="Besiktningsprotokoll">Besiktningsprotokoll</option>
+                    <option value="Skjutbaneinstruktion">Skjutbaneinstruktion</option>
+                    <option value="EnvDecision">Miljöbeslut</option>
+                    <option value="Bullerutredning">Bullerutredning</option>
+                    <option value="Markundersokning">Markundersökning (bly)</option>
+                    <option value="Skotselplan">Skötselplan</option>
+                    <option value="Insurance">Försäkring</option>
+                    <option value="Other">Annat</option>
+                </select></div>
+            <div class="col-12"><label class="form-label">Titel</label>
+                <input type="text" class="form-control" id="rngDocTitle"></div>
+            <div class="col-6"><label class="form-label">Utfärdat</label>
+                <input type="text" class="form-control rng-date" id="rngDocIssued" placeholder="ÅÅÅÅ-MM-DD"></div>
+            <div class="col-6"><label class="form-label">Giltigt t.o.m.</label>
+                <input type="text" class="form-control rng-date" id="rngDocValid" placeholder="ÅÅÅÅ-MM-DD"></div>
+            <div class="col-12"><label class="form-label">Fil (PDF/bild/Word, max 25 MB)</label>
+                <input type="file" class="form-control" id="rngDocFile" accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx"></div>
+        </div>
+        <div id="rngDocResult" class="mt-2 small"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+        <button class="btn btn-primary" id="rngDocSubmit" onclick="rngUploadDoc()"><i class="bi bi-cloud-upload me-1"></i>Ladda upp</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+@* ─────────── Manual activity modal ─────────── *@
+<div class="modal fade" id="rngActivityModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Registrera aktivitet</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted small">För aktivitet som inte fångas automatiskt — gästskyttar, andra
+            klubbar, evenemang. Räknas in i årets totala antal skott.</p>
+        <div class="row g-2">
+            <div class="col-6"><label class="form-label">Datum</label>
+                <input type="text" class="form-control" id="rngActDate" placeholder="ÅÅÅÅ-MM-DD"></div>
+            <div class="col-3"><label class="form-label">Från</label>
+                <input type="text" class="form-control" id="rngActStart" placeholder="09:00"></div>
+            <div class="col-3"><label class="form-label">Till</label>
+                <input type="text" class="form-control" id="rngActEnd" placeholder="12:00"></div>
+            <div class="col-6"><label class="form-label">Antal skott</label>
+                <input type="number" min="0" class="form-control" id="rngActShots"></div>
+            <div class="col-6"><label class="form-label">Antal skyttar</label>
+                <input type="number" min="1" class="form-control" id="rngActShooters" value="1"></div>
+            <div class="col-12"><label class="form-label">Notering (valfritt)</label>
+                <input type="text" class="form-control" id="rngActNote" placeholder="t.ex. KM, gästskytte, träningskväll"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+        <button class="btn btn-primary" onclick="rngSaveActivity()">Spara</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+    const DAYS = { 1:'Mån', 2:'Tis', 3:'Ons', 4:'Tor', 5:'Fre', 6:'Lör', 7:'Sön' };
+    const STATUS_LABEL = { Active:'Aktiv', Inactive:'Inaktiv', Decommissioned:'Avvecklad', UnclaimedSeed:'Okänd' };
+    let rngState = { ranges: [], isSiteAdmin: false, myClubs: [], current: null };
+
+    function token() {
+        const el = document.querySelector('input[name="__RequestVerificationToken"]');
+        return el ? el.value : '';
+    }
+    async function postJson(url, body) {
+        const r = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token() },
+            body: JSON.stringify(body || {})
+        });
+        return await r.json();
+    }
+    async function getJson(url) { return await (await fetch(url)).json(); }
+    function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+    // ── List ──────────────────────────────────────────────
+    async function rngLoad() {
+        const d = await getJson('/umbraco/surface/ShootingRange/GetRanges');
+        if (!d.success) { alert(d.message || 'Fel'); return; }
+        rngState.ranges = d.ranges;
+        rngState.isSiteAdmin = d.isSiteAdmin;
+        document.getElementById('rngImportBtn').style.display = d.isSiteAdmin ? '' : 'none';
+        rngRender();
+        // Default to the map view (it's the most useful entry point now that most ranges are
+        // unnamed OSM seeds located by position).
+        if (rngView === 'map') { rngInitMap(); rngRenderMap(rngFiltered()); }
+    }
+    let rngView = 'map';
+    let rngMap = null, rngCluster = null;
+
+    function rngFiltered() {
+        const q = (document.getElementById('rngSearch').value || '').toLowerCase();
+        const filter = (document.querySelector('input[name="rngFilter"]:checked') || {}).value || 'all';
+        return rngState.ranges.filter(r => {
+            if (filter === 'mine' && !r.canManage) return false;
+            if (filter === 'unclaimed' && r.status !== 'UnclaimedSeed') return false;
+            if (q) {
+                const hay = `${r.name} ${r.city||''} ${r.municipality||''} ${r.county||''}`.toLowerCase();
+                if (!hay.includes(q)) return false;
+            }
+            return true;
+        });
+    }
+
+    window.rngRender = function () {
+        const rows = rngFiltered();
+        const tb = document.getElementById('rngTableBody');
+        tb.innerHTML = rows.map(r => `
+            <tr>
+                <td><a href="#" onclick="rngOpenDetail(${r.id});return false;" class="fw-semibold text-decoration-none">${esc(r.name)}</a>
+                    ${r.canManage ? '<i class="bi bi-pencil-square text-muted ms-1" title="Du förvaltar"></i>' : ''}</td>
+                <td class="small">${esc(r.city||'')}${r.municipality ? ' · '+esc(r.municipality) : ''}</td>
+                <td class="small">${esc(r.huvudmanName||'')}</td>
+                <td><span class="badge ${r.status==='Active'?'bg-success':r.status==='UnclaimedSeed'?'bg-warning text-dark':'bg-secondary'}">${STATUS_LABEL[r.status]||r.status}</span></td>
+            </tr>`).join('');
+        document.getElementById('rngEmpty').style.display = rows.length ? 'none' : '';
+        document.getElementById('rngCount').textContent = `${rows.length} av ${rngState.ranges.length} banor`;
+        if (rngView === 'map') rngRenderMap(rows);
+    };
+
+    // ── Map view ──────────────────────────────────────────
+    window.rngSetView = function (view) {
+        rngView = view;
+        document.getElementById('rngListWrap').style.display = view === 'list' ? '' : 'none';
+        document.getElementById('rngMapWrap').style.display = view === 'map' ? '' : 'none';
+        if (view === 'map') { rngInitMap(); rngRenderMap(rngFiltered()); }
+    };
+    function rngInitMap() {
+        if (rngMap) { setTimeout(() => rngMap.invalidateSize(), 60); return; }
+        rngMap = L.map('rngMap').setView([62.5, 16.5], 5); // center of Sweden
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19, attribution: '© OpenStreetMap'
+        }).addTo(rngMap);
+        rngCluster = L.markerClusterGroup({ chunkedLoading: true, maxClusterRadius: 50 });
+        rngMap.addLayer(rngCluster);
+        rngMap.on('click', rngMapClick);
+        setTimeout(() => rngMap.invalidateSize(), 60);
+    }
+
+    // ── Place a new range on the map ──────────────────────
+    let rngPlacing = false;
+    window.rngStartPlacement = function () {
+        rngPlacing = true;
+        document.getElementById('rngPlaceHint').classList.remove('d-none');
+        const c = document.getElementById('rngMap'); if (c) c.style.cursor = 'crosshair';
+    };
+    window.rngCancelPlacement = function () {
+        rngPlacing = false;
+        document.getElementById('rngPlaceHint').classList.add('d-none');
+        const c = document.getElementById('rngMap'); if (c) c.style.cursor = '';
+    };
+    function rngMapClick(e) {
+        if (!rngPlacing) return;
+        rngCancelPlacement();
+        rngOpenEdit(0, { lat: e.latlng.lat, lng: e.latlng.lng });
+    }
+    function rngDot(color) {
+        return L.divIcon({
+            className: 'rng-dot',
+            html: `<span style="display:block;width:14px;height:14px;border-radius:50%;background:${color};border:2px solid #fff;box-shadow:0 0 3px rgba(0,0,0,.5)"></span>`,
+            iconSize: [14, 14], iconAnchor: [7, 7]
+        });
+    }
+    function rngRenderMap(rows) {
+        if (!rngCluster) return;
+        rngCluster.clearLayers();
+        const withCoords = rows.filter(r => r.latitude != null && r.longitude != null);
+        withCoords.forEach(r => {
+            const color = r.status === 'Active' ? '#198754' : (r.status === 'UnclaimedSeed' ? '#ffc107' : '#6c757d');
+            const m = L.marker([r.latitude, r.longitude], { icon: rngDot(color) });
+            m.bindPopup(`<div class="fw-semibold mb-1">${esc(r.name)}</div>
+                <div class="small text-muted mb-2">${esc(r.city || '')}${r.municipality ? ' · ' + esc(r.municipality) : ''}</div>
+                <button class="btn btn-sm btn-primary" onclick="rngOpenDetail(${r.id})">Öppna</button>`);
+            rngCluster.addLayer(m);
+        });
+        document.getElementById('rngMapCount').textContent =
+            `${withCoords.length} banor på kartan${rows.length > withCoords.length ? ` (${rows.length - withCoords.length} saknar koordinater)` : ''}`;
+    }
+
+    // ── Detail ────────────────────────────────────────────
+    window.rngOpenDetail = async function (id) {
+        const d = await getJson('/umbraco/surface/ShootingRange/GetRange?id=' + id);
+        if (!d.success) { alert(d.message || 'Fel'); return; }
+        rngState.current = d;
+        document.getElementById('rngDetailTitle').textContent = d.range.name;
+        document.getElementById('rngClaimBanner').classList.toggle('d-none', d.range.status !== 'UnclaimedSeed');
+        rngRenderInfo(); rngRenderSections(); rngRenderClubs(); rngRenderStewards();
+        // Dossier (permits + documents) is the private tier — only for managers.
+        document.getElementById('rngDossierTabLi').style.display = d.canManage ? '' : 'none';
+        document.getElementById('rngActivityTabLi').style.display = d.canManage ? '' : 'none';
+        if (d.canManage) { rngRenderDossier(); rngRenderActivity(); }
+        else { document.getElementById('rngTabDossier').innerHTML = ''; document.getElementById('rngTabActivity').innerHTML = ''; }
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('rngDetailModal')).show();
+    };
+    function cm() { return rngState.current && rngState.current.canManage; }
+
+    function rngRenderInfo() {
+        const r = rngState.current.range;
+        const row = (l, v) => v ? `<div class="col-md-6 mb-2"><div class="text-muted small">${l}</div><div>${esc(v)}</div></div>` : '';
+        document.getElementById('rngTabInfo').innerHTML = `
+            <div class="row">
+                ${row('Adress', [r.address, r.postcode, r.city].filter(Boolean).join(', '))}
+                ${row('Kommun', r.municipality)}
+                ${row('Län', r.county)}
+                ${row('Koordinater', (r.latitude!=null&&r.longitude!=null) ? `${r.latitude}, ${r.longitude}` : '')}
+                ${row('Huvudman', r.huvudmanName)}
+                ${row('Skjutbanechef', [r.skjutbanechefName, r.skjutbanechefContact].filter(Boolean).join(' · '))}
+                ${row('Synlighet', r.locationSensitivity==='Restricted'?'Begränsad':'Medlemmar')}
+                ${row('Källa', r.source)}
+                ${r.description ? `<div class="col-12 mb-2"><div class="text-muted small">Beskrivning</div><div>${esc(r.description)}</div></div>` : ''}
+            </div>
+            ${cm() ? `<div class="mt-2 d-flex gap-2">
+                <button class="btn btn-sm btn-outline-primary" onclick="rngOpenEdit(${r.id})"><i class="bi bi-pencil me-1"></i>Redigera</button>
+                <button class="btn btn-sm btn-outline-danger" onclick="rngDeleteRange(${r.id})"><i class="bi bi-trash me-1"></i>Ta bort</button>
+            </div>` : ''}`;
+    }
+
+    function rngRenderSections() {
+        const s = rngState.current.sections;
+        let html = s.length ? `<div class="list-group mb-2">` + s.map(x => `
+            <div class="list-group-item d-flex justify-content-between align-items-start">
+                <div>
+                    <div class="fw-semibold">${esc(x.label)}</div>
+                    <div class="small text-muted">${[x.banaType, x.distanceMeters?x.distanceMeters+' m':'', x.firingPoints?x.firingPoints+' platser':''].filter(Boolean).join(' · ')}</div>
+                    ${x.kulfangSpec ? `<div class="small">Kulfång: ${esc(x.kulfangSpec)}</div>` : ''}
+                </div>
+                ${cm() ? `<div class="btn-group btn-group-sm">
+                    <button class="btn btn-outline-secondary" onclick='rngOpenSection(${JSON.stringify(x)})'><i class="bi bi-pencil"></i></button>
+                    <button class="btn btn-outline-danger" onclick="rngDeleteSection(${x.id})"><i class="bi bi-trash"></i></button>
+                </div>` : ''}
+            </div>`).join('') + `</div>`
+            : `<p class="text-muted small">Inga banor/vallar tillagda.</p>`;
+        if (cm()) html += `<button class="btn btn-sm btn-success" onclick="rngOpenSection(null)"><i class="bi bi-plus-lg me-1"></i>Lägg till bana/vall</button>`;
+        document.getElementById('rngTabSections').innerHTML = html;
+    }
+
+    function rngRenderClubs() {
+        const clubs = rngState.current.clubs;
+        let html = clubs.length ? clubs.map(c => `
+            <div class="card mb-2"><div class="card-body py-2">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div class="fw-semibold">${esc(c.clubName)} <span class="badge bg-light text-dark ms-1">${esc(c.relationType)}</span></div>
+                    ${cm() ? `<button class="btn btn-sm btn-outline-danger" onclick="rngRemoveLink(${c.linkId})"><i class="bi bi-x-lg"></i></button>` : ''}
+                </div>
+                <div class="mt-2">
+                    ${c.allocations.length ? c.allocations.map(a => `
+                        <span class="badge ${rngAllocOutside(a) ? 'bg-warning-subtle text-warning-emphasis' : 'bg-info-subtle text-info-emphasis'} me-1 mb-1">
+                            ${DAYS[a.dayOfWeek]} ${a.startTime}–${a.endTime}${a.note?' ('+esc(a.note)+')':''}
+                            ${rngAllocOutside(a) ? '<i class="bi bi-exclamation-triangle ms-1" title="Utanför tillåten skjuttid enligt tillstånd"></i>' : ''}
+                            ${cm() ? `<a href="#" onclick="rngDeleteAlloc(${a.id});return false;" class="text-danger ms-1">×</a>` : ''}
+                        </span>`).join('') : '<span class="text-muted small">Inga tider angivna.</span>'}
+                </div>
+                ${cm() ? `<button class="btn btn-sm btn-link px-0 mt-1" onclick="rngOpenAlloc(${c.linkId})">+ Lägg till tid</button>` : ''}
+            </div></div>`).join('')
+            : `<p class="text-muted small">Inga klubbar kopplade.</p>`;
+        if (cm()) html += `<div class="input-group input-group-sm mt-2" style="max-width:420px">
+            <select class="form-select" id="rngLinkClubSelect"></select>
+            <button class="btn btn-success" onclick="rngAddLink()"><i class="bi bi-plus-lg me-1"></i>Koppla klubb</button>
+        </div>`;
+        document.getElementById('rngTabClubs').innerHTML = html;
+        if (cm()) rngFillClubSelect('rngLinkClubSelect');
+    }
+
+    function rngRenderStewards() {
+        const sw = rngState.current.stewards;
+        let html = `<p class="text-muted small">Förvaltare kan redigera banan och dess uppgifter (oavsett klubb).</p>`;
+        html += sw.length ? `<ul class="list-group mb-2">` + sw.map(x => `
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+                ${esc(x.memberName)}
+                ${cm() ? `<button class="btn btn-sm btn-outline-danger" onclick="rngRemoveSteward(${x.memberId})"><i class="bi bi-x-lg"></i></button>` : ''}
+            </li>`).join('') + `</ul>` : '';
+        if (cm()) html += `<div class="input-group input-group-sm" style="max-width:420px">
+            <input type="text" class="form-control" id="rngStewardSearch" placeholder="Sök medlem (namn/e-post)..." oninput="rngSearchSteward()">
+        </div><div id="rngStewardResults" class="list-group mt-1"></div>`;
+        document.getElementById('rngTabStewards').innerHTML = html;
+    }
+
+    // ── Dossier: permits + documents (Phase 2) ────────────
+    const PERMIT_LABELS = { PoliceTillstand:'Polistillstånd', EnvAnmalanC:'Miljö – anmälan (C)', EnvTillstandB:'Miljö – tillstånd (B)', Other:'Annat' };
+    const DOC_LABELS = { PoliceTillstand:'Polistillstånd', Besiktningsprotokoll:'Besiktningsprotokoll', Skjutbaneinstruktion:'Skjutbaneinstruktion', EnvDecision:'Miljöbeslut', Bullerutredning:'Bullerutredning', Markundersokning:'Markundersökning (bly)', Skotselplan:'Skötselplan', Insurance:'Försäkring', Other:'Annat' };
+
+    // Advisory: does a club allocation fall outside the range's permitted shooting window?
+    function rngAllocOutside(a) {
+        const wins = (rngState.current && rngState.current.allowedWindows) || [];
+        if (!wins.length) return false; // no permit window defined → no advice
+        const t = s => { const p = String(s).split(':'); return (+p[0]) * 60 + (+p[1] || 0); };
+        const as = t(a.startTime), ae = t(a.endTime);
+        return !wins.some(w => w.day === a.dayOfWeek && t(w.start) <= as && ae <= t(w.end));
+    }
+    function expiryBadge(dateStr) {
+        if (!dateStr) return '';
+        const days = Math.round((new Date(dateStr + 'T00:00:00') - new Date()) / 86400000);
+        if (days < 0) return ` <span class="badge bg-danger">Gått ut ${dateStr}</span>`;
+        if (days <= 90) return ` <span class="badge bg-warning text-dark">Snart (${days} d)</span>`;
+        return ` <span class="text-muted small">t.o.m. ${dateStr}</span>`;
+    }
+    async function rngRenderDossier() {
+        const el = document.getElementById('rngTabDossier');
+        el.innerHTML = '<div class="text-muted small">Laddar…</div>';
+        const d = await getJson('/umbraco/surface/ShootingRange/GetDossier?rangeId=' + rngState.current.range.id);
+        if (!d.success) { el.innerHTML = `<div class="text-danger small">${esc(d.message || 'Fel')}</div>`; return; }
+        let html = '<h6 class="mb-2">Tillstånd</h6>';
+        html += d.permits.length ? d.permits.map(p => `
+            <div class="card mb-2"><div class="card-body py-2">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <span class="fw-semibold">${PERMIT_LABELS[p.permitType] || p.permitType}</span>${expiryBadge(p.expiryDate)}
+                        <div class="small text-muted">${esc(p.issuingAuthority || '')}${p.referenceNumber ? ' · ' + esc(p.referenceNumber) : ''}</div>
+                        ${p.maxShotsPerYear != null ? `<div class="small">Max ${p.maxShotsPerYear.toLocaleString('sv-SE')} skott/år</div>` : ''}
+                        ${p.allowedWindows.length ? `<div class="small">Tider: ${p.allowedWindows.map(w => DAYS[w.day] + ' ' + w.start + '–' + w.end).join(', ')}</div>` : ''}
+                        ${p.conditions ? `<div class="small text-muted">${esc(p.conditions)}</div>` : ''}
+                    </div>
+                    <div class="btn-group btn-group-sm">
+                        <button class="btn btn-outline-secondary" onclick='rngOpenPermit(${JSON.stringify(p)})'><i class="bi bi-pencil"></i></button>
+                        <button class="btn btn-outline-danger" onclick="rngDeletePermit(${p.id})"><i class="bi bi-trash"></i></button>
+                    </div>
+                </div>
+            </div></div>`).join('') : '<p class="text-muted small">Inga tillstånd registrerade.</p>';
+        html += `<button class="btn btn-sm btn-success mb-3" onclick="rngOpenPermit(null)"><i class="bi bi-plus-lg me-1"></i>Lägg till tillstånd</button>`;
+        html += '<h6 class="mb-2 mt-2">Dokument</h6>';
+        html += d.documents.length ? `<ul class="list-group mb-2">` + d.documents.map(x => `
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+                <div>
+                    <a href="/umbraco/surface/ShootingRange/GetDocument?id=${x.id}" target="_blank" rel="noopener" class="fw-semibold text-decoration-none">${esc(x.title)}</a>
+                    <span class="badge bg-light text-dark ms-1">${DOC_LABELS[x.docType] || x.docType}</span>${expiryBadge(x.validUntil)}
+                </div>
+                <button class="btn btn-sm btn-outline-danger" onclick="rngDeleteDoc(${x.id})"><i class="bi bi-trash"></i></button>
+            </li>`).join('') + `</ul>` : '<p class="text-muted small">Inga dokument uppladdade.</p>';
+        html += `<button class="btn btn-sm btn-success" onclick="rngOpenDoc()"><i class="bi bi-cloud-upload me-1"></i>Ladda upp dokument</button>`;
+        el.innerHTML = html;
+    }
+
+    window.rngOpenPermit = function (p) {
+        document.getElementById('rngPermitId').value = p ? p.id : 0;
+        const set = (el, v) => document.getElementById(el).value = (v == null ? '' : v);
+        set('rngPermitType', p?.permitType || 'PoliceTillstand');
+        set('rngPermitAuthority', p?.issuingAuthority);
+        set('rngPermitRef', p?.referenceNumber);
+        set('rngPermitIssued', p?.issuedDate);
+        set('rngPermitExpiry', p?.expiryDate);
+        set('rngPermitMaxShots', p?.maxShotsPerYear);
+        set('rngPermitConditions', p?.conditions);
+        document.getElementById('rngPermitWindows').innerHTML = '';
+        (p?.allowedWindows || []).forEach(w => rngAddWindowRow(w.day, w.start, w.end));
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('rngPermitModal')).show();
+    };
+    window.rngAddWindowRow = function (day, start, end) {
+        const div = document.createElement('div');
+        div.className = 'input-group input-group-sm mb-1 rng-window-row';
+        div.innerHTML = `
+            <select class="form-select rng-w-day">${[1,2,3,4,5,6,7].map(dd => `<option value="${dd}" ${dd === day ? 'selected' : ''}>${DAYS[dd]}</option>`).join('')}</select>
+            <input type="text" class="form-control rng-w-start" placeholder="09:00" value="${start || ''}">
+            <input type="text" class="form-control rng-w-end" placeholder="21:00" value="${end || ''}">
+            <button class="btn btn-outline-danger" type="button" onclick="this.closest('.rng-window-row').remove()"><i class="bi bi-x"></i></button>`;
+        document.getElementById('rngPermitWindows').appendChild(div);
+    };
+    function rngCollectWindows() {
+        return Array.from(document.querySelectorAll('#rngPermitWindows .rng-window-row')).map(r => ({
+            day: parseInt(r.querySelector('.rng-w-day').value),
+            start: r.querySelector('.rng-w-start').value.trim(),
+            end: r.querySelector('.rng-w-end').value.trim()
+        })).filter(w => w.start && w.end);
+    }
+    window.rngSavePermit = async function () {
+        const num = el => { const v = document.getElementById(el).value; return v === '' ? null : parseInt(v); };
+        const body = {
+            id: parseInt(document.getElementById('rngPermitId').value) || 0,
+            rangeId: rngState.current.range.id,
+            permitType: document.getElementById('rngPermitType').value,
+            issuingAuthority: document.getElementById('rngPermitAuthority').value,
+            referenceNumber: document.getElementById('rngPermitRef').value,
+            issuedDate: document.getElementById('rngPermitIssued').value,
+            expiryDate: document.getElementById('rngPermitExpiry').value,
+            maxShotsPerYear: num('rngPermitMaxShots'),
+            allowedWindows: rngCollectWindows(),
+            conditions: document.getElementById('rngPermitConditions').value
+        };
+        const d = await postJson('/umbraco/surface/ShootingRange/SavePermit', body);
+        if (!d.success) { alert(d.message || 'Fel'); return; }
+        bootstrap.Modal.getInstance(document.getElementById('rngPermitModal')).hide();
+        rngOpenDetail(rngState.current.range.id);
+    };
+    window.rngDeletePermit = async function (id) {
+        if (!confirm('Ta bort tillståndet?')) return;
+        const d = await postJson('/umbraco/surface/ShootingRange/DeletePermit', { id });
+        if (!d.success) { alert(d.message || 'Fel'); return; }
+        rngOpenDetail(rngState.current.range.id);
+    };
+
+    window.rngOpenDoc = function () {
+        ['rngDocResult', 'rngDocFile', 'rngDocTitle', 'rngDocIssued', 'rngDocValid'].forEach(id => {
+            const e = document.getElementById(id); if (id === 'rngDocResult') e.innerHTML = ''; else e.value = '';
+        });
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('rngDocModal')).show();
+    };
+    window.rngUploadDoc = async function () {
+        const f = document.getElementById('rngDocFile').files[0];
+        if (!f) { alert('Välj en fil.'); return; }
+        const btn = document.getElementById('rngDocSubmit'); btn.disabled = true; btn.innerHTML = 'Laddar upp...';
+        try {
+            const fd = new FormData();
+            fd.append('file', f);
+            fd.append('__RequestVerificationToken', token());
+            fd.append('rangeId', rngState.current.range.id);
+            fd.append('docType', document.getElementById('rngDocType').value);
+            fd.append('title', document.getElementById('rngDocTitle').value);
+            fd.append('issuedDate', document.getElementById('rngDocIssued').value);
+            fd.append('validUntil', document.getElementById('rngDocValid').value);
+            const r = await fetch('/umbraco/surface/ShootingRange/UploadDocument', { method: 'POST', headers: { 'RequestVerificationToken': token() }, body: fd });
+            const d = await r.json();
+            if (!d.success) { document.getElementById('rngDocResult').innerHTML = `<span class="text-danger">${esc(d.message)}</span>`; return; }
+            bootstrap.Modal.getInstance(document.getElementById('rngDocModal')).hide();
+            rngOpenDetail(rngState.current.range.id);
+        } finally { btn.disabled = false; btn.innerHTML = '<i class="bi bi-cloud-upload me-1"></i>Ladda upp'; }
+    };
+    window.rngDeleteDoc = async function (id) {
+        if (!confirm('Ta bort dokumentet?')) return;
+        const d = await postJson('/umbraco/surface/ShootingRange/DeleteDocument', { id });
+        if (!d.success) { alert(d.message || 'Fel'); return; }
+        rngOpenDetail(rngState.current.range.id);
+    };
+
+    // ── Activity & environmental report (Phase 3) ─────────
+    const SOURCE_LABELS = { Competition:'Tävling', TrainingLog:'Träning', QrSelfReported:'Egenregistrering (QR)', ManualBulk:'Manuell', Estimated:'Uppskattning' };
+    async function rngRenderActivity(year) {
+        const el = document.getElementById('rngTabActivity');
+        el.innerHTML = '<div class="text-muted small">Laddar…</div>';
+        const rangeId = rngState.current.range.id;
+        const url = '/umbraco/surface/ShootingRange/GetActivityReport?rangeId=' + rangeId + (year ? '&year=' + year : '');
+        const d = await getJson(url);
+        if (!d.success) { el.innerHTML = `<div class="text-danger small">${esc(d.message || 'Fel')}</div>`; return; }
+
+        const checkinUrl = location.origin + '/skjutbana/incheckning?r=' + rangeId;
+        const qrSrc = '/umbraco/surface/Faltskytte/GenerateQrCode?url=' + encodeURIComponent(checkinUrl);
+
+        let capHtml;
+        if (d.cap) {
+            const pct = Math.min(100, Math.round(d.total / d.cap * 100));
+            const barClass = pct >= 100 ? 'bg-danger' : (pct >= 80 ? 'bg-warning' : 'bg-success');
+            capHtml = `<div class="mb-1 small">${d.total.toLocaleString('sv-SE')} / ${d.cap.toLocaleString('sv-SE')} skott (${pct}%)</div>
+                <div class="progress mb-3" style="height:10px"><div class="progress-bar ${barClass}" style="width:${pct}%"></div></div>`;
+        } else {
+            capHtml = `<div class="mb-3"><span class="fs-5 fw-semibold">${d.total.toLocaleString('sv-SE')}</span> skott totalt
+                <span class="text-muted small">(ingen maxgräns — lägg till under Tillstånd)</span></div>`;
+        }
+        const srcHtml = Object.keys(d.bySource || {}).length
+            ? Object.entries(d.bySource).map(([k, v]) => `<span class="badge bg-light text-dark me-1">${SOURCE_LABELS[k] || k}: ${v.toLocaleString('sv-SE')}</span>`).join('')
+            : '<span class="text-muted small">Ingen aktivitet ännu.</span>';
+        const maxH = Math.max(1, ...d.byHour);
+        const hoursHtml = d.byHour.map((v, h) => `<div title="kl ${h} – ${v} skott" style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center">
+            <div style="width:70%;background:var(--bs-info);height:${Math.round(v / maxH * 48)}px;border-radius:2px"></div>
+            <small class="text-muted" style="font-size:.6rem">${h % 6 === 0 ? h : '&nbsp;'}</small></div>`).join('');
+
+        let html = `
+            <div class="row g-3">
+                <div class="col-md-7">
+                    <div class="d-flex align-items-center gap-2 mb-2">
+                        <label class="form-label mb-0 small">År</label>
+                        <select class="form-select form-select-sm" style="width:auto" id="rngActYear" onchange="rngRenderActivity(this.value)">
+                            ${d.years.map(y => `<option value="${y}" ${y === d.year ? 'selected' : ''}>${y}</option>`).join('')}
+                        </select>
+                        <a class="btn btn-sm btn-outline-secondary ms-auto" href="/umbraco/surface/ShootingRange/ExportActivity?rangeId=${rangeId}&year=${d.year}"><i class="bi bi-download me-1"></i>CSV</a>
+                    </div>
+                    ${capHtml}
+                    <div class="mb-2">${srcHtml}</div>
+                    <div class="small text-muted mb-1">${d.days} skjutdag(ar) · tid på dygnet (skott/timme):</div>
+                    <div style="display:flex;align-items:flex-end;height:64px;gap:1px" class="mb-3 border-bottom">${hoursHtml}</div>
+                    <button class="btn btn-sm btn-success" onclick="rngOpenManualActivity()"><i class="bi bi-plus-lg me-1"></i>Registrera aktivitet</button>
+                </div>
+                <div class="col-md-5 text-center">
+                    <div class="small text-muted mb-1">QR för incheckning vid banan</div>
+                    <img src="${qrSrc}" alt="QR" style="max-width:160px" class="border rounded p-1 bg-white">
+                    <div class="mt-1"><a href="${checkinUrl}" target="_blank" rel="noopener" class="small">Öppna incheckningssida</a></div>
+                </div>
+            </div>
+            <hr><h6 class="mb-2">Registrerade pass (${d.year})</h6>`;
+        html += d.sessions.length
+            ? `<div class="table-responsive"><table class="table table-sm align-middle"><thead><tr><th>Datum</th><th>Tid</th><th>Skott</th><th>Källa</th><th></th></tr></thead><tbody>`
+              + d.sessions.map(s => `<tr>
+                    <td>${s.date}</td>
+                    <td class="small">${s.startTime || ''}${s.endTime ? '–' + s.endTime : ''}</td>
+                    <td>${s.shotCount}${s.shooterCount > 1 ? ` <span class="text-muted small">(${s.shooterCount} sk.)</span>` : ''}</td>
+                    <td><span class="badge bg-light text-dark">${SOURCE_LABELS[s.source] || s.source}</span>${s.note ? ' <span class="text-muted small">' + esc(s.note) + '</span>' : ''}</td>
+                    <td class="text-end"><button class="btn btn-sm btn-outline-danger" onclick="rngDeleteActivity(${s.id})"><i class="bi bi-trash"></i></button></td>
+                </tr>`).join('') + `</tbody></table></div>`
+            : '<p class="text-muted small">Inga pass registrerade för året.</p>';
+        el.innerHTML = html;
+    }
+    window.rngRenderActivity = rngRenderActivity;
+
+    window.rngOpenManualActivity = function () {
+        const today = new Date().toLocaleDateString('sv-SE');
+        document.getElementById('rngActDate').value = today;
+        document.getElementById('rngActStart').value = '';
+        document.getElementById('rngActEnd').value = '';
+        document.getElementById('rngActShots').value = '';
+        document.getElementById('rngActShooters').value = '1';
+        document.getElementById('rngActNote').value = '';
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('rngActivityModal')).show();
+    };
+    window.rngSaveActivity = async function () {
+        const body = {
+            rangeId: rngState.current.range.id,
+            date: document.getElementById('rngActDate').value,
+            startTime: document.getElementById('rngActStart').value,
+            endTime: document.getElementById('rngActEnd').value,
+            shotCount: parseInt(document.getElementById('rngActShots').value) || 0,
+            shooterCount: parseInt(document.getElementById('rngActShooters').value) || 1,
+            note: document.getElementById('rngActNote').value
+        };
+        const d = await postJson('/umbraco/surface/ShootingRange/AddManualActivity', body);
+        if (!d.success) { alert(d.message || 'Fel'); return; }
+        bootstrap.Modal.getInstance(document.getElementById('rngActivityModal')).hide();
+        rngRenderActivity(document.getElementById('rngActYear')?.value);
+    };
+    window.rngDeleteActivity = async function (id) {
+        if (!confirm('Ta bort posten?')) return;
+        const d = await postJson('/umbraco/surface/ShootingRange/DeleteActivity', { id });
+        if (!d.success) { alert(d.message || 'Fel'); return; }
+        rngRenderActivity(document.getElementById('rngActYear')?.value);
+    };
+
+    // ── Edit range ────────────────────────────────────────
+    window.rngOpenEdit = function (id, coords) {
+        const r = (id && rngState.current && rngState.current.range && rngState.current.range.id === id)
+            ? rngState.current.range : null;
+        document.getElementById('rngEditId').value = id || 0;
+        document.getElementById('rngEditTitle').textContent = id ? 'Redigera skjutbana' : 'Ny skjutbana';
+        const set = (el, v) => document.getElementById(el).value = (v == null ? '' : v);
+        set('rngEditName', r?.name); set('rngEditSensitivity', r?.locationSensitivity || 'Members');
+        set('rngEditAddress', r?.address); set('rngEditPostcode', r?.postcode); set('rngEditCity', r?.city);
+        set('rngEditMunicipality', r?.municipality); set('rngEditCounty', r?.county);
+        // Coordinates: clicked point (new from map) wins, else existing range, else blank.
+        const lat = coords ? coords.lat : r?.latitude;
+        const lng = coords ? coords.lng : r?.longitude;
+        set('rngEditLat', lat != null ? (+lat).toFixed(6) : '');
+        set('rngEditLon', lng != null ? (+lng).toFixed(6) : '');
+        set('rngEditHuvudmanType', r?.huvudmanType || ''); set('rngEditHuvudmanName', r?.huvudmanName);
+        set('rngEditChefName', r?.skjutbanechefName); set('rngEditChefContact', r?.skjutbanechefContact);
+        set('rngEditDescription', r?.description);
+        rngEditPendingPoint = (lat != null && lng != null) ? { lat: +lat, lng: +lng } : null;
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('rngEditModal')).show();
+    };
+
+    // ── Edit-modal mini-map (draggable marker ↔ lat/lon fields) ──
+    let rngEditMap = null, rngEditMarker = null, rngEditPendingPoint = null;
+    function rngInitEditMap() {
+        const start = rngEditPendingPoint || { lat: 62.5, lng: 16.5 };
+        const zoom = rngEditPendingPoint ? 14 : 5;
+        if (!rngEditMap) {
+            rngEditMap = L.map('rngEditMap').setView([start.lat, start.lng], zoom);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19, attribution: '© OpenStreetMap'
+            }).addTo(rngEditMap);
+            rngEditMap.on('click', e => rngEditSetPoint(e.latlng.lat, e.latlng.lng, false));
+        } else {
+            rngEditMap.setView([start.lat, start.lng], zoom);
+        }
+        // Place / clear the marker for the current point.
+        if (rngEditMarker) { rngEditMap.removeLayer(rngEditMarker); rngEditMarker = null; }
+        if (rngEditPendingPoint) rngEditPlaceMarker(rngEditPendingPoint.lat, rngEditPendingPoint.lng);
+        setTimeout(() => rngEditMap.invalidateSize(), 80);
+    }
+    function rngEditPlaceMarker(lat, lng) {
+        if (rngEditMarker) { rngEditMarker.setLatLng([lat, lng]); return; }
+        rngEditMarker = L.marker([lat, lng], { draggable: true }).addTo(rngEditMap);
+        rngEditMarker.on('dragend', () => {
+            const p = rngEditMarker.getLatLng();
+            rngEditSetFields(p.lat, p.lng);
+        });
+    }
+    function rngEditSetFields(lat, lng) {
+        document.getElementById('rngEditLat').value = (+lat).toFixed(6);
+        document.getElementById('rngEditLon').value = (+lng).toFixed(6);
+    }
+    function rngEditSetPoint(lat, lng, recenter) {
+        rngEditPendingPoint = { lat, lng };
+        rngEditSetFields(lat, lng);
+        rngEditPlaceMarker(lat, lng);
+        if (recenter && rngEditMap) rngEditMap.setView([lat, lng], Math.max(rngEditMap.getZoom(), 14));
+    }
+    // Manual lat/lon typing moves the marker.
+    function rngEditSyncFromFields() {
+        const lat = parseFloat(document.getElementById('rngEditLat').value);
+        const lng = parseFloat(document.getElementById('rngEditLon').value);
+        if (!isNaN(lat) && !isNaN(lng) && rngEditMap) rngEditSetPoint(lat, lng, true);
+    }
+    // Optional reverse-geocode (Nominatim/OSM). On-demand, fills only empty fields.
+    window.rngFetchAddress = async function () {
+        const lat = parseFloat(document.getElementById('rngEditLat').value);
+        const lng = parseFloat(document.getElementById('rngEditLon').value);
+        if (isNaN(lat) || isNaN(lng)) { alert('Placera markören på kartan först.'); return; }
+        try {
+            const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&zoom=14&addressdetails=1&lat=${lat}&lon=${lng}`,
+                { headers: { 'Accept-Language': 'sv' } });
+            const d = await r.json();
+            const a = d.address || {};
+            const fillIfEmpty = (el, v) => { const e = document.getElementById(el); if (v && !e.value) e.value = v; };
+            fillIfEmpty('rngEditCity', a.city || a.town || a.village || a.hamlet);
+            fillIfEmpty('rngEditMunicipality', (a.municipality || '').replace(/s kommun$/, '').replace(/ kommun$/, ''));
+            fillIfEmpty('rngEditCounty', (a.county || '').replace(/s län$/, '').replace(/ län$/, ''));
+            fillIfEmpty('rngEditPostcode', a.postcode);
+            fillIfEmpty('rngEditAddress', [a.road, a.house_number].filter(Boolean).join(' '));
+        } catch (e) {
+            alert('Kunde inte hämta adress just nu.');
+        }
+    };
+    window.rngSaveRange = async function () {
+        const num = el => { const v = document.getElementById(el).value; return v === '' ? null : parseFloat(v); };
+        const body = {
+            id: parseInt(document.getElementById('rngEditId').value) || 0,
+            name: document.getElementById('rngEditName').value,
+            locationSensitivity: document.getElementById('rngEditSensitivity').value,
+            address: document.getElementById('rngEditAddress').value,
+            postcode: document.getElementById('rngEditPostcode').value,
+            city: document.getElementById('rngEditCity').value,
+            municipality: document.getElementById('rngEditMunicipality').value,
+            county: document.getElementById('rngEditCounty').value,
+            latitude: num('rngEditLat'), longitude: num('rngEditLon'),
+            huvudmanType: document.getElementById('rngEditHuvudmanType').value,
+            huvudmanName: document.getElementById('rngEditHuvudmanName').value,
+            skjutbanechefName: document.getElementById('rngEditChefName').value,
+            skjutbanechefContact: document.getElementById('rngEditChefContact').value,
+            description: document.getElementById('rngEditDescription').value
+        };
+        const d = await postJson('/umbraco/surface/ShootingRange/SaveRange', body);
+        if (!d.success) { alert(d.message || 'Fel'); return; }
+        bootstrap.Modal.getInstance(document.getElementById('rngEditModal')).hide();
+        await rngLoad();
+        if (body.id) rngOpenDetail(body.id); else rngOpenDetail(d.id);
+    };
+    window.rngDeleteRange = async function (id) {
+        if (!confirm('Ta bort skjutbanan och alla dess uppgifter?')) return;
+        const d = await postJson('/umbraco/surface/ShootingRange/DeleteRange?id=' + id);
+        if (!d.success) { alert(d.message || 'Fel'); return; }
+        bootstrap.Modal.getInstance(document.getElementById('rngDetailModal'))?.hide();
+        rngLoad();
+    };
+
+    // ── Claim ─────────────────────────────────────────────
+    window.rngOpenClaim = async function () {
+        await rngFillClubSelect('rngClaimClub');
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('rngClaimModal')).show();
+    };
+    window.rngDoClaim = async function () {
+        const clubId = parseInt(document.getElementById('rngClaimClub').value);
+        if (!clubId) { alert('Välj en klubb.'); return; }
+        const d = await postJson('/umbraco/surface/ShootingRange/ClaimRange', { rangeId: rngState.current.range.id, clubId });
+        if (!d.success) { alert(d.message || 'Fel'); return; }
+        bootstrap.Modal.getInstance(document.getElementById('rngClaimModal')).hide();
+        await rngLoad(); rngOpenDetail(rngState.current.range.id);
+    };
+
+    async function rngFillClubSelect(elId) {
+        if (!rngState.myClubs.length) {
+            const d = await getJson('/umbraco/surface/ShootingRange/GetMyAdminClubs');
+            rngState.myClubs = d.success ? d.clubs : [];
+        }
+        const sel = document.getElementById(elId);
+        if (!sel) return;
+        sel.innerHTML = rngState.myClubs.length
+            ? rngState.myClubs.map(c => `<option value="${c.clubId}">${esc(c.clubName)}</option>`).join('')
+            : `<option value="">Du administrerar ingen klubb</option>`;
+    }
+
+    // ── Sections ──────────────────────────────────────────
+    window.rngOpenSection = function (sec) {
+        document.getElementById('rngSecId').value = sec ? sec.id : 0;
+        const set = (el, v) => document.getElementById(el).value = (v == null ? '' : v);
+        set('rngSecLabel', sec?.label); set('rngSecType', sec?.banaType); set('rngSecDistance', sec?.distanceMeters);
+        set('rngSecFiringPoints', sec?.firingPoints); set('rngSecDirection', sec?.directionDegrees);
+        set('rngSecWeapons', sec?.allowedWeaponsCalibers); set('rngSecKulfang', sec?.kulfangSpec); set('rngSecNotes', sec?.notes);
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('rngSectionModal')).show();
+    };
+    window.rngSaveSection = async function () {
+        const num = el => { const v = document.getElementById(el).value; return v === '' ? null : parseInt(v); };
+        const body = {
+            id: parseInt(document.getElementById('rngSecId').value) || 0,
+            rangeId: rngState.current.range.id,
+            label: document.getElementById('rngSecLabel').value,
+            banaType: document.getElementById('rngSecType').value,
+            distanceMeters: num('rngSecDistance'), firingPoints: num('rngSecFiringPoints'),
+            directionDegrees: num('rngSecDirection'),
+            allowedWeaponsCalibers: document.getElementById('rngSecWeapons').value,
+            kulfangSpec: document.getElementById('rngSecKulfang').value,
+            notes: document.getElementById('rngSecNotes').value
+        };
+        const d = await postJson('/umbraco/surface/ShootingRange/SaveSection', body);
+        if (!d.success) { alert(d.message || 'Fel'); return; }
+        bootstrap.Modal.getInstance(document.getElementById('rngSectionModal')).hide();
+        rngOpenDetail(rngState.current.range.id);
+    };
+    window.rngDeleteSection = async function (id) {
+        if (!confirm('Ta bort bana/vall?')) return;
+        const d = await postJson('/umbraco/surface/ShootingRange/DeleteSection', { id, rangeId: rngState.current.range.id });
+        if (!d.success) { alert(d.message || 'Fel'); return; }
+        rngOpenDetail(rngState.current.range.id);
+    };
+
+    // ── Club links ────────────────────────────────────────
+    window.rngAddLink = async function () {
+        const clubId = parseInt(document.getElementById('rngLinkClubSelect').value);
+        if (!clubId) { alert('Välj en klubb.'); return; }
+        const d = await postJson('/umbraco/surface/ShootingRange/AddClubLink', { rangeId: rngState.current.range.id, clubId, relationType: 'User' });
+        if (!d.success) { alert(d.message || 'Fel'); return; }
+        rngOpenDetail(rngState.current.range.id);
+    };
+    window.rngRemoveLink = async function (linkId) {
+        if (!confirm('Ta bort klubbkopplingen och dess tider?')) return;
+        const d = await postJson('/umbraco/surface/ShootingRange/RemoveClubLink', { linkId });
+        if (!d.success) { alert(d.message || 'Fel'); return; }
+        rngOpenDetail(rngState.current.range.id);
+    };
+
+    // ── Allocations ───────────────────────────────────────
+    window.rngOpenAlloc = function (linkId) {
+        document.getElementById('rngAllocLinkId').value = linkId;
+        document.getElementById('rngAllocStart').value = '';
+        document.getElementById('rngAllocEnd').value = '';
+        document.getElementById('rngAllocNote').value = '';
+        const sel = document.getElementById('rngAllocSection');
+        sel.innerHTML = `<option value="">Hela banan</option>` +
+            rngState.current.sections.map(s => `<option value="${s.id}">${esc(s.label)}</option>`).join('');
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('rngAllocModal')).show();
+    };
+    window.rngSaveAlloc = async function () {
+        const secVal = document.getElementById('rngAllocSection').value;
+        const body = {
+            clubRangeLinkId: parseInt(document.getElementById('rngAllocLinkId').value),
+            rangeSectionId: secVal ? parseInt(secVal) : null,
+            dayOfWeek: parseInt(document.getElementById('rngAllocDay').value),
+            startTime: document.getElementById('rngAllocStart').value,
+            endTime: document.getElementById('rngAllocEnd').value,
+            note: document.getElementById('rngAllocNote').value
+        };
+        const d = await postJson('/umbraco/surface/ShootingRange/AddAllocation', body);
+        if (!d.success) { alert(d.message || 'Fel'); return; }
+        bootstrap.Modal.getInstance(document.getElementById('rngAllocModal')).hide();
+        rngOpenDetail(rngState.current.range.id);
+    };
+    window.rngDeleteAlloc = async function (id) {
+        const d = await postJson('/umbraco/surface/ShootingRange/DeleteAllocation', { id });
+        if (!d.success) { alert(d.message || 'Fel'); return; }
+        rngOpenDetail(rngState.current.range.id);
+    };
+
+    // ── Stewards ──────────────────────────────────────────
+    let rngStewardTimer = null;
+    window.rngSearchSteward = function () {
+        clearTimeout(rngStewardTimer);
+        rngStewardTimer = setTimeout(async () => {
+            const q = document.getElementById('rngStewardSearch').value;
+            if (!q || q.length < 2) { document.getElementById('rngStewardResults').innerHTML = ''; return; }
+            const d = await getJson('/umbraco/surface/ShootingRange/SearchMembers?query=' + encodeURIComponent(q));
+            document.getElementById('rngStewardResults').innerHTML = (d.members || []).map(m => `
+                <button class="list-group-item list-group-item-action" onclick="rngAddSteward(${m.memberId})">${esc(m.memberName)}</button>`).join('');
+        }, 250);
+    };
+    window.rngAddSteward = async function (memberId) {
+        const d = await postJson('/umbraco/surface/ShootingRange/AddSteward', { rangeId: rngState.current.range.id, memberId });
+        if (!d.success) { alert(d.message || 'Fel'); return; }
+        rngOpenDetail(rngState.current.range.id);
+    };
+    window.rngRemoveSteward = async function (memberId) {
+        const d = await postJson('/umbraco/surface/ShootingRange/RemoveSteward', { rangeId: rngState.current.range.id, memberId });
+        if (!d.success) { alert(d.message || 'Fel'); return; }
+        rngOpenDetail(rngState.current.range.id);
+    };
+
+    // ── OSM import ────────────────────────────────────────
+    window.rngOpenImport = function () {
+        document.getElementById('rngImportResult').innerHTML = '';
+        document.getElementById('rngImportFile').value = '';
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('rngImportModal')).show();
+    };
+    window.rngDoImport = async function () {
+        const f = document.getElementById('rngImportFile').files[0];
+        if (!f) { alert('Välj en fil.'); return; }
+        const btn = document.getElementById('rngImportSubmit');
+        btn.disabled = true; btn.innerHTML = 'Importerar...';
+        try {
+            const fd = new FormData();
+            fd.append('file', f);
+            fd.append('__RequestVerificationToken', token());
+            const r = await fetch('/umbraco/surface/ShootingRange/ImportOsm', {
+                method: 'POST', headers: { 'RequestVerificationToken': token() }, body: fd
+            });
+            const d = await r.json();
+            if (!d.success) { document.getElementById('rngImportResult').innerHTML = `<span class="text-danger">${esc(d.message)}</span>`; }
+            else {
+                document.getElementById('rngImportResult').innerHTML = `<span class="text-success">Importerade ${d.imported} banor, hoppade över ${d.skipped} dubbletter.</span>`;
+                rngLoad();
+            }
+        } finally { btn.disabled = false; btn.innerHTML = '<i class="bi bi-cloud-upload me-1"></i>Importera'; }
+    };
+
+    document.addEventListener('DOMContentLoaded', function () {
+        rngLoad();
+        // Init the edit-modal mini-map once it's visible (Leaflet needs a sized container).
+        document.getElementById('rngEditModal').addEventListener('shown.bs.modal', rngInitEditMap);
+        document.getElementById('rngEditLat').addEventListener('change', rngEditSyncFromFields);
+        document.getElementById('rngEditLon').addEventListener('change', rngEditSyncFromFields);
+        // Deep-link: /skjutbanor?range=<id> opens that range directly (used by the club page).
+        const dl = new URLSearchParams(location.search).get('range');
+        if (dl && /^\d+$/.test(dl)) rngOpenDetail(parseInt(dl));
+    });
+})();
+</script>

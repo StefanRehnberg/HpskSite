@@ -176,6 +176,12 @@
                     <button type="button" class="btn btn-outline-primary" id="listViewBtn" title="Listvy">
                         <i class="bi bi-list"></i>
                     </button>
+                    @if (currentMember != null)
+                    {
+                        <button type="button" class="btn btn-outline-primary" id="mapViewBtn" title="Kartvy">
+                            <i class="bi bi-map"></i>
+                        </button>
+                    }
                 </div>
             </div>
 
@@ -602,6 +608,9 @@
                      data-season="@seasonId"
                      data-series="@seriesId"
                      data-date="@compDate.ToString("yyyy-MM-dd")"
+                     data-range-id="@(competition.HasProperty("rangeId") ? competition.Value<int>("rangeId") : 0)"
+                     data-comp-name="@competition.Name"
+                     data-comp-url="@competition.CompetitionUrl()"
                      data-search-text="@((competition.Name + " " + venue + " " + description + " " + competitionTypeName + " " + shootingClassName).ToLower())">
                     <div class="card h-100 border-@statusClass">
                         <div class="card-header bg-@statusClass text-white">
@@ -1101,6 +1110,19 @@
         </div>
     </div>
 
+    @if (currentMember != null)
+    {
+        <link rel="stylesheet" href="https://unpkg.com/leaflet@@1.9.4/dist/leaflet.css" />
+        <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@@1.5.3/dist/MarkerCluster.css" />
+        <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@@1.5.3/dist/MarkerCluster.Default.css" />
+        <script src="https://unpkg.com/leaflet@@1.9.4/dist/leaflet.js"></script>
+        <script src="https://unpkg.com/leaflet.markercluster@@1.5.3/dist/leaflet.markercluster.js"></script>
+        <div class="mt-4 d-none" id="competitionsMap">
+            <div id="competitionsMapEl" style="height:70vh;border-radius:.5rem;border:1px solid var(--bs-border-color)"></div>
+            <small class="text-muted d-block mt-1" id="competitionsMapInfo"></small>
+        </div>
+    }
+
 <style>
 .card-title {
     font-size: 1.1rem;
@@ -1282,8 +1304,10 @@ document.addEventListener('DOMContentLoaded', function() {
     // View toggle elements
     const cardViewBtn = document.getElementById('cardViewBtn');
     const listViewBtn = document.getElementById('listViewBtn');
+    const mapViewBtn = document.getElementById('mapViewBtn');
     const competitionsGrid = document.getElementById('competitionsGrid');
     const competitionsList = document.getElementById('competitionsList');
+    const competitionsMap = document.getElementById('competitionsMap');
 
     let activeStatuses = new Set(['open', 'upcoming', 'active']); // Default: show open, upcoming, active - hide completed
     let currentView = 'card'; // Default view
@@ -1443,6 +1467,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // Update counts
         updateStatusCounts();
+
+        // Keep the map in sync with the active filter when the map view is showing.
+        if (currentView === 'map') buildCompetitionsMap();
     }
 
     // Sort function
@@ -1514,8 +1541,10 @@ document.addEventListener('DOMContentLoaded', function() {
         currentView = 'card';
         competitionsGrid.classList.remove('d-none');
         competitionsList.classList.add('d-none');
+        if (competitionsMap) competitionsMap.classList.add('d-none');
         cardViewBtn.classList.add('active');
         listViewBtn.classList.remove('active');
+        if (mapViewBtn) mapViewBtn.classList.remove('active');
 
         // Store preference in localStorage
         localStorage.setItem('competitionsView', 'card');
@@ -1525,22 +1554,88 @@ document.addEventListener('DOMContentLoaded', function() {
         currentView = 'list';
         competitionsGrid.classList.add('d-none');
         competitionsList.classList.remove('d-none');
+        if (competitionsMap) competitionsMap.classList.add('d-none');
         cardViewBtn.classList.remove('active');
         listViewBtn.classList.add('active');
+        if (mapViewBtn) mapViewBtn.classList.remove('active');
 
         // Store preference in localStorage
         localStorage.setItem('competitionsView', 'list');
+    }
+
+    // Map view (members only — shows competitions grouped by their linked shooting range)
+    let compMap = null, compCluster = null;
+    function compEsc(s) { return (s == null ? '' : String(s)).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+    function switchToMapView() {
+        currentView = 'map';
+        competitionsGrid.classList.add('d-none');
+        competitionsList.classList.add('d-none');
+        if (competitionsMap) competitionsMap.classList.remove('d-none');
+        cardViewBtn.classList.remove('active');
+        listViewBtn.classList.remove('active');
+        if (mapViewBtn) mapViewBtn.classList.add('active');
+        localStorage.setItem('competitionsView', 'map');
+        buildCompetitionsMap();
+    }
+
+    function buildCompetitionsMap() {
+        if (!competitionsMap || typeof L === 'undefined') return;
+        if (!compMap) {
+            compMap = L.map('competitionsMapEl').setView([62.5, 16.5], 5);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(compMap);
+            compCluster = L.markerClusterGroup({ chunkedLoading: true, maxClusterRadius: 50 });
+            compMap.addLayer(compCluster);
+        }
+        setTimeout(() => compMap.invalidateSize(), 60);
+
+        // Group the currently-visible competitions (filters already applied to the DOM) by range.
+        const cards = [...document.querySelectorAll('#competitionsGrid .competition-card:not(.series-card):not(.filtered-out)')];
+        const byRange = {};
+        cards.forEach(c => {
+            const rid = parseInt(c.dataset.rangeId || '0');
+            if (!rid) return;
+            (byRange[rid] = byRange[rid] || []).push({ name: c.dataset.compName || '', url: c.dataset.compUrl || '#', date: c.dataset.date || '' });
+        });
+        const rangeIds = Object.keys(byRange);
+        compCluster.clearLayers();
+        const info = document.getElementById('competitionsMapInfo');
+        const totalComps = Object.values(byRange).reduce((a, b) => a + b.length, 0);
+        if (!rangeIds.length) { info.textContent = 'Inga tävlingar med kopplad skjutbana i nuvarande urval.'; return; }
+
+        fetch('/umbraco/surface/ShootingRange/GetRangeLocations?ids=' + rangeIds.join(','))
+            .then(r => r.json())
+            .then(d => {
+                if (!d.success) { info.textContent = ''; return; }
+                const pts = [];
+                const icon = L.divIcon({ className: 'comp-dot', html: '<span style="display:block;width:16px;height:16px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:#0d6efd;border:2px solid #fff;box-shadow:0 0 3px rgba(0,0,0,.5)"></span>', iconSize: [16, 16], iconAnchor: [8, 8] });
+                d.ranges.forEach(rg => {
+                    const comps = byRange[rg.id] || [];
+                    const list = comps.map(co => `<div><a href="${co.url}">${compEsc(co.name)}</a>${co.date ? ' <span class="text-muted small">' + co.date + '</span>' : ''}</div>`).join('');
+                    const m = L.marker([rg.latitude, rg.longitude], { icon });
+                    m.bindPopup(`<div class="fw-semibold mb-1">${compEsc(rg.name)}</div>${list}`);
+                    compCluster.addLayer(m);
+                    pts.push([rg.latitude, rg.longitude]);
+                });
+                const mapped = d.ranges.reduce((a, rg) => a + (byRange[rg.id] ? byRange[rg.id].length : 0), 0);
+                info.textContent = `${mapped} tävling(ar) på ${d.ranges.length} skjutbana/-or` + (totalComps > mapped ? ` · ${totalComps - mapped} saknar kopplad bana/koordinater` : '');
+                if (pts.length === 1) compMap.setView(pts[0], 11);
+                else if (pts.length > 1) { try { compMap.fitBounds(L.latLngBounds(pts).pad(0.2), { maxZoom: 12 }); } catch (e) { } }
+            });
     }
 
     // Load saved view preference
     const savedView = localStorage.getItem('competitionsView');
     if (savedView === 'list') {
         switchToListView();
+    } else if (savedView === 'map' && mapViewBtn) {
+        switchToMapView();
     }
 
     // View toggle event listeners
     cardViewBtn.addEventListener('click', switchToCardView);
     listViewBtn.addEventListener('click', switchToListView);
+    if (mapViewBtn) mapViewBtn.addEventListener('click', switchToMapView);
 
     // Search input handler
     searchInput.addEventListener('input', filterCompetitions);

@@ -533,6 +533,11 @@
                                     Kretsar
                                 </a>
                                 <ul class="dropdown-menu dropdown-menu-regions">
+                                    @if (isLoggedIn)
+                                    {
+                                        <li><a class="dropdown-item" href="/skjutbanor"><i class="bi bi-geo-alt me-2"></i>Skjutbanor</a></li>
+                                        <li><hr class="dropdown-divider"></li>
+                                    }
                                     @if (clubsPage != null)
                                     {
                                         <li><a class="dropdown-item" href="@clubsPage.Url()"><i class="bi bi-list-ul me-2"></i>Alla klubbar</a></li>

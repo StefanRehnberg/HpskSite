@@ -76,6 +76,14 @@ namespace HpskSite.Composers
             // many clubs don't run results through pistol.nu)
             builder.Services.AddScoped<CompetitionChampionsService>();
 
+            // Skjutbanedatabas (Shooting Range Database) — Phase 0: ranges + sections + club links +
+            // per-club allocations + steward ACL + OSM seed import. Phase 2 adds permits + documents.
+            // See SHOOTING_RANGE_DATABASE.md.
+            builder.Services.AddScoped<ShootingRangeService>();
+            // Range compliance documents (permit/besiktning/buller/lead …) under App_Data, served via
+            // an authorized steward-gated endpoint. Mirrors StandardMedalProofStorage.
+            builder.Services.AddScoped<RangeDocumentStorage>();
+
             // Fältskytte member-stats aggregator (powers /user-profile-page dashboard + Resultat tab)
             builder.Services.AddScoped<FaltskytteStatsService>();
 
