@@ -1309,6 +1309,33 @@ namespace HpskSite.Controllers
                     }
                 }
 
+                // Handle rangeId (link to a shooting range in the Skjutbanedatabas)
+                if (fields.TryGetValue("rangeId", out var rangeIdObj) && rangeIdObj != null)
+                {
+                    int rangeId = 0;
+                    if (rangeIdObj is System.Text.Json.JsonElement jsonRangeElement)
+                    {
+                        if (jsonRangeElement.ValueKind == System.Text.Json.JsonValueKind.Number)
+                        {
+                            rangeId = jsonRangeElement.GetInt32();
+                        }
+                        else if (jsonRangeElement.ValueKind == System.Text.Json.JsonValueKind.String &&
+                                 int.TryParse(jsonRangeElement.GetString(), out int parsedRange))
+                        {
+                            rangeId = parsedRange;
+                        }
+                    }
+                    else if (int.TryParse(rangeIdObj.ToString(), out int parsedRangeId))
+                    {
+                        rangeId = parsedRangeId;
+                    }
+
+                    if (rangeId > 0)
+                    {
+                        newCompetition.SetValue("rangeId", rangeId);
+                    }
+                }
+
                 // Set all other properties from fields
                 foreach (var field in fields)
                 {
@@ -1317,7 +1344,8 @@ namespace HpskSite.Controllers
                         // Skip fields already handled or special fields
                         if (field.Key == "competitionName" || field.Key == "competitionType" ||
                             field.Key == "isExternal" || field.Key == "isActive" || field.Key == "isClubOnly" ||
-                            field.Key == "clubId" || field.Key == "invitationFile" || field.Key == "resultListFile") // Skip file upload fields - handle separately
+                            field.Key == "clubId" || field.Key == "rangeId" ||
+                            field.Key == "invitationFile" || field.Key == "resultListFile") // Skip file upload fields - handle separately
                             continue;
 
                         var value = field.Value;
@@ -1593,6 +1621,30 @@ namespace HpskSite.Controllers
                     competition.SetValue("clubId", clubIdValue);
                 }
 
+                // Handle rangeId (link to a shooting range in the Skjutbanedatabas; 0 clears the link)
+                if (fields.TryGetValue("rangeId", out var rangeIdObjValue) && rangeIdObjValue != null)
+                {
+                    int rangeIdValue = 0;
+                    if (rangeIdObjValue is System.Text.Json.JsonElement jsonRangeElement)
+                    {
+                        if (jsonRangeElement.ValueKind == System.Text.Json.JsonValueKind.Number)
+                        {
+                            rangeIdValue = jsonRangeElement.GetInt32();
+                        }
+                        else if (jsonRangeElement.ValueKind == System.Text.Json.JsonValueKind.String &&
+                                 int.TryParse(jsonRangeElement.GetString(), out int parsedRange))
+                        {
+                            rangeIdValue = parsedRange;
+                        }
+                    }
+                    else if (int.TryParse(rangeIdObjValue.ToString(), out int parsedRangeId))
+                    {
+                        rangeIdValue = parsedRangeId;
+                    }
+
+                    competition.SetValue("rangeId", rangeIdValue > 0 ? rangeIdValue : 0);
+                }
+
                 // Update all properties from fields
                 foreach (var field in fields)
                 {
@@ -1601,7 +1653,7 @@ namespace HpskSite.Controllers
                         // Skip special fields already handled
                         if (field.Key == "competitionId" || field.Key == "invitationFile" || field.Key == "resultListFile" ||
                             field.Key == "competitionName" || field.Key == "numberOfSeriesOrStations" ||
-                            field.Key == "numberOfFinalSeries" || field.Key == "clubId")
+                            field.Key == "numberOfFinalSeries" || field.Key == "clubId" || field.Key == "rangeId")
                             continue;
 
                         var value = field.Value;

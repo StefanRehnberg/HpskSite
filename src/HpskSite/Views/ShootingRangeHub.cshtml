@@ -623,6 +623,7 @@
         bootstrap.Modal.getOrCreateInstance(document.getElementById('rngDetailModal')).show();
     };
     function cm() { return rngState.current && rngState.current.canManage; }
+    function isSiteAdmin() { return rngState.current && rngState.current.canDelete; }
 
     function rngRenderInfo() {
         const r = rngState.current.range;
@@ -641,7 +642,7 @@
             </div>
             ${cm() ? `<div class="mt-2 d-flex gap-2">
                 <button class="btn btn-sm btn-outline-primary" onclick="rngOpenEdit(${r.id})"><i class="bi bi-pencil me-1"></i>Redigera</button>
-                <button class="btn btn-sm btn-outline-danger" onclick="rngDeleteRange(${r.id})"><i class="bi bi-trash me-1"></i>Ta bort</button>
+                ${isSiteAdmin() ? `<button class="btn btn-sm btn-outline-danger" onclick="rngDeleteRange(${r.id})"><i class="bi bi-trash me-1"></i>Ta bort</button>` : ''}
             </div>` : ''}`;
     }
 

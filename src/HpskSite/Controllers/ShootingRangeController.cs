@@ -111,7 +111,8 @@ namespace HpskSite.Controllers
                 var range = await _rangeService.GetByIdAsync(id);
                 if (range == null) return Json(new { success = false, message = "Skjutbanan hittades inte." });
 
-                bool canManage = await _rangeService.CanManageRangeAsync(id, memberId);
+                bool isSiteAdmin = await _rangeService.IsSiteAdminAsync();
+                bool canManage = isSiteAdmin || await _rangeService.CanManageRangeAsync(id, memberId);
 
                 var sections = await _rangeService.GetSectionsAsync(id);
                 var links = await _rangeService.GetLinksAsync(id);
@@ -152,6 +153,7 @@ namespace HpskSite.Controllers
                 {
                     success = true,
                     canManage,
+                    canDelete = isSiteAdmin, // only site admins may delete a range
                     range = new
                     {
                         id = range.Id,
@@ -349,8 +351,8 @@ namespace HpskSite.Controllers
             {
                 var memberId = await _rangeService.GetCurrentMemberIdAsync();
                 if (memberId == null) return Json(new { success = false, message = "Inloggning krävs." });
-                if (!await _rangeService.CanManageRangeAsync(id, memberId))
-                    return Json(new { success = false, message = "Endast förvaltare eller administratör kan ta bort skjutbanan." });
+                if (!await _rangeService.IsSiteAdminAsync())
+                    return Json(new { success = false, message = "Endast administratör kan ta bort skjutbanan." });
 
                 await _rangeService.DeleteAsync(id);
                 return Json(new { success = true });

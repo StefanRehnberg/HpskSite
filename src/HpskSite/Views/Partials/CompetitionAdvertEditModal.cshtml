@@ -100,6 +100,18 @@
                         <input type="text" class="form-control" id="advertEdit_venue" name="venue" required>
                     </div>
 
+                    <!-- Shooting range link (optional) -->
+                    <div class="mb-3" id="advertEdit_rngPickCard">
+                        <label class="form-label"><i class="bi bi-geo-alt me-1"></i>Skjutbana (valfritt)</label>
+                        <div class="small text-muted mb-1" id="advertEdit_rngPickCurrent">Ingen vald</div>
+                        <div class="position-relative">
+                            <input type="text" class="form-control" id="advertEdit_rngPickSearch" placeholder="Sök skjutbana att koppla…" autocomplete="off">
+                            <div id="advertEdit_rngPickResults" class="list-group position-absolute w-100 shadow" style="z-index:1090;display:none;max-height:260px;overflow:auto"></div>
+                        </div>
+                        <input type="hidden" id="advertEdit_rangeId" name="rangeId" value="0">
+                        <small class="form-text text-muted">Kopplar annonsen till en skjutbana i Skjutbanedatabasen — visar karta och vägbeskrivning på tävlingssidan.</small>
+                    </div>
+
                     <hr>
 
                     <!-- Dates -->
@@ -288,7 +300,65 @@ document.getElementById('competitionAdvertEditModal')?.addEventListener('shown.b
 
     // Load shooting classes with stored selected IDs
     loadAdvertEditShootingClasses(window.advertEditSelectedClassIds || []);
+
+    // Load the currently linked shooting range (if any)
+    loadAdvertEditRange();
 });
+
+// ── Shooting-range picker ──────────────────────────────────────────────
+const advertEditRngEsc = s => (s == null ? '' : String(s)).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let advertEditRngResults = [];
+function advertEditSetRange(id, name, city) {
+    document.getElementById('advertEdit_rangeId').value = id || 0;
+    const cur = document.getElementById('advertEdit_rngPickCurrent');
+    if (id) {
+        cur.innerHTML = `<span class="badge bg-success-subtle text-success-emphasis">${advertEditRngEsc(name)}${city ? ' · ' + advertEditRngEsc(city) : ''}</span> <a href="#" id="advertEdit_rngPickClear" class="ms-1">Ta bort</a>`;
+        document.getElementById('advertEdit_rngPickClear').onclick = e => { e.preventDefault(); advertEditSetRange(0, '', ''); };
+    } else {
+        cur.textContent = 'Ingen vald';
+    }
+}
+window.advertEditRngSelect = function (id) {
+    const r = (advertEditRngResults || []).find(x => x.id === id);
+    advertEditSetRange(id, r ? r.name : '', r ? r.city : '');
+    document.getElementById('advertEdit_rngPickSearch').value = '';
+    document.getElementById('advertEdit_rngPickResults').style.display = 'none';
+};
+async function loadAdvertEditRange() {
+    advertEditSetRange(0, '', '');
+    document.getElementById('advertEdit_rngPickSearch').value = '';
+    document.getElementById('advertEdit_rngPickResults').style.display = 'none';
+    const compId = document.getElementById('advertEdit_competitionId').value;
+    if (!compId) return;
+    try {
+        const d = await (await fetch('/umbraco/surface/ShootingRange/GetRangeForCompetition?competitionId=' + compId)).json();
+        if (d.success && d.hasRange && d.range) {
+            advertEditSetRange(d.range.id, d.range.name, d.range.city);
+        }
+    } catch (e) { /* leave as none */ }
+}
+(function () {
+    let t = null;
+    const search = document.getElementById('advertEdit_rngPickSearch');
+    if (!search) return;
+    search.addEventListener('input', function () {
+        clearTimeout(t);
+        const q = this.value;
+        t = setTimeout(async () => {
+            const box = document.getElementById('advertEdit_rngPickResults');
+            if (!q || q.length < 2) { box.style.display = 'none'; return; }
+            try {
+                const d = await (await fetch('/umbraco/surface/ShootingRange/GetRangePicker?query=' + encodeURIComponent(q))).json();
+                advertEditRngResults = d.ranges || [];
+                box.innerHTML = advertEditRngResults.map(x =>
+                    `<button type="button" class="list-group-item list-group-item-action py-1" onclick="advertEditRngSelect(${x.id})">${advertEditRngEsc(x.name)}<small class="text-muted">${x.city ? ' · ' + advertEditRngEsc(x.city) : ''}${x.municipality ? ' · ' + advertEditRngEsc(x.municipality) : ''}</small></button>`
+                ).join('') || '<div class="list-group-item small text-muted">Inga träffar</div>';
+                box.style.display = '';
+            } catch (e) { box.style.display = 'none'; }
+        }, 250);
+    });
+    document.addEventListener('click', e => { if (!e.target.closest('#advertEdit_rngPickCard')) { const b = document.getElementById('advertEdit_rngPickResults'); if (b) b.style.display = 'none'; } });
+})();
 
 // Load series list for dropdown
 function loadAdvertEditSeriesList() {

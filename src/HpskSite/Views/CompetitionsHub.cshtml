@@ -24,6 +24,24 @@
                    !x.Value<bool>("isClubOnly"))
         .ToList();
     var allCompetitionSeries = allContent.Where(x => x.ContentType.Alias == "competitionSeries").ToList();
+
+    // Competitions that belong to a series are rendered as part of their series card (not as
+    // individual cards), so the map — which reads competition cards from the DOM — never sees them.
+    // Collect the range-linked ones here so the map view can show them too.
+    var seriesChildCompetitionsForMap = allContent
+        .Where(x => x.ContentType.Alias == "competition"
+                   && x.Parent()?.ContentType.Alias == "competitionSeries"
+                   && !x.Value<bool>("isClubOnly")
+                   && (x.HasProperty("rangeId") ? x.Value<int>("rangeId") : 0) > 0)
+        .Select(x => new
+        {
+            name = x.Name,
+            url = x.Url(),
+            rangeId = x.Value<int>("rangeId"),
+            date = x.Value<DateTime>("competitionDate").ToString("yyyy-MM-dd")
+        })
+        .ToList();
+    var seriesChildCompetitionsForMapJson = System.Text.Json.JsonSerializer.Serialize(seriesChildCompetitionsForMap);
     var competitionTypes = allContent.Where(x => x.ContentType.Alias == "competitionType").ToList();
     // Use centralized shooting classes model (includes R, L, M classes)
     var shootingClasses = HpskSite.Models.ShootingClasses.All;
@@ -1597,6 +1615,16 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!rid) return;
             (byRange[rid] = byRange[rid] || []).push({ name: c.dataset.compName || '', url: c.dataset.compUrl || '#', date: c.dataset.date || '' });
         });
+
+        // Competitions that are part of a series aren't rendered as cards — add them from the
+        // server-supplied list so they appear on the map too.
+        const seriesComps = @Html.Raw(seriesChildCompetitionsForMapJson);
+        seriesComps.forEach(sc => {
+            const rid = parseInt(sc.rangeId || '0');
+            if (!rid) return;
+            (byRange[rid] = byRange[rid] || []).push({ name: sc.name || '', url: sc.url || '#', date: sc.date || '' });
+        });
+
         const rangeIds = Object.keys(byRange);
         compCluster.clearLayers();
         const info = document.getElementById('competitionsMapInfo');

@@ -103,6 +103,18 @@
                         <input type="text" class="form-control" id="advert_venue" name="venue" required>
                     </div>
 
+                    <!-- Shooting range link (optional) -->
+                    <div class="mb-3" id="advert_rngPickCard">
+                        <label class="form-label"><i class="bi bi-geo-alt me-1"></i>Skjutbana (valfritt)</label>
+                        <div class="small text-muted mb-1" id="advert_rngPickCurrent">Ingen vald</div>
+                        <div class="position-relative">
+                            <input type="text" class="form-control" id="advert_rngPickSearch" placeholder="Sök skjutbana att koppla…" autocomplete="off">
+                            <div id="advert_rngPickResults" class="list-group position-absolute w-100 shadow" style="z-index:1090;display:none;max-height:260px;overflow:auto"></div>
+                        </div>
+                        <input type="hidden" id="advert_rangeId" name="rangeId" value="0">
+                        <small class="form-text text-muted">Kopplar annonsen till en skjutbana i Skjutbanedatabasen — visar karta och vägbeskrivning på tävlingssidan.</small>
+                    </div>
+
                     <hr>
 
                     <!-- Dates -->
@@ -279,7 +291,54 @@ document.getElementById('competitionAdvertModal')?.addEventListener('shown.bs.mo
 
     // Load shooting classes
     loadAdvertShootingClasses();
+
+    // Reset range picker for a fresh advert
+    advertSetRange(0, '', '');
+    document.getElementById('advert_rngPickSearch').value = '';
+    document.getElementById('advert_rngPickResults').style.display = 'none';
 });
+
+// ── Shooting-range picker ──────────────────────────────────────────────
+const advertRngEsc = s => (s == null ? '' : String(s)).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let advertRngResults = [];
+function advertSetRange(id, name, city) {
+    document.getElementById('advert_rangeId').value = id || 0;
+    const cur = document.getElementById('advert_rngPickCurrent');
+    if (id) {
+        cur.innerHTML = `<span class="badge bg-success-subtle text-success-emphasis">${advertRngEsc(name)}${city ? ' · ' + advertRngEsc(city) : ''}</span> <a href="#" id="advert_rngPickClear" class="ms-1">Ta bort</a>`;
+        document.getElementById('advert_rngPickClear').onclick = e => { e.preventDefault(); advertSetRange(0, '', ''); };
+    } else {
+        cur.textContent = 'Ingen vald';
+    }
+}
+window.advertRngSelect = function (id) {
+    const r = (advertRngResults || []).find(x => x.id === id);
+    advertSetRange(id, r ? r.name : '', r ? r.city : '');
+    document.getElementById('advert_rngPickSearch').value = '';
+    document.getElementById('advert_rngPickResults').style.display = 'none';
+};
+(function () {
+    let t = null;
+    const search = document.getElementById('advert_rngPickSearch');
+    if (!search) return;
+    search.addEventListener('input', function () {
+        clearTimeout(t);
+        const q = this.value;
+        t = setTimeout(async () => {
+            const box = document.getElementById('advert_rngPickResults');
+            if (!q || q.length < 2) { box.style.display = 'none'; return; }
+            try {
+                const d = await (await fetch('/umbraco/surface/ShootingRange/GetRangePicker?query=' + encodeURIComponent(q))).json();
+                advertRngResults = d.ranges || [];
+                box.innerHTML = advertRngResults.map(x =>
+                    `<button type="button" class="list-group-item list-group-item-action py-1" onclick="advertRngSelect(${x.id})">${advertRngEsc(x.name)}<small class="text-muted">${x.city ? ' · ' + advertRngEsc(x.city) : ''}${x.municipality ? ' · ' + advertRngEsc(x.municipality) : ''}</small></button>`
+                ).join('') || '<div class="list-group-item small text-muted">Inga träffar</div>';
+                box.style.display = '';
+            } catch (e) { box.style.display = 'none'; }
+        }, 250);
+    });
+    document.addEventListener('click', e => { if (!e.target.closest('#advert_rngPickCard')) { const b = document.getElementById('advert_rngPickResults'); if (b) b.style.display = 'none'; } });
+})();
 
 // Load series list for dropdown
 function loadAdvertSeriesList() {

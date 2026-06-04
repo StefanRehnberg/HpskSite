@@ -139,7 +139,10 @@ namespace HpskSite.Services
             await db.ExecuteAsync("DELETE FROM RangeSteward WHERE RangeId = @0", id);
             await db.ExecuteAsync("DELETE FROM RangePermit WHERE RangeId = @0", id);
             await db.ExecuteAsync("DELETE FROM RangeDocument WHERE RangeId = @0", id);
-            await db.ExecuteAsync("DELETE FROM RangeActivitySession WHERE RangeId = @0", id);
+            // RangeActivitySession is created by a later migration (create-range-activity-table.sql) —
+            // guard the delete so a range can still be removed on databases where it hasn't been run yet.
+            await db.ExecuteAsync(
+                "IF OBJECT_ID('RangeActivitySession', 'U') IS NOT NULL DELETE FROM RangeActivitySession WHERE RangeId = @0", id);
             await db.ExecuteAsync("DELETE FROM ShootingRange WHERE Id = @0", id);
         }
 
