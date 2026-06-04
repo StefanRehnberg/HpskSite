@@ -902,6 +902,7 @@
                     <div class="small text-muted mb-1">QR för incheckning vid banan</div>
                     <img src="${qrSrc}" alt="QR" style="max-width:160px" class="border rounded p-1 bg-white">
                     <div class="mt-1"><a href="${checkinUrl}" target="_blank" rel="noopener" class="small">Öppna incheckningssida</a></div>
+                    <div class="mt-2"><button class="btn btn-sm btn-outline-primary" onclick="rngPrintRangeSign()"><i class="bi bi-printer me-1"></i>Skriv ut skylt</button></div>
                 </div>
             </div>
             <hr><h6 class="mb-2">Registrerade pass (${d.year})</h6>`;
@@ -918,6 +919,44 @@
         el.innerHTML = html;
     }
     window.rngRenderActivity = rngRenderActivity;
+
+    // Printable A4 sign with a large QR to put up at the range.
+    window.rngPrintRangeSign = function () {
+        const range = rngState.current.range;
+        const checkinUrl = location.origin + '/skjutbana/incheckning?r=' + range.id;
+        const qrSrc = '/umbraco/surface/Faltskytte/GenerateQrCode?url=' + encodeURIComponent(checkinUrl);
+        const w = window.open('', '_blank');
+        if (!w) { alert('Tillåt popup-fönster för att skriva ut skylten.'); return; }
+        w.document.write(`<!doctype html><html lang="sv"><head><meta charset="utf-8">
+            <title>Incheckning – ${esc(range.name)}</title>
+            <style>
+                @page { size: A4 portrait; margin: 18mm; }
+                body { font-family: Arial, Helvetica, sans-serif; text-align: center; color: #111; }
+                .name { font-size: 32px; font-weight: 700; margin: 0 0 4px; }
+                .sub { font-size: 18px; color: #555; margin: 0 0 28px; }
+                .lead { font-size: 26px; font-weight: 700; margin: 22px 0 12px; }
+                .qr { width: 340px; height: 340px; }
+                .steps { font-size: 18px; line-height: 1.5; margin: 14px auto 0; max-width: 460px; text-align: left; }
+                .url { font-size: 13px; color: #666; margin-top: 24px; word-break: break-all; }
+                .foot { font-size: 13px; color: #999; margin-top: 30px; }
+            </style></head><body>
+            <div class="name">${esc(range.name)}</div>
+            ${range.city ? `<div class="sub">${esc(range.city)}</div>` : ''}
+            <div class="lead">Skanna för att checka in</div>
+            <img class="qr" src="${qrSrc}" alt="QR">
+            <ol class="steps">
+                <li>Skanna QR-koden med mobilens kamera.</li>
+                <li>Logga in på pistol.nu om du inte redan är inloggad.</li>
+                <li>Tryck <strong>Checka in</strong> när du börjar – och <strong>Checka ut</strong> med antal skott när du är klar.</li>
+            </ol>
+            <div class="url">${esc(checkinUrl)}</div>
+            <div class="foot">pistol.nu · Skjutbanedatabas</div>
+        </body></html>`);
+        w.document.close();
+        const img = w.document.querySelector('img.qr');
+        const go = () => { try { w.focus(); w.print(); } catch (e) { } };
+        if (img && !img.complete) { img.onload = go; img.onerror = go; } else { setTimeout(go, 300); }
+    };
 
     window.rngOpenManualActivity = function () {
         const today = new Date().toLocaleDateString('sv-SE');
