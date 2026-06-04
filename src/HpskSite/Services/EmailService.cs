@@ -719,6 +719,95 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// Notify a regional admin that a club has requested a certification for a member whose
+        /// issuing instructor is not on pistol.nu. The approver verifies the candidate against
+        /// the SPSF registry, then approves/rejects in the Certifieringar tab.
+        /// </summary>
+        public async Task SendCertificationRequestSubmittedAsync(
+            string toEmail, string toName, string requesterName, string candidateName,
+            string certificationTypeLabel, string clubName)
+        {
+            if (string.IsNullOrWhiteSpace(toEmail))
+            {
+                _logger.LogWarning("SendCertificationRequestSubmittedAsync skipped — no email address for {Name}", toName);
+                return;
+            }
+
+            var subject = $"Ny certifieringsförfrågan: {certificationTypeLabel}";
+            var safeName = System.Web.HttpUtility.HtmlEncode(toName);
+            var safeRequester = System.Web.HttpUtility.HtmlEncode(requesterName);
+            var safeCandidate = System.Web.HttpUtility.HtmlEncode(candidateName);
+            var safeCert = System.Web.HttpUtility.HtmlEncode(certificationTypeLabel);
+            var safeClub = System.Web.HttpUtility.HtmlEncode(clubName);
+
+            var body = $@"
+<html>
+<head>
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+        .notice {{ color: #666; font-size: 13px; margin-top: 10px; }}
+    </style>
+</head>
+<body>
+    <h2>Hej {safeName},</h2>
+    <p><strong>{safeRequester}</strong> ({safeClub}) har begärt att <strong>{safeCandidate}</strong> ska registreras som <strong>{safeCert}</strong> på pistol.nu.</p>
+    <p>Förfrågan innehåller personens namn, e-post och Pistolkortnummer så att du kan verifiera den mot SPSF-registret innan du godkänner.</p>
+    <p>Logga in och öppna kretsens <em>Certifieringar</em>-flik för att granska och godkänna eller avslå förfrågan.</p>
+    <p class=""notice"">Certifieringen utfärdas först när du godkänner förfrågan.</p>
+    <p>Med vänliga hälsningar,<br/>Pistol.nu</p>
+</body>
+</html>";
+
+            await SendEmailAsync(toEmail, subject, body);
+        }
+
+        /// <summary>
+        /// Notify the club admin who submitted a certification request that it was approved or
+        /// rejected by an approver.
+        /// </summary>
+        public async Task SendCertificationRequestDecisionAsync(
+            string toEmail, string toName, string candidateName, string certificationTypeLabel,
+            bool approved, string? note)
+        {
+            if (string.IsNullOrWhiteSpace(toEmail))
+            {
+                _logger.LogWarning("SendCertificationRequestDecisionAsync skipped — no email address for {Name}", toName);
+                return;
+            }
+
+            var safeName = System.Web.HttpUtility.HtmlEncode(toName);
+            var safeCandidate = System.Web.HttpUtility.HtmlEncode(candidateName);
+            var safeCert = System.Web.HttpUtility.HtmlEncode(certificationTypeLabel);
+            var outcome = approved ? "godkänd" : "avslagen";
+            var subject = $"Certifieringsförfrågan {outcome}: {certificationTypeLabel}";
+
+            var safeNote = string.IsNullOrWhiteSpace(note)
+                ? ""
+                : $"<blockquote style=\"border-left:3px solid #ccc; margin:10px 0; padding:5px 10px; color:#555;\">{System.Web.HttpUtility.HtmlEncode(note)}</blockquote>";
+
+            var statusLine = approved
+                ? $"Din förfrågan om <strong>{safeCert}</strong> för <strong>{safeCandidate}</strong> har godkänts och certifieringen är nu registrerad."
+                : $"Din förfrågan om <strong>{safeCert}</strong> för <strong>{safeCandidate}</strong> har avslagits.";
+
+            var body = $@"
+<html>
+<head>
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+    </style>
+</head>
+<body>
+    <h2>Hej {safeName},</h2>
+    <p>{statusLine}</p>
+    {safeNote}
+    <p>Med vänliga hälsningar,<br/>Pistol.nu</p>
+</body>
+</html>";
+
+            await SendEmailAsync(toEmail, subject, body);
+        }
+
+        /// <summary>
         /// Send a single formatted HTML email through the site SMTP, but presented as coming from a
         /// club/region (display name) with replies routed to their own address. Lets clubs without
         /// Brevo still send nice HTML member mail. From address stays the authenticated site address

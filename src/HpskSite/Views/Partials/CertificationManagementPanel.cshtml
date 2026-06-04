@@ -34,6 +34,15 @@
 
         @if (certScopeType == "Region")
         {
+            <!-- Pending certification requests awaiting approval (regional/site admins) -->
+            <div class="card mb-3 border-warning cert-requests-card" style="display:none;">
+                <div class="card-body">
+                    <h6 class="mb-1"><i class="bi bi-inbox-fill me-1 text-warning"></i>Förfrågningar att granska</h6>
+                    <small class="text-muted d-block mb-2">Certifieringsförfrågningar från klubbar du administrerar. Verifiera personen mot SPSF-registret (Pistolkortnummer) innan du godkänner — certifieringen utfärdas vid godkännande.</small>
+                    <ul class="list-group list-group-flush cert-pending-list"></ul>
+                </div>
+            </div>
+
             <!-- Kretsinstruktörer for this region -->
             <div class="card mb-3">
                 <div class="card-body">
@@ -124,6 +133,15 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Requests this club has submitted (read-only status) -->
+            <div class="card mt-3 cert-requests-card" style="display:none;">
+                <div class="card-body">
+                    <h6 class="mb-1"><i class="bi bi-send me-1"></i>Inskickade förfrågningar</h6>
+                    <small class="text-muted d-block mb-2">Certifieringar klubben begärt där utfärdaren inte finns på pistol.nu. Väntar på godkännande av krets-/förbundsadmin.</small>
+                    <ul class="list-group list-group-flush cert-myrequests-list"></ul>
+                </div>
+            </div>
         }
     </div>
 </div>
@@ -153,16 +171,39 @@
                     </select>
                     <small class="form-text text-muted">Endast medlemmar med behörighet att utfärda denna certifieringstyp visas.</small>
                 </div>
-                <div class="mb-3">
+                <div class="form-check mb-3" id="certRequestModeWrapper-@certInstanceKey" style="display:none;">
+                    <input class="form-check-input" type="checkbox" id="certRequestMode-@certInstanceKey">
+                    <label class="form-check-label" for="certRequestMode-@certInstanceKey">
+                        Utfärdaren finns inte på pistol.nu — skicka som förfrågan för godkännande
+                    </label>
+                    <small class="form-text text-muted d-block">En krets- eller förbundsadmin granskar och godkänner. Certifieringen utfärdas först vid godkännande.</small>
+                </div>
+                <div class="mb-3 cert-request-field" id="certGrantIssuerNameWrapper-@certInstanceKey" style="display:none;">
+                    <label class="form-label">Utfärdarens namn *</label>
+                    <input type="text" class="form-control" id="certGrantIssuerName-@certInstanceKey" maxlength="200">
+                    <small class="form-text text-muted">Namnet på den (oftast en Kretsinstruktör) som utfärdat certifieringen.</small>
+                </div>
+                <div class="mb-3 cert-request-field" id="certGrantIssuerPistolWrapper-@certInstanceKey" style="display:none;">
+                    <label class="form-label">Utfärdarens Pistolkortnummer (frivilligt)</label>
+                    <input type="text" class="form-control" id="certGrantIssuerPistol-@certInstanceKey" maxlength="50">
+                    <small class="form-text text-muted">Hjälper den som godkänner att verifiera utfärdaren mot SPSF-registret. Lämna tomt om det inte är känt (t.ex. äldre certifieringar).</small>
+                </div>
+                <div class="mb-3 cert-request-field" id="certGrantPistolWrapper-@certInstanceKey" style="display:none;">
+                    <label class="form-label">Skyttens Pistolkortnummer *</label>
+                    <input type="text" class="form-control" id="certGrantPistol-@certInstanceKey" maxlength="50">
+                    <small class="form-text text-muted">Pistolkortnummer för medlemmen som certifieras, så att hen kan slås upp i SPSF-registret.</small>
+                </div>
+                <div class="mb-3" id="certGrantCertifiedAtWrapper-@certInstanceKey">
                     <label class="form-label">Certifierad datum *</label>
                     <input type="text" class="form-control cert-date-picker" id="certGrantCertifiedAt-@certInstanceKey" placeholder="ÅÅÅÅ-MM-DD">
+                    <small class="form-text text-muted">Måste inte vara exakt. Om det var länge sedan och exakt datum inte är känt, ange ett ungefärligt datum (t.ex. 1 januari det året).</small>
                 </div>
-                <div class="mb-3">
+                <div class="mb-3" id="certGrantExpiresAtWrapper-@certInstanceKey">
                     <label class="form-label">Förfaller (frivilligt)</label>
                     <input type="text" class="form-control cert-date-picker" id="certGrantExpiresAt-@certInstanceKey" placeholder="ÅÅÅÅ-MM-DD">
                     <small class="form-text text-muted">Lämna tomt om certifieringen aldrig förfaller.</small>
                 </div>
-                <div class="mb-3">
+                <div class="mb-3" id="certGrantNumberWrapper-@certInstanceKey">
                     <label class="form-label">Certifikatnummer (frivilligt)</label>
                     <input type="text" class="form-control" id="certGrantNumber-@certInstanceKey" maxlength="100">
                 </div>
@@ -339,6 +380,94 @@
         listEl.innerHTML = persons.map(function (p) { return renderPersonItem(p, certType); }).join('');
     }
 
+    // ── Certification requests (queue) ───────────────────────────────
+    function statusBadge(status) {
+        if (status === 'Approved') return '<span class="badge bg-success">Godkänd</span>';
+        if (status === 'Rejected') return '<span class="badge bg-danger">Avslagen</span>';
+        return '<span class="badge bg-warning text-dark">Väntar på granskning</span>';
+    }
+
+    function loadRequests() {
+        if (scopeType === 'Region') {
+            loadPendingRequests();
+        } else {
+            loadMyRequests();
+        }
+    }
+
+    function loadPendingRequests() {
+        var card = root.querySelector('.cert-requests-card');
+        var listEl = root.querySelector('.cert-pending-list');
+        if (!listEl) return;
+        fetch('/umbraco/surface/Certification/GetPendingRequests')
+            .then(function (r) { return r.json(); })
+            .then(function (resp) {
+                if (!resp.success) { if (card) card.style.display = 'none'; return; }
+                var rows = resp.data || [];
+                if (rows.length === 0) { if (card) card.style.display = 'none'; return; }
+                if (card) card.style.display = '';
+                listEl.innerHTML = rows.map(renderPendingItem).join('');
+            })
+            .catch(function () { if (card) card.style.display = 'none'; });
+    }
+
+    function renderPendingItem(req) {
+        var meta = 'Klubb: ' + escapeHtml(req.clubName)
+                 + ' · Certifierad: ' + escapeHtml(req.certifiedAt)
+                 + (req.certificateNumber ? ' · Certifikatnr: ' + escapeHtml(req.certificateNumber) : '')
+                 + ' · Begärd av ' + escapeHtml(req.requestedByName) + ' (' + escapeHtml(req.requestedAt) + ')';
+        var issuer = '<div class="small">Utfärdare: <strong>' + escapeHtml(req.issuerName) + '</strong>'
+                   + (req.issuerPistolkortnummer ? ' (Pistolkortnr ' + escapeHtml(req.issuerPistolkortnummer) + ')' : '')
+                   + ' · Skyttens Pistolkortnr: ' + escapeHtml(req.pistolkortnummer) + '</div>';
+        var email = req.candidateEmail ? '<div class="small">Skyttens e-post: ' + escapeHtml(req.candidateEmail) + '</div>' : '';
+        var note = req.requestNote ? '<div class="small fst-italic text-muted">' + escapeHtml(req.requestNote) + '</div>' : '';
+        return '<li class="list-group-item">'
+             + '  <div class="d-flex justify-content-between align-items-start">'
+             + '    <div>'
+             + '      <strong>' + escapeHtml(req.candidateName) + '</strong> '
+             + '      <span class="text-muted">— ' + escapeHtml(req.certificationTypeLabel) + '</span>'
+             + '      <div class="small text-muted">' + meta + '</div>'
+             + issuer + email + note
+             + '    </div>'
+             + '    <div class="cert-req-actions text-nowrap ms-2">'
+             + '      <button type="button" class="btn btn-sm btn-success cert-approve-btn" data-req-id="' + req.id + '" title="Godkänn"><i class="bi bi-check-lg"></i></button> '
+             + '      <button type="button" class="btn btn-sm btn-outline-danger cert-reject-btn" data-req-id="' + req.id + '" title="Avslå"><i class="bi bi-x-lg"></i></button>'
+             + '    </div>'
+             + '  </div>'
+             + '</li>';
+    }
+
+    function loadMyRequests() {
+        var card = root.querySelector('.cert-requests-card');
+        var listEl = root.querySelector('.cert-myrequests-list');
+        if (!listEl) return;
+        fetch('/umbraco/surface/Certification/GetClubRequests?clubId=' + encodeURIComponent(scopeId))
+            .then(function (r) { return r.json(); })
+            .then(function (resp) {
+                if (!resp.success) { if (card) card.style.display = 'none'; return; }
+                var rows = resp.data || [];
+                if (rows.length === 0) { if (card) card.style.display = 'none'; return; }
+                if (card) card.style.display = '';
+                listEl.innerHTML = rows.map(renderMyRequestItem).join('');
+            })
+            .catch(function () { if (card) card.style.display = 'none'; });
+    }
+
+    function renderMyRequestItem(req) {
+        var meta = 'Pistolkortnr: ' + escapeHtml(req.pistolkortnummer) + ' · Begärd ' + escapeHtml(req.requestedAt);
+        var review = (req.status === 'Rejected' && req.reviewNote)
+            ? '<div class="small fst-italic text-danger">Motivering: ' + escapeHtml(req.reviewNote) + '</div>' : '';
+        return '<li class="list-group-item d-flex justify-content-between align-items-center">'
+             + '  <div>'
+             + '    <strong>' + escapeHtml(req.candidateName) + '</strong> '
+             + '    <span class="text-muted">— ' + escapeHtml(req.certificationTypeLabel) + '</span>'
+             + '    <div class="small text-muted">' + meta + '</div>'
+             + review
+             + '  </div>'
+             + '  <div class="ms-2">' + statusBadge(req.status) + '</div>'
+             + '</li>';
+    }
+
     // ── Add (grant) flow ─────────────────────────────────────────────
     var modal = document.getElementById('certGrantModal-' + instanceKey);
     var bsModal = null;
@@ -361,11 +490,23 @@
         // Hide "Certifierad av" for cert types issued by SPSF (Kretsinstruktör, Riksinstruktör).
         // For those, the grantor is implicitly SPSF and we record the cert without naming
         // an individual person; the acting admin's authority is checked server-side.
-        var grantorWrapper = document.getElementById('certGrantGrantorWrapper-' + instanceKey);
-        if (grantorWrapper) {
-            var hideGrantor = (certType === 'Kretsinstruktor' || certType === 'Riksinstruktor');
-            grantorWrapper.style.display = hideGrantor ? 'none' : '';
-        }
+        var hideGrantor = (certType === 'Kretsinstruktor' || certType === 'Riksinstruktor');
+        modal.dataset.hideGrantor = hideGrantor ? '1' : '';
+
+        // The request (queue) path is the bootstrap fallback for the club-level certs whose
+        // issuer is normally a Kretsinstruktör — only offered at Club scope.
+        var canRequest = scopeType === 'Club'
+            && (certType === 'Foreningsinstruktor' || certType === 'Vapenkontrollant' || certType === 'Banlaggare');
+        modal.dataset.canRequest = canRequest ? '1' : '';
+
+        var reqWrapper = document.getElementById('certRequestModeWrapper-' + instanceKey);
+        var reqCheck = document.getElementById('certRequestMode-' + instanceKey);
+        if (reqCheck) reqCheck.checked = false;
+        if (reqWrapper) reqWrapper.style.display = canRequest ? '' : 'none';
+        document.getElementById('certGrantPistol-' + instanceKey).value = '';
+        document.getElementById('certGrantIssuerName-' + instanceKey).value = '';
+        document.getElementById('certGrantIssuerPistol-' + instanceKey).value = '';
+        applyRequestMode(false);
 
         // Load member list — scoped: for Club, only club members; for Region, all approved members.
         var memberUrl = scopeType === 'Club'
@@ -428,7 +569,82 @@
         })[t] || t;
     }
 
+    // Toggle the modal between direct-grant and request (queue) layout. The only structural
+    // difference is the issuer: direct mode picks an on-platform grantor ("Certifierad av"),
+    // request mode collects the off-platform issuer's name + Pistolkortnummer plus the
+    // shooter's Pistolkortnummer. The cert attributes (date, expiry, number) appear in both.
+    function applyRequestMode(isRequest) {
+        var grantorWrapper = document.getElementById('certGrantGrantorWrapper-' + instanceKey);
+        var hideGrantor = modal.dataset.hideGrantor === '1';
+        if (grantorWrapper) grantorWrapper.style.display = (isRequest || hideGrantor) ? 'none' : '';
+
+        modal.querySelectorAll('.cert-request-field').forEach(function (el) {
+            el.style.display = isRequest ? '' : 'none';
+        });
+
+        var submitBtn = modal.querySelector('.cert-grant-submit-btn');
+        if (submitBtn) {
+            submitBtn.innerHTML = isRequest
+                ? '<i class="bi bi-send me-1"></i>Skicka förfrågan'
+                : '<i class="bi bi-save me-1"></i>Spara';
+        }
+    }
+
+    function submitRequest() {
+        var errEl = document.getElementById('certGrantError-' + instanceKey);
+        errEl.classList.add('d-none');
+        function fail(msg) { errEl.textContent = msg; errEl.classList.remove('d-none'); }
+
+        var certType = modal.dataset.certType;
+        var memberId = parseInt(document.getElementById('certGrantMember-' + instanceKey).value, 10);
+        var pistol = document.getElementById('certGrantPistol-' + instanceKey).value.trim();
+        var issuerName = document.getElementById('certGrantIssuerName-' + instanceKey).value.trim();
+        var issuerPistol = document.getElementById('certGrantIssuerPistol-' + instanceKey).value.trim();
+        var certifiedAt = document.getElementById('certGrantCertifiedAt-' + instanceKey).value || null;
+        var expiresAt = document.getElementById('certGrantExpiresAt-' + instanceKey).value || null;
+        var certNumber = document.getElementById('certGrantNumber-' + instanceKey).value.trim() || null;
+        var notes = document.getElementById('certGrantNotes-' + instanceKey).value.trim() || null;
+
+        if (!memberId) { fail('Välj en medlem.'); return; }
+        if (!issuerName) { fail('Ange utfärdarens namn.'); return; }
+        if (!pistol) { fail('Ange skyttens Pistolkortnummer.'); return; }
+        if (!certifiedAt) { fail('Ange certifieringsdatum.'); return; }
+
+        var body = {
+            candidateMemberId: memberId,
+            certificationType: certType,
+            clubId: parseInt(scopeId, 10),
+            pistolkortnummer: pistol,
+            issuerName: issuerName,
+            issuerPistolkortnummer: issuerPistol,
+            certifiedAt: certifiedAt,
+            expiresAt: expiresAt,
+            certificateNumber: certNumber,
+            note: notes
+        };
+
+        fetch('/umbraco/surface/Certification/RequestCertification', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getToken() },
+            body: JSON.stringify(body)
+        }).then(function (r) { return r.json(); }).then(function (resp) {
+            if (!resp.success) {
+                errEl.textContent = resp.message || 'Kunde inte skicka förfrågan';
+                errEl.classList.remove('d-none');
+                return;
+            }
+            bsModal.hide();
+            loadRequests();
+        });
+    }
+
     function submitGrant() {
+        // Request (queue) path — distinct from the direct grant below.
+        if (modal.dataset.canRequest === '1') {
+            var reqCheck = document.getElementById('certRequestMode-' + instanceKey);
+            if (reqCheck && reqCheck.checked) { submitRequest(); return; }
+        }
+
         var errEl = document.getElementById('certGrantError-' + instanceKey);
         errEl.classList.add('d-none');
 
@@ -534,13 +750,58 @@
             return;
         }
 
+        var approveBtn = ev.target.closest('.cert-approve-btn');
+        if (approveBtn) {
+            ev.preventDefault();
+            if (!confirm('Godkänn förfrågan? Certifieringen utfärdas och blir aktiv direkt.')) return;
+            approveBtn.disabled = true;
+            fetch('/umbraco/surface/Certification/ApproveRequest', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getToken() },
+                body: JSON.stringify({ requestId: parseInt(approveBtn.dataset.reqId, 10) })
+            }).then(function (r) { return r.json(); }).then(function (resp) {
+                if (!resp.success) { alert(resp.message || 'Kunde inte godkänna'); approveBtn.disabled = false; }
+                loadRequests();
+                loadCerts();
+            });
+            return;
+        }
+
+        var rejectBtn = ev.target.closest('.cert-reject-btn');
+        if (rejectBtn) {
+            ev.preventDefault();
+            var reason = prompt('Avslå förfrågan. Motivering (frivilligt):');
+            if (reason === null) return; // cancelled
+            rejectBtn.disabled = true;
+            fetch('/umbraco/surface/Certification/RejectRequest', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getToken() },
+                body: JSON.stringify({ requestId: parseInt(rejectBtn.dataset.reqId, 10), note: reason || null })
+            }).then(function (r) { return r.json(); }).then(function (resp) {
+                if (!resp.success) { alert(resp.message || 'Kunde inte avslå'); rejectBtn.disabled = false; }
+                loadRequests();
+            });
+            return;
+        }
+
         var refreshBtn = ev.target.closest('.cert-refresh-btn');
-        if (refreshBtn) { ev.preventDefault(); loadCerts(); return; }
+        if (refreshBtn) { ev.preventDefault(); loadCerts(); loadRequests(); return; }
     });
 
     document.getElementById('certGrantMember-' + instanceKey).addEventListener('change', function (ev) {
+        if (modal.dataset.canRequest === '1') {
+            var reqCheck = document.getElementById('certRequestMode-' + instanceKey);
+            if (reqCheck && reqCheck.checked) return; // grantor list not used in request mode
+        }
         loadGrantorsForCandidate(modal.dataset.certType, parseInt(ev.target.value, 10));
     });
+
+    var requestModeCheck = document.getElementById('certRequestMode-' + instanceKey);
+    if (requestModeCheck) {
+        requestModeCheck.addEventListener('change', function (ev) {
+            applyRequestMode(ev.target.checked);
+        });
+    }
 
     modal.querySelector('.cert-grant-submit-btn').addEventListener('click', function (ev) {
         ev.preventDefault();
@@ -548,5 +809,6 @@
     });
 
     loadCerts();
+    loadRequests();
 })();
 </script>

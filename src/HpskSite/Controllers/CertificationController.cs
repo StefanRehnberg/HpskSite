@@ -24,6 +24,7 @@ namespace HpskSite.Controllers
         private readonly AdminAuthorizationService _authService;
         private readonly CertificationService _certService;
         private readonly CertificationAuthorizationService _certAuth;
+        private readonly EmailService _emailService;
         private readonly ILogger<CertificationController> _logger;
 
         public CertificationController(
@@ -38,6 +39,7 @@ namespace HpskSite.Controllers
             AdminAuthorizationService authService,
             CertificationService certService,
             CertificationAuthorizationService certAuth,
+            EmailService emailService,
             ILogger<CertificationController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
@@ -46,6 +48,7 @@ namespace HpskSite.Controllers
             _authService = authService;
             _certService = certService;
             _certAuth = certAuth;
+            _emailService = emailService;
             _logger = logger;
         }
 
@@ -527,7 +530,240 @@ namespace HpskSite.Controllers
             return Json(new { success = ok, message = ok ? "Sparat." : msg });
         }
 
+        // ── Certification requests (bootstrap queue) ───────────────────
+
+        /// <summary>
+        /// A club admin requests a certification for a member whose issuing instructor is not
+        /// on pistol.nu. The candidate's SPSF identity (name/email from the member record,
+        /// Pistolkortnummer typed in) is captured so an approver can verify them. Lands Pending.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> RequestCertification([FromBody] CertificationRequestDto req)
+        {
+            if (req == null || req.CandidateMemberId <= 0 || string.IsNullOrEmpty(req.CertificationType) || req.ClubId <= 0)
+                return Json(new { success = false, message = "Ogiltig begäran." });
+            if (string.IsNullOrWhiteSpace(req.Pistolkortnummer))
+                return Json(new { success = false, message = "Skyttens Pistolkortnummer krävs." });
+            if (string.IsNullOrWhiteSpace(req.IssuerName))
+                return Json(new { success = false, message = "Utfärdarens namn krävs." });
+            if (!req.CertifiedAt.HasValue)
+                return Json(new { success = false, message = "Certifieringsdatum krävs." });
+
+            var current = await GetCurrentMemberDataAsync();
+            if (current == null) return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            // Only the club's admins may submit on the club's behalf.
+            if (!await _authService.IsClubAdminForClub(req.ClubId))
+                return Json(new { success = false, message = "Du har inte behörighet att begära certifieringar för den här klubben." });
+
+            var candidate = _memberService.GetById(req.CandidateMemberId);
+            if (candidate == null) return Json(new { success = false, message = "Medlemmen hittades inte." });
+
+            var entry = new CertificationRequest
+            {
+                CandidateMemberId = req.CandidateMemberId,
+                CertificationType = req.CertificationType,
+                ClubId = req.ClubId,
+                CandidateFullName = MemberDisplayName(candidate),
+                CandidateEmail = candidate.Email,
+                Pistolkortnummer = req.Pistolkortnummer.Trim(),
+                IssuerName = req.IssuerName.Trim(),
+                IssuerPistolkortnummer = string.IsNullOrWhiteSpace(req.IssuerPistolkortnummer) ? null : req.IssuerPistolkortnummer.Trim(),
+                CertifiedAt = req.CertifiedAt.Value,
+                ExpiresAt = req.ExpiresAt,
+                CertificateNumber = string.IsNullOrWhiteSpace(req.CertificateNumber) ? null : req.CertificateNumber.Trim(),
+                RequestedByMemberId = current.Id,
+                RequestNote = string.IsNullOrWhiteSpace(req.Note) ? null : req.Note.Trim()
+            };
+
+            var candidateName = entry.CandidateFullName;
+            var (ok, requestId, msg) = await _certService.CreateRequestAsync(entry);
+
+            if (!ok) return Json(new { success = false, message = msg });
+
+            // Best-effort: notify the regional admins for the candidate's region.
+            try { await NotifyApproversOfRequestAsync(req.ClubId, candidateName, req.CertificationType, MemberDisplayName(current)); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Failed to notify approvers of certification request {RequestId}", requestId); }
+
+            return Json(new { success = true, requestId, message = $"Förfrågan om {CertificationTypes.DisplayName(req.CertificationType)} skickad för granskning." });
+        }
+
+        /// <summary>Pending requests the current user may approve — every club in the regions
+        /// they administer (all regions for site admins). Powers the approver queue.</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetPendingRequests()
+        {
+            var current = await GetCurrentMemberDataAsync();
+            if (current == null) return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            var regions = await _authService.GetManagedRegions();
+            if (regions == null || regions.Count == 0)
+                return Json(new { success = false, message = "Access denied" });
+
+            var clubIds = _authService.GetClubsInRegions(regions);
+            var pending = await _certService.GetPendingRequestsForClubsAsync(clubIds);
+
+            return Json(new { success = true, data = pending.Select(ProjectRequest).ToList() });
+        }
+
+        /// <summary>A club admin's read-only view of the requests submitted from their club.</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetClubRequests(int clubId)
+        {
+            if (clubId <= 0) return Json(new { success = false, message = "Ogiltigt klubb-ID." });
+            if (!await _authService.IsClubAdminForClub(clubId))
+                return Json(new { success = false, message = "Access denied" });
+
+            var rows = await _certService.GetRequestsForClubAsync(clubId);
+            return Json(new { success = true, data = rows.Select(ProjectRequest).ToList() });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ApproveRequest([FromBody] RequestDecisionDto req)
+        {
+            if (req == null || req.RequestId <= 0) return Json(new { success = false, message = "Ogiltig begäran." });
+
+            var current = await GetCurrentMemberDataAsync();
+            if (current == null) return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            var request = await _certService.GetRequestByIdAsync(req.RequestId);
+            if (request == null) return Json(new { success = false, message = "Förfrågan hittades inte." });
+
+            if (!await CanApproveRequestAsync(request))
+                return Json(new { success = false, message = "Du har inte behörighet att godkänna den här förfrågan." });
+
+            var (ok, msg, reviewed) = await _certService.ApproveRequestAsync(req.RequestId, current.Id);
+            if (!ok) return Json(new { success = false, message = msg });
+
+            try { await NotifyRequesterOfDecisionAsync(reviewed!, approved: true, note: null); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Failed to notify requester of approved request {RequestId}", req.RequestId); }
+
+            return Json(new { success = true, message = $"{CertificationTypes.DisplayName(request.CertificationType)} utfärdad." });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> RejectRequest([FromBody] RequestDecisionDto req)
+        {
+            if (req == null || req.RequestId <= 0) return Json(new { success = false, message = "Ogiltig begäran." });
+
+            var current = await GetCurrentMemberDataAsync();
+            if (current == null) return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            var request = await _certService.GetRequestByIdAsync(req.RequestId);
+            if (request == null) return Json(new { success = false, message = "Förfrågan hittades inte." });
+
+            if (!await CanApproveRequestAsync(request))
+                return Json(new { success = false, message = "Du har inte behörighet att avslå den här förfrågan." });
+
+            var note = string.IsNullOrWhiteSpace(req.Note) ? null : req.Note.Trim();
+            var (ok, msg, reviewed) = await _certService.RejectRequestAsync(req.RequestId, current.Id, note);
+            if (!ok) return Json(new { success = false, message = msg });
+
+            try { await NotifyRequesterOfDecisionAsync(reviewed!, approved: false, note: note); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Failed to notify requester of rejected request {RequestId}", req.RequestId); }
+
+            return Json(new { success = true, message = "Förfrågan avslagen." });
+        }
+
         // ── Helpers ───────────────────────────────────────────────────
+
+        /// <summary>An approver is a site admin or a regional admin for the candidate's region.</summary>
+        private async Task<bool> CanApproveRequestAsync(CertificationRequest request)
+        {
+            if (await _authService.IsCurrentUserAdminAsync()) return true;
+            var region = GetRegionForClub(request.ClubId);
+            return !string.IsNullOrEmpty(region) && await _authService.IsRegionalAdminForRegion(region);
+        }
+
+        private string? GetRegionForClub(int clubId)
+        {
+            if (clubId <= 0) return null;
+            if (!UmbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null) return null;
+            var clubNode = ctx.Content.GetById(clubId);
+            return clubNode?.Value<string>("regionalFederation");
+        }
+
+        private string GetClubName(int clubId)
+        {
+            if (clubId <= 0) return "";
+            if (!UmbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null) return "";
+            return ctx.Content.GetById(clubId)?.Name ?? "";
+        }
+
+        private static string MemberDisplayName(Umbraco.Cms.Core.Models.IMember m)
+        {
+            var n = $"{m.GetValue<string>("firstName") ?? ""} {m.GetValue<string>("lastName") ?? ""}".Trim();
+            return string.IsNullOrEmpty(n) ? (m.Name ?? "Okänd") : n;
+        }
+
+        private object ProjectRequest(CertificationRequest r)
+        {
+            var requester = r.RequestedByMemberId > 0 ? _memberService.GetById(r.RequestedByMemberId) : null;
+            var reviewer = r.ReviewedByMemberId.HasValue ? _memberService.GetById(r.ReviewedByMemberId.Value) : null;
+            return new
+            {
+                id = r.Id,
+                candidateMemberId = r.CandidateMemberId,
+                candidateName = r.CandidateFullName,
+                candidateEmail = r.CandidateEmail,
+                pistolkortnummer = r.Pistolkortnummer,
+                issuerName = r.IssuerName,
+                issuerPistolkortnummer = r.IssuerPistolkortnummer,
+                certifiedAt = r.CertifiedAt.ToString("yyyy-MM-dd"),
+                expiresAt = r.ExpiresAt?.ToString("yyyy-MM-dd"),
+                certificateNumber = r.CertificateNumber,
+                certificationType = r.CertificationType,
+                certificationTypeLabel = CertificationTypes.DisplayName(r.CertificationType),
+                clubId = r.ClubId,
+                clubName = GetClubName(r.ClubId),
+                requestedByName = requester != null ? MemberDisplayName(requester) : "Okänd",
+                requestedAt = r.RequestedAt.ToString("yyyy-MM-dd"),
+                requestNote = r.RequestNote,
+                status = r.Status,
+                reviewedByName = reviewer != null ? MemberDisplayName(reviewer) : null,
+                reviewedAt = r.ReviewedAt?.ToString("yyyy-MM-dd"),
+                reviewNote = r.ReviewNote
+            };
+        }
+
+        /// <summary>Best-effort email to everyone who can approve the request — the regional
+        /// admins for the candidate's region plus all site admins (deduped).</summary>
+        private async Task NotifyApproversOfRequestAsync(int clubId, string candidateName, string certType, string requesterName)
+        {
+            var region = GetRegionForClub(clubId);
+            var roleGroup = string.IsNullOrEmpty(region) ? null : $"RegionalAdmin_{region}";
+            var clubName = GetClubName(clubId);
+            var certLabel = CertificationTypes.DisplayName(certType);
+
+            var admins = _memberService.GetAll(0, int.MaxValue, out _)
+                .Where(m => m.IsApproved && !string.IsNullOrEmpty(m.Email))
+                .Where(m =>
+                {
+                    var roles = _memberService.GetAllRoles(m.Id) ?? Enumerable.Empty<string>();
+                    return roles.Contains("Administrators") || (roleGroup != null && roles.Contains(roleGroup));
+                })
+                .ToList();
+
+            foreach (var a in admins)
+            {
+                await _emailService.SendCertificationRequestSubmittedAsync(
+                    a.Email!, MemberDisplayName(a), requesterName, candidateName, certLabel, clubName);
+            }
+        }
+
+        private async Task NotifyRequesterOfDecisionAsync(CertificationRequest request, bool approved, string? note)
+        {
+            var requester = request.RequestedByMemberId > 0 ? _memberService.GetById(request.RequestedByMemberId) : null;
+            if (requester == null || string.IsNullOrEmpty(requester.Email)) return;
+
+            await _emailService.SendCertificationRequestDecisionAsync(
+                requester.Email!, MemberDisplayName(requester),
+                request.CandidateFullName, CertificationTypes.DisplayName(request.CertificationType),
+                approved, note);
+        }
 
         private async Task<bool> IsAuthorizedForAppointmentScope(string certType, string scopeId)
         {
@@ -588,5 +824,25 @@ namespace HpskSite.Controllers
         public string? CertificateNumber { get; set; }
         public string? Notes { get; set; }
         public DateTime? ExpiresAt { get; set; }
+    }
+
+    public class CertificationRequestDto
+    {
+        public int CandidateMemberId { get; set; }
+        public string CertificationType { get; set; } = "";
+        public int ClubId { get; set; }
+        public string Pistolkortnummer { get; set; } = "";
+        public string IssuerName { get; set; } = "";
+        public string IssuerPistolkortnummer { get; set; } = "";
+        public DateTime? CertifiedAt { get; set; }
+        public DateTime? ExpiresAt { get; set; }
+        public string? CertificateNumber { get; set; }
+        public string? Note { get; set; }
+    }
+
+    public class RequestDecisionDto
+    {
+        public int RequestId { get; set; }
+        public string? Note { get; set; }
     }
 }

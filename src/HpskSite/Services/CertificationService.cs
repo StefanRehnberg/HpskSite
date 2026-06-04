@@ -90,7 +90,8 @@ namespace HpskSite.Services
         public async Task<(bool Success, int CertId, string? Message)> GrantAsync(
             GrantCertificationRequest req,
             int actingMemberId,
-            bool isSiteAdmin)
+            bool isSiteAdmin,
+            bool bypassAuthorityCheck = false)
         {
             if (req == null) return (false, 0, "Ogiltig begäran.");
             if (req.MemberId <= 0) return (false, 0, "Saknar medlem.");
@@ -98,7 +99,10 @@ namespace HpskSite.Services
 
             // Authorization: either site admin, OR the acting member holds appropriate authority,
             // OR a specific grantor is named who has authority. Site-admin gets a free pass.
-            if (!isSiteAdmin)
+            // bypassAuthorityCheck is set by the request-approval path, where the approver's
+            // authority (regional admin for the candidate's region, or site admin) was already
+            // verified in the controller before issuing the cert.
+            if (!isSiteAdmin && !bypassAuthorityCheck)
             {
                 var grantorId = req.CertifiedByMemberId ?? actingMemberId;
                 if (!await _certAuth.CanGrantAsync(grantorId, req.CertificationType, req.MemberId))
@@ -244,6 +248,160 @@ namespace HpskSite.Services
             cert.ExpiresAt = expiresAt;
             await db.UpdateAsync(cert);
             return (true, null);
+        }
+
+        // ── Certification requests (bootstrap queue) ───────────────────
+
+        public async Task<CertificationRequest?> GetRequestByIdAsync(int requestId)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            return await db.SingleOrDefaultByIdAsync<CertificationRequest>(requestId);
+        }
+
+        /// <summary>All requests submitted from a single club, newest first — the club admin's
+        /// read-only status list.</summary>
+        public async Task<List<CertificationRequest>> GetRequestsForClubAsync(int clubId)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            return await db.FetchAsync<CertificationRequest>(
+                "WHERE ClubId = @0 ORDER BY RequestedAt DESC", clubId);
+        }
+
+        /// <summary>Pending requests for any of the given clubs — the approver queue, scoped to
+        /// the regional/site admin's reachable clubs.</summary>
+        public async Task<List<CertificationRequest>> GetPendingRequestsForClubsAsync(IEnumerable<int> clubIds)
+        {
+            var ids = clubIds.Distinct().ToList();
+            if (ids.Count == 0) return new List<CertificationRequest>();
+
+            var paramNames = string.Join(",", ids.Select((_, i) => "@" + i));
+            using var db = _databaseFactory.CreateDatabase();
+            return await db.FetchAsync<CertificationRequest>(
+                $"WHERE Status = '{CertificationRequestStatus.Pending}' AND ClubId IN ({paramNames}) ORDER BY RequestedAt ASC",
+                ids.Cast<object>().ToArray());
+        }
+
+        /// <summary>
+        /// Record a club admin's request to certify a member. Authorization (club admin for
+        /// the club) is enforced in the controller, which also fills the candidate identity
+        /// from the member record; this method validates the request shape and persists it as
+        /// Pending. Stamps Status/RequestedAt/CreatedAt.
+        /// </summary>
+        public async Task<(bool Success, int RequestId, string? Message)> CreateRequestAsync(CertificationRequest entry)
+        {
+            if (entry == null) return (false, 0, "Ogiltig begäran.");
+            if (entry.CandidateMemberId <= 0) return (false, 0, "Saknar medlem.");
+            if (string.IsNullOrEmpty(entry.CertificationType)) return (false, 0, "Saknar certifieringstyp.");
+            if (entry.ClubId <= 0) return (false, 0, "Saknar klubb.");
+            if (string.IsNullOrWhiteSpace(entry.Pistolkortnummer))
+                return (false, 0, "Skyttens Pistolkortnummer krävs för att kunna verifiera personen mot SPSF-registret.");
+            if (string.IsNullOrWhiteSpace(entry.IssuerName))
+                return (false, 0, "Utfärdarens namn krävs.");
+            if (entry.CertifiedAt == default)
+                return (false, 0, "Certifieringsdatum krävs.");
+
+            // Requests are only the bootstrap path for the club-level certs whose issuer is
+            // normally a Kretsinstruktör. Kretsinstruktör / Riksinstruktör go through the
+            // direct (regional/site admin) flow, never the queue.
+            if (entry.CertificationType != CertificationTypes.Foreningsinstruktor
+                && entry.CertificationType != CertificationTypes.Vapenkontrollant
+                && entry.CertificationType != CertificationTypes.Banlaggare)
+                return (false, 0, "Den här certifieringstypen kan inte begäras via klubben.");
+
+            if (await HasActiveCertAsync(entry.CandidateMemberId, entry.CertificationType))
+                return (false, 0, $"{CertificationTypes.DisplayName(entry.CertificationType)} är redan utfärdad och aktiv för medlemmen.");
+
+            using var db = _databaseFactory.CreateDatabase();
+            var existingPending = await db.ExecuteScalarAsync<int>(
+                $@"SELECT COUNT(*) FROM CertificationRequests
+                   WHERE CandidateMemberId = @0 AND CertificationType = @1 AND ClubId = @2
+                     AND Status = '{CertificationRequestStatus.Pending}'",
+                entry.CandidateMemberId, entry.CertificationType, entry.ClubId);
+            if (existingPending > 0)
+                return (false, 0, "Det finns redan en obehandlad förfrågan för den här medlemmen och certifieringstypen.");
+
+            entry.Status = CertificationRequestStatus.Pending;
+            entry.RequestedAt = DateTime.UtcNow;
+            entry.CreatedAt = DateTime.UtcNow;
+            var newId = Convert.ToInt32(await db.InsertAsync(entry));
+
+            _logger.LogInformation(
+                "Certification request {RequestId} created: {Type} for member {MemberId} at club {ClubId} by {By}",
+                newId, entry.CertificationType, entry.CandidateMemberId, entry.ClubId, entry.RequestedByMemberId);
+
+            return (true, newId, null);
+        }
+
+        /// <summary>
+        /// Approve a pending request: issue the actual certification (authority already verified
+        /// in the controller) and, for Föreningsinstruktör, append the club appointment. The
+        /// functional member group flips here — never while the request is Pending.
+        /// </summary>
+        public async Task<(bool Success, string? Message, CertificationRequest? Request)> ApproveRequestAsync(
+            int requestId, int approverId)
+        {
+            var request = await GetRequestByIdAsync(requestId);
+            if (request == null) return (false, "Förfrågan hittades inte.", null);
+            if (request.Status != CertificationRequestStatus.Pending)
+                return (false, "Förfrågan är redan behandlad.", request);
+
+            // Issue the cert unless the member somehow already holds it (idempotent approve).
+            if (!await HasActiveCertAsync(request.CandidateMemberId, request.CertificationType))
+            {
+                var grantReq = new GrantCertificationRequest
+                {
+                    MemberId = request.CandidateMemberId,
+                    CertificationType = request.CertificationType,
+                    CertifiedByMemberId = approverId,
+                    CertifiedAt = request.CertifiedAt,
+                    ExpiresAt = request.ExpiresAt,
+                    CertificateNumber = request.CertificateNumber,
+                    Notes = $"Utfärdad av {request.IssuerName}"
+                        + (string.IsNullOrWhiteSpace(request.IssuerPistolkortnummer) ? "" : $" (Pistolkortnr {request.IssuerPistolkortnummer})")
+                        + ", ej pistol.nu-medlem."
+                        + $" Skyttens Pistolkortnr: {request.Pistolkortnummer}. Godkänd förfrågan #{request.Id}."
+                        + (string.IsNullOrWhiteSpace(request.RequestNote) ? "" : $" {request.RequestNote}")
+                };
+                var (gOk, _, gMsg) = await GrantAsync(grantReq, approverId, isSiteAdmin: false, bypassAuthorityCheck: true);
+                if (!gOk) return (false, gMsg, request);
+            }
+
+            // Föreningsinstruktör needs the club appointment too (Vapen/Ban flip their global
+            // group inside GrantAsync; Föreningsinstruktör's authority is the appointment).
+            if (request.CertificationType == CertificationTypes.Foreningsinstruktor)
+            {
+                await AppointAsync(request.CandidateMemberId, CertificationTypes.Foreningsinstruktor, request.ClubId.ToString());
+            }
+
+            using var db = _databaseFactory.CreateDatabase();
+            request.Status = CertificationRequestStatus.Approved;
+            request.ReviewedByMemberId = approverId;
+            request.ReviewedAt = DateTime.UtcNow;
+            await db.UpdateAsync(request);
+
+            _logger.LogInformation(
+                "Certification request {RequestId} approved by {Approver}", requestId, approverId);
+            return (true, null, request);
+        }
+
+        public async Task<(bool Success, string? Message, CertificationRequest? Request)> RejectRequestAsync(
+            int requestId, int approverId, string? note)
+        {
+            var request = await GetRequestByIdAsync(requestId);
+            if (request == null) return (false, "Förfrågan hittades inte.", null);
+            if (request.Status != CertificationRequestStatus.Pending)
+                return (false, "Förfrågan är redan behandlad.", request);
+
+            using var db = _databaseFactory.CreateDatabase();
+            request.Status = CertificationRequestStatus.Rejected;
+            request.ReviewedByMemberId = approverId;
+            request.ReviewedAt = DateTime.UtcNow;
+            request.ReviewNote = note;
+            await db.UpdateAsync(request);
+
+            _logger.LogInformation(
+                "Certification request {RequestId} rejected by {Approver}", requestId, approverId);
+            return (true, null, request);
         }
 
         // ── Helpers ───────────────────────────────────────────────────

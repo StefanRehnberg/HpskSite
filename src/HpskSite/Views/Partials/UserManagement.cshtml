@@ -48,6 +48,26 @@
         </div>
     </div>
 
+    <!-- Pending Certification Requests Section (regional/site admins) -->
+    <div class="card mb-3 border-warning d-none" id="pendingCertCard">
+        <div class="card-header bg-warning text-dark">
+            <h5 class="mb-0">
+                <i class="bi bi-patch-check"></i>
+                Certifieringsförfrågningar att granska
+                <span class="badge bg-dark ms-2" id="pendingCertCount">0</span>
+            </h5>
+        </div>
+        <div class="card-body">
+            <small class="text-muted d-block mb-2">Förfrågningar från klubbar där utfärdaren inte finns på pistol.nu. Verifiera utfärdaren och skytten mot SPSF-registret (Pistolkortnummer) innan du godkänner — certifieringen utfärdas vid godkännande.</small>
+            <div id="pendingCertRequests">
+                <div class="text-center">
+                    <div class="spinner-border spinner-border-sm" role="status"></div>
+                    Laddar certifieringsförfrågningar...
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h4>Användare</h4>
         <div>
@@ -629,6 +649,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 loadRegions();
                 loadMemberGroups();
                 loadClubsForDropdown();
+                loadPendingCertRequests();
                 userManagementLoaded = true;
             }
         });
@@ -1650,6 +1671,107 @@ function loadPendingApprovals() {
             container.innerHTML = '<div class="alert alert-danger">Fel vid laddning av väntande godkännanden.</div>';
             countBadge.textContent = '!';
         });
+}
+
+// ── Certification requests queue (regional/site admins) ──────────────────
+function loadPendingCertRequests() {
+    const card = document.getElementById('pendingCertCard');
+    const container = document.getElementById('pendingCertRequests');
+    const countBadge = document.getElementById('pendingCertCount');
+    if (!card || !container) return;
+
+    fetch('/umbraco/surface/Certification/GetPendingRequests')
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) {
+                // Viewer isn't a regional/site admin → nothing to approve, hide the card.
+                card.classList.add('d-none');
+                return;
+            }
+            const rows = data.data || [];
+            card.classList.remove('d-none');
+            if (countBadge) countBadge.textContent = rows.length;
+            if (rows.length === 0) {
+                container.innerHTML = '<div class="alert alert-info mb-0">Inga certifieringsförfrågningar att granska.</div>';
+            } else {
+                displayPendingCertRequests(rows);
+            }
+        })
+        .catch(() => { card.classList.add('d-none'); });
+}
+
+function displayPendingCertRequests(rows) {
+    const container = document.getElementById('pendingCertRequests');
+    let html = `
+        <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle">
+                <thead>
+                    <tr>
+                        <th>Skytt</th>
+                        <th>Certifiering</th>
+                        <th>Klubb</th>
+                        <th>Utfärdare</th>
+                        <th>Certifierad</th>
+                        <th>Begärd av</th>
+                        <th class="text-end">Åtgärder</th>
+                    </tr>
+                </thead>
+                <tbody>
+    `;
+    rows.forEach(req => {
+        const issuer = escapeHtml(req.issuerName || '')
+            + (req.issuerPistolkortnummer ? ' <span class="small text-muted">(Pk ' + escapeHtml(req.issuerPistolkortnummer) + ')</span>' : '');
+        const shooter = '<strong>' + escapeHtml(req.candidateName || '') + '</strong>'
+            + '<br><span class="small text-muted">Pk ' + escapeHtml(req.pistolkortnummer || '')
+            + (req.candidateEmail ? ' · ' + escapeHtml(req.candidateEmail) : '') + '</span>';
+        const note = req.requestNote ? '<br><span class="small fst-italic text-muted">' + escapeHtml(req.requestNote) + '</span>' : '';
+        html += `
+            <tr data-cert-req-id="${req.id}">
+                <td>${shooter}${note}</td>
+                <td>${escapeHtml(req.certificationTypeLabel || '')}</td>
+                <td>${escapeHtml(req.clubName || '')}</td>
+                <td>${issuer}</td>
+                <td>${escapeHtml(req.certifiedAt || '')}</td>
+                <td>${escapeHtml(req.requestedByName || '')}<br><span class="small text-muted">${escapeHtml(req.requestedAt || '')}</span></td>
+                <td class="text-end text-nowrap">
+                    <button type="button" class="btn btn-sm btn-success" onclick="approveCertRequest(${req.id})" title="Godkänn"><i class="bi bi-check-lg"></i></button>
+                    <button type="button" class="btn btn-sm btn-outline-danger" onclick="rejectCertRequest(${req.id})" title="Avslå"><i class="bi bi-x-lg"></i></button>
+                </td>
+            </tr>
+        `;
+    });
+    html += `</tbody></table></div>`;
+    container.innerHTML = html;
+}
+
+function certReqToken() {
+    const t = document.querySelector('input[name="__RequestVerificationToken"]');
+    return t ? t.value : '';
+}
+
+function approveCertRequest(id) {
+    if (!confirm('Godkänn förfrågan? Certifieringen utfärdas och blir aktiv direkt.')) return;
+    fetch('/umbraco/surface/Certification/ApproveRequest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': certReqToken() },
+        body: JSON.stringify({ requestId: id })
+    }).then(r => r.json()).then(data => {
+        if (!data.success) alert('Fel: ' + (data.message || 'Kunde inte godkänna'));
+        loadPendingCertRequests();
+    }).catch(() => { alert('Nätverksfel.'); });
+}
+
+function rejectCertRequest(id) {
+    const reason = prompt('Avslå förfrågan. Motivering (frivilligt):');
+    if (reason === null) return;
+    fetch('/umbraco/surface/Certification/RejectRequest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': certReqToken() },
+        body: JSON.stringify({ requestId: id, note: reason || null })
+    }).then(r => r.json()).then(data => {
+        if (!data.success) alert('Fel: ' + (data.message || 'Kunde inte avslå'));
+        loadPendingCertRequests();
+    }).catch(() => { alert('Nätverksfel.'); });
 }
 
 function renderNotifiedAdmins(clubCount, regionCount) {
