@@ -726,6 +726,135 @@ namespace HpskSite.Controllers
             return Json(new { success = true, canValidate = await CanSignOffForClubAsync(clubId), items });
         }
 
+        // ── Backlog entry (migrate a paper ledger) ─────────────────────
+
+        public class BacklogSeriesEntry
+        {
+            public int MemberId { get; set; }
+            public string SeriesType { get; set; } = Marken.SeriesTypePrecision; // Precision | Speed
+            public string SeriesDate { get; set; } = "";                          // yyyy-MM-dd
+            public string WeaponGroup { get; set; } = "C";
+            public int? Total { get; set; }                                       // precision score, or snabbpistol score
+            public string? Target { get; set; }                                   // speed target
+            public string? ClaimedLevel { get; set; }                             // speed tillämpning valör
+        }
+
+        public class AddBacklogSeriesRequest
+        {
+            public int ClubId { get; set; }
+            public List<BacklogSeriesEntry> Entries { get; set; } = new();
+        }
+
+        /// <summary>
+        /// Club-admin bulk entry of historical Guldserier / Snabbserier from a paper ledger. Each row
+        /// lands directly Verified (the entering functionary is the validator), then the yearly
+        /// Guldfodring + series-proof families are recomputed. Authority = club sign-off (board /
+        /// Skjutledare-if-enabled / site admin). POST /umbraco/surface/Marken/AddBacklogSeries
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> AddBacklogSeries([FromBody] AddBacklogSeriesRequest request)
+        {
+            if (request == null || request.ClubId <= 0) return Json(new { success = false, message = "Ogiltig begäran." });
+            if (request.Entries == null || request.Entries.Count == 0) return Json(new { success = false, message = "Inga serier angivna." });
+
+            int actingId = await GetCurrentMemberIdAsync();
+            if (actingId <= 0) return Json(new { success = false, message = "Du måste vara inloggad." });
+            if (!await CanSignOffForClubAsync(request.ClubId))
+                return Json(new { success = false, message = "Du har inte behörighet att registrera serier för den här klubben." });
+
+            int inserted = 0, skipped = 0;
+            var errors = new List<string>();
+            var affectedYears = new HashSet<(int Member, int Year)>();
+            var affectedMembers = new HashSet<int>();
+
+            for (int i = 0; i < request.Entries.Count; i++)
+            {
+                var e = request.Entries[i];
+                string row = $"Rad {i + 1}";
+
+                var member = e.MemberId > 0 ? _memberService.GetById(e.MemberId) : null;
+                if (member == null) { errors.Add($"{row}: medlem saknas."); skipped++; continue; }
+                if (!MemberBelongsToClub(member, request.ClubId)) { errors.Add($"{row}: medlemmen tillhör inte klubben."); skipped++; continue; }
+                if (!DateTime.TryParse(e.SeriesDate, out var date)) { errors.Add($"{row}: ogiltigt datum."); skipped++; continue; }
+                if (date.Date > DateTime.Now.Date) { errors.Add($"{row}: datumet ligger i framtiden."); skipped++; continue; }
+                int year = date.Year;
+
+                var group = Marken.WeaponGroup(e.WeaponGroup);
+                if (group == null) { errors.Add($"{row}: ogiltig vapengrupp."); skipped++; continue; }
+
+                int birthYear = _candidates.GetBirthYear(member.Id, year);
+
+                var series = new MarkenSeries
+                {
+                    MemberId = member.Id,
+                    ClubId = request.ClubId,
+                    BadgeFamily = Family,
+                    Year = year,
+                    SeriesDate = date,
+                    WeaponGroup = group,
+                    Status = Marken.StatusVerified,
+                    ValidatedByMemberId = actingId,
+                    ValidatedDate = DateTime.Now,
+                    EnteredByMemberId = actingId,
+                    Notes = "Historisk inmatning från klubbliggare."
+                };
+
+                if (e.SeriesType == Marken.SeriesTypeSpeed)
+                {
+                    if (!Marken.IsValidSpeedTarget(e.Target)) { errors.Add($"{row}: välj ett giltigt mål för snabbserien."); skipped++; continue; }
+                    series.SeriesType = Marken.SeriesTypeSpeed;
+                    series.Target = e.Target;
+                    if (e.Target == Marken.SpeedTargetSnabbpistol)
+                    {
+                        int total = e.Total ?? 0;
+                        if (total <= 0 || total > 50) { errors.Add($"{row}: ange snabbpistolseriens poäng (0–50)."); skipped++; continue; }
+                        series.Total = total;
+                        series.ClaimedLevel = total >= 49 ? Marken.LevelGuld : total >= 48 ? Marken.LevelSilver : total >= 45 ? Marken.LevelBrons : "";
+                        series.Qualifies = total >= 45;
+                    }
+                    else
+                    {
+                        var level = string.IsNullOrWhiteSpace(e.ClaimedLevel) ? Marken.LevelGuld : e.ClaimedLevel!;
+                        if (Marken.LevelOrdinal(level) == 0) { errors.Add($"{row}: välj valör."); skipped++; continue; }
+                        series.ClaimedLevel = level;
+                        series.Qualifies = true; // tillämpning är pass/fail per valör
+                    }
+                }
+                else
+                {
+                    int total = e.Total ?? 0;
+                    if (total <= 0 || total > 50) { errors.Add($"{row}: ange seriens poäng (0–50)."); skipped++; continue; }
+                    int threshold = Marken.PrecisionThreshold(group, year, birthYear);
+                    series.SeriesType = Marken.SeriesTypePrecision;
+                    series.ClaimedLevel = Marken.LevelGuld;
+                    series.Shots = "[]"; // backlog records the total only, not shot-by-shot
+                    series.Total = total;
+                    series.Threshold = threshold;
+                    series.Qualifies = total >= threshold;
+                }
+
+                await _ledger.InsertSeriesAsync(series);
+                inserted++;
+                affectedYears.Add((member.Id, year));
+                affectedMembers.Add(member.Id);
+            }
+
+            foreach (var (m, y) in affectedYears) await RecomputeYearlyQualificationAsync(m, y, actingId);
+            foreach (var m in affectedMembers) await RecomputeSeriesProofFamiliesAsync(m);
+
+            return Json(new
+            {
+                success = inserted > 0,
+                inserted,
+                skipped,
+                errors,
+                message = inserted > 0
+                    ? $"{inserted} serie(r) registrerade och validerade." + (skipped > 0 ? $" {skipped} hoppades över." : "")
+                    : "Inga serier registrerades." + (errors.Count > 0 ? " " + string.Join(" ", errors) : "")
+            });
+        }
+
         // ── Club Guldserie-ligan (friendly leaderboard, Medlemmar tab) ─
 
         private static int CountX(string? shotsJson)
@@ -838,14 +967,27 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Åtkomst nekad." });
 
             int y = year ?? DateTime.Now.Year;
-            var activeIds = await _ledger.GetAllActiveMemberIdsAsync();
+
+            // Members to show = badge/Guldfodring holders in this club PLUS anyone with verified
+            // series recorded at this club this year (so backlog/self-submitted series are visible
+            // even before a Guldfodring completes).
+            var clubSeries = (await _ledger.GetVerifiedSeriesForClubAsync(clubId))
+                .Where(s => s.Year == y && s.BadgeFamily == Family).ToList();
+            var seriesByMember = clubSeries.GroupBy(s => s.MemberId).ToDictionary(g => g.Key, g => g.ToList());
+
+            var memberIds = new HashSet<int>(seriesByMember.Keys);
+            foreach (var mid in await _ledger.GetAllActiveMemberIdsAsync())
+            {
+                var m = _memberService.GetById(mid);
+                if (m != null && int.TryParse(m.GetValue("primaryClubId")?.ToString(), out var pc) && pc == clubId)
+                    memberIds.Add(mid);
+            }
 
             var rows = new List<MarkenSummaryRow>();
-            foreach (var mid in activeIds)
+            foreach (var mid in memberIds)
             {
                 var member = _memberService.GetById(mid);
                 if (member == null) continue;
-                if (!int.TryParse(member.GetValue("primaryClubId")?.ToString(), out var pc) || pc != clubId) continue;
 
                 var badges = await _ledger.GetBadgesForMemberAsync(mid, Family);
                 var top = badges.Where(b => b.LevelOrdinal is >= 1 and <= 3).OrderByDescending(b => b.LevelOrdinal).FirstOrDefault();
@@ -853,6 +995,10 @@ namespace HpskSite.Controllers
                 var ladder = await _ledger.GetArtalsmarkeStatusAsync(mid, Family, includeUnverified: false);
                 var pending = await _ledger.GetPendingCountAsync(mid, Family);
                 var thisYearQ = await _ledger.GetQualificationForYearAsync(mid, Family, y);
+
+                var ms = seriesByMember.GetValueOrDefault(mid) ?? new List<MarkenSeries>();
+                int part1 = ms.Count(s => s.SeriesType == Marken.SeriesTypePrecision && s.Qualifies && s.ClaimedLevel == Marken.LevelGuld);
+                int part2 = ms.Count(s => s.SeriesType == Marken.SeriesTypeSpeed && s.ClaimedLevel == Marken.LevelGuld);
 
                 rows.Add(new MarkenSummaryRow
                 {
@@ -864,7 +1010,9 @@ namespace HpskSite.Controllers
                     Artalsmarke = ladder.CurrentName,
                     Pending = pending,
                     ThisYearStatus = thisYearQ == null ? "" : Marken.StatusDisplay(thisYearQ.Status),
-                    ThisYearFulfilled = thisYearQ?.Fulfilled ?? false
+                    ThisYearFulfilled = thisYearQ?.Fulfilled ?? false,
+                    QualifyingSeries = part1,
+                    SpeedSeries = part2
                 });
             }
 
@@ -881,7 +1029,9 @@ namespace HpskSite.Controllers
                     artalsmarke = r.Artalsmarke,
                     pending = r.Pending,
                     thisYearStatus = r.ThisYearStatus,
-                    thisYearFulfilled = r.ThisYearFulfilled
+                    thisYearFulfilled = r.ThisYearFulfilled,
+                    qualifyingSeries = r.QualifyingSeries,
+                    speedSeries = r.SpeedSeries
                 });
 
             return Json(new { success = true, year = y, members });
@@ -900,12 +1050,25 @@ namespace HpskSite.Controllers
 
             int y = year ?? DateTime.Now.Year;
             var payload = await BuildMemberPayloadAsync(memberId, y, includeUnverifiedInLadder: false, isOwnView: false);
+
+            // Other badge families (Elit, Fält, Precision, Milsnabb, Nat.helmatch, Luftpistol, Mästar,
+            // Stormästar) so functionaries see the member's full standing, not just Pistolskyttemärket.
+            // Recompute first (mirrors the member's own view) so auto-awarded families are current.
+            await RecomputeCompetitionFamiliesAsync(memberId);
+            await RecomputeSeriesProofFamiliesAsync(memberId);
+            var families = await BuildFamilySummariesAsync(memberId, y);
+            var mastar = await MastarSummaryAsync(memberId);
+            var stormastar = await StormastarSummaryAsync(memberId);
+
             // Add the acting user's sign-off capability so the UI can show/hide the buttons.
             return Json(new
             {
                 success = true,
                 canSignOff = await CanSignOffForMemberAsync(memberId),
-                detail = payload
+                detail = payload,
+                families,
+                mastar,
+                stormastar
             });
         }
 
@@ -974,7 +1137,8 @@ namespace HpskSite.Controllers
             return Json(new { success = true, message = $"{Marken.FamilyDisplayName(Family)} i {level} tilldelat." });
         }
 
-        /// <summary>Set/replace the national registration number on a member's Guld badge.</summary>
+        /// <summary>Set/replace the national registration number AND/OR the achieved year on a member's
+        /// Guld badge. The year matters for the Elitmärke timing gate (proofs count from the year after).</summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> SetBadgeUniqueNumber([FromBody] UniqueNumberRequest request)
@@ -984,8 +1148,12 @@ namespace HpskSite.Controllers
             if (!await CanSignOffForMemberAsync(badge.MemberId))
                 return Json(new { success = false, message = "Åtkomst nekad." });
 
-            var (ok, msg) = await _ledger.SetUniqueNumberAsync(badge.Id, request?.UniqueNumber);
-            return Json(new { success = ok, message = ok ? "Registreringsnummer sparat." : msg });
+            if (badge.Level == Marken.LevelGuld)
+                badge.UniqueNumber = string.IsNullOrWhiteSpace(request?.UniqueNumber) ? null : request!.UniqueNumber!.Trim();
+            if (request?.Year is > 0)
+                badge.AchievedYear = request.Year!.Value;
+            await _ledger.UpdateBadgeAsync(badge);
+            return Json(new { success = true, message = "Sparat." });
         }
 
         [HttpPost]
@@ -998,6 +1166,30 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Åtkomst nekad." });
             var (ok, msg) = await _ledger.DeleteBadgeAsync(badge.Id);
             return Json(new { success = ok, message = ok ? "Borttaget." : msg });
+        }
+
+        /// <summary>
+        /// Remove ALL of a member's badges + årtalsmärke qualifications for one family — for clearing
+        /// an erroneously/leniently auto-awarded family märke (e.g. Elit). Note: derived families
+        /// (competition / series-proof) re-materialize on next read if the underlying evidence still
+        /// qualifies, so the lasting fix is to remove the underlying series/results first.
+        /// POST /umbraco/surface/Marken/DeleteFamilyBadges { memberId, family }
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeleteFamilyBadges([FromBody] FamilyMemberRequest request)
+        {
+            if (request == null || request.MemberId <= 0 || string.IsNullOrWhiteSpace(request.Family))
+                return Json(new { success = false, message = "Ogiltig begäran." });
+            if (!await CanSignOffForMemberAsync(request.MemberId))
+                return Json(new { success = false, message = "Åtkomst nekad." });
+
+            foreach (var b in await _ledger.GetBadgesForMemberAsync(request.MemberId, request.Family, includeRejected: true))
+                await _ledger.DeleteBadgeAsync(b.Id);
+            foreach (var q in await _ledger.GetQualificationsForMemberAsync(request.MemberId, request.Family))
+                await _ledger.DeleteQualificationAsync(q.Id);
+
+            return Json(new { success = true, message = "Märket borttaget." });
         }
 
         // ── Member profile surface (member admin edit form) ───────────
@@ -1108,40 +1300,73 @@ namespace HpskSite.Controllers
             int y = year ?? DateTime.Now.Year;
             var activeIds = await _ledger.GetAllActiveMemberIdsAsync();
 
-            var sb = new System.Text.StringBuilder();
-            sb.AppendLine("Medlem;Personnr-födelseår;Högsta valör;Guldnummer;Godkända guldfodringar;Årtalsmärke;Guldfodring " + y);
+            string FamilyLabel(string fam) => fam switch
+            {
+                Marken.FamilyPistolskytte => "Pistolskyttemärket",
+                Marken.FamilyMastar => "Mästarmärket",
+                Marken.FamilyStormastar => "Stormästarmärket",
+                _ => MarkenFamilies.DisplayName(fam)
+            };
 
-            var lines = new List<(string Name, string Row)>();
+            var sb = new System.Text.StringBuilder();
+            // Year achievements across ALL families — what the club reports to SPSF for the year:
+            // new badges (grundmärken + family valörer earned this year) and fulfilled Guldfodringar.
+            sb.AppendLine($"Medlem;Födelseår;Familj;Märke i år;Guldnummer;Guldfodring {y} uppfylld;Årtalsmärke");
+
+            // One sortable row per (member, family) achievement.
+            var lines = new List<(string Name, string Fam, string Row)>();
             foreach (var mid in activeIds)
             {
                 var member = _memberService.GetById(mid);
                 if (member == null) continue;
                 if (!int.TryParse(member.GetValue("primaryClubId")?.ToString(), out var pc) || pc != clubId) continue;
 
-                var badges = await _ledger.GetBadgesForMemberAsync(mid, Family);
-                var top = badges.Where(b => b.LevelOrdinal is >= 1 and <= 3).OrderByDescending(b => b.LevelOrdinal).FirstOrDefault();
-                var guld = badges.FirstOrDefault(b => b.Level == Marken.LevelGuld);
-                var ladder = await _ledger.GetArtalsmarkeStatusAsync(mid, Family, includeUnverified: false);
-                var thisYearQ = await _ledger.GetQualificationForYearAsync(mid, Family, y);
                 int birthYear = _candidates.GetBirthYear(mid, y);
-
                 var name = member.Name ?? $"Medlem {mid}";
-                lines.Add((name, string.Join(";", new[]
+                var allBadges = await _ledger.GetBadgesForMemberAsync(mid, null);
+
+                void AddRow(string famKey, string marke, string guldNr, bool guldfodring, string artalsmarke)
                 {
-                    Csv(name),
-                    birthYear > 0 ? birthYear.ToString() : "",
-                    Csv(top?.Level ?? ""),
-                    Csv(guld?.UniqueNumber ?? ""),
-                    ladder.FulfilledYears.ToString(),
-                    Csv(ladder.CurrentName),
-                    Csv(thisYearQ == null ? "" : Marken.StatusDisplay(thisYearQ.Status))
-                })));
+                    lines.Add((name, FamilyLabel(famKey), string.Join(";", new[]
+                    {
+                        Csv(name),
+                        birthYear > 0 ? birthYear.ToString() : "",
+                        Csv(FamilyLabel(famKey)),
+                        Csv(marke),
+                        Csv(guldNr),
+                        guldfodring ? "Ja" : "",
+                        Csv(artalsmarke)
+                    })));
+                }
+
+                // Pistolskyttemärket — new grundmärke this year and/or a fulfilled Guldfodring.
+                var pNew = allBadges.Where(b => b.BadgeFamily == Family && b.AchievedYear == y && b.LevelOrdinal is >= 1 and <= 3)
+                    .OrderByDescending(b => b.LevelOrdinal).FirstOrDefault();
+                var thisYearQ = await _ledger.GetQualificationForYearAsync(mid, Family, y);
+                bool guldfodringMet = thisYearQ?.Fulfilled ?? false;
+                if (pNew != null || guldfodringMet)
+                {
+                    var guld = allBadges.FirstOrDefault(b => b.BadgeFamily == Family && b.Level == Marken.LevelGuld);
+                    var pLadder = await _ledger.GetArtalsmarkeStatusAsync(mid, Family, includeUnverified: false);
+                    AddRow(Family, pNew?.Level ?? "", pNew?.Level == Marken.LevelGuld ? (guld?.UniqueNumber ?? "") : "", guldfodringMet, pLadder.CurrentName);
+                }
+
+                // Every other family with a badge earned this year (Elit, Fält, Precision, Milsnabb,
+                // Nat.helmatch, Luftpistol, Mästar).
+                foreach (var fg in allBadges.Where(b => b.BadgeFamily != Family && b.AchievedYear == y && b.LevelOrdinal is >= 1 and <= 3)
+                                            .GroupBy(b => b.BadgeFamily))
+                {
+                    var topThisYear = fg.OrderByDescending(x => x.LevelOrdinal).First();
+                    var fLadder = await _ledger.GetArtalsmarkeStatusAsync(mid, fg.Key, includeUnverified: false);
+                    AddRow(fg.Key, topThisYear.Level, "", false, fLadder.CurrentName);
+                }
             }
 
-            foreach (var (_, row) in lines.OrderBy(l => l.Name, StringComparer.Create(new System.Globalization.CultureInfo("sv-SE"), false)))
+            var sv = StringComparer.Create(new System.Globalization.CultureInfo("sv-SE"), false);
+            foreach (var (_, _, row) in lines.OrderBy(l => l.Name, sv).ThenBy(l => l.Fam, sv))
                 sb.AppendLine(row);
 
-            return CsvFile(sb.ToString(), $"marken-pistolskytte-{clubId}-{y}.csv");
+            return CsvFile(sb.ToString(), $"marken-arsrapport-{clubId}-{y}.csv");
         }
 
         /// <summary>
@@ -1288,7 +1513,7 @@ namespace HpskSite.Controllers
 
                 if (!string.IsNullOrEmpty(a.EarnedLevel))
                 {
-                    int earnedYear = a.GuldMetYears.Count > 0 ? a.GuldMetYears[0] : DateTime.Now.Year;
+                    int earnedYear = a.EarnedYear > 0 ? a.EarnedYear : DateTime.Now.Year;
                     await _ledger.EnsureBadgeAsync(memberId, fam.Key, a.EarnedLevel!, earnedYear, Marken.SourceAuto);
                 }
                 // Årtalsmärke years = guld-met years after the first (the first earns the guld märke).
@@ -1302,7 +1527,7 @@ namespace HpskSite.Controllers
         /// series at that level (Elit also needs ≥ required snabb series). Returns the highest valör
         /// across years + the guld-met years + this-year counts.
         /// </summary>
-        private async Task<(string? Earned, List<int> GuldYears, List<MarkenSeries> ThisYear)>
+        private async Task<(string? Earned, int EarnedYear, List<int> GuldYears, List<MarkenSeries> ThisYear)>
             AnalyzeSeriesProofAsync(int memberId, MarkenFamilyDef def, int displayYear)
         {
             // Read by DISCIPLINE, not family: Elit's precision series come from the Guldserie button
@@ -1317,6 +1542,16 @@ namespace HpskSite.Controllers
                         return d == Marken.DisciplinePrecision || d == Marken.DisciplineSnabbpistol;
                     })
                     .ToList();
+
+                // SHB 5.4.2: "Prov för elitmärke får avläggas första gången året efter det guldmärket
+                // erövrats." Elit requires a held Pistolskyttemärket Guld, and only series from the year
+                // AFTER that grundmärke's year count.
+                var guld = (await _ledger.GetBadgesForMemberAsync(memberId, Marken.FamilyPistolskytte))
+                    .FirstOrDefault(b => b.Level == Marken.LevelGuld);
+                if (guld == null)
+                    return (null, 0, new List<int>(), new List<MarkenSeries>());
+                int firstEligibleYear = guld.AchievedYear + 1;
+                series = series.Where(s => s.Year >= firstEligibleYear).ToList();
             }
             else
             {
@@ -1324,16 +1559,11 @@ namespace HpskSite.Controllers
                 series = await _ledger.GetVerifiedSeriesByFamilyAsync(memberId, def.Key);
             }
 
-            string? earned = null;
-            var guldYears = new List<int>();
-            foreach (var yg in series.GroupBy(s => s.Year))
-            {
-                var lvl = SeriesProofLevel(def, yg.ToList());
-                if (Marken.LevelOrdinal(lvl) > Marken.LevelOrdinal(earned)) earned = lvl;
-                if (lvl == Marken.LevelGuld) guldYears.Add(yg.Key);
-            }
-            guldYears.Sort();
-            return (earned, guldYears, series.Where(s => s.Year == displayYear).ToList());
+            // SHB progression: one valör/year, sequential (Brons→Silver→Guld).
+            var perYear = series.GroupBy(s => s.Year)
+                .Select(g => (g.Key, Marken.LevelOrdinal(SeriesProofLevel(def, g.ToList()))));
+            var (held, heldYear, guldYears) = Marken.ApplyValorProgression(perYear);
+            return (Marken.LevelFromOrdinal(held), heldYear, guldYears, series.Where(s => s.Year == displayYear).ToList());
         }
 
         /// <summary>Count of series qualifying for a level (Elit = min of precision + snabb counts).</summary>
@@ -1398,13 +1628,13 @@ namespace HpskSite.Controllers
         {
             foreach (var fam in MarkenFamilies.SeriesProofFamilies)
             {
-                (string? earned, List<int> guldYears, List<MarkenSeries> thisYear) tuple;
+                (string? Earned, int EarnedYear, List<int> GuldYears, List<MarkenSeries> ThisYear) tuple;
                 try { tuple = await AnalyzeSeriesProofAsync(memberId, fam, DateTime.Now.Year); }
                 catch { continue; }
-                if (!string.IsNullOrEmpty(tuple.earned))
-                    await _ledger.EnsureBadgeAsync(memberId, fam.Key, tuple.earned!,
-                        tuple.guldYears.Count > 0 ? tuple.guldYears[0] : DateTime.Now.Year, Marken.SourceAuto);
-                foreach (var gy in tuple.guldYears.Skip(1))
+                if (!string.IsNullOrEmpty(tuple.Earned))
+                    await _ledger.EnsureBadgeAsync(memberId, fam.Key, tuple.Earned!,
+                        tuple.EarnedYear > 0 ? tuple.EarnedYear : DateTime.Now.Year, Marken.SourceAuto);
+                foreach (var gy in tuple.GuldYears.Skip(1))
                     await _ledger.EnsureFulfilledYearAsync(memberId, fam.Key, gy);
             }
         }
@@ -1415,6 +1645,7 @@ namespace HpskSite.Controllers
             var pistolBadges = await _ledger.GetBadgesForMemberAsync(memberId, Marken.FamilyPistolskytte);
             int pistolTop = pistolBadges.Where(b => b.LevelOrdinal is >= 1 and <= 3)
                 .Select(b => b.LevelOrdinal).DefaultIfEmpty(0).Max();
+            int pistolGuldYear = pistolBadges.FirstOrDefault(b => b.Level == Marken.LevelGuld)?.AchievedYear ?? 0;
 
             var list = new List<object>();
 
@@ -1467,27 +1698,40 @@ namespace HpskSite.Controllers
             // Series-proof families (Luftpistol / Elit) — one section each, always shown.
             foreach (var fam in MarkenFamilies.SeriesProofFamilies)
             {
-                (string? earned, List<int> guldYears, List<MarkenSeries> thisYear) sp;
+                (string? Earned, int EarnedYear, List<int> GuldYears, List<MarkenSeries> ThisYear) sp;
                 try { sp = await AnalyzeSeriesProofAsync(memberId, fam, year); }
-                catch { sp = (null, new List<int>(), new List<MarkenSeries>()); }
+                catch { sp = (null, 0, new List<int>(), new List<MarkenSeries>()); }
 
                 var badges = await _ledger.GetBadgesForMemberAsync(memberId, fam.Key);
                 var top = badges.Where(b => b.LevelOrdinal is >= 1 and <= 3).OrderByDescending(b => b.LevelOrdinal).FirstOrDefault();
                 var ladder = await _ledger.GetArtalsmarkeStatusAsync(memberId, fam.Key, includeUnverified: false);
-                var earned = top?.Level ?? sp.earned;
+                var earned = top?.Level ?? sp.Earned;
                 bool prereqOk = fam.PrereqPistolskytteLevel == null || pistolTop >= Marken.LevelOrdinal(fam.PrereqPistolskytteLevel);
+
+                // Elit timing gate (SHB 5.4.2): proofs may first be done the year after the Guldmärke.
+                string? prereqNote = prereqOk ? null : fam.PrereqText;
+                if (fam.Key == MarkenFamilies.Elit && prereqOk && pistolGuldYear > 0 && year <= pistolGuldYear)
+                    prereqNote = $"Elitprov får avläggas först {pistolGuldYear + 1} (året efter att guldmärket erövrades {pistolGuldYear}).";
 
                 var next = NextLevel(earned);
                 string status;
                 if (next == null)
                     status = ladder.FulfilledYears > 0 ? $"Guldmärket uppnått · {ladder.CurrentName}" : "Guldmärket uppnått.";
+                else if (fam.RequiresSpeedSeriesToo && fam.SeriesThreshold != null)
+                {
+                    // Elit: show both halves so it's clear precision series are counting even when the
+                    // snabb half is still empty (the badge needs the lesser of the two to reach the target).
+                    int thr = fam.SeriesThreshold[Marken.LevelOrdinal(next) - 1];
+                    int prec = sp.ThisYear.Count(s => s.SeriesType == Marken.SeriesTypePrecision && s.Total >= thr);
+                    int speed = sp.ThisYear.Count(s => s.SeriesType == Marken.SeriesTypeSpeed && s.Total >= thr);
+                    status = $"För {next.ToLowerInvariant()} (≥{thr} p/serie): precision {prec}/{fam.SeriesRequired} · snabb {speed}/{fam.SeriesRequired} (snabbpistoltavla), i år.";
+                }
                 else
                 {
-                    int atNext = SeriesProofCount(fam, sp.thisYear, next);
+                    int atNext = SeriesProofCount(fam, sp.ThisYear, next);
                     int needMore = Math.Max(0, fam.SeriesRequired - atNext);
                     status = $"För {next.ToLowerInvariant()}: {atNext}/{fam.SeriesRequired} serier på nivå i år"
-                           + (needMore > 0 ? $" (saknar {needMore})" : "")
-                           + (fam.RequiresSpeedSeriesToo ? " — av både precisions- och snabbserier." : ".");
+                           + (needMore > 0 ? $" (saknar {needMore})" : "") + ".";
                 }
 
                 list.Add(new
@@ -1503,7 +1747,7 @@ namespace HpskSite.Controllers
                     seriesRequired = fam.SeriesRequired,
                     requiresSpeedSeriesToo = fam.RequiresSpeedSeriesToo,
                     artalsmarke = new { current = ladder.CurrentName, fulfilledYears = ladder.FulfilledYears, next = ladder.NextName, nextAtYears = ladder.NextAtYears },
-                    prereqText = prereqOk ? null : fam.PrereqText
+                    prereqText = prereqNote
                 });
             }
             return list;
@@ -2064,8 +2308,9 @@ namespace HpskSite.Controllers
         public class YearRequest { public int Year { get; set; } }
         public class IdRequest { public int Id { get; set; } }
         public class AwardBadgeRequest { public int MemberId { get; set; } public string Level { get; set; } = ""; public int Year { get; set; } public string? UniqueNumber { get; set; } public string? Note { get; set; } }
-        public class UniqueNumberRequest { public int BadgeId { get; set; } public string? UniqueNumber { get; set; } }
+        public class UniqueNumberRequest { public int BadgeId { get; set; } public string? UniqueNumber { get; set; } public int? Year { get; set; } }
         public class SetMemberPistolskytteRequest { public int MemberId { get; set; } public string Level { get; set; } = ""; public string? GuldNumber { get; set; } }
+        public class FamilyMemberRequest { public int MemberId { get; set; } public string Family { get; set; } = ""; }
 
         private class MarkenSummaryRow
         {
@@ -2078,6 +2323,8 @@ namespace HpskSite.Controllers
             public int Pending { get; set; }
             public string ThisYearStatus { get; set; } = "";
             public bool ThisYearFulfilled { get; set; }
+            public int QualifyingSeries { get; set; }   // verified qualifying Guld precision series this year (Part 1)
+            public int SpeedSeries { get; set; }        // verified Guld snabbserier this year (Part 2)
         }
     }
 }

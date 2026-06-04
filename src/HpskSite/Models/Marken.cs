@@ -37,6 +37,52 @@ namespace HpskSite.Models
             _ => 0
         };
 
+        /// <summary>Base valör name for an ordinal (1..3), or null.</summary>
+        public static string? LevelFromOrdinal(int ord) => ord switch
+        {
+            1 => LevelBrons,
+            2 => LevelSilver,
+            3 => LevelGuld,
+            _ => null
+        };
+
+        /// <summary>
+        /// SHB progression rule (5.4.2 and the equivalent clause in the other märke families):
+        /// "Endast ett märke kan under året erövras … och märke av högre grad endast av den som
+        /// förut innehar märke av närmast lägre grad." At most one valör per year, and a higher
+        /// grade only once the next-lower is held.
+        ///
+        /// Input: each year's highest qualified valör ordinal (0=none, 1=Brons, 2=Silver, 3=Guld).
+        /// Walks years chronologically, stepping up exactly one grade in any year that qualifies for
+        /// the next grade. Returns the held ordinal, the year that level was reached, and the Guld
+        /// fulfilment years that feed the årtalsmärke ladder (the year Guld is first reached, then
+        /// each later year Guld requirements were re-met).
+        /// </summary>
+        public static (int HeldOrdinal, int HeldYear, List<int> GuldYears) ApplyValorProgression(
+            IEnumerable<(int Year, int QualifiedOrdinal)> perYear)
+        {
+            int held = 0, heldYear = 0;
+            var guldYears = new List<int>();
+            foreach (var (year, ord) in perYear.OrderBy(p => p.Year))
+            {
+                if (held >= 3)
+                {
+                    if (ord >= 3) guldYears.Add(year); // re-met Guld → årtalsmärke ("ånyo")
+                }
+                else
+                {
+                    int next = held + 1;
+                    if (ord >= next)
+                    {
+                        held = next;
+                        heldYear = year;
+                        if (held == 3) guldYears.Add(year); // year Guld first reached
+                    }
+                }
+            }
+            return (held, heldYear, guldYears);
+        }
+
         // ── Sources ──
         public const string SourceSelfReported = "SelfReported";
         public const string SourceOnSite = "OnSite";

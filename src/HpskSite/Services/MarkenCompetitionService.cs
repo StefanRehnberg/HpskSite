@@ -24,7 +24,8 @@ namespace HpskSite.Services
     public class CompFamilyAnalysis
     {
         public string Family { get; set; } = "";
-        public string? EarnedLevel { get; set; }       // highest valör supported across all years
+        public string? EarnedLevel { get; set; }       // valör held per SHB progression (one/year, sequential)
+        public int EarnedYear { get; set; }             // year the held valör was reached (0 if none)
         public List<int> GuldMetYears { get; set; } = new();
         public List<MarkenCompEvidence> ThisYear { get; set; } = new();
         public string? ThisYearLevel { get; set; }     // valör supported by this year's results
@@ -153,16 +154,13 @@ namespace HpskSite.Services
                 });
             }
 
-            // Per-year supported valör + guld-met set.
-            string? highest = null;
-            foreach (var yearGroup in evidence.GroupBy(e => e.Year))
-            {
-                var lvl = SupportedLevel(yearGroup.ToList(), def.CompetitionsRequired);
-                if (Marken.LevelOrdinal(lvl) > Marken.LevelOrdinal(highest)) highest = lvl;
-                if (lvl == Marken.LevelGuld) result.GuldMetYears.Add(yearGroup.Key);
-            }
-            result.GuldMetYears.Sort();
-            result.EarnedLevel = highest;
+            // Per-year supported valör, then SHB progression (one valör/year, sequential).
+            var perYear = evidence.GroupBy(e => e.Year)
+                .Select(g => (g.Key, Marken.LevelOrdinal(SupportedLevel(g.ToList(), def.CompetitionsRequired))));
+            var (held, heldYear, guldYears) = Marken.ApplyValorProgression(perYear);
+            result.EarnedLevel = Marken.LevelFromOrdinal(held);
+            result.EarnedYear = heldYear;
+            result.GuldMetYears = guldYears;
 
             result.ThisYear = evidence.Where(e => e.Year == displayYear)
                 .OrderByDescending(e => Marken.LevelOrdinal(e.ReachedLevel)).ThenByDescending(e => e.Total).ToList();

@@ -494,6 +494,37 @@
                 </div>
             </div>
 
+            @* Backlog entry — bulk-register historical series from a paper ledger (functionaries only). *@
+            <div id="markenBacklogCard" class="card mb-3 border-secondary" style="display:none;">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-1">
+                        <h6 class="card-title mb-0"><i class="bi bi-journal-plus text-secondary me-1"></i>Historiska serier från klubbliggare</h6>
+                        <button class="btn btn-sm btn-outline-secondary" type="button" id="markenBacklogToggleBtn" onclick="toggleMarkenBacklog()">Lägg till serier</button>
+                    </div>
+                    <div id="markenBacklogBody" style="display:none;">
+                        <p class="text-muted small mb-2">Registrera tidigare skjutna guldserier/snabbserier (t.ex. från en pappersliggare). Varje rad valideras direkt och räknas mot guldfodringen. Poäng under guldkravet sparas men markeras som ej kvalificerande.</p>
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle mb-2">
+                                <thead><tr>
+                                    <th style="min-width:150px;">Medlem</th>
+                                    <th>Typ</th>
+                                    <th>Datum</th>
+                                    <th>Vapengrupp</th>
+                                    <th>Poäng / mål</th>
+                                    <th></th>
+                                </tr></thead>
+                                <tbody id="markenBacklogRows"></tbody>
+                            </table>
+                        </div>
+                        <div class="d-flex gap-2 flex-wrap">
+                            <button class="btn btn-sm btn-outline-primary" type="button" onclick="addMarkenBacklogRow()"><i class="bi bi-plus-lg me-1"></i>Lägg till rad</button>
+                            <button class="btn btn-sm btn-success" type="button" onclick="saveMarkenBacklog()"><i class="bi bi-save me-1"></i>Spara alla</button>
+                        </div>
+                        <div id="markenBacklogResult" class="small mt-2"></div>
+                    </div>
+                </div>
+            </div>
+
             <div id="clubMarkenContent">
                 <div class="text-center py-4">
                     <div class="spinner-border text-primary" role="status"><span class="visually-hidden">Laddar...</span></div>
@@ -1572,6 +1603,8 @@ function renderClubMarken(members) {
         let statusCell;
         if (m.pending > 0) statusCell = `<span class="badge bg-warning text-dark" title="Väntar på signering">${m.pending} att signera</span>`;
         else if (m.thisYearFulfilled) statusCell = '<span class="badge bg-success-subtle text-success">Signerad</span>';
+        else if ((m.qualifyingSeries || 0) > 0 || (m.speedSeries || 0) > 0)
+            statusCell = `<span class="badge bg-info-subtle text-info" title="Framsteg mot årets guldfodring (godkända serier)">${m.qualifyingSeries || 0}/3 guldserier · ${m.speedSeries || 0}/3 snabb</span>`;
         else statusCell = '<span class="text-muted small">–</span>';
         const top = m.topLevel ? `<span class="badge bg-warning text-dark">${escapeMedalHtml(m.topLevel)}</span>` : '<span class="text-muted small">–</span>';
         html += `<tr>
@@ -1627,8 +1660,10 @@ function renderMemberMarkenDetail(data) {
             const src = held.source === 'Skyttetrappan' ? ' <span class="badge bg-info-subtle text-info border border-info-subtle">Skyttetrappan</span>' : '';
             if (level === 'Guld') {
                 const num = held.uniqueNumber ? escapeMedalAttr(held.uniqueNumber) : '';
-                right = `<span class="text-success me-2"><i class="bi bi-check-circle-fill"></i> Tilldelat${yr}${src}</span>
+                right = `<span class="text-success me-2"><i class="bi bi-check-circle-fill"></i> Tilldelat${src}</span>
                     <span class="input-group input-group-sm" style="width:auto;display:inline-flex;vertical-align:middle;">
+                      <span class="input-group-text">År</span>
+                      <input type="number" class="form-control" id="guldYear_${held.id}" value="${held.achievedYear || ''}" style="width:88px;" placeholder="ÅÅÅÅ" title="Året guldmärket erövrades — styr när elitprov får börja räknas">
                       <span class="input-group-text">Nr</span>
                       <input type="text" class="form-control" id="guldNr_${held.id}" value="${num}" style="width:120px;" placeholder="registreringsnr">
                       <button class="btn btn-outline-secondary" onclick="setMarkenGuldNumber(${held.id}, ${memberId}, '${escapeMedalAttr(name)}')">Spara</button>
@@ -1691,10 +1726,43 @@ function renderMemberMarkenDetail(data) {
         </div></div>
         <p class="text-muted small">Precisionsdelen byggs av validerade guldserier och resultat från hemmatävlingar. Serier valideras i kön högst upp på fliken (eller via QR).</p>
 
+        ${renderMarkenFamiliesBlock(data.families, data.stormastar, canSign, memberId, name)}
+
         <h6 class="text-muted">Mästarmärket</h6>
         <div id="memberMastarBlock" class="mb-2"><div class="text-muted small">Laddar…</div></div>`;
 
     loadMemberMastar(memberId);
+}
+
+// Other badge families (Elit, Fält, Precision, Milsnabb, Nat.helmatch, Luftpistol) + Stormästar,
+// shown read-only in the secretary detail so functionaries see the member's full standing.
+function renderMarkenFamiliesBlock(families, stormastar, canSign, memberId, name) {
+    families = families || [];
+    const rows = families.map(f => {
+        const earned = f.earnedLevel
+            ? `<span class="badge bg-warning text-dark">${escapeMedalHtml(f.earnedLevel)}</span>`
+            : '<span class="text-muted small">–</span>';
+        const art = (f.artalsmarke && f.artalsmarke.fulfilledYears > 0)
+            ? ` <span class="text-muted small">· ${escapeMedalHtml(f.artalsmarke.current)}</span>` : '';
+        const prereq = f.prereqText ? `<div class="small text-warning">${escapeMedalHtml(f.prereqText)}</div>` : '';
+        const del = (canSign && f.earnedLevel)
+            ? `<button class="btn btn-sm btn-outline-danger ms-2" title="Ta bort märket" onclick="deleteMarkenFamily(${memberId}, '${escapeMedalAttr(f.family)}', '${escapeMedalAttr(name)}', '${escapeMedalAttr(f.displayName)}')"><i class="bi bi-trash"></i></button>`
+            : '';
+        return `<li class="list-group-item px-0 d-flex justify-content-between align-items-start gap-2">
+            <span><strong>${escapeMedalHtml(f.displayName)}</strong> ${earned}${art}
+            <div class="small text-muted">${escapeMedalHtml(f.statusText || '')}</div>${prereq}</span>${del}</li>`;
+    }).join('');
+    let storm = '';
+    if (stormastar) {
+        const eligible = stormastar.eligible ? ' <span class="badge bg-success">Behörig</span>' : '';
+        const pend = stormastar.pendingPoints ? ` (+${stormastar.pendingPoints} väntar)` : '';
+        storm = `<li class="list-group-item px-0">
+            <span><strong>${escapeMedalHtml(stormastar.displayName)}</strong>${eligible}</span>
+            <div class="small text-muted">${stormastar.verifiedPoints || 0}/${stormastar.eligibleAt || 30} inteckningspoäng${pend}</div></li>`;
+    }
+    if (!rows && !storm) return '';
+    return `<h6 class="text-muted">Andra märken</h6>
+        <ul class="list-group list-group-flush mb-3">${rows}${storm}</ul>`;
 }
 
 // Mästarmärket detail in the secretary per-member panel — auto-qualifying years (silver fält +
@@ -1754,6 +1822,9 @@ function loadClubMarkenQueue() {
     fetch(`/umbraco/surface/Marken/GetClubPendingSeries?clubId=${clubId}`)
         .then(r => r.json())
         .then(d => {
+            // Backlog entry card is for functionaries (sign-off authority), shown regardless of queue size.
+            const backlog = document.getElementById('markenBacklogCard');
+            if (backlog) backlog.style.display = (d.success && d.canValidate) ? 'block' : 'none';
             const list = (d.items || []);
             if (!d.success || list.length === 0) { card.style.display = 'none'; return; }
             card.style.display = 'block';
@@ -1761,6 +1832,137 @@ function loadClubMarkenQueue() {
             content.innerHTML = list.map(s => renderClubQueueItem(s, d.canValidate)).join('');
         })
         .catch(() => { card.style.display = 'none'; });
+}
+
+// ── Backlog entry: bulk-register historical series from a paper ledger ──
+let markenBacklogMembers = null;
+let markenBacklogIdx = 0;
+
+function ensureMarkenBacklogMembers() {
+    if (markenBacklogMembers) return Promise.resolve(markenBacklogMembers);
+    return fetch(`/umbraco/surface/ClubAdmin/GetClubMembers?clubId=${clubId}`)
+        .then(r => r.json())
+        .then(d => {
+            const items = Array.isArray(d.data) ? d.data : (d.data && d.data.items) || [];
+            markenBacklogMembers = items
+                .map(m => ({ id: m.id, name: ((m.firstName || '') + ' ' + (m.lastName || '')).trim() || m.email || ('Medlem ' + m.id) }))
+                .sort((a, b) => a.name.localeCompare(b.name, 'sv'));
+            return markenBacklogMembers;
+        })
+        .catch(() => { markenBacklogMembers = []; return markenBacklogMembers; });
+}
+
+function markenBacklogMemberOptions(selectedId) {
+    let opts = '<option value="">— välj medlem —</option>';
+    (markenBacklogMembers || []).forEach(m => {
+        opts += `<option value="${m.id}"${m.id == selectedId ? ' selected' : ''}>${escapeMedalHtml(m.name)}</option>`;
+    });
+    return opts;
+}
+
+function toggleMarkenBacklog() {
+    const body = document.getElementById('markenBacklogBody');
+    const open = body.style.display === 'none';
+    body.style.display = open ? '' : 'none';
+    document.getElementById('markenBacklogToggleBtn').textContent = open ? 'Dölj' : 'Lägg till serier';
+    if (open) {
+        ensureMarkenBacklogMembers().then(() => {
+            if (!document.querySelectorAll('#markenBacklogRows tr').length) addMarkenBacklogRow();
+        });
+    }
+}
+
+function addMarkenBacklogRow() {
+    const idx = ++markenBacklogIdx;
+    const prev = document.querySelector('#markenBacklogRows tr:last-child .mb-member');
+    const prevMember = prev ? prev.value : '';
+    const tr = document.createElement('tr');
+    tr.dataset.idx = idx;
+    tr.innerHTML = `
+        <td><select class="form-select form-select-sm mb-member">${markenBacklogMemberOptions(prevMember)}</select></td>
+        <td><select class="form-select form-select-sm mb-type" style="width:auto;" onchange="markenBacklogRenderDetail(${idx})">
+                <option value="Precision">Guldserie</option>
+                <option value="Speed">Snabbserie</option>
+            </select></td>
+        <td><input type="text" class="form-control form-control-sm mb-date" placeholder="ÅÅÅÅ-MM-DD" style="width:120px;"></td>
+        <td class="mb-wg"></td>
+        <td class="mb-detail"></td>
+        <td class="text-end"><button class="btn btn-sm btn-outline-danger" type="button" onclick="this.closest('tr').remove()" title="Ta bort rad"><i class="bi bi-trash"></i></button></td>`;
+    document.getElementById('markenBacklogRows').appendChild(tr);
+    markenBacklogRenderDetail(idx);
+    if (window.flatpickr) flatpickr(tr.querySelector('.mb-date'), { locale: 'sv', dateFormat: 'Y-m-d', maxDate: 'today', allowInput: true });
+}
+
+function markenBacklogRenderDetail(idx) {
+    const tr = document.querySelector(`#markenBacklogRows tr[data-idx="${idx}"]`);
+    if (!tr) return;
+    const type = tr.querySelector('.mb-type').value;
+    tr.querySelector('.mb-wg').innerHTML =
+        `<select class="form-select form-select-sm mb-group" style="width:75px;"><option>C</option><option>A</option><option>B</option><option>R</option></select>`;
+    const detail = tr.querySelector('.mb-detail');
+    if (type === 'Speed') {
+        detail.innerHTML = `
+            <select class="form-select form-select-sm mb-target d-inline-block" style="width:auto;" onchange="markenBacklogRenderSpeed(${idx})">
+                <option value="C30_25m">Tillämpning C30 (25m)</option>
+                <option value="B100_50m">Tillämpning B100 (50m)</option>
+                <option value="Snabbpistol_25m">Snabbpistol (25m)</option>
+            </select> <span class="mb-speed-extra"></span>`;
+        markenBacklogRenderSpeed(idx);
+    } else {
+        detail.innerHTML = `<input type="number" min="0" max="50" class="form-control form-control-sm mb-total d-inline-block" style="width:90px;" placeholder="poäng"> <span class="text-muted small">/ 50</span>`;
+    }
+}
+
+function markenBacklogRenderSpeed(idx) {
+    const tr = document.querySelector(`#markenBacklogRows tr[data-idx="${idx}"]`);
+    if (!tr) return;
+    const extra = tr.querySelector('.mb-speed-extra');
+    if (tr.querySelector('.mb-target').value === 'Snabbpistol_25m') {
+        extra.innerHTML = `<input type="number" min="0" max="50" class="form-control form-control-sm mb-total d-inline-block" style="width:90px;" placeholder="poäng">`;
+    } else {
+        extra.innerHTML = `<select class="form-select form-select-sm mb-level d-inline-block" style="width:auto;"><option value="Guld">Guld</option><option value="Silver">Silver</option><option value="Brons">Brons</option></select>`;
+    }
+}
+
+function saveMarkenBacklog() {
+    const box = document.getElementById('markenBacklogResult');
+    const entries = [];
+    document.querySelectorAll('#markenBacklogRows tr').forEach(tr => {
+        const memberId = parseInt(tr.querySelector('.mb-member').value) || 0;
+        const date = tr.querySelector('.mb-date').value.trim();
+        const type = tr.querySelector('.mb-type').value;
+        const groupEl = tr.querySelector('.mb-group');
+        const entry = { memberId, seriesType: type, seriesDate: date, weaponGroup: groupEl ? groupEl.value : 'C' };
+        if (type === 'Speed') {
+            entry.target = tr.querySelector('.mb-target').value;
+            const totalEl = tr.querySelector('.mb-total');
+            const levelEl = tr.querySelector('.mb-level');
+            if (totalEl) entry.total = parseInt(totalEl.value) || 0;
+            if (levelEl) entry.claimedLevel = levelEl.value;
+        } else {
+            const totalEl = tr.querySelector('.mb-total');
+            entry.total = totalEl ? (parseInt(totalEl.value) || 0) : 0;
+        }
+        if (memberId && date) entries.push(entry);
+    });
+    if (entries.length === 0) { box.innerHTML = '<span class="text-danger">Fyll i minst medlem och datum på en rad.</span>'; return; }
+
+    box.innerHTML = '<span class="text-muted">Sparar…</span>';
+    fetch('/umbraco/surface/Marken/AddBacklogSeries', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getAntiForgeryToken() },
+        body: JSON.stringify({ clubId, entries })
+    })
+    .then(r => r.json())
+    .then(res => {
+        const warn = (res.errors && res.errors.length) ? `<div class="text-warning mt-1">${res.errors.map(escapeMedalHtml).join('<br>')}</div>` : '';
+        if (!res.success) { box.innerHTML = `<span class="text-danger">${escapeMedalHtml(res.message || 'Kunde inte spara.')}</span>${warn}`; return; }
+        box.innerHTML = `<span class="text-success">${escapeMedalHtml(res.message)}</span>${warn}`;
+        document.getElementById('markenBacklogRows').innerHTML = '';
+        addMarkenBacklogRow();
+        loadClubMarken(); // backlog may complete guldfodringar / årtalsmärken
+    })
+    .catch(() => { box.innerHTML = '<span class="text-danger">Något gick fel.</span>'; });
 }
 
 function markenEvidenceDescAdmin(s) {
@@ -1821,16 +2023,20 @@ function clubQueueAct(kind, id, approve) {
 
 function awardMarkenBadge(memberId, level, name) {
     let uniqueNumber = null;
+    let year = 0;
     if (level === 'Guld') {
         uniqueNumber = prompt('Tilldela guldmärket. Ange registreringsnummer från förbundet (kan lämnas tomt och fyllas i senare):', '');
         if (uniqueNumber === null) return;
+        const yStr = prompt('Årtal då guldmärket erövrades (styr när elitprov får börja räknas — året efter):', new Date().getFullYear());
+        if (yStr === null) return;
+        year = parseInt(yStr) || new Date().getFullYear();
     } else if (!confirm(`Tilldela ${level.toLowerCase()}märket till ${name}?`)) {
         return;
     }
     fetch('/umbraco/surface/Marken/AwardBadge', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getAntiForgeryToken() },
-        body: JSON.stringify({ memberId, level, year: 0, uniqueNumber })
+        body: JSON.stringify({ memberId, level, year, uniqueNumber })
     })
     .then(r => r.json())
     .then(res => {
@@ -1841,13 +2047,31 @@ function awardMarkenBadge(memberId, level, name) {
     .catch(() => alert('Kunde inte tilldela märket.'));
 }
 
+function deleteMarkenFamily(memberId, family, name, displayName) {
+    if (!confirm(`Ta bort ${displayName} för ${name}?\n\nTas bort helt. Obs: om underlaget (serier/tävlingsresultat) finns kvar och uppfyller kraven kan märket återskapas automatiskt — ta bort underlaget först för en bestående borttagning.`)) return;
+    fetch('/umbraco/surface/Marken/DeleteFamilyBadges', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getAntiForgeryToken() },
+        body: JSON.stringify({ memberId, family })
+    })
+    .then(r => r.json())
+    .then(res => {
+        if (!res.success) { alert('Fel: ' + (res.message || 'Kunde inte ta bort.')); return; }
+        openMemberMarkenDetail(memberId, name);
+        loadClubMarken();
+    })
+    .catch(() => alert('Kunde inte ta bort märket.'));
+}
+
 function setMarkenGuldNumber(badgeId, memberId, name) {
     const input = document.getElementById('guldNr_' + badgeId);
     const uniqueNumber = input ? input.value.trim() : '';
+    const yearEl = document.getElementById('guldYear_' + badgeId);
+    const year = yearEl ? (parseInt(yearEl.value) || null) : null;
     fetch('/umbraco/surface/Marken/SetBadgeUniqueNumber', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getAntiForgeryToken() },
-        body: JSON.stringify({ badgeId, uniqueNumber })
+        body: JSON.stringify({ badgeId, uniqueNumber, year })
     })
     .then(r => r.json())
     .then(res => {
