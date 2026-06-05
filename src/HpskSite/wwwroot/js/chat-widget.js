@@ -36,6 +36,9 @@
             </div>
             <div class="chat-messages"></div>
             <div class="chat-error" style="display:none"></div>
+            <div class="chat-disclaimer" style="padding:4px 12px;font-size:.72rem;opacity:.6;">
+                Skriv inte personuppgifter här.
+            </div>
             <div class="chat-input-area">
                 <textarea rows="1" placeholder="Ställ en fråga..." maxlength="2000"></textarea>
                 <button type="button">Skicka</button>

@@ -42,6 +42,10 @@ namespace HpskSite.Composers
             // Register BoardRoleService as scoped
             builder.Services.AddScoped<BoardRoleService>();
 
+            // Tracks each club's electronic acceptance of the Personuppgiftsbiträdesavtal (DPA).
+            // Backed by the ClubDpaAcceptance table — run create-club-dpa-acceptance-table.sql.
+            builder.Services.AddScoped<DpaAcceptanceService>();
+
             // Register ClubComparisonService as scoped (snapshot is cached via IMemoryCache)
             builder.Services.AddScoped<ClubComparisonService>();
 

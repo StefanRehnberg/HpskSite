@@ -14,6 +14,9 @@
         <strong>Klubbadministration</strong> - Du kan hantera klubbhändelser, tävlingar och inställningar här.
     </div>
 
+    <!-- Personuppgiftsbiträdesavtal (DPA) acceptance gate — populated by loadDpaGate() -->
+    <div id="dpaGate" class="mb-4" style="display:none;"></div>
+
     <!-- Admin Tabs -->
     <ul class="nav nav-tabs mb-3" id="adminTabs" role="tablist">
         <li class="nav-item" role="presentation">
@@ -1668,6 +1671,14 @@ function renderMemberMarkenDetail(data) {
                       <input type="text" class="form-control" id="guldNr_${held.id}" value="${num}" style="width:120px;" placeholder="registreringsnr">
                       <button class="btn btn-outline-secondary" onclick="setMarkenGuldNumber(${held.id}, ${memberId}, '${escapeMedalAttr(name)}')">Spara</button>
                     </span>`;
+            } else if (canSign) {
+                // Brons/Silver: editable achieved-year so a functionary can record when it was taken.
+                right = `<span class="text-success me-2"><i class="bi bi-check-circle-fill"></i> Tilldelat${src}</span>
+                    <span class="input-group input-group-sm" style="width:auto;display:inline-flex;vertical-align:middle;">
+                      <span class="input-group-text">År</span>
+                      <input type="number" class="form-control" id="badgeYear_${held.id}" value="${held.achievedYear || ''}" style="width:88px;" placeholder="ÅÅÅÅ" title="Året märket erövrades">
+                      <button class="btn btn-outline-secondary" onclick="setMarkenBadgeYear(${held.id}, ${memberId}, '${escapeMedalAttr(name)}')">Spara</button>
+                    </span>`;
             } else {
                 right = `<span class="text-success"><i class="bi bi-check-circle-fill"></i> Tilldelat${yr}${src}</span>`;
             }
@@ -1681,10 +1692,7 @@ function renderMemberMarkenDetail(data) {
     });
 
     // ── Årtalsmärke ──
-    const artLine = (art.fulfilledYears || 0) > 0 || badges.some(b => b.isGuld)
-        ? `<strong>${escapeMedalHtml(art.current) || 'Inget årtalsmärke än'}</strong>
-           <span class="text-muted">— ${art.fulfilledYears || 0} godkända guldfodringar</span>`
-        : '<span class="text-muted">Kräver guldmärke först.</span>';
+    const artBlock = renderMarkenArtalsmarke(art, canSign, memberId, name);
 
     // ── Guldfodring (this year) ──
     const p = gf.persisted;
@@ -1714,7 +1722,7 @@ function renderMemberMarkenDetail(data) {
         <ul class="list-group list-group-flush mb-3">${badgeRows}</ul>
 
         <h6 class="text-muted">Årtalsmärke</h6>
-        <p class="mb-3"><i class="bi bi-calendar-check text-warning"></i> ${artLine}</p>
+        ${artBlock}
 
         <h6 class="text-muted">Guldfodring ${year}</h6>
         <div class="card border-warning-subtle mb-2"><div class="card-body py-2">
@@ -1798,6 +1806,79 @@ function loadMemberMastar(memberId) {
                 <div>${yearChips}</div>${adder}`;
         })
         .catch(() => { block.innerHTML = ''; });
+}
+
+// ── Årtalsmärke (Pistolskyttemärket): functionary add/remove of fulfilled Guldfodring-years ──
+// Each fulfilled year is one step of 3 toward the next årtalsmärke. System-derived years (from
+// validated guldserier) are shown read-only; manually-asserted historical years get a remove ×.
+function renderMarkenArtalsmarke(art, canSign, memberId, name) {
+    art = art || {};
+    const years = art.yearList || [];
+    const count = art.fulfilledYears || 0;
+    const current = escapeMedalHtml(art.current) || 'Inget årtalsmärke än';
+
+    let progress;
+    if (art.nextAtYears > 0) {
+        progress = `<span class="text-muted">— ${count} godkända guldfodringar · nästa (${escapeMedalHtml(art.next)}) vid ${art.nextAtYears}</span>`;
+    } else if (count > 0) {
+        progress = `<span class="text-muted">— ${count} godkända guldfodringar</span>`;
+    } else {
+        progress = '<span class="text-muted">— inga godkända guldfodringar än</span>';
+    }
+
+    const chips = years.length
+        ? years.map(y => `<span class="badge bg-light text-dark border me-1 mb-1" title="${y.manual ? 'Manuellt registrerat år' : 'Härlett från validerade guldserier'}">${y.year}${y.manual && canSign ? ` <a href="#" onclick="setGuldfodringYear(${memberId}, ${y.year}, false, '${escapeMedalAttr(name)}');return false;" class="text-danger text-decoration-none" title="Ta bort">×</a>` : (y.manual ? '' : ' <i class="bi bi-lock-fill text-muted" style="font-size:.7em;"></i>')}</span>`).join('')
+        : '<span class="text-muted small">Inga godkända guldfodringar registrerade.</span>';
+
+    const adder = canSign
+        ? `<div class="input-group input-group-sm mt-2" style="max-width:280px;">
+             <span class="input-group-text">Lägg till år</span>
+             <input type="number" class="form-control" id="guldfodringYearInput_${memberId}" min="1950" max="${new Date().getFullYear() + 1}" placeholder="${new Date().getFullYear()}">
+             <button class="btn btn-outline-warning" onclick="addGuldfodringYear(${memberId}, '${escapeMedalAttr(name)}')">Lägg till</button>
+           </div>
+           <div class="form-text">Lägg till äldre uppfyllda guldfodringsår manuellt (t.ex. från klubbliggaren). Aktuella år hämtas automatiskt från validerade guldserier.</div>`
+        : '';
+
+    return `<p class="mb-1"><i class="bi bi-calendar-check text-warning"></i> <strong>${current}</strong> ${progress}</p>
+            <div class="mb-3"><div>${chips}</div>${adder}</div>`;
+}
+
+function setGuldfodringYear(memberId, year, fulfilled, name) {
+    fetch('/umbraco/surface/Marken/SetGuldfodringYear', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getAntiForgeryToken() },
+        body: JSON.stringify({ memberId: memberId, year: year, fulfilled: fulfilled })
+    }).then(r => r.json()).then(d => {
+        if (!d.success) { alert(d.message || 'Fel'); return; }
+        openMemberMarkenDetail(memberId, name);
+        loadClubMarken();
+    }).catch(() => alert('Något gick fel.'));
+}
+function addGuldfodringYear(memberId, name) {
+    const input = document.getElementById('guldfodringYearInput_' + memberId);
+    const year = parseInt(input && input.value) || 0;
+    if (year < 1950) { alert('Ange ett giltigt år.'); return; }
+    setGuldfodringYear(memberId, year, true, name);
+}
+
+// Save an edited achieved-year on a Brons/Silver grundmärke (reuses SetBadgeUniqueNumber, which
+// sets AchievedYear for any valör; the registration number only applies to Guld).
+function setMarkenBadgeYear(badgeId, memberId, name) {
+    const yearEl = document.getElementById('badgeYear_' + badgeId);
+    const year = yearEl ? (parseInt(yearEl.value) || null) : null;
+    if (!year) { alert('Ange ett giltigt år.'); return; }
+    fetch('/umbraco/surface/Marken/SetBadgeUniqueNumber', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getAntiForgeryToken() },
+        body: JSON.stringify({ badgeId, year })
+    })
+    .then(r => r.json())
+    .then(res => {
+        if (!res.success) { alert('Fel: ' + (res.message || 'Kunde inte spara.')); return; }
+        openMemberMarkenDetail(memberId, name);
+        loadClubMarken();
+    })
+    .catch(() => alert('Kunde inte spara året.'));
 }
 
 function setMastarYear(memberId, year, qualified) {
@@ -2030,8 +2111,10 @@ function awardMarkenBadge(memberId, level, name) {
         const yStr = prompt('Årtal då guldmärket erövrades (styr när elitprov får börja räknas — året efter):', new Date().getFullYear());
         if (yStr === null) return;
         year = parseInt(yStr) || new Date().getFullYear();
-    } else if (!confirm(`Tilldela ${level.toLowerCase()}märket till ${name}?`)) {
-        return;
+    } else {
+        const yStr = prompt(`Tilldela ${level.toLowerCase()}märket till ${name}.\nÅrtal då märket erövrades:`, new Date().getFullYear());
+        if (yStr === null) return;
+        year = parseInt(yStr) || new Date().getFullYear();
     }
     fetch('/umbraco/surface/Marken/AwardBadge', {
         method: 'POST',
@@ -4813,6 +4896,79 @@ async function removeClubAdmin(memberId, name) {
         alert('Ett fel uppstod');
     }
 }
+
+// ── Personuppgiftsbiträdesavtal (DPA) acceptance gate ─────────────────────────
+async function loadDpaGate() {
+    const gate = document.getElementById('dpaGate');
+    if (!gate || !clubId) return;
+    try {
+        const res = await fetch(`/umbraco/surface/Dpa/GetDpaStatus?clubId=${clubId}`);
+        const data = await res.json();
+        if (!data.success) { gate.style.display = 'none'; return; }
+
+        if (data.accepted) {
+            gate.className = 'alert alert-success d-flex align-items-center mb-4';
+            gate.innerHTML =
+                '<i class="bi bi-shield-check me-2"></i>' +
+                '<div>Personuppgiftsbiträdesavtalet (v' + data.acceptedVersion + ') är godkänt' +
+                (data.acceptedDate ? ' ' + data.acceptedDate : '') +
+                (data.acceptedByName ? ' av ' + escapeDpaHtml(data.acceptedByName) : '') + '. ' +
+                '<a href="/personuppgiftsbitradesavtal" target="_blank" rel="noopener">Läs avtalet</a></div>';
+            gate.style.display = '';
+        } else {
+            gate.className = 'alert alert-warning mb-4';
+            gate.innerHTML =
+                '<h6 class="mb-2"><i class="bi bi-exclamation-triangle me-2"></i>Godkänn personuppgiftsbiträdesavtalet</h6>' +
+                '<p class="mb-2 small">Som administratör behöver du godkänna personuppgiftsbiträdesavtalet ' +
+                '(GDPR art. 28) på klubbens vägnar. Det reglerar hur Pistol.nu behandlar era medlemmars ' +
+                'personuppgifter åt klubben.</p>' +
+                '<p class="mb-2 small text-muted">Genom att godkänna intygar du att du har behörighet att ' +
+                'ingå avtalet för föreningens räkning. Det är föreningens ansvar att rätt person godkänner ' +
+                '(t.ex. efter styrelsebeslut).</p>' +
+                '<a href="/personuppgiftsbitradesavtal" target="_blank" rel="noopener" class="btn btn-sm btn-outline-secondary me-2">' +
+                '<i class="bi bi-file-earmark-text me-1"></i>Granska avtalet</a>' +
+                '<button type="button" class="btn btn-sm btn-primary" id="dpaAcceptBtn">' +
+                '<i class="bi bi-check2-circle me-1"></i>Godkänn för klubben</button>';
+            gate.style.display = '';
+            const btn = document.getElementById('dpaAcceptBtn');
+            if (btn) btn.addEventListener('click', acceptDpa);
+        }
+    } catch (e) {
+        console.error('Error loading DPA gate:', e);
+        gate.style.display = 'none';
+    }
+}
+
+function escapeDpaHtml(s) {
+    const d = document.createElement('div');
+    d.textContent = s == null ? '' : String(s);
+    return d.innerHTML;
+}
+
+async function acceptDpa() {
+    const btn = document.getElementById('dpaAcceptBtn');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Sparar...'; }
+    try {
+        const res = await fetch('/umbraco/surface/Dpa/AcceptDpa', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getAntiForgeryToken() },
+            body: JSON.stringify({ clubId: clubId })
+        });
+        const data = await res.json();
+        if (data.success) {
+            loadDpaGate();
+        } else {
+            alert('Kunde inte godkänna avtalet: ' + (data.message || 'okänt fel'));
+            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-check2-circle me-1"></i>Godkänn för klubben'; }
+        }
+    } catch (e) {
+        console.error('Error accepting DPA:', e);
+        alert('Ett fel uppstod');
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-check2-circle me-1"></i>Godkänn för klubben'; }
+    }
+}
+
+document.addEventListener('DOMContentLoaded', loadDpaGate);
 </script>
 
 <style>

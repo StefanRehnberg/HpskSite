@@ -1,0 +1,266 @@
+﻿@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@using HpskSite.Models
+@{
+    Layout = "Master.cshtml";
+
+    // Operatören (personuppgiftsbiträde) som driver Pistol.nu.
+    var operatorName = "Hallands Pistolskyttekrets (HPSK)";
+    var operatorOrgNr = "org.nr 849202-2416";
+    var operatorContact = "admin@pistol.nu";
+}
+
+<div class="row justify-content-center">
+    <div class="col-lg-8 prose">
+        <h1 class="mb-2"><i class="bi bi-file-earmark-lock me-2"></i>Personuppgiftsbiträdesavtal</h1>
+        <p class="text-muted">
+            Version @DpaInfo.Version · Gäller från @DpaInfo.EffectiveDate
+        </p>
+
+        <p class="lead mb-4">
+            Detta personuppgiftsbiträdesavtal (”Avtalet”) reglerar @operatorName:s behandling av
+            personuppgifter när Pistol.nu tillhandahålls som tjänst åt en ansluten förening. Avtalet
+            ingås elektroniskt när föreningens administratör godkänner det och utgör en del av
+            villkoren för att använda tjänsten.
+        </p>
+
+        <div class="card mb-4">
+            <div class="card-header"><h2 class="h5 mb-0"><i class="bi bi-people me-2"></i>1. Parter</h2></div>
+            <div class="card-body">
+                <p><strong>Personuppgiftsansvarig (”Föreningen”):</strong> den förening vars administratör
+                godkänner detta avtal och på vars uppdrag personuppgifter behandlas.</p>
+                <p class="mb-0"><strong>Personuppgiftsbiträde (”Biträdet”):</strong> @operatorName,
+                @operatorOrgNr, som driver webbplatsen och tjänsten Pistol.nu. Kontakt:
+                <a href="mailto:@operatorContact">@operatorContact</a>.</p>
+            </div>
+        </div>
+
+        <div class="card mb-4">
+            <div class="card-header"><h2 class="h5 mb-0"><i class="bi bi-info-circle me-2"></i>2. Bakgrund och syfte</h2></div>
+            <div class="card-body">
+                <p class="mb-0">
+                    Föreningen är personuppgiftsansvarig för behandlingen av sina medlemmars
+                    personuppgifter. Biträdet tillhandahåller en plattform för medlems-, tränings- och
+                    tävlingsadministration och behandlar därvid personuppgifter för Föreningens räkning.
+                    Avtalet uppfyller kravet i artikel 28 i dataskyddsförordningen (GDPR) på ett skriftligt
+                    biträdesavtal. Vid motstridighet gäller tvingande dataskyddslagstiftning före Avtalet.
+                </p>
+            </div>
+        </div>
+
+        <div class="card mb-4">
+            <div class="card-header"><h2 class="h5 mb-0"><i class="bi bi-card-checklist me-2"></i>3. Behandlingens art och ändamål</h2></div>
+            <div class="card-body">
+                <p>Biträdet behandlar personuppgifter <strong>endast inom ramen för tjänsten</strong> och
+                <strong>enbart enligt Föreningens dokumenterade instruktioner</strong>. Detta avtal,
+                tjänstens funktioner och Föreningens inställningar i tjänsten utgör Föreningens instruktioner.</p>
+                <p class="mb-0">Biträdet använder <strong>inte</strong> uppgifterna för egna ändamål, säljer
+                dem inte vidare och använder dem inte för reklam eller profilering.
+                Behandlingens kategorier av uppgifter, registrerade och ändamål framgår av <strong>Bilaga A</strong>.</p>
+            </div>
+        </div>
+
+        <div class="card mb-4">
+            <div class="card-header"><h2 class="h5 mb-0"><i class="bi bi-shield-lock me-2"></i>4. Biträdets åtaganden</h2></div>
+            <div class="card-body">
+                <p>Biträdet ska:</p>
+                <ul class="mb-0">
+                    <li>behandla personuppgifter endast enligt Föreningens instruktioner, och utan dröjsmål
+                    informera Föreningen om en instruktion bedöms strida mot dataskyddslagstiftning;</li>
+                    <li>säkerställa att personer med åtkomst till uppgifterna omfattas av <strong>tystnadsplikt</strong>;</li>
+                    <li>vidta lämpliga tekniska och organisatoriska <strong>säkerhetsåtgärder</strong> enligt
+                    artikel 32 GDPR (se <strong>Bilaga C</strong>);</li>
+                    <li>bistå Föreningen med att besvara <strong>registrerades önskemål</strong> om att utöva
+                    sina rättigheter (avsnitt 7);</li>
+                    <li>bistå Föreningen med skyldigheterna avseende säkerhet, incidentrapportering och
+                    konsekvensbedömningar (artiklarna 32–36 GDPR);</li>
+                    <li>ställa den information till förfogande som behövs för att visa att skyldigheterna
+                    enligt artikel 28 fullgörs. I första hand sker detta genom att Biträdet lämnar
+                    <strong>dokumentation</strong>; en granskning på plats kan ske efter rimlig
+                    överenskommelse och bekostas av Föreningen.</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="card mb-4">
+            <div class="card-header"><h2 class="h5 mb-0"><i class="bi bi-diagram-3 me-2"></i>5. Underbiträden</h2></div>
+            <div class="card-body">
+                <p>Föreningen lämnar härmed ett <strong>allmänt förhandsgodkännande</strong> till att
+                Biträdet anlitar underbiträden. De underbiträden som anlitas vid Avtalets ingående framgår
+                av <strong>Bilaga B</strong>.</p>
+                <p>Biträdet ska genom avtal ålägga varje underbiträde <strong>samma skyldigheter</strong> i
+                fråga om dataskydd som följer av detta avtal, och Biträdet ansvarar gentemot Föreningen för
+                underbiträdets behandling.</p>
+                <p class="mb-0">Vid <strong>byte eller tillägg</strong> av underbiträde informerar Biträdet
+                Föreningen i förväg (via e-post till föreningens administratör och uppdaterad Bilaga B).
+                Föreningen har rätt att inom <strong>30 dagar</strong> invända mot förändringen. Kan parterna
+                inte enas har Föreningen rätt att säga upp tjänsten i den del som berörs.</p>
+            </div>
+        </div>
+
+        <div class="card mb-4">
+            <div class="card-header"><h2 class="h5 mb-0"><i class="bi bi-globe-europe-africa me-2"></i>6. Överföring till tredjeland</h2></div>
+            <div class="card-body">
+                <p class="mb-0">All behandling sker <strong>inom EU/EES</strong>. Samtliga underbiträden i
+                Bilaga B är etablerade och behandlar uppgifterna inom EU/EES, och <strong>ingen överföring
+                till tredjeland sker</strong>. Skulle en överföring till tredjeland bli aktuell i framtiden
+                sker den endast med laglig grund enligt kapitel V GDPR (t.ex. EU-kommissionens
+                standardavtalsklausuler eller ett giltigt adekvansbeslut) och efter information till
+                Föreningen enligt avsnitt 5.</p>
+            </div>
+        </div>
+
+        <div class="card mb-4">
+            <div class="card-header"><h2 class="h5 mb-0"><i class="bi bi-shield-exclamation me-2"></i>7. Personuppgiftsincidenter</h2></div>
+            <div class="card-body">
+                <p class="mb-0">Vid en personuppgiftsincident informerar Biträdet Föreningen
+                <strong>utan onödigt dröjsmål</strong> efter att ha fått kännedom om den, så att Föreningen
+                kan fullgöra sin eventuella anmälan till Integritetsskyddsmyndigheten (inom 72 timmar) och
+                vid behov informera de registrerade. Underrättelsen innehåller den information Föreningen
+                behöver enligt artikel 33.3 GDPR, i den mån den är tillgänglig, och Biträdet bistår med
+                rimliga åtgärder för att begränsa och åtgärda incidenten.</p>
+            </div>
+        </div>
+
+        <div class="card mb-4">
+            <div class="card-header"><h2 class="h5 mb-0"><i class="bi bi-person-check me-2"></i>8. Registrerades rättigheter</h2></div>
+            <div class="card-body">
+                <p class="mb-0">Biträdet bistår Föreningen, genom lämpliga tekniska och organisatoriska
+                åtgärder och i den mån det är möjligt, med att fullgöra Föreningens skyldighet att svara på
+                de registrerades begäranden om tillgång, rättelse, radering, begränsning, dataportabilitet
+                och invändning. Vänder sig en registrerad direkt till Biträdet vidarebefordras begäran till
+                Föreningen, som är ansvarig för att besvara den.</p>
+            </div>
+        </div>
+
+        <div class="card mb-4">
+            <div class="card-header"><h2 class="h5 mb-0"><i class="bi bi-box-arrow-right me-2"></i>9. Radering och återlämnande vid upphörande</h2></div>
+            <div class="card-body">
+                <p>När tjänsten upphör, eller på Föreningens begäran, ska Biträdet efter Föreningens val
+                <strong>återlämna eller radera</strong> samtliga personuppgifter som behandlats för
+                Föreningens räkning, samt radera befintliga kopior. På begäran kan uppgifterna dessförinnan
+                lämnas ut i ett <strong>maskinläsbart format (export)</strong>.</p>
+                <p class="mb-0">Radering/återlämnande från aktiv behandling sker inom <strong>90 dagar</strong>
+                från upphörandet. Uppgifter i <strong>säkerhetskopior</strong> isoleras från aktiv behandling
+                och raderas vid nästa ordinarie gallring av säkerhetskopior. Undantag gäller för uppgifter som
+                Biträdet enligt lag är skyldigt att bevara (t.ex. bokföringsunderlag enligt bokföringslagen,
+                7 år); sådana behandlas endast för det lagstadgade ändamålet och raderas därefter.</p>
+            </div>
+        </div>
+
+        <div class="card mb-4">
+            <div class="card-header"><h2 class="h5 mb-0"><i class="bi bi-scale me-2"></i>10. Ansvar</h2></div>
+            <div class="card-body">
+                <p class="mb-0">Parternas ansvar för skada till följd av behandlingen regleras av
+                artikel 82 GDPR. Pistol.nu tillhandahålls utan avgift för föreningar; om inget annat avtalats
+                skriftligen är Biträdets ersättningsansvar gentemot Föreningen begränsat till vad som följer
+                av tvingande lag.</p>
+            </div>
+        </div>
+
+        <div class="card mb-4">
+            <div class="card-header"><h2 class="h5 mb-0"><i class="bi bi-arrow-repeat me-2"></i>11. Avtalstid och ändringar</h2></div>
+            <div class="card-body">
+                <p>Avtalet gäller så länge Biträdet behandlar personuppgifter för Föreningens räkning.
+                Avtalet godkänns och dokumenteras <strong>elektroniskt</strong> (artikel 28.9 GDPR); tidpunkt,
+                version och vem som godkänt registreras. Den som godkänner avtalet gör det för Föreningens
+                räkning och intygar att han eller hon har behörighet till det. Det är <strong>Föreningens
+                ansvar</strong> att tillse att godkännandet sker av behörig person (t.ex. efter styrelsebeslut).</p>
+                <p class="mb-0">Vid <strong>väsentliga ändringar</strong> av villkoren publiceras en ny version
+                med nytt versionsnummer, och Föreningens administratör ombeds godkänna den på nytt. Ändringar
+                som endast rör underbiträdesförteckningen (Bilaga B) hanteras enligt avsnitt 5 och kräver inte
+                nytt godkännande.</p>
+            </div>
+        </div>
+
+        <div class="card mb-4">
+            <div class="card-header"><h2 class="h5 mb-0"><i class="bi bi-bank me-2"></i>12. Tillämplig lag och tvist</h2></div>
+            <div class="card-body">
+                <p class="mb-0">På Avtalet tillämpas svensk rätt. Tvist avgörs av svensk allmän domstol.</p>
+            </div>
+        </div>
+
+        <hr class="my-4" />
+        <h2 class="h4 mb-3">Bilagor</h2>
+
+        <div class="card mb-4">
+            <div class="card-header"><h2 class="h5 mb-0">Bilaga A – Behandlingens detaljer</h2></div>
+            <div class="card-body">
+                <p><strong>Kategorier av registrerade:</strong> föreningens medlemmar (samt i förekommande fall
+                gäster/deltagare som registreras i tävlingar).</p>
+                <p><strong>Kategorier av personuppgifter:</strong></p>
+                <ul>
+                    <li>Kontaktuppgifter: namn, e-postadress, telefonnummer, adress</li>
+                    <li>Identifikation: personnummer (för tävlingsregistrering), pistolkortnummer</li>
+                    <li>Klubbtillhörighet och roller</li>
+                    <li>Tävlings- och träningsdata: anmälningar, resultat, skytteklasser, framsteg</li>
+                    <li>Betalningsuppgifter kopplade till anmälningsavgifter</li>
+                    <li>Tekniska uppgifter: senaste aktivitet på webbplatsen</li>
+                </ul>
+                <p><strong>Ändamål:</strong> tillhandahålla medlems-, tränings- och tävlingsfunktionerna i
+                tjänsten på Föreningens uppdrag.</p>
+                <p class="mb-0"><strong>Varaktighet:</strong> så länge Föreningen använder tjänsten, med
+                radering/återlämnande enligt avsnitt 9.</p>
+            </div>
+        </div>
+
+        <div class="card mb-4">
+            <div class="card-header"><h2 class="h5 mb-0">Bilaga B – Underbiträdesförteckning</h2></div>
+            <div class="card-body">
+                <p class="text-muted small">Aktuell vid version @DpaInfo.Version (@DpaInfo.EffectiveDate).
+                Uppdateras enligt avsnitt 5.</p>
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle">
+                        <thead>
+                            <tr>
+                                <th>Underbiträde</th>
+                                <th>Tjänst</th>
+                                <th>Plats</th>
+                                <th>Tredjelands&shy;överföring</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Simply.com A/S</td>
+                                <td>Webb- och databasdrift (hosting)</td>
+                                <td>Danmark (EU)</td>
+                                <td>Nej</td>
+                            </tr>
+                            <tr>
+                                <td>Brevo (Sendinblue SAS)</td>
+                                <td>E-post: aviseringar, kvitton, föreningsutskick</td>
+                                <td>Frankrike (EU)</td>
+                                <td>Nej</td>
+                            </tr>
+                            <tr>
+                                <td>Mistral AI</td>
+                                <td>AI-assistenten på webbplatsen (frivillig hjälpfunktion)</td>
+                                <td>Frankrike (EU)</td>
+                                <td>Nej</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="card mb-4">
+            <div class="card-header"><h2 class="h5 mb-0">Bilaga C – Säkerhetsåtgärder</h2></div>
+            <div class="card-body">
+                <ul class="mb-0">
+                    <li>Krypterad överföring (HTTPS/TLS) för all kommunikation med tjänsten.</li>
+                    <li>Behörighetsstyrning: roll- och klubbaserad åtkomstkontroll så att användare endast
+                    når de uppgifter de har rätt till.</li>
+                    <li>Autentisering med lösenord; lösenord lagras aldrig i klartext.</li>
+                    <li>Loggning av administrativa åtgärder där det är relevant (t.ex. betalnings- och
+                    medlemsändringar).</li>
+                    <li>Säkerhetskopiering hos driftleverantören samhörande med tjänstens drift.</li>
+                    <li>Begränsad personkrets med åtkomst, omfattad av tystnadsplikt.</li>
+                </ul>
+            </div>
+        </div>
+
+        <p class="text-muted small">
+            <i class="bi bi-calendar me-1"></i>Version @DpaInfo.Version · Gäller från @DpaInfo.EffectiveDate
+        </p>
+    </div>
+</div>
