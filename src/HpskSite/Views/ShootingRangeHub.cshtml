@@ -33,7 +33,7 @@
         <div>
             <h4 class="mb-1"><i class="bi bi-geo-alt me-2"></i>Skjutbanor</h4>
             <p class="text-muted small mb-0">
-                Sveriges skjutbanor. Hävda din klubbs bana för att förvalta den — koppla klubbar,
+                Sveriges skjutbanor. Gör anspråk på din klubbs bana för att förvalta den — koppla klubbar,
                 lägg till banor/vallar och ange klubbarnas tider.
             </p>
         </div>
@@ -41,7 +41,7 @@
             <button class="btn btn-outline-secondary" id="rngImportBtn" style="display:none" onclick="rngOpenImport()">
                 <i class="bi bi-cloud-upload me-1"></i>Importera OSM
             </button>
-            <button class="btn btn-success" onclick="rngOpenEdit(0)">
+            <button class="btn btn-success" id="rngNewBtn" style="display:none" onclick="rngOpenEdit(0)">
                 <i class="bi bi-plus-lg me-1"></i>Ny skjutbana
             </button>
         </div>
@@ -103,7 +103,7 @@
                 <i class="bi bi-info-circle me-1"></i>Klicka på en markör för att öppna banan. Gula = okända,
                 gröna = aktiva. Banor utan koordinater visas inte på kartan.
             </p>
-            <button class="btn btn-sm btn-success" id="rngPlaceBtn" onclick="rngStartPlacement()">
+            <button class="btn btn-sm btn-success" id="rngPlaceBtn" style="display:none" onclick="rngStartPlacement()">
                 <i class="bi bi-geo-alt-fill me-1"></i>Lägg till skjutbana här
             </button>
         </div>
@@ -126,8 +126,8 @@
       </div>
       <div class="modal-body">
         <div id="rngClaimBanner" class="alert alert-warning d-none">
-            <i class="bi bi-flag me-1"></i>Den här skjutbanan är inte hävdad ännu.
-            <button class="btn btn-sm btn-warning ms-2" onclick="rngOpenClaim()">Hävda för din klubb</button>
+            <i class="bi bi-flag me-1"></i>Ingen klubb har gjort anspråk på den här skjutbanan ännu.
+            <button class="btn btn-sm btn-warning ms-2" id="rngClaimBtn" onclick="rngOpenClaim()">Gör anspråk på banan</button>
         </div>
         <ul class="nav nav-tabs" role="tablist">
             <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#rngTabInfo" type="button">Info</button></li>
@@ -251,17 +251,17 @@
   <div class="modal-dialog">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title">Hävda skjutbana</h5>
+        <h5 class="modal-title">Gör anspråk på skjutbana</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
-        <p class="text-muted small">Välj vilken klubb som hävdar banan. Du blir förvaltare och kan
+        <p class="text-muted small">Välj vilken klubb som gör anspråk på banan. Du blir förvaltare och kan
             koppla fler klubbar, lägga till banor/vallar och ange tider.</p>
         <select class="form-select" id="rngClaimClub"></select>
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
-        <button class="btn btn-warning" onclick="rngDoClaim()"><i class="bi bi-flag me-1"></i>Hävda</button>
+        <button class="btn btn-warning" onclick="rngDoClaim()"><i class="bi bi-flag me-1"></i>Gör anspråk</button>
       </div>
     </div>
   </div>
@@ -350,7 +350,7 @@
       </div>
       <div class="modal-body">
         <p class="text-muted small">Ladda upp en GeoJSON-export (overpass-turbo, sport=shooting). Banor
-            läggs till som <em>ej hävdade</em> och dubbletter hoppas över (matchas på OSM-id).</p>
+            läggs till utan klubbanspråk och dubbletter hoppas över (matchas på OSM-id).</p>
         <input type="file" class="form-control" id="rngImportFile" accept=".geojson,.json,application/json">
         <div id="rngImportResult" class="mt-3 small"></div>
       </div>
@@ -486,7 +486,7 @@
 (function () {
     const DAYS = { 1:'Mån', 2:'Tis', 3:'Ons', 4:'Tor', 5:'Fre', 6:'Lör', 7:'Sön' };
     const STATUS_LABEL = { Active:'Aktiv', Inactive:'Inaktiv', Decommissioned:'Avvecklad', UnclaimedSeed:'Okänd' };
-    let rngState = { ranges: [], isSiteAdmin: false, myClubs: [], current: null };
+    let rngState = { ranges: [], isSiteAdmin: false, canCreate: false, myClubs: [], current: null };
 
     function token() {
         const el = document.querySelector('input[name="__RequestVerificationToken"]');
@@ -509,7 +509,11 @@
         if (!d.success) { alert(d.message || 'Fel'); return; }
         rngState.ranges = d.ranges;
         rngState.isSiteAdmin = d.isSiteAdmin;
+        rngState.canCreate = d.canCreate;
         document.getElementById('rngImportBtn').style.display = d.isSiteAdmin ? '' : 'none';
+        // "Ny skjutbana" + "Lägg till skjutbana här" are club/regional/site-admin only.
+        document.getElementById('rngNewBtn').style.display = d.canCreate ? '' : 'none';
+        document.getElementById('rngPlaceBtn').style.display = d.canCreate ? '' : 'none';
         rngRender();
         // Default to the map view (it's the most useful entry point now that most ranges are
         // unnamed OSM seeds located by position).
@@ -558,9 +562,38 @@
     function rngInitMap() {
         if (rngMap) { setTimeout(() => rngMap.invalidateSize(), 60); return; }
         rngMap = L.map('rngMap').setView([62.5, 16.5], 5); // center of Sweden
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        const rngStreets = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19, attribution: '© OpenStreetMap'
-        }).addTo(rngMap);
+        });
+        const rngSatellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            maxZoom: 19, attribution: 'Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics'
+        });
+        rngStreets.addTo(rngMap);
+        // Toggle button (top-right) to switch between street map and satellite imagery.
+        let rngSatOn = false;
+        const RngSatToggle = L.Control.extend({
+            options: { position: 'topright' },
+            onAdd: function () {
+                const btn = L.DomUtil.create('button', 'btn btn-sm btn-light shadow-sm');
+                btn.type = 'button';
+                btn.style.cssText = 'border:1px solid rgba(0,0,0,.25)';
+                btn.innerHTML = '<i class="bi bi-globe-americas me-1"></i>Satellit';
+                L.DomEvent.disableClickPropagation(btn);
+                L.DomEvent.on(btn, 'click', function (e) {
+                    L.DomEvent.stop(e);
+                    rngSatOn = !rngSatOn;
+                    if (rngSatOn) {
+                        rngMap.removeLayer(rngStreets); rngSatellite.addTo(rngMap);
+                        btn.innerHTML = '<i class="bi bi-map me-1"></i>Karta';
+                    } else {
+                        rngMap.removeLayer(rngSatellite); rngStreets.addTo(rngMap);
+                        btn.innerHTML = '<i class="bi bi-globe-americas me-1"></i>Satellit';
+                    }
+                });
+                return btn;
+            }
+        });
+        rngMap.addControl(new RngSatToggle());
         rngCluster = L.markerClusterGroup({ chunkedLoading: true, maxClusterRadius: 50 });
         rngMap.addLayer(rngCluster);
         rngMap.on('click', rngMapClick);
@@ -613,7 +646,10 @@
         if (!d.success) { alert(d.message || 'Fel'); return; }
         rngState.current = d;
         document.getElementById('rngDetailTitle').textContent = d.range.name;
-        document.getElementById('rngClaimBanner').classList.toggle('d-none', d.range.status !== 'UnclaimedSeed');
+        // Only club/regional/site admins can claim, so the whole "unclaimed" banner is admin-only —
+        // regular members can't act on it and don't need the noise.
+        const rngShowClaimBanner = d.range.status === 'UnclaimedSeed' && rngState.canCreate;
+        document.getElementById('rngClaimBanner').classList.toggle('d-none', !rngShowClaimBanner);
         rngRenderInfo(); rngRenderSections(); rngRenderClubs(); rngRenderStewards();
         // Dossier (permits + documents) is the private tier — only for managers.
         document.getElementById('rngDossierTabLi').style.display = d.canManage ? '' : 'none';
@@ -623,6 +659,9 @@
         bootstrap.Modal.getOrCreateInstance(document.getElementById('rngDetailModal')).show();
     };
     function cm() { return rngState.current && rngState.current.canManage; }
+    // canEdit is true for managers AND for club/regional admins on still-unclaimed ranges,
+    // so name + data can be filled in before a range is claimed.
+    function canEdit() { return rngState.current && rngState.current.canEdit; }
     function isSiteAdmin() { return rngState.current && rngState.current.canDelete; }
 
     function rngRenderInfo() {
@@ -640,7 +679,7 @@
                 ${row('Källa', r.source)}
                 ${r.description ? `<div class="col-12 mb-2"><div class="text-muted small">Beskrivning</div><div>${esc(r.description)}</div></div>` : ''}
             </div>
-            ${cm() ? `<div class="mt-2 d-flex gap-2">
+            ${canEdit() ? `<div class="mt-2 d-flex gap-2">
                 <button class="btn btn-sm btn-outline-primary" onclick="rngOpenEdit(${r.id})"><i class="bi bi-pencil me-1"></i>Redigera</button>
                 ${isSiteAdmin() ? `<button class="btn btn-sm btn-outline-danger" onclick="rngDeleteRange(${r.id})"><i class="bi bi-trash me-1"></i>Ta bort</button>` : ''}
             </div>` : ''}`;
@@ -927,8 +966,11 @@
         const qrSrc = '/umbraco/surface/Faltskytte/GenerateQrCode?url=' + encodeURIComponent(checkinUrl);
         const w = window.open('', '_blank');
         if (!w) { alert('Tillåt popup-fönster för att skriva ut skylten.'); return; }
+        // NOTE: every closing tag below is written as `<\/x>` (escaped slash). A literal `</...>`
+        // inside this page's inline <script> breaks Razor/HTML parsing and dumps the script onto
+        // the page — same convention as the print helpers in _FaltskytteConfiguratorScript.cshtml.
         w.document.write(`<!doctype html><html lang="sv"><head><meta charset="utf-8">
-            <title>Incheckning – ${esc(range.name)}</title>
+            <title>Incheckning – ${esc(range.name)}<\/title>
             <style>
                 @@page { size: A4 portrait; margin: 18mm; }
                 body { font-family: Arial, Helvetica, sans-serif; text-align: center; color: #111; }
@@ -939,19 +981,19 @@
                 .steps { font-size: 18px; line-height: 1.5; margin: 14px auto 0; max-width: 460px; text-align: left; }
                 .url { font-size: 13px; color: #666; margin-top: 24px; word-break: break-all; }
                 .foot { font-size: 13px; color: #999; margin-top: 30px; }
-            </style></head><body>
-            <div class="name">${esc(range.name)}</div>
-            ${range.city ? `<div class="sub">${esc(range.city)}</div>` : ''}
-            <div class="lead">Skanna för att checka in</div>
+            <\/style><\/head><body>
+            <div class="name">${esc(range.name)}<\/div>
+            ${range.city ? `<div class="sub">${esc(range.city)}<\/div>` : ''}
+            <div class="lead">Skanna för att checka in<\/div>
             <img class="qr" src="${qrSrc}" alt="QR">
             <ol class="steps">
-                <li>Skanna QR-koden med mobilens kamera.</li>
-                <li>Logga in på pistol.nu om du inte redan är inloggad.</li>
-                <li>Tryck <strong>Checka in</strong> när du börjar – och <strong>Checka ut</strong> med antal skott när du är klar.</li>
-            </ol>
-            <div class="url">${esc(checkinUrl)}</div>
-            <div class="foot">pistol.nu · Skjutbanedatabas</div>
-        </body></html>`);
+                <li>Skanna QR-koden med mobilens kamera.<\/li>
+                <li>Logga in på pistol.nu om du inte redan är inloggad.<\/li>
+                <li>Tryck <strong>Checka in<\/strong> när du börjar – och <strong>Checka ut<\/strong> med antal skott när du är klar.<\/li>
+            <\/ol>
+            <div class="url">${esc(checkinUrl)}<\/div>
+            <div class="foot">pistol.nu · Skjutbanedatabas<\/div>
+        <\/body><\/html>`);
         w.document.close();
         const img = w.document.querySelector('img.qr');
         const go = () => { try { w.focus(); w.print(); } catch (e) { } };

@@ -979,7 +979,7 @@ namespace HpskSite.Controllers
                             }
                         }
                         else if ((field.Key == "maxParticipants" || field.Key == "numberOfSeriesOrStations" ||
-                                  field.Key == "numberOfFinalSeries" || field.Key == "clubId") && value != null)
+                                  field.Key == "numberOfFinalSeries" || field.Key == "clubId" || field.Key == "rangeId") && value != null)
                         {
                             // Handle JsonElement numbers
                             if (value is System.Text.Json.JsonElement jsonElement)

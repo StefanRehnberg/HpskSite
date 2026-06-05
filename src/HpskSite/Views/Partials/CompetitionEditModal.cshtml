@@ -252,6 +252,9 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                         <input type="text" class="form-control" id="venue" name="venue" value="@compVenue" required>
                     </div>
 
+                    @* Optional link to a shooting range in the Skjutbanedatabas — club list / search / map *@
+                    @await Html.PartialAsync("_CompetitionRangePicker", "edit_")
+
                     <hr>
 
                     <div class="row">
@@ -933,6 +936,10 @@ window.populateEditModal = function(competition) {
     setFieldValue('competitionName', competition.competitionName || '');
     setFieldValue('description', competition.description || '');
     setFieldValue('venue', competition.venue || '');
+
+    // Shooting-range picker — loads the currently linked range + the club's ranges
+    // (club list / search / map). Runs for every competition type.
+    if (typeof compRangeInit === 'function') compRangeInit('edit_', { compId: competition.id, clubId: competition.clubId });
 
     // Handle date fields - set value directly, then sync Flatpickr if available
     function setDateField(fieldId, dateStr, includeTime) {
@@ -1653,6 +1660,9 @@ function onEditClubChange() {
     syncEditClubOnlyAvailability();
     updateEditOrganizerUI();
     updateEditMismatchWarning();
+
+    // Refresh the range picker's "Klubbens banor" quick-pick for the chosen club.
+    if (typeof compRangeLoadClubRanges === 'function') compRangeLoadClubRanges('edit_', document.getElementById('clubId').value);
 }
 
 // Handle region selection change

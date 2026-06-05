@@ -66,6 +66,9 @@ namespace HpskSite.Controllers
 
                 bool isSiteAdmin = await _rangeService.IsSiteAdminAsync();
                 var stewarded = await _rangeService.GetStewardedRangeIdsAsync(memberId.Value);
+                // Club admins (incl. regional admins, via GetManagedClubIds) and site admins may
+                // create ranges and edit unclaimed ones — gates the "Ny skjutbana" / placement buttons.
+                bool canCreate = isSiteAdmin || (await _authService.GetManagedClubIds()).Count > 0;
                 var ranges = await _rangeService.ListAsync();
 
                 var items = ranges.Select(r =>
@@ -90,7 +93,7 @@ namespace HpskSite.Controllers
                     };
                 }).ToList();
 
-                return Json(new { success = true, isSiteAdmin, ranges = items });
+                return Json(new { success = true, isSiteAdmin, canCreate, ranges = items });
             }
             catch (Exception ex)
             {
@@ -113,6 +116,10 @@ namespace HpskSite.Controllers
 
                 bool isSiteAdmin = await _rangeService.IsSiteAdminAsync();
                 bool canManage = isSiteAdmin || await _rangeService.CanManageRangeAsync(id, memberId);
+                // An unclaimed range can have its name + data edited by any club/regional admin even
+                // before it's claimed (claiming assigns a steward; editing basic data doesn't need one).
+                bool isClubOrRegionalAdmin = isSiteAdmin || (await _authService.GetManagedClubIds()).Count > 0;
+                bool canEdit = canManage || (range.Status == RangeConstants.StatusUnclaimedSeed && isClubOrRegionalAdmin);
 
                 var sections = await _rangeService.GetSectionsAsync(id);
                 var links = await _rangeService.GetLinksAsync(id);
@@ -153,6 +160,7 @@ namespace HpskSite.Controllers
                 {
                     success = true,
                     canManage,
+                    canEdit,
                     canDelete = isSiteAdmin, // only site admins may delete a range
                     range = new
                     {
@@ -310,7 +318,14 @@ namespace HpskSite.Controllers
                 {
                     var range = await _rangeService.GetByIdAsync(req.Id);
                     if (range == null) return Json(new { success = false, message = "Skjutbanan hittades inte." });
-                    if (!isSiteAdmin && !await _rangeService.IsStewardAsync(req.Id, memberId.Value))
+                    // Stewards + site admins may always edit. Unclaimed ranges may additionally be edited
+                    // by any club/regional admin so name + data can be filled in before the range is claimed.
+                    bool isUnclaimed = range.Status == RangeConstants.StatusUnclaimedSeed;
+                    bool isClubOrRegionalAdmin = (await _authService.GetManagedClubIds()).Count > 0;
+                    bool canEdit = isSiteAdmin
+                        || await _rangeService.IsStewardAsync(req.Id, memberId.Value)
+                        || (isUnclaimed && isClubOrRegionalAdmin);
+                    if (!canEdit)
                         return Json(new { success = false, message = "Endast förvaltare eller administratör kan ändra skjutbanan." });
 
                     ApplyFields(range, req);

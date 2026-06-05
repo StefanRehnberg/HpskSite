@@ -253,6 +253,19 @@ namespace HpskSite.Controllers
                     });
                 }
 
+                // Persist the shooting-range link here (type-agnostic): the per-type save
+                // services map only their own fields and would drop "rangeId". Only act when
+                // the field is actually present so a partial-update client can't clear it by
+                // omission. The type-specific service re-loads + publishes the node afterwards,
+                // so this saved value gets published with the rest. SetValue is a no-op if the
+                // doctype lacks the (optional) rangeId property.
+                if (request.Fields != null && request.Fields.ContainsKey("rangeId"))
+                {
+                    int newRangeId = ReadFieldOrContentAsInt(request.Fields, "rangeId", content);
+                    content.SetValue("rangeId", newRangeId > 0 ? newRangeId : 0);
+                    _contentService.Save(content);
+                }
+
                 // Route to type-specific save logic
                 var result = await RouteToTypeSpecificSave(request, content);
 

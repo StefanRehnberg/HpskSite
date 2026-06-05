@@ -57,13 +57,7 @@
                                 <option value="Faltskytte">Fältskytte</option>
                                 <option value="MagnumPrecision">Magnum Precision</option>
                                 <option value="MagnumFalt">Magnum Fältskytte</option>
-                                <option value="__other__">Annat...</option>
                             </select>
-                        </div>
-                        <div class="mb-3 d-none" id="wizard_customTypeContainer">
-                            <label for="wizard_customCompetitionType" class="form-label">Ange tävlingstyp <span class="text-danger">*</span></label>
-                            <input type="text" class="form-control" id="wizard_customCompetitionType" name="customCompetitionType" placeholder="">
-                            <small class="form-text text-muted">Skriv in den tävlingstyp som saknas i listan</small>
                         </div>
 
                         <div class="mb-3">
@@ -142,6 +136,9 @@
                             <label for="wizard_venue" class="form-label">Plats <span class="text-danger">*</span></label>
                             <input type="text" class="form-control" id="wizard_venue" name="venue" required>
                         </div>
+
+                        @* Optional link to a shooting range in the Skjutbanedatabas — club list / search / map *@
+                        @await Html.PartialAsync("_CompetitionRangePicker", "wizard_")
 
                         <div class="mb-3">
                             <label for="wizard_registrationOpenDate" class="form-label">Anmälan öppnar <span class="text-danger">*</span></label>
@@ -1004,18 +1001,6 @@ let wizardContext = {
 // Handle competition type dropdown change - show/hide custom input + apply type-specific defaults
 function onCompetitionTypeChange() {
     const typeSelect = document.getElementById('wizard_competitionType');
-    const customContainer = document.getElementById('wizard_customTypeContainer');
-    const customInput = document.getElementById('wizard_customCompetitionType');
-
-    if (typeSelect.value === '__other__') {
-        customContainer.classList.remove('d-none');
-        customInput.required = true;
-        customInput.focus();
-    } else {
-        customContainer.classList.add('d-none');
-        customInput.required = false;
-        customInput.value = '';
-    }
 
     // Apply type-specific series defaults
     applySeriesDefaults();
@@ -1416,6 +1401,9 @@ function onWizardClubChange() {
 
     syncWizardClubOnlyAvailability();
     updateWizardMismatchWarning();
+
+    // Refresh the range picker's "Klubbens banor" quick-pick for the chosen club.
+    if (typeof compRangeLoadClubRanges === 'function') compRangeLoadClubRanges('wizard_', clubSelect.value);
 }
 
 // "Endast för vald klubb" only makes sense when an actual club is selected.
@@ -1936,17 +1924,9 @@ function submitWizard() {
         }
     });
 
-    // Handle competition type - use custom value if "Annat" is selected
+    // Competition type
     const typeSelect = document.getElementById('wizard_competitionType');
-    if (typeSelect.value === '__other__') {
-        const customType = document.getElementById('wizard_customCompetitionType').value.trim();
-        fields.competitionType = customType || 'Precision';
-    } else {
-        fields.competitionType = typeSelect.value || 'Precision';
-    }
-
-    // Remove the placeholder custom type field from submission
-    delete fields.customCompetitionType;
+    fields.competitionType = typeSelect.value || 'Precision';
 
     // Add defaults
     fields.isActive = true;
@@ -2047,11 +2027,6 @@ window.resetWizard = function() {
         form.reset();
     }
 
-    // Reset custom competition type field
-    document.getElementById('wizard_customTypeContainer').classList.add('d-none');
-    document.getElementById('wizard_customCompetitionType').value = '';
-    document.getElementById('wizard_customCompetitionType').required = false;
-
     // Clear shooting class selection
     document.getElementById('wizard_shootingClassIds').value = '';
     updateClassSelectionDisplay();
@@ -2106,6 +2081,9 @@ window.resetWizard = function() {
     onWizardIsClubOnlyChange();
     // Disable the checkbox when no club is selected (e.g. region-hosted or national comp).
     syncWizardClubOnlyAvailability();
+
+    // Reset the shooting-range picker (clear selection, wire search, load the club's ranges).
+    if (typeof compRangeInit === 'function') compRangeInit('wizard_', { clubId: document.getElementById('wizard_clubId')?.value });
 
     // Reset Egenbokning section
     document.getElementById('wizard_enableDirektplacering').checked = false;

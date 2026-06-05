@@ -1,0 +1,220 @@
+@model string
+@{
+    // Model = the field-id prefix. Pass "wizard_" or "edit_" to scope IDs so the
+    // wizard's and edit modal's copies don't collide when both live on the page.
+    var prefix = (Model ?? "").ToString();
+}
+@*
+ * Shared shooting-range / location picker for the competition wizard + edit modal.
+ *
+ * Three ways to pick a venue (all feed the same hidden <input name="rangeId">,
+ * which flows through the form's FormData to Create/SaveCompetition):
+ *   1. The selected club's linked ranges  — quick buttons (GetClubRanges)
+ *   2. Free-text search of all ranges      — (GetRangePicker)
+ *   3. An embedded Leaflet map             — click a pin (GetRanges)
+ *
+ * Public JS entrypoints (idempotent, prefix-scoped):
+ *   compRangeInit(prefix, {compId?, clubId?})  — wire + load current/club ranges
+ *   compRangeLoadClubRanges(prefix, clubId)     — refresh the club quick-pick
+ *   compRangeSetRange(prefix, id, name, city)   — set/clear the selection
+ *@
+<div class="card mb-3 bg-body-tertiary" id="@(prefix)rngPickCard">
+    <div class="card-body py-2">
+        <label class="form-label small fw-bold mb-1"><i class="bi bi-geo-alt me-1"></i>Tävlingsplats (skjutbana)</label>
+        <div class="small mb-2" id="@(prefix)rngPickCurrent"><span class="text-muted">Ingen skjutbana vald (valfritt).</span></div>
+
+        @* Club-linked ranges — quick pick (shown once a club with linked ranges is selected) *@
+        <div id="@(prefix)rngPickClubWrap" class="mb-2 d-none">
+            <div class="small text-muted mb-1">Klubbens banor:</div>
+            <div id="@(prefix)rngPickClubList" class="d-flex flex-wrap gap-1"></div>
+        </div>
+
+        @* Free-text search *@
+        <div class="position-relative mb-2">
+            <input type="text" class="form-control form-control-sm" id="@(prefix)rngPickSearch" placeholder="Sök skjutbana på namn, ort eller kommun…" autocomplete="off">
+            <div id="@(prefix)rngPickResults" class="list-group position-absolute w-100 shadow" style="z-index:1090;display:none;max-height:260px;overflow:auto"></div>
+        </div>
+
+        @* Map selector (lazy-initialised when expanded) *@
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="@(prefix)rngPickMapToggle" onclick="compRangeToggleMap('@prefix')">
+            <i class="bi bi-map me-1"></i>Välj på karta
+        </button>
+        <div id="@(prefix)rngPickMapWrap" class="mt-2 d-none">
+            <div id="@(prefix)rngPickMap" style="height:320px;border-radius:.5rem;border:1px solid var(--bs-border-color)"></div>
+            <div class="form-text">Klicka på en markör för att välja den som tävlingsplats.</div>
+        </div>
+
+        <input type="hidden" id="@(prefix)rangeId" name="rangeId" value="0">
+        <div class="form-text small mt-1">Kopplar tävlingen till en skjutbana i Skjutbanedatabasen — visar karta och vägbeskrivning på tävlingssidan.</div>
+    </div>
+</div>
+
+<script>
+// Idempotent — both the wizard and the edit modal include this partial. Defines the
+// global, prefix-scoped helpers once; subsequent includes no-op.
+(function () {
+    if (window.compRangePickerLoaded) return;
+    window.compRangePickerLoaded = true;
+
+    function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]; }); }
+
+    // Per-prefix caches of the search + club result arrays (so onclick can pick by id
+    // without embedding names in the markup) and the per-prefix map instances.
+    window._compRangeData = window._compRangeData || {};
+    window._compRangeMaps = window._compRangeMaps || {};
+    function dataFor(p) { return (window._compRangeData[p] = window._compRangeData[p] || { search: [], club: [] }); }
+
+    // The venue free-text field id differs: the wizard prefixes it, the edit modal doesn't.
+    function venueFieldId(prefix) { return prefix === 'wizard_' ? 'wizard_venue' : 'venue'; }
+
+    window.compRangeSetRange = function (prefix, id, name, city) {
+        var hid = document.getElementById(prefix + 'rangeId');
+        if (hid) hid.value = id || 0;
+        var cur = document.getElementById(prefix + 'rngPickCurrent');
+        if (cur) {
+            if (id) {
+                cur.innerHTML = '<span class="badge bg-success-subtle text-success-emphasis">' + esc(name) +
+                    (city ? ' · ' + esc(city) : '') + '</span> ' +
+                    '<a href="#" class="ms-1" onclick="compRangeSetRange(\'' + prefix + '\',0,\'\',\'\');return false;">Ta bort</a>';
+            } else {
+                cur.innerHTML = '<span class="text-muted">Ingen skjutbana vald (valfritt).</span>';
+            }
+        }
+        // Convenience: if a range is chosen and the venue text is still empty, prefill it.
+        if (id && name) {
+            var venue = document.getElementById(venueFieldId(prefix));
+            if (venue && !venue.value.trim()) venue.value = name;
+        }
+        var box = document.getElementById(prefix + 'rngPickResults');
+        if (box) box.style.display = 'none';
+        var s = document.getElementById(prefix + 'rngPickSearch');
+        if (s) s.value = '';
+    };
+
+    // Pick from a cached array (search or club) by id.
+    window.compRangePickById = function (prefix, id, source) {
+        var arr = source === 'club' ? dataFor(prefix).club : dataFor(prefix).search;
+        var r = arr.find(function (x) { return x.id === id; });
+        if (r) compRangeSetRange(prefix, r.id, r.name, r.city);
+    };
+
+    function wireSearch(prefix) {
+        var search = document.getElementById(prefix + 'rngPickSearch');
+        if (!search || search._compWired) return;
+        search._compWired = true;
+        var t;
+        search.addEventListener('input', function () {
+            clearTimeout(t);
+            var q = (search.value || '').trim();
+            var box = document.getElementById(prefix + 'rngPickResults');
+            if (q.length < 2) { box.style.display = 'none'; return; }
+            t = setTimeout(async function () {
+                try {
+                    var d = await (await fetch('/umbraco/surface/ShootingRange/GetRangePicker?query=' + encodeURIComponent(q))).json();
+                    var ranges = (d && d.ranges) || [];
+                    dataFor(prefix).search = ranges;
+                    box.innerHTML = ranges.length
+                        ? ranges.map(function (x) {
+                            return '<button type="button" class="list-group-item list-group-item-action py-1" onclick="compRangePickById(\'' + prefix + '\',' + x.id + ',\'search\')">' +
+                                esc(x.name) + '<small class="text-muted">' + (x.city ? ' · ' + esc(x.city) : '') + (x.municipality ? ' · ' + esc(x.municipality) : '') + '</small></button>';
+                        }).join('')
+                        : '<div class="list-group-item py-1 text-muted small">Inga träffar.</div>';
+                    box.style.display = 'block';
+                } catch (e) { box.style.display = 'none'; }
+            }, 250);
+        });
+    }
+
+    window.compRangeLoadClubRanges = async function (prefix, clubId) {
+        var wrap = document.getElementById(prefix + 'rngPickClubWrap');
+        var list = document.getElementById(prefix + 'rngPickClubList');
+        if (!wrap || !list) return;
+        if (!clubId || parseInt(clubId, 10) <= 0) { wrap.classList.add('d-none'); list.innerHTML = ''; dataFor(prefix).club = []; return; }
+        try {
+            var d = await (await fetch('/umbraco/surface/ShootingRange/GetClubRanges?clubId=' + encodeURIComponent(clubId))).json();
+            var ranges = (d && d.success && d.ranges) ? d.ranges : [];
+            dataFor(prefix).club = ranges;
+            if (!ranges.length) { wrap.classList.add('d-none'); list.innerHTML = ''; return; }
+            list.innerHTML = ranges.map(function (r) {
+                return '<button type="button" class="btn btn-sm btn-outline-primary" onclick="compRangePickById(\'' + prefix + '\',' + r.id + ',\'club\')">' +
+                    esc(r.name) + (r.city ? ' <span class="text-muted">· ' + esc(r.city) + '</span>' : '') + '</button>';
+            }).join('');
+            wrap.classList.remove('d-none');
+        } catch (e) { wrap.classList.add('d-none'); }
+    };
+
+    // ── Map ──────────────────────────────────────────────────────────────────
+    var leafletLoading = false, leafletWaiters = [];
+    function ensureLeaflet(cb) {
+        if (window.L && window.L.markerClusterGroup) { cb(); return; }
+        leafletWaiters.push(cb);
+        if (leafletLoading) return;
+        leafletLoading = true;
+        function addCss(href) {
+            if ([].slice.call(document.querySelectorAll('link[rel=stylesheet]')).some(function (l) { return l.href.indexOf(href) !== -1; })) return;
+            var l = document.createElement('link'); l.rel = 'stylesheet'; l.href = href; document.head.appendChild(l);
+        }
+        addCss('https://unpkg.com/leaflet@@1.9.4/dist/leaflet.css');
+        addCss('https://unpkg.com/leaflet.markercluster@@1.5.3/dist/MarkerCluster.css');
+        addCss('https://unpkg.com/leaflet.markercluster@@1.5.3/dist/MarkerCluster.Default.css');
+        function loadScript(src, next) { var s = document.createElement('script'); s.src = src; s.onload = next; s.onerror = next; document.body.appendChild(s); }
+        function done() { var ws = leafletWaiters.slice(); leafletWaiters = []; ws.forEach(function (w) { w(); }); }
+        if (window.L) { loadScript('https://unpkg.com/leaflet.markercluster@@1.5.3/dist/leaflet.markercluster.js', done); }
+        else { loadScript('https://unpkg.com/leaflet@@1.9.4/dist/leaflet.js', function () { loadScript('https://unpkg.com/leaflet.markercluster@@1.5.3/dist/leaflet.markercluster.js', done); }); }
+    }
+
+    window.compRangeToggleMap = function (prefix) {
+        var wrap = document.getElementById(prefix + 'rngPickMapWrap');
+        if (!wrap) return;
+        var show = wrap.classList.contains('d-none');
+        wrap.classList.toggle('d-none', !show);
+        if (show) ensureLeaflet(function () { initMap(prefix); });
+    };
+
+    function initMap(prefix) {
+        var st = window._compRangeMaps[prefix];
+        if (st && st.map) { setTimeout(function () { st.map.invalidateSize(); }, 60); return; }
+        var map = L.map(prefix + 'rngPickMap').setView([62.5, 16.5], 4); // center of Sweden
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map);
+        var cluster = L.markerClusterGroup({ chunkedLoading: true, maxClusterRadius: 50 });
+        map.addLayer(cluster);
+        window._compRangeMaps[prefix] = { map: map, cluster: cluster, loaded: false };
+        setTimeout(function () { map.invalidateSize(); }, 60);
+        loadMapMarkers(prefix);
+    }
+
+    function loadMapMarkers(prefix) {
+        var st = window._compRangeMaps[prefix];
+        if (!st || st.loaded) return;
+        st.loaded = true;
+        fetch('/umbraco/surface/ShootingRange/GetRanges').then(function (r) { return r.json(); }).then(function (d) {
+            if (!d || !d.success) return;
+            (d.ranges || []).forEach(function (r) {
+                if (r.latitude == null || r.longitude == null) return;
+                var m = L.marker([r.latitude, r.longitude]);
+                m.bindTooltip(esc(r.name) + (r.city ? ' · ' + esc(r.city) : ''));
+                m.on('click', function () {
+                    compRangeSetRange(prefix, r.id, r.name, r.city);
+                    var wrap = document.getElementById(prefix + 'rngPickMapWrap');
+                    if (wrap) wrap.classList.add('d-none');
+                });
+                st.cluster.addLayer(m);
+            });
+        }).catch(function () { });
+    }
+
+    window.compRangeInit = function (prefix, opts) {
+        opts = opts || {};
+        wireSearch(prefix);
+        compRangeSetRange(prefix, 0, '', ''); // clear, then load current/club
+        if (opts.compId) {
+            fetch('/umbraco/surface/ShootingRange/GetRangeForCompetition?competitionId=' + opts.compId)
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    if (d && d.success && d.hasRange && d.range) compRangeSetRange(prefix, d.range.id, d.range.name, d.range.city);
+                }).catch(function () { });
+        }
+        compRangeLoadClubRanges(prefix, opts.clubId || 0);
+    };
+})();
+</script>
