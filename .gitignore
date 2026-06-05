@@ -47,10 +47,14 @@ appsettings.Development.json
 /src/HpskSite/Clubs.json
 /src/HpskSite/Associations.json
 /src/HpskSite/access.txt
-/src/HpskSite/wwwroot/images/field-targets/
-/src/HpskSite/wwwroot/images/competition-types/
+/src/HpskSite/wwwroot/images/
 /src/HpskSite/KnowledgeBase/docs/
 /src/HpskSite/Documentation/
+
+# Operational scripts + DB migrations (run locally / in SSMS; not part of source)
+/src/HpskSite/Migrations/
+/src/HpskSite/publishToProd.ps1
+/src/HpskSite/startsite.bat
 
 # Reference documents shared by external contributors (not part of source)
 /Pokalen 2 tidutrakning.xls
