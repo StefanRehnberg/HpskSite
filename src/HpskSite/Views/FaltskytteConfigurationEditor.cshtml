@@ -24,11 +24,25 @@
 @* Figure picker + suggestion modal + the configurator JS — shared with the legacy modal. *@
 @await Html.PartialAsync("FaltskytteTargetPickerModal")
 <style>
-    /* When a configuration is Godkänd, the configurator UI is read-only.
-       Pointer-events disable click/focus/scroll-on-inputs; the opacity dims
-       to signal locked state. Buttons in the approval banner stay outside
-       this wrapper so they remain clickable. */
-    #fkEditorConfigurator.fk-locked { pointer-events: none; opacity: 0.65; user-select: text; }
+    /* When a configuration is Godkänd the configurator is READ-ONLY — but the
+       stations must still be expandable so the approved design can be inspected.
+       Strategy: block every interaction inside the configurator, then re-enable
+       ONLY the collapse toggle on each station's card-header. Buttons that sit
+       inside a header become click-through to the header (harmless — they just
+       toggle the panel). Form fields get a muted background so they read as
+       disabled. Approval-banner buttons stay outside this wrapper, so they're
+       unaffected and remain clickable. */
+    #fkEditorConfigurator.fk-locked { opacity: 0.92; }
+    #fkEditorConfigurator.fk-locked * { pointer-events: none !important; }
+    #fkEditorConfigurator.fk-locked .card-header[data-bs-toggle="collapse"] {
+        pointer-events: auto !important;
+        cursor: pointer;
+    }
+    #fkEditorConfigurator.fk-locked input,
+    #fkEditorConfigurator.fk-locked select,
+    #fkEditorConfigurator.fk-locked textarea {
+        background-color: var(--bs-secondary-bg);
+    }
 </style>
 @await Html.PartialAsync("_FaltskytteConfiguratorSuggestionModal")
 @Html.AntiForgeryToken()
