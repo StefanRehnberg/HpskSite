@@ -43,7 +43,7 @@ appsettings.Development.json
 /Marketing
 
 # Curated content — see CONTENT.md
-# (Code stays open-source under AGPL-3.0; the curated data/images/docs do not.)
+# (Code is source-available under FSL-1.1-Apache-2.0; the curated data/images/docs are not.)
 /src/HpskSite/Clubs.json
 /src/HpskSite/Associations.json
 /src/HpskSite/access.txt
