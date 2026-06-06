@@ -24,6 +24,50 @@
         </div>
     </div>
 
+    <!-- DPA (Personuppgiftsbiträdesavtal) compliance overview — site admins only -->
+    <div class="card mb-3 border-secondary" id="dpaOverviewCard" style="display:none;">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
+                <h5 class="mb-0">
+                    <i class="bi bi-shield-check me-1"></i>Personuppgiftsbiträdesavtal (PUB/DPA)
+                    <span class="badge bg-light text-dark ms-1" id="dpaCurrentVersion"></span>
+                </h5>
+                <div class="d-flex gap-2">
+                    <div class="form-check mb-0 align-self-center">
+                        <input class="form-check-input" type="checkbox" id="dpaOnlyMissing" onchange="renderDpaOverview()">
+                        <label class="form-check-label small" for="dpaOnlyMissing">Visa endast klubbar utan aktuellt avtal</label>
+                    </div>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="exportDpaOverviewCsv()" title="Exportera till CSV">
+                        <i class="bi bi-download me-1"></i>CSV
+                    </button>
+                </div>
+            </div>
+
+            <div class="row g-2 text-center mb-3" id="dpaSummary">
+                <div class="col"><div class="border rounded py-2"><div class="fs-4 fw-bold" id="dpaCountTotal">–</div><small class="text-muted">Klubbar</small></div></div>
+                <div class="col"><div class="border rounded py-2 border-success"><div class="fs-4 fw-bold text-success" id="dpaCountCurrent">–</div><small class="text-muted">Aktuellt avtal</small></div></div>
+                <div class="col"><div class="border rounded py-2 border-warning"><div class="fs-4 fw-bold text-warning" id="dpaCountOutdated">–</div><small class="text-muted">Äldre version</small></div></div>
+                <div class="col"><div class="border rounded py-2 border-danger"><div class="fs-4 fw-bold text-danger" id="dpaCountNone">–</div><small class="text-muted">Ej godkänt</small></div></div>
+            </div>
+
+            <div class="table-responsive" id="dpaTableWrap" style="display:none;">
+                <table class="table table-sm table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>Klubb</th>
+                            <th>Krets</th>
+                            <th>Status</th>
+                            <th>Godkänd av</th>
+                            <th>Datum</th>
+                        </tr>
+                    </thead>
+                    <tbody id="dpaTableBody"></tbody>
+                </table>
+            </div>
+            <p class="text-muted small mb-0" id="dpaEmptyNote" style="display:none;"></p>
+        </div>
+    </div>
+
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h4>Klubbar</h4>
         <button class="btn btn-success" onclick="showAddClubModal()">
@@ -282,6 +326,7 @@
                     <th>Krets</th>
                     <th>Ort</th>
                     <th>Kontakt</th>
+                    <th class="dpa-col">PUB-avtal</th>
                     <th>Åtgärder</th>
                 </tr>
             </thead>
@@ -301,6 +346,7 @@
         <td>{kretsDisplay}</td>
         <td>{city}</td>
         <td>{contactDisplay}</td>
+        <td class="dpa-col" data-dpa-club="{id}">{dpaBadge}</td>
         <td>
             <button class="btn btn-sm btn-warning me-1" onclick="editClub({id})" title="Redigera klubb">
                 <i class="bi bi-pencil"></i>
@@ -536,6 +582,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!clubManagementLoaded) {
                 // populateAdminKretsFilter() will call loadClubs() after regions are loaded
                 populateAdminKretsFilter();
+                loadDpaOverview(); // site-admin-only PUB/DPA compliance card (no-op otherwise)
                 clubManagementLoaded = true;
             }
         });
@@ -583,6 +630,14 @@ function displayClubs(clubs) {
 
     document.getElementById('clubsList').innerHTML = tableTemplate;
 
+    // The PUB-avtal column is only meaningful for site admins (the overview endpoint
+    // is site-admin gated); hide it entirely for regional admins.
+    const dpaIsSiteAdmin = document.getElementById('clubs-tab')?.dataset.isSiteAdmin === 'true';
+    if (!dpaIsSiteAdmin) {
+        document.getElementById('clubsList')
+            .querySelectorAll('.dpa-col').forEach(el => el.style.display = 'none');
+    }
+
     const tbody = document.getElementById('clubsTableBody');
     tbody.innerHTML = '';
 
@@ -606,10 +661,133 @@ function displayClubs(clubs) {
             .replace(/{regionalFederation}/g, club.regionalFederation || '')
             .replace(/{city}/g, club.city || '-')
             .replace(/{contactDisplay}/g, contactDisplay)
+            .replace(/{dpaBadge}/g, dpaIsSiteAdmin ? dpaBadgeHtml(dpaStatusMap[club.id]) : '')
             .replace(/{id}/g, club.id);
 
         tbody.innerHTML += row;
     });
+}
+
+// ===== DPA / PUB-avtal compliance overview (site admins only) =====
+let dpaOverview = null;   // full response { summary, clubs, currentVersion }
+let dpaStatusMap = {};    // clubId -> { state, version, date, by, name, region }
+
+function dpaBadgeHtml(entry) {
+    if (!entry) return '<span class="text-muted">–</span>';
+    if (entry.state === 'current')
+        return `<span class="badge bg-success" title="Godkänt ${entry.version || ''} ${entry.date || ''}">Aktuellt</span>`;
+    if (entry.state === 'outdated')
+        return `<span class="badge bg-warning text-dark" title="Godkände ${entry.version || 'äldre version'} – behöver godkänna det aktuella avtalet på nytt">Äldre (${entry.version || '?'})</span>`;
+    return '<span class="badge bg-danger">Ej godkänt</span>';
+}
+
+function loadDpaOverview() {
+    const isSiteAdmin = document.getElementById('clubs-tab')?.dataset.isSiteAdmin === 'true';
+    if (!isSiteAdmin) return; // endpoint is site-admin gated; card stays hidden for others
+
+    fetch('/umbraco/surface/Dpa/GetDpaOverview')
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) return; // silent — card simply stays hidden
+            dpaOverview = data;
+            dpaStatusMap = {};
+            (data.clubs || []).forEach(c => {
+                dpaStatusMap[c.clubId] = {
+                    state: c.state, version: c.acceptedVersion,
+                    date: c.acceptedDate, by: c.acceptedByName,
+                    name: c.clubName, region: c.region
+                };
+            });
+            document.getElementById('dpaCurrentVersion').textContent = 'v' + (data.currentVersion || '');
+            document.getElementById('dpaOverviewCard').style.display = '';
+            renderDpaOverview();
+            applyDpaBadgesToTable();
+        })
+        .catch(err => console.error('Kunde inte ladda PUB-översikt:', err));
+}
+
+function renderDpaOverview() {
+    if (!dpaOverview) return;
+    const s = dpaOverview.summary || {};
+    document.getElementById('dpaCountTotal').textContent = s.total ?? 0;
+    document.getElementById('dpaCountCurrent').textContent = s.current ?? 0;
+    document.getElementById('dpaCountOutdated').textContent = s.outdated ?? 0;
+    document.getElementById('dpaCountNone').textContent = s.none ?? 0;
+
+    const onlyMissing = document.getElementById('dpaOnlyMissing').checked;
+    let rows = (dpaOverview.clubs || []);
+    if (onlyMissing) rows = rows.filter(c => c.state !== 'current');
+
+    const tbody = document.getElementById('dpaTableBody');
+    const wrap = document.getElementById('dpaTableWrap');
+    const note = document.getElementById('dpaEmptyNote');
+
+    if (rows.length === 0) {
+        wrap.style.display = 'none';
+        note.style.display = '';
+        note.textContent = onlyMissing
+            ? 'Alla klubbar har godkänt det aktuella avtalet.'
+            : 'Inga klubbar hittades.';
+        return;
+    }
+    note.style.display = 'none';
+    wrap.style.display = '';
+    tbody.innerHTML = rows.map(c => {
+        const by = c.acceptedByName ? escapeDpaHtml(c.acceptedByName) : '<span class="text-muted">–</span>';
+        const date = c.acceptedDate || '<span class="text-muted">–</span>';
+        return `<tr>
+            <td>${escapeDpaHtml(c.clubName)}</td>
+            <td>${getKretsDescription(c.region)}</td>
+            <td>${dpaBadgeHtml({ state: c.state, version: c.acceptedVersion, date: c.acceptedDate })}</td>
+            <td>${by}</td>
+            <td>${date}</td>
+        </tr>`;
+    }).join('');
+}
+
+function applyDpaBadgesToTable() {
+    // Patch badges into any already-rendered club rows (the table may render before
+    // the overview fetch resolves).
+    document.querySelectorAll('#clubsTableBody td.dpa-col[data-dpa-club]').forEach(td => {
+        const id = td.getAttribute('data-dpa-club');
+        td.innerHTML = dpaBadgeHtml(dpaStatusMap[id]);
+    });
+}
+
+function escapeDpaHtml(s) {
+    const d = document.createElement('div');
+    d.textContent = s == null ? '' : String(s);
+    return d.innerHTML;
+}
+
+function exportDpaOverviewCsv() {
+    if (!dpaOverview || !dpaOverview.clubs) return;
+    const stateLabel = { current: 'Aktuellt', outdated: 'Äldre version', none: 'Ej godkänt' };
+    const header = ['Klubb', 'Krets', 'Status', 'Godkänd version', 'Godkänd av', 'Datum'];
+    const lines = [header];
+    dpaOverview.clubs.forEach(c => {
+        lines.push([
+            c.clubName || '',
+            getKretsDescription(c.region) || '',
+            stateLabel[c.state] || c.state,
+            c.acceptedVersion || '',
+            c.acceptedByName || '',
+            c.acceptedDate || ''
+        ]);
+    });
+    const csv = lines.map(row =>
+        row.map(f => `"${String(f).replace(/"/g, '""')}"`).join(',')
+    ).join('\r\n');
+    const bom = String.fromCharCode(0xFEFF); // UTF-8 BOM so Excel reads åäö correctly
+    const blob = new Blob([bom + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'pub-avtal-oversikt.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
 }
 
 function showAddClubModal() {

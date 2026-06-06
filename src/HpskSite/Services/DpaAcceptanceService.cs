@@ -62,6 +62,44 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// Returns the acceptance status for every club that has at least one acceptance
+        /// row, keyed by ClubId. A single table read (no per-club queries) — the caller
+        /// joins this against the club list from the content cache. Clubs absent from the
+        /// dictionary have never accepted any version (treat as not accepted).
+        /// Defensive: any DB error (e.g. table not yet created) yields an empty dictionary.
+        /// </summary>
+        public async Task<IReadOnlyDictionary<int, DpaStatus>> GetAllStatusesAsync()
+        {
+            try
+            {
+                using var db = _databaseFactory.CreateDatabase();
+                var rows = await db.FetchAsync<ClubDpaAcceptance>("ORDER BY AcceptedDate DESC");
+
+                return rows
+                    .GroupBy(r => r.ClubId)
+                    .ToDictionary(g => g.Key, g =>
+                    {
+                        var latest = g.First(); // group preserves source order → newest first
+                        var current = g.FirstOrDefault(r => r.DpaVersion == DpaInfo.Version);
+
+                        if (current != null)
+                            return new DpaStatus(true, DpaInfo.Version, current.DpaVersion,
+                                current.AcceptedDate, current.AcceptedByName);
+
+                        return new DpaStatus(false, DpaInfo.Version, latest.DpaVersion,
+                            latest.AcceptedDate, latest.AcceptedByName);
+                    });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Could not read ClubDpaAcceptance overview — treating as none accepted. " +
+                    "Has create-club-dpa-acceptance-table.sql been run?");
+                return new Dictionary<int, DpaStatus>();
+            }
+        }
+
+        /// <summary>
         /// Records (or refreshes) the club's acceptance of the current contract version.
         /// Idempotent on (ClubId, DpaInfo.Version): a repeat accept just updates the
         /// timestamp / acceptor on the existing row rather than creating duplicates.

@@ -110,6 +110,89 @@ namespace HpskSite.Controllers
             });
         }
 
+        /// <summary>
+        /// Site-admin-only overview of DPA acceptance across every club. Returns summary
+        /// counts (current / outdated / never accepted) plus a per-club row carrying the
+        /// evidence (version, date, who accepted). Used by the compliance card on the
+        /// admin Klubbar tab to chase clubs without a current acceptance.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetDpaOverview()
+        {
+            if (!await _authorizationService.IsCurrentUserAdminAsync())
+                return Json(new { success = false, message = "Endast siteadministratörer har åtkomst." });
+
+            // One table read for all clubs (no per-club queries — perf rule).
+            var statuses = await _dpaService.GetAllStatusesAsync();
+
+            var clubs = new List<object>();
+            int current = 0, outdated = 0, none = 0;
+
+            var sortedNodes = EnumerateClubNodes()
+                .OrderBy(n => n.Value<string>("clubName") ?? n.Name, StringComparer.CurrentCultureIgnoreCase);
+
+            foreach (var clubNode in sortedNodes)
+            {
+                var clubName = clubNode.Value<string>("clubName") ?? clubNode.Name ?? "";
+                var region = clubNode.Value<string>("regionalFederation") ?? "";
+
+                statuses.TryGetValue(clubNode.Id, out var status);
+
+                // status == null → no row at all → never accepted.
+                string state;
+                if (status == null) { state = "none"; none++; }
+                else if (status.Accepted) { state = "current"; current++; }
+                else { state = "outdated"; outdated++; }
+
+                clubs.Add(new
+                {
+                    clubId = clubNode.Id,
+                    clubName,
+                    region,
+                    state, // "current" | "outdated" | "none"
+                    acceptedVersion = status?.AcceptedVersion,
+                    acceptedDate = status?.AcceptedDate?.ToString("yyyy-MM-dd"),
+                    acceptedByName = status?.AcceptedByName
+                });
+            }
+
+            return Json(new
+            {
+                success = true,
+                currentVersion = DpaInfo.Version,
+                summary = new { total = clubs.Count, current, outdated, none },
+                clubs
+            });
+        }
+
+        /// <summary>
+        /// Enumerates published club nodes from the content cache — regional structure
+        /// (Home → RegionalPage → clubsPage → club) plus the legacy root-level clubsPage.
+        /// Mirrors ClubAdminController.GetClubsAsContent without the per-club view model cost.
+        /// </summary>
+        private IEnumerable<Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent> EnumerateClubNodes()
+        {
+            var content = UmbracoContext.Content;
+            var root = content?.GetAtRoot().FirstOrDefault();
+            if (root == null)
+                yield break;
+
+            foreach (var regionalPage in root.Children().Where(c => c.ContentType.Alias == "regionalPage"))
+            {
+                var clubsPage = regionalPage.Children().FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+                if (clubsPage == null) continue;
+                foreach (var club in clubsPage.Children().Where(c => c.ContentType.Alias == "club"))
+                    yield return club;
+            }
+
+            var rootClubsHub = root.Children().FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+            if (rootClubsHub != null)
+            {
+                foreach (var club in rootClubsHub.Children().Where(c => c.ContentType.Alias == "club"))
+                    yield return club;
+            }
+        }
+
         /// <summary>Best-effort client IP, honouring the reverse proxy's X-Forwarded-For.</summary>
         private string? GetClientIp()
         {
