@@ -17,6 +17,27 @@
     <!-- Personuppgiftsbiträdesavtal (DPA) acceptance gate — populated by loadDpaGate() -->
     <div id="dpaGate" class="mb-4" style="display:none;"></div>
 
+    <!-- Plain-language "what is this" explanation for the DPA banner -->
+    <div class="modal fade" id="dpaInfoModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-info-circle me-2"></i>Vad är personuppgiftsbiträdesavtalet?</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Pistol.nu sparar uppgifter om er klubbs medlemmar – till exempel namn, e-post och tävlingsresultat – åt er.</p>
+                    <p>Avtalet är vårt löfte om hur vi sköter de uppgifterna: vi använder dem bara för att få klubben att fungera, vi håller dem säkra, och vi säljer dem aldrig vidare.</p>
+                    <p>Lagen (GDPR) säger att klubben måste ha ett sådant avtal med oss. När du klickar <strong>Godkänn</strong> säger du att klubben är okej med det. Det kostar inget och tar en sekund.</p>
+                    <p class="mb-0 text-muted small">Bra att veta: det är klubbens ansvar att rätt person godkänner – helst någon i styrelsen.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Admin Tabs -->
     <ul class="nav nav-tabs mb-3" id="adminTabs" role="tablist">
         <li class="nav-item" role="presentation">
@@ -4925,6 +4946,8 @@ async function loadDpaGate() {
                 '<p class="mb-2 small text-muted">Genom att godkänna intygar du att du har behörighet att ' +
                 'ingå avtalet för föreningens räkning. Det är föreningens ansvar att rätt person godkänner ' +
                 '(t.ex. efter styrelsebeslut).</p>' +
+                '<button type="button" class="btn btn-sm btn-outline-info me-2" data-bs-toggle="modal" data-bs-target="#dpaInfoModal">' +
+                '<i class="bi bi-info-circle me-1"></i>Vad är detta?</button>' +
                 '<a href="/personuppgiftsbitradesavtal" target="_blank" rel="noopener" class="btn btn-sm btn-outline-secondary me-2">' +
                 '<i class="bi bi-file-earmark-text me-1"></i>Granska avtalet</a>' +
                 '<button type="button" class="btn btn-sm btn-primary" id="dpaAcceptBtn">' +

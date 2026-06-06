@@ -11,9 +11,9 @@ namespace HpskSite.Models
     public static class DpaInfo
     {
         /// <summary>Current contract version. Bump on material changes to the main terms.</summary>
-        public const string Version = "1.0";
+        public const string Version = "1.1";
 
         /// <summary>Effective date shown on the agreement (yyyy-MM-dd).</summary>
-        public const string EffectiveDate = "2026-06-05";
+        public const string EffectiveDate = "2026-06-06";
     }
 }
