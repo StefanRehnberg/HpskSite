@@ -32,39 +32,58 @@
                     <i class="bi bi-shield-check me-1"></i>Personuppgiftsbiträdesavtal (PUB/DPA)
                     <span class="badge bg-light text-dark ms-1" id="dpaCurrentVersion"></span>
                 </h5>
-                <div class="d-flex gap-2">
-                    <div class="form-check mb-0 align-self-center">
-                        <input class="form-check-input" type="checkbox" id="dpaOnlyMissing" onchange="renderDpaOverview()">
-                        <label class="form-check-label small" for="dpaOnlyMissing">Visa endast klubbar utan aktuellt avtal</label>
-                    </div>
-                    <button class="btn btn-sm btn-outline-secondary" onclick="exportDpaOverviewCsv()" title="Exportera till CSV">
-                        <i class="bi bi-download me-1"></i>CSV
-                    </button>
-                </div>
+                <button class="btn btn-sm btn-outline-secondary" id="dpaToggleBtn" onclick="toggleDpaDetails()" aria-expanded="false">
+                    <i class="bi bi-chevron-down me-1" id="dpaToggleIcon"></i><span id="dpaToggleLabel">Visa klubblista</span>
+                </button>
             </div>
 
-            <div class="row g-2 text-center mb-3" id="dpaSummary">
+            <div class="row g-2 text-center mb-2" id="dpaSummary">
                 <div class="col"><div class="border rounded py-2"><div class="fs-4 fw-bold" id="dpaCountTotal">–</div><small class="text-muted">Klubbar</small></div></div>
                 <div class="col"><div class="border rounded py-2 border-success"><div class="fs-4 fw-bold text-success" id="dpaCountCurrent">–</div><small class="text-muted">Aktuellt avtal</small></div></div>
                 <div class="col"><div class="border rounded py-2 border-warning"><div class="fs-4 fw-bold text-warning" id="dpaCountOutdated">–</div><small class="text-muted">Äldre version</small></div></div>
                 <div class="col"><div class="border rounded py-2 border-danger"><div class="fs-4 fw-bold text-danger" id="dpaCountNone">–</div><small class="text-muted">Ej godkänt</small></div></div>
             </div>
 
-            <div class="table-responsive" id="dpaTableWrap" style="display:none;">
-                <table class="table table-sm table-hover mb-0">
-                    <thead>
-                        <tr>
-                            <th>Klubb</th>
-                            <th>Krets</th>
-                            <th>Status</th>
-                            <th>Godkänd av</th>
-                            <th>Datum</th>
-                        </tr>
-                    </thead>
-                    <tbody id="dpaTableBody"></tbody>
-                </table>
+            <!-- Collapsible, paginated club list (collapsed by default — can be hundreds of rows) -->
+            <div id="dpaDetails" style="display:none;">
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 my-2">
+                    <div class="form-check mb-0">
+                        <input class="form-check-input" type="checkbox" id="dpaOnlyMissing" onchange="dpaFilterChanged()">
+                        <label class="form-check-label small" for="dpaOnlyMissing">Visa endast klubbar utan aktuellt avtal</label>
+                    </div>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="exportDpaOverviewCsv()" title="Exportera alla rader till CSV">
+                        <i class="bi bi-download me-1"></i>CSV
+                    </button>
+                </div>
+
+                <div class="table-responsive" id="dpaTableWrap" style="display:none;">
+                    <table class="table table-sm table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>Klubb</th>
+                                <th>Krets</th>
+                                <th>Status</th>
+                                <th>Godkänd av</th>
+                                <th>Datum</th>
+                            </tr>
+                        </thead>
+                        <tbody id="dpaTableBody"></tbody>
+                    </table>
+                </div>
+                <p class="text-muted small mb-0 mt-2" id="dpaEmptyNote" style="display:none;"></p>
+
+                <div class="d-flex justify-content-between align-items-center mt-2" id="dpaPager" style="display:none;">
+                    <small class="text-muted" id="dpaPagerInfo"></small>
+                    <div class="btn-group btn-group-sm">
+                        <button class="btn btn-outline-secondary" id="dpaPrev" onclick="dpaChangePage(-1)">
+                            <i class="bi bi-chevron-left"></i> Föregående
+                        </button>
+                        <button class="btn btn-outline-secondary" id="dpaNext" onclick="dpaChangePage(1)">
+                            Nästa <i class="bi bi-chevron-right"></i>
+                        </button>
+                    </div>
+                </div>
             </div>
-            <p class="text-muted small mb-0" id="dpaEmptyNote" style="display:none;"></p>
         </div>
     </div>
 
@@ -671,6 +690,28 @@ function displayClubs(clubs) {
 // ===== DPA / PUB-avtal compliance overview (site admins only) =====
 let dpaOverview = null;   // full response { summary, clubs, currentVersion }
 let dpaStatusMap = {};    // clubId -> { state, version, date, by, name, region }
+let dpaPage = 1;          // current page of the (filtered) club list
+const DPA_PAGE_SIZE = 25;
+
+function toggleDpaDetails() {
+    const details = document.getElementById('dpaDetails');
+    const open = details.style.display === 'none';
+    details.style.display = open ? '' : 'none';
+    document.getElementById('dpaToggleBtn').setAttribute('aria-expanded', open ? 'true' : 'false');
+    document.getElementById('dpaToggleIcon').className =
+        (open ? 'bi bi-chevron-up' : 'bi bi-chevron-down') + ' me-1';
+    document.getElementById('dpaToggleLabel').textContent = open ? 'Dölj klubblista' : 'Visa klubblista';
+}
+
+function dpaFilterChanged() {
+    dpaPage = 1; // filtering can shrink the list — restart at page 1
+    renderDpaOverview();
+}
+
+function dpaChangePage(delta) {
+    dpaPage += delta;
+    renderDpaOverview();
+}
 
 function dpaBadgeHtml(entry) {
     if (!entry) return '<span class="text-muted">–</span>';
@@ -721,18 +762,28 @@ function renderDpaOverview() {
     const tbody = document.getElementById('dpaTableBody');
     const wrap = document.getElementById('dpaTableWrap');
     const note = document.getElementById('dpaEmptyNote');
+    const pager = document.getElementById('dpaPager');
 
     if (rows.length === 0) {
         wrap.style.display = 'none';
+        pager.style.display = 'none';
         note.style.display = '';
         note.textContent = onlyMissing
             ? 'Alla klubbar har godkänt det aktuella avtalet.'
             : 'Inga klubbar hittades.';
         return;
     }
+
+    // Clamp the page to the available range, then slice.
+    const totalPages = Math.max(1, Math.ceil(rows.length / DPA_PAGE_SIZE));
+    if (dpaPage > totalPages) dpaPage = totalPages;
+    if (dpaPage < 1) dpaPage = 1;
+    const start = (dpaPage - 1) * DPA_PAGE_SIZE;
+    const pageRows = rows.slice(start, start + DPA_PAGE_SIZE);
+
     note.style.display = 'none';
     wrap.style.display = '';
-    tbody.innerHTML = rows.map(c => {
+    tbody.innerHTML = pageRows.map(c => {
         const by = c.acceptedByName ? escapeDpaHtml(c.acceptedByName) : '<span class="text-muted">–</span>';
         const date = c.acceptedDate || '<span class="text-muted">–</span>';
         return `<tr>
@@ -743,6 +794,17 @@ function renderDpaOverview() {
             <td>${date}</td>
         </tr>`;
     }).join('');
+
+    // Pager — only when more than one page.
+    if (rows.length > DPA_PAGE_SIZE) {
+        pager.style.display = '';
+        document.getElementById('dpaPagerInfo').textContent =
+            `Visar ${start + 1}–${start + pageRows.length} av ${rows.length}`;
+        document.getElementById('dpaPrev').disabled = dpaPage <= 1;
+        document.getElementById('dpaNext').disabled = dpaPage >= totalPages;
+    } else {
+        pager.style.display = 'none';
+    }
 }
 
 function applyDpaBadgesToTable() {
