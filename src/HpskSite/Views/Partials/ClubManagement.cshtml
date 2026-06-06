@@ -632,7 +632,7 @@ function displayClubs(clubs) {
 
     // The PUB-avtal column is only meaningful for site admins (the overview endpoint
     // is site-admin gated); hide it entirely for regional admins.
-    const dpaIsSiteAdmin = document.getElementById('clubs-tab')?.dataset.isSiteAdmin === 'true';
+    const dpaIsSiteAdmin = document.getElementById('clubs')?.dataset.isSiteAdmin === 'true';
     if (!dpaIsSiteAdmin) {
         document.getElementById('clubsList')
             .querySelectorAll('.dpa-col').forEach(el => el.style.display = 'none');
@@ -682,7 +682,7 @@ function dpaBadgeHtml(entry) {
 }
 
 function loadDpaOverview() {
-    const isSiteAdmin = document.getElementById('clubs-tab')?.dataset.isSiteAdmin === 'true';
+    const isSiteAdmin = document.getElementById('clubs')?.dataset.isSiteAdmin === 'true';
     if (!isSiteAdmin) return; // endpoint is site-admin gated; card stays hidden for others
 
     fetch('/umbraco/surface/Dpa/GetDpaOverview')
