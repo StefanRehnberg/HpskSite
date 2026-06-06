@@ -2851,7 +2851,18 @@ namespace HpskSite.Controllers
                     var dbResults = await GetCompetitionResultsInternal(request.CompetitionId);
                     if (dbResults.Any())
                     {
-                        var freshResults = await CalculateFinalResults(dbResults, request.CompetitionId);
+                        // Re-apply the stored class-merge config so the published snapshot keeps
+                        // the merged groups the admin saw on the preliminary list. Without this the
+                        // snapshot is regenerated with every class in its own group.
+                        List<ClassMergeAction>? storedMerges = null;
+                        var mergeConfigJson = finalResultsList.GetValue<string>("mergeConfig");
+                        if (!string.IsNullOrEmpty(mergeConfigJson))
+                        {
+                            try { storedMerges = JsonConvert.DeserializeObject<List<ClassMergeAction>>(mergeConfigJson); }
+                            catch { /* ignore malformed config — fall back to unmerged */ }
+                        }
+
+                        var freshResults = await CalculateFinalResults(dbResults, request.CompetitionId, storedMerges);
                         var resultDataJson = JsonConvert.SerializeObject(freshResults);
                         finalResultsList.SetValue("resultData", resultDataJson);
                         _logger.LogInformation("Regenerated results JSON with {Count} shooters for competition {CompetitionId}",
