@@ -425,6 +425,26 @@ namespace HpskSite.Services
             await UpsertQualificationAsync(q);
         }
 
+        /// <summary>
+        /// Functionary-asserted historical Guldfodring year (for märken earned before the system / off
+        /// pistol.nu). Stamps <see cref="Marken.PartSourceManualAttest"/> so the lazy yearly recompute
+        /// recognises it and never downgrades it (it has no validated series to re-derive from).
+        /// </summary>
+        public async Task EnsureManualFulfilledYearAsync(int memberId, string family, int year, int actingMemberId)
+        {
+            var q = await GetQualificationForYearAsync(memberId, family, year)
+                    ?? new MemberBadgeQualification { MemberId = memberId, BadgeFamily = family, Year = year, EnteredByMemberId = actingMemberId };
+            q.Part1Met = true;
+            q.Part1Source = Marken.PartSourceManualAttest;
+            q.Part2Met = true;
+            q.Part2Source = Marken.PartSourceManualAttest;
+            q.Fulfilled = true;
+            q.Status = Marken.StatusVerified;
+            q.SignedOffByMemberId = actingMemberId;
+            q.SignedOffDate ??= DateTime.Now;
+            await UpsertQualificationAsync(q);
+        }
+
         // ── Club secretary reads ──────────────────────────────────────
 
         /// <summary>

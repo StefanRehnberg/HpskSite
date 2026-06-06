@@ -1156,6 +1156,36 @@ namespace HpskSite.Controllers
             return Json(new { success = true, message = "Sparat." });
         }
 
+        public class GuldfodringYearRequest { public int MemberId { get; set; } public int Year { get; set; } public bool Fulfilled { get; set; } }
+
+        /// <summary>
+        /// Functionary override: mark/unmark a fulfilled Guldfodring year for Pistolskyttemärket — for
+        /// årtalsmärke history earned before the system / off pistol.nu. Each fulfilled year is one step
+        /// of 3 toward the next årtalsmärke. Manually-asserted years are stamped so the lazy yearly
+        /// recompute never downgrades them. POST /umbraco/surface/Marken/SetGuldfodringYear
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetGuldfodringYear([FromBody] GuldfodringYearRequest request)
+        {
+            int memberId = request?.MemberId ?? 0;
+            int year = request?.Year ?? 0;
+            if (memberId <= 0 || year < 1900 || year > DateTime.Now.Year + 1)
+                return Json(new { success = false, message = "Ogiltigt år." });
+            if (!await CanSignOffForMemberAsync(memberId))
+                return Json(new { success = false, message = "Du har inte behörighet att registrera guldfodringar för den här medlemmen." });
+
+            int actingId = await GetCurrentMemberIdAsync();
+            if (request!.Fulfilled)
+                await _ledger.EnsureManualFulfilledYearAsync(memberId, Family, year, actingId);
+            else
+            {
+                var q = await _ledger.GetQualificationForYearAsync(memberId, Family, year);
+                if (q != null) await _ledger.DeleteQualificationAsync(q.Id);
+            }
+            return Json(new { success = true, message = "Sparat." });
+        }
+
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> DeleteBadge([FromBody] IdRequest request)
@@ -1438,7 +1468,12 @@ namespace HpskSite.Controllers
                     fulfilledYears = ladder.FulfilledYears,
                     current = ladder.CurrentName,
                     next = ladder.NextName,
-                    nextAtYears = ladder.NextAtYears
+                    nextAtYears = ladder.NextAtYears,
+                    // Per-year breakdown so a functionary can add/remove historical Guldfodring-years.
+                    // manual = functionary-asserted (removable); otherwise system-derived from validated series.
+                    yearList = quals.Where(q => q.Fulfilled && q.Status == Marken.StatusVerified)
+                        .OrderBy(q => q.Year)
+                        .Select(q => new { year = q.Year, manual = q.Part1Source == Marken.PartSourceManualAttest })
                 },
                 guldfodring = new
                 {
@@ -2073,9 +2108,11 @@ namespace HpskSite.Controllers
                 q.SignedOffDate ??= DateTime.Now;
                 await _ledger.UpsertQualificationAsync(q);
             }
-            else if (existing != null)
+            else if (existing != null && existing.Part1Source != Marken.PartSourceManualAttest)
             {
                 // No longer complete — reflect current parts; drops out of the årtalsmärke count.
+                // A functionary-asserted historical year (PartSourceManualAttest) is authoritative and
+                // has no validated series to re-derive from, so it is left untouched here.
                 existing.Part1Met = cand.Part1Met;
                 existing.Part2Met = cand.Part2Met;
                 existing.Fulfilled = false;
