@@ -150,6 +150,27 @@
             Teaser = "Sammanhållande plattform för hela kretsen.",
             Detail = "Kretsens samtliga klubbar samlas under en kretssida med gemensam kalender, kretstävlingar och kretsmästare. Rekord och statistik per disciplin följs upp över alla klubbar. Kretsadministratörer kan stötta sina föreningar utan att behöva varje klubbs interna inloggning.",
             Tutorial = "tutorial-06"
+        },
+        new {
+            Image = "/images/about/skjutbanor-karta.png",
+            Title = "Skjutbanedatabas — gör anspråk på och förvalta er bana",
+            Teaser = "Hela Sveriges skjutbanor på en karta. Hitta er bana, gör anspråk på den och samla allt om den på ett ställe.",
+            Detail = "Sveriges skjutbanor finns redan utplacerade på en karta — hittar ni inte er bana lägger ni till den med ett klick. Gör anspråk på banan för klubben så blir ni förvaltare och kan bjuda in fler. En bana kan delas av flera klubbar: lägg till banor och vallar (avstånd, skjutplatser, kulfång), koppla de klubbar som nyttjar banan och ange varje klubbs träningstider. Banan kan dessutom kopplas till era tävlingar — då får tävlingssidan adress, karta och vägbeskrivning automatiskt, och tävlingarna syns på en egen karta under Tävlingar.",
+            Tutorial = ""
+        },
+        new {
+            Image = "/images/about/skjutbanor-tillstand.png",
+            Title = "Tillstånd, besiktning och dokument — utan pappershög",
+            Teaser = "Polistillstånd, besiktningar och dokument på ett ställe — med påminnelser inför förnyelse.",
+            Detail = "Samla polistillståndet (med giltighetstid och tillåtna skjuttider), max antal skott per år, besiktningsprotokoll samt buller- och blyutredningar. Pistol.nu påminner när ett tillstånd eller en besiktning närmar sig sista giltighetsdag och flaggar automatiskt klubbtider som ligger utanför tillståndet. Allt är klubbinternt — bara förvaltare ser det.",
+            Tutorial = ""
+        },
+        new {
+            Image = "/images/about/skjutbanor-incheckning.png",
+            Title = "Incheckning med QR — och ett färdigt miljöunderlag",
+            Teaser = "Skyttarna checkar in med mobilen och anger antal skott. Ni får årsöversikten — utan listor.",
+            Detail = "Skriv ut en A4-skylt med QR-kod och sätt upp den vid banan. Skytten skannar, checkar in när passet börjar och checkar ut med antal avlossade skott — ingen app att installera, bara mobilkameran. Förvaltaren får en årsöversikt: totalt antal skott mot tillståndets tak (över 5 000 skott/år blir verksamheten anmälningspliktig), antal skjutdagar och fördelning över dygnet, exporterbart som CSV för anmälan och rapportering. Rapporten är aggregerad — inga medlemsnamn.",
+            Tutorial = ""
         }
     };
 }
@@ -187,7 +208,8 @@
     /* Portrait phone screenshots (precision.png, faltskytte.png) — cap height so
        they don't tower over the desktop screenshots in the rest of the page. */
     .about-slab img.about-shot[src*="precision.png"],
-    .about-slab img.about-shot[src*="faltskytte.png"] {
+    .about-slab img.about-shot[src*="faltskytte.png"],
+    .about-slab img.about-shot[src*="skjutbanor-incheckning.png"] {
         width: auto;
         max-width: 100%;
         max-height: 360px;
@@ -523,6 +545,26 @@
     </header>
 
     <div class="row g-3 mb-5">
+        <div class="col-md-6 col-lg-4">
+            <div class="card h-100 border-0 shadow-sm position-relative" style="opacity: 0.85;">
+                <div class="position-absolute top-0 end-0 m-2">
+                    <span class="badge rounded-pill bg-success">
+                        <i class="bi bi-check-circle-fill me-1"></i>Klart
+                    </span>
+                </div>
+                <div class="card-body">
+                    <h6 class="card-title text-decoration-line-through">
+                        <i class="bi bi-geo-alt text-success me-2"></i>Skjutbanedatabas
+                    </h6>
+                    <p class="card-text small mb-0">
+                        Ett samlat register över klubbarnas skjutbanor — med tillstånd, besiktningar och miljöunderlag på ett ställe.
+                        <span class="d-block mt-1 text-success small fw-semibold">
+                            <i class="bi bi-arrow-right me-1"></i>Levererat juni 2026 — nationell bandatabas med karta och &quot;gör anspråk på banan&quot;, banor/vallar och delning mellan klubbar, kompletta tillstånds- och dokumentdossiéer med förnyelsepåminnelser, samt QR-incheckning med skotträkning som bygger ett färdigt underlag för miljörapporteringen.
+                        </span>
+                    </p>
+                </div>
+            </div>
+        </div>
         <div class="col-md-6 col-lg-4">
             <div class="card h-100 border-0 shadow-sm">
                 <div class="card-body">
