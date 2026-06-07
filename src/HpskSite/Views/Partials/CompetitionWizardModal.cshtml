@@ -123,8 +123,9 @@
                             <small class="form-text text-muted d-block">Tävlingen visas bara för den valda klubbens medlemmar</small>
                         </div>
 
-                        <div class="alert alert-light py-2 mb-0" id="wizard_organizerHelpText">
-                            <i class="bi bi-info-circle me-1"></i>Om varken klubb eller krets väljs syns tävlingen för alla.
+                        <div class="alert alert-info py-2 mb-0" id="wizard_organizerHelpText">
+                            <i class="bi bi-geo-alt me-1"></i><strong>Var hamnar tävlingen?</strong>
+                            <span id="wizard_destinationText" class="d-block mt-1">Välj klubb eller krets ovan.</span>
                         </div>
                     </div>
 
@@ -1297,7 +1298,7 @@ function populateWizardClubs(clubs) {
             lockedInfo.classList.remove('d-none');
         }
 
-        document.getElementById('wizard_organizerHelpText').classList.add('d-none');
+        document.getElementById('wizard_organizerHelpText').classList.remove('d-none');
         document.getElementById('wizard_isClubOnly').checked = true;
         onWizardIsClubOnlyChange();
     }
@@ -1343,19 +1344,16 @@ function applyClubPageContext() {
     wizardContext.clubName = origOption ? origOption.textContent : '';
 
     if (wizardUserRole === 'admin') {
-        // Site admin: keep enabled with info text
+        // Site admin: keep enabled
         select.disabled = false;
         document.getElementById('wizard_regionalFederation').disabled = false;
-        document.getElementById('wizard_organizerHelpText').innerHTML =
-            '<i class="bi bi-building me-1"></i>Tävlingen kopplas till vald klubb och dess krets.';
-        document.getElementById('wizard_organizerHelpText').classList.remove('alert-light');
-        document.getElementById('wizard_organizerHelpText').classList.add('alert-info');
         document.getElementById('wizard_organizerHelpText').classList.remove('d-none');
 
         const lockedInfo = document.getElementById('wizard_clubLockedInfo');
         if (lockedInfo) lockedInfo.classList.add('d-none');
     }
     // Non-admin lock is already applied by populateWizardClubs
+    updateWizardDestinationSummary();
 }
 
 // Load regions for dropdown
@@ -1382,25 +1380,19 @@ function loadRegionsForWizard() {
 function onWizardClubChange() {
     const clubSelect = document.getElementById('wizard_clubId');
     const regionSelect = document.getElementById('wizard_regionalFederation');
-    const helpText = document.getElementById('wizard_organizerHelpText');
 
     if (clubSelect.value) {
         // Club selected - disable region dropdown and clear its value
         regionSelect.value = '';
         regionSelect.disabled = true;
-        helpText.innerHTML = '<i class="bi bi-building me-1"></i>Tävlingen kopplas till vald klubb och dess krets.';
-        helpText.classList.remove('alert-light');
-        helpText.classList.add('alert-info');
     } else {
         // No club - enable region dropdown
         regionSelect.disabled = false;
-        helpText.innerHTML = '<i class="bi bi-info-circle me-1"></i>Om varken klubb eller krets väljs syns tävlingen för alla.';
-        helpText.classList.remove('alert-info');
-        helpText.classList.add('alert-light');
     }
 
     syncWizardClubOnlyAvailability();
     updateWizardMismatchWarning();
+    updateWizardDestinationSummary();
 
     // Refresh the range picker's "Klubbens banor" quick-pick for the chosen club.
     if (typeof compRangeLoadClubRanges === 'function') compRangeLoadClubRanges('wizard_', clubSelect.value);
@@ -1426,21 +1418,9 @@ function syncWizardClubOnlyAvailability() {
 
 // Handle region selection change
 function onWizardRegionChange() {
-    const regionSelect = document.getElementById('wizard_regionalFederation');
-    const helpText = document.getElementById('wizard_organizerHelpText');
-
-    if (regionSelect.value) {
-        helpText.innerHTML = '<i class="bi bi-diagram-3 me-1"></i>Tävlingen kopplas till vald krets.';
-        helpText.classList.remove('alert-light');
-        helpText.classList.add('alert-info');
-    } else {
-        helpText.innerHTML = '<i class="bi bi-info-circle me-1"></i>Om varken klubb eller krets väljs syns tävlingen för alla.';
-        helpText.classList.remove('alert-info');
-        helpText.classList.add('alert-light');
-    }
-
     syncWizardClubOnlyAvailability();
     updateWizardMismatchWarning();
+    updateWizardDestinationSummary();
 }
 
 function onWizardAllowTeamsChange() {
@@ -1466,6 +1446,7 @@ function onWizardIsClubOnlyChange() {
     if (hint) {
         hint.style.display = clubOnly ? '' : 'none';
     }
+    updateWizardDestinationSummary();
 }
 
 function onWizardAllowStafettChange() {
@@ -1505,7 +1486,7 @@ function updateWizardMismatchWarning() {
         message = '<strong>Varning!</strong> Tävlingen kopplas till en krets istället för <strong>' + origClubName + '</strong>. Den kommer inte att visas i någon klubbs tävlingslista — den hanteras istället från <strong>kretsens regionsida</strong>.';
     } else if (!newClubId && !newRegion) {
         // Both cleared — national competition
-        message = '<strong>Varning!</strong> Tävlingen skapas utan klubb eller krets och blir nationell. Den kommer inte att visas i <strong>' + origClubName + '</strong>s tävlingslista. Du måste gå till den allmänna <strong>administrationssidan</strong> för att redigera den.';
+        message = '<strong>Varning!</strong> Tävlingen skapas utan klubb eller krets och blir nationell. Den kommer inte att visas i <strong>' + origClubName + '</strong>s tävlingslista — den hanteras från den allmänna <strong>administrationssidan</strong> (eller kretsens regionsida).';
     }
 
     if (message) {
@@ -1514,6 +1495,46 @@ function updateWizardMismatchWarning() {
     } else {
         warningDiv.classList.add('d-none');
     }
+}
+
+// Live "Var hamnar tävlingen?" summary — neutral, always-on plain-language statement of
+// where the competition will be managed/shown, based on the current Arrangör + visibility
+// choices. Shown in ALL contexts (club page, regional page, general admin) so a user who
+// ticks a club "because the club arranges it" immediately sees the visibility consequence.
+function updateWizardDestinationSummary() {
+    const textEl = document.getElementById('wizard_destinationText');
+    if (!textEl) return;
+
+    const clubSelect = document.getElementById('wizard_clubId');
+    const regionSelect = document.getElementById('wizard_regionalFederation');
+    const clubVal = clubSelect ? (clubSelect.value || '') : '';
+    const regionVal = regionSelect ? (regionSelect.value || '') : '';
+    const clubOnly = document.getElementById('wizard_isClubOnly')?.checked || false;
+
+    // Before clubs have loaded the dropdown only has its placeholder — stay neutral.
+    if (clubSelect && clubSelect.options.length <= 1 && !regionVal) {
+        textEl.innerHTML = 'Välj klubb eller krets ovan.';
+        return;
+    }
+
+    const clubName = (clubVal && clubSelect.selectedIndex >= 0)
+        ? clubSelect.options[clubSelect.selectedIndex].textContent : '';
+    const regionName = (regionVal && regionSelect.selectedIndex >= 0)
+        ? regionSelect.options[regionSelect.selectedIndex].textContent : '';
+
+    let msg;
+    if (clubVal) {
+        if (clubOnly) {
+            msg = 'Visas <strong>endast för ' + clubName + 's medlemmar</strong>, på ' + clubName + 's sida. Hanteras från <strong>' + clubName + 's administrationssida</strong>.';
+        } else {
+            msg = 'Visas på <strong>' + clubName + 's sida</strong> och i kretsens inbjudningslista. Hanteras från <strong>' + clubName + 's administrationssida</strong>.';
+        }
+    } else if (regionVal) {
+        msg = 'Visas på <strong>kretsens (' + regionName + ') regionsida</strong> — inte under någon klubb. Hanteras från <strong>regionsidan</strong>.';
+    } else {
+        msg = '<strong>Nationell tävling</strong> — syns för alla. Hanteras endast från den allmänna <strong>administrationssidan</strong>.';
+    }
+    textEl.innerHTML = msg;
 }
 
 // Load series for dropdown
@@ -1993,8 +2014,23 @@ function submitWizard() {
                 window.onCompetitionSaved();
             }
 
-            // Show success message
-            alert('Tävling skapad!');
+            // Show success message naming WHERE the competition landed, so a user who
+            // mis-scoped it (e.g. picked a krets/national instead of their club) knows
+            // where to look instead of reporting "I can't find it".
+            const _cName = (clubIdVal && clubSelect.selectedIndex >= 0) ? clubSelect.options[clubSelect.selectedIndex].textContent : '';
+            const _rName = (regFedVal && regionSelect.selectedIndex >= 0) ? regionSelect.options[regionSelect.selectedIndex].textContent : '';
+            const _clubOnly = document.getElementById('wizard_isClubOnly')?.checked || false;
+            let _where;
+            if (clubIdVal) {
+                _where = _clubOnly
+                    ? 'Den visas endast för ' + _cName + 's medlemmar och hanteras på ' + _cName + 's administrationssida.'
+                    : 'Den hanteras på ' + _cName + 's administrationssida och syns i kretsens inbjudningslista.';
+            } else if (regFedVal) {
+                _where = 'Den ligger på kretsens (' + _rName + ') regionsida — inte under någon klubb.';
+            } else {
+                _where = 'Den är nationell och hanteras via den allmänna administrationssidan.';
+            }
+            alert('Tävling skapad!\n\n' + _where);
         } else {
             alert('Fel vid skapande av tävling: ' + (data.message || 'Okänt fel'));
             btnCreate.disabled = false;
@@ -2069,9 +2105,9 @@ window.resetWizard = function() {
     const helpText = document.getElementById('wizard_organizerHelpText');
     if (helpText) {
         helpText.classList.remove('d-none');
-        helpText.classList.remove('alert-info');
-        helpText.classList.add('alert-light');
-        helpText.innerHTML = '<i class="bi bi-info-circle me-1"></i>Om varken klubb eller krets väljs syns tävlingen för alla.';
+        helpText.classList.add('alert-info');
+        helpText.innerHTML = '<i class="bi bi-geo-alt me-1"></i><strong>Var hamnar tävlingen?</strong>' +
+            '<span id="wizard_destinationText" class="d-block mt-1">Välj klubb eller krets ovan.</span>';
     }
 
     // Auto-check "isClubOnly" checkbox if on club page

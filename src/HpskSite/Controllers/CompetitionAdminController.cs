@@ -562,6 +562,9 @@ namespace HpskSite.Controllers
                             isClubOnly = comp.Value<bool>("isClubOnly"),
                             isExternal = comp.Value<bool>("isExternal"),
                             clubId = comp.Value<int?>("clubId") ?? 0,
+                            // Surfaced so the list can tag each row Klubb / Krets / Nationell — lets a
+                            // regional admin who mis-scoped a comp recognise where it actually landed.
+                            regionalFederation = comp.Value<string>("regionalFederation") ?? "",
                             registrationCount = regCount,
                             allowSelfReporting = comp.Value<bool>("allowSelfReporting"),
                             seriesId = isInSeries ? parent!.Id : (int?)null,
@@ -575,6 +578,7 @@ namespace HpskSite.Controllers
                 var result = new
                 {
                     success = true,
+                    isSiteAdmin = isSiteAdmin,
                     data = competitions
                 };
 

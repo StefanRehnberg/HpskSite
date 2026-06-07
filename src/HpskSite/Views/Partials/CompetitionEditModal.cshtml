@@ -541,8 +541,9 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                                 <span id="edit_clubMismatchText"></span>
                             </div>
 
-                            <div class="alert alert-light py-2 mb-0" id="edit_organizerHelpText">
-                                <i class="bi bi-info-circle me-1"></i>Om varken klubb eller krets väljs syns tävlingen för alla.
+                            <div class="alert alert-info py-2 mb-0" id="edit_organizerHelpText">
+                                <i class="bi bi-geo-alt me-1"></i><strong>Var hamnar tävlingen?</strong>
+                                <span id="edit_destinationText" class="d-block mt-1">Välj klubb eller krets ovan.</span>
                             </div>
                         </div>
                     </div>
@@ -1195,6 +1196,7 @@ function onEditIsClubOnlyChange() {
     if (hint) {
         hint.style.display = clubOnly ? '' : 'none';
     }
+    updateEditDestinationSummary();
 }
 
 function onEditAllowTeamsChange() {
@@ -1669,6 +1671,7 @@ function onEditClubChange() {
 function onEditRegionChange() {
     syncEditClubOnlyAvailability();
     updateEditMismatchWarning();
+    updateEditDestinationSummary();
 }
 
 // "Endast för vald klubb" only makes sense when an actual club is selected.
@@ -1710,7 +1713,7 @@ function updateEditMismatchWarning() {
             message = '<strong>Obs!</strong> Du ändrar tävlingens klubb. Om du sparar kommer tävlingen att flyttas och visas under den nya klubben istället.';
         } else if (!newClubId && !newRegion) {
             // Case 4: Both club and region removed (national)
-            message = '<strong>Obs!</strong> Tävlingen blir nationell utan klubb eller krets. Den kan bara hanteras på den allmänna administrationssidan.';
+            message = '<strong>Obs!</strong> Tävlingen blir nationell utan klubb eller krets. Den hanteras från den allmänna administrationssidan (eller kretsens regionsida).';
         } else if (!newClubId && newRegion) {
             // Case 3: Club removed but region set
             message = '<strong>Obs!</strong> Tävlingen flyttas till kretsnivå. Den kommer inte att visas i någon klubbs tävlingslista — den hanteras istället från <strong>kretsens regionsida</strong>.';
@@ -1719,7 +1722,7 @@ function updateEditMismatchWarning() {
         // Competition originally had a region but no club
         if (!newClubId && !newRegion) {
             // Region removed, now national
-            message = '<strong>Obs!</strong> Tävlingen blir nationell utan klubb eller krets. Den kan bara hanteras på den allmänna administrationssidan.';
+            message = '<strong>Obs!</strong> Tävlingen blir nationell utan klubb eller krets. Den hanteras från den allmänna administrationssidan (eller kretsens regionsida).';
         }
     }
 
@@ -1731,11 +1734,10 @@ function updateEditMismatchWarning() {
     }
 }
 
-// Update the organizer help text and region dropdown state
+// Update the region dropdown state + the destination summary
 function updateEditOrganizerUI() {
     const clubSelect = document.getElementById('clubId');
     const regionSelect = document.getElementById('regionalFederation');
-    const helpText = document.getElementById('edit_organizerHelpText');
 
     // Don't re-enable region if dropdown is locked on club page
     const isClubPage = window.location.pathname.includes('/clubs/');
@@ -1746,22 +1748,52 @@ function updateEditOrganizerUI() {
         if (!isLocked) {
             regionSelect.disabled = true;
         }
-        if (helpText) {
-            helpText.innerHTML = '<i class="bi bi-building me-1"></i>Tävlingen kopplas till vald klubb och dess krets.';
-            helpText.classList.remove('alert-light');
-            helpText.classList.add('alert-info');
-        }
     } else {
         // No club - enable region dropdown (unless locked)
         if (!isLocked) {
             regionSelect.disabled = false;
         }
-        if (helpText) {
-            helpText.innerHTML = '<i class="bi bi-info-circle me-1"></i>Om varken klubb eller krets väljs syns tävlingen för alla.';
-            helpText.classList.remove('alert-info');
-            helpText.classList.add('alert-light');
-        }
     }
+
+    updateEditDestinationSummary();
+}
+
+// Live "Var hamnar tävlingen?" summary — neutral, always-on statement of where the
+// competition is managed/shown, based on the current Arrangör + visibility choices.
+// Mirrors updateWizardDestinationSummary in CompetitionWizardModal.cshtml.
+function updateEditDestinationSummary() {
+    const textEl = document.getElementById('edit_destinationText');
+    if (!textEl) return;
+
+    const clubSelect = document.getElementById('clubId');
+    const regionSelect = document.getElementById('regionalFederation');
+    const clubVal = clubSelect ? (clubSelect.value || '') : '';
+    const regionVal = regionSelect ? (regionSelect.value || '') : '';
+    const clubOnly = document.getElementById('isClubOnly')?.checked || false;
+
+    if (clubSelect && clubSelect.options.length <= 1 && !regionVal) {
+        textEl.innerHTML = 'Välj klubb eller krets ovan.';
+        return;
+    }
+
+    const clubName = (clubVal && clubSelect.selectedIndex >= 0)
+        ? clubSelect.options[clubSelect.selectedIndex].textContent : '';
+    const regionName = (regionVal && regionSelect.selectedIndex >= 0)
+        ? regionSelect.options[regionSelect.selectedIndex].textContent : '';
+
+    let msg;
+    if (clubVal) {
+        if (clubOnly) {
+            msg = 'Visas <strong>endast för ' + clubName + 's medlemmar</strong>, på ' + clubName + 's sida. Hanteras från <strong>' + clubName + 's administrationssida</strong>.';
+        } else {
+            msg = 'Visas på <strong>' + clubName + 's sida</strong> och i kretsens inbjudningslista. Hanteras från <strong>' + clubName + 's administrationssida</strong>.';
+        }
+    } else if (regionVal) {
+        msg = 'Visas på <strong>kretsens (' + regionName + ') regionsida</strong> — inte under någon klubb. Hanteras från <strong>regionsidan</strong>.';
+    } else {
+        msg = '<strong>Nationell tävling</strong> — syns för alla. Hanteras endast från den allmänna <strong>administrationssidan</strong>.';
+    }
+    textEl.innerHTML = msg;
 }
 
 // Update populateEditModal to handle club and region fields

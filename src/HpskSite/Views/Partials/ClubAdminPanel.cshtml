@@ -3105,11 +3105,19 @@ function loadClubCompetitions() {
                 const clubCompetitions = (data.data || []).filter(comp =>
                     comp.clubId === clubId
                 );
+                // Comps this user manages that have NO club (krets/nationell). They never show
+                // under any club page — surfacing the count stops the "I created it but can't
+                // find it" confusion when a regional admin mis-scoped the Arrangör.
+                // Suppressed for site admins: they receive every no-club comp site-wide, so the
+                // count would be noise unrelated to this club (they use the main admin page).
+                const noClubComps = data.isSiteAdmin
+                    ? []
+                    : (data.data || []).filter(comp => !comp.clubId || comp.clubId <= 0);
                 // Populate type dropdown from full club result on first load (when no type filter active)
                 if (!clubCompetitionsFilters.type && clubCompetitionTypesCache.length === 0) {
                     populateClubTypeFilter(clubCompetitions);
                 }
-                displayClubCompetitions(clubCompetitions);
+                displayClubCompetitions(clubCompetitions, noClubComps);
             } else {
                 container.innerHTML = '<div class="alert alert-warning">Kunde inte ladda tävlingar.</div>';
             }
@@ -3120,24 +3128,38 @@ function loadClubCompetitions() {
         });
 }
 
-function displayClubCompetitions(competitions) {
+function displayClubCompetitions(competitions, noClubComps) {
     const container = document.getElementById('competitionsTableContainer');
 
+    // Hint: comps the user manages that have no club (krets/nationell) don't appear in this
+    // club list. Point them to where those are managed instead.
+    let noClubHint = '';
+    if (noClubComps && noClubComps.length > 0) {
+        noClubHint = '<div class="alert alert-info py-2 small">' +
+            '<i class="bi bi-info-circle me-1"></i>Du hanterar även <strong>' + noClubComps.length +
+            '</strong> tävling' + (noClubComps.length === 1 ? '' : 'ar') + ' utan klubb (krets-/nationell nivå). ' +
+            'De visas inte här — öppna kretsens regionsida eller den allmänna administrationssidan för att hantera dem.' +
+            '</div>';
+    }
+
     if (!competitions || competitions.length === 0) {
-        container.innerHTML = '<div class="alert alert-info">Inga tävlingar har skapats ännu för denna klubb.</div>';
+        container.innerHTML = noClubHint + '<div class="alert alert-info">Inga tävlingar har skapats ännu för denna klubb.</div>';
         return;
     }
 
-    let html = '<div class="table-responsive"><table class="table table-striped">';
+    let html = noClubHint + '<div class="table-responsive"><table class="table table-striped">';
     html += '<thead><tr><th>Namn</th><th>Typ</th><th>Startdatum</th><th>Status</th><th>Anmälningar</th><th>Åtgärder</th></tr></thead><tbody>';
 
     competitions.forEach(comp => {
         const startDate = comp.startDate ? new Date(comp.startDate).toLocaleDateString('sv-SE') : '-';
         const statusBadge = getCompetitionStatusBadge(comp.status);
+        const scopeBadge = comp.isClubOnly
+            ? '<span class="badge bg-warning text-dark ms-2"><i class="bi bi-shield-lock me-1"></i>Endast klubb</span>'
+            : '<span class="badge bg-primary ms-2"><i class="bi bi-building me-1"></i>Öppen/inbjudan</span>';
 
         html += `
             <tr>
-                <td><strong>${escapeHtml(comp.name)}</strong></td>
+                <td><strong>${escapeHtml(comp.name)}</strong>${scopeBadge}</td>
                 <td><span class="badge bg-secondary">${escapeHtml(comp.type)}</span></td>
                 <td>${startDate}</td>
                 <td>${statusBadge}</td>

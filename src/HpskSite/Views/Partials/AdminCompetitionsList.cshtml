@@ -121,6 +121,7 @@
         <td>
             {name}
             {externalBadge}
+            {scopeBadge}
         </td>
         <td><span class="badge bg-secondary">{type}</span></td>
         <td>{competitionDate}</td>
@@ -497,6 +498,19 @@ function renderCompetitionRow(comp, template) {
         ? '<span class="badge bg-info ms-2"><i class="bi bi-box-arrow-up-right me-1"></i>Extern</span>'
         : '';
 
+    // Host/scope badge — makes it obvious whether a row is a club, krets or national
+    // competition, so a mis-scoped comp is recognisable rather than "missing".
+    let scopeBadge;
+    if (comp.clubId && comp.clubId > 0) {
+        scopeBadge = comp.isClubOnly
+            ? '<span class="badge bg-warning text-dark ms-2"><i class="bi bi-shield-lock me-1"></i>Endast klubb</span>'
+            : '<span class="badge bg-primary ms-2"><i class="bi bi-building me-1"></i>Klubb</span>';
+    } else if (comp.regionalFederation) {
+        scopeBadge = '<span class="badge bg-info text-dark ms-2"><i class="bi bi-diagram-3 me-1"></i>Krets</span>';
+    } else {
+        scopeBadge = '<span class="badge bg-dark ms-2"><i class="bi bi-globe me-1"></i>Nationell</span>';
+    }
+
     // Generate upload buttons (only for external competitions)
     const nameEscaped = escapeHtml(comp.name).replace(/'/g, "\\'");
     const uploadInvitationButton = comp.isExternal
@@ -524,6 +538,7 @@ function renderCompetitionRow(comp, template) {
         .replace(/{statusClass}/g, statusInfo.badgeClass)
         .replace(/{registrationCount}/g, comp.registrationCount || 0)
         .replace(/{externalBadge}/g, externalBadge)
+        .replace(/{scopeBadge}/g, scopeBadge)
         .replace(/{isExternal}/g, comp.isExternal ? 'true' : 'false')
         .replace(/{uploadInvitationButton}/g, uploadInvitationButton)
         .replace(/{uploadResultListButton}/g, uploadResultListButton);
