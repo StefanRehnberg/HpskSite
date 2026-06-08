@@ -282,6 +282,29 @@
                     </div>
                     <div class="small mt-2" id="sightDevReadout"></div>
                 </div>
+
+                <!-- Hold wobble -->
+                <div class="col-md-6 col-xl-3">
+                    <div class="sikt-control-label">
+                        <span><i class="bi bi-activity me-1"></i>Skakning (vingel)</span>
+                    </div>
+                    <div class="mb-3">
+                        <div class="sikt-control-label">
+                            <span class="small">Amplitud</span>
+                            <span class="val" id="wobbleAmpVal">0&nbsp;%</span>
+                        </div>
+                        <input type="range" class="form-range" id="wobbleAmp" min="0" max="100" value="0">
+                        <div class="sikt-ends"><span>Stadig</span><span>Skakig</span></div>
+                    </div>
+                    <div>
+                        <div class="sikt-control-label">
+                            <span class="small">Frekvens</span>
+                            <span class="val" id="wobbleFreqVal">1.0&nbsp;Hz</span>
+                        </div>
+                        <input type="range" class="form-range" id="wobbleFreq" min="0.2" max="12" step="0.1" value="1.0">
+                        <div class="sikt-ends"><span>Långsam sväng</span><span>Darrning (tremor)</span></div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -428,10 +451,16 @@
         diopter: false,
         aperture: 1.2,          // mm
         sightDx: 0,             // front-sight alignment error, mm (right +)
-        sightDy: 0              // front-sight alignment error, mm (up + = "too much front sight")
+        sightDy: 0,             // front-sight alignment error, mm (up + = "too much front sight")
+        wobbleAmp: 0,           // hold wobble amplitude, 0..1
+        wobbleFreq: 1.0         // hold wobble frequency, Hz
     };
 
     var SIGHT_VIS_PX = 20;      // canvas px per mm of (exaggerated) front-sight offset in the picture
+
+    // Live wobble offset (px), updated by the animation loop; all zero when steady.
+    var wob = { tx: 0, ty: 0, ax: 0, ay: 0 };
+    var wobbleRaf = null;
 
     function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
     function dTarget() { return 1 / state.distanceM; }
@@ -530,6 +559,7 @@
         return { x: state.sightDx * cmPerMm, y: state.sightDy * cmPerMm }; // y: up + = high
     }
 
+
     // ---- Canvas rendering ------------------------------------------------
     var W = 700, H = 560;            // canvas logical size (cropped on top — less empty sky)
     var CX = 350;
@@ -581,8 +611,8 @@
 
     function drawFront(c, cx) {
         // Alignment error shifts the blade in the notch (exaggerated for visibility).
-        var ox = state.sightDx * SIGHT_VIS_PX;     // right +
-        var oy = -state.sightDy * SIGHT_VIS_PX;    // up + -> higher on canvas
+        var ox = state.sightDx * SIGHT_VIS_PX + wob.ax;  // alignment error + tremor (right +)
+        var oy = -state.sightDy * SIGHT_VIS_PX + wob.ay; // up + -> higher on canvas
         var w = FRONT_W, x = cx - w / 2 + ox, top = SIGHT_TOP + oy, bottom = H - 6;
         var g = c.createLinearGradient(x, 0, x + w, 0);
         g.addColorStop(0, "#717171");
@@ -619,6 +649,9 @@
         // white gap under the bull equals the light bar on each side of the front sight ("lika ljusgap").
         var R = clamp(150 * Math.sqrt(25 / state.distanceM), 70, 200);
         var cy = (SIGHT_TOP - LIGHT_BAR) - R;
+        // Hold wobble: the aim wanders, so the bull drifts relative to the (eye-fixed) sights.
+        var tcx = CX + wob.tx;
+        var tcy = cy + wob.ty;
 
         var cR = DIO_R;
         if (state.diopter) {
@@ -633,7 +666,7 @@
         ctx.fillRect(0, 0, W, H);
 
         // layers, far -> near (correct occlusion); each blurred by its own defocus
-        ctx.filter = blurStr(tB); drawTarget(ctx, CX, cy, R);
+        ctx.filter = blurStr(tB); drawTarget(ctx, tcx, tcy, R);
         ctx.filter = blurStr(fB); drawFront(ctx, CX);
         ctx.filter = blurStr(rB); drawRear(ctx, CX);
         ctx.filter = "none";
@@ -645,7 +678,7 @@
             ctx.setLineDash([9, 9]);
             ctx.lineWidth = 2;
             ctx.strokeStyle = "rgba(255,255,255,0.85)";
-            ctx.beginPath(); ctx.arc(CX, cy, R, 0, Math.PI * 2); ctx.stroke();
+            ctx.beginPath(); ctx.arc(tcx, tcy, R, 0, Math.PI * 2); ctx.stroke();
             ctx.setLineDash([]);
             ctx.restore();
         }
@@ -668,10 +701,10 @@
     // ---- Shot group panel ------------------------------------------------
     var grpCvs = document.getElementById("grpCanvas");
     var grpCtx = grpCvs.getContext("2d");
-    var GSIZE = 300, GR = 130, GCX = 150, GCY = 150;
+    var GSIZE = 300, GR = 100, GCX = 150, GCY = 150;  // GR < canvas half so misses outside the rings show
     var TARGET_RADIUS_CM = 15;        // ring-7 radius on paper (~30 cm across); for the cm read-out
-    var shotSamples = [];             // standard-normal (x,y) draws, one per shot in the series
-    var groupMaxPairNorm = 0;         // largest pairwise distance among the draws (in sigma units)
+    var WOBBLE_PEAK_CM = 15;          // peak aim-wander (cm) at full amplitude — same scale drives view + group
+    var shotSamples = [];             // per shot: {x,y} clarity draws + {px,py} random wobble phases
 
     function setupGroupCanvas() {
         grpCvs.width = GSIZE * dpr;
@@ -687,16 +720,32 @@
 
     function generateSamples() {
         shotSamples = [];
-        for (var i = 0; i < 5; i++) shotSamples.push({ x: gauss(), y: gauss() });
-        groupMaxPairNorm = 0;
-        for (var a = 0; a < shotSamples.length; a++) {
-            for (var b = a + 1; b < shotSamples.length; b++) {
-                var dx = shotSamples[a].x - shotSamples[b].x;
-                var dy = shotSamples[a].y - shotSamples[b].y;
-                var d = Math.sqrt(dx * dx + dy * dy);
-                if (d > groupMaxPairNorm) groupMaxPairNorm = d;
-            }
+        for (var i = 0; i < 5; i++) {
+            shotSamples.push({
+                x: gauss(), y: gauss(),                       // clarity dispersion (gaussian)
+                px: Math.random() * 6.2832, py: Math.random() * 6.2832  // wobble phase at trigger break
+            });
         }
+    }
+
+    // Each shot's offset from the bull centre (cm): the wobble position at a random trigger-break
+    // moment + the clarity/blur dispersion + the systematic alignment and elevation shifts.
+    function computeShots() {
+        var claritySigmaCm = groupSigmaFrac() * TARGET_RADIUS_CM;
+        var peakCm = state.wobbleAmp * WOBBLE_PEAK_CM;
+        var align = poiAlignCm();                  // {x: right+, y: up+}
+        var lowCm = poiLowFrac() * TARGET_RADIUS_CM;
+        var out = [];
+        for (var i = 0; i < shotSamples.length; i++) {
+            var s = shotSamples[i];
+            var wx = peakCm * Math.sin(s.px);
+            var wy = peakCm * 0.8 * Math.sin(s.py);
+            out.push({
+                x: align.x + wx + claritySigmaCm * s.x,            // right +
+                y: (-align.y) + lowCm + wy + claritySigmaCm * s.y  // down +
+            });
+        }
+        return out;
     }
 
     function drawGroup() {
@@ -715,16 +764,12 @@
         grpCtx.moveTo(GCX, GCY - cmk); grpCtx.lineTo(GCX, GCY + cmk);
         grpCtx.stroke();
 
-        var sigma = groupSigmaFrac() * GR;
-        var cyShift = poiLowFrac() * GR;        // perceived-larger bull -> aim low
         var pxPerCm = GR / TARGET_RADIUS_CM;
-        var align = poiAlignCm();               // sight-alignment error -> POI shift
-        var poiX = align.x * pxPerCm;           // right +
-        var poiY = -align.y * pxPerCm;          // high (up) -> -y
-        var hr = GR * 0.045;
-        for (var i = 0; i < shotSamples.length; i++) {
-            var sx = GCX + poiX + shotSamples[i].x * sigma;
-            var sy = GCY + cyShift + poiY + shotSamples[i].y * sigma;
+        var pos = computeShots();
+        var hr = GR * 0.05;
+        for (var i = 0; i < pos.length; i++) {
+            var sx = GCX + pos[i].x * pxPerCm;
+            var sy = GCY + pos[i].y * pxPerCm;
             grpCtx.beginPath();
             grpCtx.arc(sx, sy, hr, 0, Math.PI * 2);
             grpCtx.fillStyle = "#101010";
@@ -736,7 +781,16 @@
     }
 
     function updateGroupLabel() {
-        var spreadCm = groupMaxPairNorm * groupSigmaFrac() * TARGET_RADIUS_CM;
+        var pos = computeShots();
+        var spreadCm = 0, misses = 0;
+        for (var a = 0; a < pos.length; a++) {
+            if (Math.sqrt(pos[a].x * pos[a].x + pos[a].y * pos[a].y) > TARGET_RADIUS_CM) misses++;
+            for (var b = a + 1; b < pos.length; b++) {
+                var dx = pos[a].x - pos[b].x, dy = pos[a].y - pos[b].y;
+                var d = Math.sqrt(dx * dx + dy * dy);
+                if (d > spreadCm) spreadCm = d;
+            }
+        }
         var label, cls;
         if (spreadCm < 7) { label = "Tät grupp"; cls = "text-success"; }
         else if (spreadCm < 13) { label = "Bra grupp"; cls = "text-success"; }
@@ -750,6 +804,7 @@
         var elevCm = poiLowFrac() * TARGET_RADIUS_CM;
         var sizeHtml = "Gruppstorlek ca " + Math.round(spreadCm) + "&nbsp;cm";
         if (elevCm >= 1) sizeHtml += " &middot; <span class='text-danger'>ca " + Math.round(elevCm) + "&nbsp;cm lågt</span>";
+        if (misses > 0) sizeHtml += " &middot; <span class='text-danger fw-semibold'>" + misses + " av " + pos.length + " utanför ringarna</span>";
         document.getElementById("grpSize").innerHTML = sizeHtml;
 
         var hint;
@@ -771,6 +826,9 @@
         }
         if (state.sightDx !== 0 || state.sightDy !== 0) {
             hint += " Lägg märke till hur ett pyttelitet linjeringsfel i kornet (bråkdels mm) flyttar hela träffbilden flera cm &ndash; därför är exakt likadan linjering varje skott helt avgörande.";
+        }
+        if (state.wobbleAmp > 0) {
+            hint += " Skakningen gör att skottet bryter någonstans i vingelområdet &ndash; ju större vingel, desto större grupp. Lugn andning, stödhand och avtryck mitt i vingeln håller ihop den.";
         }
         document.getElementById("grpHint").innerHTML = hint;
     }
@@ -839,6 +897,31 @@
         updateGroupLabel();
     }
 
+    // Wobble animation: drives only the sight picture (the group is a static result, not a live frame).
+    function wobbleLoop(now) {
+        if (state.wobbleAmp <= 0) { wobbleRaf = null; wob.tx = wob.ty = wob.ax = wob.ay = 0; draw(); return; }
+        var t = now / 1000;
+        // Sight-picture px per cm: target R=150 px = 15 cm. Same WOBBLE_PEAK_CM that drives the group,
+        // so the visible wander and the shot scatter match.
+        var peak = state.wobbleAmp * WOBBLE_PEAK_CM * (150 / TARGET_RADIUS_CM);
+        var ww = 2 * Math.PI * state.wobbleFreq;
+        wob.tx = peak * Math.sin(ww * t);            // two incommensurate freqs -> organic wander
+        wob.ty = peak * 0.8 * Math.sin(ww * 0.78 * t + 1.3);
+        var ap = peak * 0.08;                        // small, faster tremor in the alignment
+        wob.ax = ap * Math.sin(ww * 2.3 * t + 0.5);
+        wob.ay = ap * Math.sin(ww * 2.9 * t + 2.1);
+        draw();
+        wobbleRaf = requestAnimationFrame(wobbleLoop);
+    }
+    function syncWobbleAnim() {
+        if (state.wobbleAmp > 0) {
+            if (wobbleRaf === null) wobbleRaf = requestAnimationFrame(wobbleLoop);
+        } else {
+            if (wobbleRaf !== null) { cancelAnimationFrame(wobbleRaf); wobbleRaf = null; }
+            wob.tx = wob.ty = wob.ax = wob.ay = 0;
+        }
+    }
+
     window.siktNewSeries = function () {
         generateSamples();
         drawGroup();
@@ -849,6 +932,8 @@
         document.getElementById("lightVal").innerHTML = Math.round(state.light * 100) + "&nbsp;%";
         document.getElementById("apVal").innerHTML = state.aperture.toFixed(1) + "&nbsp;mm";
         document.getElementById("apertureWrap").style.display = state.diopter ? "" : "none";
+        document.getElementById("wobbleAmpVal").innerHTML = Math.round(state.wobbleAmp * 100) + "&nbsp;%";
+        document.getElementById("wobbleFreqVal").innerHTML = state.wobbleFreq.toFixed(1) + "&nbsp;Hz";
         updateBadges();
         updateSightDev();
     }
@@ -917,6 +1002,14 @@
         state.aperture = parseFloat(e.target.value);
         syncLabels(); render();
     });
+    document.getElementById("wobbleAmp").addEventListener("input", function (e) {
+        state.wobbleAmp = parseInt(e.target.value, 10) / 100;
+        syncLabels(); syncWobbleAnim(); render();
+    });
+    document.getElementById("wobbleFreq").addEventListener("input", function (e) {
+        state.wobbleFreq = parseFloat(e.target.value);
+        syncLabels();   // loop reads the new frequency live; group is unaffected
+    });
 
     // --- Advanced settings (cogwheel modal) ---
     function syncCfgLabels() {
@@ -959,24 +1052,35 @@
         document.getElementById("glassesToggle").checked = state.glasses;
         document.getElementById("diopterToggle").checked = state.diopter;
         document.getElementById("apRange").value = state.aperture;
+        document.getElementById("wobbleAmp").value = Math.round(state.wobbleAmp * 100);
+        document.getElementById("wobbleFreq").value = state.wobbleFreq;
         syncLabels();
+        syncWobbleAnim();
     }
 
     window.siktScenario = function (name) {
         if (name === "correct") {
-            state = { focus: "front", light: 0.70, refractive: "none", presbyopia: false, glasses: false, distanceM: 25, diopter: false, aperture: 1.2, sightDx: 0, sightDy: 0 };
+            state = { focus: "front", light: 0.70, refractive: "none", presbyopia: false, glasses: false, distanceM: 25, diopter: false, aperture: 1.2, sightDx: 0, sightDy: 0, wobbleAmp: 0, wobbleFreq: 1.0 };
         } else if (name === "beginner") {
-            state = { focus: "target", light: 0.55, refractive: "none", presbyopia: false, glasses: false, distanceM: 25, diopter: false, aperture: 1.2, sightDx: 0, sightDy: 0 };
+            state = { focus: "target", light: 0.55, refractive: "none", presbyopia: false, glasses: false, distanceM: 25, diopter: false, aperture: 1.2, sightDx: 0, sightDy: 0, wobbleAmp: 0, wobbleFreq: 1.0 };
         }
         pushStateToControls();
         render();
     };
 
     window.siktReset = function () {
-        state = { focus: "front", light: 0.60, refractive: "none", presbyopia: false, glasses: false, distanceM: 25, diopter: false, aperture: 1.2, sightDx: 0, sightDy: 0 };
+        state = { focus: "front", light: 0.60, refractive: "none", presbyopia: false, glasses: false, distanceM: 25, diopter: false, aperture: 1.2, sightDx: 0, sightDy: 0, wobbleAmp: 0, wobbleFreq: 1.0 };
         pushStateToControls();
         render();
     };
+
+    document.addEventListener("visibilitychange", function () {
+        if (document.hidden) {
+            if (wobbleRaf !== null) { cancelAnimationFrame(wobbleRaf); wobbleRaf = null; }
+        } else {
+            syncWobbleAnim();
+        }
+    });
 
     window.addEventListener("resize", function () { setupCanvas(); setupGroupCanvas(); render(); });
 
