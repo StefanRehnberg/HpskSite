@@ -78,6 +78,13 @@
             Tutorial = "tutorial-05"
         },
         new {
+            Image = "/images/about/siktbild.png",
+            Title = "Siktbild — träna siktbilden",
+            Teaser = "En interaktiv simulator som visar hur fokus, ljus, syn och diopter påverkar träffen.",
+            Detail = "Siktbildssimulatorn visar siktbilden ur skyttens öga och låter dig dra i reglagen: var skärpan ligger (korn, bakre sikte eller tavla), ljus, brytningsfel och ålderssynthet, korrektionsglas och diopter. Träffbilden bredvid visar hur gruppen påverkas — och varför ett skarpt korn slår en skarp tavla. Du ser också hur en oskarp tavla upplevs större och drar skotten lågt, hur ett pyttelitet linjeringsfel flyttar träffen flera centimeter, och hur skakning påverkar. Knappen \"Perfekt skott\" spelar upp hela skottets förlopp: lyft, stabilisering, jämnt avtryckartryck — och varför man ska skjuta inom några sekunder innan hjärnan börjar lura ögat.",
+            Tutorial = ""
+        },
+        new {
             Image = "/images/about/anmalan-swish.png",
             Title = "Tävlingsanmälan + Swish",
             Teaser = "Anmäl dig till tävlingar i två klick. Betala med Swish.",
@@ -359,6 +366,12 @@
                                     <i class="bi bi-play-circle me-1"></i> Se video
                                 </a>
                             }
+                            @if (slab.Image.Contains("siktbild"))
+                            {
+                                <a class="btn btn-primary btn-sm" href="/siktbild">
+                                    <i class="bi bi-bullseye me-1"></i> Öppna simulatorn
+                                </a>
+                            }
                         </div>
                         <div class="collapse mt-2" id="@collapseId">
                             <p class="mb-0">@slab.Detail</p>
@@ -439,6 +452,12 @@
                             {
                                 <a class="btn btn-link read-more-btn" href="/tutorials?tutorial=@slab.Tutorial">
                                     <i class="bi bi-play-circle me-1"></i> Se video
+                                </a>
+                            }
+                            @if (slab.Image.Contains("siktbild"))
+                            {
+                                <a class="btn btn-primary btn-sm" href="/siktbild">
+                                    <i class="bi bi-bullseye me-1"></i> Öppna simulatorn
                                 </a>
                             }
                         </div>
