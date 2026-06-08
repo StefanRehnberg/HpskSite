@@ -1,0 +1,885 @@
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+    ViewBag.Title = "Siktbild - så ska din siktbild se ut";
+}
+
+<style>
+    .sikt-stage {
+        position: relative;
+        width: 100%;
+        max-width: 560px;
+        margin: 0 auto;
+        aspect-ratio: 5 / 4;
+        border-radius: 12px;
+        overflow: hidden;
+        background: #0b0b0d;
+        box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25);
+    }
+
+    .sikt-stage canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+    }
+
+    .sikt-badge {
+        position: absolute;
+        padding: 0.2rem 0.5rem;
+        font-size: 0.72rem;
+        font-weight: 600;
+        border-radius: 6px;
+        color: #fff;
+        pointer-events: none;
+    }
+
+    .sikt-badge-tl {
+        top: 8px;
+        left: 8px;
+        background: rgba(0, 0, 0, 0.55);
+    }
+
+    .sikt-badge-tr {
+        top: 8px;
+        right: 8px;
+        background: rgba(13, 110, 253, 0.9);
+    }
+
+    .sikt-control-label {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        font-size: 0.9rem;
+        font-weight: 600;
+        margin-bottom: 0.25rem;
+    }
+
+    .sikt-control-label .val {
+        font-weight: 500;
+        color: var(--bs-secondary-color);
+        font-variant-numeric: tabular-nums;
+    }
+
+    .sikt-ends {
+        display: flex;
+        justify-content: space-between;
+        font-size: 0.72rem;
+        color: var(--bs-secondary-color);
+        margin-top: 0.1rem;
+    }
+
+    .sikt-focus-group .btn {
+        font-size: 0.85rem;
+    }
+
+    .sikt-caption {
+        min-height: 4.5rem;
+        font-size: 0.95rem;
+        line-height: 1.45;
+    }
+
+    .sikt-lesson-icon {
+        flex: 0 0 auto;
+        width: 2rem;
+        height: 2rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 50%;
+        background: var(--bs-primary-bg-subtle);
+        color: var(--bs-primary);
+    }
+</style>
+
+<div class="container-fluid py-4">
+    <div class="mb-4">
+        <h1 class="h3 mb-1"><i class="bi bi-bullseye me-2"></i>Siktbild</h1>
+        <p class="text-muted mb-0">
+            Dra i reglagen och se hur siktbilden förändras &ndash; så förstår du varför skärpan ska ligga på kornet,
+            och vad en diopter gör.
+        </p>
+    </div>
+
+    <!-- Images side by side -->
+    <div class="row g-4">
+        <!-- Sight picture -->
+        <div class="col-lg-6">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h6 class="mb-0"><i class="bi bi-eye me-2"></i>Siktbild</h6>
+                </div>
+                <div class="card-body">
+                    <div class="sikt-stage">
+                        <canvas id="siktCanvas"></canvas>
+                        <div id="siktImpairBadge" class="sikt-badge sikt-badge-tl" style="display:none;"></div>
+                        <div id="siktGlassesBadge" class="sikt-badge sikt-badge-tr" style="display:none;"><i class="bi bi-eyeglasses me-1"></i>Skytteglasögon</div>
+                    </div>
+
+                    <!-- Scenario shortcuts -->
+                    <div class="d-flex flex-wrap gap-2 justify-content-center mt-3">
+                        <button type="button" class="btn btn-sm btn-outline-success" onclick="siktScenario('correct')">
+                            <i class="bi bi-check2-circle me-1"></i>Rätt teknik
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-danger" onclick="siktScenario('beginner')">
+                            <i class="bi bi-exclamation-triangle me-1"></i>Nybörjarens misstag
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Shot group -->
+        <div class="col-lg-6">
+            <div class="card h-100">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h6 class="mb-0"><i class="bi bi-bullseye me-2"></i>Träffbild</h6>
+                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="siktNewSeries()">
+                        <i class="bi bi-arrow-repeat me-1"></i>Ny serie
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div class="text-center">
+                        <canvas id="grpCanvas" style="width:100%;max-width:320px;aspect-ratio:1/1;"></canvas>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-baseline mt-2">
+                        <span class="fw-semibold" id="grpLabel"></span>
+                        <span class="small text-muted" id="grpSize"></span>
+                    </div>
+                    <p class="small text-muted mt-2 mb-0" id="grpHint"></p>
+
+                    <hr>
+
+                    <!-- Live lesson caption -->
+                    <div class="d-flex gap-3 align-items-start">
+                        <div class="sikt-lesson-icon"><i class="bi bi-lightbulb"></i></div>
+                        <div class="sikt-caption" id="siktCaption"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="card mt-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h6 class="mb-0"><i class="bi bi-sliders me-2"></i>Reglage</h6>
+            <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#siktSettingsModal" title="Avancerade inställningar">
+                <i class="bi bi-gear"></i>
+            </button>
+        </div>
+        <div class="card-body">
+            <div class="row g-4 align-items-start">
+                <!-- Focus -->
+                <div class="col-md-6 col-xl-3">
+                    <div class="sikt-control-label">
+                        <span>Var ligger ögats skärpa?</span>
+                    </div>
+                    <div class="btn-group w-100 sikt-focus-group" role="group" id="siktFocusGroup">
+                        <input type="radio" class="btn-check" name="siktFocus" id="focusRear" value="rear" autocomplete="off">
+                        <label class="btn btn-outline-secondary" for="focusRear">Bakre sikte</label>
+
+                        <input type="radio" class="btn-check" name="siktFocus" id="focusFront" value="front" autocomplete="off" checked>
+                        <label class="btn btn-outline-secondary" for="focusFront">Kornet <i class="bi bi-star-fill text-warning small"></i></label>
+
+                        <input type="radio" class="btn-check" name="siktFocus" id="focusTarget" value="target" autocomplete="off">
+                        <label class="btn btn-outline-secondary" for="focusTarget">Tavlan</label>
+                    </div>
+                    <div class="sikt-ends">
+                        <span>Närmast ögat</span>
+                        <span>Längst bort</span>
+                    </div>
+                </div>
+
+                <!-- Light -->
+                <div class="col-md-6 col-xl-3">
+                    <div class="sikt-control-label">
+                        <span><i class="bi bi-brightness-high me-1"></i>Ljus</span>
+                        <span class="val" id="lightVal">60&nbsp;%</span>
+                    </div>
+                    <input type="range" class="form-range" id="lightRange" min="0" max="100" value="60">
+                    <div class="sikt-ends"><span>Skymning</span><span>Klart solsken</span></div>
+                </div>
+
+                <!-- Eye condition -->
+                <div class="col-md-6 col-xl-3">
+                    <div class="sikt-control-label">
+                        <span><i class="bi bi-eye me-1"></i>Ögats tillstånd</span>
+                    </div>
+                    <div class="small text-muted mb-1">Brytningsfel</div>
+                    <div class="btn-group btn-group-sm w-100" role="group" id="siktRefractiveGroup">
+                        <input type="radio" class="btn-check" name="siktRefractive" id="refrNone" value="none" autocomplete="off" checked>
+                        <label class="btn btn-outline-secondary" for="refrNone">Ingen</label>
+
+                        <input type="radio" class="btn-check" name="siktRefractive" id="refrMyopia" value="myopia" autocomplete="off">
+                        <label class="btn btn-outline-secondary" for="refrMyopia">Närsynt</label>
+
+                        <input type="radio" class="btn-check" name="siktRefractive" id="refrHyperopia" value="hyperopia" autocomplete="off">
+                        <label class="btn btn-outline-secondary" for="refrHyperopia">Långsynt</label>
+                    </div>
+                    <div class="form-check form-switch mt-2 mb-1">
+                        <input class="form-check-input" type="checkbox" role="switch" id="presbyopiaToggle">
+                        <label class="form-check-label small" for="presbyopiaToggle">Ålderssynthet (presbyopi)</label>
+                    </div>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" role="switch" id="glassesToggle">
+                        <label class="form-check-label small" for="glassesToggle">Skytteglasögon (korrektion)</label>
+                    </div>
+                </div>
+
+                <!-- Diopter -->
+                <div class="col-md-6 col-xl-3">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <div>
+                            <div class="fw-semibold"><i class="bi bi-record-circle me-1"></i>Diopter (siktring)</div>
+                            <div class="small text-muted">Nålhåls&shy;effekt &ndash; ökar skärpedjupet</div>
+                        </div>
+                        <div class="form-check form-switch m-0">
+                            <input class="form-check-input" type="checkbox" role="switch" id="diopterToggle" style="transform: scale(1.4);">
+                        </div>
+                    </div>
+
+                    <!-- Aperture (only when diopter on) -->
+                    <div class="mb-1" id="apertureWrap" style="display:none;">
+                        <div class="sikt-control-label">
+                            <span>Diopteröppning</span>
+                            <span class="val" id="apVal">1.2&nbsp;mm</span>
+                        </div>
+                        <input type="range" class="form-range" id="apRange" min="0.5" max="2.5" step="0.1" value="1.2">
+                        <div class="sikt-ends"><span>Litet hål (skarpt men mörkt)</span><span>Stort hål</span></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Teaching section -->
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h6 class="mb-0"><i class="bi bi-mortarboard me-2"></i>Det här lär simulatorn ut</h6>
+                </div>
+                <div class="card-body">
+                    <div class="row g-4">
+                        <div class="col-md-6 col-lg-3">
+                            <h6 class="fw-bold"><i class="bi bi-1-circle text-primary me-1"></i>Skärpan på kornet</h6>
+                            <p class="small text-muted mb-0">
+                                Ögat kan bara ställa skärpa på <em>ett</em> avstånd. Lägg den på kornet:
+                                då blir tavlan suddig och bakre siktet aningen mjukt &ndash; det är helt rätt.
+                                Ett skarpt korn är viktigare än en skarp tavla.
+                            </p>
+                        </div>
+                        <div class="col-md-6 col-lg-3">
+                            <h6 class="fw-bold"><i class="bi bi-2-circle text-primary me-1"></i>Ljuset styr pupillen</h6>
+                            <p class="small text-muted mb-0">
+                                I svagt ljus vidgas pupillen. En stor pupill ger litet skärpedjup &ndash;
+                                allt utanför skärpeplanet blir suddigare. I starkt ljus dras pupillen ihop och
+                                mer hamnar i fokus.
+                            </p>
+                        </div>
+                        <div class="col-md-6 col-lg-3">
+                            <h6 class="fw-bold"><i class="bi bi-3-circle text-primary me-1"></i>Syn, glasögon &amp; ålder</h6>
+                            <p class="small text-muted mb-0">
+                                Brytningsfel och framför allt ålderssynthet (ögat slutar ställa om) gör kornet suddigt.
+                                Skytteglasögon lägger skärpan på kornet &ndash; men låser ögat där, så tavlan blir
+                                <em>ännu</em> suddigare. Då gör dioptern störst nytta.
+                            </p>
+                        </div>
+                        <div class="col-md-6 col-lg-3">
+                            <h6 class="fw-bold"><i class="bi bi-4-circle text-primary me-1"></i>Diopterns nålhål</h6>
+                            <p class="small text-muted mb-0">
+                                En liten öppning fungerar som ett nålhål och ger nästan oändligt skärpedjup &ndash;
+                                både korn och tavla blir skarpa samtidigt. Priset: hålet släpper in mindre ljus,
+                                så det kräver tillräckligt med ljus. För litet hål &rarr; mörk bild.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="alert alert-info mt-4 mb-0 d-flex gap-3">
+                        <i class="bi bi-arrow-down-circle fs-4 flex-shrink-0"></i>
+                        <div>
+                            <strong>Suddig tavla drar skotten lågt &ndash; och träffläget vandrar med ljuset.</strong>
+                            En oskarp tavla upplevs som <em>större</em>. Med riktpunkt strax under tavlan (6-läge)
+                            håller du då omedvetet lite lägre och träffar lågt. Eftersom suddigheten ändras med ljuset
+                            ändras även höjdträffen, så du tvingas justera siktet i höjd om och om igen. En diopter håller
+                            tavlan skarp &ndash; och därmed lika stor &ndash; så höjdträffen ligger stilla oavsett ljus.
+                            Det är en av de största anledningarna att skjuta med diopter.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Advanced settings modal -->
+<div class="modal fade" id="siktSettingsModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-gear me-2"></i>Avancerade inställningar</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small text-muted">Finjustera styrkan på synfelen bakom knapparna. Värdena anges i dioptrier (D).</p>
+
+                <div class="mb-4">
+                    <div class="sikt-control-label">
+                        <span>Närsynthet (myopi)</span>
+                        <span class="val" id="cfgMyopiaVal">1.7&nbsp;D</span>
+                    </div>
+                    <input type="range" class="form-range" id="cfgMyopia" min="0.5" max="4" step="0.1" value="1.7">
+                    <div class="sikt-ends"><span>Mild</span><span>Kraftig (suddigare)</span></div>
+                </div>
+
+                <div class="mb-4">
+                    <div class="sikt-control-label">
+                        <span>Långsynthet (hyperopi)</span>
+                        <span class="val" id="cfgHyperopiaVal">2.0&nbsp;D</span>
+                    </div>
+                    <input type="range" class="form-range" id="cfgHyperopia" min="0.5" max="4" step="0.1" value="2.0">
+                    <div class="sikt-ends"><span>Mild</span><span>Kraftig (suddigare)</span></div>
+                </div>
+
+                <div class="mb-2">
+                    <div class="sikt-control-label">
+                        <span>Ålderssynthet (kvar ackommodation)</span>
+                        <span class="val" id="cfgPresbyVal">0.25&nbsp;D</span>
+                    </div>
+                    <input type="range" class="form-range" id="cfgPresby" min="0" max="2" step="0.05" value="0.25">
+                    <div class="sikt-ends"><span>Ingen kvar (svårast)</span><span>Mycket kvar (mild)</span></div>
+                </div>
+            </div>
+            <div class="modal-footer justify-content-between">
+                <button type="button" class="btn btn-outline-secondary" onclick="siktCfgReset()">
+                    <i class="bi bi-arrow-counterclockwise me-1"></i>Återställ till vanliga värden
+                </button>
+                <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Klar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    "use strict";
+
+    // ---- Optics model ----------------------------------------------------
+    // Three things sit at three distances from the eye (pistol, open sights).
+    // The eye focuses at one distance; blur of everything else grows with the
+    // dioptric defocus and with the effective aperture (pupil, or diopter hole).
+    var D_REAR = 1 / 0.60;   // rear sight ~60 cm  -> 1.667 D
+    var D_FRONT = 1 / 0.77;  // front sight ~77 cm -> 1.30 D
+    var K_DEF = 2.0;         // px of blur per (mm aperture * diopter defocus); tuned to look right
+
+    var RESIDUAL = 0.5;      // small constant softness so even a focused image isn't pixel-perfect
+
+    var state = {
+        focus: "front",
+        light: 0.60,            // 0..1
+        refractive: "none",     // "none" | "myopia" | "hyperopia"
+        presbyopia: false,      // loss of accommodation (age)
+        glasses: false,         // shooting glasses prescribed for the front sight
+        distanceM: 25,
+        diopter: false,
+        aperture: 1.2           // mm
+    };
+
+    function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+    function dTarget() { return 1 / state.distanceM; }
+
+    // Where the shooter is *trying* to focus (the layer they look at).
+    function desiredFocusD() {
+        if (state.focus === "rear") return D_REAR;
+        if (state.focus === "target") return dTarget();
+        return D_FRONT;
+    }
+
+    // The eye as a focus window in accommodation-demand (diopter) space:
+    //   - baseOffset: built-in refractive power. Myopia = extra plus (relaxed eye focused short, so
+    //     distant objects fall outside the window); hyperopia = a deficit.
+    //   - amplitude:  how much the eye can *change* focus. Presbyopia collapses it toward zero.
+    //   - lens:       shooting glasses, prescribed to put the FRONT SIGHT at the window's far edge.
+    //                 Accommodation can pull nearer but never relax past the lens — that's the catch.
+    // Tunable model constants (exposed via the cogwheel settings modal). Diopters.
+    var CFG_DEFAULTS = { myopia: 1.7, hyperopia: 2.0, presbyAmp: 0.25 };
+    var cfg = { myopia: CFG_DEFAULTS.myopia, hyperopia: CFG_DEFAULTS.hyperopia, presbyAmp: CFG_DEFAULTS.presbyAmp };
+    var NORMAL_AMP = 2.5;    // healthy adult accommodation (plenty for all three sight distances)
+
+    function baseOffsetD() {
+        if (state.refractive === "myopia") return cfg.myopia;     // far point near: can't see far (target worst)
+        if (state.refractive === "hyperopia") return -cfg.hyperopia; // a plus deficit: near/front sight worst
+        return 0;
+    }
+    // Accommodation amplitude. A healthy adult is ~2.5 D — NOT the textbook-young ~8 D, which would
+    // let a hyperope simply accommodate the error away and show nothing. Presbyopia collapses it.
+    function accommAmp() { return state.presbyopia ? cfg.presbyAmp : NORMAL_AMP; }
+    function lensPower() { return state.glasses ? (D_FRONT - baseOffsetD()) : 0; }
+
+    // Where the eye actually ends up focusing — the desired focus clamped to the reachable window.
+    // Normal eye, no glasses: window is huge, so this just returns the desired focus (unchanged).
+    function focusD() {
+        var lo = baseOffsetD() + lensPower();
+        return clamp(desiredFocusD(), lo, lo + accommAmp());
+    }
+
+    // Light -> pupil diameter: bright ~2 mm, dark ~7 mm
+    function pupilMm() { return 7 - 5 * state.light; }
+    function effectiveAperture() { return state.diopter ? state.aperture : pupilMm(); }
+    function diffractionPx() { return state.diopter ? 0.6 / state.aperture : 0; } // tiny; grows as hole shrinks
+
+    function layerBlur(dObj) {
+        return K_DEF * effectiveAperture() * Math.abs(dObj - focusD()) + RESIDUAL + diffractionPx();
+    }
+
+    function brightness() {
+        var base = 0.35 + 0.65 * state.light;
+        if (state.diopter) {
+            var throughput = Math.pow(state.aperture / 1.5, 2); // light ~ hole area
+            base = base * throughput * 1.3;
+        }
+        return clamp(base, 0, 1);
+    }
+
+    // Shot dispersion as a fraction of the target radius. Grouping depends on how clearly + how
+    // consistently you can hold *sight alignment* — the sharpness of the FRONT sight and the rear
+    // notch (you line the front blade up inside it). The target's own sharpness barely matters:
+    // a blurry aiming mark still groups tight. Three modifiers on top:
+    //   - distance: the same angular wobble spreads more the further away the target is.
+    //   - visibility: in a dark picture you can't see the sights well, so the group opens up.
+    //   - diopter: a bright, crisp peep gives full depth of field + self-centres the eye -> tighter;
+    //     but if the hole is too small/dark to see through, that benefit is lost (caught by visibility).
+    function groupSigmaFrac() {
+        var align = layerBlur(D_FRONT) + 0.8 * layerBlur(D_REAR);
+        var base = 0.045 + 0.020 * align;
+
+        var b = brightness();
+        var visPenalty = b < 0.45 ? (1 + (0.45 - b) * 1.8) : 1;        // up to ~1.8x in the dark
+        var diopterBonus = (state.diopter && b > 0.45) ? 0.62 : 1;     // crisp peep tightens the group
+
+        return clamp(base * (state.distanceM / 25) * visPenalty * diopterBonus, 0.03, 0.5);
+    }
+
+    // Pure defocus blur of the TARGET (no eye/diffraction baseline). This is what makes a fuzzy
+    // bull's edge bleed outward so it looks larger.
+    function targetDefocusPx() {
+        return K_DEF * effectiveAperture() * Math.abs(dTarget() - focusD());
+    }
+
+    // Elevation error (downward, as a fraction of target radius): a blurred bull is perceived as
+    // bigger, so with a 6-o'clock hold you instinctively aim lower and hit low. A diopter keeps the
+    // aperture fixed regardless of light, so this shift barely changes with light — no constant
+    // re-zeroing. Focusing ON the target removes the shift (sharp bull) but wrecks the group instead.
+    function poiLowFrac() {
+        return clamp(0.024 * targetDefocusPx(), 0, 0.55);
+    }
+
+    // ---- Canvas rendering ------------------------------------------------
+    var W = 700, H = 560;            // canvas logical size (cropped on top — less empty sky)
+    var CX = 350;
+    var DIO_CY = 283, DIO_R = 275;   // diopter (peep) circular field, fitted to the shorter canvas
+    // Shared sight geometry (logical px). Front sight top + rear posts top are level.
+    var SIGHT_TOP = 343;
+    var FRONT_W = 50;                          // front-sight blade width
+    var NOTCH_HALF = 56;                       // half the rear-sight notch opening (was 37; +50% wider)
+    var LIGHT_BAR = NOTCH_HALF - FRONT_W / 2;  // white gap on each side of the front sight
+    var cvs = document.getElementById("siktCanvas");
+    var ctx = cvs.getContext("2d");
+    var dpr = Math.max(1, window.devicePixelRatio || 1);
+
+    function setupCanvas() {
+        dpr = Math.max(1, window.devicePixelRatio || 1);
+        cvs.width = W * dpr;
+        cvs.height = H * dpr;
+    }
+
+    function blurStr(px) { return "blur(" + px.toFixed(2) + "px)"; }
+
+    function drawTarget(c, cx, cy, R) {
+        c.fillStyle = "#4e5c7e";
+        c.beginPath(); c.arc(cx, cy, R, 0, Math.PI * 2); c.fill();
+
+        // Rings from outer to inner: 7 sits at the disc rim (nothing scored outside it),
+        // then 8, 9, then the two innermost rings are both the 10.
+        c.strokeStyle = "rgba(233,237,246,0.92)";
+        c.lineWidth = Math.max(1, R * 0.012);
+        var rings = [1.0, 0.77, 0.55, 0.33, 0.17];
+        for (var i = 0; i < rings.length; i++) {
+            c.beginPath(); c.arc(cx, cy, R * rings[i], 0, Math.PI * 2); c.stroke();
+        }
+
+        // Numbers centred in their scoring bands (9 just outside the 10, then 8, then 7 near the rim).
+        c.fillStyle = "#eef1f8";
+        c.textAlign = "center";
+        c.textBaseline = "middle";
+        c.font = "bold " + (R * 0.13).toFixed(1) + "px system-ui, sans-serif";
+        var nums = [{ r: 0.885, n: "7" }, { r: 0.66, n: "8" }, { r: 0.44, n: "9" }];
+        for (var j = 0; j < nums.length; j++) {
+            var o = nums[j];
+            c.fillText(o.n, cx, cy - R * o.r);
+            c.fillText(o.n, cx, cy + R * o.r);
+            c.fillText(o.n, cx - R * o.r, cy);
+            c.fillText(o.n, cx + R * o.r, cy);
+        }
+    }
+
+    function drawFront(c, cx) {
+        var w = FRONT_W, x = cx - w / 2, top = SIGHT_TOP, bottom = H - 6;
+        var g = c.createLinearGradient(x, 0, x + w, 0);
+        g.addColorStop(0, "#717171");
+        g.addColorStop(0.5, "#535353");
+        g.addColorStop(1, "#404040");
+        c.fillStyle = g;
+        c.fillRect(x, top, w, bottom - top);
+        c.fillStyle = "rgba(255,255,255,0.10)";
+        c.fillRect(x, top, w, 4);
+    }
+
+    function drawRear(c, cx) {
+        var notchHalf = NOTCH_HALF, top = SIGHT_TOP, postBottom = SIGHT_TOP + 146, baseTop = SIGHT_TOP + 130, baseBottom = H - 6;
+        var left = 96, right = 604;
+        c.fillStyle = "#141414";
+        c.fillRect(left, top, (cx - notchHalf) - left, postBottom - top);          // left post
+        c.fillRect(cx + notchHalf, top, right - (cx + notchHalf), postBottom - top); // right post
+        c.fillRect(left, baseTop, right - left, baseBottom - baseTop);              // base bar
+        c.fillStyle = "rgba(255,255,255,0.06)";
+        c.fillRect(left, top, (cx - notchHalf) - left, 3);
+        c.fillRect(cx + notchHalf, top, right - (cx + notchHalf), 3);
+    }
+
+    function draw() {
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.clearRect(0, 0, W, H);
+
+        var bright = brightness();
+        var tB = layerBlur(dTarget());
+        var fB = layerBlur(D_FRONT);
+        var rB = layerBlur(D_REAR);
+
+        // Target size scales with distance; bull held above the front sight (6-o'clock) so the
+        // white gap under the bull equals the light bar on each side of the front sight ("lika ljusgap").
+        var R = clamp(150 * Math.sqrt(25 / state.distanceM), 70, 200);
+        var cy = (SIGHT_TOP - LIGHT_BAR) - R;
+
+        var cR = DIO_R;
+        if (state.diopter) {
+            ctx.fillStyle = "#000";
+            ctx.fillRect(0, 0, W, H);
+            ctx.save();
+            ctx.beginPath(); ctx.arc(CX, DIO_CY, cR, 0, Math.PI * 2); ctx.clip();
+        }
+
+        // sky / backstop
+        ctx.fillStyle = "#eef2f8";
+        ctx.fillRect(0, 0, W, H);
+
+        // layers, far -> near (correct occlusion); each blurred by its own defocus
+        ctx.filter = blurStr(tB); drawTarget(ctx, CX, cy, R);
+        ctx.filter = blurStr(fB); drawFront(ctx, CX);
+        ctx.filter = blurStr(rB); drawRear(ctx, CX);
+        ctx.filter = "none";
+
+        // When the bull is blurred its dark edge bleeds outward and it looks bigger than it is.
+        // Show its true size as a dashed ring so the "ser större ut"-effect is visible.
+        if (targetDefocusPx() > 4) {
+            ctx.save();
+            ctx.setLineDash([9, 9]);
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = "rgba(255,255,255,0.85)";
+            ctx.beginPath(); ctx.arc(CX, cy, R, 0, Math.PI * 2); ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.restore();
+        }
+
+        if (bright < 1) {
+            ctx.fillStyle = "rgba(0,0,0," + (1 - bright).toFixed(3) + ")";
+            ctx.fillRect(0, 0, W, H);
+        }
+
+        if (state.diopter) {
+            var vg = ctx.createRadialGradient(CX, DIO_CY, cR * 0.80, CX, DIO_CY, cR);
+            vg.addColorStop(0, "rgba(0,0,0,0)");
+            vg.addColorStop(1, "rgba(0,0,0,0.38)");
+            ctx.fillStyle = vg;
+            ctx.beginPath(); ctx.arc(CX, DIO_CY, cR, 0, Math.PI * 2); ctx.fill();
+            ctx.restore();
+        }
+    }
+
+    // ---- Shot group panel ------------------------------------------------
+    var grpCvs = document.getElementById("grpCanvas");
+    var grpCtx = grpCvs.getContext("2d");
+    var GSIZE = 300, GR = 130, GCX = 150, GCY = 150;
+    var TARGET_RADIUS_CM = 15;        // ring-7 radius on paper (~30 cm across); for the cm read-out
+    var shotSamples = [];             // standard-normal (x,y) draws, one per shot in the series
+    var groupMaxPairNorm = 0;         // largest pairwise distance among the draws (in sigma units)
+
+    function setupGroupCanvas() {
+        grpCvs.width = GSIZE * dpr;
+        grpCvs.height = GSIZE * dpr;
+    }
+
+    function gauss() {
+        var u = 0, v = 0;
+        while (u === 0) u = Math.random();
+        while (v === 0) v = Math.random();
+        return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+    }
+
+    function generateSamples() {
+        shotSamples = [];
+        for (var i = 0; i < 5; i++) shotSamples.push({ x: gauss(), y: gauss() });
+        groupMaxPairNorm = 0;
+        for (var a = 0; a < shotSamples.length; a++) {
+            for (var b = a + 1; b < shotSamples.length; b++) {
+                var dx = shotSamples[a].x - shotSamples[b].x;
+                var dy = shotSamples[a].y - shotSamples[b].y;
+                var d = Math.sqrt(dx * dx + dy * dy);
+                if (d > groupMaxPairNorm) groupMaxPairNorm = d;
+            }
+        }
+    }
+
+    function drawGroup() {
+        grpCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        grpCtx.clearRect(0, 0, GSIZE, GSIZE);
+        grpCtx.fillStyle = "#eef2f8";
+        grpCtx.fillRect(0, 0, GSIZE, GSIZE);
+        drawTarget(grpCtx, GCX, GCY, GR);   // sharp — this is the paper seen up close
+
+        // Intended point of impact (centre of the bull) — so a low group is obvious.
+        var cmk = GR * 0.07;
+        grpCtx.strokeStyle = "rgba(220,53,69,0.9)";
+        grpCtx.lineWidth = 2;
+        grpCtx.beginPath();
+        grpCtx.moveTo(GCX - cmk, GCY); grpCtx.lineTo(GCX + cmk, GCY);
+        grpCtx.moveTo(GCX, GCY - cmk); grpCtx.lineTo(GCX, GCY + cmk);
+        grpCtx.stroke();
+
+        var sigma = groupSigmaFrac() * GR;
+        var cyShift = poiLowFrac() * GR;   // perceived-larger bull -> aim low
+        var hr = GR * 0.045;
+        for (var i = 0; i < shotSamples.length; i++) {
+            var sx = GCX + shotSamples[i].x * sigma;
+            var sy = GCY + cyShift + shotSamples[i].y * sigma;
+            grpCtx.beginPath();
+            grpCtx.arc(sx, sy, hr, 0, Math.PI * 2);
+            grpCtx.fillStyle = "#101010";
+            grpCtx.fill();
+            grpCtx.lineWidth = 1;
+            grpCtx.strokeStyle = "rgba(255,255,255,0.55)";
+            grpCtx.stroke();
+        }
+    }
+
+    function updateGroupLabel() {
+        var spreadCm = groupMaxPairNorm * groupSigmaFrac() * TARGET_RADIUS_CM;
+        var label, cls;
+        if (spreadCm < 7) { label = "Tät grupp"; cls = "text-success"; }
+        else if (spreadCm < 13) { label = "Bra grupp"; cls = "text-success"; }
+        else if (spreadCm < 22) { label = "Spridd grupp"; cls = "text-warning"; }
+        else { label = "Mycket spridd"; cls = "text-danger"; }
+
+        var lbl = document.getElementById("grpLabel");
+        lbl.textContent = label;
+        lbl.className = "fw-semibold " + cls;
+
+        var elevCm = poiLowFrac() * TARGET_RADIUS_CM;
+        var sizeHtml = "Gruppstorlek ca " + Math.round(spreadCm) + "&nbsp;cm";
+        if (elevCm >= 1) sizeHtml += " &middot; <span class='text-danger'>ca " + Math.round(elevCm) + "&nbsp;cm lågt</span>";
+        document.getElementById("grpSize").innerHTML = sizeHtml;
+
+        var hint;
+        if (state.focus === "front") {
+            hint = "Skärpan på kornet håller skotten samlade &ndash; även när tavlan är suddig.";
+        } else if (state.focus === "target") {
+            hint = "Suddiga riktmedel gör att du inte kan rikta likadant varje skott, så gruppen sprids &ndash; trots att tavlan ser skarp ut.";
+        } else {
+            hint = "Med skärpan på bakre siktet blir kornet otydligt och gruppen öppnar sig.";
+        }
+        if (state.distanceM > 30) hint += " På längre håll förstoras samma lilla vingel.";
+        if (elevCm >= 2 && !state.diopter) {
+            hint += " Den suddiga tavlan upplevs större, så du håller lägre och skotten sätter sig lågt &ndash; och eftersom suddigheten följer ljuset måste du justera höjden om och om igen.";
+        }
+        if (state.diopter) {
+            hint += brightness() > 0.45
+                ? " Dioptern ger en skarp, stabil siktbild som drar ihop gruppen och håller höjdträffen still oavsett ljus."
+                : " Men hålet är för litet för ljuset &ndash; du ser inte sikten och gruppen sprids.";
+        }
+        document.getElementById("grpHint").innerHTML = hint;
+    }
+
+    // ---- Live caption ----------------------------------------------------
+    function caption() {
+        var parts = [];
+        if (state.focus === "front") {
+            parts.push("<strong class='text-success'>Skärpan ligger på kornet &ndash; helt rätt.</strong> " +
+                "Kornet är skarpt, tavlan suddig och bakre siktet aningen mjukt. Så ska en bra siktbild se ut.");
+        } else if (state.focus === "target") {
+            parts.push("<strong class='text-danger'>Skärpan ligger på tavlan &ndash; nybörjarens misstag.</strong> " +
+                "Tavlan blir skarp, men både korn och bakre sikte blir suddiga och du tappar precisionen i riktmedlen.");
+        } else {
+            parts.push("<strong>Skärpan ligger på bakre siktet.</strong> " +
+                "Bakre siktet blir skarpt, men kornet &ndash; det du faktiskt riktar med &ndash; och tavlan blir suddiga.");
+        }
+
+        if (!state.diopter && state.light < 0.30) {
+            parts.push("I svagt ljus vidgas pupillen, skärpedjupet krymper och allt blir suddigare.");
+        }
+        if (state.glasses) {
+            parts.push("<strong>Med skytteglasögon</strong> ställs skärpan på kornet &ndash; men ögat låses på det avståndet, så tavlan blir ännu suddigare. Därför blir en <strong>diopter nästan ett måste</strong> för den som behöver glasögon.");
+        } else if (state.presbyopia) {
+            parts.push("<strong>Ålderssynthet:</strong> ögat kan inte längre ställa om till kornet, så det förblir suddigt &ndash; tavlan kan rentav se skarpare ut. Det behövs korrektionsglas.");
+        } else if (state.refractive === "myopia") {
+            parts.push("<strong>Närsynthet:</strong> allt bortom ögats närgräns blir suddigt, särskilt tavlan. Korrektionsglas behövs.");
+        } else if (state.refractive === "hyperopia") {
+            parts.push("<strong>Långsynthet:</strong> ögat måste anstränga sig extra för att ställa skärpa, särskilt på kornet på nära håll.");
+        }
+
+        if (state.diopter) {
+            if (brightness() < 0.28) {
+                parts.push("Diopterns hål är nu <strong>för litet för ljuset</strong> &ndash; bilden blir mörk. Öppna hålet eller höj ljuset.");
+            } else {
+                parts.push("Diopterns lilla hål ger <strong>nästan oändligt skärpedjup</strong>: korn och tavla blir skarpa samtidigt " +
+                    "&ndash; så länge hålet inte är för litet och ljuset räcker.");
+            }
+        }
+        if (targetDefocusPx() > 4) {
+            parts.push("Den <strong>streckade ringen</strong> visar tavlans verkliga storlek &ndash; suddig upplevs den större, vilket lurar dig att sikta lägre och träffa lågt.");
+        }
+        document.getElementById("siktCaption").innerHTML = parts.join(" ");
+    }
+
+    // ---- UI wiring -------------------------------------------------------
+    function updateBadges() {
+        var impair = document.getElementById("siktImpairBadge");
+        var labels = [];
+        if (state.refractive === "myopia") labels.push("Närsynt");
+        if (state.refractive === "hyperopia") labels.push("Långsynt");
+        if (state.presbyopia) labels.push("Ålderssynt");
+        if (labels.length) {
+            impair.textContent = labels.join(" + ");
+            impair.style.display = "";
+        } else {
+            impair.style.display = "none";
+        }
+        document.getElementById("siktGlassesBadge").style.display = state.glasses ? "" : "none";
+    }
+
+    function render() {
+        draw();
+        caption();
+        drawGroup();
+        updateGroupLabel();
+    }
+
+    window.siktNewSeries = function () {
+        generateSamples();
+        drawGroup();
+        updateGroupLabel();
+    };
+
+    function syncLabels() {
+        document.getElementById("lightVal").innerHTML = Math.round(state.light * 100) + "&nbsp;%";
+        document.getElementById("apVal").innerHTML = state.aperture.toFixed(1) + "&nbsp;mm";
+        document.getElementById("apertureWrap").style.display = state.diopter ? "" : "none";
+        updateBadges();
+    }
+
+    var focusRadios = document.querySelectorAll("input[name='siktFocus']");
+    for (var k = 0; k < focusRadios.length; k++) {
+        focusRadios[k].addEventListener("change", function (e) {
+            state.focus = e.target.value;
+            render();
+        });
+    }
+    document.getElementById("lightRange").addEventListener("input", function (e) {
+        state.light = parseInt(e.target.value, 10) / 100;
+        syncLabels(); render();
+    });
+    var refrRadios = document.querySelectorAll("input[name='siktRefractive']");
+    for (var rr = 0; rr < refrRadios.length; rr++) {
+        refrRadios[rr].addEventListener("change", function (e) {
+            state.refractive = e.target.value;
+            syncLabels(); render();
+        });
+    }
+    document.getElementById("presbyopiaToggle").addEventListener("change", function (e) {
+        state.presbyopia = e.target.checked;
+        syncLabels(); render();
+    });
+    document.getElementById("glassesToggle").addEventListener("change", function (e) {
+        state.glasses = e.target.checked;
+        syncLabels(); render();
+    });
+    document.getElementById("diopterToggle").addEventListener("change", function (e) {
+        state.diopter = e.target.checked;
+        syncLabels(); render();
+    });
+    document.getElementById("apRange").addEventListener("input", function (e) {
+        state.aperture = parseFloat(e.target.value);
+        syncLabels(); render();
+    });
+
+    // --- Advanced settings (cogwheel modal) ---
+    function syncCfgLabels() {
+        document.getElementById("cfgMyopiaVal").innerHTML = cfg.myopia.toFixed(1) + "&nbsp;D";
+        document.getElementById("cfgHyperopiaVal").innerHTML = cfg.hyperopia.toFixed(1) + "&nbsp;D";
+        document.getElementById("cfgPresbyVal").innerHTML = cfg.presbyAmp.toFixed(2) + "&nbsp;D";
+    }
+    document.getElementById("cfgMyopia").addEventListener("input", function (e) {
+        cfg.myopia = parseFloat(e.target.value); syncCfgLabels(); render();
+    });
+    document.getElementById("cfgHyperopia").addEventListener("input", function (e) {
+        cfg.hyperopia = parseFloat(e.target.value); syncCfgLabels(); render();
+    });
+    document.getElementById("cfgPresby").addEventListener("input", function (e) {
+        cfg.presbyAmp = parseFloat(e.target.value); syncCfgLabels(); render();
+    });
+    window.siktCfgReset = function () {
+        cfg.myopia = CFG_DEFAULTS.myopia;
+        cfg.hyperopia = CFG_DEFAULTS.hyperopia;
+        cfg.presbyAmp = CFG_DEFAULTS.presbyAmp;
+        document.getElementById("cfgMyopia").value = cfg.myopia;
+        document.getElementById("cfgHyperopia").value = cfg.hyperopia;
+        document.getElementById("cfgPresby").value = cfg.presbyAmp;
+        syncCfgLabels(); render();
+    };
+
+    function pushStateToControls() {
+        document.getElementById("focus" + state.focus.charAt(0).toUpperCase() + state.focus.slice(1)).checked = true;
+        document.getElementById("lightRange").value = Math.round(state.light * 100);
+        document.getElementById("refr" + state.refractive.charAt(0).toUpperCase() + state.refractive.slice(1)).checked = true;
+        document.getElementById("presbyopiaToggle").checked = state.presbyopia;
+        document.getElementById("glassesToggle").checked = state.glasses;
+        document.getElementById("diopterToggle").checked = state.diopter;
+        document.getElementById("apRange").value = state.aperture;
+        syncLabels();
+    }
+
+    window.siktScenario = function (name) {
+        if (name === "correct") {
+            state = { focus: "front", light: 0.70, refractive: "none", presbyopia: false, glasses: false, distanceM: 25, diopter: false, aperture: 1.2 };
+        } else if (name === "beginner") {
+            state = { focus: "target", light: 0.55, refractive: "none", presbyopia: false, glasses: false, distanceM: 25, diopter: false, aperture: 1.2 };
+        }
+        pushStateToControls();
+        render();
+    };
+
+    window.siktReset = function () {
+        state = { focus: "front", light: 0.60, refractive: "none", presbyopia: false, glasses: false, distanceM: 25, diopter: false, aperture: 1.2 };
+        pushStateToControls();
+        render();
+    };
+
+    window.addEventListener("resize", function () { setupCanvas(); setupGroupCanvas(); render(); });
+
+    setupCanvas();
+    setupGroupCanvas();
+    generateSamples();
+    syncLabels();
+    syncCfgLabels();
+    render();
+})();
+</script>

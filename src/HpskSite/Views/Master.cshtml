@@ -413,7 +413,8 @@
 
                         @{
                             var trainingStairsPage = Model.Root().Children.FirstOrDefault(x => x.Url().Contains("skyttetrappan"));
-                            bool isTrainingActive = (trainingStairsPage != null && trainingStairsPage.IsAncestorOrSelf(Model)) || Model.Url().Contains("skyttetrappan");
+                            var currentPath = Context.Request.Path.Value ?? "";
+                            bool isTrainingActive = (trainingStairsPage != null && trainingStairsPage.IsAncestorOrSelf(Model)) || Model.Url().Contains("skyttetrappan") || currentPath.Contains("siktbild");
                         }
                         <li class="nav-item dropdown">
                             <a class="nav-link dropdown-toggle @(isTrainingActive ? "active" : "")" href="#" role="button" data-bs-toggle="dropdown">
@@ -422,6 +423,7 @@
                             <ul class="dropdown-menu">
                                 <li><a class="dropdown-item" href="/skyttetrappan">Skyttetrappan</a></li>
                                 <li><a class="dropdown-item" href="/traningsmatch/">Träningsmatch</a></li>
+                                <li><a class="dropdown-item" href="/siktbild">Siktbild</a></li>
                             </ul>
                         </li>
                         
