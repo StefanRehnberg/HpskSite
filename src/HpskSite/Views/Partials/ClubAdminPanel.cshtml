@@ -549,6 +549,18 @@
                 </div>
             </div>
 
+            @* Open any club member's Märken detail — needed to award a base grundmärke (e.g. Brons)
+               to a shooter who hasn't submitted any series yet, so isn't in the summary table below.
+               Functionary-only (same gate as the backlog card). *@
+            <div id="markenMemberPickerCard" class="card mb-3 border-0 bg-body-tertiary" style="display:none;">
+                <div class="card-body py-2 d-flex align-items-center gap-2 flex-wrap">
+                    <label for="markenMemberPicker" class="small fw-semibold mb-0"><i class="bi bi-person-plus me-1"></i>Öppna skytt / tilldela märke:</label>
+                    <select id="markenMemberPicker" class="form-select form-select-sm" style="max-width:280px;"></select>
+                    <button class="btn btn-sm btn-outline-primary" type="button" onclick="openMarkenMemberPicker()">Öppna</button>
+                    <span class="form-text mb-0">Här hittar du även skyttar som ännu inte skickat in några serier.</span>
+                </div>
+            </div>
+
             <div id="clubMarkenContent">
                 <div class="text-center py-4">
                     <div class="spinner-border text-primary" role="status"><span class="visually-hidden">Laddar...</span></div>
@@ -1660,6 +1672,22 @@ function openMemberMarkenDetail(memberId, name) {
         .catch(() => { body.innerHTML = '<div class="alert alert-danger">Fel vid inläsning.</div>'; });
 }
 
+// Member picker — lets a functionary open the Detaljer modal for ANY club member, not just
+// those already in the summary (which only lists members with submitted series/awarded badges).
+// Reuses the backlog card's shared member loader. The award buttons inside the modal stay
+// server-gated by sign-off authority, so this only widens reach, not permissions.
+function populateMarkenMemberPicker() {
+    const sel = document.getElementById('markenMemberPicker');
+    if (!sel) return;
+    ensureMarkenBacklogMembers().then(() => { sel.innerHTML = markenBacklogMemberOptions(''); });
+}
+
+function openMarkenMemberPicker() {
+    const sel = document.getElementById('markenMemberPicker');
+    if (!sel || !sel.value) { alert('Välj en medlem först.'); return; }
+    openMemberMarkenDetail(parseInt(sel.value, 10), sel.options[sel.selectedIndex].text);
+}
+
 function renderMemberMarkenDetail(data) {
     const body = document.getElementById('memberMarkenDetailBody');
     const d = data.detail || {};
@@ -1924,9 +1952,16 @@ function loadClubMarkenQueue() {
     fetch(`/umbraco/surface/Marken/GetClubPendingSeries?clubId=${clubId}`)
         .then(r => r.json())
         .then(d => {
-            // Backlog entry card is for functionaries (sign-off authority), shown regardless of queue size.
+            // Backlog entry card + member picker are for functionaries (sign-off authority),
+            // shown regardless of queue size.
+            const canFunc = !!(d.success && d.canValidate);
             const backlog = document.getElementById('markenBacklogCard');
-            if (backlog) backlog.style.display = (d.success && d.canValidate) ? 'block' : 'none';
+            if (backlog) backlog.style.display = canFunc ? 'block' : 'none';
+            const pickerCard = document.getElementById('markenMemberPickerCard');
+            if (pickerCard) {
+                pickerCard.style.display = canFunc ? 'block' : 'none';
+                if (canFunc) populateMarkenMemberPicker();
+            }
             const list = (d.items || []);
             if (!d.success || list.length === 0) { card.style.display = 'none'; return; }
             card.style.display = 'block';
