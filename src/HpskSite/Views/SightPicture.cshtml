@@ -72,6 +72,24 @@
         font-size: 0.85rem;
     }
 
+    .sikt-dpad {
+        display: grid;
+        grid-template-columns: repeat(3, 40px);
+        grid-template-rows: repeat(3, 40px);
+        grid-template-areas: ". up ." "left mid right" ". down .";
+        gap: 5px;
+        width: max-content;
+    }
+
+    .sikt-dpad .btn {
+        width: 40px;
+        height: 40px;
+        padding: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
     .sikt-caption {
         min-height: 4.5rem;
         font-size: 0.95rem;
@@ -248,6 +266,22 @@
                         <div class="sikt-ends"><span>Litet hål (skarpt men mörkt)</span><span>Stort hål</span></div>
                     </div>
                 </div>
+
+                <!-- Sight alignment -->
+                <div class="col-md-6 col-xl-3">
+                    <div class="sikt-control-label">
+                        <span><i class="bi bi-arrows-move me-1"></i>Kornets linjering</span>
+                    </div>
+                    <div class="small text-muted mb-2">Flytta kornet i siktet (0,1 mm/steg)</div>
+                    <div class="sikt-dpad">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" style="grid-area:up;" onclick="siktNudge(0,0.1)" title="Korn upp"><i class="bi bi-arrow-up"></i></button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" style="grid-area:left;" onclick="siktNudge(-0.1,0)" title="Korn vänster"><i class="bi bi-arrow-left"></i></button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" style="grid-area:mid;" onclick="siktSightCenter()" title="Centrera kornet">0</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" style="grid-area:right;" onclick="siktNudge(0.1,0)" title="Korn höger"><i class="bi bi-arrow-right"></i></button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" style="grid-area:down;" onclick="siktNudge(0,-0.1)" title="Korn ned"><i class="bi bi-arrow-down"></i></button>
+                    </div>
+                    <div class="small mt-2" id="sightDevReadout"></div>
+                </div>
             </div>
         </div>
     </div>
@@ -341,13 +375,23 @@
                     <div class="sikt-ends"><span>Mild</span><span>Kraftig (suddigare)</span></div>
                 </div>
 
-                <div class="mb-2">
+                <div class="mb-4">
                     <div class="sikt-control-label">
                         <span>Ålderssynthet (kvar ackommodation)</span>
                         <span class="val" id="cfgPresbyVal">0.25&nbsp;D</span>
                     </div>
                     <input type="range" class="form-range" id="cfgPresby" min="0" max="2" step="0.05" value="0.25">
                     <div class="sikt-ends"><span>Ingen kvar (svårast)</span><span>Mycket kvar (mild)</span></div>
+                </div>
+
+                <div class="mb-2">
+                    <div class="sikt-control-label">
+                        <span>Visirlinje (korn&ndash;sikte)</span>
+                        <span class="val" id="cfgSightRadiusVal">220&nbsp;mm</span>
+                    </div>
+                    <input type="range" class="form-range" id="cfgSightRadius" min="100" max="300" step="5" value="220">
+                    <div class="sikt-ends"><span>Kort (känsligare)</span><span>Lång</span></div>
+                    <div class="form-text" id="cfgSightRadiusHint"></div>
                 </div>
             </div>
             <div class="modal-footer justify-content-between">
@@ -382,8 +426,12 @@
         glasses: false,         // shooting glasses prescribed for the front sight
         distanceM: 25,
         diopter: false,
-        aperture: 1.2           // mm
+        aperture: 1.2,          // mm
+        sightDx: 0,             // front-sight alignment error, mm (right +)
+        sightDy: 0              // front-sight alignment error, mm (up + = "too much front sight")
     };
+
+    var SIGHT_VIS_PX = 20;      // canvas px per mm of (exaggerated) front-sight offset in the picture
 
     function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
     function dTarget() { return 1 / state.distanceM; }
@@ -402,8 +450,8 @@
     //   - lens:       shooting glasses, prescribed to put the FRONT SIGHT at the window's far edge.
     //                 Accommodation can pull nearer but never relax past the lens — that's the catch.
     // Tunable model constants (exposed via the cogwheel settings modal). Diopters.
-    var CFG_DEFAULTS = { myopia: 1.7, hyperopia: 2.0, presbyAmp: 0.25 };
-    var cfg = { myopia: CFG_DEFAULTS.myopia, hyperopia: CFG_DEFAULTS.hyperopia, presbyAmp: CFG_DEFAULTS.presbyAmp };
+    var CFG_DEFAULTS = { myopia: 1.7, hyperopia: 2.0, presbyAmp: 0.25, sightRadius: 220 };
+    var cfg = { myopia: CFG_DEFAULTS.myopia, hyperopia: CFG_DEFAULTS.hyperopia, presbyAmp: CFG_DEFAULTS.presbyAmp, sightRadius: CFG_DEFAULTS.sightRadius };
     var NORMAL_AMP = 2.5;    // healthy adult accommodation (plenty for all three sight distances)
 
     function baseOffsetD() {
@@ -474,6 +522,14 @@
         return clamp(0.024 * targetDefocusPx(), 0, 0.55);
     }
 
+    // Point-of-impact shift from a front-sight ALIGNMENT error (geometry, not blur):
+    //   POI shift = deviation × (target distance / sight radius). The bullet "follows the front
+    //   sight" — front sight held right -> hits right; too much front sight (up) -> hits high.
+    function poiAlignCm() {
+        var cmPerMm = 2500 / cfg.sightRadius;   // = (25000 mm / radius) / 10
+        return { x: state.sightDx * cmPerMm, y: state.sightDy * cmPerMm }; // y: up + = high
+    }
+
     // ---- Canvas rendering ------------------------------------------------
     var W = 700, H = 560;            // canvas logical size (cropped on top — less empty sky)
     var CX = 350;
@@ -524,7 +580,10 @@
     }
 
     function drawFront(c, cx) {
-        var w = FRONT_W, x = cx - w / 2, top = SIGHT_TOP, bottom = H - 6;
+        // Alignment error shifts the blade in the notch (exaggerated for visibility).
+        var ox = state.sightDx * SIGHT_VIS_PX;     // right +
+        var oy = -state.sightDy * SIGHT_VIS_PX;    // up + -> higher on canvas
+        var w = FRONT_W, x = cx - w / 2 + ox, top = SIGHT_TOP + oy, bottom = H - 6;
         var g = c.createLinearGradient(x, 0, x + w, 0);
         g.addColorStop(0, "#717171");
         g.addColorStop(0.5, "#535353");
@@ -657,11 +716,15 @@
         grpCtx.stroke();
 
         var sigma = groupSigmaFrac() * GR;
-        var cyShift = poiLowFrac() * GR;   // perceived-larger bull -> aim low
+        var cyShift = poiLowFrac() * GR;        // perceived-larger bull -> aim low
+        var pxPerCm = GR / TARGET_RADIUS_CM;
+        var align = poiAlignCm();               // sight-alignment error -> POI shift
+        var poiX = align.x * pxPerCm;           // right +
+        var poiY = -align.y * pxPerCm;          // high (up) -> -y
         var hr = GR * 0.045;
         for (var i = 0; i < shotSamples.length; i++) {
-            var sx = GCX + shotSamples[i].x * sigma;
-            var sy = GCY + cyShift + shotSamples[i].y * sigma;
+            var sx = GCX + poiX + shotSamples[i].x * sigma;
+            var sy = GCY + cyShift + poiY + shotSamples[i].y * sigma;
             grpCtx.beginPath();
             grpCtx.arc(sx, sy, hr, 0, Math.PI * 2);
             grpCtx.fillStyle = "#101010";
@@ -705,6 +768,9 @@
             hint += brightness() > 0.45
                 ? " Dioptern ger en skarp, stabil siktbild som drar ihop gruppen och håller höjdträffen still oavsett ljus."
                 : " Men hålet är för litet för ljuset &ndash; du ser inte sikten och gruppen sprids.";
+        }
+        if (state.sightDx !== 0 || state.sightDy !== 0) {
+            hint += " Lägg märke till hur ett pyttelitet linjeringsfel i kornet (bråkdels mm) flyttar hela träffbilden flera cm &ndash; därför är exakt likadan linjering varje skott helt avgörande.";
         }
         document.getElementById("grpHint").innerHTML = hint;
     }
@@ -784,7 +850,38 @@
         document.getElementById("apVal").innerHTML = state.aperture.toFixed(1) + "&nbsp;mm";
         document.getElementById("apertureWrap").style.display = state.diopter ? "" : "none";
         updateBadges();
+        updateSightDev();
     }
+
+    function updateSightDev() {
+        var el = document.getElementById("sightDevReadout");
+        if (state.sightDx === 0 && state.sightDy === 0) {
+            el.innerHTML = "<span class='text-success'>Centrerat &ndash; rätt linjering</span>";
+            return;
+        }
+        var cmPerMm = 2500 / cfg.sightRadius;
+        var mmParts = [], cmParts = [];
+        if (state.sightDx !== 0) {
+            mmParts.push(Math.abs(state.sightDx).toFixed(1) + " mm " + (state.sightDx > 0 ? "höger" : "vänster"));
+            cmParts.push((Math.abs(state.sightDx) * cmPerMm).toFixed(1) + " cm " + (state.sightDx > 0 ? "höger" : "vänster"));
+        }
+        if (state.sightDy !== 0) {
+            mmParts.push(Math.abs(state.sightDy).toFixed(1) + " mm " + (state.sightDy > 0 ? "upp" : "ned"));
+            cmParts.push((Math.abs(state.sightDy) * cmPerMm).toFixed(1) + " cm " + (state.sightDy > 0 ? "högt" : "lågt"));
+        }
+        el.innerHTML = "Korn " + mmParts.join(", ") +
+            " &rarr; <span class='text-danger fw-semibold'>träff " + cmParts.join(", ") + "</span>";
+    }
+
+    window.siktNudge = function (dx, dy) {
+        state.sightDx = clamp(Math.round((state.sightDx + dx) * 10) / 10, -1.5, 1.5);
+        state.sightDy = clamp(Math.round((state.sightDy + dy) * 10) / 10, -1.5, 1.5);
+        syncLabels(); render();
+    };
+    window.siktSightCenter = function () {
+        state.sightDx = 0; state.sightDy = 0;
+        syncLabels(); render();
+    };
 
     var focusRadios = document.querySelectorAll("input[name='siktFocus']");
     for (var k = 0; k < focusRadios.length; k++) {
@@ -826,6 +923,9 @@
         document.getElementById("cfgMyopiaVal").innerHTML = cfg.myopia.toFixed(1) + "&nbsp;D";
         document.getElementById("cfgHyperopiaVal").innerHTML = cfg.hyperopia.toFixed(1) + "&nbsp;D";
         document.getElementById("cfgPresbyVal").innerHTML = cfg.presbyAmp.toFixed(2) + "&nbsp;D";
+        document.getElementById("cfgSightRadiusVal").innerHTML = cfg.sightRadius + "&nbsp;mm";
+        document.getElementById("cfgSightRadiusHint").innerHTML =
+            "≈ " + (2500 / cfg.sightRadius).toFixed(1) + " cm träffläge per mm linjeringsfel (25 m)";
     }
     document.getElementById("cfgMyopia").addEventListener("input", function (e) {
         cfg.myopia = parseFloat(e.target.value); syncCfgLabels(); render();
@@ -836,13 +936,18 @@
     document.getElementById("cfgPresby").addEventListener("input", function (e) {
         cfg.presbyAmp = parseFloat(e.target.value); syncCfgLabels(); render();
     });
+    document.getElementById("cfgSightRadius").addEventListener("input", function (e) {
+        cfg.sightRadius = parseInt(e.target.value, 10); syncCfgLabels(); render();
+    });
     window.siktCfgReset = function () {
         cfg.myopia = CFG_DEFAULTS.myopia;
         cfg.hyperopia = CFG_DEFAULTS.hyperopia;
         cfg.presbyAmp = CFG_DEFAULTS.presbyAmp;
+        cfg.sightRadius = CFG_DEFAULTS.sightRadius;
         document.getElementById("cfgMyopia").value = cfg.myopia;
         document.getElementById("cfgHyperopia").value = cfg.hyperopia;
         document.getElementById("cfgPresby").value = cfg.presbyAmp;
+        document.getElementById("cfgSightRadius").value = cfg.sightRadius;
         syncCfgLabels(); render();
     };
 
@@ -859,16 +964,16 @@
 
     window.siktScenario = function (name) {
         if (name === "correct") {
-            state = { focus: "front", light: 0.70, refractive: "none", presbyopia: false, glasses: false, distanceM: 25, diopter: false, aperture: 1.2 };
+            state = { focus: "front", light: 0.70, refractive: "none", presbyopia: false, glasses: false, distanceM: 25, diopter: false, aperture: 1.2, sightDx: 0, sightDy: 0 };
         } else if (name === "beginner") {
-            state = { focus: "target", light: 0.55, refractive: "none", presbyopia: false, glasses: false, distanceM: 25, diopter: false, aperture: 1.2 };
+            state = { focus: "target", light: 0.55, refractive: "none", presbyopia: false, glasses: false, distanceM: 25, diopter: false, aperture: 1.2, sightDx: 0, sightDy: 0 };
         }
         pushStateToControls();
         render();
     };
 
     window.siktReset = function () {
-        state = { focus: "front", light: 0.60, refractive: "none", presbyopia: false, glasses: false, distanceM: 25, diopter: false, aperture: 1.2 };
+        state = { focus: "front", light: 0.60, refractive: "none", presbyopia: false, glasses: false, distanceM: 25, diopter: false, aperture: 1.2, sightDx: 0, sightDy: 0 };
         pushStateToControls();
         render();
     };
